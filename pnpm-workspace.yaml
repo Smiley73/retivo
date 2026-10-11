@@ -3,6 +3,17 @@ packages:
   - "packages/*"
   - "infrastructure"
 
+# Install policy: pnpm will not pick a package version published less than 3
+# days ago (the unit is minutes: 4320 = 3 days); if nothing older satisfies the
+# request it fails with "No matching version found". A compromised release is
+# usually caught and pulled from the registry within days, so waiting costs
+# little. It applies when pnpm picks a version (adding or updating a
+# dependency); installing the versions already in pnpm-lock.yaml is not
+# affected. To let a fresh security fix through sooner, list it as
+# `name@version` under `minimumReleaseAgeExclude`. Keep the Dependabot
+# `cooldown` in .github/dependabot.yml at least this long.
+minimumReleaseAge: 4320
+
 # Transitive-dependency pins. Each one forces a resolved version above a
 # known-vulnerable range; removing one without an equivalent fix in the
 # parent's own declared range risks the advisory re-entering the tree on the
