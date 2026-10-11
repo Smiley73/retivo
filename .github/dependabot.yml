@@ -69,6 +69,16 @@ updates:
       - dependency-name: "@nestjs/testing"
         update-types:
           - version-update:semver-major
+      # supertest 7.3.0 and 7.3.1 close the shared test server while a request
+      # that was built but not yet sent still needs it. A call such as
+      # `request(server).post(url).send(await helper())`, where the helper makes
+      # its own requests, then fails with "Cannot read properties of null
+      # (reading 'address')" (ladjs/supertest issue 909, still open). Only these
+      # two versions are skipped, so the release that fixes it is not ignored.
+      - dependency-name: "supertest"
+        versions:
+          - "7.3.0"
+          - "7.3.1"
     groups:
       npm-minor-patch:
         update-types:
