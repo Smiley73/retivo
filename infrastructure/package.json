@@ -11,8 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@pulumi/aws": "^7.48.0",
-    "@pulumi/pulumi": "^3.267.0"
+    "@pulumi/aws": "^7.50.0",
+    "@pulumi/pulumi": "^3.268.0"
   },
   "devDependencies": {
     "@types/node": "^24",
