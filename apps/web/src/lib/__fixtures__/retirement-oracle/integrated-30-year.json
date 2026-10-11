@@ -1,0 +1,528 @@
+{
+  "$comment": "Primary-source oracle — 30-year integrated projection workbook. Expected values derived INDEPENDENTLY from the cited statutory sources (see derivation), never from production code. Zero-inflation model: the 2026 statutory tables apply unchanged to every projection year; the OBBBA senior deduction expires after tax year 2028.",
+  "domain": "integrated-30-year",
+  "sources": {
+    "irs-ir-2025-103": {
+      "name": "IRS IR-2025-103 — tax year 2026 annual inflation adjustments (with Rev. Proc. 2025-32)",
+      "url": "https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2026-including-amendments-from-the-one-big-beautiful-bill",
+      "publication": "2025-10-09",
+      "accessed": "2026-07-24",
+      "identifier": "2026 Single brackets ($12,400/$50,400/$105,700/$201,775/$256,225/$640,600); standard deduction $16,100; Rev. Proc. 2025-32 §2.15 age-65 additional deduction $2,050 (unmarried)"
+    },
+    "irs-senior-deduction": {
+      "name": "IRS — Check your eligibility for the new enhanced deduction for seniors",
+      "url": "https://www.irs.gov/newsroom/check-your-eligibility-for-the-new-enhanced-deduction-for-seniors",
+      "publication": "2026-02-27 (page last reviewed 2026-07-02)",
+      "accessed": "2026-07-24",
+      "identifier": "$6,000 per filer 65+, tax years 2025-2028; phases out at 6% of MAGI over $75,000 non-joint / $150,000 joint (Pub. L. 119-21 §70103)"
+    },
+    "usc-86": {
+      "name": "26 U.S.C. §86(c) — Social Security taxation base amounts (statutory, not indexed)",
+      "url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section86&num=0&edition=prelim",
+      "publication": "statutory (OLRC current edition; base amounts fixed since 1993)",
+      "accessed": "2026-07-24",
+      "identifier": "Single base $25,000 / adjusted base $34,000; 50%/85% tiers"
+    },
+    "irs-p590b": {
+      "name": "IRS Publication 590-B — Appendix B Table III (Uniform Lifetime)",
+      "url": "https://www.irs.gov/publications/p590b",
+      "publication": "2025-return edition (page last reviewed 2026-04-30)",
+      "accessed": "2026-07-24",
+      "identifier": "Table III divisors ages 75-94 (24.6 at 75 ... 9.5 at 94); SECURE 2.0 §107 trigger age 75 for born 1960+"
+    },
+    "cms-2026": {
+      "name": "CMS — 2026 Medicare Parts A & B Premiums and Deductibles",
+      "url": "https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-deductibles",
+      "publication": "2025-11-14",
+      "accessed": "2026-07-24",
+      "identifier": "Individual-return IRMAA tier 1 (> $109,000 to $137,000): Part B $81.20/mo, Part D $14.50/mo"
+    }
+  },
+  "tolerance": "Every cents field within $1/year (100 cents) of the engine after documented rounding; tier labels exact.",
+  "derivation": [
+    "Household: one Single member born 1961-07-15 (age 65 in 2026; SECURE 2.0 RMD trigger age 75 for born 1960+, first RMD year 2036). On Medicare every projection year (whole-year model).",
+    "Annual inputs, constant in nominal dollars: $80,000 pre-tax IRA withdrawal; $24,000 gross Social Security; $500,000 Dec-31 prior-year IRA balance (stylized flat-balance workbook assumption); no ACA coverage; no taxable-brokerage balance, no cash interest, no other income.",
+    "inflationRatePct is omitted (zero-inflation model), so every year at or after 2026 resolves the 2026 statutory tables with a scaling factor of 1; the only year-varying statutory element is the senior deduction (expires after 2028) and the Table III divisor (age).",
+    "SS taxation (26 USC 86, Single): provisional income = 80,000 + 0.5*24,000 = 92,000 > 34,000 -> 85% tier; taxable = min(0.85*24,000, 0.85*(92,000-34,000) + min(0.5*(34,000-25,000), 0.5*24,000)) = min(20,400, 49,300+4,500) = 20,400 every year.",
+    "Ordinary income = 80,000 + 20,400 = 100,400; MAGI = 100,400 (no LTCG, no tax-exempt interest).",
+    "Deductions: standard 16,100 + age-65 add-on 2,050 = 18,150. Senior deduction 2026-2028: 6,000 - 0.06*(100,400-75,000) = 4,476; 2029+: expired -> 0.",
+    "Federal tax 2026-2028: taxable 77,774 -> 1,240 + 12%*(50,400-12,400) + 22%*(77,774-50,400) = 11,822.28. 2029+: taxable 82,250 -> 12,807.00. No LTCG tax; no NIIT (MAGI < 200,000).",
+    "RMD (Pub 590-B Table III): 0 before age 75 (born 1960+ -> trigger 75); from 2036 RMD = 500,000 / divisor(age), rounded to cents (e.g. 2036 age 75: 500,000/24.6 = 20,325.20).",
+    "IRMAA: lookback MAGI supplied only from 2028 (the two-year lookback ring is unpopulated for 2026-2027 -> engine skips IRMAA those years). Lookback MAGI $120,000 (stylized) > $109,000 and <= $137,000 -> individual tier 1: (81.20 + 14.50) * 12 = 1,148.40/yr for the single beneficiary."
+  ],
+  "inputs": {
+    "memberId": "oracle-primary",
+    "isoBirthdate": "1961-07-15",
+    "filingStatus": "Single",
+    "householdSize": 1,
+    "preTaxWithdrawalDollars": 80000,
+    "grossSsDollars": 24000,
+    "iraBalancePriorYearDollars": 500000,
+    "irmaaLookbackMagiDollars": 120000,
+    "irmaaLookbackSuppliedFromYear": 2028,
+    "startYear": 2026,
+    "years": 30
+  },
+  "statutory": {
+    "singleBrackets2026": [
+      {
+        "floor": 0,
+        "rate": 0.1
+      },
+      {
+        "floor": 12400,
+        "rate": 0.12
+      },
+      {
+        "floor": 50400,
+        "rate": 0.22
+      },
+      {
+        "floor": 105700,
+        "rate": 0.24
+      },
+      {
+        "floor": 201775,
+        "rate": 0.32
+      },
+      {
+        "floor": 256225,
+        "rate": 0.35
+      },
+      {
+        "floor": 640600,
+        "rate": 0.37
+      }
+    ],
+    "standardDeductionSingle2026": 16100,
+    "age65AddOnSingle2026": 2050,
+    "seniorDeduction": {
+      "perFilerCap": 6000,
+      "nonJointPhaseoutBaseMagi": 75000,
+      "phaseoutRatePct": 0.06,
+      "lastTaxYear": 2028
+    },
+    "ssBaseAmountsSingle": {
+      "tier1": 25000,
+      "tier2": 34000
+    },
+    "uniformLifetimeDivisorsByAge": {
+      "75": 24.6,
+      "76": 23.7,
+      "77": 22.9,
+      "78": 22.0,
+      "79": 21.1,
+      "80": 20.2,
+      "81": 19.4,
+      "82": 18.5,
+      "83": 17.7,
+      "84": 16.8,
+      "85": 16.0,
+      "86": 15.2,
+      "87": 14.4,
+      "88": 13.7,
+      "89": 12.9,
+      "90": 12.2,
+      "91": 11.5,
+      "92": 10.8,
+      "93": 10.1,
+      "94": 9.5
+    },
+    "irmaa2026IndividualTier1MonthlyDollars": {
+      "partB": 81.2,
+      "partD": 14.5
+    }
+  },
+  "expectedByYear": [
+    {
+      "taxYear": 2026,
+      "expected": {
+        "federalTaxCents": 1182228,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 0,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "none",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2027,
+      "expected": {
+        "federalTaxCents": 1182228,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 0,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "none",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2028,
+      "expected": {
+        "federalTaxCents": 1182228,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2029,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2030,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2031,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2032,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2033,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2034,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2035,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 0,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": false
+      }
+    },
+    {
+      "taxYear": 2036,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2032520,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2037,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2109705,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2038,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2183406,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2039,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2272727,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2040,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2369668,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2041,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2475248,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2042,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2577320,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2043,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2702703,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2044,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2824859,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2045,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 2976190,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2046,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 3125000,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2047,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 3289474,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2048,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 3472222,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2049,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 3649635,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2050,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 3875969,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2051,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 4098361,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2052,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 4347826,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2053,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 4629630,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2054,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 4950495,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    },
+    {
+      "taxYear": 2055,
+      "expected": {
+        "federalTaxCents": 1280700,
+        "taxableSsCents": 2040000,
+        "magiCents": 10040000,
+        "rmdFloorCents": 5263158,
+        "irmaaSurchargeCents": 114840,
+        "ssTaxationTier": "eighty-five",
+        "irmaaTier": "tier1",
+        "rmdApplicable": true
+      }
+    }
+  ]
+}

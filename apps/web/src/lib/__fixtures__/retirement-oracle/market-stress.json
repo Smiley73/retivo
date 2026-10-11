@@ -1,0 +1,131 @@
+{
+  "$comment": "Oracle — investment-cost and market-stress cases. MIXED PROVENANCE: the shock magnitudes are a repo product decision and the long-horizon fee-drag case is repo-designed; only the fee-drag PRINCIPLE and the past-performance rule are taken from the cited SEC bulletins. Each case names its own source key. An annual investment cost is a flat mean-shift of cost/12 percentage points on each month's blended return; the named stresses compose additively on that same shift; the longevity stress extends the horizon but never past age 105. Expected values are derived independently from the cited sources, never from production code.",
+  "domain": "market-stress",
+  "sources": {
+    "sec-fees-bulletin": {
+      "name": "SEC Investor.gov — Investor Bulletin: How fees and expenses affect your investment portfolio",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins/updated",
+      "publication": "updated investor bulletin (no dated revision on the page)",
+      "accessed": "2026-08-10",
+      "identifier": "PRINCIPLE ONLY, not a reproduced worked example: an ongoing annual fee reduces the portfolio's return by that fee each year; the shortfall compounds, so a small annual fee costs a large share of the ending balance over a long horizon. The bulletin's own illustration uses different parameters; the long-horizon case below is repo-designed (see `repo-designed-fee-drag`)."
+    },
+    "repo-designed-fee-drag": {
+      "name": "Repo-designed long-horizon fee-drag illustration",
+      "url": "docs/yearly-tax-refresh.md (Market-stress fixture)",
+      "publication": "repo-designed, 2026-08-10 (parameters chosen here, NOT taken from any publication)",
+      "accessed": "2026-08-10",
+      "identifier": "$100,000 compounded for 360 months at a 0.85% monthly blended return, with and without a 0.50% annual investment cost. Parameters are chosen to match the portfolio and month used by the two exact cases above so the three cases compose; the arithmetic is derived independently in this fixture and only the DIRECTION and compounding principle come from the SEC bulletin."
+    },
+    "sec-performance-claims": {
+      "name": "SEC Investor.gov — Investor Bulletin: Performance claims",
+      "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-bulletins-47",
+      "publication": "investor bulletin",
+      "accessed": "2026-08-10",
+      "identifier": "Past performance is not indicative of future results; a past return may not be presented as a forecast"
+    },
+    "stress-magnitudes": {
+      "name": "Repo product decision — approved market-stress magnitudes",
+      "url": "docs/math-projections.md (The four market stress tests)",
+      "publication": "product-approved sensitivities, 2026-07-18 (disclosed, not statutory)",
+      "accessed": "2026-08-10",
+      "identifier": "Higher fees +0.50 pp; lower returns stocks -2 pp / bonds and cash -1 pp; higher inflation +2 pp; longer life +5 years capped at age 105"
+    }
+  },
+  "statutory": {
+    "monthsPerYear": 12,
+    "stressMaxAge": 105,
+    "shocks": {
+      "investmentCostPctDelta": 0.5,
+      "returnShockStocksPct": 2,
+      "returnShockBondsPct": 1,
+      "returnShockCashPct": 1,
+      "inflationShockPct": 2,
+      "longevityShockYears": 5
+    }
+  },
+  "cases": [
+    {
+      "id": "fee-drag-monthly-mean-shift",
+      "description": "A 0.50% annual investment cost applied to a 60/30/10 portfolio in a month returning 1.20% on stocks, 0.40% on bonds, and 0.10% on cash.",
+      "tolerance": "exact",
+      "mix": { "stocksPct": 60, "bondsPct": 30, "cashPct": 10 },
+      "month": { "stockPct": 1.2, "bondPct": 0.4, "cashPct": 0.1 },
+      "annualInvestmentCostPct": 0.5,
+      "derivation": [
+        "Gross blended month = 0.60*1.20 + 0.30*0.40 + 0.10*0.10 = 0.72 + 0.12 + 0.01 = 0.85 percent.",
+        "Annual cost 0.50 percent spread evenly = 0.50/12 = 0.0416666666666667 percent per month.",
+        "Net blended month = 0.85 - 0.0416666666666667 = 0.8083333333333333 percent."
+      ],
+      "expectedGrossMonthlyPct": 0.85,
+      "expectedNetMonthlyPct": 0.8083333333333333
+    },
+    {
+      "id": "combined-shock-composition",
+      "description": "Same portfolio and month, with the fee and return shocks applied together: 0.50% extra annual cost AND the per-sleeve return reduction (stocks -2 pp, bonds and cash -1 pp).",
+      "tolerance": "exact",
+      "mix": { "stocksPct": 60, "bondsPct": 30, "cashPct": 10 },
+      "month": { "stockPct": 1.2, "bondPct": 0.4, "cashPct": 0.1 },
+      "annualInvestmentCostPct": 0.5,
+      "derivation": [
+        "Gross blended month = 0.85 percent (previous case).",
+        "Cost shift = 0.50/12 = 0.0416666666666667 percent per month.",
+        "Blended annual return reduction = 0.60*2 + 0.30*1 + 0.10*1 = 1.2 + 0.3 + 0.1 = 1.6 pp per year; per month = 1.6/12 = 0.13333333333333333 percent.",
+        "Net blended month = 0.85 - 0.0416666666666667 - 0.13333333333333333 = 0.675 percent.",
+        "Composition is additive: applying the fee shock and the return shock together equals the sum of the two individual shifts."
+      ],
+      "expectedNetMonthlyPct": 0.675
+    },
+    {
+      "id": "fee-drag-30-year-shortfall",
+      "description": "Repo-designed fee-drag illustration (source `repo-designed-fee-drag`, NOT the SEC bulletin's own worked example): $100,000 held for 30 years at a 0.85%/month gross blended return, with and without a 0.50% annual investment cost. Only the compounding principle and the direction come from the SEC bulletin.",
+      "tolerance": "within $1",
+      "startingBalanceDollars": 100000,
+      "months": 360,
+      "grossMonthlyPct": 0.85,
+      "annualInvestmentCostPct": 0.5,
+      "derivation": [
+        "No-cost ending balance = 100000 * (1 + 0.0085)^360 = 2105352.97 dollars.",
+        "With-cost monthly return = 0.85 - 0.5/12 = 0.8083333333333333 percent.",
+        "With-cost ending balance = 100000 * (1 + 0.008083333333333333)^360 = 1814330.73 dollars.",
+        "Shortfall = 2105352.97 - 1814330.73 = 291022.24 dollars, i.e. the ongoing 0.50 percent fee costs about 13.8 percent of the ending balance over 30 years.",
+        "Direction: a fee can only lower the ending balance, never raise it."
+      ],
+      "expectedNoCostEndingDollars": 2105352.97,
+      "expectedWithCostEndingDollars": 1814330.73,
+      "expectedShortfallDollars": 291022.24,
+      "expectedShortfallDirection": "lower"
+    },
+    {
+      "id": "longevity-cap-at-105",
+      "description": "The longer-life stress extends the horizon by five years, but never past the longest-lived member's age-105 year.",
+      "tolerance": "exact",
+      "longestLivedBirthYear": 1970,
+      "cases": [
+        {
+          "id": "uncapped",
+          "baseHorizonYear": 2060,
+          "derivation": [
+            "Extended = 2060 + 5 = 2065; age-105 year = 1970 + 105 = 2075; min(2065, 2075) = 2065."
+          ],
+          "expectedHorizonYear": 2065
+        },
+        {
+          "id": "cap-binds",
+          "baseHorizonYear": 2073,
+          "derivation": [
+            "Extended = 2073 + 5 = 2078; age-105 year = 2075; min(2078, 2075) = 2075."
+          ],
+          "expectedHorizonYear": 2075
+        },
+        {
+          "id": "already-past-cap-never-shortens",
+          "baseHorizonYear": 2080,
+          "derivation": [
+            "Extended = 2085; age-105 year = 2075; min = 2075, but the stress must never SHORTEN a horizon, so max(2080, 2075) = 2080."
+          ],
+          "expectedHorizonYear": 2080
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,172 @@
+// Source generators for the CloudFront Functions cloudfront.ts publishes:
+// the SPA-route rewrite, the dev-only viewer IP gate, and the combination
+// of the two. Kept as a dependency-free ESM module (like config-helpers.mjs)
+// so `node --test` can execute the GENERATED handler code against fake
+// viewer events (scripts/test/edge-functions.test.mjs) without a Pulumi
+// runtime or AWS credentials. cloudfront.ts imports the generators and
+// hands their output to `aws.cloudfront.Function`.
+//
+// Constraints on the emitted code (CloudFront Functions, cloudfront-js-2.0):
+//   - ES5-subset JavaScript, no imports, no network/DNS access;
+//   - the published function must stay under 10 KB — the allowlist is
+//     unbounded config, so `assertFunctionSize` makes the limit an
+//     invariant checked BEFORE any resource is registered;
+//   - one function per event type per behavior, so the gate is folded into
+//     the SPA router for the default behavior and published separately
+//     (`gateOnlyCode`) for `/api/*`;
+//   - `event.viewer.ip` is the connecting viewer/proxy address (a VPN or
+//     privacy relay changes it); X-Forwarded-For is never consulted.
+
+/**
+ * Local ceiling on published function size. AWS documents the CloudFront
+ * Functions limit as "10 KB" without saying whether that is 10,000 or
+ * 10,240 bytes, so this invariant uses the conservative reading.
+ * @type {number}
+ */
+export const CLOUDFRONT_FUNCTION_MAX_BYTES = 10_000;
+
+/**
+ * Throw when generated function code would exceed CloudFront's size limit.
+ * Called by every generator so an oversized allowlist fails `pulumi preview`
+ * instead of an opaque CreateFunction error mid-deploy.
+ * @param {string} code generated handler source
+ * @param {string} label which function, for the error message
+ * @returns {string} the same code, for chaining
+ */
+export function assertFunctionSize(code, label) {
+  const bytes = Buffer.byteLength(code, "utf8");
+  if (bytes > CLOUDFRONT_FUNCTION_MAX_BYTES) {
+    throw new Error(
+      `CloudFront Function "${label}" is ${bytes} bytes — over the ${CLOUDFRONT_FUNCTION_MAX_BYTES}-byte ceiling (CloudFront's 10 KB limit). Shorten retivo:edgeAllowedIps (fewer, wider CIDR blocks).`,
+    );
+  }
+  return code;
+}
+
+/**
+ * The viewer-IP allowlist check, emitted as top-level helpers the handler
+ * calls. `rules` are `{ base, mask }` pairs from ipv4CidrToRule; a request
+ * is allowed when `((ip & mask) >>> 0) === base` for any rule. Anything that
+ * is not exactly four numeric octets in 0–255 (a missing ip, an IPv6
+ * literal, a partial address) is treated as NOT allowed.
+ * @param {ReadonlyArray<{ base: number, mask: number }>} rules
+ * @returns {string}
+ */
+function edgeGateSnippet(rules) {
+  if (rules.length === 0) {
+    throw new Error("edgeGateSnippet needs at least one allowlist rule");
+  }
+  const allow = rules.map((r) => `[${r.base >>> 0}, ${r.mask >>> 0}]`).join(", ");
+  return `
+var ALLOW = [${allow}];
+var FORBIDDEN = {
+  statusCode: 403,
+  statusDescription: 'Forbidden',
+  headers: {
+    'content-type': { value: 'text/plain; charset=utf-8' },
+    'cache-control': { value: 'no-store' }
+  },
+  body: { encoding: 'text', data: 'Forbidden' }
+};
+function ip4(s) {
+  if (typeof s !== 'string') return -1;
+  var parts = s.split('.');
+  if (parts.length !== 4) return -1;
+  var n = 0;
+  for (var i = 0; i < 4; i++) {
+    var p = parts[i];
+    if (p.length === 0 || p.length > 3 || !/^[0-9]+$/.test(p)) return -1;
+    var v = parseInt(p, 10);
+    if (v > 255) return -1;
+    n = (n * 256) + v;
+  }
+  return n;
+}
+function allowed(ip) {
+  var n = ip4(ip);
+  if (n < 0) return false;
+  for (var i = 0; i < ALLOW.length; i++) {
+    if (((n & ALLOW[i][1]) >>> 0) === ALLOW[i][0]) return true;
+  }
+  return false;
+}
+`.trim();
+}
+
+/**
+ * Body of the SPA-route rewrite: anything whose last path segment has no
+ * `.` is rewritten to /index.html so React Router resolves it client-side;
+ * static assets keep their URI (S3 returns the file, or a real 404).
+ * Shared verbatim by the gated and ungated router variants.
+ * @returns {string}
+ */
+function spaRouterBody() {
+  return `
+  var uri = req.uri;
+  var lastSlash = uri.lastIndexOf('/');
+  var lastSegment = uri.substring(lastSlash + 1);
+  if (lastSegment.indexOf('.') === -1) {
+    req.uri = '/index.html';
+  }
+  return req;
+`.replace(/^\n/, "").replace(/\n$/, "");
+}
+
+/**
+ * Ungated viewer-request handler for the SPA (default) cache behavior —
+ * the behaviour every stack has shipped since the customErrorResponses
+ * rewrite was retired. /api/* is a separate behavior and never reaches it.
+ * @returns {string}
+ */
+export function spaRouterCode() {
+  return assertFunctionSize(
+    `
+function handler(event) {
+  var req = event.request;
+${spaRouterBody()}
+}
+`.trim(),
+    "spa-router",
+  );
+}
+
+/**
+ * Gated viewer-request handler for the SPA behavior: the allowlist check
+ * runs first and answers 403 from the edge (no origin request), then the
+ * unchanged SPA rewrite.
+ * @param {ReadonlyArray<{ base: number, mask: number }>} rules
+ * @returns {string}
+ */
+export function gatedSpaRouterCode(rules) {
+  return assertFunctionSize(
+    `
+${edgeGateSnippet(rules)}
+function handler(event) {
+  if (!allowed(event.viewer && event.viewer.ip)) return FORBIDDEN;
+  var req = event.request;
+${spaRouterBody()}
+}
+`.trim(),
+    "spa-router (gated)",
+  );
+}
+
+/**
+ * Gate-only viewer-request handler for the `/api/*` behavior: 403 for a
+ * viewer outside the allowlist, otherwise the request passes through
+ * untouched (the API origin sees exactly what it sees today).
+ * @param {ReadonlyArray<{ base: number, mask: number }>} rules
+ * @returns {string}
+ */
+export function gateOnlyCode(rules) {
+  return assertFunctionSize(
+    `
+${edgeGateSnippet(rules)}
+function handler(event) {
+  if (!allowed(event.viewer && event.viewer.ip)) return FORBIDDEN;
+  return event.request;
+}
+`.trim(),
+    "api-gate",
+  );
+}

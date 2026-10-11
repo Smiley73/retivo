@@ -1,0 +1,658 @@
+# CI: the same gates a developer runs locally (`pnpm lint`, `pnpm depcruise`,
+# `pnpm knip`, `pnpm typecheck`, `pnpm test`, `pnpm audit:ci`) plus the
+# coverage-gated variants (`test:coverage`) and the Playwright smoke/journey
+# suite.
+#
+# When it runs: on every pull request (opened, reopened, and every later push
+# to it), on every push to `main`, and on manual dispatch (Actions tab -> Run
+# workflow, against any branch). Pull requests from forks run the same
+# workflow as same-repo ones. The `main` run also seeds the Actions caches
+# (the emulator images, the pnpm store): cache entries saved on a PR ref are
+# visible only to that PR, entries saved on the default branch are visible to
+# every PR, forks included.
+#
+# Trust boundary (a stranger's PR runs this workflow's code): the token is
+# read-only (`contents: read`, no job widens it) and no checkout keeps it in
+# the clone (`persist-credentials: false`), no job reads a secret, there is no
+# `pull_request_target` / `workflow_run` / `issue_comment` trigger, and every
+# action is pinned to a commit SHA. A first-time outside contributor's run
+# additionally waits for the owner's approval (a repo setting).
+# scripts/test/workflow-trust-boundary.test.mjs enforces these rules.
+#
+# Runners: every job runs on a pinned image (`ubuntu-24.04`), never
+# `ubuntu-latest`, which GitHub moves to a new Ubuntu release on its own
+# schedule (Ubuntu 26 from 2026-10-19). Move the pin on purpose, in a PR. The
+# same test enforces this.
+#
+# Branch protection: require ONLY the `All checks` job (the `all-checks` job
+# below). It always runs (`if: always()`) and ends in success or failure, never
+# skipped, and it fails when any suite failed, was cancelled or was skipped. Do
+# NOT require the per-suite jobs, especially the matrix legs such as
+# `web-unit (1/4)`: their check names depend on the matrix and are not stable.
+# Do not rename `All checks`; branch protection refers to it by name.
+#
+# Every PR/push/dispatch runs the FULL suite (no path-based gating):
+#   1. lint-typecheck-scripts — static gates + node:test scripts suite
+#                                + a `pnpm audit` dependency-vulnerability
+#                                gate (NYDFS 500.05).
+#   2. web-unit (4 shards) +  — Vitest with v8 coverage; the merge job
+#      web-coverage              combines shard blobs and enforces the
+#                                coverage thresholds once.
+#   3. api-integration        — Jest + supertest against DynamoDB Local +
+#                               Moto (the repo's compose file), coverage
+#                               thresholds enforced.
+#   4. e2e                    — Playwright (Chromium) against the Vite dev
+#                               server; traces uploaded on failure
+#                               (temporarily disabled — if: false; re-enable
+#                               per the comment near the e2e job definition).
+#   5. All checks             — the aggregate: needs every enabled suite above
+#                               and writes a per-suite results table to the
+#                               run's job summary.
+#
+# Flake containment (a PR should not fail for reasons unrelated to its change):
+#   - api-integration restarts the emulators and re-runs the whole suite once
+#     when the emulators fail to start or `test:coverage` fails; a pass on the
+#     re-run is flagged with a `::warning::` annotation and shown as "pass on
+#     re-run" in the summary. A failure that repeats fails the run.
+#   - web-unit does the same per shard: one re-run of that shard's Vitest step
+#     (rewriting its blob), flagged the same way.
+#   - On a PR that changes no dependency file (any `package.json`,
+#     `pnpm-lock.yaml`, `pnpm-workspace.yaml`) a failing `pnpm audit:ci` is
+#     reported in the summary but does not fail the job, so an advisory
+#     published overnight cannot red unrelated PRs.
+#   - Tests that compare against today's date (the feature-flag `reviewBy`
+#     check) are skipped on PR runs (SKIP_REVIEW_BY_DATE_CHECK).
+#   The relaxations key off `github.event_name == 'pull_request'` only: `main`
+#   and manual dispatch runs stay strict (audit and date checks included).
+#
+# Deploys are NOT part of CI — they run from your machine with
+# infrastructure/scripts/deploy-stack.sh.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Superseded PR runs are cancelled. `main` and dispatch runs get a group of
+# their own (the run id) so they are never cancelled: each merge's result and
+# cache save matters, and a shared group would also drop a queued older run.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least-privilege: read-only token for every job; no job widens it.
+permissions:
+  contents: read
+
+jobs:
+  lint-typecheck-scripts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      # "clean", "advisories-nonblocking" or "failed"; read by `all-checks`.
+      audit: ${{ steps.audit.outputs.result }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Two commits so a pull_request run (which checks out the merge
+          # commit; its first parent is the base) can diff HEAD^1..HEAD to see
+          # exactly what the PR changes.
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6 (reads packageManager from package.json)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      # Module-boundary + cycle enforcement (dependency-cruiser). Part of the
+      # local `pnpm gate` too — see .dependency-cruiser.cjs for the rules.
+      - run: pnpm depcruise
+      # Dead-code gate: fail on unused exports/files/dependencies (knip). Also
+      # part of the local `pnpm gate` — this step mirrors it in CI.
+      - run: pnpm knip
+      - run: pnpm typecheck
+      # Does this PR change what gets installed? Any package.json, the lockfile
+      # or pnpm-workspace.yaml (it holds the overrides and
+      # `auditConfig.ignoreGhsas`, so editing it can hide an advisory).
+      - name: Detect dependency changes
+        id: deps
+        if: github.event_name == 'pull_request'
+        run: |
+          changed_files=$(git diff --name-only HEAD^1 HEAD)
+          if grep -qE '(^|/)package\.json$|^pnpm-lock\.yaml$|^pnpm-workspace\.yaml$' <<< "$changed_files"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - run: pnpm test:scripts
+      # The slow contract checks: builds the Lambda artifact and runs a
+      # production audit (lambda-artifact-contract.test.mjs), plus the
+      # schema-ahead guard's subprocess runs. The audit gets the same PR-only
+      # relaxation as the audit step below.
+      - name: Contract checks
+        run: pnpm test:contracts
+        env:
+          AUDIT_ADVISORIES_NONBLOCKING: ${{ github.event_name == 'pull_request' && steps.deps.outputs.changed != 'true' }}
+      # Dependency-vulnerability gate (NYDFS 500.05): fail the
+      # build on a known moderate+ advisory. Same `audit:ci` step that runs in
+      # the local `pnpm gate`; it is green on a clean tree, so it only fires
+      # on a new advisory. If one ever lands with no
+      # upstream fix, waive that specific advisory via `pnpm-workspace.yaml`'s
+      # `auditConfig.ignoreGhsas` — do not drop the gate.
+      # The audit is a network lookup against a moving advisory database, so a
+      # new advisory would red every open PR. On a pull request that changes
+      # no dependency file the failure is reported (annotation + the
+      # `all-checks` summary) but does not fail the job; `main`, manual
+      # dispatch and PRs that change dependencies stay strict.
+      - name: Dependency audit
+        id: audit
+        env:
+          AUDIT_ADVISORIES_NONBLOCKING: ${{ github.event_name == 'pull_request' && steps.deps.outputs.changed != 'true' }}
+        run: |
+          if pnpm audit:ci; then
+            echo "result=clean" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$AUDIT_ADVISORIES_NONBLOCKING" = "true" ]; then
+            echo "::warning::advisories found, not blocking: this PR changes no dependencies"
+            echo "result=advisories-nonblocking" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "result=failed" >> "$GITHUB_OUTPUT"
+          exit 1
+
+  # The web suite is sharded 4 ways: ~40% of an unsharded run is per-file
+  # jsdom + import overhead across 341 files, and the 2-vCPU runner turns
+  # the instrumented suite into ~12 minutes. Shards run with thresholds
+  # suppressed (VITEST_SHARDED — a slice can't meet whole-suite numbers);
+  # web-coverage merges the blob reports and enforces the thresholds once.
+  web-unit:
+    runs-on: ubuntu-24.04
+    # Shards are now roughly even: after the test-suite consolidation (MC
+    # parity cut from ~83s to ~25s, SyncContext/stress-test splits) a green
+    # main run finishes all four in ~4-6.5 min (run 37937785176: 3.8, 6.0,
+    # 6.1 and 4.8 min). Before it, shard 4 alone took 10-14.5 min and was
+    # bimodal across runner classes (620-655s pass / ~870s fail).
+    #
+    # 35: setup plus TWO Vitest attempts (15 minutes each, see the steps
+    # below) - still ~2x headroom over the slow runner class.
+    timeout-minutes: 35
+    # One distinct output per shard: matrix legs that set the SAME output name
+    # collapse to a single value, which would lose every other shard's flag.
+    outputs:
+      rerun_1: ${{ steps.flag.outputs.rerun_1 }}
+      rerun_2: ${{ steps.flag.outputs.rerun_2 }}
+      rerun_3: ${{ steps.flag.outputs.rerun_3 }}
+      rerun_4: ${{ steps.flag.outputs.rerun_4 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      VITEST_COVERAGE: "1"
+      VITEST_SHARDED: "1"
+      # The feature-flag `reviewBy` test compares against today's date, so it
+      # would fail every PR once a flag's date passes. Skipped (reported as
+      # skipped) on pull requests only; `main` and dispatch runs keep it, and
+      # so does a local `pnpm gate` (the variable is unset there).
+      SKIP_REVIEW_BY_DATE_CHECK: ${{ github.event_name == 'pull_request' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Diagnostic: print the runner's real CPU count so we can
+      # confirm/correct the "2-vCPU runner" assumption the pinned `maxWorkers`
+      # and this file's comments rely on. availableParallelism
+      # is optional-chained so an older Node without it prints `undefined` instead
+      # of throwing (Node 24, this repo's pin, has it).
+      - run: node -e "console.log('CPUs:', require('node:os').cpus().length, 'availableParallelism:', require('node:os').availableParallelism?.())"
+      # The `--` is load-bearing: without it pnpm consumes --reporter as
+      # its OWN flag and vitest never writes the blob report. The extra
+      # dot reporter exists because blob alone prints NOTHING: a shard
+      # has died after writing its blob with only "undefined" as output
+      # (an unhandled teardown rejection?) — if that recurs, the visible
+      # reporter is what names the culprit.
+      #
+      # One bounded re-run: a shard that failed on an untouched test and
+      # passed on a re-run of the identical commit has happened (run
+      # 32090593535 -> 32091506759, shard 1, a 30 s test timeout). The first
+      # attempt does not fail the job; the second does. Each attempt has its
+      # own timeout so a stall cannot use up the job before the retry starts.
+      - name: Vitest shard (attempt 1)
+        id: vitest-1
+        continue-on-error: true
+        timeout-minutes: 15
+        run: >
+          pnpm --filter @retirement/web exec -- vitest run --coverage
+          --reporter=blob --reporter=dot --shard=${{ matrix.shard }}/4
+          --passWithNoTests
+      - name: Vitest shard (attempt 2, only after a failed attempt 1)
+        id: vitest-2
+        if: steps.vitest-1.outcome == 'failure'
+        timeout-minutes: 15
+        run: |
+          rm -rf apps/web/.vitest/blob
+          pnpm --filter @retirement/web exec -- vitest run --coverage \
+            --reporter=blob --reporter=dot --shard=${{ matrix.shard }}/4 \
+            --passWithNoTests
+      # Reached only when attempt 2 passed (a failed attempt 2 fails the job).
+      - name: Flag pass on re-run
+        id: flag
+        if: steps.vitest-1.outcome == 'failure'
+        run: |
+          echo "::warning::web-unit shard ${{ matrix.shard }}/4 passed only on its re-run after a first-attempt failure"
+          echo "rerun_${{ matrix.shard }}=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        # Upload the blob even when the test step fails: the merge job
+        # doesn't run on failure, but the artifact is the only record of
+        # WHICH test failed when the shard dies without console output.
+        if: always()
+        with:
+          name: web-blob-${{ matrix.shard }}
+          path: apps/web/.vitest/blob/
+          retention-days: 1
+          # always() + rerun would otherwise collide with the artifact
+          # uploaded by the previous attempt.
+          overwrite: true
+          # .vitest is a dot-directory; upload-artifact v4 skips
+          # hidden paths by default and would silently upload nothing.
+          include-hidden-files: true
+
+  web-coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # A failed or skipped web-unit skips this job (no status function in an
+    # `if`), so it only runs when all four shards succeeded; `all-checks`
+    # counts that skip as a failure.
+    needs: web-unit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: web-blob-*
+          path: apps/web/.vitest/blob/
+          merge-multiple: true
+      # --merge-reports with no path reads vitest's default blob directory,
+      # .vitest/blob, which is also where the shards write (and upload from).
+      # No VITEST_SHARDED here: the merged report carries the whole
+      # suite's coverage, so the config thresholds apply.
+      - run: pnpm --filter @retirement/web exec -- vitest run --merge-reports --coverage
+
+  api-integration:
+    runs-on: ubuntu-24.04
+    # 45: setup plus two attempts. Each attempt has its own step timeout (an
+    # API stall of roughly 300 s is a known, unsolved local failure, and one
+    # could otherwise use up the whole job before the retry gets a chance).
+    # Worst case: ~2 setup + 12 start + 12 attempt 1 + 5 restart + 12 attempt 2.
+    timeout-minutes: 45
+    outputs:
+      # "true" when the emulator start or the test run needed its one re-run.
+      rerun: ${{ steps.emulators.outputs.rerun || steps.flag.outputs.rerun }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Plain `docker compose` instead of `pnpm emu:up`: the pnpm script
+      # passes `--env-file .env`, which doesn't exist in CI (the compose
+      # file's defaults are exactly what the Jest bootstrap expects).
+      # No `--wait`: the compose healthchecks curl from *inside* the
+      # containers — DynamoDB Local answers a bare GET with HTTP 400 (so
+      # `curl -sf` fails) and the image has no curl, so the services
+      # would never report healthy. Poll from the runner instead.
+      # Docker Hub anonymous pulls from shared runners are flaky/rate-
+      # limited and have killed runs even with retries — serve the
+      # emulator images from the Actions cache instead, so only the
+      # first run after a key change touches the registry at all. Both
+      # images are pinned in the compose file and the key is that file's
+      # hash, so changing a tag misses the cache and pulls the new image.
+      # The cache is seeded by the `push: main` run (entries saved on a PR
+      # ref are visible only to that PR).
+      - name: Restore emulator images
+        id: emu-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: /tmp/emulator-images.tar
+          key: emulator-images-${{ hashFiles('infrastructure/docker-compose.yml') }}
+      - name: Load emulator images
+        if: steps.emu-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/emulator-images.tar
+      # Pull (cache miss only), up, then wait until both emulators answer. If
+      # any of that fails — including all 5 pulls failing — take the emulators
+      # down and do it once more. A pass on the second go is flagged.
+      - name: Start emulators
+        id: emulators
+        timeout-minutes: 12
+        env:
+          IMAGES_CACHED: ${{ steps.emu-cache.outputs.cache-hit }}
+        run: |
+          compose() { docker compose -f infrastructure/docker-compose.yml "$@"; }
+          start_emulators() {
+            if [ "${IMAGES_CACHED}" != "true" ]; then
+              pulled=false
+              for i in 1 2 3 4 5; do
+                if compose pull --quiet; then pulled=true; break; fi
+                echo "image pull attempt ${i} failed; retrying in 30s" >&2
+                sleep 30
+              done
+              if [ "${pulled}" != "true" ]; then
+                echo "image pull failed after 5 attempts" >&2
+                return 1
+              fi
+            fi
+            compose up -d || return 1
+            for i in $(seq 1 30); do
+              if curl -s -o /dev/null http://localhost:8000 \
+                && curl -sf http://localhost:5001/moto-api/ > /dev/null; then
+                echo "emulators up after ${i} attempt(s)"
+                return 0
+              fi
+              sleep 2
+            done
+            echo "emulators failed to come up" >&2
+            compose logs
+            return 1
+          }
+          if start_emulators; then
+            exit 0
+          fi
+          echo "::warning::emulators failed to start; restarting them once"
+          compose down
+          start_emulators || exit 1
+          echo "rerun=true" >> "$GITHUB_OUTPUT"
+      - name: Save emulator images for the cache
+        # Runs right after the pull (not at job end) so a later test
+        # failure still populates the cache; the cache action's post
+        # step uploads the tar.
+        if: steps.emu-cache.outputs.cache-hit != 'true'
+        run: docker save -o /tmp/emulator-images.tar $(docker compose -f infrastructure/docker-compose.yml config --images)
+      # No .env / secrets needed: jest.config.cjs defaults the emulator
+      # endpoints + fake AWS creds, and jest.setup.ts mints per-worker
+      # JWT keys and table/bucket namespaces.
+      #
+      # One bounded re-run, the CI form of the local rule (restart the
+      # emulators, re-run, treat a repeat as real). The whole suite re-runs:
+      # the coverage thresholds need it. The first attempt does not fail the
+      # job; the second does.
+      - name: API tests (attempt 1)
+        id: api-tests-1
+        continue-on-error: true
+        timeout-minutes: 12
+        run: pnpm --filter @retirement/api test:coverage
+      - name: Restart emulators (only after a failed attempt 1)
+        if: steps.api-tests-1.outcome == 'failure'
+        timeout-minutes: 5
+        run: |
+          docker compose -f infrastructure/docker-compose.yml down
+          docker compose -f infrastructure/docker-compose.yml up -d
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null http://localhost:8000 \
+              && curl -sf http://localhost:5001/moto-api/ > /dev/null; then
+              echo "emulators up after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "emulators failed to come up" >&2
+          docker compose -f infrastructure/docker-compose.yml logs
+          exit 1
+      - name: API tests (attempt 2, only after a failed attempt 1)
+        id: api-tests-2
+        if: steps.api-tests-1.outcome == 'failure'
+        timeout-minutes: 12
+        run: pnpm --filter @retirement/api test:coverage
+      # Reached only when attempt 2 passed (a failed attempt 2 fails the job).
+      - name: Flag pass on re-run
+        id: flag
+        if: steps.api-tests-1.outcome == 'failure'
+        run: |
+          echo "::warning::api-integration passed only on its re-run after a first-attempt failure"
+          echo "rerun=true" >> "$GITHUB_OUTPUT"
+
+  # Full-stack job: every e2e flow starts from a real sign-in as the
+  # seeded dev user (the app's demo-data surfaces sit behind auth), so
+  # the emulators AND the API must be up. The API self-provisions in
+  # dev mode: ephemeral JWT keys (placeholder detection), emulator
+  # table bootstrap, and the dev-user seed all run at boot.
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # TEMPORARILY DISABLED. The suite was failing every test at the shared
+    # sign-in fixture once an acceptance gate (since removed) began
+    # parking a fresh session before the dashboard. The job stays off until
+    # the suite is confirmed stable, to keep its known flakiness off green
+    # PRs. To re-enable, replace `if: false` with nothing (delete the line, so
+    # it runs on every event like its sibling suites). Then add 'e2e' to the
+    # `all-checks` job's `needs` list and a row for it in that job's summary
+    # table; scripts/test/workflow-trust-boundary.test.mjs fails if an enabled
+    # job is missing from `needs`.
+    if: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Same Actions-cache image strategy as api-integration (see the
+      # comment there).
+      - name: Restore emulator images
+        id: emu-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: /tmp/emulator-images.tar
+          key: emulator-images-${{ hashFiles('infrastructure/docker-compose.yml') }}
+      - name: Load emulator images
+        if: steps.emu-cache.outputs.cache-hit == 'true'
+        run: docker load -i /tmp/emulator-images.tar
+      - name: Start emulators
+        run: |
+          if [ "${{ steps.emu-cache.outputs.cache-hit }}" != "true" ]; then
+            for i in 1 2 3 4 5; do
+              docker compose -f infrastructure/docker-compose.yml pull --quiet && break
+              echo "image pull attempt ${i} failed; retrying in 30s" >&2
+              sleep 30
+            done
+          fi
+          docker compose -f infrastructure/docker-compose.yml up -d
+      - name: Save emulator images for the cache
+        if: steps.emu-cache.outputs.cache-hit != 'true'
+        run: docker save -o /tmp/emulator-images.tar $(docker compose -f infrastructure/docker-compose.yml config --images)
+      - name: Wait for emulators
+        run: |
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null http://localhost:8000 \
+              && curl -sf http://localhost:5001/moto-api/ > /dev/null; then
+              echo "emulators up after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "emulators failed to come up" >&2
+          docker compose -f infrastructure/docker-compose.yml logs
+          exit 1
+      - name: Start API
+        run: |
+          # The API dev script loads the repo-root .env; the example file
+          # is a working local-dev config (placeholder JWT keys trigger
+          # the ephemeral-keypair fallback). Throttling off so 11 logins
+          # in quick succession can't trip the per-IP limiter.
+          cp .env.example .env
+          echo "DISABLE_THROTTLE=true" >> .env
+          pnpm --filter @retirement/api dev > /tmp/api.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3001/api/v1/health > /dev/null 2>&1; then
+              echo "API up after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API failed to start" >&2
+          tail -80 /tmp/api.log
+          exit 1
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm --filter @retirement/web exec playwright install chromium --with-deps
+      # playwright.config.ts is CI-aware: retries=2, github reporter,
+      # forbidOnly, and it boots the Vite dev server itself.
+      # Step-level continue-on-error: the suite is OPTIONAL while it
+      # stabilizes — failures stay visible in the step log + uploaded traces,
+      # but the job and the PR check stay green. Remove the flag to make e2e
+      # blocking again.
+      - run: pnpm --filter @retirement/web test:e2e
+        id: e2e
+        continue-on-error: true
+      - name: Surface API log on e2e failure
+        if: steps.e2e.outcome == 'failure'
+        run: tail -120 /tmp/api.log
+      - name: Upload traces
+        # always(): a flaky-then-passed test leaves the step green but
+        # its failed first attempt still writes a trace
+        # (retain-on-first-failure) — that evidence is the input for
+        # making this job blocking.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-traces
+          path: apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+          overwrite: true
+
+
+  # The one check to require in branch protection. `if: always()` and nothing
+  # that can evaluate false (no `!cancelled()`, no `success()`, no event or fork
+  # condition): a required check that ends SKIPPED satisfies branch protection,
+  # so this job must always run and end in success or failure. On a superseded,
+  # cancelled run it reports failure for the old commit, which is correct. A
+  # suite that ends skipped (e.g. web-coverage after a failed shard) counts as a
+  # failure. Needs no checkout, install or token scope: it only reads
+  # `needs.*` and writes the run's job summary (the replacement for the old PR
+  # comment, and it works the same for fork PRs).
+  # Keep `needs` listing every job except this one and any `if: false` job.
+  all-checks:
+    name: All checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [lint-typecheck-scripts, web-unit, web-coverage, api-integration]
+    if: always()
+    steps:
+      - name: Summarize suite results
+        env:
+          LINT_RESULT: ${{ needs.lint-typecheck-scripts.result }}
+          AUDIT_RESULT: ${{ needs.lint-typecheck-scripts.outputs.audit }}
+          WEB_UNIT_RESULT: ${{ needs.web-unit.result }}
+          WEB_COVERAGE_RESULT: ${{ needs.web-coverage.result }}
+          WEB_RERUN_1: ${{ needs.web-unit.outputs.rerun_1 }}
+          WEB_RERUN_2: ${{ needs.web-unit.outputs.rerun_2 }}
+          WEB_RERUN_3: ${{ needs.web-unit.outputs.rerun_3 }}
+          WEB_RERUN_4: ${{ needs.web-unit.outputs.rerun_4 }}
+          API_RESULT: ${{ needs.api-integration.result }}
+          API_RERUN: ${{ needs.api-integration.outputs.rerun }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          label() {
+            case "$1" in
+              success) echo "PASS" ;;
+              failure) echo "FAIL" ;;
+              cancelled) echo "CANCELLED" ;;
+              skipped) echo "SKIPPED" ;;
+              *) echo "UNKNOWN ($1)" ;;
+            esac
+          }
+
+          # web-unit + web-coverage collapse into one "Web tests" row: a
+          # failed shard skips web-coverage, so treat the pair as the worst
+          # non-success state (failure beats cancelled beats skipped beats
+          # success).
+          if [ "$WEB_UNIT_RESULT" = success ] && [ "$WEB_COVERAGE_RESULT" = success ]; then
+            web=success
+          elif [ "$WEB_UNIT_RESULT" = failure ] || [ "$WEB_COVERAGE_RESULT" = failure ]; then
+            web=failure
+          elif [ "$WEB_UNIT_RESULT" = cancelled ] || [ "$WEB_COVERAGE_RESULT" = cancelled ]; then
+            web=cancelled
+          else
+            web=skipped
+          fi
+
+          web_note=""
+          for shard in 1 2 3 4; do
+            var="WEB_RERUN_${shard}"
+            if [ "${!var}" = "true" ]; then web_note="${web_note} shard ${shard}/4"; fi
+          done
+
+          row_for() {
+            # $1 result, $2 re-run note ("" when no re-run was needed)
+            if [ "$1" = success ] && [ -n "$2" ]; then
+              echo "PASS ON RE-RUN | Passed only on the re-run after a first-attempt failure:${2}. See the warning annotations."
+            else
+              echo "$(label "$1") |"
+            fi
+          }
+
+          api_note=""
+          if [ "$API_RERUN" = "true" ]; then api_note=" emulator start or test run"; fi
+
+          case "$AUDIT_RESULT" in
+            clean) audit_line="clean" ;;
+            advisories-nonblocking) audit_line="advisories found, not blocking: this PR changes no dependencies" ;;
+            failed) audit_line="advisories found, BLOCKING" ;;
+            *) audit_line="not reached (an earlier step failed or the job did not run)" ;;
+          esac
+          if [ "$EVENT_NAME" = pull_request ]; then
+            date_line="skipped on pull requests (enforced on main and manual runs)"
+          else
+            date_line="enforced"
+          fi
+
+          {
+            echo "## All checks"
+            echo
+            echo "| Suite | Result | Note |"
+            echo "| --- | --- | --- |"
+            echo "| Lint / Typecheck / Scripts | $(row_for "$LINT_RESULT" "") |"
+            echo "| Web tests (unit shards + coverage) | $(row_for "$web" "$web_note") |"
+            echo "| API integration | $(row_for "$API_RESULT" "$api_note") |"
+            echo
+            echo "- Dependency audit: ${audit_line}"
+            echo "- Date checks (feature-flag reviewBy): ${date_line}"
+            echo
+            echo "[Run logs](${RUN_URL})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for result in "$LINT_RESULT" "$WEB_UNIT_RESULT" "$WEB_COVERAGE_RESULT" "$API_RESULT"; do
+            if [ "$result" != success ]; then
+              echo "::error::At least one suite did not succeed (failed, cancelled or skipped); see the summary table."
+              exit 1
+            fi
+          done

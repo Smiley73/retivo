@@ -1,0 +1,382 @@
+/**
+ * Unit tests for the annual tax-cashflow solver.
+ */
+import { describe, it, expect } from 'vitest';
+import {
+  solveTaxCashflow,
+  type TaxCashflowSolveArgs,
+  type WithdrawalClassification,
+} from './tax-cashflow-solver';
+import { applyTaxYear } from './tax-integration';
+import type { TaxCalibrationBundle, TaxYearInput, TaxMemberInput } from './tax-integration';
+import { FEDERAL_TAX_CONFIG } from './federal-tax-config';
+import { SS_TAX_THRESHOLDS } from './ss-taxation-thresholds';
+import { IRMAA_TIERS } from './irmaa-tiers';
+import { ACA_PTC_PARAMETERS } from './aca-ptc-parameters';
+import { RMD_DIVISORS } from './rmd-divisors';
+import { DEFAULT_ASSUMED_TAXABLE_YIELD_CONFIG } from './assumed-taxable-yield-config';
+
+const REAL_BUNDLE: TaxCalibrationBundle = {
+  federalTax: FEDERAL_TAX_CONFIG,
+  ssTax: SS_TAX_THRESHOLDS,
+  irmaa: IRMAA_TIERS,
+  acaPtc: ACA_PTC_PARAMETERS,
+  rmd: RMD_DIVISORS,
+  assumedTaxableYield: DEFAULT_ASSUMED_TAXABLE_YIELD_CONFIG,
+};
+
+/** Single-member 2024 tax input, no SS / no Medicare / no ACA. */
+function baseTaxInput(overrides: Partial<TaxYearInput> = {}): TaxYearInput {
+  const member: TaxMemberInput = {
+    memberId: 'p',
+    isoBirthdate: '1960-01-01',
+    onMedicare: false,
+    hasAcaCoverage: false,
+  };
+  return {
+    taxYear: 2024,
+    filingStatus: 'Single',
+    grossSsDollars: 0,
+    preTaxWithdrawalDollars: 0,
+    postTaxNonRothWithdrawalDollars: 0,
+    rothWithdrawalDollars: 0,
+    otherOrdinaryIncomeDollars: 0,
+    taxExemptInterestDollars: 0,
+    householdSize: 1,
+    members: [member],
+    accounts: [],
+    taxpayersAge65Plus: 0,
+    ...overrides,
+  };
+}
+
+/** Classifier: route the whole target to pre-tax, always fully funded. */
+function allPreTaxClassifier(target: number): WithdrawalClassification {
+  return {
+    preTaxDollars: target,
+    postTaxNonRothDollars: 0,
+    postTaxCashLikeDollars: 0,
+    rothDollars: 0,
+    fundedDollars: target,
+  };
+}
+
+function baseArgs(overrides: Partial<TaxCashflowSolveArgs> = {}): TaxCashflowSolveArgs {
+  return {
+    ordinaryNetNeedDollars: 60_000,
+    taxInputBase: baseTaxInput(),
+    bundle: REAL_BUNDLE,
+    irmaaPayment: { ownSsDollarsByMemberId: {} },
+    classifyForTarget: allPreTaxClassifier,
+    ...overrides,
+  };
+}
+
+/**
+ * 2026 tax input for a Medicare beneficiary collecting a large own SS benefit
+ * with a prior-year MAGI that lands in a non-trivial IRMAA surcharge tier — the
+ * fixture the withheld-surcharge tests are built on. `preTaxWithdrawal`
+ * is the pre-tax draw the year is taxed against (0 for the args base, the
+ * cash-only target for the direct federal-tax recomputation).
+ */
+function withheldMedicareInput(preTaxWithdrawal = 0): TaxYearInput {
+  return baseTaxInput({
+    taxYear: 2026,
+    grossSsDollars: 30_000,
+    magiTwoYearsPriorDollars: 130_000, // pushes IRMAA into a non-trivial surcharge tier
+    preTaxWithdrawalDollars: preTaxWithdrawal,
+    members: [{ memberId: 'p', isoBirthdate: '1955-01-01', onMedicare: true, hasAcaCoverage: false }],
+  });
+}
+
+describe('solveTaxCashflow', () => {
+  it('converges within $1 for an all-pre-tax fundable year', () => {
+    const result = solveTaxCashflow(baseArgs());
+    expect(result.taxCashflowConverged).toBe(true);
+    expect(result.taxCashflowIterations).toBeLessThanOrEqual(8);
+    expect(result.taxCashflowShortfallCents).toBe(0);
+    // Pre-tax draw of ~$60k+ owes federal tax → positive cashflow need.
+    expect(result.federalTaxCashNeedCents).toBeGreaterThan(0);
+    expect(result.totalTaxCashflowNeedCents).toBeGreaterThan(0);
+  });
+
+  it('produces a fixpoint: the converged tax need is self-consistent', () => {
+    const result = solveTaxCashflow(baseArgs());
+    // The final need should match the federal tax on the grossed-up draw to
+    // within the convergence threshold ($1 = 100 cents) — IRMAA/ACA are zero.
+    expect(
+      Math.abs(result.totalTaxCashflowNeedCents - result.federalTaxCashNeedCents),
+    ).toBeLessThanOrEqual(100);
+  });
+
+  it('stops after 8 passes and marks non-convergence when the loop never settles', () => {
+    // Pathological classifier: tax never settles because each pass reports a
+    // wildly different funded classification (alternating huge / tiny pre-tax).
+    let flip = false;
+    const oscillating = (target: number): WithdrawalClassification => {
+      flip = !flip;
+      const pre = flip ? target + 500_000 : target;
+      return {
+        preTaxDollars: pre,
+        postTaxNonRothDollars: 0,
+        postTaxCashLikeDollars: 0,
+        rothDollars: 0,
+        fundedDollars: pre,
+      };
+    };
+    const result = solveTaxCashflow(baseArgs({ classifyForTarget: oscillating }));
+    expect(result.taxCashflowIterations).toBe(8);
+    expect(result.taxCashflowConverged).toBe(false);
+  });
+
+  it('marks a shortfall when the portfolio cannot fund the grossed-up draw', () => {
+    // Portfolio caps funding at $40k — well below the $60k ordinary need.
+    const capped = (target: number): WithdrawalClassification => {
+      const funded = Math.min(target, 40_000);
+      return {
+        preTaxDollars: funded,
+        postTaxNonRothDollars: 0,
+        postTaxCashLikeDollars: 0,
+        rothDollars: 0,
+        fundedDollars: funded,
+      };
+    };
+    const result = solveTaxCashflow(baseArgs({ classifyForTarget: capped }));
+    expect(result.taxCashflowShortfallCents).toBeGreaterThan(0);
+    // Never throws — returns last computed values + diagnostic.
+    expect(result.taxYearResult).toBeDefined();
+  });
+
+  it('withholds IRMAA from the member own SS when receiving their own benefit (no cash need)', () => {
+    const args = baseArgs({
+      ordinaryNetNeedDollars: 20_000,
+      taxInputBase: baseTaxInput({
+        taxYear: 2026,
+        grossSsDollars: 40_000,
+        magiTwoYearsPriorDollars: 250_000, // pushes IRMAA into a surcharge tier
+        members: [{ memberId: 'p', isoBirthdate: '1955-01-01', onMedicare: true, hasAcaCoverage: false }],
+      }),
+      irmaaPayment: { ownSsDollarsByMemberId: { p: 40_000 } },
+    });
+    const result = solveTaxCashflow(args);
+    expect(result.irmaaWithheldFromSsCents).toBeGreaterThan(0);
+    expect(result.irmaaCashNeedCents).toBe(0);
+  });
+
+  it('treats IRMAA as a cash need when on Medicare but not receiving their own SS', () => {
+    const args = baseArgs({
+      ordinaryNetNeedDollars: 20_000,
+      taxInputBase: baseTaxInput({
+        taxYear: 2026,
+        grossSsDollars: 0,
+        magiTwoYearsPriorDollars: 250_000,
+        members: [{ memberId: 'p', isoBirthdate: '1955-01-01', onMedicare: true, hasAcaCoverage: false }],
+      }),
+      irmaaPayment: { ownSsDollarsByMemberId: {} },
+    });
+    const result = solveTaxCashflow(args);
+    expect(result.irmaaCashNeedCents).toBeGreaterThan(0);
+    expect(result.irmaaWithheldFromSsCents).toBe(0);
+    // The IRMAA cash portion raises the total cashflow need.
+    expect(result.totalTaxCashflowNeedCents).toBeGreaterThanOrEqual(result.irmaaCashNeedCents);
+  });
+
+  it('mixed household: the Medicare spouse who delays SS pays IRMAA as cash, '
+    + 'never withheld from the spouse who is collecting SS', () => {
+    // Primary is on Medicare but has NOT claimed SS (own SS $0); secondary is
+    // NOT on Medicare but IS collecting a large SS benefit. The primary's
+    // surcharge must be a CASH need — a member's surcharge is withheld only from
+    // that member's own SS, never the secondary's. (A household-pool split would
+    // wrongly withhold it from the secondary's $40k benefit.)
+    const args = baseArgs({
+      ordinaryNetNeedDollars: 20_000,
+      taxInputBase: baseTaxInput({
+        taxYear: 2026,
+        filingStatus: 'MFJ',
+        householdSize: 2,
+        grossSsDollars: 40_000, // entirely the secondary's benefit
+        magiTwoYearsPriorDollars: 250_000, // surcharge tier
+        members: [
+          { memberId: 'p', isoBirthdate: '1955-01-01', onMedicare: true, hasAcaCoverage: false },
+          { memberId: 's', isoBirthdate: '1962-01-01', onMedicare: false, hasAcaCoverage: false },
+        ],
+      }),
+      // Only the secondary collects SS; the Medicare member (primary) has none.
+      irmaaPayment: { ownSsDollarsByMemberId: { s: 40_000 } },
+    });
+    const result = solveTaxCashflow(args);
+    // The Medicare member's surcharge is a cash need, NOT withheld from the
+    // collecting spouse's SS.
+    expect(result.irmaaCashNeedCents).toBeGreaterThan(0);
+    expect(result.irmaaWithheldFromSsCents).toBe(0);
+  });
+
+  it('mixed household: each Medicare member is withheld from their OWN SS only', () => {
+    // Both members on Medicare and both collecting their own SS. Each
+    // member's surcharge is withheld from their own benefit → no cash need,
+    // and the total withheld equals the full household surcharge.
+    const args = baseArgs({
+      ordinaryNetNeedDollars: 20_000,
+      taxInputBase: baseTaxInput({
+        taxYear: 2026,
+        filingStatus: 'MFJ',
+        householdSize: 2,
+        grossSsDollars: 80_000,
+        magiTwoYearsPriorDollars: 280_000,
+        members: [
+          { memberId: 'p', isoBirthdate: '1955-01-01', onMedicare: true, hasAcaCoverage: false },
+          { memberId: 's', isoBirthdate: '1956-01-01', onMedicare: true, hasAcaCoverage: false },
+        ],
+      }),
+      irmaaPayment: { ownSsDollarsByMemberId: { p: 40_000, s: 40_000 } },
+    });
+    const result = solveTaxCashflow(args);
+    expect(result.irmaaWithheldFromSsCents).toBeGreaterThan(0);
+    expect(result.irmaaCashNeedCents).toBe(0);
+  });
+
+  it('two returns on DIFFERENT IRMAA tiers keep their own surcharge per beneficiary', () => {
+    // Both spouses are on Medicare, but only the SECONDARY collects Social
+    // Security — and only the PRIMARY's look-back return is in a surcharge
+    // tier. Re-splitting the merged household surcharge equally would withhold
+    // half of the primary's surcharge from the secondary's SS check, which is
+    // not how CMS collects it. Each return's own surcharge must follow its own
+    // beneficiaries.
+    const args = baseArgs({
+      ordinaryNetNeedDollars: 20_000,
+      taxInputBase: {
+        ...baseTaxInput({
+          taxYear: 2026,
+          filingStatus: 'MFJ',
+          householdSize: 2,
+          grossSsDollars: 40_000,
+          members: [
+            { memberId: 'p', isoBirthdate: '1955-01-01', onMedicare: true, hasAcaCoverage: false },
+            { memberId: 's', isoBirthdate: '1956-01-01', onMedicare: true, hasAcaCoverage: false },
+          ],
+        }),
+        memberIdByRole: { primary: 'p', secondary: 's' },
+        taxUnits: [
+          { memberIds: ['primary'], filingStatus: 'MFS', householdSize: 1 },
+          { memberIds: ['secondary'], filingStatus: 'MFS', householdSize: 1 },
+        ],
+        irmaaLookbackUnits: [
+          { memberIds: ['p'], filingStatus: 'MFS', mfsLivedWithSpouse: false, magiCents: 30_000_000 },
+          { memberIds: ['s'], filingStatus: 'MFS', mfsLivedWithSpouse: false, magiCents: 0 },
+        ],
+      },
+      // Only the SECONDARY collects SS — and their own return owes nothing.
+      irmaaPayment: { ownSsDollarsByMemberId: { s: 40_000 } },
+    });
+    const result = solveTaxCashflow(args);
+    const byUnit = result.taxYearResult.irmaaSurchargeCentsByUnit ?? [];
+    expect(byUnit).toHaveLength(2);
+    expect(byUnit[0].surchargeCents).toBeGreaterThan(0);
+    expect(byUnit[1].surchargeCents).toBe(0);
+    // The whole surcharge belongs to the primary, who collects no SS, so NOTHING
+    // is withheld from the secondary's check.
+    expect(result.irmaaWithheldFromSsCents).toBe(0);
+    expect(result.irmaaCashNeedCents).toBe(result.taxYearResult.irmaaSurchargeCents);
+  });
+
+  it('returns the zero result and never throws for a year below the calibration floor', () => {
+    // A projection year before the earliest published calibration table has no
+    // modelable tax — `applyTaxYear` throws `UnsupportedTaxYearError`
+    // ({ code: 'UNSUPPORTED_TAX_YEAR' }). The solver must catch it and degrade
+    // gracefully (zero need, converged, never throw).
+    const args = baseArgs({
+      ordinaryNetNeedDollars: 60_000,
+      taxInputBase: baseTaxInput({ taxYear: 1990 }),
+    });
+    let result!: ReturnType<typeof solveTaxCashflow>;
+    expect(() => {
+      result = solveTaxCashflow(args);
+    }).not.toThrow();
+    expect(result.taxCashflowConverged).toBe(true);
+    expect(result.totalTaxCashflowNeedCents).toBe(0);
+    expect(result.taxCashflowShortfallCents).toBe(0);
+    expect(result.federalTaxCashNeedCents).toBe(0);
+  });
+
+  it('taxes the SS-withheld IRMAA draw: trial target grosses up by the withheld '
+    + 'surcharge, federal tax reflects it, withheld amount unchanged, still '
+    + 'converges', () => {
+    // A member on Medicare AND collecting a large own SS benefit: the full
+    // per-beneficiary IRMAA surcharge is withheld from their own SS (no cash
+    // need). The runner funds that withheld surcharge with an extra portfolio
+    // draw, which is itself taxable pre-tax income — the solver now folds the
+    // withheld cents into its trial target so federal tax reflects it.
+    const ordinaryNeed = 40_000;
+    // Record every target the classifier is asked to fund; the final entry is
+    // the committing target the solver converged on.
+    const targets: number[] = [];
+    const recordingClassifier = (target: number): WithdrawalClassification => {
+      targets.push(target);
+      return allPreTaxClassifier(target);
+    };
+    const withheldArgs = baseArgs({
+      ordinaryNetNeedDollars: ordinaryNeed,
+      taxInputBase: withheldMedicareInput(),
+      irmaaPayment: { ownSsDollarsByMemberId: { p: 30_000 } },
+      classifyForTarget: recordingClassifier,
+    });
+    const withheld = solveTaxCashflow(withheldArgs);
+
+    // The full surcharge is withheld (own SS covers it) — a full per-beneficiary
+    // surcharge (>$1,000), not a token cent.
+    expect(withheld.irmaaWithheldFromSsCents).toBeGreaterThan(100_000);
+    expect(withheld.irmaaCashNeedCents).toBe(0);
+
+    // The committing target grosses up by the cash tax need AND the withheld
+    // surcharge — so the pre-tax draw the year is taxed against exceeds the
+    // ordinary + cash-need draw by ~the withheld dollars (the feedback). The
+    // recorded final target uses the prior pass's need, so it matches the
+    // converged figure only to within the $1 convergence threshold.
+    const finalTarget = targets[targets.length - 1];
+    const cashOnlyTarget = ordinaryNeed + withheld.totalTaxCashflowNeedCents / 100;
+    const withheldDollars = withheld.irmaaWithheldFromSsCents / 100;
+    expect(finalTarget).toBeGreaterThan(cashOnlyTarget + withheldDollars - 2);
+    expect(finalTarget).toBeLessThan(cashOnlyTarget + withheldDollars + 2);
+
+    // Federal tax need equals federal tax on the withheld-grossed pre-tax draw
+    // — strictly higher than the federal tax on the cash-only draw (proves the
+    // withheld-funded draw is actually taxed, not just funded).
+    const cashOnlyFed = applyTaxYear(
+      withheldMedicareInput(cashOnlyTarget),
+      REAL_BUNDLE,
+    ).federalTaxCents;
+    expect(withheld.federalTaxCashNeedCents).toBeGreaterThan(cashOnlyFed);
+
+    // The constant withheld offset did not break the contraction.
+    expect(withheld.taxCashflowConverged).toBe(true);
+    expect(withheld.taxCashflowIterations).toBeLessThanOrEqual(8);
+  });
+
+  it('zero-withheld year is identical with and without the withheld feedback '
+    + '(regression guard)', () => {
+    // No Medicare member → no IRMAA surcharge → withheld cents always zero, so
+    // the trial-target withheld addend is a no-op. The result must match the
+    // plain all-pre-tax baseline exactly.
+    const args = baseArgs({ ordinaryNetNeedDollars: 60_000 });
+    const result = solveTaxCashflow(args);
+    expect(result.irmaaWithheldFromSsCents).toBe(0);
+    // The federal tax need equals the fixpoint on the ordinary draw alone
+    // (within the $1 convergence threshold) — no withheld draw inflates it.
+    expect(
+      Math.abs(result.totalTaxCashflowNeedCents - result.federalTaxCashNeedCents),
+    ).toBeLessThanOrEqual(100);
+    expect(result.taxCashflowConverged).toBe(true);
+  });
+
+  it('never produces a negative tax cashflow need (ACA PTC offset floored at zero)', () => {
+    const args = baseArgs({
+      ordinaryNetNeedDollars: 5_000,
+      taxInputBase: baseTaxInput({
+        taxYear: 2024,
+        members: [{ memberId: 'p', isoBirthdate: '1973-01-01', onMedicare: false, hasAcaCoverage: true }],
+      }),
+    });
+    const result = solveTaxCashflow(args);
+    expect(result.totalTaxCashflowNeedCents).toBeGreaterThanOrEqual(0);
+  });
+});

@@ -1,0 +1,12 @@
+name: retivo
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+    packagemanager: pnpm
+description: |
+  Local-first retirement-planning platform — AWS infrastructure.
+  Two Lambdas (api + compactor), DynamoDB sync + auth tables, S3 workspace
+  snapshots, CloudFront + WAF + Shield, Route53 + ACM (when domain configured).
+  Stack-config keys: see Pulumi.<stack>.yaml.
+main: index.ts

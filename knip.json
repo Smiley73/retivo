@@ -1,0 +1,40 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.mjs", "scripts/test/**/*.test.mjs"],
+      "project": ["scripts/**/*.mjs"]
+    },
+    "apps/web": {
+      // main.tsx / vite.config.ts / vitest.config.ts are already covered by
+      // knip's vite + vitest plugins (index.html -> main.tsx), so they are
+      // omitted here. Workers are invisible to the static import graph, and
+      // the Playwright e2e specs are their own test entrypoints.
+      "entry": ["src/workers/*.worker.ts", "e2e/**/*.ts"],
+      "project": ["src/**/*.{ts,tsx}"],
+      // tailwindcss v4 is loaded via the @tailwindcss/vite plugin + a CSS
+      // `@import "tailwindcss"`, never a JS import, so knip can't see it.
+      // axe-core is consumed transitively for its types by @types/jest-axe
+      // (jest-axe@10 bundles its own axe-core and ships no types).
+      "ignoreDependencies": ["tailwindcss", "axe-core"]
+    },
+    "apps/api": {
+      // main.ts is the NestJS server; lambda.ts is the API Gateway
+      // serverless-express bridge (Pulumi handler "lambda.handler"); the
+      // *-lambda.ts files are the standalone Lambda handlers, all wired by
+      // handler-string in infrastructure/src/lambda.ts, not by import.
+      "entry": ["src/main.ts", "src/lambda.ts", "src/**/*-lambda.ts", "scripts/*.mjs"],
+      "project": ["src/**/*.ts"],
+      // jest is invoked via `node node_modules/jest/bin/jest.js` in the test
+      // script (CLI, not an import), so knip's dependency scan can't see it.
+      "ignoreDependencies": ["jest"]
+    },
+    "infrastructure": {
+      "entry": ["index.ts", "lambda-shells/**/index.mjs"],
+      "project": ["**/*.ts", "**/*.mjs"],
+      // pulumi is a system-installed CLI (the Pulumi engine), invoked by the
+      // preview/up/destroy scripts; it is intentionally not an npm dependency.
+      "ignoreBinaries": ["pulumi"]
+    }
+  }
+}

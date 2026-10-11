@@ -1,0 +1,247 @@
+{
+  "$comment": "Primary-source oracle — ACA / Medicare cases: the 2026 §36B applicable-percentage schedule with the reinstated 400% cliff (including whole-percent mid-band interpolation at 177.5% with production's raw-percentage smoothing pinned as a divergence record, the documented (400%,401%) cliff-sliver production bug, and the §86-vs-§36B dual-MAGI case), the disclosed rough-benchmark fallback, and month-aware IRMAA proration. Expected values derived independently from the cited sources; never from production code.",
+  "domain": "aca-medicare",
+  "sources": {
+    "rp-2025-25": {
+      "name": "IRS Rev. Proc. 2025-25 — Applicable Percentage Table for 2026",
+      "url": "https://www.irs.gov/pub/irs-drop/rp-25-25.pdf",
+      "publication": "Rev. Proc. 2025-25 (published 2025; verified from the IRS PDF)",
+      "accessed": "2026-07-24",
+      "identifier": "2026 table: <133% -> 2.10 flat; 133-150 -> 3.14-4.19; 150-200 -> 4.19-6.60; 200-250 -> 6.60-8.44; 250-300 -> 8.44-9.96; 300-400 -> 9.96 flat. Table ends at 400% (pre-ARPA cliff reinstated; §36B(c)(1)(A))"
+    },
+    "hhs-fpl-2025": {
+      "name": "HHS 2025 poverty guidelines (prior-year FPL lag per Rev. Proc. 2014-37 §4.02)",
+      "url": "https://aspe.hhs.gov/topics/poverty-economic-mobility/poverty-guidelines/prior-hhs-poverty-guidelines-federal-register-references/2025-hhs-poverty-guidelines",
+      "publication": "Federal Register 90 FR 5917, 2025-01-17",
+      "accessed": "2026-07-24 (values as recorded and verified)",
+      "identifier": "Contiguous-48 single-person FPL $15,650 (increment $5,500)"
+    },
+    "irs-ptc-qa": {
+      "name": "IRS — Questions and answers on the Premium Tax Credit",
+      "url": "https://www.irs.gov/affordable-care-act/individuals-and-families/questions-and-answers-on-the-premium-tax-credit",
+      "publication": "FS-2025-10, 2025-12-23 (page last reviewed 2026-07-22)",
+      "accessed": "2026-07-24",
+      "identifier": "PTC = benchmark SLCSP premium minus the expected contribution (MAGI x applicable percentage); household income measured against the FPL"
+    },
+    "cms-2026": {
+      "name": "CMS — 2026 Medicare Parts A & B Premiums and Deductibles",
+      "url": "https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-deductibles",
+      "publication": "2025-11-14",
+      "accessed": "2026-07-24",
+      "identifier": "2026 Part B standard premium $202.90/mo; joint-return IRMAA tier 1 (> $218,000 to $274,000): Part B $81.20/mo, Part D $14.50/mo"
+    },
+    "poms-hi-01101-031": {
+      "name": "SSA POMS HI 01101.031 — How IRMAA is calculated",
+      "url": "https://secure.ssa.gov/poms.nsf/lnx/0601101031",
+      "publication": "TN 36 (12-25), effective 2025-12-02",
+      "accessed": "2026-07-24",
+      "identifier": "IRMAA applies per enrolled beneficiary; Part B and Part D adjustments are separate amounts (35/50/65/80/85% cost shares); premium year 2026 tables match the CMS fact sheet"
+    },
+    "i8962-2020": {
+      "name": "IRS Instructions for Form 8962 (2020) — the last pre-ARPA edition (Worksheet 2 + applicable-figure Table 2 mechanics)",
+      "url": "https://www.irs.gov/pub/irs-prior/i8962--2020.pdf",
+      "publication": "2020 tax-year edition (pre-ARPA rules the 2026 cliff reinstates)",
+      "accessed": "2026-07-24",
+      "identifier": "Worksheet 2 line 5 compares household income DIRECTLY with 4.0 x the FPL — 'more than' -> not eligible for the PTC, BEFORE any rounding; only an eligible household's income-as-percentage-of-FPL is then rounded DOWN to a whole percent (Form 8962 line 5) for the Table 2 applicable-figure lookup"
+    },
+    "usc-36b": {
+      "name": "26 U.S.C. §36B(d)(2)(B) — ACA household-income MAGI definition",
+      "url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section36B&num=0&edition=prelim",
+      "publication": "statutory (OLRC current edition)",
+      "accessed": "2026-07-24",
+      "identifier": "ACA MAGI = AGI increased by (i) foreign earned income, (ii) tax-exempt interest, and (iii) the portion of Social Security benefits NOT included in gross income under §86 — the full benefit counts, unlike the federal/IRMAA MAGI which carries only the §86-taxable portion"
+    },
+    "usc-86": {
+      "name": "26 U.S.C. §86 — taxation of Social Security benefits (base amounts + tier composition)",
+      "url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section86&num=0&edition=prelim",
+      "publication": "statutory (OLRC current edition; base amounts fixed since 1993)",
+      "accessed": "2026-07-24",
+      "identifier": "Single base $25,000 / adjusted base $34,000; 50%/85% tiers feed the taxable portion the §36B(d)(2)(B) add-back is computed against"
+    }
+  },
+  "statutory": {
+    "fpl2026Single": 15650,
+    "ssBaseAmountsSingle": { "tier1": 25000, "tier2": 34000 },
+    "applicablePercentageTable2026": [
+      { "fplFloorPct": 100, "fplCeilingPct": 133, "floorPct": 0.021, "ceilingPct": 0.021 },
+      { "fplFloorPct": 133, "fplCeilingPct": 150, "floorPct": 0.0314, "ceilingPct": 0.0419 },
+      { "fplFloorPct": 150, "fplCeilingPct": 200, "floorPct": 0.0419, "ceilingPct": 0.066 },
+      { "fplFloorPct": 200, "fplCeilingPct": 250, "floorPct": 0.066, "ceilingPct": 0.0844 },
+      { "fplFloorPct": 250, "fplCeilingPct": 300, "floorPct": 0.0844, "ceilingPct": 0.0996 },
+      { "fplFloorPct": 300, "fplCeilingPct": 400, "floorPct": 0.0996, "ceilingPct": 0.0996 }
+    ],
+    "irmaa2026JointTier1": { "over": 218000, "upTo": 274000, "partBMonthly": 81.2, "partDMonthly": 14.5 }
+  },
+  "cases": [
+    {
+      "id": "ptc-2026-at-200pct-fpl",
+      "description": "2026 PTC, Single household of 1 at exactly 200% FPL: the 6.60% applicable percentage (200-250 band floor) applies.",
+      "tolerance": "within $1 (band selection exact)",
+      "derivation": [
+        "MAGI = 2.0 * 15,650 = 31,300 -> 200% FPL exactly; the 150-200 band is upper-exclusive, so the 200-250 band's floor figure 6.60% applies.",
+        "Expected contribution = round(3,130,000 cents * 0.066) = 206,580 cents.",
+        "Benchmark override $600/mo = $7,200/yr -> PTC = 720,000 - 206,580 = 513,420 cents ($5,134.20)."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "householdSize": 1,
+        "magiCents": 3130000,
+        "benchmarkAnnualSlcspCents": 720000
+      },
+      "expected": { "annualPtcCents": 513420, "applicableFigurePct": 0.066, "tier": "sliding", "fplPercentage": 200 }
+    },
+    {
+      "id": "ptc-2026-at-400pct-fpl",
+      "description": "2026 PTC at exactly 400% FPL: still eligible (the cliff is strictly ABOVE 400%), flat 9.96%.",
+      "tolerance": "within $1 (cliff boundary exact)",
+      "derivation": [
+        "MAGI = 4.0 * 15,650 = 62,600 -> exactly 400%; the 300-400 band is inclusive at 400 -> 9.96%.",
+        "Expected contribution = round(6,260,000 * 0.0996) = 623,496 cents; PTC = 720,000 - 623,496 = 96,504 cents ($965.04)."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "householdSize": 1,
+        "magiCents": 6260000,
+        "benchmarkAnnualSlcspCents": 720000
+      },
+      "expected": { "annualPtcCents": 96504, "applicableFigurePct": 0.0996, "tier": "sliding", "fplPercentage": 400 }
+    },
+    {
+      "id": "ptc-2026-mid-band-interpolated",
+      "description": "2026 PTC mid-band at 177.5% FPL: MATERIALLY between two whole percents, so Form 8962 line 5's round-DOWN-to-a-whole-percent step is genuinely discriminated from raw-percentage interpolation — floor(177.5) = 177 -> 5.49%, while interpolating the raw 177.5% would give 5.52%. `expected` records the correct truncate-then-interpolate answer; `expectedCurrentEngine` records production aca-ptc.ts's raw-percentage interpolation (its deliberate smoothing — see the whole-percent comment in computeAcaPtc) so the $8.34 divergence stays visible. If production adopts the whole-percent Table 2 lookup, the engine pin fails loudly and this flips to a normal agreement case.",
+      "tolerance": "within $1 (whole-percent figure exact; engine-divergence record exact)",
+      "derivation": [
+        "MAGI = 1.775 * 15,650 = 27,778.75 -> raw 177.5% FPL (materially between whole percents); Form 8962 line 5 rounds DOWN to 177%.",
+        "CORRECT Table 2 figure at 177%: 4.19% + ((177-150)/50) * (6.60%-4.19%) = 4.19% + 0.54*2.41% = 5.4914% -> published-table rounding to 4 decimals -> 5.49%.",
+        "Expected contribution = round(2,777,875 cents * 0.0549) = 152,505 cents; benchmark $600/mo = 720,000 -> PTC = 720,000 - 152,505 = 567,495 cents ($5,674.95).",
+        "CURRENT ENGINE (raw-percentage interpolation, truncation skipped): 4.19% + ((177.5-150)/50) * 2.41% = 5.5155% -> 4-decimal rounding -> 5.52%; contribution = round(2,777,875 * 0.0552) = 153,339 -> PTC = 720,000 - 153,339 = 566,661 cents ($5,666.61) — $8.34 less subsidy than the Worksheet answer."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "householdSize": 1,
+        "magiCents": 2777875,
+        "benchmarkAnnualSlcspCents": 720000
+      },
+      "expected": { "annualPtcCents": 567495, "applicableFigurePct": 0.0549, "tier": "sliding", "fplPercentage": 177.5 },
+      "expectedCurrentEngine": { "annualPtcCents": 566661, "applicableFigurePct": 0.0552, "tier": "sliding" }
+    },
+    {
+      "id": "ptc-2026-above-400pct-cliff",
+      "description": "2026 PTC just above 401% FPL: the pre-ARPA cliff returns — $0 PTC (Rev. Proc. 2025-25's table ends at 400%).",
+      "tolerance": "exact",
+      "derivation": [
+        "MAGI $62,757 > 4.0 * 15,650 = $62,600 -> ineligible per Form 8962 Worksheet 2 (household income compared directly with 4 x FPL, before any rounding).",
+        "PTC = 0; tier above-400-cliff. (At 401.0% FPL the production engine's floored-percent comparison agrees with Worksheet 2; the (400%, 401%) sliver where they diverge is the separate known-bug case below.)"
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "householdSize": 1,
+        "magiCents": 6275700,
+        "benchmarkAnnualSlcspCents": 720000
+      },
+      "expected": { "annualPtcCents": 0, "tier": "above-400-cliff", "eligible": false }
+    },
+    {
+      "id": "ptc-2026-cliff-sliver-known-bug",
+      "description": "KNOWN BUG: 2026 household at 400.5% FPL. Form 8962 Worksheet 2 makes it INELIGIBLE (income $62,678.25 > 4 x FPL = $62,600, compared before any truncation), but production aca-ptc.ts floors the FPL percent to 400 BEFORE the cliff comparison and wrongly keeps the household subsidized. expectedCorrect records the Worksheet 2 answer; expectedCurrentEngine records today's (incorrect) production output so the divergence stays visible until the production fix lands.",
+      "tolerance": "exact (both records)",
+      "derivation": [
+        "MAGI = 4.005 * 15,650 = 62,678.25 -> raw 400.5% FPL.",
+        "CORRECT (i8962-2020 Worksheet 2): 62,678.25 > 62,600 -> not eligible for the PTC; $0.",
+        "CURRENT ENGINE (the bug): floor(400.5) = 400 is not > 400 -> treated as eligible; the raw 400.5% misses every band so the engine clamps to the top band's 9.96% -> expected contribution = round(6,267,825 * 0.0996) = 624,275 -> PTC = 720,000 - 624,275 = 95,725 cents."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "householdSize": 1,
+        "magiCents": 6267825,
+        "benchmarkAnnualSlcspCents": 720000
+      },
+      "expectedCorrect": { "annualPtcCents": 0, "eligible": false },
+      "expectedCurrentEngine": { "annualPtcCents": 95725, "applicableFigurePct": 0.0996, "tier": "sliding", "eligible": true }
+    },
+    {
+      "id": "ss-add-back-two-magis",
+      "description": "One Social-Security-receiving household, BOTH statutory MAGIs at once: the federal/IRMAA MAGI carries only the §86-TAXABLE benefit portion, while the §36B(d)(2)(B) ACA MAGI adds back the FULL benefit (including the nontaxable portion). ACA-covered (non-Medicare) member near the 400% cliff: the add-back moves the household from the 200-250 band (federal MAGI, 249.2% FPL) to 396.2% FPL.",
+      "tolerance": "SS/MAGI cents within $1; PTC within $1 (band + tier selection exact)",
+      "derivation": [
+        "Retiree born 1963-04-15 (age 63 in 2026): claimed Social Security early, on ACA Marketplace coverage until Medicare at 65. Gross SS 36,000; pre-tax IRA withdrawal 26,000; no other income.",
+        "§86 (Single): provisional income = 26,000 + 0.5*36,000 = 44,000 > 34,000 -> 85% tier; taxable = min(0.85*36,000 = 30,600, 0.85*(44,000-34,000) + min(0.5*(34,000-25,000), 0.5*36,000) = 8,500 + 4,500 = 13,000) = 13,000.",
+        "Federal/IRMAA MAGI = 26,000 + 13,000 (taxable SS only) = 39,000 -> 3,900,000 cents (249.2% FPL — would sit mid-band if it were, wrongly, fed to §36B).",
+        "§36B(d)(2)(B) ACA MAGI = 39,000 + (36,000 - 13,000) nontaxable add-back = 62,000 -> 6,200,000 cents -> 62,000/15,650 = 396.17% FPL (whole-percent 396) -> flat 9.96% band, still eligible (below the 400% cliff).",
+        "Expected contribution = round(6,200,000 * 0.0996) = 617,520; benchmark $700/mo = 840,000 -> PTC = 840,000 - 617,520 = 222,480 cents ($2,224.80).",
+        "Conflation guard: computing the PTC from the FEDERAL MAGI instead would use the 200-250 band's figure at 249% (8.40%) -> 840,000 - round(3,900,000*0.084) = 512,400 cents — $2,899.20 too generous, so a dropped add-back cannot pass."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "householdSize": 1,
+        "memberId": "aca-ss-member",
+        "isoBirthdate": "1963-04-15",
+        "grossSsDollars": 36000,
+        "preTaxWithdrawalDollars": 26000,
+        "acaBenchmarkSlcspDollars": 8400
+      },
+      "expected": {
+        "taxableSsCents": 1300000,
+        "ssTaxationTier": "eighty-five",
+        "federalMagiCents": 3900000,
+        "acaMagiCents": 6200000,
+        "fplPercentage": 396.1661341853035,
+        "acaPtcSubsidyCents": 222480,
+        "acaPtcTier": "sliding",
+        "conflatedFederalMagiPtcCents": 512400
+      }
+    },
+    {
+      "id": "rough-benchmark-per-member-sum",
+      "description": "Disclosed rough ACA benchmark fallback: per-member age-priced monthly premium summed over each member's covered months — an approximation, NOT an exchange SLCSP quote.",
+      "tolerance": "within $50/year vs the independent workbook; assumptions and direction asserted separately",
+      "derivation": [
+        "Disclosed assumptions (product calibration, not statute): $700/mo at age 60, +5% per year of age, per covered member per covered month.",
+        "Member A age 62, 12 months: 700*1.05^2 = 771.75/mo -> 77,175 cents * 12 = 926,100.",
+        "Member B age 60, 4 months: 70,000 cents * 4 = 280,000.",
+        "Household total = 1,206,100 cents ($12,061.00). Direction: premium must rise with age (age-62 monthly > age-60 monthly)."
+      ],
+      "inputs": {
+        "members": [
+          { "age": 62, "marketplaceMonths": 12 },
+          { "age": 60, "marketplaceMonths": 4 }
+        ]
+      },
+      "expected": {
+        "householdAnnualCents": 1206100,
+        "assumptions": { "baseMonthlyDollars": 700, "baseAge": 60, "ageGrowthRate": 0.05 }
+      }
+    },
+    {
+      "id": "month-aware-irmaa-partial-year",
+      "description": "Month-aware IRMAA, 2026 MFJ lookback MAGI $250,000 (joint tier 1): Part B prorated over 6 enrolled months, Part D over 12 — the two parts prorate independently.",
+      "tolerance": "exact (coverage-month counts and table lookup exact; CMS dollars exact)",
+      "derivation": [
+        "250,000 in (218,000, 274,000] -> joint tier 1: Part B 81.20/mo, Part D 14.50/mo (CMS 2025-11-14).",
+        "Full-year cents: B = round(81.20*12*100) = 97,440; D = round(14.50*12*100) = 17,400.",
+        "Beneficiary 1: B 6/12 months -> round(97,440*6/12) = 48,720; D 12/12 -> 17,400. Beneficiary 2: not enrolled -> 0.",
+        "Household total = 66,120 cents ($661.20)."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "lookback": { "magiCents": 25000000, "filingStatus": "MFJ" },
+        "beneficiaries": [
+          { "partBMonths": 6, "partDMonths": 12 },
+          { "partBMonths": 0, "partDMonths": 0 }
+        ]
+      },
+      "expected": {
+        "tier": "tier1",
+        "partBProratedHouseholdCents": 48720,
+        "partDProratedHouseholdCents": 17400,
+        "totalHouseholdAnnualCents": 66120
+      }
+    }
+  ]
+}

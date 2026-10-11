@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm view *)",
+      "Bash(pnpm --filter @retirement/web dev)",
+      "Bash(pnpm typecheck *)",
+      "Bash(pnpm test *)",
+      "Bash(codegraph explore *)",
+      "Bash(codegraph init *)",
+      "Bash(codegraph status *)",
+      "Bash(codegraph sync *)"
+    ]
+  }
+}

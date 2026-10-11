@@ -1,0 +1,21 @@
+{
+  "name": "@retirement/infrastructure",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "scripts": {
+    "preview": "pulumi preview",
+    "up": "pulumi up",
+    "destroy": "pulumi destroy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^7.48.0",
+    "@pulumi/pulumi": "^3.267.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "^5.7.2"
+  }
+}

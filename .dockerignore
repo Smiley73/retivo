@@ -1,0 +1,45 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+build
+.vite
+
+# Environment files (never include secrets in images)
+.env
+.env.*
+!.env.example
+
+# IDE / editor
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Docker
+.dockerignore
+docker-compose*.yml
+
+# Docs / misc
+*.md
+LICENSE
+AGENTS.md
+CLAUDE.md
+
+# Test / coverage
+coverage
+.nyc_output
+
+# Logs
+*.log
+logs

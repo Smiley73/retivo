@@ -1,0 +1,144 @@
+config:
+  aws:region: us-east-1
+  # Default tags stamped on every taggable resource.
+  aws:defaultTags:
+    tags:
+      App: retivo
+      Stack: dev
+  # The exact origin the SPA is served from. Used for CORS Allow-Origin
+  # and Origin/Referer enforcement. Leave empty: bootstrap-stack.sh fills it
+  # in once the stack exists (https://<cloudfront-domain>, or
+  # https://<domainName> when a custom web domain is set below).
+  retivo:webOrigin: ""
+  # ---- Web and API addresses ----
+  # The default is NO custom domain: leave both keys below empty and the
+  # stack is reached at its default Amazon addresses (a *.cloudfront.net web
+  # address, with the API behind it). A custom domain is an opt-in. Limits of
+  # the default addresses:
+  #   1. Default email mode only delivers to addresses verified with Amazon.
+  #   2. The API's default Amazon address stays reachable but refuses any
+  #      request that did not come through CloudFront.
+  #   3. Passkeys and data stored in the browser are tied to the web address,
+  #      so they do not carry over if a custom domain is added later.
+  #
+  # Optional. Custom web domain, for a registered domain with a Route53 zone
+  # the stack can manage.
+  # Example: retivo:domainName: dev.retivo.example.com
+  retivo:domainName: ""
+  # Optional. Custom API domain (regional), under a Route53 zone the stack
+  # can manage. When set, CloudFront's /api/* origin points at it instead of
+  # the default execute-api address.
+  # Example: retivo:apiDomainName: api.dev.retivo.example.com
+  retivo:apiDomainName: ""
+  # Two-step edge cutover; only applies with a custom API domain (ignored
+  # when apiDomainName is empty). Keep false on the first `pulumi up` that
+  # adds the API domain + points CloudFront /api/* at it; verify /api/*
+  # works; then set true on a second `pulumi up` to disable the public
+  # execute-api endpoint. Rollback = set back to false + `pulumi up`.
+  retivo:disableExecuteApiEndpoint: "false"
+  # SES "From" address for signup verification mail. Must be verified in
+  # SES (mandatory in sandbox mode). The bootstrap script triggers the
+  # verification flow on first run if this address isn't yet verified;
+  # until it completes, signup mail does not deliver. Replace the
+  # placeholder with a real address you control.
+  retivo:sesFromAddress: "no-reply@example.invalid"
+  # Owner/approver inbox for owner approval of new sign-ups. The api
+  # receives it as APPROVER_EMAIL: new-signup notices go here, and a signup
+  # from this exact address is auto-approved as the owner. REQUIRED once
+  # sesFromAddress is a real address (a no-reply sender must not double as
+  # the approval inbox). Example: retivo:approverEmail: owner@example.com
+  retivo:approverEmail: ""
+
+  # ---- Required stack config (ALL REQUIRED — no defaults) ----
+  # Each key below must be present or `pulumi preview/up` fails loud at
+  # config load. See docs/deploy.md for cost/behavior impact.
+  #
+  # Provision the CloudFront AWS WAF (AWSManagedRulesCommonRuleSet + IP rate
+  # rule). Turns on a paid Amazon service. Off here: with this and
+  # retivo:edgeAllowedIps (below) both empty, every preview prints a warning
+  # that the stack has neither WAF nor the edge IP gate. That warning is
+  # expected with these defaults. To restrict who can reach this stack, set
+  # retivo:edgeAllowedIps to your own IPv4 address, or turn WAF on.
+  retivo:enableWaf: "false"
+  # Second-factor (MFA) enforcement. OPTIONAL (unlike the required keys in
+  # this block); defaults true (enforcement ON) when absent. Set "false" to
+  # turn enforcement off without a code change.
+  retivo:authMfaEnforced: "true"
+  # Beta features this stack's SPA build OFFERS (baked in as
+  # VITE_BETA_FEATURES by the deploy scripts; see
+  # apps/web/src/lib/feature-flags.ts). OPTIONAL; unset ⇒ "all". Values:
+  # "all", "none", or comma-separated feature ids (today:
+  # projected-withdrawals, guardrails). An offered
+  # beta feature still stays hidden until a person switches on "Show beta
+  # features" in Preferences. Changing it is a config edit + redeploy.
+  retivo:betaFeatures: "all"
+  # Own the account-level CloudTrail trail from this stack. Turns on a paid
+  # Amazon service. Only the first trail per region is free: if dev AND prod
+  # both turn this on in the same AWS account, the second trail is a billed
+  # duplicate. New-stacks-only flag: decide it when the stack is created. An
+  # existing stack with a live trail cannot switch it off without manual
+  # Pulumi state surgery (see docs/deploy.md -> "Audit trail (`manageCloudTrail`)").
+  retivo:manageCloudTrail: "false"
+  # DynamoDB point-in-time recovery on every table. Turns on a paid Amazon
+  # service. Dev forgoes PITR as an explicit cost/DR tradeoff (no production
+  # data at risk).
+  retivo:enablePitr: "false"
+  # Immutable AWS Backup vault. Turns on a paid Amazon service. PROD-ONLY by
+  # design: the GOVERNANCE Vault Lock would resist a routine dev
+  # `pulumi destroy`. Keep this FALSE on dev: the region-global
+  # RegionSettings singleton is prod-owned and the two stacks would contend
+  # for it. False also leaves the dev snapshots bucket un-versioned.
+  retivo:enableBackups: "false"
+  # CloudWatch alarm groups (infrastructure/src/monitoring.ts). Each switch
+  # deploys or removes exactly its own group; all four are required. All off
+  # here. Turning any one on (or retivo:enableBackups) also requires
+  # retivo:alarmNotificationEmail (below).
+  # Failed-login, MFA-failed and token-reuse alarms. Turns on a paid Amazon
+  # service.
+  retivo:enableSecurityAlarms: "false"
+  # Api error count (prod adds API latency). Turns on a paid Amazon service.
+  retivo:enableApiHealthAlarms: "false"
+  # Compactor alarms (prod adds the janitor heartbeat). Turns on a paid
+  # Amazon service.
+  retivo:enableBackgroundJobAlarms: "false"
+  # Account-wide Lambda concurrency alarms (prod only). Turns on a paid
+  # Amazon service.
+  retivo:enableCapacityAlarms: "false"
+  # CloudWatch Logs retention (days) for every Lambda + API Gateway log
+  # group. Must be an AWS CloudWatch Logs enum value (1,3,5,7,14,30,60,90,
+  # 120,150,180,365,400,545,731,1096,1827,2192,2557,2922,3288,3653); any
+  # other value (e.g. 45) fails config load.
+  retivo:logRetentionDays: "7"
+  # Email address the per-stack CloudWatch alarm SNS topic subscribes.
+  # Left blank here because nothing alerts with the switches above off. It
+  # becomes REQUIRED once any alarm switch above or retivo:enableBackups is
+  # "true": deploy fails loud if it is missing. Then set a real inbox you
+  # monitor and confirm the SNS subscription after the next `pulumi up`.
+  retivo:alarmNotificationEmail: ""
+  # Optional: the account's Lambda concurrency quota (dev + prod share it).
+  # The prod-only account-wide ConcurrentExecutions alarm fires at
+  # quota - 2. Defaults to 10 when unset. Raise this and redeploy after AWS
+  # approves a Service Quotas increase — this is the ONLY place the ceiling
+  # is written.
+  retivo:lambdaConcurrencyQuota: "10"
+  # Optional, DEV-ONLY: edge IP gate. Comma-separated IPv4 addresses or
+  # IPv4/prefix blocks (e.g. "203.0.113.7/32,198.51.100.0/24") allowed to
+  # reach this stack's CloudFront distribution; every other viewer gets a
+  # 403 at the edge before S3, API Gateway or the Lambda is touched. Empty
+  # (the default) = off. Turning it on also switches the distribution to
+  # IPv4-only (the list is IPv4-only, so a dual-stack browser must not arrive
+  # over IPv6). The IP is baked into the published CloudFront Function at
+  # deploy time — a new home IP is `pulumi config set` + deploy. The prod
+  # stack refuses a non-empty value. Find your IPv4: curl -4 https://checkip.amazonaws.com
+  retivo:edgeAllowedIps: ""
+  # Optional: API Gateway stage throttle — steady requests/second and burst,
+  # aggregate across every caller (defaults 20 / 50 when unset). Dev can sit
+  # much lower than prod; excess requests get API Gateway's own 429 without
+  # invoking the Lambda. Change + redeploy, no code change.
+  retivo:apiThrottleRatePerSec: "5"
+  retivo:apiThrottleBurst: "10"
+  # Optional: ARN of the IAM permissions boundary attached to every role
+  # the stack creates, for accounts whose policy requires one. Leave unset
+  # otherwise.
+  # Example: retivo:iamPermissionsBoundaryArn: arn:aws:iam::123456789012:policy/my-permissions-boundary
+# encryptionsalt is added automatically by `pulumi stack init dev`.

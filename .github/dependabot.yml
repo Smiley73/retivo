@@ -1,0 +1,92 @@
+# Automated dependency-update PRs. Dependabot *alerts* were already on; this
+# adds the PRs that actually do the bumps. Weekly + grouped to keep the noise
+# low: routine minor/patch bumps land as one combined PR per ecosystem, while
+# riskier majors come through as individual PRs so they get reviewed on their
+# own. The repo is a single-lockfile pnpm workspace, so npm at "/" covers every
+# workspace package.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # TypeScript 6.0 can't be adopted yet: it promotes deprecated compiler
+    # options to hard errors (infrastructure's legacy moduleResolution) and the
+    # surrounding toolchain (@typescript-eslint v8, @types/jest resolution under
+    # NodeNext) isn't ready for it. Skip the major; keep getting 5.x bumps.
+    ignore:
+      - dependency-name: "typescript"
+        update-types:
+          - version-update:semver-major
+      # The app runs on Node 24; @types/node is pinned to ^24 so the types match
+      # the runtime. Skip major bumps (25+) that would type features Node 24
+      # doesn't have. 24.x minor/patch updates still come through.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
+      # NestJS 12 ships ES modules only. @nestjs/throttler (CommonJS, 6.7.1 is
+      # its latest release) loads NestJS with require(), which the Lambda
+      # Node.js runtime refuses, so the API crashes at start-up with
+      # ERR_REQUIRE_ESM. Skip the NestJS majors until throttler ships a build
+      # that works there; NestJS 11.x minor/patch updates still come through.
+      # @nestjs/throttler itself is deliberately not listed, so the release
+      # that fixes this is not ignored.
+      - dependency-name: "@nestjs/common"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@nestjs/core"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@nestjs/platform-express"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@nestjs/config"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@nestjs/cli"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@nestjs/schematics"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@nestjs/testing"
+        update-types:
+          - version-update:semver-major
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Every workflow action is pinned to a full commit SHA with the semantic
+  # release in a trailing `# vN` comment (supply-chain hardening — a moving tag
+  # in a workflow is a hole). The github-actions updater is
+  # SHA-pin aware: it reads the current version from that comment and rewrites
+  # BOTH the SHA and the comment on a bump, so pinning does not disable updates.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # The two emulator images the API tests run against (DynamoDB Local and
+  # Moto) are pinned to version tags in infrastructure/docker-compose.yml. This
+  # opens the bump PRs. Run the API suite on each before merging: a newer
+  # emulator can change behaviour the tests rely on. Majors come as their own
+  # PRs, like the npm ones.
+  - package-ecosystem: docker-compose
+    directory: "/infrastructure"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      docker-minor-patch:
+        update-types:
+          - minor
+          - patch

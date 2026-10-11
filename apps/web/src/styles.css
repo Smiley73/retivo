@@ -1,0 +1,646 @@
+/* ===========================================================================
+ * Tailwind v4 entry.
+ *
+ * `@import "tailwindcss"` pulls in Tailwind's bundle (Preflight + theme +
+ * utilities). On top of it this file defines the "Graphite Spectrum"
+ * design system: a self-hosted variable-font pair (`@font-face`) and a
+ * semantic OKLCH token layer exposed through `@theme inline` so the
+ * tokens become first-class Tailwind utilities (`bg-surface`,
+ * `text-muted`, `border-line`, `bg-accent`, `text-positive`,
+ * `border-pretax`, …). Those utilities are the SOLE color vocabulary —
+ * raw `slate-*`/`indigo-*` utilities are retired.
+ *
+ * Dark mode is a pure CSS-variable swap: `ThemeContext` toggles `.dark`
+ * on <html> and the
+ * `.dark { … }` block below re-points every `--color-*` token. Because
+ * the utilities resolve the variable at paint time, color utilities no
+ * longer need a `dark:` twin.
+ *
+ * What remains under `@layer base` is ONLY the genuine globals that
+ * cannot be expressed as a Tailwind utility on a single element (the
+ * document-level body surface, the reduced-motion media query, the
+ * scenario file-tree rail pseudo-elements, the SVG paint-order
+ * chart-label halo). Their colors reference the new semantic tokens; no
+ * raw hex survives. Every AA-relevant pair is registered in
+ * apps/web/src/lib/contrast.ts.
+ * ========================================================================= */
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Self-hosted variable fonts (latin subset, served from /fonts/*) ── */
+@font-face {
+  font-family: 'Hanken Grotesk';
+  src: url('/fonts/hanken-grotesk-var.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/jetbrains-mono-var.woff2') format('woff2-variations');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Semantic token layer (Graphite Spectrum) ──
+ * Light defaults live here; `.dark` below swaps the same names. Exposed
+ * via `@theme inline` so each `--color-*` becomes a Tailwind utility. */
+@theme inline {
+  /* Neutrals (graphite spectrum) */
+  --color-surface: var(--gs-surface);
+  --color-surface-raised: var(--gs-surface-raised);
+  --color-surface-sunken: var(--gs-surface-sunken);
+  --color-overlay: var(--gs-overlay);
+
+  --color-line: var(--gs-line);
+  --color-line-strong: var(--gs-line-strong);
+  --color-input-line: var(--gs-input-line);
+
+  --color-muted: var(--gs-muted);
+  --color-ink: var(--gs-ink);
+  --color-ink-faint: var(--gs-ink-faint);
+
+  /* Accent (pine money-green) */
+  --color-accent: var(--gs-accent);
+  --color-accent-ink: var(--gs-accent-ink);
+  --color-accent-subtle: var(--gs-accent-subtle);
+  --color-accent-link: var(--gs-accent-link);
+
+  /* Semantic states */
+  --color-positive: var(--gs-positive);
+  --color-negative: var(--gs-negative);
+  --color-warning: var(--gs-warning);
+  --color-info: var(--gs-info);
+
+  /* Account bucket hues */
+  --color-pretax: var(--gs-pretax);
+  --color-pretax-subtle: var(--gs-pretax-subtle);
+  --color-roth: var(--gs-roth);
+  --color-roth-subtle: var(--gs-roth-subtle);
+  --color-taxable: var(--gs-taxable);
+  --color-taxable-subtle: var(--gs-taxable-subtle);
+  --color-cash: var(--gs-cash);
+  --color-cash-subtle: var(--gs-cash-subtle);
+  --color-tax_free: var(--gs-tax_free);
+  --color-tax_free-subtle: var(--gs-tax_free-subtle);
+
+  /* Account-category color (used ONLY by the dashboard by-account-type card)
+   * — NOT one of the five account-bucket hues. HSA is its own whole-account
+   * category there; in the account-bucket system HSA → tax_free (the teal
+   * 5th hue above). This standalone green mirrors the existing `acctHsa`
+   * chart green so the card matches the account-balance stack chart. The two
+   * tokens are deliberately distinct: `--color-hsa` is the account-CATEGORY
+   * card slice; `--color-tax_free` is the account-table BUCKET tint. */
+  --color-hsa: var(--gs-hsa);
+  --color-hsa-subtle: var(--gs-hsa-subtle);
+
+  /* Focus ring */
+  --color-ring: var(--gs-ring);
+  --color-ring-offset: var(--gs-ring-offset);
+
+  /* Typography */
+  --font-sans: 'Hanken Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Light token values (the default theme). */
+:root {
+  --gs-surface: oklch(0.985 0.002 264);
+  --gs-surface-raised: oklch(1 0 0);
+  --gs-surface-sunken: oklch(0.965 0.003 264);
+  --gs-overlay: oklch(0.2 0.01 264 / 0.45);
+
+  --gs-line: oklch(0.89 0.005 264);
+  --gs-line-strong: oklch(0.82 0.008 264);
+  --gs-input-line: oklch(0.62 0.012 264);
+
+  --gs-muted: oklch(0.47 0.012 264);
+  --gs-ink: oklch(0.18 0.015 264);
+  --gs-ink-faint: oklch(0.62 0.010 264);
+
+  /* Pine money-green accent (replaces the earlier
+     electric lime). A deep forest green carries the single brand voice; the
+     fill is dark enough to take a WHITE label (white-on-accent 7.06:1). The
+     same deep value is used in dark mode (one identity across themes). */
+  --gs-accent: oklch(0.45 0.09 165);
+  --gs-accent-ink: oklch(0.99 0 0);
+  --gs-accent-subtle: oklch(0.95 0.03 165);
+  /* The legible-as-text green for links / secondary-button labels / active
+     nav (the accent FILL is button-only). A dedicated token because the deep
+     fill is too dark on dark surfaces; this one swaps lighter in `.dark`.
+     Replaces the former iris double-duty, freeing iris to mean pre-tax only. */
+  --gs-accent-link: oklch(0.48 0.11 163);
+  /* Subtle green halo under a selected segmented-control option (the
+     `.seg .on` mock glow). Raw shadow var — intentionally not exposed in
+     @theme; consumed via `shadow-[var(--gs-accent-glow)]`. */
+  --gs-accent-glow: 0 2px 10px -3px oklch(0.45 0.09 165 / 0.45);
+
+  --gs-positive: oklch(0.52 0.16 145);
+  --gs-negative: oklch(0.50 0.18 25);
+  --gs-warning: oklch(0.52 0.13 70);
+  --gs-info: oklch(0.50 0.14 240);
+
+  --gs-pretax: oklch(0.50 0.18 260);
+  --gs-pretax-subtle: oklch(0.94 0.05 260);
+  --gs-roth: oklch(0.46 0.20 320);
+  --gs-roth-subtle: oklch(0.94 0.05 320);
+  --gs-taxable: oklch(0.50 0.13 200);
+  --gs-taxable-subtle: oklch(0.94 0.04 200);
+  --gs-cash: oklch(0.52 0.13 70);
+  --gs-cash-subtle: oklch(0.96 0.04 70);
+
+  /* tax_free account-bucket hue (teal) — the 5th account-bucket tint, used by
+     the account-table HSA row (bucket bar + type chip). Distinct from the
+     cyan `taxable` (hue 200) and the green `--gs-hsa` account-category color.
+     Light text #00756b on the #cff4ef subtle clears WCAG AA (4.75:1). */
+  --gs-tax_free: oklch(0.50 0.10 185);
+  --gs-tax_free-subtle: oklch(0.94 0.04 185);
+
+  /* HSA account-category color (dashboard by-account-type card only — NOT an
+     account-bucket hue). Mirrors the existing `acctHsa` chart green #097f23
+     (= oklch(0.52 0.16 145)) so the CSS bar and the stack chart stay in sync;
+     5.16:1 on the card surface (contrast.ts gates it). */
+  --gs-hsa: oklch(0.52 0.16 145);
+  --gs-hsa-subtle: oklch(0.95 0.05 145);
+
+  --gs-ring: oklch(0.55 0.11 165);
+  --gs-ring-offset: oklch(0.985 0.002 264);
+}
+
+/* Dark theme — variable swap. */
+.dark {
+  --gs-surface: oklch(0.14 0.008 264);
+  --gs-surface-raised: oklch(0.19 0.008 264);
+  --gs-surface-sunken: oklch(0.12 0.010 264);
+  --gs-overlay: oklch(0.05 0.005 264 / 0.62);
+
+  --gs-line: oklch(0.30 0.010 264);
+  --gs-line-strong: oklch(0.40 0.012 264);
+  --gs-input-line: oklch(0.55 0.014 264);
+
+  --gs-muted: oklch(0.72 0.012 264);
+  --gs-ink: oklch(0.95 0.005 264);
+  --gs-ink-faint: oklch(0.52 0.010 264);
+
+  /* Dark mode keeps the same deep pine fill + white label (one identity
+     across themes); only `accent-link` lifts so links stay legible on dark. */
+  --gs-accent: oklch(0.45 0.09 165);
+  --gs-accent-ink: oklch(0.99 0 0);
+  --gs-accent-subtle: oklch(0.26 0.06 165);
+  --gs-accent-link: oklch(0.70 0.12 163);
+  --gs-accent-glow: 0 2px 10px -3px oklch(0.45 0.09 165 / 0.45);
+
+  /* Dark greens retuned deeper so they read as rich greens, not
+     neon-lime, alongside the pine accent — light values stay deep already. */
+  --gs-positive: oklch(0.70 0.15 150);
+  --gs-negative: oklch(0.68 0.17 25);
+  --gs-warning: oklch(0.78 0.15 80);
+  --gs-info: oklch(0.74 0.13 240);
+
+  /* Dark hues intentionally retain the pre-retune 278°/300° pair; dark mode already
+     separates iris/roth via the 22° hue gap (278° vs 300°) + chroma (0.15 vs 0.17) — no hue widening needed. */
+  --gs-pretax: oklch(0.74 0.15 278);
+  --gs-pretax-subtle: oklch(0.26 0.06 278);
+  --gs-roth: oklch(0.72 0.17 300);
+  --gs-roth-subtle: oklch(0.26 0.06 300);
+  --gs-taxable: oklch(0.74 0.12 200);
+  --gs-taxable-subtle: oklch(0.26 0.05 200);
+  --gs-cash: oklch(0.80 0.13 80);
+  --gs-cash-subtle: oklch(0.28 0.05 80);
+
+  /* tax_free account-bucket hue (teal, dark) — the 5th bucket tint lifted for
+     dark surfaces. Text #45c1b4 on the #002c27 subtle clears WCAG AA
+     (6.87:1). Distinct from cyan `taxable` + the green HSA category color. */
+  --gs-tax_free: oklch(0.74 0.11 185);
+  --gs-tax_free-subtle: oklch(0.26 0.05 185);
+
+  /* HSA account-category color (dark) — mirrors `acctHsa` dark green #4cb86a
+     (= oklch(0.70 0.15 150)); 7.36:1 on the dark card surface. */
+  --gs-hsa: oklch(0.70 0.15 150);
+  --gs-hsa-subtle: oklch(0.26 0.06 150);
+
+  --gs-ring: oklch(0.74 0.12 163);
+  --gs-ring-offset: oklch(0.14 0.008 264);
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+  /* Document surface only — the one genuine document-level global (no
+   * element owns the whole viewport). Resolves the semantic tokens, so
+   * the dark swap rides the `.dark` variable change automatically. */
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  /* Respect reduced-motion — a11y baseline (see "Accessibility" in
+     docs/ui-conventions.md). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* -------------------------------------------------------------------------
+   * Scenarios file-tree connectors (/scenarios index). The ::before /
+   * ::after rails bridge the inter-row gap and cannot be Tailwind
+   * utilities (they connect across sibling rows). Re-tokened to the
+   * semantic line color.
+   * ------------------------------------------------------------------------- */
+  .scenario-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .scenario-tree__row {
+    display: flex;
+    align-items: stretch;
+  }
+  .scenario-tree__slot {
+    position: relative;
+    flex: 0 0 3.5rem;
+    align-self: stretch;
+  }
+  .scenario-tree__slot--rail::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -0.5rem;
+    bottom: -0.5rem;
+    border-left: 1px solid var(--color-line-strong);
+  }
+  .scenario-tree__slot--connector::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -0.5rem;
+    height: calc(50% + 0.5rem);
+    border-left: 1px solid var(--color-line-strong);
+  }
+  .scenario-tree__slot--connector:not(.is-last)::before {
+    height: calc(100% + 1rem);
+  }
+  .scenario-tree__slot--connector::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 50%;
+    border-top: 1px solid var(--color-line-strong);
+  }
+
+  /* -------------------------------------------------------------------------
+   * Chart marker labels — death / retirement / depletion marker labels
+   * render on top of busy chart bands. The SVG `paint-order: stroke`
+   * trick draws a wide background-colored stroke before the fill, giving
+   * each glyph a halo of the chart surface so it stays legible. Stroke =
+   * the raised chart-card surface so the halo matches what the chart
+   * paints on (the SVG engine renders on `--color-surface-raised`).
+   * ------------------------------------------------------------------------- */
+  .chart-marker-label {
+    stroke: var(--color-surface-raised);
+    stroke-width: 3px;
+    paint-order: stroke;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Row-actions reveal (Graphite Spectrum account-table row pattern).
+ *
+ * The hover-revealed icon-action cluster on account-table rows. This lives
+ * as a global (not a Tailwind utility) because its visibility is driven by
+ * a combination Tailwind utilities can't express on a single element:
+ *   - reveal on row HOVER and on `:focus-within` (so keyboard tabbing into
+ *     an action shows the cluster — a hidden-on-blur focusable would be a
+ *     keyboard trap / WCAG 2.4.7 failure), AND
+ *   - hidden-until-revealed ONLY on POINTER devices (`@media (hover: hover)`).
+ *
+ * Touch devices (`@media (hover: none)`) have no hover, so the cluster is
+ * ALWAYS visible there — the default `opacity` is 1 and the pointer-only
+ * media query never narrows it. The icon buttons keep visible-text
+ * equivalents via `aria-label`, so the reveal is purely visual polish; the
+ * actions are always reachable by keyboard + screen reader regardless of
+ * device. The row opts in with the `group/row` marker class (RA `<Row>`).
+ * ------------------------------------------------------------------------- */
+@layer components {
+  .row-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    transition: opacity 0.12s;
+  }
+  /* Pointer devices only: hide until the row is hovered or holds focus.
+
+     NOTE: rows whose `.row-actions` reveal on hover must NOT live inside an
+     `overflow` scroll container — WebKit/Safari leaves a row's CSS `:hover`
+     stuck while it sits in a scroll context, so the prior row's actions never
+     hid. Such tables opt out of scrolling via `<TableScroll scroll={false}>`.
+     See "Tables" in docs/ui-conventions.md. */
+  @media (hover: hover) {
+    .row-actions {
+      opacity: 0;
+    }
+    .group\/row:hover .row-actions,
+    .group\/row:focus-within .row-actions {
+      opacity: 1;
+    }
+  }
+  /* Touch / no-hover devices inherit the default opacity: 1 — always shown. */
+
+  /* Schedule-anchor picker alignment: radio label in an auto-sized first
+     column, its input(s) in a flexible second column, so the age/year
+     sliders and other inputs line up vertically across the radio rows.
+     A real CSS class (not a `grid-cols-[auto_1fr]` arbitrary utility) per
+     the UI coding standards' ban on raw arbitrary Tailwind utilities
+     (AGENTS.md). */
+  .anchor-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+  }
+}
+
+/* ===========================================================================
+ * Print optimisation — CFP Report page
+ *
+ * Rules hide navigation chrome and apply page-break hints for the /report
+ * route. This block uses CSS variable references (var(--color-*)) so the
+ * semantic-token vocabulary carries into print without any raw hex.
+ * All rules are annotated with the rationale for each choice.
+ *
+ * Manual verification required: jsdom cannot evaluate @media print, so these
+ * rules are not covered by unit tests. Verify by opening /report →
+ * File → Print and confirming the expected layout.
+ * ========================================================================= */
+/* =========================================================================
+   Balance Projection tab panels — SCREEN-ONLY hide for the non-selected
+   force-mounted panels. Every panel stays
+   mounted at all times — print is pure CSS with no `beforeprint` hook
+   anywhere in this app, so a panel React Aria unmounted would simply be
+   absent from the printout. This rule must therefore be `@media screen`-
+   scoped: an unscoped hide would also blank the printout. It must also NOT
+   use `display:none` — that collapses the chart-measuring node to zero
+   width, `useChartGeometry`'s ResizeObserver never re-fires from 0, so a
+   hidden chart keeps the 800px fallback and `preserveAspectRatio="none"`
+   stretches it once revealed or printed (the same hazard applies to the PDF
+   render host). Keying on
+   `[data-inert]` — the attribute React Aria's `Tabs` sets on exactly the
+   non-selected force-mounted `TabPanel`s — means there is no second source
+   of truth about which panel is showing; `styles.test.ts` is the only
+   automated guard over this rule.
+   `position: relative` is load-bearing: `overflow: hidden` only clips
+   descendants whose containing-block chain passes through the panel. The
+   hidden views contain absolutely positioned screen-reader-only spans
+   (React Aria radio labels, etc.); on a static panel their containing block
+   is the page root, so they escape the clip and extend the document's
+   scrollable height to wherever their static position lands — hundreds of
+   pixels of blank scroll space below the visible view, and once scrolled
+   into it the sticky sidebar runs out of its container and slides up.
+   Making the panel positioned puts every such descendant back inside the
+   clipped box.
+   ========================================================================= */
+@media screen {
+  .bp-view-panel[data-inert] {
+    position: relative;
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+  }
+}
+
+@media print {
+  /* Hide the sidebar nav column — the reader gets the document, not
+     the application chrome. */
+  [aria-label="Primary navigation"] {
+    display: none !important;
+  }
+
+  /* Hide the mobile top bar (menu toggle + sync badge). */
+  [role="banner"] {
+    display: none !important;
+  }
+
+  /* Hide action buttons (Print, any future controls) so the printed
+     output is clean document copy, not interactive UI. */
+  .report-print-hide {
+    display: none !important;
+  }
+
+  /* Force black-on-white output regardless of app theme. Without this
+     the dark-mode --gs-* values (near-white text, dark surfaces) print
+     as invisible text on white paper when "Use Background" is disabled
+     in the print dialog. Remapping the primitives here cascades through
+     every Tailwind utility that references them, so no per-utility
+     override is needed. Both :root and .dark are targeted so the dark
+     class selector cannot win the specificity race. */
+  :root,
+  .dark {
+    --gs-surface: oklch(1 0 0);
+    --gs-surface-raised: oklch(1 0 0);
+    --gs-surface-sunken: oklch(0.93 0 0);
+    --gs-overlay: transparent;
+    --gs-line: oklch(0.80 0 0);
+    --gs-line-strong: oklch(0.70 0 0);
+    --gs-input-line: oklch(0.60 0 0);
+    --gs-muted: oklch(0.30 0 0);
+    --gs-ink: oklch(0.05 0 0);
+    --gs-ink-faint: oklch(0.40 0 0);
+  }
+
+  /* Row stripe backgrounds are semantic surfaces — tell the print
+     engine to honour them even in economy / no-background mode. */
+  .bg-surface-sunken {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Remove the shell's min-h-screen so the printed page isn't padded
+     with whitespace from the viewport-height constraint. Also revoke
+     the screen-layout overflow-x-clip: without this the table content
+     is clipped at the viewport boundary before the print engine sees
+     it, so zooming the print dialog has no effect on the cut-off. */
+  .flex.min-h-screen {
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Proportionally reduce ALL report text for print. Screen font sizes
+     (text-base=16px, text-sm=14px, text-xs=12px) are designed for 96 dpi
+     screens; a Letter/A4 page with margins fits ~670 px usable width.
+     Setting the root font-size to 12 px scales every rem-based Tailwind
+     utility proportionally: text-base→12 px, text-sm→10.5 px, text-xs→9 px.
+     Headings, overview KPI rows, cards, and labels all shrink together so
+     the printed hierarchy remains consistent without per-element overrides. */
+  html {
+    font-size: 12px !important;
+  }
+
+  /* Report tables need a further floor below the base 12 px to compact
+     9-column rows onto a Letter/A4 portrait page without manual zoom.
+     Tighter cell padding matches the smaller text. */
+  .report-section table {
+    font-size: 9px !important;
+  }
+
+  .report-section table th,
+  .report-section table td {
+    padding: 3px 5px !important;
+    font-size: 9px !important;
+  }
+
+  /* Undo sticky positioning on th — Chrome's PDF engine can lose the
+     text layer inside sticky+z-index stacking contexts. Explicit colour
+     bypasses any variable-resolution edge case in the print renderer.
+     Background matches --gs-surface-sunken print value (0.93) so header
+     shading is preserved in the PDF. nowrap prevents multi-word headers
+     ("POST-TAX", "HIST.TWR") from line-breaking and inflating row height. */
+  .report-section table th {
+    position: static !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    background-color: oklch(0.93 0 0) !important;
+    color: oklch(0.10 0 0) !important;
+    white-space: nowrap !important;
+  }
+
+  /* Page-break before each major report section so sections don't
+     split across printed pages. Applied via a .report-section class
+     on each section wrapper in ReportPage.tsx. */
+  .report-section {
+    break-before: page;
+    page-break-before: always; /* legacy alias for older print engines */
+  }
+
+  /* First section never needs a break — it follows the header. */
+  .report-section:first-of-type {
+    break-before: avoid;
+    page-break-before: avoid;
+  }
+
+  /* Ensure links print as text (not underlined blue) — the report is
+     a read-only summary, not a hyperlink document. */
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+
+  /* =======================================================================
+     Balance Projection page (/balance-projection) — print force-expand.
+     Scoped under `.print-projection` (the page's outer <section>) so these
+     reveal/expand rules fire ONLY on this page; a bare `[hidden]{display}`
+     would un-hide every other page's collapsed content when printed.
+     Manual verification required — jsdom cannot evaluate @media print.
+     ======================================================================= */
+
+  /* (a) The three `[hidden]` reveal rules — the print-only metadata header
+     (`.bp-print-header`), the four collapsed table wrappers
+     (`.bp-print-expand`), and the print-only stress-test error notice
+     (`.bp-print-error`) — CANNOT live here (unlayered): Tailwind v4 Preflight
+     sets `[hidden] { display: none !important }` in `@layer base`, and for
+     `!important` declarations a *layered* rule beats an *unlayered* one
+     regardless of specificity — so an unlayered reveal loses and the elements
+     print collapsed/blank. They are authored in a `@layer base` block below
+     instead, where specificity (0,3,0 > 0,1,0) decides. See that block. */
+
+  /* (b) Lift the TableScroll 60vh body cap + scroll clipping so every row
+     prints instead of being truncated to the on-screen scroll viewport. */
+  .print-projection [role='region'] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* (c) Projection-scoped table compaction — reduced font-size + tighter cell
+     padding + de-stickied `th`. This block intentionally MIRRORS, and does NOT
+     share, the `.report-section table` rules above: unifying the two under a
+     shared selector would re-introduce the cross-page leakage this scoping prevents
+     (the report page's print scope must stay independent of this one). */
+  .print-projection table {
+    font-size: 9px !important;
+  }
+
+  .print-projection table th,
+  .print-projection table td {
+    padding: 3px 5px !important;
+    font-size: 9px !important;
+  }
+
+  /* De-sticky `th` — Chrome's PDF engine can lose the text layer inside
+     sticky+z-index stacking contexts. Explicit shading is preserved so the
+     header band still reads in the PDF; nowrap keeps multi-word headers on one
+     line so row height doesn't inflate. */
+  .print-projection table th {
+    position: static !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    background-color: oklch(0.93 0 0) !important;
+    color: oklch(0.1 0 0) !important;
+    white-space: nowrap !important;
+  }
+
+  /* (d) Long-table pagination — repeat the column header on each printed page
+     and never split a single row across a page boundary. The year-by-year
+     table routinely exceeds one page (40+ rows), so it must paginate, not be
+     kept whole. */
+  .print-projection thead {
+    display: table-header-group;
+  }
+
+  .print-projection tr {
+    break-inside: avoid;
+    page-break-inside: avoid; /* legacy alias for older print engines */
+  }
+
+  /* (e) Keep fixed-size chart / short-card blocks whole across page breaks
+     (NOT the long table containers — those paginate per (d)). The chart cards
+     use the page's CARD_SECTION_CLASS; target it directly so charts don't split
+     mid-element. `print-color-adjust: exact` on the chart SVG fills keeps series
+     colours from dropping in the print dialog's economy / no-background mode. */
+  .print-projection section svg {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-projection svg [fill],
+  .print-projection svg [stroke] {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
+
+/* =========================================================================
+   Balance Projection print — `[hidden]` REVEAL rules (cascade-layer fix).
+
+   These un-hide the print-only metadata header, the four collapsed table
+   wrappers, and the print-only stress-test error notice when printing.
+
+   They live in `@layer base` ON PURPOSE. Tailwind v4 Preflight defines
+   `[hidden]:where(...) { display: none !important }` in `@layer base`. For
+   `!important` declarations the cascade prefers a *layered* rule over an
+   *unlayered* one regardless of specificity, so an unlayered `display: block
+   !important` reveal LOSES to Preflight and the elements print collapsed/blank
+   (the headline-feature regression this fixes). Authoring the reveal in the
+   same `@layer base` makes specificity decide instead — `.print-projection
+   .bp-print-expand[hidden]` (0,3,0) outranks `[hidden]:where(...)` (0,1,0),
+   so the reveal wins. Still scoped under `.print-projection` so no other
+   page's collapsed content is un-hidden. Browser-verified — jsdom cannot
+   evaluate `@media print` or cascade layers, so do NOT move these out of
+   `@layer base` on the assumption that `!important` alone is enough.
+   ========================================================================= */
+@layer base {
+  @media print {
+    .print-projection .bp-print-header[hidden],
+    .print-projection .bp-print-expand[hidden],
+    .print-projection .bp-print-error[hidden] {
+      display: block !important;
+    }
+  }
+}

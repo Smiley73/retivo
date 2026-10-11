@@ -1,0 +1,28 @@
+name: Idea
+description: Suggest a change or a new feature.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please write in your own words; you do not need to know how the code works.
+
+        **Do not paste** real financial figures, account details, workspace export files, passwords or recovery keys. Use made-up numbers in any example.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation or goal behind your idea.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like RETIVO to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you do today instead?
+      description: Any workaround, or other ways you thought about solving it.

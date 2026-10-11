@@ -1,0 +1,16 @@
+---
+title: Assistant Policy
+description: Pointer to AGENTS.md and CODING_STANDARDS.md — the single source of assistant policy in this repo.
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Project Rules
+
+All assistant policy for this repo lives in two files. Read both and follow them as if inlined here:
+
+- [AGENTS.md](../../AGENTS.md) — repo-specific rules: locked stack, commands, security, UI standards, ask-before list.
+- [CODING_STANDARDS.md](../../CODING_STANDARDS.md) — universal standards.
+
+This file restates no stack, command or rule. A restated copy goes stale; the two files above are the only source.

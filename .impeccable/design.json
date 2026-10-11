@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-07T00:00:00.000Z",
+  "title": "Design System: RETIVO",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Pine",
+        "canonical": "oklch(0.45 0.09 165)",
+        "tonalRamp": ["oklch(0.22 0.05 165)", "oklch(0.30 0.07 165)", "oklch(0.38 0.08 165)", "oklch(0.45 0.09 165)", "oklch(0.55 0.11 165)", "oklch(0.70 0.10 165)", "oklch(0.85 0.06 165)", "oklch(0.95 0.03 165)"]
+      },
+      "accent-link": {
+        "role": "primary",
+        "displayName": "Pine Link",
+        "canonical": "oklch(0.48 0.11 163)",
+        "tonalRamp": ["oklch(0.24 0.06 163)", "oklch(0.32 0.08 163)", "oklch(0.40 0.10 163)", "oklch(0.48 0.11 163)", "oklch(0.58 0.12 163)", "oklch(0.70 0.12 163)", "oklch(0.85 0.07 163)", "oklch(0.95 0.03 163)"]
+      },
+      "pretax": {
+        "role": "secondary",
+        "displayName": "Iris (pre-tax)",
+        "canonical": "oklch(0.50 0.18 260)",
+        "tonalRamp": ["oklch(0.20 0.08 260)", "oklch(0.30 0.12 260)", "oklch(0.40 0.16 260)", "oklch(0.50 0.18 260)", "oklch(0.62 0.17 260)", "oklch(0.74 0.15 260)", "oklch(0.85 0.10 260)", "oklch(0.94 0.05 260)"]
+      },
+      "roth": {
+        "role": "secondary",
+        "displayName": "Violet (Roth)",
+        "canonical": "oklch(0.46 0.20 320)",
+        "tonalRamp": ["oklch(0.20 0.09 320)", "oklch(0.30 0.13 320)", "oklch(0.38 0.17 320)", "oklch(0.46 0.20 320)", "oklch(0.58 0.19 320)", "oklch(0.72 0.17 320)", "oklch(0.84 0.10 320)", "oklch(0.94 0.05 320)"]
+      },
+      "taxable": {
+        "role": "secondary",
+        "displayName": "Cyan (taxable)",
+        "canonical": "oklch(0.50 0.13 200)",
+        "tonalRamp": ["oklch(0.22 0.06 200)", "oklch(0.32 0.09 200)", "oklch(0.41 0.11 200)", "oklch(0.50 0.13 200)", "oklch(0.62 0.12 200)", "oklch(0.74 0.12 200)", "oklch(0.85 0.08 200)", "oklch(0.94 0.04 200)"]
+      },
+      "cash": {
+        "role": "secondary",
+        "displayName": "Amber (cash)",
+        "canonical": "oklch(0.52 0.13 70)",
+        "tonalRamp": ["oklch(0.24 0.06 70)", "oklch(0.34 0.09 70)", "oklch(0.43 0.11 70)", "oklch(0.52 0.13 70)", "oklch(0.64 0.13 70)", "oklch(0.80 0.13 70)", "oklch(0.90 0.08 70)", "oklch(0.96 0.04 70)"]
+      },
+      "tax_free": {
+        "role": "secondary",
+        "displayName": "Teal (tax-free)",
+        "canonical": "oklch(0.50 0.10 185)",
+        "tonalRamp": ["oklch(0.22 0.05 185)", "oklch(0.32 0.07 185)", "oklch(0.41 0.09 185)", "oklch(0.50 0.10 185)", "oklch(0.62 0.10 185)", "oklch(0.74 0.10 185)", "oklch(0.85 0.07 185)", "oklch(0.94 0.04 185)"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Graphite Ink",
+        "canonical": "oklch(0.18 0.015 264)",
+        "tonalRamp": ["oklch(0.14 0.008 264)", "oklch(0.18 0.015 264)", "oklch(0.30 0.012 264)", "oklch(0.47 0.012 264)", "oklch(0.62 0.010 264)", "oklch(0.82 0.008 264)", "oklch(0.89 0.005 264)", "oklch(0.985 0.002 264)"]
+      },
+      "positive": {
+        "role": "tertiary",
+        "displayName": "Positive Green",
+        "canonical": "oklch(0.52 0.16 145)",
+        "tonalRamp": ["oklch(0.24 0.07 145)", "oklch(0.34 0.10 145)", "oklch(0.43 0.13 145)", "oklch(0.52 0.16 145)", "oklch(0.64 0.16 145)", "oklch(0.78 0.16 145)", "oklch(0.88 0.10 145)", "oklch(0.95 0.05 145)"]
+      },
+      "negative": {
+        "role": "tertiary",
+        "displayName": "Negative Red",
+        "canonical": "oklch(0.50 0.18 25)",
+        "tonalRamp": ["oklch(0.24 0.09 25)", "oklch(0.34 0.13 25)", "oklch(0.42 0.16 25)", "oklch(0.50 0.18 25)", "oklch(0.62 0.17 25)", "oklch(0.72 0.16 25)", "oklch(0.86 0.10 25)", "oklch(0.95 0.04 25)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page titles in the header." },
+      "title": { "displayName": "Title", "purpose": "Section and card headings." },
+      "body": { "displayName": "Body", "purpose": "Default text, table cells, form values. 14px baseline." },
+      "label": { "displayName": "Label", "purpose": "Field labels, sidebar sections, metadata pills." },
+      "mono": { "displayName": "Mono Numerals", "purpose": "Every dollar amount and column of figures — tabular figures." }
+    },
+    "shadows": [
+      { "name": "card-lift", "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)", "purpose": "The only ambient shadow — a soft seat under raised cards, buttons, pills." },
+      { "name": "accent-glow", "value": "0 2px 10px -3px oklch(0.45 0.09 165 / 0.45)", "purpose": "Reserved pine halo under the selected segmented-control option." }
+    ],
+    "motion": [
+      { "name": "color-transition", "value": "transition-colors ~120-200ms", "purpose": "State-change transitions on buttons, nav, row-action reveals. Reserved; no choreography." }
+    ],
+    "breakpoints": [
+      { "name": "mobile-nav", "value": "drawer below the sidebar breakpoint" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Highest-emphasis action: pine fill with a white accent-ink label.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 8px; background: oklch(0.45 0.09 165); color: oklch(0.99 0 0); border: none; border-radius: 10px; padding: 11px 17px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); cursor: pointer; transition: background 0.15s; } .ds-btn-primary:hover { background: oklch(0.45 0.09 165 / 0.9); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px oklch(0.985 0.002 264), 0 0 0 4px oklch(0.55 0.11 165); } .ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action: raised surface with a strong hairline border.",
+      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 8px; background: oklch(1 0 0); color: oklch(0.18 0.015 264); border: 1px solid oklch(0.82 0.008 264); border-radius: 10px; padding: 11px 17px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: background 0.15s; } .ds-btn-ghost:hover { background: oklch(0.965 0.003 264); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 2px oklch(0.985 0.002 264), 0 0 0 4px oklch(0.55 0.11 165); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Single-line text/number entry; border shifts to accent with a ring on focus.",
+      "html": "<input class=\"ds-input\" type=\"text\" inputmode=\"decimal\" placeholder=\"0\" aria-label=\"Amount\" />",
+      "css": ".ds-input { display: block; width: 100%; min-width: 0; background: oklch(0.985 0.002 264); color: oklch(0.18 0.015 264); border: 1px solid oklch(0.62 0.012 264); border-radius: 6px; padding: 8px 12px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 0.875rem; } .ds-input::placeholder { color: oklch(0.47 0.012 264); } .ds-input:focus { outline: none; border-color: oklch(0.45 0.09 165); box-shadow: 0 0 0 2px oklch(0.55 0.11 165); } .ds-input:disabled { background: oklch(0.965 0.003 264); color: oklch(0.47 0.012 264); cursor: not-allowed; }"
+    },
+    {
+      "name": "Account Bucket Badge",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Type-coded status pill — bucket hue with subtle fill and matching text. Shown with its label, never hue alone.",
+      "html": "<span class=\"ds-badge-pretax\">Pre-tax</span>",
+      "css": ".ds-badge-pretax { display: inline-flex; align-items: center; border-radius: 9999px; border: 1px solid oklch(0.50 0.18 260 / 0.4); background: oklch(0.94 0.05 260); color: oklch(0.50 0.18 260); padding: 2px 8px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 0.75rem; font-weight: 500; }"
+    },
+    {
+      "name": "Content Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Elevated surface with a hairline border, 16px corners, generous padding, and the single soft shadow. Never nested.",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-title\">Portfolio</h3><p class=\"ds-card-num\">$1,284,500</p></div>",
+      "css": ".ds-card { background: oklch(1 0 0); border: 1px solid oklch(0.89 0.005 264); border-radius: 16px; padding: 24px; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); } .ds-card-title { margin: 0 0 8px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 1.125rem; font-weight: 600; color: oklch(0.18 0.015 264); } .ds-card-num { margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.5rem; font-weight: 400; font-feature-settings: 'tnum'; color: oklch(0.18 0.015 264); }"
+    },
+    {
+      "name": "Sidebar Nav Item",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Vertical rail row; hover fills sunken and lifts text, active route uses the pine accent.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item is-active\">Dashboard</a><a class=\"ds-nav-item\">Accounts</a></nav>",
+      "css": ".ds-nav { display: flex; flex-direction: column; gap: 2px; } .ds-nav-item { display: flex; align-items: center; gap: 8px; width: 100%; border-radius: 6px; padding: 8px 10px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 0.875rem; color: oklch(0.18 0.015 264); text-decoration: none; cursor: pointer; transition: background 0.12s, color 0.12s; } .ds-nav-item:hover { background: oklch(0.965 0.003 264); } .ds-nav-item.is-active { background: oklch(0.95 0.03 165); color: oklch(0.48 0.11 163); font-weight: 500; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Precise Instrument",
+    "overview": "This is the dashboard of a well-made financial instrument, not a marketing surface. Cool graphite neutrals recede so the numbers carry the page; a single pine money-green accent does the pointing; and five type-coded account-bucket hues (iris, violet, cyan, amber, teal) let the eye sort pre-tax / Roth / taxable / cash / tax-free (HSA) at a glance. Tabular numerals are set in a monospace face so columns of money line up to the digit. The whole system is built in OKLCH and flips light/dark as a pure variable swap, so contrast is engineered, not approximated. The voice is quiet and confident. Chrome stays out of the way, motion is reserved for state changes, and nothing cheerleads over an inconvenient figure.",
+    "keyCharacteristics": [
+      "Graphite neutrals + one pine money-green accent; color is rationed, never sprayed.",
+      "Five account-bucket hues, always paired with a label — never hue alone.",
+      "Monospace tabular numerals for every column of money.",
+      "WCAG 2.2 AA engineered into every token pair, both themes.",
+      "Dark mode is a variable swap; no dark: color twins anywhere."
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "The pine accent is the only accent. It appears on a small fraction of any screen (primary action, active state). Never introduce a second competing accent.", "section": "colors" },
+      { "name": "The Label-Never-Hue Rule", "body": "Account-bucket color is redundant encoding, never the sole signal. Every bucket hue is paired with a text label so meaning survives color blindness and grayscale.", "section": "colors" },
+      { "name": "The Engineered-Contrast Rule", "body": "Every UI and chart color pair is registered in lib/contrast.ts and proven AA in contrast.test.ts, both themes, before it ships.", "section": "colors" },
+      { "name": "The Tabular-Money Rule", "body": "Any number a user compares vertically is set in JetBrains Mono with tabular figures. Proportional digits in a money column are forbidden.", "section": "typography" },
+      { "name": "The 14px Baseline Rule", "body": "Body is 14px, not 16px. This is an information-dense instrument; comfort comes from hierarchy and spacing, not from inflating every line.", "section": "typography" },
+      { "name": "The Tonal-Depth Rule", "body": "Layer surfaces by tone first, border second, shadow last.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do set every comparable number in JetBrains Mono with tabular figures.",
+      "Do carry account type with hue and a text label, never hue alone.",
+      "Do use the pine accent as a fill with accent-ink text — and only as the single highest-emphasis action on a view.",
+      "Do build depth from tonal surfaces + a hairline first, shadow last.",
+      "Do register any new color pair in lib/contrast.ts and prove it AA in both themes before shipping it.",
+      "Do keep the 14px body baseline; earn comfort through hierarchy and spacing.",
+      "Do give every animation a prefers-reduced-motion alternative."
+    ],
+    "donts": [
+      "Don't ship the generic SaaS dashboard: stock indigo-on-slate, hero-metric cards, or repeated identical icon+heading+text card grids.",
+      "Don't drift toward salesy fintech / robo-advisor patterns: gamified confetti, cheerleading, or nudges that hide the real numbers.",
+      "Don't fall back to the spreadsheet / legacy-finance wall of undifferentiated gray with no hierarchy.",
+      "Don't go consumer-cute: no mascots, pastel illustrations, emoji, or jokey copy on money decisions.",
+      "Don't use the pine accent as small text on a light surface — it fails AA as text. Fill + accent-ink only.",
+      "Don't introduce a second accent, raw slate-*/indigo-* utilities, or a dark: color twin.",
+      "Don't nest a card inside a card.",
+      "Don't use type=number inputs (spinner jitter) or border-left/-right greater than 1px as a colored accent stripe."
+    ]
+  }
+}

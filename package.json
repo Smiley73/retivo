@@ -1,0 +1,38 @@
+{
+  "name": "retirement-planner",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=24.2.0 <25.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm --filter @retirement/contracts run build && pnpm -r run typecheck",
+    "lint": "eslint apps/api/src/**/*.ts apps/web/src/**/*.{ts,tsx}",
+    "test": "pnpm -r --workspace-concurrency=1 run test && pnpm test:scripts",
+    "test:affected": "node scripts/test-affected.mjs",
+    "test:coverage": "pnpm -r --workspace-concurrency=1 run test:coverage && pnpm test:scripts",
+    "test:e2e": "pnpm --filter @retirement/web test:e2e",
+    "knip": "knip",
+    "depcruise": "depcruise --config .dependency-cruiser.cjs apps/web/src apps/api/src",
+    "test:contracts": "RUN_CONTRACT_TESTS=1 node --test scripts/test/lambda-artifact-contract.test.mjs scripts/test/schema-ahead-guard.test.mjs",
+    "test:scripts": "node --test \"scripts/test/**/*.test.mjs\" \"apps/api/scripts/**/*.test.mjs\"",
+    "emu:up": "docker compose --env-file .env -f infrastructure/docker-compose.yml up -d",
+    "emu:down": "docker compose --env-file .env -f infrastructure/docker-compose.yml down",
+    "audit:ci": "pnpm audit --audit-level=moderate",
+    "gate": "pnpm lint && pnpm depcruise && pnpm knip && pnpm typecheck && pnpm test && pnpm audit:ci"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.71.1",
+    "@typescript-eslint/parser": "^8.71.1",
+    "dependency-cruiser": "^18.5.0",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "knip": "^6.39.0"
+  }
+}

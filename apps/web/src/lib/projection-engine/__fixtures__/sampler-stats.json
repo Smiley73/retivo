@@ -1,0 +1,65 @@
+{
+  "_comment": "Red-first baseline constants for the block-bootstrap validation suite. Recorded from the PRE-rewrite IID sampler + raw empirical series on RECORDER_SEED. Do not hand-edit; regenerate via sampler-stats.recorder.test.ts. See docs/math-projections.md.",
+  "recorderSeed": 9001,
+  "seriesLen": 600,
+  "referenceMix": {
+    "stocksPct": 60,
+    "bondsPct": 35,
+    "cashPct": 5
+  },
+  "drawdownRunLength": 3,
+  "baseline_iid_autocorr": 0.0014177949517059664,
+  "empirical_autocorr": 0.13722261689416373,
+  "empirical_corr": {
+    "stockPct|bondPct": -0.12471160321740771,
+    "stockPct|cashPct": -0.05654770350195927,
+    "stockPct|cpiPct": -0.04940968360887876,
+    "bondPct|cashPct": 0.16188270416198638,
+    "bondPct|cpiPct": -0.10349463331488047,
+    "cashPct|cpiPct": 0.38157835558421566
+  },
+  "baseline_iid_drawdown_freq": 0.07233333333333333,
+  "empirical_drawdown_freq": 0.11038251366120219,
+  "baseline_iid_p10": 2037960.9304705157,
+  "baseline_iid_success": 0.9725,
+  "baseline_iid_success_se": 0.003656757443418962,
+  "baseline_iid_p10_se": 0.04575071570340352,
+  "perCandidateL": [
+    {
+      "L": 1,
+      "autocorr": 0.0014177949517059664,
+      "success": 0.9725,
+      "successSe": 0.003656757443418962
+    },
+    {
+      "L": 3,
+      "autocorr": 0.10144766670444909,
+      "success": 0.9434583333333332,
+      "successSe": 0.0051645283713627884
+    },
+    {
+      "L": 6,
+      "autocorr": 0.11739277191546098,
+      "success": 0.9267083333333334,
+      "successSe": 0.005827520839254411
+    },
+    {
+      "L": 12,
+      "autocorr": 0.13149570050948492,
+      "success": 0.9187083333333335,
+      "successSe": 0.006110782748438293
+    },
+    {
+      "L": 18,
+      "autocorr": 0.1278421545879225,
+      "success": 0.9117499999999997,
+      "successSe": 0.006342788720271243
+    },
+    {
+      "L": 24,
+      "autocorr": 0.11998433419123056,
+      "success": 0.9063333333333333,
+      "successSe": 0.006515106377574438
+    }
+  ]
+}

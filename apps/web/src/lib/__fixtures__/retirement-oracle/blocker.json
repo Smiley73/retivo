@@ -1,0 +1,100 @@
+{
+  "$comment": "Primary-source oracle — blocker cases: results that must be WITHHELD with the missing inputs listed, never guessed. The rule is to withhold rather than guess a missing fact; the cited sources establish why each fact is legally required. Expected values derived independently; never from production code.",
+  "domain": "blocker",
+  "sources": {
+    "irs-p590b-beneficiaries": {
+      "name": "IRS Publication 590-B — IRA Beneficiaries (post-death rules)",
+      "url": "https://www.irs.gov/publications/p590b",
+      "publication": "2025-return edition (page last reviewed 2026-04-30)",
+      "accessed": "2026-07-24",
+      "identifier": "The post-death distribution rule depends on the beneficiary category, the owner's date of death, and whether the owner died before or on/after their required beginning date — without these no rule can be selected"
+    },
+    "irs-rmd-faq-still-working": {
+      "name": "IRS — RMD FAQs (still-working delay until retirement year)",
+      "url": "https://www.irs.gov/retirement-plans/retirement-plan-and-ira-required-minimum-distributions-faqs",
+      "publication": "page last reviewed 2026-01-29",
+      "accessed": "2026-07-24",
+      "identifier": "A still-working participant's first RMD year is the year they retire — unknown retirement year means the first RMD year cannot be resolved"
+    },
+    "usc-402ef": {
+      "name": "42 U.S.C. §402(e)/(f) — widow(er) benefit requires the survivor's own application/election",
+      "url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section402&num=0&edition=prelim",
+      "publication": "statutory (OLRC current edition)",
+      "accessed": "2026-07-24",
+      "identifier": "Entitlement requires that the widow(er) 'has filed application for widow's insurance benefits' (subject to the §402(q) reduction at the chosen start); with no survivor claim age on file the amount depends on an unmade election (withhold, no silent early-claim or FRA default)"
+    }
+  },
+  "cases": [
+    {
+      "id": "inherited-rmd-missing-facts",
+      "description": "Inherited IRA with only the beneficiary category on file: the RMD is withheld and the two missing baseline facts are listed.",
+      "tolerance": "exact (structural)",
+      "derivation": [
+        "Pub 590-B: selecting a post-death rule requires the owner's death date and the before/on-after-RBD status; only 'SPOUSE' is on file.",
+        "Expected: withheld, missing ['inheritedOwnerDeathDate', 'inheritedOwnerDiedOnOrAfterRbd']."
+      ],
+      "inputs": {
+        "facts": { "inheritedAccount": true, "beneficiaryType": "SPOUSE" },
+        "accountType": "RETIREMENT_IRA",
+        "taxTreatment": "PRE_TAX",
+        "taxYear": 2026
+      },
+      "expected": { "kind": "withheld", "missingFacts": ["inheritedOwnerDeathDate", "inheritedOwnerDiedOnOrAfterRbd"] }
+    },
+    {
+      "id": "still-working-unknown-retirement-year",
+      "description": "Still-working exception applied in prior years but the retirement year is unknown: the first-RMD-year plan is withheld (never guessed).",
+      "tolerance": "exact (structural)",
+      "derivation": [
+        "IRS RMD FAQ: the delayed first RMD year is the retirement year; without it the later-of rule cannot resolve.",
+        "Expected: withheld, missing ['retirementYear']."
+      ],
+      "inputs": {
+        "ownerAge": 74,
+        "triggerAge": 73,
+        "taxYear": 2026,
+        "stillWorkingExceptionApplied": true
+      },
+      "expected": { "kind": "withheld", "missingFacts": ["retirementYear"] }
+    },
+    {
+      "id": "survivor-claim-age-withheld",
+      "description": "Survivor benefit with no survivor claim age on file: the deceased-record component is withheld (null), not defaulted.",
+      "tolerance": "exact (structural)",
+      "derivation": [
+        "42 USC 402(e)/(f): the survivor-claim start is the survivor's own election; the withhold-rather-than-guess rule forbids silently assuming an early claim or FRA.",
+        "Expected: the survivor benefit computation returns null (withheld) for the same deceased facts that produce $19,800/yr when the claim age IS on file (see survivor.json rib-lim case)."
+      ],
+      "inputs": {
+        "survivor": { "survivorFraMonths": 804, "survivorClaimAgeMonths": null, "survivorClaimMonthIdx": null },
+        "deceased": {
+          "piaMonthlyDollars": 2000,
+          "fraMonths": 804,
+          "scenarioClaimAgeMonths": 744,
+          "deathAgeMonths": 823,
+          "deathYear": 2030,
+          "colaAnchorYear": 2031
+        },
+        "currentYear": 2031,
+        "colaPct": 2.5
+      },
+      "expected": { "withheld": true }
+    },
+    {
+      "id": "owner-age-missing-withheld",
+      "description": "Living-owner RMD rule with no owner age resolvable: withheld listing ['ownerAge'] — a missing age must never default to the most favorable divisor.",
+      "tolerance": "exact (structural)",
+      "derivation": [
+        "The Table III divisor is indexed by the owner's attained age; defaulting a missing age (e.g. to the trigger age) would silently understate the RMD (withhold rather than guess).",
+        "Expected: withheld, missing ['ownerAge']."
+      ],
+      "inputs": {
+        "facts": {},
+        "accountType": "RETIREMENT_401K",
+        "taxTreatment": "PRE_TAX",
+        "taxYear": 2026
+      },
+      "expected": { "kind": "withheld", "missingFacts": ["ownerAge"] }
+    }
+  ]
+}

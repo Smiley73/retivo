@@ -1,0 +1,61 @@
+# Local emulator stack for backend integration testing without AWS.
+# See docs/local-setup.md.
+#
+# Host ports are configurable via env vars (sourced from repo-root .env
+# by `pnpm emu:up` / `emu:down`). Defaults below; override when a port
+# clashes (macOS AirPlay Receiver squats on :5000 -> EMU_MOTO_HOST_PORT
+# defaults to 5001).
+#
+#   EMU_DYNAMODB_HOST_PORT  default 8000
+#   EMU_MOTO_HOST_PORT      default 5001
+#   REGISTRY                default (empty) — prefix images to pull from a private registry
+#                           e.g. REGISTRY=myregistry.example.com/
+#
+# Both images are pinned to a version tag, so every machine and every CI run
+# tests against the same emulators. Dependabot opens a PR when a newer tag
+# exists (.github/dependabot.yml); run the API suite on it before merging. CI
+# keys its image cache on this file, so a changed tag pulls the new image.
+#
+# DYNAMODB_ENDPOINT / S3_ENDPOINT (consumed by the API) must point at
+# the same host ports — keep them in sync in .env.
+#
+# Usage:
+#   pnpm emu:up      # docker compose --env-file .env -f ... up -d
+#   pnpm emu:down
+#
+# DynamoDB Local stores data in an in-memory database by default; pass
+# `-jar DynamoDBLocal.jar -sharedDb -inMemory` (already the entrypoint
+# default) to share state across connections within a single run.
+# Restart = clean slate.
+
+services:
+  dynamodb-local:
+    image: ${REGISTRY:-}amazon/dynamodb-local:3.3.0
+    container_name: retivo-dynamodb-local
+    command: -jar DynamoDBLocal.jar -sharedDb -inMemory
+    ports:
+      - "${EMU_DYNAMODB_HOST_PORT:-8000}:8000"
+    healthcheck:
+      # DynamoDB Local answers a bare GET with HTTP 400 — it expects a signed
+      # POST — and `curl -f` treats 400 as failure, so the old `-sf` check
+      # reported this container unhealthy for its entire life even while it
+      # served every request. Drop `-f`: any HTTP response proves the JVM is
+      # up and listening, which is all this check is for.
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:8000 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  moto:
+    image: ${REGISTRY:-}motoserver/moto:5.2.0
+    container_name: retivo-moto
+    ports:
+      - "${EMU_MOTO_HOST_PORT:-5001}:5000"
+    environment:
+      MOTO_PORT: "5000"
+      MOTO_CALL_RESET_API: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/moto-api/ > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

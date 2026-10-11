@@ -1,0 +1,130 @@
+{
+  "$comment": "Primary-source oracle — taxable-interest / yield-character / basis cases: bank/CD interest is annual ordinary income, brokerage yield splits by explicit tax character, cash-like principal withdrawals are untaxed return of already-taxed dollars, and the assumed-cost-basis fraction drives the LTCG proxy. Expected values derived independently from the cited sources; never from production code.",
+  "domain": "basis",
+  "sources": {
+    "irs-tc403": {
+      "name": "IRS Topic no. 403 — Interest received",
+      "url": "https://www.irs.gov/taxtopics/tc403",
+      "publication": "page last reviewed 2026-06-28",
+      "accessed": "2026-07-24",
+      "identifier": "Interest on bank accounts, money market accounts, and certificates of deposit is taxable ordinary income in the year it becomes available; principal itself is not re-taxed"
+    },
+    "usc-1411": {
+      "name": "26 U.S.C. §1411 — Net investment income tax",
+      "url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section1411",
+      "publication": "statutory (thresholds not indexed: Single $200,000)",
+      "accessed": "2026-07-24",
+      "identifier": "Interest and dividends are net investment income; NIIT applies only above the MAGI threshold"
+    },
+    "irs-ir-2025-103": {
+      "name": "IRS IR-2025-103 — tax year 2026 annual inflation adjustments",
+      "url": "https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2026-including-amendments-from-the-one-big-beautiful-bill",
+      "publication": "2025-10-09",
+      "accessed": "2026-07-24",
+      "identifier": "2026 Single brackets + $16,100 standard deduction; Rev. Proc. 2025-32 LTCG 0% band to $49,450 (Single)"
+    },
+    "yield-assumption": {
+      "name": "Repo calibration assumption — assumed taxable-account yield (2% total, 50% qualified-dividend, 0% municipal)",
+      "url": "docs/yearly-tax-refresh.md (Assumed taxable yield)",
+      "publication": "population-level planning assumption, asOfDate 2026-06-10 (no single authoritative source; disclosed, not statutory)",
+      "accessed": "2026-07-24",
+      "identifier": "yield = 2% of the brokerage-like start balance; half qualified dividends, half ordinary interest; municipal share 0 unless explicitly calibrated"
+    }
+  },
+  "statutory": {
+    "singleBrackets2026": [
+      {
+        "floor": 0,
+        "rate": 0.1
+      },
+      {
+        "floor": 12400,
+        "rate": 0.12
+      },
+      {
+        "floor": 50400,
+        "rate": 0.22
+      },
+      {
+        "floor": 105700,
+        "rate": 0.24
+      },
+      {
+        "floor": 201775,
+        "rate": 0.32
+      },
+      {
+        "floor": 256225,
+        "rate": 0.35
+      },
+      {
+        "floor": 640600,
+        "rate": 0.37
+      }
+    ],
+    "standardDeductionSingle2026": 16100,
+    "ltcgZeroBandCeilingSingle2026": 49450,
+    "niitThresholdSingle": 200000,
+    "assumedYield": {
+      "totalYieldPct": 0.02,
+      "qualifiedDividendFraction": 0.5,
+      "taxExemptMunicipalFraction": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "interest-and-yield-character-2026",
+      "description": "2026 Single filer (age 55): $3,500 bank/CD interest taxed as ordinary income, $200,000 brokerage balance throws 2% assumed yield split QDI/ordinary, $20,000 brokerage sale with a 60% cost-basis fraction, and a $10,000 cash-like principal withdrawal contributing $0 to income or MAGI.",
+      "tolerance": "within $1",
+      "derivation": [
+        "Assumed yield = 2% * 200,000 = 4,000 -> 2,000 QDI (LTCG-rate stack) + 2,000 ordinary interest + 0 municipal.",
+        "LTCG/QDI = 20,000 * (1 - 0.60) + 2,000 = 10,000. Ordinary income = 40,000 other + 2,000 yield interest + 3,500 cash interest = 45,500.",
+        "Taxable income = 45,500 + 10,000 - 16,100 = 39,400; taxable ordinary = 29,400 -> tax = 1,240 + 12%*17,000 = 3,280.00; LTCG stacks entirely inside the 0% band (39,400 < 49,450) -> $0.",
+        "NIIT: NII = 10,000 + 2,000 + 3,500 = 15,500 but MAGI 55,500 < 200,000 -> $0.",
+        "MAGI = 45,500 + 10,000 = 55,500 — the $10,000 cash-like principal withdrawal adds NOTHING (already-taxed principal; its growth was taxed annually as interest per Topic 403)."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "isoBirthdate": "1971-04-10",
+        "householdSize": 1,
+        "otherOrdinaryIncomeDollars": 40000,
+        "postTaxNonRothWithdrawalDollars": 20000,
+        "assumedCostBasisFraction": 0.6,
+        "postTaxCashLikeWithdrawalDollars": 10000,
+        "cashInterestDollars": 3500,
+        "brokerageLikeStartBalanceDollars": 200000
+      },
+      "expected": {
+        "federalTaxCents": 328000,
+        "magiCents": 5550000,
+        "taxableSsCents": 0
+      }
+    },
+    {
+      "id": "interest-direction-no-cash-interest",
+      "description": "Direction check: removing the $3,500 annual cash interest lowers ordinary income dollar-for-dollar — annual interest taxation is a real drag, not a wash.",
+      "tolerance": "within $1; direction asserted separately (tax WITH interest > tax WITHOUT)",
+      "derivation": [
+        "Same case with cashInterestDollars 0: ordinary = 42,000; taxable income = 35,900; taxable ordinary = 25,900 -> tax = 1,240 + 12%*13,500 = 2,860.00.",
+        "MAGI = 42,000 + 10,000 = 52,000. Delta vs the with-interest case = 12% * 3,500 = 420.00 of extra tax."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "isoBirthdate": "1971-04-10",
+        "householdSize": 1,
+        "otherOrdinaryIncomeDollars": 40000,
+        "postTaxNonRothWithdrawalDollars": 20000,
+        "assumedCostBasisFraction": 0.6,
+        "postTaxCashLikeWithdrawalDollars": 10000,
+        "cashInterestDollars": 0,
+        "brokerageLikeStartBalanceDollars": 200000
+      },
+      "expected": {
+        "federalTaxCents": 286000,
+        "magiCents": 5200000
+      }
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in RETIVO does not work or shows a wrong number.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for telling us. Please write in your own words; you do not need to know how the code works.
+
+        **Do not paste** real financial figures, account details, workspace export files, passwords or recovery keys. Describe the problem with made-up numbers instead.
+
+        Security problems do not belong here. Use the private form on the issue chooser page instead.
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do?
+      description: The steps, one by one, starting from where you were in the app.
+      placeholder: |
+        1. Open the Projections page.
+        2. Change ...
+        3. Choose ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+      description: Include the exact wording of any error message.
+    validations:
+      required: true
+  - type: dropdown
+    id: how-run
+    attributes:
+      label: How do you run RETIVO?
+      options:
+        - On my own computer (local run)
+        - In my own deployment
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Which copy of RETIVO?
+      description: The commit of your copy, or the date you last updated it.
+      placeholder: "For example: 1a2b3c4, or updated 2026-10-01"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics (optional)
+      description: |
+        In the app, Workspace settings has a Diagnostics section where you can export a file of recent errors and activity (see the Diagnostics part of [the user guide](https://github.com/Smiley73/retivo/blob/main/docs/user-guide.md#workspace)).
+        The file may contain personal data, so look through it before sharing any of it. Paste only the lines that matter, or leave this empty.

@@ -1,0 +1,135 @@
+{
+  "$comment": "Primary-source oracle — RMD cases: the Pub 590-B worked example, exact Table I/II/III divisor lookups, SECURE 2.0 trigger ages, the still-working exception, first-year April-1 deferral, and an inherited 10-year-rule year. Expected values derived independently from the cited sources; never from production code.",
+  "domain": "rmd",
+  "sources": {
+    "irs-p590b": {
+      "name": "IRS Publication 590-B — RMD chapter + Appendix B life expectancy tables",
+      "url": "https://www.irs.gov/publications/p590b",
+      "publication": "2025-return edition (page last reviewed 2026-04-30)",
+      "accessed": "2026-07-24",
+      "identifier": "Worked example: Justin became 73 on Dec 15 2025; IRA balance Dec 31 2024 $38,400; 2025 RMD $1,450 ($38,400 / 26.5). Appendix B: Table III 73 -> 26.5, 74 -> 25.5, 75 -> 24.6, 80 -> 20.2; Table I 55 -> 31.6, 58 -> 28.9, 62 -> 25.4, 74 -> 15.6; Table II (75,60) -> 28.3, (73,63) -> 26.5"
+    },
+    "irs-rmd-faq": {
+      "name": "IRS — Retirement plan and IRA required minimum distributions FAQs",
+      "url": "https://www.irs.gov/retirement-plans/retirement-plan-and-ira-required-minimum-distributions-faqs",
+      "publication": "page last reviewed 2026-01-29",
+      "accessed": "2026-07-24",
+      "identifier": "Withdrawals generally must start at age 73; workplace-plan participants can delay until the year they retire unless a 5% owner; reaching 73 in 2024 -> first RMD due April 1 2025 AND second due Dec 31 2025 (two RMDs in the deferral year); post-2019 deaths -> 10-year rule for non-eligible designated beneficiaries"
+    },
+    "secure2-107": {
+      "name": "SECURE 2.0 Act §107 (Pub. L. 117-328, Div. T) — applicable RMD age",
+      "url": "https://www.congress.gov/bill/117th-congress/house-bill/2617",
+      "publication": "enacted 2022-12-29",
+      "accessed": "2026-07-24 (enacted §107(c) applicable-age text; the age-73 side is cross-checked against the IRS RMD FAQs and Pub 590-B 'reach age 72 after December 31, 2022 -> age 73' statements fetched the same day)",
+      "identifier": "Applicable age 73 for those who reach 72 after 2022 (born 1951-1959); 75 for born 1960 or later (§107(c))"
+    }
+  },
+  "statutory": {
+    "tableIII": { "73": 26.5, "74": 25.5, "75": 24.6, "80": 20.2 },
+    "tableI": { "55": 31.6, "58": 28.9, "62": 25.4, "74": 15.6 },
+    "tableII": { "75x60": 28.3, "73x63": 26.5 }
+  },
+  "cases": [
+    {
+      "id": "pub590b-justin-2025",
+      "description": "The Pub 590-B worked example: age 73 in 2025, prior-year-end IRA balance $38,400, Uniform Lifetime divisor 26.5 -> IRS-published RMD $1,450.",
+      "tolerance": "within $1 of the IRS-published whole-dollar figure (the exact quotient is $1,449.06); divisor exact",
+      "derivation": [
+        "Justin became 73 on Dec 15 2025 (born 1952 -> SECURE 2.0 trigger age 73).",
+        "RMD = 38,400 / 26.5 (Table III, age 73) = 1,449.06; Pub 590-B publishes the rounded $1,450."
+      ],
+      "inputs": {
+        "isoBirthdate": "1952-12-15",
+        "taxYear": 2025,
+        "account": { "id": "justin-ira", "balanceDec31PriorYearCents": 3840000, "accountType": "RETIREMENT_IRA", "taxTreatment": "PRE_TAX" }
+      },
+      "expected": { "publishedRmdDollars": 1450, "divisor": 26.5, "applicable": true }
+    },
+    {
+      "id": "table-divisor-lookups",
+      "description": "Exact Appendix B divisor lookups across all three tables, including the Table II sole-spouse >10-years-younger divisors.",
+      "tolerance": "exact",
+      "derivation": [
+        "Values transcribed from Pub 590-B Appendix B (accessed 2026-07-24): Table III 73/75/80; Table I (recalculating spouse mode) 55 and 62; Table II owner 75 x spouse 60 and owner 73 x spouse 63.",
+        "Non-spouse anchored mode: base age 58 -> 28.9, minus 1.0 per elapsed year (3 years -> 25.9)."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "lookups": [
+          { "request": { "table": "uniformLifetime", "ownerAge": 73 }, "divisor": 26.5 },
+          { "request": { "table": "uniformLifetime", "ownerAge": 75 }, "divisor": 24.6 },
+          { "request": { "table": "uniformLifetime", "ownerAge": 80 }, "divisor": 20.2 },
+          { "request": { "table": "singleLife", "mode": "recalculate", "age": 55 }, "divisor": 31.6 },
+          { "request": { "table": "singleLife", "mode": "recalculate", "age": 62 }, "divisor": 25.4 },
+          { "request": { "table": "singleLife", "mode": "anchoredDecrement", "baseAge": 58, "elapsedYears": 3 }, "divisor": 25.9 },
+          { "request": { "table": "jointLastSurvivor", "ownerAge": 75, "beneficiaryAge": 60 }, "divisor": 28.3 },
+          { "request": { "table": "jointLastSurvivor", "ownerAge": 73, "beneficiaryAge": 63 }, "divisor": 26.5 }
+        ]
+      },
+      "expected": {}
+    },
+    {
+      "id": "secure2-trigger-ages",
+      "description": "SECURE 2.0 §107 trigger-age boundary: born 1959 -> 73; born 1960 -> 75.",
+      "tolerance": "exact",
+      "derivation": ["§107: the applicable age is 73 for those born 1951-1959 and 75 for those born in 1960 or later."],
+      "inputs": { "birthYears": [1959, 1960] },
+      "expected": { "triggerAges": [73, 75] }
+    },
+    {
+      "id": "still-working-exception",
+      "description": "The §401(a)(9)(C) still-working exception: granted only on affirmative facts (current-employer plan, NOT a 5% owner, plan does not force statutory-age distributions); never available to an IRA.",
+      "tolerance": "exact",
+      "derivation": [
+        "IRS RMD FAQ: workplace-plan participants can delay RMDs until the year they retire, unless they are a 5% owner.",
+        "Affirmative facts on a 401(k) -> exception applies; an unknown ownership share (fivePercentOwner absent) must DENY the deferral (conservative); an IRA never qualifies."
+      ],
+      "inputs": {
+        "affirmative": { "currentEmployerPlan": true, "fivePercentOwner": false, "planRequiresDistributionAtStatutoryAge": false },
+        "missingOwnershipFact": { "currentEmployerPlan": true, "planRequiresDistributionAtStatutoryAge": false }
+      },
+      "expected": { "affirmative401k": true, "missingOwnershipFact401k": false, "affirmativeIra": false }
+    },
+    {
+      "id": "first-year-april-1-deferral",
+      "description": "First-year RMD deferral to April 1 of the following year -> TWO RMDs due in that following year.",
+      "tolerance": "exact",
+      "derivation": [
+        "IRS RMD FAQ: reaching 73 in 2024 means the first RMD is due April 1 2025 AND the second by Dec 31 2025.",
+        "Owner at exactly the trigger age with the election -> deferred, 2 RMDs due the following year; without the election -> none from this rule."
+      ],
+      "inputs": { "ownerAge": 73, "triggerAge": 73 },
+      "expected": { "electedRmdsDueFollowingYear": 2, "notElectedRmdsDueFollowingYear": 0 }
+    },
+    {
+      "id": "inherited-ten-year-annual-window",
+      "description": "Inherited IRA, non-eligible designated beneficiary, owner died on/after their RBD in 2022: 10-year rule with annual distributions required in window years 1-9, full liquidation by 2032; the annual divisor is the anchored single-life schedule (longer-of vs the decedent's ghost life).",
+      "tolerance": "exact (rule/kind selection exact; divisor to 6 decimal places)",
+      "derivation": [
+        "Owner died 2022 on/after RBD; beneficiary (OTHER_DESIGNATED, born 1965) -> 10-year rule with annual RMDs in years 1-9 (IRS RMD FAQ / Pub 590-B).",
+        "2026 is window year 4; full liquidation by 2022 + 10 = 2032.",
+        "Beneficiary schedule: base year 2023 (year after death), age then 58 -> Table I 28.9; elapsed 3 years -> divisor 25.9.",
+        "Ghost life: decedent (born 1948) was 74 at death -> Table I 15.6 - 4 = 11.6; the LONGER (larger divisor) 25.9 wins."
+      ],
+      "inputs": {
+        "facts": {
+          "inheritedAccount": true,
+          "beneficiaryType": "OTHER_DESIGNATED",
+          "inheritedOwnerDeathDate": "2022-06-15",
+          "inheritedOwnerDiedOnOrAfterRbd": true,
+          "beneficiaryBirthdate": "1965-03-05",
+          "originalOwnerBirthdate": "1948-09-01"
+        },
+        "accountType": "RETIREMENT_IRA",
+        "taxTreatment": "PRE_TAX",
+        "taxYear": 2026
+      },
+      "expected": {
+        "kind": "inheritedTenYearRule",
+        "annualDistributionRequired": true,
+        "fullLiquidationByYear": 2032,
+        "divisor": 25.9
+      }
+    }
+  ]
+}

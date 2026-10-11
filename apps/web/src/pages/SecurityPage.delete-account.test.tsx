@@ -1,0 +1,374 @@
+/**
+ * Component tests for the Security page's Delete account danger card: the
+ * three-step flow (password → export-offer interstitial → confirm) including
+ * the within-delete export that silently reuses the step-1 password. Renders
+ * through SecurityPage, which hosts the card; the within-delete export uses the
+ * shared `useProfileExport` primitive, so the export-reuse path is exercised
+ * here even though the standalone Data card lives on the Workspace page.
+ */
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
+import { SecurityPage } from '../pages/SecurityPage';
+import { DELETED_NOTICE_KEY } from '../pages/profile-page-shared';
+import { DEVICE_ID_STORAGE_KEY } from '../auth/AuthContext';
+import { expectNoA11yViolations } from '../test/a11y';
+
+vi.mock('react-router', async () => (await import('./security-page.test-harness')).reactRouterMock());
+vi.mock('../db/store', async () => (await import('./security-page.test-harness')).dbStoreMock());
+vi.mock('../lib/local-data', async () => (await import('./security-page.test-harness')).localDataMock());
+vi.mock('../db/monte-carlo-cache', async () => (await import('./security-page.test-harness')).monteCarloCacheMock());
+vi.mock('../lib/demo-data-loader', async () => (await import('./security-page.test-harness')).demoDataLoaderMock());
+vi.mock('../api/client', async () => (await import('./security-page.test-harness')).apiClientMock({ getCurrentAccessToken: vi.fn(() => 'access-tok') }));
+vi.mock('../auth/AuthContext', async () => (await import('./security-page.test-harness')).authContextMock());
+vi.mock('../contexts/ThemeContext', async () => (await import('./security-page.test-harness')).themeContextMock());
+vi.mock('../sync/SyncContext', async () => (await import('./security-page.test-harness')).syncContextMock());
+// The within-delete "Export my data" step runs the server-authoritative export
+// via the shared `useProfileExport` primitive. Mock its single entry point.
+vi.mock('../lib/server-data-export', () => ({
+  exportServerData: vi.fn().mockResolvedValue({ unresolvedCount: 0 }),
+}));
+vi.mock('../lib/data-import', async () => (await import('./security-page.test-harness')).dataImportMock());
+vi.mock('../auth/key-envelope-client', async () => (await import('./security-page.test-harness')).keyEnvelopeClientMock());
+
+import { useAuth } from '../auth/AuthContext';
+import { securityAuthValue, securityMocks } from './security-page.test-harness';
+
+const { mockNavigate } = securityMocks;
+
+function renderPage(overrides: Record<string, unknown> = {}) {
+  (useAuth as any).mockReturnValue(securityAuthValue({ getHdk: () => null, refreshAccessToken: vi.fn().mockResolvedValue(null) }, overrides));
+  return render(<MemoryRouter><SecurityPage /></MemoryRouter>);
+}
+
+describe('SecurityPage Danger zone — account deletion', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sessionStorage.clear();
+  });
+
+  async function openDeleteModal() {
+    await waitFor(() => expect(screen.getByRole('button', { name: /delete my account/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /delete my account/i }));
+    await waitFor(() => expect(screen.getByLabelText('Current password')).toBeInTheDocument());
+  }
+
+  // The wording is the owner's to edit, so these assert the key facts (what is
+  // deleted, what expires on its own and when) rather than whole sentences.
+  function expectDeletionFacts(text: string) {
+    expect(text).toMatch(/security logs.*expire.*one year/i);
+    expect(text).toMatch(/backups.*expire.*90 days/i);
+    expect(text).not.toMatch(/seven years|legal|privacy notice/i);
+  }
+
+  it('says the data is deleted and that security logs and backups expire on their own', async () => {
+    renderPage();
+    const note = screen.getByText(/security logs.*one year/i);
+    expect(note).toHaveTextContent(/deleted/i);
+    expectDeletionFacts(note.textContent ?? '');
+
+    await openDeleteModal();
+    fireEvent.change(screen.getByLabelText('Current password'), {
+      target: { value: 'secretpw' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() =>
+      expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/removes your live account and workspace/i)).toBeInTheDocument();
+    expect(screen.queryByText(/erases everything/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
+    await waitFor(() =>
+      expect(screen.getByText('Delete account and live data?')).toBeInTheDocument(),
+    );
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveTextContent(/permanently deletes/i);
+    expectDeletionFacts(dialog.textContent ?? '');
+    expect(screen.queryByText(/every backup we have/i)).not.toBeInTheDocument();
+  });
+
+  it('Continue is disabled until a password is typed', async () => {
+    renderPage();
+    await openDeleteModal();
+    const continueBtn = screen.getByRole('button', { name: 'Continue' });
+    expect(continueBtn).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'pw' } });
+    expect(continueBtn).not.toBeDisabled();
+  });
+
+  it('Enter submits the prompt form once a password is typed, and is a no-op while empty', async () => {
+    // Native form submission (password-manager fill-and-submit relies on
+    // it); same gate as the Continue button, so an empty field can't
+    // advance. jsdom doesn't run implicit submission from a keydown, so
+    // Enter is driven as the submit event it produces in a real browser.
+    renderPage();
+    await openDeleteModal();
+    const input = screen.getByLabelText('Current password');
+    const form = input.closest('form');
+    expect(form).not.toBeNull();
+
+    fireEvent.submit(form!);
+    expect(screen.queryByText('Save a copy of your data first?')).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'secretpw' } });
+    fireEvent.submit(form!);
+    await waitFor(() =>
+      expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument(),
+    );
+  });
+
+  it('happy path: password → confirm → deleteAccount + clearAllLocalData (deviceId + toast preserved) + redirect to /login', async () => {
+    const deleteAccount = vi.fn().mockResolvedValue(undefined);
+    const { clearAllLocalData } = await import('../lib/local-data');
+    renderPage({ deleteAccount });
+    await openDeleteModal();
+
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    // Skip the export offer to reach the final confirm.
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
+
+    await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /yes, delete account/i }));
+
+    await waitFor(() => expect(deleteAccount).toHaveBeenCalledWith('secretpw'));
+    // Deletion preserves the deviceId (no reload) + the toast across
+    // the nuke; clear-data (separate test) passes no args.
+    expect(clearAllLocalData).toHaveBeenCalledWith({
+      preserveLocalKeys: [DEVICE_ID_STORAGE_KEY],
+      preserveSessionKeys: [DELETED_NOTICE_KEY],
+    });
+    expect(sessionStorage.getItem(DELETED_NOTICE_KEY)).toMatch(/deleted/i);
+    expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true });
+  });
+
+  // Regression: deleteAccount calls setMe(null) internally, which causes
+  // RequireAuth to redirect to /login mid-await. The notice must already
+  // be in sessionStorage when that redirect's LoginPage useEffect runs —
+  // otherwise the flag lands too late and surfaces on a *later* /login
+  // visit (e.g., after the user signs up again).
+  it('writes the toast flag to sessionStorage BEFORE invoking deleteAccount', async () => {
+    let storedAtCallTime: string | null | undefined;
+    const deleteAccount = vi.fn().mockImplementation(async () => {
+      storedAtCallTime = sessionStorage.getItem(DELETED_NOTICE_KEY);
+    });
+    renderPage({ deleteAccount });
+    await openDeleteModal();
+
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
+    await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /yes, delete account/i }));
+
+    await waitFor(() => expect(deleteAccount).toHaveBeenCalled());
+    expect(storedAtCallTime).toMatch(/deleted/i);
+  });
+
+  it('wrong-password error: surfaces the server message and does not delete or redirect', async () => {
+    class FakeApiError extends Error {
+      error = { code: 'INVALID_CREDENTIALS', message: 'Current password is incorrect.' };
+    }
+    const { ApiRequestError } = await import('../api/client');
+    Object.setPrototypeOf(FakeApiError.prototype, ApiRequestError.prototype);
+    const deleteAccount = vi.fn().mockRejectedValue(new FakeApiError('boom'));
+
+    renderPage({ deleteAccount });
+    await openDeleteModal();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'wrong' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
+    await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /yes, delete account/i }));
+
+    await waitFor(() => expect(deleteAccount).toHaveBeenCalledWith('wrong'));
+    // The failure drops both the confirm and the export-offer interstitial so
+    // the password modal reopens — the only step with a field to fix the wrong
+    // password — carrying the server error inline.
+    await waitFor(() =>
+      expect(screen.getByLabelText('Current password')).toBeInTheDocument(),
+    );
+    expect(screen.queryByText('Save a copy of your data first?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Delete account and live data?')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/current password is incorrect/i);
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(DELETED_NOTICE_KEY)).toBeNull();
+  });
+
+  it('Cancel on the confirm dialog returns to the export-offer modal without deleting', async () => {
+    const deleteAccount = vi.fn();
+    renderPage({ deleteAccount });
+    await openDeleteModal();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    // Skip past the export offer to reach the final confirm.
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
+    await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByText('Delete account and live data?')).not.toBeInTheDocument());
+    // Cancelling the confirm returns to the offer modal (which carries a Cancel).
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    expect(deleteAccount).not.toHaveBeenCalled();
+  });
+
+  it('export path: enter password → Export my data → verify+export → final confirm (no second password modal)', async () => {
+    const verifyPassword = vi.fn().mockResolvedValue(undefined);
+    const { exportServerData } = await import('../lib/server-data-export');
+    renderPage({ verifyPassword });
+    await openDeleteModal();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Export my data' }));
+
+    // The step-1 password is reused silently: the export verifies with
+    // `data_export` and runs the export, with no second password prompt.
+    await waitFor(() =>
+      expect(verifyPassword).toHaveBeenCalledWith('secretpw', { purpose: 'data_export' }),
+    );
+    await waitFor(() =>
+      expect(exportServerData).toHaveBeenCalledWith(
+        expect.objectContaining({ householdId: 'hh-1' }),
+        'gzip',
+      ),
+    );
+    // Auto-advance to the final confirm. No standalone export gate mounted.
+    await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
+    expect(screen.queryByText('Export your data?')).not.toBeInTheDocument();
+  });
+
+  it('skip path: Skip, delete anyway opens the final confirm without verifying or exporting', async () => {
+    const verifyPassword = vi.fn().mockResolvedValue(undefined);
+    const { exportServerData } = await import('../lib/server-data-export');
+    renderPage({ verifyPassword });
+    await openDeleteModal();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
+
+    await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
+    expect(verifyPassword).not.toHaveBeenCalled();
+    expect(exportServerData).not.toHaveBeenCalled();
+  });
+
+  it('export failure: keeps the offer step open with an inline error and does not advance', async () => {
+    class FakeApiError extends Error {
+      error = { code: 'INVALID_CREDENTIALS', message: 'Current password is incorrect.' };
+    }
+    const { ApiRequestError } = await import('../api/client');
+    Object.setPrototypeOf(FakeApiError.prototype, ApiRequestError.prototype);
+    const verifyPassword = vi.fn().mockRejectedValue(new FakeApiError('boom'));
+    const { exportServerData } = await import('../lib/server-data-export');
+    renderPage({ verifyPassword });
+    await openDeleteModal();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Export my data' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/current password is incorrect/i),
+    );
+    // Stays on the offer step; export never ran; confirm never opened.
+    expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument();
+    expect(screen.queryByText('Delete account and live data?')).not.toBeInTheDocument();
+    expect(exportServerData).not.toHaveBeenCalled();
+  });
+
+  it('Cancel on the export-offer modal resets the whole delete flow', async () => {
+    const verifyPassword = vi.fn();
+    const { exportServerData } = await import('../lib/server-data-export');
+    renderPage({ verifyPassword });
+    await openDeleteModal();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // Whole flow closed — neither the offer modal nor the password modal remain.
+    await waitFor(() =>
+      expect(screen.queryByText('Save a copy of your data first?')).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByLabelText('Current password')).not.toBeInTheDocument();
+    expect(verifyPassword).not.toHaveBeenCalled();
+    expect(exportServerData).not.toHaveBeenCalled();
+  });
+
+  // When AUTH_MFA_ENFORCED is on the server returns
+  // stepUpRequired via GET /auth/mfa/status; the card inserts a fresh-factor
+  // step-up between the export offer and the final confirm.
+  const enforcedStatus = {
+    totpEnabled: true,
+    stepUpRequired: true,
+    methods: ['totp'],
+    recoveryMethods: ['email_otp'],
+  };
+
+  it('shows the step-up modal on the confirm path when a second factor is required, and carries the proof to deleteAccount', async () => {
+    const deleteAccount = vi.fn().mockResolvedValue(undefined);
+    const getMfaStatus = vi.fn().mockResolvedValue(enforcedStatus);
+    const { container } = renderPage({ deleteAccount, getMfaStatus });
+    await openDeleteModal();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
+
+    // Step-up modal appears instead of jumping straight to the final confirm.
+    await waitFor(() => expect(screen.getByText("Confirm it's you")).toBeInTheDocument());
+    expect(screen.queryByText('Delete account and live data?')).not.toBeInTheDocument();
+    await expectNoA11yViolations(container);
+
+    // Enter an authenticator code + confirm → advances to the final confirm.
+    fireEvent.change(screen.getByLabelText('Authenticator code'), { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /yes, delete account/i }));
+
+    await waitFor(() =>
+      expect(deleteAccount).toHaveBeenCalledWith('secretpw', {
+        method: 'totp',
+        code: '123456',
+      }),
+    );
+  });
+
+  it('Skip clears a stale export error so it does not carry into the offer modal after a confirm-Cancel round trip', async () => {
+    class FakeApiError extends Error {
+      error = { code: 'INVALID_CREDENTIALS', message: 'Current password is incorrect.' };
+    }
+    const { ApiRequestError } = await import('../api/client');
+    Object.setPrototypeOf(FakeApiError.prototype, ApiRequestError.prototype);
+    const verifyPassword = vi.fn().mockRejectedValue(new FakeApiError('boom'));
+    renderPage({ verifyPassword });
+    await openDeleteModal();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    // Fail an export so the offer modal carries an inline error.
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Export my data' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/current password is incorrect/i),
+    );
+
+    // Skip clears the stale error and opens the confirm; Cancel returns to the
+    // offer modal, which must now show no error.
+    fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
+    await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});

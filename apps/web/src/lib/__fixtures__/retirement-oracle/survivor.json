@@ -1,0 +1,101 @@
+{
+  "$comment": "Primary-source oracle — survivor / dual-entitlement cases: SSA POMS RS 00615.020 separate-reduction composition and the RS 00615.320 RIB-LIM cap. Expected values derived independently from the cited sources; never from production code.",
+  "domain": "survivor",
+  "sources": {
+    "poms-rs-00615-020": {
+      "name": "SSA POMS RS 00615.020 — Dual Entitlement Overview",
+      "url": "https://secure.ssa.gov/POMS.NSF/lnx/0300615020",
+      "publication": "TN 41 (12-23), effective 2023-12-05",
+      "accessed": "2026-07-24",
+      "identifier": "Method C worked example: spouse benefit $1,000 / RIB $400 before reduction -> full RIB subtracted from full spouse benefit, the $600 excess reduced separately to $540, RIB reduced to $380, total payable $920"
+    },
+    "poms-reduction-rates": {
+      "name": "SSA POMS RS 00615.101 (Reduced RIB) + RS 00615.201 (Reduced Spouse's Benefits) — 42 U.S.C. §402(q) actuarial reduction rates",
+      "url": "https://secure.ssa.gov/poms.nsf/lnx/0300615101, https://secure.ssa.gov/poms.nsf/lnx/0300615201",
+      "publication": "RS 00615.101 TN 24 (09-02); RS 00615.201 TN 53 (12-23), effective 2023-12-07",
+      "accessed": "2026-07-24",
+      "identifier": "Worker (RIB) reduction 5/9 of 1% per month for the first 36 early months, 5/12 of 1% beyond; spousal reduction 25/36 of 1% per month for the first 36, 5/12 of 1% beyond"
+    },
+    "poms-rs-00615-320": {
+      "name": "SSA POMS RS 00615.320 — Reduced WIB, deceased NH entitled to reduced RIB (RIB-LIM)",
+      "url": "https://secure.ssa.gov/poms.nsf/lnx/0300615320",
+      "publication": "TN 62 (12-23), effective 2023-12-14",
+      "accessed": "2026-07-24",
+      "identifier": "Widow(er) benefit limited to the LARGER of 82 1/2 percent of the deceased's PIA and the deceased's own reduced benefit"
+    }
+  },
+  "statutory": {
+    "workerReduction": { "firstBlockPerMonth": 0.005555555555555556, "firstBlockMonths": 36, "beyondPerMonth": 0.004166666666666667 },
+    "spousalReduction": { "firstBlockPerMonth": 0.006944444444444444, "firstBlockMonths": 36, "beyondPerMonth": 0.004166666666666667 },
+    "spousalPiaFraction": 0.5,
+    "ribLimPiaFraction": 0.825
+  },
+  "cases": [
+    {
+      "id": "poms-method-c-worked-example",
+      "description": "The POMS RS 00615.020 Method C worked example, reproduced by the independent separate-reduction composition formula (workbook-only case — the POMS illustration factors are given, not derived from claim ages).",
+      "tolerance": "exact (the POMS worked example's own dollars)",
+      "derivation": [
+        "POMS gives: spouse benefit $1,000 and RIB $400 before reduction; the RIB reduces to $380 (implied factor 0.95) and the $600 excess reduces to $540 (implied factor 0.90).",
+        "Independent composition: total = RIB*factorRib + (spouseBenefit - fullRib)*factorSpousal = 400*0.95 + 600*0.90 = 380 + 540 = 920.",
+        "The incorrect larger-of method (max of reduced RIB and reduced whole spouse benefit = max(380, 900)) yields 900, not the POMS-published 920 — the composition, not the max, is the law."
+      ],
+      "inputs": {
+        "spouseBenefitBeforeReduction": 1000,
+        "ribBeforeReduction": 400,
+        "impliedRibFactor": 0.95,
+        "impliedSpousalFactor": 0.9
+      },
+      "expected": { "totalMonthlyDollars": 920 }
+    },
+    {
+      "id": "dual-entitlement-separate-reduction",
+      "description": "Dual entitlement at age 62 (both FRA 67): reduced own benefit PLUS the separately-reduced spousal excess.",
+      "tolerance": "within $1/year",
+      "derivation": [
+        "Recipient PIA $800, worker PIA $2,000; both claim at 62y0m = 60 months early (FRA 67).",
+        "Own reduction (42 USC 402(q)): 36*(5/900) + 24*(5/1200) = 30% -> own monthly = 800*0.70 = 560.00 -> annual 6,720.",
+        "Spousal excess = max(0, 0.5*2,000 - 800) = 200/mo, reduced by the SPOUSAL schedule: 36*(25/3600) + 24*(5/1200) = 35% -> 200*0.65 = 130.00/mo -> annual 1,560.",
+        "Total = 8,280/yr. The incorrect larger-of method gives max(6,720, 0.65*1,000*12 = 7,800) = 7,800 — $480/yr low."
+      ],
+      "inputs": {
+        "recipient": { "piaMonthlyDollars": 800, "birthdate": "1963-05-15", "claimAge": { "ageYears": 62, "ageMonths": 0 } },
+        "worker": { "piaMonthlyDollars": 2000, "birthdate": "1961-08-20", "claimAge": { "ageYears": 62, "ageMonths": 0 } },
+        "effectiveRecipientAgeMonths": 744
+      },
+      "expected": {
+        "ownAnnualDollars": 6720,
+        "spousalExcessAnnualDollars": 1560,
+        "totalAnnualDollars": 8280,
+        "incorrectLargerOfAnnualDollars": 7800
+      }
+    },
+    {
+      "id": "rib-lim-early-claiming-deceased",
+      "description": "RIB-LIM: the deceased claimed at 62 (reduced RIB $1,400); the survivor claims at survivor FRA. The widow benefit caps at the larger of 82.5% of PIA and the deceased's reduced benefit.",
+      "tolerance": "within $1/year",
+      "derivation": [
+        "Deceased: PIA $2,000, FRA 67 (804 months), claimed at 744 months (62y0m) -> reduced RIB = 2,000*(1-0.30) = 1,400; died Dec 31 2030 (age 823 months at the Jan-1-2031 boundary).",
+        "Survivor claims the survivor benefit at their survivor FRA (804 months, April 2031) -> no widow(er) early reduction (factor 1.0).",
+        "Widow base = full PIA 2,000 (the deceased's own early reduction never flows into the widow base).",
+        "RIB-LIM (POMS RS 00615.320): deceased was entitled to a reduced RIB before death -> cap at max(0.825*2,000 = 1,650, 1,400) = 1,650.",
+        "Widow monthly = min(2,000, 1,650) = 1,650 -> annual 19,800 (no COLA: evaluation year equals the deceased's COLA anchor year)."
+      ],
+      "inputs": {
+        "survivor": { "survivorFraMonths": 804, "survivorClaimAgeMonths": 804, "survivorClaimMonthIdx": 24375 },
+        "deceased": {
+          "piaMonthlyDollars": 2000,
+          "fraMonths": 804,
+          "scenarioClaimAgeMonths": 744,
+          "deathAgeMonths": 823,
+          "deathYear": 2030,
+          "colaAnchorYear": 2031
+        },
+        "currentYear": 2031,
+        "colaPct": 2.5,
+        "deceasedWithheldMonths": 0
+      },
+      "expected": { "survivorAnnualDollars": 19800, "ribLimCapMonthlyDollars": 1650 }
+    }
+  ]
+}

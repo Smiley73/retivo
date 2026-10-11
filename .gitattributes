@@ -1,0 +1,10 @@
+# Text files use LF line endings in the working tree on every platform, so a
+# contributor's git settings do not change them.
+* text=auto eol=lf
+
+# These two data files are kept exactly as committed, with CRLF line endings.
+apps/web/src/lib/historical-data/french-rf-monthly.csv -text
+apps/web/src/lib/historical-data/shiller-monthly.csv -text
+
+# Binary assets: never converted, never diffed as text.
+*.woff2 binary

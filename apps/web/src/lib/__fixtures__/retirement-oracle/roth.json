@@ -1,0 +1,188 @@
+{
+  "$comment": "Primary-source oracle — Roth distribution cases: Pub 590-B §408A ordering with per-year conversion recapture clocks, and the designated-Roth pro-rata split. Expected values derived independently from the cited sources; never from production code.",
+  "domain": "roth",
+  "sources": {
+    "irs-p590b-ordering": {
+      "name": "IRS Publication 590-B — Ordering Rules for Distributions",
+      "url": "https://www.irs.gov/publications/p590b",
+      "publication": "2025-return edition (page last reviewed 2026-04-30)",
+      "accessed": "2026-07-24",
+      "identifier": "Order: (1) regular contributions; (2) conversion/rollover contributions FIFO by year, taxable portion before nontaxable within each year; (3) earnings. Recapture: taxable converted principal withdrawn within its own 5-year period before 59 1/2 is subject to the 10% additional tax (Figuring your recapture amount)"
+    },
+    "irs-designated-roth-faq": {
+      "name": "IRS — Retirement plans FAQs on designated Roth accounts",
+      "url": "https://www.irs.gov/retirement-plans/retirement-plans-faqs-on-designated-roth-accounts",
+      "publication": "page last reviewed 2025-08-26",
+      "accessed": "2026-07-24",
+      "identifier": "A nonqualified designated-Roth distribution is a pro-rata share of earnings and basis (NOT contribution-first); qualified requires the 5-year period plus age 59 1/2, death, or disability"
+    },
+    "usc-72t9": {
+      "name": "26 U.S.C. §72(t) — 10% additional tax; §72(t)(9) governmental 457(b) exception",
+      "url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section72&num=0&edition=prelim",
+      "publication": "statutory (OLRC current edition)",
+      "accessed": "2026-07-24",
+      "identifier": "§72(t) reaches a 457(b) distribution only 'to the extent that such distribution is attributable to an amount transferred to an eligible deferred compensation plan from a qualified retirement plan' — ordinary governmental 457(b) amounts are outside the 10% additional tax"
+    }
+  },
+  "cases": [
+    {
+      "id": "ira-ordering-nonqualified-mixed-clocks",
+      "description": "Nonqualified Roth IRA distribution (owner under 59 1/2) across regular basis, two conversion years (one outside its 5-year window, one inside), and earnings.",
+      "tolerance": "exact (distribution ordering is exact-equality)",
+      "derivation": [
+        "Facts: regular-contribution basis $30,000; conversion lots 2021 (taxable $12,000, nontaxable $3,000) and 2023 (taxable $8,000); first contribution year 2019; distribution year 2026; owner under 59 1/2 -> nonqualified (5-year met but no qualifying event).",
+        "Withdrawal $60,000 consumes: 30,000 regular -> 12,000 of 2021 taxable (2026-2021 = 5 >= 5: OUTSIDE the recapture window, no 10% recapture) -> 3,000 of 2021 nontaxable -> 8,000 of 2023 taxable (2026-2023 = 3 < 5: recaptured) -> 7,000 earnings.",
+        "Income-taxable = earnings 7,000. 10% additional-tax base = in-window taxable conversion principal 8,000 + pre-59 1/2 earnings 7,000 = 15,000."
+      ],
+      "inputs": {
+        "facts": {
+          "regularContributionBasisCents": 3000000,
+          "firstContributionTaxYear": 2019,
+          "conversionLots": [
+            { "taxYear": 2021, "taxableConvertedPrincipalCents": 1200000, "nontaxableConvertedPrincipalCents": 300000 },
+            { "taxYear": 2023, "taxableConvertedPrincipalCents": 800000, "nontaxableConvertedPrincipalCents": 0 }
+          ]
+        },
+        "withdrawalCents": 6000000,
+        "distributionTaxYear": 2026,
+        "ownerReached59Half": false
+      },
+      "expected": {
+        "qualified": false,
+        "regularContributionCents": 3000000,
+        "conversionTaxablePrincipalCents": 2000000,
+        "conversionNontaxablePrincipalCents": 300000,
+        "earningsCents": 700000,
+        "incomeTaxableCents": 700000,
+        "additionalTaxBaseCents": 1500000
+      }
+    },
+    {
+      "id": "ira-qualified-tax-free",
+      "description": "Qualified Roth IRA distribution (59 1/2 reached AND the 5-taxable-year clock met): entirely tax- and penalty-free.",
+      "tolerance": "exact",
+      "derivation": [
+        "Same facts, owner 59 1/2+; first contribution 2019 -> 2026 - 2019 = 7 >= 5 -> qualified.",
+        "All buckets still populate for bookkeeping, but income-taxable and additional-tax bases are $0."
+      ],
+      "inputs": {
+        "facts": {
+          "regularContributionBasisCents": 3000000,
+          "firstContributionTaxYear": 2019,
+          "conversionLots": [
+            { "taxYear": 2021, "taxableConvertedPrincipalCents": 1200000, "nontaxableConvertedPrincipalCents": 300000 },
+            { "taxYear": 2023, "taxableConvertedPrincipalCents": 800000, "nontaxableConvertedPrincipalCents": 0 }
+          ]
+        },
+        "withdrawalCents": 6000000,
+        "distributionTaxYear": 2026,
+        "ownerReached59Half": true
+      },
+      "expected": { "qualified": true, "incomeTaxableCents": 0, "additionalTaxBaseCents": 0 }
+    },
+    {
+      "id": "ira-ordering-future-dated-lot-excluded",
+      "description": "Nonqualified Roth IRA distribution with a FUTURE-DATED conversion lot (tax year after the distribution year): the future lot cannot exist yet, so the ordering skips it entirely — the shortfall is earnings, not future conversion principal.",
+      "tolerance": "exact (distribution ordering is exact-equality)",
+      "derivation": [
+        "Facts: regular-contribution basis $5,000; conversion lots 2024 (taxable $4,000) and 2027 (taxable $6,000 — dated AFTER the 2026 distribution year); first contribution year 2019; owner under 59 1/2.",
+        "Withdrawal $12,000 consumes: 5,000 regular -> 4,000 of 2024 taxable (2026-2024 = 2 < 5: recaptured) -> the 2027 lot is SKIPPED (a conversion in a later tax year is not part of this distribution's facts) -> 3,000 earnings.",
+        "Income-taxable = earnings 3,000. 10% additional-tax base = in-window taxable conversion principal 4,000 + pre-59 1/2 earnings 3,000 = 7,000.",
+        "Regression guard: an ordering that consumed the future lot would report 7,000 of conversion principal, $0 earnings, and $0 income-taxable — every bucket differs, so a future-lot leak cannot pass."
+      ],
+      "inputs": {
+        "facts": {
+          "regularContributionBasisCents": 500000,
+          "firstContributionTaxYear": 2019,
+          "conversionLots": [
+            { "taxYear": 2024, "taxableConvertedPrincipalCents": 400000, "nontaxableConvertedPrincipalCents": 0 },
+            { "taxYear": 2027, "taxableConvertedPrincipalCents": 600000, "nontaxableConvertedPrincipalCents": 0 }
+          ]
+        },
+        "withdrawalCents": 1200000,
+        "distributionTaxYear": 2026,
+        "ownerReached59Half": false
+      },
+      "expected": {
+        "qualified": false,
+        "regularContributionCents": 500000,
+        "conversionTaxablePrincipalCents": 400000,
+        "conversionNontaxablePrincipalCents": 0,
+        "earningsCents": 300000,
+        "incomeTaxableCents": 300000,
+        "additionalTaxBaseCents": 700000
+      }
+    },
+    {
+      "id": "designated-roth-pro-rata",
+      "description": "Nonqualified designated-Roth distribution: pro-rata basis/earnings split (NOT contribution-first), earnings taxable + 10% before 59 1/2.",
+      "tolerance": "exact (pro-rata split after documented half-up integer rounding)",
+      "derivation": [
+        "Account balance $100,000, designated-Roth basis $40,000, withdrawal $10,000; first participation 2023 -> 5-year clock NOT met in 2026 -> nonqualified.",
+        "Basis portion = round(10,000 * 40,000 / 100,000) = 4,000; earnings = 6,000.",
+        "Income-taxable = 6,000; additional-tax base (under 59 1/2, non-457(b)) = 6,000."
+      ],
+      "inputs": {
+        "facts": { "basisCents": 4000000, "firstParticipationTaxYear": 2023 },
+        "accountBalanceCents": 10000000,
+        "withdrawalCents": 1000000,
+        "distributionTaxYear": 2026,
+        "ownerReached59Half": false
+      },
+      "expected": {
+        "qualified": false,
+        "basisCents": 400000,
+        "earningsCents": 600000,
+        "incomeTaxableCents": 600000,
+        "additionalTaxBaseCents": 600000
+      }
+    },
+    {
+      "id": "designated-roth-457b-penalty-exempt",
+      "description": "Same nonqualified split inside a GOVERNMENTAL 457(b): ordinary Roth 457(b) earnings are exempt from the 10% additional tax (§72(t)(9)); income tax on earnings is unchanged.",
+      "tolerance": "exact",
+      "derivation": [
+        "Identical pro-rata split (4,000 basis / 6,000 earnings).",
+        "isGovernmental457b -> the earnings leave the 10% base (no rollover-attributable earnings) -> additional-tax base $0; income-taxable stays 6,000."
+      ],
+      "inputs": {
+        "facts": { "basisCents": 4000000, "firstParticipationTaxYear": 2023, "isGovernmental457b": true },
+        "accountBalanceCents": 10000000,
+        "withdrawalCents": 1000000,
+        "distributionTaxYear": 2026,
+        "ownerReached59Half": false
+      },
+      "expected": {
+        "qualified": false,
+        "basisCents": 400000,
+        "earningsCents": 600000,
+        "incomeTaxableCents": 600000,
+        "additionalTaxBaseCents": 0
+      }
+    },
+    {
+      "id": "designated-roth-pro-rata-half-cent",
+      "description": "Nonqualified designated-Roth pro-rata split landing EXACTLY on a half-cent: half-up rounding is distinguishable from floor/truncation (a truncating split would report one cent less basis).",
+      "tolerance": "exact (pro-rata split after documented half-up integer rounding)",
+      "derivation": [
+        "Account balance $120,000, designated-Roth basis $45,000 (ratio 0.375), withdrawal $10,001.00; first participation 2023 -> nonqualified in 2026.",
+        "Basis portion = round(1,000,100 * 4,500,000 / 12,000,000) = round(375,037.5) = 375,038 cents (half-up); floor/truncation would give 375,037 — one cent lower, so this case fails under a truncating split.",
+        "Earnings = 1,000,100 - 375,038 = 625,062. Income-taxable = 625,062; additional-tax base (under 59 1/2, non-457(b)) = 625,062."
+      ],
+      "inputs": {
+        "facts": { "basisCents": 4500000, "firstParticipationTaxYear": 2023 },
+        "accountBalanceCents": 12000000,
+        "withdrawalCents": 1000100,
+        "distributionTaxYear": 2026,
+        "ownerReached59Half": false
+      },
+      "expected": {
+        "qualified": false,
+        "basisCents": 375038,
+        "earningsCents": 625062,
+        "incomeTaxableCents": 625062,
+        "additionalTaxBaseCents": 625062
+      }
+    }
+  ]
+}

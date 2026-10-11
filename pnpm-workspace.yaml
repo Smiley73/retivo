@@ -1,0 +1,100 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "infrastructure"
+
+# Transitive-dependency pins. Each one forces a resolved version above a
+# known-vulnerable range; removing one without an equivalent fix in the
+# parent's own declared range risks the advisory re-entering the tree on the
+# next re-resolve. They are added by hand because Dependabot cannot clear a
+# transitive advisory here: its security-update job only touches direct
+# dependencies, so for an indirect package it reports the installed version as
+# the newest resolvable one and fails with `security_update_not_possible`, even
+# when the parent's declared range already admits the patched release. Every
+# pin needs a reason comment directly above it (no blank line between), and a
+# new pin also needs its floor added to EXPECTED_OVERRIDES in
+# scripts/test/pnpm-config-contract.test.mjs.
+overrides:
+  # Two advisories in fast-uri: inconsistent host-name case handling and mailto
+  # header injection. Reached through @nestjs/cli > @angular-devkit/core > ajv
+  # (build tooling only).
+  fast-uri: ">=4.1.5"
+  # CVE-2026-45149 / GHSA-jxxr-4gwj-5jf2: denial of service from unbounded
+  # numeric brace-range allocation. Reached through the ESLint toolchain >
+  # minimatch (dev tooling only).
+  "brace-expansion@>=5.0.0 <5.0.6": ">=5.0.6"
+  # Published protobufjs advisory fixed in 7.5.8. Capped below 8 to stay on the
+  # 7.x line. Reached through infrastructure > @pulumi/pulumi > @grpc/grpc-js
+  # (deploy tooling only).
+  protobufjs: ">=7.5.8 <8"
+  # Published qs advisory fixed in 6.15.2. Reached through express and
+  # body-parser (API runtime).
+  qs: ">=6.15.2"
+  # CVE-2026-48068 / GHSA-5375-pq7m-f5r2 and CVE-2026-48069 / GHSA-99f4-grh7-6pcq
+  # (two HTTP/2 denial-of-service flaws) plus GHSA-m9gg-hp2v-232j. Reached
+  # through infrastructure > @pulumi/pulumi (deploy tooling only).
+  "@grpc/grpc-js": ">=1.14.5"
+  # Published undici advisories fixed in 7.29.1, within the 7.x line. Reached
+  # through jsdom > vitest (test tooling only).
+  "undici@>=7.0.0 <7.29.1": ">=7.29.1 <8"
+  # Published undici advisories fixed in 6.27.0, within the 6.x line. Reached
+  # through node-gyp > infrastructure / Pulumi (deploy tooling only).
+  "undici@<6.27.0": ">=6.27.0 <7"
+  # Published form-data advisory fixed in 4.0.6. Reached through supertest
+  # (test tooling only).
+  "form-data@>=4.0.0 <4.0.6": ">=4.0.6"
+  # Four denial-of-service advisories: GHSA-wc9g-mqfw-jrwm, GHSA-qfvm-cv95-jqjf,
+  # GHSA-535w-7cp7-47q4 and GHSA-3pph-fpjx-jg34. Reached through
+  # @nestjs/platform-express (API runtime); no file-upload route exercises it.
+  "multer@>=1.0.0 <2.4.0": ">=2.4.0"
+  # Published denial-of-service advisory fixed in 2.3.0, inside the 2.x line
+  # express already requires. Reached through express (API runtime).
+  "body-parser@>=2.0.0 <2.3.0": ">=2.3.0 <3"
+  # Published sanitizer advisories fixed in 3.4.16 (CUSTOM_ELEMENT_HANDLING
+  # bypass; two IN_PLACE hook/rawtext flaws). Reached through jspdf (web
+  # runtime, PDF export).
+  "dompurify@<3.4.16": ">=3.4.16 <4"
+  # GHSA-2v37-7h3g-55p8: custom generators loop forever when `size` is 0.
+  # Capped below 4 on purpose: postcss declares ^3.3.16 and nanoid 4+ is
+  # ESM-only, so an open floor would resolve a major the parent cannot load.
+  # Reached through apps/web > vite > postcss (build tooling only); the shipped
+  # browser bundle contains no nanoid.
+  "nanoid@<3.3.17": ">=3.3.17 <4"
+  # GHSA-c83g-rgw3-j3cx (unbounded memory growth, no cache eviction) and
+  # GHSA-73wf-gq98-2v4g (crash or prototype write from an untrusted
+  # browserslist-stats.json). Capped below 5 on purpose: both parents declare
+  # ^4, so an open floor would resolve a major neither can load. Reached through
+  # apps/api > @nestjs/cli > webpack and @babel/helper-compilation-targets
+  # (build tooling only).
+  browserslist: ">=4.28.7 <5"
+  # GHSA-jqcg-44mw-7w3h (critical): client IP spoofing through IPv4-mapped
+  # addresses, fixed in 2.0.8. Capped below 3 to stay inside the ^2.0.7 range
+  # Express 5 declares. Reached through express (API runtime).
+  "proxy-addr@<2.0.8": ">=2.0.8 <3"
+  # GHSA-68fv-2mgg-jv7q: event-loop denial of service, fixed in 1.2.2. Reached
+  # through @tailwindcss/vite > @tailwindcss/node (web build tooling only).
+  "source-map-js@<1.2.2": ">=1.2.2 <2"
+  # GHSA-r4xh-jqrq-34v2: quadratic-time parse(), fixed in 1.9.0. Reached through
+  # knip (dev tooling only).
+  "smol-toml@<1.9.0": ">=1.9.0 <2"
+
+# pnpm v11 renames onlyBuiltDependencies to allowBuilds; do not adopt while pinned to v10.
+onlyBuiltDependencies:
+  - "@nestjs/core"
+  - "@swc/core"
+  - argon2
+  - esbuild
+  - unrs-resolver
+
+# http-cache-semantics (GHSA-ch52-4w7c-c8xp) has no patched release yet. It is
+# reachable only through the Pulumi deploy tooling (infrastructure >
+# @pulumi/pulumi > @npmcli/arborist), never the app or the Lambda bundles.
+# sprintf-js (GHSA-hp3w-g68c-fv3c) also has no patched release. It is reachable
+# only through jest's test tooling (apps/api > jest > @jest/core > babel-plugin-
+# istanbul > test-exclude > ...), never shipped.
+# Drop each entry, and ALLOWED_WAIVERS in scripts/test/pnpm-config-contract.test.mjs,
+# once a fix is published.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-ch52-4w7c-c8xp
+    - GHSA-hp3w-g68c-fv3c

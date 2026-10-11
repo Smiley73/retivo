@@ -1,0 +1,15 @@
+node_modules/
+bin/
+*.tsbuildinfo
+
+# Pulumi
+Pulumi.*.local.yaml
+.pulumi/
+
+# Local deploy convenience env (PULUMI_BACKEND_URL, optional cached
+# passphrase). Auto-created by scripts/bootstrap-stack.sh; never committed.
+.deploy.env
+
+# Lambda build artifacts
+lambda-shells/**/node_modules
+*.zip

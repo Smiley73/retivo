@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://github.com/Smiley73/retivo/discussions
+    about: Ask how to run, deploy or use RETIVO in Discussions. Issues are for bugs and ideas.
+  - name: Report a security problem privately
+    url: https://github.com/Smiley73/retivo/security/advisories/new
+    about: Please do not file security problems as public issues. Use this private form instead.
+  - name: Report a Code of Conduct concern
+    url: https://github.com/Smiley73/retivo/security/advisories/new
+    about: Put no details of the incident in the report. The maintainer will reply and arrange a private way to talk. See CODE_OF_CONDUCT.md.

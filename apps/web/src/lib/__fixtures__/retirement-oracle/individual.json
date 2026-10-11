@@ -1,0 +1,282 @@
+{
+  "$comment": "Primary-source oracle — individual-filer cases: 2026 enhanced senior deduction phaseout boundaries and the SSA retirement earnings test. Expected values derived independently from the cited sources; never from production code.",
+  "domain": "individual",
+  "sources": {
+    "irs-senior-deduction": {
+      "name": "IRS — Check your eligibility for the new enhanced deduction for seniors",
+      "url": "https://www.irs.gov/newsroom/check-your-eligibility-for-the-new-enhanced-deduction-for-seniors",
+      "publication": "2026-02-27 (page last reviewed 2026-07-02)",
+      "accessed": "2026-07-24",
+      "identifier": "$6,000 per eligible individual 65+, tax years 2025-2028; phases out for MAGI over $75,000 ($150,000 joint); Pub. L. 119-21 §70103 phase-out rate 6%"
+    },
+    "irs-ir-2025-103": {
+      "name": "IRS IR-2025-103 — tax year 2026 annual inflation adjustments (with Rev. Proc. 2025-32)",
+      "url": "https://www.irs.gov/newsroom/irs-releases-tax-inflation-adjustments-for-tax-year-2026-including-amendments-from-the-one-big-beautiful-bill",
+      "publication": "2025-10-09",
+      "accessed": "2026-07-24",
+      "identifier": "2026 Single ordinary brackets and $16,100 standard deduction; Rev. Proc. 2025-32 §2.15 additional standard deduction $2,050 (unmarried, 65+)"
+    },
+    "ssa-rtea-2026": {
+      "name": "SSA Office of the Chief Actuary — Exempt Amounts Under the Earnings Test",
+      "url": "https://www.ssa.gov/oact/cola/rtea.html",
+      "publication": "2026 amounts announced with the SSA 2026 COLA determination (October 2025)",
+      "accessed": "2026-07-24 (via Internet Archive snapshot of 2026-07-02; the live page rejects non-browser clients)",
+      "identifier": "2026 lower exempt amount $24,480 ($1 withheld per $2 over); higher (FRA-year) exempt amount $65,160 ($1 per $3 over)"
+    },
+    "poms-rs-02501-030": {
+      "name": "SSA POMS RS 02501.030 — Applying the Monthly Earnings Test (MET) (implements 20 C.F.R. §404.435)",
+      "url": "https://secure.ssa.gov/poms.nsf/lnx/0302501030",
+      "publication": "TN 37 (11-23), effective 2012-07-03",
+      "accessed": "2026-07-24",
+      "identifier": "The MET applies when an entitled beneficiary has one or more non-service months in a grace year: full benefit payable for a non-service month (earnings at/below the monthly limit = 1/12 of the annual exempt amount); a service month's check is withheld"
+    },
+    "usc-86": {
+      "name": "26 U.S.C. §86 — taxation of Social Security benefits (base amounts + tier composition)",
+      "url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section86&num=0&edition=prelim",
+      "publication": "statutory (OLRC current edition; base amounts fixed since 1993)",
+      "accessed": "2026-07-24",
+      "identifier": "Single base $25,000 / adjusted base $34,000 (§86(c)(1)(A)); provisional income = modified AGI + tax-exempt interest (§86(b)(2)(B)) + 1/2 benefits; 50% tier = lesser of 1/2 benefits and 1/2 the excess over the base; 85% tier above the adjusted base"
+    },
+    "ssa-fra-1959": {
+      "name": "SSA — Retirement age chart (42 U.S.C. §416(l) full-retirement-age schedule)",
+      "url": "https://www.ssa.gov/oact/ProgData/nra.html",
+      "publication": "statutory schedule (1983 Amendments)",
+      "accessed": "2026-07-24",
+      "identifier": "Born 1959 -> FRA 66 years 10 months (802 months); born 1960+ -> 67"
+    }
+  },
+  "statutory": {
+    "singleBrackets2026": [
+      { "floor": 0, "rate": 0.1 },
+      { "floor": 12400, "rate": 0.12 },
+      { "floor": 50400, "rate": 0.22 },
+      { "floor": 105700, "rate": 0.24 },
+      { "floor": 201775, "rate": 0.32 },
+      { "floor": 256225, "rate": 0.35 },
+      { "floor": 640600, "rate": 0.37 }
+    ],
+    "standardDeductionSingle2026": 16100,
+    "age65AddOnSingle2026": 2050,
+    "seniorDeduction": { "perFilerCap": 6000, "nonJointPhaseoutBaseMagi": 75000, "phaseoutRatePct": 0.06 },
+    "earningsTest2026": { "lowerExemptDollars": 24480, "higherExemptDollars": 65160 },
+    "ssBaseAmountsSingle": { "tier1": 25000, "tier2": 34000 }
+  },
+  "cases": [
+    {
+      "id": "senior-full",
+      "description": "Single filer age 66, ordinary income $50,000 (below the $75,000 phaseout base): full $6,000 senior deduction.",
+      "tolerance": "within $1",
+      "derivation": [
+        "MAGI 50,000 <= 75,000 -> senior deduction 6,000 (no phaseout).",
+        "Taxable = 50,000 - 16,100 - 2,050 - 6,000 = 25,850.",
+        "Tax = 10%*12,400 + 12%*(25,850-12,400) = 1,240 + 1,614 = 2,854.00."
+      ],
+      "inputs": { "year": 2026, "filingStatus": "Single", "ordinaryIncome": 50000, "taxpayersAge65Plus": 1 },
+      "expected": { "seniorDeductionDollars": 6000, "totalTaxCents": 285400 }
+    },
+    {
+      "id": "senior-at-base",
+      "description": "Single filer age 66, MAGI exactly $75,000 (at the phaseout base): still the full $6,000.",
+      "tolerance": "within $1 (threshold selection exact)",
+      "derivation": [
+        "MAGI 75,000: phaseout applies only to the excess OVER the base -> max(0, 75,000-75,000)*6% = 0 -> deduction 6,000.",
+        "Taxable = 75,000 - 18,150 - 6,000 = 50,850.",
+        "Tax = 1,240 + 12%*38,000 + 22%*450 = 5,899.00."
+      ],
+      "inputs": { "year": 2026, "filingStatus": "Single", "ordinaryIncome": 75000, "taxpayersAge65Plus": 1 },
+      "expected": { "seniorDeductionDollars": 6000, "totalTaxCents": 589900 }
+    },
+    {
+      "id": "senior-partial",
+      "description": "Single filer age 66, MAGI $95,000 (above the base): deduction phased down by 6% of the $20,000 excess.",
+      "tolerance": "within $1",
+      "derivation": [
+        "Senior deduction = 6,000 - 0.06*(95,000-75,000) = 4,800.",
+        "Taxable = 95,000 - 18,150 - 4,800 = 72,050.",
+        "Tax = 1,240 + 12%*38,000 + 22%*(72,050-50,400) = 1,240 + 4,560 + 4,763 = 10,563.00."
+      ],
+      "inputs": { "year": 2026, "filingStatus": "Single", "ordinaryIncome": 95000, "taxpayersAge65Plus": 1 },
+      "expected": { "seniorDeductionDollars": 4800, "totalTaxCents": 1056300 }
+    },
+    {
+      "id": "senior-eliminated",
+      "description": "Single filer age 66, MAGI $180,000 (at/above $175,000 the deduction is fully phased out).",
+      "tolerance": "within $1",
+      "derivation": [
+        "Phaseout: 6,000 - 0.06*(180,000-75,000) = 6,000 - 6,300 -> floored at 0.",
+        "Taxable = 180,000 - 18,150 = 161,850.",
+        "Tax = 1,240 + 4,560 + 22%*55,300 + 24%*(161,850-105,700) = 1,240 + 4,560 + 12,166 + 13,476 = 31,442.00."
+      ],
+      "inputs": { "year": 2026, "filingStatus": "Single", "ordinaryIncome": 180000, "taxpayersAge65Plus": 1 },
+      "expected": { "seniorDeductionDollars": 0, "totalTaxCents": 3144200 }
+    },
+    {
+      "id": "earnings-test-pre-fra-annual",
+      "description": "Pre-FRA-year annual earnings test, 2026: $1 withheld per $2 of earnings over the $24,480 lower exempt amount.",
+      "tolerance": "exact ($1-per-$2 statutory rule on exact exempt amounts; month counts exact)",
+      "derivation": [
+        "Beneficiary born 1962-03-10 -> FRA 67 reached March 2029, so 2026 is a pre-FRA year.",
+        "Excess earnings = 40,480 - 24,480 = 16,000 -> withholding = 16,000/2 = 8,000.",
+        "Gross benefit 18,000/yr = 1,500/mo uniform checks; charging fills whole checks from January: 5 full checks (7,500) + a 500 partial in June -> 6 withheld months (a partially withheld check is a non-payment month)."
+      ],
+      "inputs": {
+        "year": 2026,
+        "isoBirthdate": "1962-03-10",
+        "earnedIncomeDollars": 40480,
+        "grossBenefitDollars": 18000,
+        "inflationRatePct": 0
+      },
+      "expected": {
+        "withheldDollars": 8000,
+        "reducedBenefitDollars": 10000,
+        "rateApplied": "pre-fra-year",
+        "withheldMonths": 6,
+        "estimated": false
+      }
+    },
+    {
+      "id": "earnings-test-grace-year-monthly",
+      "description": "Grace-year monthly non-service test, 2026: full benefit for each non-service month (earnings <= $24,480/12 = $2,040); the more favorable test wins.",
+      "tolerance": "exact",
+      "derivation": [
+        "Monthly earnings $10,000 Jan-Aug (service months, > 2,040), $0 Sep-Dec (non-service).",
+        "Annual test would withhold min(24,000, (80,000-24,480)/2 = 27,760) = 24,000 (every check).",
+        "Monthly test withholds only the 8 service-month checks: 8 * 2,000 = 16,000; the smaller withholding wins -> 16,000 withheld, 8,000 payable, 8 withheld months."
+      ],
+      "inputs": {
+        "year": 2026,
+        "isoBirthdate": "1962-03-10",
+        "earnedIncomeDollars": 80000,
+        "grossBenefitDollars": 24000,
+        "inflationRatePct": 0,
+        "monthlyEarningsDollars": [10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 0, 0, 0, 0],
+        "graceYearMonthly": true
+      },
+      "expected": {
+        "withheldDollars": 16000,
+        "reducedBenefitDollars": 8000,
+        "rateApplied": "grace-year-monthly",
+        "withheldMonths": 8,
+        "estimated": false
+      }
+    },
+    {
+      "id": "earnings-test-fra-year",
+      "description": "FRA-year earnings test, 2026: born 1959-05-10 (FRA 66y10m -> March 2026); $1 withheld per $3 of pre-FRA-month earnings over the $65,160 higher exempt amount.",
+      "tolerance": "exact ($1-per-$3 statutory rule on the exact higher exempt amount; month counts exact)",
+      "derivation": [
+        "Born 1959-05-10 -> FRA 66y10m (SSA schedule): 1959*12 + 4 + 802 = 24,314 months -> FRA reached March 2026 (month index 2), so 2026 is the FRA year and only January + February earnings count (20 C.F.R. §404.430).",
+        "Pre-FRA-month earnings = 36,000 + 35,160 = 71,160 -> excess = 71,160 - 65,160 = 6,000 -> withholding = 6,000/3 = 2,000.",
+        "Gross benefit 24,000/yr = 2,000/mo checks; only the two pre-FRA checks (4,000) are chargeable; charging fills January's whole 2,000 check -> 1 withheld month; benefits from March on are untouched (the test stops at FRA)."
+      ],
+      "inputs": {
+        "year": 2026,
+        "isoBirthdate": "1959-05-10",
+        "fraMonthsFromSsaTable": 802,
+        "earnedIncomeDollars": 71160,
+        "grossBenefitDollars": 24000,
+        "inflationRatePct": 0,
+        "monthlyEarningsDollars": [36000, 35160, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "expected": {
+        "withheldDollars": 2000,
+        "reducedBenefitDollars": 22000,
+        "rateApplied": "fra-year",
+        "withheldMonths": 1,
+        "estimated": false
+      }
+    },
+    {
+      "id": "earnings-test-below-exempt",
+      "description": "Pre-FRA year, 2026 earnings below the $24,480 lower exempt amount: no excess, nothing withheld, no months charged.",
+      "tolerance": "exact",
+      "derivation": [
+        "Beneficiary born 1962-03-10 -> 2026 is a pre-FRA year (FRA 67 reached March 2029).",
+        "Earnings 20,000 <= 24,480 -> excess 0 -> withholding $0, 0 withheld months, full 18,000 benefit payable."
+      ],
+      "inputs": {
+        "year": 2026,
+        "isoBirthdate": "1962-03-10",
+        "earnedIncomeDollars": 20000,
+        "grossBenefitDollars": 18000,
+        "inflationRatePct": 0
+      },
+      "expected": {
+        "withheldDollars": 0,
+        "reducedBenefitDollars": 18000,
+        "rateApplied": "none",
+        "withheldMonths": 0,
+        "estimated": false
+      }
+    },
+    {
+      "id": "ss-none-tier",
+      "description": "§86(a)(1) none tier: provisional income at/below the $25,000 Single base amount -> $0 of benefits taxable.",
+      "tolerance": "within $1 (tier selection exact)",
+      "derivation": [
+        "Gross SS 20,000; other AGI 12,000; no tax-exempt interest -> provisional income = 12,000 + 10,000 = 22,000 <= 25,000.",
+        "Taxable = $0; tier none."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "grossSsCents": 2000000,
+        "otherAgiCents": 1200000,
+        "taxExemptInterestCents": 0
+      },
+      "expected": { "taxableSsCents": 0, "tier": "none" }
+    },
+    {
+      "id": "ss-fifty-tier-excess-binds",
+      "description": "§86(a)(2)(A) 50% tier where HALF THE EXCESS over the base binds inside the min() (the smaller of the two 50% terms).",
+      "tolerance": "within $1 (tier selection exact)",
+      "derivation": [
+        "Gross SS 20,000; other AGI 20,000 -> provisional income = 20,000 + 10,000 = 30,000, in (25,000, 34,000].",
+        "Taxable = min(0.5*20,000 = 10,000, 0.5*(30,000-25,000) = 2,500) = 2,500; tier fifty."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "grossSsCents": 2000000,
+        "otherAgiCents": 2000000,
+        "taxExemptInterestCents": 0
+      },
+      "expected": { "taxableSsCents": 250000, "tier": "fifty" }
+    },
+    {
+      "id": "ss-fifty-tier-half-gross-binds",
+      "description": "§86(a)(2)(A) 50% tier where HALF THE GROSS BENEFIT binds inside the min() (the other arm of the composition).",
+      "tolerance": "within $1 (tier selection exact)",
+      "derivation": [
+        "Gross SS 4,000; other AGI 29,000 -> provisional income = 29,000 + 2,000 = 31,000, in (25,000, 34,000].",
+        "Taxable = min(0.5*4,000 = 2,000, 0.5*(31,000-25,000) = 3,000) = 2,000; tier fifty."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "grossSsCents": 400000,
+        "otherAgiCents": 2900000,
+        "taxExemptInterestCents": 0
+      },
+      "expected": { "taxableSsCents": 200000, "tier": "fifty" }
+    },
+    {
+      "id": "ss-fifty-tier-tax-exempt-addback",
+      "description": "§86(b)(2)(B): tax-exempt (muni) interest is added back to provisional income — here the add-back alone lifts the household from the none tier into the 50% tier.",
+      "tolerance": "within $1 (tier selection exact)",
+      "derivation": [
+        "Gross SS 20,000; other AGI 14,000; tax-exempt interest 4,000 -> provisional income = 14,000 + 4,000 + 10,000 = 28,000, in (25,000, 34,000].",
+        "Taxable = min(0.5*20,000 = 10,000, 0.5*(28,000-25,000) = 1,500) = 1,500; tier fifty.",
+        "Without the §86(b)(2)(B) add-back, provisional income would be 24,000 <= 25,000 -> tier none, $0 — the add-back changes both the tier and the amount, so a dropped add-back cannot pass."
+      ],
+      "inputs": {
+        "taxYear": 2026,
+        "filingStatus": "Single",
+        "grossSsCents": 2000000,
+        "otherAgiCents": 1400000,
+        "taxExemptInterestCents": 400000
+      },
+      "expected": { "taxableSsCents": 150000, "tier": "fifty" }
+    }
+  ]
+}
