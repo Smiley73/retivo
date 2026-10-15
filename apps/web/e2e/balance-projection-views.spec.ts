@@ -12,23 +12,37 @@ import type { Page } from '@playwright/test';
 import { test, expect, loadDemo, perYearChartSvg } from './fixtures';
 
 /**
- * Waits for the page's embedded stress test to land before the test touches
- * geometry or clicks. The run auto-starts shortly after load, spawns workers
- * that pull the engine's modules from Vite and saturates the CI runner's two
- * vCPUs for tens of seconds: a tab switch then renders slower than an
- * assertion's 5s window, and the progress row leaving the pinned strip when
- * the run lands shrinks the strip, which scroll anchoring turns into a
- * `scrollY` jump. The outcomes stats flipping from "—" to dollar values is the
- * completion signal. `includeHidden` because the Overview panel that holds
- * them stays mounted but hidden while another view is selected.
+ * Waits until the page's embedded stress test has landed and nothing is about
+ * to start it again, before the test touches geometry or clicks. A run spawns
+ * workers that pull the engine's modules from Vite and saturates the CI
+ * runner's two vCPUs for tens of seconds: a tab switch then renders slower
+ * than an assertion's 5s window, and the progress row leaving the pinned strip
+ * when the run lands shrinks the strip, which scroll anchoring turns into a
+ * `scrollY` jump. Three conditions, in order:
+ * - The sync badge reads "Synced". After a (re)load the page first shows the
+ *   result cached by the previous run, then the pull changes the household's
+ *   data and a second run starts; the badge reads "Refreshing…" until then.
+ * - The outcomes stats read dollar values instead of "—" (`includeHidden`
+ *   because the Overview panel that holds them stays mounted but hidden while
+ *   another view is selected).
+ * - The success card is not `aria-busy`, which it is while a run is in flight
+ *   or the shown result is stale for the current inputs.
  */
 async function settleStressTest(page: Page): Promise<void> {
+  await expect(
+    page.getByRole('button', { name: /^synced\b/i }).first(),
+  ).toBeVisible({ timeout: 60_000 });
   await expect(
     page.getByRole('region', {
       name: /monte carlo outcomes/i,
       includeHidden: true,
     }),
   ).toContainText(/\$\d/, { timeout: 60_000 });
+  await expect(
+    page
+      .locator('div[aria-busy="false"]')
+      .filter({ hasText: /^Success probability/i }),
+  ).toHaveCount(1, { timeout: 60_000 });
 }
 
 test.describe('Balance Projection tabbed views + pinned controls strip', () => {
@@ -91,11 +105,11 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
       'aria-selected',
       'true',
     );
-    // Settle again after the reloads above: each one re-mounts the page and
-    // may start the run again. Measured mid-run, the wheel's scroll can land
-    // after the scrollY read, and the strip shrinking under the Overview tab
-    // fails Playwright's click stability check, whose retry scrolls the tab to
-    // the viewport bottom.
+    // Settle again after the reloads above: each one re-mounts the page, and
+    // its post-load pull can start a second run. Measured mid-run, the wheel's
+    // scroll can land after the scrollY read, and the strip shrinking under
+    // the Overview tab fails Playwright's click stability check, whose retry
+    // scrolls the tab to the viewport bottom.
     await settleStressTest(page);
     await page.getByRole('tab', { name: 'Overview' }).focus();
     await page.keyboard.press('ArrowRight');
