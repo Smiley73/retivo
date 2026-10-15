@@ -91,17 +91,12 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
       'aria-selected',
       'true',
     );
-    // Settle the embedded stress test before any scroll geometry below is
-    // measured. It auto-runs shortly after load, parks a progress row in the
-    // pinned strip while it runs (removed again when it lands) and keeps the
-    // main thread busy meanwhile. Measured mid-run, the wheel's scroll can land
+    // Settle again after the reloads above: each one re-mounts the page and
+    // may start the run again. Measured mid-run, the wheel's scroll can land
     // after the scrollY read, and the strip shrinking under the Overview tab
     // fails Playwright's click stability check, whose retry scrolls the tab to
-    // the viewport bottom. The outcomes stats flipping from "—" to dollar
-    // values is the completion signal (same wait as chart-zoom.spec.ts).
-    await expect(
-      page.getByRole('region', { name: /monte carlo outcomes/i }),
-    ).toContainText(/\$\d/, { timeout: 60_000 });
+    // the viewport bottom.
+    await settleStressTest(page);
     await page.getByRole('tab', { name: 'Overview' }).focus();
     await page.keyboard.press('ArrowRight');
     await expect(cashflowTab).toBeFocused();
