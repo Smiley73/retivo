@@ -52,7 +52,7 @@ export function fetchRecordOnce(
 }
 
 /** Queue the create mutation for the household's primary member. */
-export function queuePrimaryMember(
+function queuePrimaryMember(
   householdId: string,
   email: string,
   profile: PrimaryMemberProfile,
