@@ -15,21 +15,11 @@ export interface Me {
   email: string;
   displayName: string;
   roles: Role[];
-  /** Profile captured at signup, merged in after login when the response
-   * carries it (old accounts omit it). Read by the first-run seeding path. */
-  firstName?: string;
-  lastName?: string;
-  birthdate?: string;
 }
 
 export interface LoginResponse {
   accessToken: string;
   expiresIn: number;
-  /** Signup profile, returned by password login + passkey-finish when
-   * present so the SPA can seed the primary HouseholdMember. */
-  firstName?: string;
-  lastName?: string;
-  birthdate?: string;
 }
 
 /** Transient pre-session MFA challenge state, surfaced to the LoginPage. */
@@ -53,7 +43,7 @@ export interface VerifyMfaResult {
  * card — `PATCH /auth/me` corrects
  * `firstName` / `lastName` / `birthdate`; `email` stays on its own verified
  * change flow. The two unset fields are omitted for accounts that predate
- * the signup-profile capture, until a correction fills them in.
+ * profile capture at signup, until a correction fills them in.
  */
 export interface AccountRecord {
   email: string;
@@ -135,17 +125,6 @@ export interface PasskeyInfo {
   /** True while this passkey is restricted post-reset — needs a confirm-restriction lift (or removal) before it can sign
    * in or approve changes. */
   restrictedPostReset?: boolean;
-}
-
-/**
- * Signup profile persisted at the localStorage handoff: the name +
- * birthdate captured at signup, keyed by userId, read once by App.tsx's
- * first-run effect to seed the primary HouseholdMember.
- */
-export interface SignupProfile {
-  firstName: string;
-  lastName: string;
-  birthdate: string;
 }
 
 /**

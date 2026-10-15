@@ -100,7 +100,6 @@ import {
   writeBlockedResetMarker,
   readBlockedResetMarker,
   clearBlockedResetMarker,
-  persistSignupProfile,
 } from './session-storage';
 import type {
   Role,
@@ -118,7 +117,7 @@ import type {
 } from './types';
 import { PasswordChangeCommittedError, PasswordChangeNotSentError } from './types';
 
-// Re-export the public auth types + storage/signup helpers from their new
+// Re-export the public auth types + storage helpers from their new
 // homes so the ~53 `useAuth()` consumer files keep their existing import
 // paths.
 export type {
@@ -132,8 +131,6 @@ export type {
 export {
   DEVICE_ID_STORAGE_KEY,
   readStoredAuthEmail,
-  clearSignupProfile,
-  updateSignupProfile,
 } from './session-storage';
 
 /**
@@ -676,25 +673,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (claims) {
       setHouseholdId(claims.householdId);
       const email = claims.email ?? readStoredEmail();
-      // A same-user/household refresh (boot refresh, idle "stay signed in",
-      // 401 retry, change-password) must not lose the firstName/lastName/
-      // birthdate a prior `updateAccountRecord` merged in — reconstructing
-      // `me` from bare claims would otherwise revert them to the login-time
-      // (absent) values. An actual user switch gets a fresh `me` with none
-      // of the previous user's profile fields carried over.
-      setMe((prevMe) => ({
+      setMe({
         id: claims.userId,
         email,
         displayName: email,
         roles: [],
-        ...(sameSession && prevMe
-          ? {
-              firstName: prevMe.firstName,
-              lastName: prevMe.lastName,
-              birthdate: prevMe.birthdate,
-            }
-          : {}),
-      }));
+      });
       // Only (re-)derive unlock state on a genuine new session; a same-session
       // refresh keeps the still-valid cached HDK and unlock flags untouched.
       if (!sameSession) void initializeUnlockState(claims);
@@ -1075,26 +1059,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // local cache. A blocked drop fails closed (blocking modal + Retry).
     // Retry re-runs the full login so it re-mints the session the blocked-drop
     // revoke killed.
-    const didAdopt = await resetThenCompleteLogin(res.accessToken, password, undefined, () =>
+    await resetThenCompleteLogin(res.accessToken, password, undefined, () =>
       login(email, password),
     );
-    // Blocked cross-user reset (fail-closed): the new claims were NOT adopted —
-    // the blocking modal is shown and user A's session is still active. Bail out
-    // before merging/persisting user B's profile so B's PII never leaks into A's
-    // session.
-    if (!didAdopt) return;
-    // After the cross-user reset has succeeded and the claims are adopted,
-    // merge the signup profile into `me` and persist it for first-run
-    // HouseholdMember seeding. No-op when the response omits the
-    // fields (old account → existing first-run demo modal path).
-    if (res.firstName || res.lastName || res.birthdate) {
-      setMe((prev) =>
-        prev
-          ? { ...prev, firstName: res.firstName, lastName: res.lastName, birthdate: res.birthdate }
-          : prev,
-      );
-    }
-    persistSignupProfile(res);
   }, [deviceId, resetThenCompleteLogin]);
 
   // Shared session-adoption tail for both MFA verify paths. Given the
@@ -1103,8 +1070,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // the password step so the post-login zero-knowledge unlock runs
   // without a second prompt. A blocked cross-user reset (fail-closed) clears the
   // overlay + challenge so the user lands on the sign-in form; the retained
-  // challenge password (mfaPasswordRef) is cleared on EVERY exit. On a
-  // successful adopt with profile fields present, merge + persist them.
+  // challenge password (mfaPasswordRef) is cleared on EVERY exit.
   // Returns whether the device was remembered. The ONLY per-caller difference is
   // how `res` is obtained (code factor vs passkey assertion).
   const adoptMfaSession = useCallback(
@@ -1122,14 +1088,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       mfaPasswordRef.current = null;
       setMfaChallenge(null);
-      if (didAdopt && (res.firstName || res.lastName || res.birthdate)) {
-        setMe((prev) =>
-          prev
-            ? { ...prev, firstName: res.firstName, lastName: res.lastName, birthdate: res.birthdate }
-            : prev,
-        );
-        persistSignupProfile(res);
-      }
       return { deviceRemembered: didAdopt && res.deviceRemembered };
     },
     [resetThenCompleteLogin],
@@ -1423,7 +1381,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // The PRF unlock runs as the post-completion step so a Retry replays it too.
     // Retry re-runs the full passkey login so it re-mints the session the
     // blocked-drop revoke killed.
-    const didAdopt = await resetThenCompleteLogin(
+    await resetThenCompleteLogin(
       result.accessToken,
       null,
       () => {
@@ -1437,19 +1395,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       },
       () => loginWithPasskey(),
     );
-    // Blocked cross-user reset (fail-closed): claims not adopted, A's session
-    // still active. Bail before merging/persisting B's profile.
-    if (!didAdopt) return;
-    // Merge + persist the signup profile after the reset/claims adoption,
-    // mirroring the password path. No-op for old accounts.
-    if (result.firstName || result.lastName || result.birthdate) {
-      setMe((prev) =>
-        prev
-          ? { ...prev, firstName: result.firstName, lastName: result.lastName, birthdate: result.birthdate }
-          : prev,
-      );
-    }
-    persistSignupProfile(result);
   }, [deviceId, resetThenCompleteLogin, tryUnlockWithPrf]);
 
   const registerPasskey = useCallback(
@@ -1688,24 +1633,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateAccountRecord = useCallback(
     async (profile: UpdateAccountRecordRequest): Promise<AccountRecord> => {
-      const res = await apiRequest<AccountRecord>('/api/v1/auth/me', {
+      return apiRequest<AccountRecord>('/api/v1/auth/me', {
         method: 'PATCH',
         body: profile,
       });
-      // Merge the server-returned profile into the in-memory `me` so
-      // useAuth().me.firstName/lastName/birthdate agree with the just-saved
-      // values everywhere they're read.
-      setMe((prev) =>
-        prev
-          ? {
-              ...prev,
-              firstName: res.firstName,
-              lastName: res.lastName,
-              birthdate: res.birthdate,
-            }
-          : prev,
-      );
-      return res;
     },
     [],
   );

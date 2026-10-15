@@ -26,7 +26,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { useAuth, updateSignupProfile, type AccountRecord } from '../auth/AuthContext';
+import { useAuth, type AccountRecord } from '../auth/AuthContext';
 import { ApiRequestError } from '../api/client';
 import { PasswordManagerModal } from '../components/PasswordManagerModal';
 import { StepUpModal } from '../components/StepUpModal';
@@ -63,7 +63,6 @@ interface Props {
 
 export const AccountCard: React.FC<Props> = ({ email, onError }) => {
   const {
-    me,
     fetchAccountRecord,
     updateAccountRecord,
     changeEmail,
@@ -207,16 +206,6 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
       });
       // Render from the server's response, not the typed values.
       setRecord(updated);
-      // Rewrite the signup-profile handoff if one is still pending —
-      // a first-run seed that hasn't run yet must pick up the correction, not
-      // the stale signup-time values. No-op when no handoff exists.
-      if (me?.id) {
-        updateSignupProfile(me.id, {
-          firstName: trimmedFirst,
-          lastName: trimmedLast,
-          birthdate: birthdateInput,
-        });
-      }
       setEditing(false);
     } catch (err) {
       // Leave the form open with the entered values; the displayed record

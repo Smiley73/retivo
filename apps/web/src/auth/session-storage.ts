@@ -1,16 +1,14 @@
 /**
  * localStorage-backed auth session helpers (device id, last-known email, idle
- * marker, blocked-reset marker, signup-profile handoff).
+ * marker, blocked-reset marker).
  *
  * Extracted from `AuthContext.tsx`.
- * Pure module helpers — no React. Every key here is a session guard flag or a
- * write-once handoff, NOT persisted user data; the wholesale local-data nuke
+ * Pure module helpers — no React. Every key here is a session guard flag, NOT
+ * persisted user data; the wholesale local-data nuke
  * (`clearStoragePreserving(localStorage, …)` in `lib/local-data.ts`) clears them
  * all by clearing the store outright.
  */
 import { cryptoUuid } from '../lib/crypto-uuid';
-import { decodeJwt } from './token-utils';
-import type { LoginResponse, SignupProfile } from './types';
 
 const EMAIL_STORAGE_KEY = 'retivo.auth.email';
 export const DEVICE_ID_STORAGE_KEY = 'retivo.auth.deviceId';
@@ -27,12 +25,9 @@ const ACTIVITY_STORAGE_KEY = 'retivo.auth.lastActivityAt';
 // IDB because IDB is exactly what is blocked. This is a session guard flag, not
 // persisted user data — the wholesale local-data nuke clears it by name prefix.
 const BLOCKED_RESET_STORAGE_KEY = 'retivo:blocked-reset:pending';
-// Per-user signup-profile handoff. After a successful login + cross-user
-// IDB reset, the name + birthdate captured at signup are written here keyed by
-// userId. Nothing reads it any more (the first-run seed in App.tsx takes the
-// primary member from `GET /auth/me`); App.tsx still clears it. Holds birthdate
-// (PII) so it is cleared by the wholesale local-data nuke (localStorage.clear).
-const SIGNUP_PROFILE_KEY_PREFIX = 'retivo:signup-profile:';
+// Key prefix of the retired per-user signup-profile handoff. Only the start-up
+// sweep refers to it; nothing writes or reads these keys any more.
+const LEGACY_PROFILE_HANDOFF_PREFIX = 'retivo:signup-profile:';
 
 export function readOrInitDeviceId(): string {
   if (typeof localStorage === 'undefined') return cryptoUuid();
@@ -98,47 +93,22 @@ export function clearBlockedResetMarker(): void {
 }
 
 /**
- * Persist the signup profile for the first-run HouseholdMember seeding.
- * Writes `{ firstName, lastName, birthdate }` to localStorage keyed by the
- * userId parsed from the just-issued access token (NOT `me.id`, which is not
- * yet settled in the login callback closure). No-op unless all three fields
- * are present and the token decodes — old accounts simply fall through to the
- * existing first-run demo modal.
+ * Remove `retivo:signup-profile:<userId>` keys left behind by earlier builds,
+ * which kept the signup name and birthdate in localStorage. Remove-only: keys
+ * are matched by prefix and their values are never read. Matches are collected
+ * before removal because removing while iterating by index skips keys. Must
+ * not throw into boot (some private-browsing modes throw on storage access).
  */
-export function persistSignupProfile(res: LoginResponse): void {
+export function sweepLegacySignupProfileKeys(): void {
   if (typeof localStorage === 'undefined') return;
-  const { firstName, lastName, birthdate } = res;
-  if (!firstName || !lastName || !birthdate) return;
-  const userId = decodeJwt(res.accessToken)?.userId;
-  if (!userId) return;
-  localStorage.setItem(
-    `${SIGNUP_PROFILE_KEY_PREFIX}${userId}`,
-    JSON.stringify({ firstName, lastName, birthdate }),
-  );
-}
-
-/** Remove the one-shot signup profile after a successful seed (write-once-use-once). */
-export function clearSignupProfile(userId: string): void {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.removeItem(`${SIGNUP_PROFILE_KEY_PREFIX}${userId}`);
-}
-
-/**
- * Rewrite the per-user signup-profile handoff with freshly corrected values.
- * This module is the single source of
- * truth for the `SIGNUP_PROFILE_KEY_PREFIX` handoff; the Account card
- * calls this after a successful `PATCH /auth/me` save so a first-run seed
- * that hasn't run yet picks up the correction instead of stale signup-time
- * values. **Update-if-present only** — when no handoff exists for this user
- * (already consumed by the first-run seed, or the account predates signup
- * capture) this writes nothing. Clearing the key instead was rejected: it
- * would drop a brand-new account back to the first-run demo modal and
- * silently lose the seeding feature for exactly the person most likely to be
- * fixing a typo the same day they signed up.
- */
-export function updateSignupProfile(userId: string, profile: SignupProfile): void {
-  if (typeof localStorage === 'undefined') return;
-  const key = `${SIGNUP_PROFILE_KEY_PREFIX}${userId}`;
-  if (localStorage.getItem(key) === null) return;
-  localStorage.setItem(key, JSON.stringify(profile));
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key !== null && key.startsWith(LEGACY_PROFILE_HANDOFF_PREFIX)) stale.push(key);
+    }
+    for (const key of stale) localStorage.removeItem(key);
+  } catch {
+    // Storage unavailable — nothing to sweep.
+  }
 }

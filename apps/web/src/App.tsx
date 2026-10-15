@@ -19,7 +19,7 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { textLinkClass } from './components/TextLink';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
-import { useAuth, clearSignupProfile } from './auth/AuthContext';
+import { useAuth } from './auth/AuthContext';
 import type { AccountRecord } from './auth/types';
 import { apiRequest } from './api/client';
 import { RequireAuth } from './auth/RequireAuth';
@@ -277,13 +277,7 @@ export const AppShell: React.FC = () => {
         const members = await listAggregates('householdMember');
         if (cancelled) return;
         if (members.length > 0) {
-          // Stale one-shot profile key cleanup: always clear the signup
-          // handoff (firstName/lastName/birthdate) when the user already
-          // has household members — it was either already consumed on a
-          // prior login or arrived for an account that doesn't need seeding.
-          // Prevents indefinite PII persistence in localStorage.
           markPrimaryMemberSeeded(householdId);
-          clearSignupProfile(me.id);
           firstRunCheckedRef.current = true;
           return;
         }
@@ -339,7 +333,6 @@ export const AppShell: React.FC = () => {
         if (seed === 'already-populated') {
           // Another tab seeded or populated the workspace: nothing to create.
           markPrimaryMemberSeeded(householdId);
-          clearSignupProfile(me.id);
           return;
         }
         if (seed === 'already-seeded') {
@@ -348,9 +341,8 @@ export const AppShell: React.FC = () => {
           return;
         }
         if (cancelled) return;
-        // Seed succeeded: consume the one-shot profile key and arm the banner
-        // (pending key survives reloads until dismissed).
-        clearSignupProfile(me.id);
+        // Seed succeeded: arm the banner (pending key survives reloads until
+        // dismissed).
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem(bannerPendingKey(householdId), '1');
         }
@@ -618,11 +610,6 @@ export const AppShell: React.FC = () => {
     </MonteCarloProvider>
   );
 };
-
-// `clearSignupProfile` (key `retivo:signup-profile:<userId>`) is the single
-// source of truth in AuthContext (imported above) — AuthContext still writes
-// the profile after a successful login; the first-run effect here only clears
-// it. Nothing reads it: the primary member comes from `GET /auth/me`.
 
 const MenuIcon = () => (
   <svg
