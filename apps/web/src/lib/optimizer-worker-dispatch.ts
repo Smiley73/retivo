@@ -32,7 +32,7 @@ export function dispatchToOptimizerWorker(
   worker: Worker,
   input: OptimizerWorkerInput,
 ): Promise<OptimizerWorkerOutbound> {
-  const runId = cryptoUuid('optimizer-run');
+  const runId = cryptoUuid();
   return new Promise((resolve) => {
     const cleanup = (): void => {
       worker.removeEventListener('message', onMessage);

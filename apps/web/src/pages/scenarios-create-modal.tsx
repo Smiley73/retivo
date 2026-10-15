@@ -86,7 +86,7 @@ export const CreateScenarioModal: React.FC<CreateScenarioModalProps> = ({
     setSubmitting(true);
     try {
       await createScenario({
-        id: cryptoUuid('scen'),
+        id: cryptoUuid(),
         name: trimmed,
         description: description.trim(),
         parentScenarioId: parentId,

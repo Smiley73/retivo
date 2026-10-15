@@ -366,7 +366,7 @@ export const IncomeOverridesCard: React.FC<Props> = ({
       // Strip _localId before promoting; assign a fresh canonical UUID.
       const { _localId, ...canonicalPayload } = target;
       void _localId;
-      const newCanonicalId = cryptoUuid('lid');
+      const newCanonicalId = cryptoUuid();
       await queueLocalMutation<IncomeStreamPayload>({
         type: 'incomeStream',
         aggregateId: newCanonicalId,

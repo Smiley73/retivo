@@ -60,7 +60,7 @@ export async function ensureBaseScenario(
     const existing = await listAggregates('scenario');
     if (existing.length > 0) return null;
 
-    const id = cryptoUuid('scen');
+    const id = cryptoUuid();
     const payload: ScenarioPayload = {
       name: BASE_SCENARIO_NAME,
       description: '',

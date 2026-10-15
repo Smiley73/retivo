@@ -388,7 +388,7 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
       if (target.end) canonicalPayload.end = target.end;
       if (target.discretionaryGlide)
         canonicalPayload.discretionaryGlide = target.discretionaryGlide;
-      const newCanonicalId = cryptoUuid('lid');
+      const newCanonicalId = cryptoUuid();
       await queueLocalMutation<ExpensePayload>({
         type: 'expense',
         aggregateId: newCanonicalId,

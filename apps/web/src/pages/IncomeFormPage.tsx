@@ -198,7 +198,7 @@ export const IncomeFormPage: React.FC = () => {
   const [draft, setDraft] = useState<FormDraft | null>(null);
   const [baseline, setBaseline] = useState<FormDraft | null>(null);
   const [version, setVersion] = useState<number>(0);
-  const [aggregateId, setAggregateId] = useState<string>(() => cryptoUuid('iv'));
+  const [aggregateId, setAggregateId] = useState<string>(() => cryptoUuid());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -568,7 +568,7 @@ export const IncomeFormPage: React.FC = () => {
                 ? { ...built, _localId: editingAddedLocalId }
                 : a,
             )
-          : [...existingAdded, { ...built, _localId: cryptoUuid('iv') }];
+          : [...existingAdded, { ...built, _localId: cryptoUuid() }];
         const nextOverrides: IncomeOverride = {
           ...existingOverrides,
           added: nextAdded,

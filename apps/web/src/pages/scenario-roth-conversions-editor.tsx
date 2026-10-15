@@ -89,7 +89,7 @@ export function defaultConversion(
   return {
     // Stable per-entry key so removing a middle row never mis-associates
     // uncommitted picker UI state. STRIPPED before persist (save helpers).
-    draftId: cryptoUuid('prc'),
+    draftId: cryptoUuid(),
     sourceAccountId: sourceId,
     targetRothAccountId: targetId,
     annualAmountDollars: 10000,

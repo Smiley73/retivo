@@ -215,7 +215,7 @@ export const ExpenseCategoriesPage: React.FC = () => {
     try {
       await queueLocalMutation<ExpenseCategoryPayload>({
         type: 'expenseCategory',
-        aggregateId: cryptoUuid('cat'),
+        aggregateId: cryptoUuid(),
         householdId,
         operation: 'create',
         expectedVersion: 0,
