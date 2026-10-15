@@ -40,7 +40,10 @@ may wait for the maintainer's approval before they start.
   - the dependency audit, unless your pull request changes a dependency file;
   - tests that compare against today's date, which are skipped on pull
     requests;
-  - the browser end-to-end tests, which are switched off for now.
+  - the browser end-to-end tests: a failing test shows in the results as
+    "FAILED, NOT BLOCKING" and does not turn `All checks` red while the suite
+    earns trust. A broken job (the emulators or API not starting, the browser
+    not installing, a timeout) still fails the check.
 - **Where to read the results:** the run's job summary (open the run from the
   pull request's Checks tab, then its Summary page) lists each suite, whether
   it needed a re-run, and the audit and date checks.
