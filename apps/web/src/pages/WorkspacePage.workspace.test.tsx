@@ -639,6 +639,11 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
 
   it('confirming calls clearWorkspace (2xx), wipes local residue, suppresses the demo modal, stashes a notice, and reloads', async () => {
     const { clearAllStores, clearMutationQueue } = await import('../db/store');
+    // The per-browser first-run seeded flag: "Delete workspace data" must leave
+    // it, which is what makes the wipe stick on this browser (the first-run
+    // check then shows the prompt with no request instead of re-seeding).
+    const seededKey = 'retivo:primary-member-seeded:hh-1';
+    localStorage.setItem(seededKey, '1');
     await openConfirmDialog();
     fireEvent.click(screen.getByRole('button', { name: /Delete everything/i }));
     await waitFor(() =>
@@ -659,6 +664,8 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
     await waitFor(() =>
       expect(sessionStorage.getItem('suppressDemoModal')).toBe('1'),
     );
+    expect(localStorage.getItem(seededKey)).toBe('1');
+    localStorage.removeItem(seededKey);
     expect(sessionStorage.getItem(WORKSPACE_NOTICE_KEY)).toBe('Workspace data deleted.');
     // Default path: erase-history was NOT requested (checkbox unticked, so
     // eraseHistory:false), so the server's historyErased:false is the normal

@@ -132,7 +132,6 @@ export type {
 export {
   DEVICE_ID_STORAGE_KEY,
   readStoredAuthEmail,
-  readSignupProfile,
   clearSignupProfile,
   updateSignupProfile,
 } from './session-storage';
@@ -472,8 +471,10 @@ interface AuthContextValue {
    * the client-side cleanup (`dropLocalDatabase` + redirect). */
   deleteAccount(currentPassword: string, proof?: StepUpProof): Promise<void>;
   /** Fetch the account record (`GET /auth/me`) for the Security-page account
-   * card. */
-  fetchAccountRecord(): Promise<AccountRecord>;
+   * card and the shell's first-run primary-member seed. `raiseWaitNotice:
+   * false` keeps a throttled background check from raising the shared "Please
+   * wait" toast about a request the person never made. */
+  fetchAccountRecord(opts?: { raiseWaitNotice?: boolean }): Promise<AccountRecord>;
   /** Correct the account-record `firstName`/`lastName`/`birthdate`
    * (`PATCH /auth/me`). Session-only
    * — no password re-entry or MFA step-up. Returns the server's typed
@@ -1678,7 +1679,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Self-service email change + account record. Thin `apiRequest` wrappers — all logic lives server-side in
   // ChangeEmailService; bulk client orchestration lives in the AccountCard.
   const fetchAccountRecord = useCallback(
-    (): Promise<AccountRecord> => apiRequest<AccountRecord>('/api/v1/auth/me'),
+    (opts?: { raiseWaitNotice?: boolean }): Promise<AccountRecord> =>
+      opts
+        ? apiRequest<AccountRecord>('/api/v1/auth/me', opts)
+        : apiRequest<AccountRecord>('/api/v1/auth/me'),
     [],
   );
 

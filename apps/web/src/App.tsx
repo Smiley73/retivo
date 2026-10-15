@@ -19,11 +19,8 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { textLinkClass } from './components/TextLink';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
-import {
-  useAuth,
-  readSignupProfile,
-  clearSignupProfile,
-} from './auth/AuthContext';
+import { useAuth, clearSignupProfile } from './auth/AuthContext';
+import type { AccountRecord } from './auth/types';
 import { apiRequest } from './api/client';
 import { RequireAuth } from './auth/RequireAuth';
 import { AppToastRegion } from './components/AppToastRegion';
@@ -36,10 +33,13 @@ import {
   shouldShowReadyBanner,
 } from './components/HouseholdReadyBanner';
 import { VersionBanner } from './components/VersionBanner';
-import { queueLocalMutation } from './sync/mutation-queue';
 import { notifyWorkspaceChanged } from './lib/workspace-events';
-import type { HouseholdMemberPayload } from './db/types';
-import { cryptoUuid } from './lib/crypto-uuid';
+import { hasPrimaryMemberSeeded, markPrimaryMemberSeeded } from './lib/first-run-seed-flag';
+import {
+  fetchRecordOnce,
+  primaryMemberProfileFromRecord,
+  queuePrimaryMember,
+} from './lib/first-run-seed';
 import { MonteCarloProvider } from './monte-carlo/MonteCarloProvider';
 import { MonteCarloProgressChip } from './monte-carlo/MonteCarloProgressChip';
 import { Sidebar } from './layout/Sidebar';
@@ -212,7 +212,7 @@ export const App: React.FC = () => {
  * itself only ever renders it through the `*` route in `App` above.
  */
 export const AppShell: React.FC = () => {
-  const { logout, householdId, me } = useAuth();
+  const { logout, householdId, me, fetchAccountRecord } = useAuth();
   const { state: syncState, notifyPending, runDestructive } = useSync();
   const navigate = useNavigate();
   const location = useLocation();
@@ -220,6 +220,9 @@ export const AppShell: React.FC = () => {
   const [firstRunModalOpen, setFirstRunModalOpen] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(false);
   const firstRunCheckedRef = useRef(false);
+  // The one in-flight `GET /auth/me` for the first-run check, shared by every
+  // run of the effect below (StrictMode double mount, token refresh mid-request).
+  const accountRecordRef = useRef<Promise<AccountRecord> | null>(null);
   const scenarioBootstrapCheckedRef = useRef(false); // ensures base-scenario auto-create + reconcile run once per shell mount.
 
   // `lastSyncedAt` lives only on the `synced` variant of the SyncBadgeState
@@ -240,15 +243,20 @@ export const AppShell: React.FC = () => {
   // First-login demo prompt: once sync has settled in `synced` **and**
   // lastSyncedAt is non-null (= a real server round-trip completed),
   // check whether the local IndexedDB still has no household members.
-  // If so, this is the user's first session — offer the demo dataset.
-  // Done at most once per mount; skipping it leaves the Household
-  // welcome card as the fallback path.
+  // If so, this is the user's first session on this browser — seed the
+  // primary member from the account record (`GET /auth/me`) when it carries
+  // first name, last name and birthdate, else offer the demo dataset.
+  // Skipping it leaves the Household welcome card as the fallback path.
   //
   // The `lastSyncedAt` guard prevents a race where the SyncProvider's
   // initial `useState` seeds `kind: 'synced'` before `initialSync`
   // fires — without it the modal could open while bootstrap is still
   // in flight, re-creating all demo aggregates under new UUIDs and
   // producing duplicates.
+  //
+  // `firstRunCheckedRef` is latched only on a terminal outcome. A failed
+  // account fetch is not one: nothing is shown or written and the check runs
+  // again at the effect's next natural re-run (token refresh, sync, next open).
   useEffect(() => {
     if (firstRunCheckedRef.current) return;
     if (!householdId || !me) return;
@@ -258,6 +266,7 @@ export const AppShell: React.FC = () => {
     // dismissed the banner → just reshow it, do NOT re-seed or open the modal.
     if (shouldShowReadyBanner(householdId)) {
       firstRunCheckedRef.current = true;
+      markPrimaryMemberSeeded(householdId);
       setBannerVisible(true);
       return;
     }
@@ -267,14 +276,15 @@ export const AppShell: React.FC = () => {
       try {
         const members = await listAggregates('householdMember');
         if (cancelled) return;
-        firstRunCheckedRef.current = true;
         if (members.length > 0) {
           // Stale one-shot profile key cleanup: always clear the signup
           // handoff (firstName/lastName/birthdate) when the user already
           // has household members — it was either already consumed on a
           // prior login or arrived for an account that doesn't need seeding.
           // Prevents indefinite PII persistence in localStorage.
+          markPrimaryMemberSeeded(householdId);
           clearSignupProfile(me.id);
+          firstRunCheckedRef.current = true;
           return;
         }
         // Post-reset suppression: a deliberate "Delete workspace data" reset
@@ -286,34 +296,46 @@ export const AppShell: React.FC = () => {
         // skip) so the offer fires once at most and never resurfaces on a later
         // reload. Gating at the source (App, not FirstRunDemoModal) prevents
         // the shell from ever setting firstRunModalOpen=true — a
-        // mounted-but-hidden modal could otherwise resurface.
+        // mounted-but-hidden modal could otherwise resurface. A consumed flag
+        // proves a deliberate wipe, so the per-browser seeded flag is written
+        // too: the wipe sticks on later opens.
         if (sessionStorage.getItem('suppressDemoModal')) {
           sessionStorage.removeItem('suppressDemoModal');
+          markPrimaryMemberSeeded(householdId);
+          firstRunCheckedRef.current = true;
           return;
         }
-        // Zero members: a brand-new workspace. If the signup profile is present
-        // (new-account path), silently seed the primary member + show the
-        // non-blocking banner. Otherwise fall back to the existing demo modal
-        // (old account / API-direct signup).
-        const profile = readSignupProfile(me.id);
-        if (!profile) {
+        // Zero members but this browser already saw the workspace populated (or
+        // queued the seed): a wipe, not a new workspace. Prompt, no request.
+        if (hasPrimaryMemberSeeded(householdId)) {
+          firstRunCheckedRef.current = true;
           setFirstRunModalOpen(true);
           return;
         }
-        await queueLocalMutation<HouseholdMemberPayload>({
-          type: 'householdMember',
-          aggregateId: cryptoUuid(),
-          householdId,
-          operation: 'create',
-          expectedVersion: 0,
-          payload: {
-            isPrimary: true,
-            firstName: profile.firstName,
-            lastName: profile.lastName,
-            email: me.email,
-            birthdate: profile.birthdate,
-          },
-        });
+        // Zero members, never seeded here: a brand-new workspace. A failed
+        // fetch is handled here and never reaches the catch below (which
+        // latches and prompts) — it is not latched, so a later run retries.
+        let record: AccountRecord;
+        try {
+          record = await fetchRecordOnce(accountRecordRef, () =>
+            fetchAccountRecord({ raiseWaitNotice: false }),
+          );
+        } catch (e) {
+          console.warn('[first-run] account record unavailable; will retry', e);
+          return;
+        }
+        if (cancelled) return;
+        firstRunCheckedRef.current = true;
+        const profile = primaryMemberProfileFromRecord(record);
+        if (!profile) {
+          // Old account / API-direct signup without the three fields.
+          setFirstRunModalOpen(true);
+          return;
+        }
+        // Flag before the queue call: a throw inside it (which may have partly
+        // written) must never lead to a second seed.
+        markPrimaryMemberSeeded(householdId);
+        await queuePrimaryMember(householdId, me.email, profile);
         if (cancelled) return;
         // Seed succeeded: consume the one-shot profile key and arm the banner
         // (pending key survives reloads until dismissed).
@@ -330,9 +352,9 @@ export const AppShell: React.FC = () => {
         notifyWorkspaceChanged();
         notifyPending();
       } catch (e) {
-        // The seed failed (IDB write threw). firstRunCheckedRef is already
-        // latched above so we don't retry against a bad store; fall back to the
-        // demo modal so the user is never stranded with neither banner nor modal.
+        // The check failed (IDB read or the seed's write threw), so latch to
+        // avoid retrying against a bad store; fall back to the demo modal so
+        // the user is never stranded with neither banner nor modal.
         firstRunCheckedRef.current = true;
         console.warn('[first-run] primary-member seed failed', e);
         if (!cancelled) setFirstRunModalOpen(true);
@@ -341,7 +363,7 @@ export const AppShell: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [householdId, me, syncedAt, notifyPending]);
+  }, [householdId, me, syncedAt, notifyPending, fetchAccountRecord]);
 
   // Scenarios bootstrap: after the first real sync round-trip, make
   // sure a base scenario exists, then run the reconciliation pass
@@ -586,10 +608,10 @@ export const AppShell: React.FC = () => {
   );
 };
 
-// The signup-profile handoff helpers (`readSignupProfile` / `clearSignupProfile`,
-// key `retivo:signup-profile:<userId>`) are the single source of truth in
-// AuthContext (imported above) — AuthContext writes the profile after a
-// successful login; the first-run effect here reads it once and clears it.
+// `clearSignupProfile` (key `retivo:signup-profile:<userId>`) is the single
+// source of truth in AuthContext (imported above) — AuthContext still writes
+// the profile after a successful login; the first-run effect here only clears
+// it. Nothing reads it: the primary member comes from `GET /auth/me`.
 
 const MenuIcon = () => (
   <svg
