@@ -371,6 +371,51 @@ describe('AppShell first-login household seeding', () => {
     await waitFor(() => expect(queueLocalMutationMock).toHaveBeenCalledTimes(1));
   });
 
+  it('creates nothing when another tab populated the workspace while the account fetch was pending', async () => {
+    localStorage.setItem(SIGNUP_PROFILE_KEY, SIGNUP_PROFILE);
+    let resolveFetch: (r: typeof FULL_RECORD) => void = () => {};
+    fetchAccountRecordMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    setSync(SYNCED);
+    renderShell();
+    await waitFor(() => expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1));
+
+    // The other tab seeds the primary member and writes the shared flag.
+    localStorage.setItem(SEEDED_FLAG_KEY, '1');
+    listAggregatesMock.mockResolvedValue([{ id: 'm-1', aggregateType: 'householdMember' }]);
+    resolveFetch(FULL_RECORD);
+
+    await waitFor(() => expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBeNull());
+    expect(queueLocalMutationMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('ready-banner')).toBeNull();
+    expect(screen.queryByTestId('first-run-modal')).toBeNull();
+    expect(localStorage.getItem(PENDING_BANNER_KEY)).toBeNull();
+  });
+
+  it('creates nothing when the seeded flag appeared while the account fetch was pending', async () => {
+    let resolveFetch: (r: typeof FULL_RECORD) => void = () => {};
+    fetchAccountRecordMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    setSync(SYNCED);
+    renderShell();
+    await waitFor(() => expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1));
+
+    localStorage.setItem(SEEDED_FLAG_KEY, '1');
+    resolveFetch(FULL_RECORD);
+
+    expect(await screen.findByTestId('first-run-modal')).toBeInTheDocument();
+    expect(queueLocalMutationMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('ready-banner')).toBeNull();
+  });
+
   it('shows the prompt with no request when the seeded flag is set and the workspace is empty', async () => {
     localStorage.setItem(SEEDED_FLAG_KEY, '1');
     setSync(SYNCED);

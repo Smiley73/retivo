@@ -38,7 +38,7 @@ import { hasPrimaryMemberSeeded, markPrimaryMemberSeeded } from './lib/first-run
 import {
   fetchRecordOnce,
   primaryMemberProfileFromRecord,
-  queuePrimaryMember,
+  seedPrimaryMemberOnce,
 } from './lib/first-run-seed';
 import { MonteCarloProvider } from './monte-carlo/MonteCarloProvider';
 import { MonteCarloProgressChip } from './monte-carlo/MonteCarloProgressChip';
@@ -332,10 +332,21 @@ export const AppShell: React.FC = () => {
           setFirstRunModalOpen(true);
           return;
         }
-        // Flag before the queue call: a throw inside it (which may have partly
-        // written) must never lead to a second seed.
-        markPrimaryMemberSeeded(householdId);
-        await queuePrimaryMember(householdId, me.email, profile);
+        // Another tab can finish its own seed while the record was in flight, so
+        // the helper re-checks the store and flag under a cross-tab lock before
+        // creating anything (and writes the flag before the queue call).
+        const seed = await seedPrimaryMemberOnce(householdId, me.email, profile);
+        if (seed === 'already-populated') {
+          // Another tab seeded or populated the workspace: nothing to create.
+          markPrimaryMemberSeeded(householdId);
+          clearSignupProfile(me.id);
+          return;
+        }
+        if (seed === 'already-seeded') {
+          // Flag set with no members: a wipe elsewhere; same as the check above.
+          if (!cancelled) setFirstRunModalOpen(true);
+          return;
+        }
         if (cancelled) return;
         // Seed succeeded: consume the one-shot profile key and arm the banner
         // (pending key survives reloads until dismissed).
