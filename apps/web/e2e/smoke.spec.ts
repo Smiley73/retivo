@@ -16,7 +16,7 @@
  * coverage now that the framework, fixture, and dev-server lifecycle
  * are proven.
  */
-import { test, expect, loadDemo } from './fixtures';
+import { test, expect, loadDemo, perYearChartSvg } from './fixtures';
 
 test.describe('smoke', () => {
   test('app boots and renders the dashboard', async ({ page }) => {
@@ -71,8 +71,11 @@ test.describe('smoke', () => {
     await expect(
       page.getByRole('heading', { name: /balance projection/i }),
     ).toBeVisible({ timeout: 10_000 });
-    // Recharts renders an `<svg>` once the data is ready.
-    await expect(page.locator('svg').first()).toBeVisible({ timeout: 10_000 });
+    // The chart's own `<svg>` appears once the data is ready. A bare
+    // `page.locator('svg')` would match a sidebar icon and pass without it.
+    const chart = perYearChartSvg(page);
+    await expect(chart).toBeVisible({ timeout: 10_000 });
+    await expect(chart.locator('path').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('Plan stress-test page auto-runs and shows the headline cards', async ({

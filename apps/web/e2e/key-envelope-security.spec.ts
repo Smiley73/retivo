@@ -12,7 +12,11 @@
  *      unavailable to the new session (auth/user-transition.ts cross-user guard).
  *   2. Stale key-envelope writer conflict + refetch/retry — a writer that no
  *      longer holds the current envelope-set version is rejected with
- *      `409 STALE_ENVELOPE_VERSION` by the atomic slot+meta transaction, and succeeds after refetching the current version and retrying.
+ *      `409 STALE_ENVELOPE_VERSION` (the server checks the version the writer
+ *      expects against the stored one before writing), and succeeds after
+ *      refetching the current version and retrying. The write transaction's own
+ *      version condition is the backstop for two truly concurrent writers,
+ *      which sequential requests here cannot reproduce.
  *
  * Runs serially — the whole suite shares the one seeded dev user.
  */
@@ -37,14 +41,16 @@ const LAST_USER_STORAGE_KEY = 'retivo.auth.lastUserId';
 /**
  * A minimal, DTO-valid slot body. `wrappedKey` is stored opaquely (never
  * decrypted), so a short placeholder is accepted; the server overrides
- * `householdId` from the JWT.
+ * `householdId` from the JWT. The slot is a `recovery` slot because the
+ * server pins a `password` slot to its one canonical id, and these writers
+ * need distinct ids to race on the envelope-set version.
  */
 function makeSlot(slotId: string): Record<string, unknown> {
   const now = new Date().toISOString();
   return {
     householdId: 'placeholder-overridden-by-server',
     slotId,
-    slotType: 'password',
+    slotType: 'recovery',
     wrappedKey: 'AAAA',
     encryptionVersion: 1,
     createdAt: now,
@@ -126,11 +132,12 @@ test.describe('key-envelope + cross-user security', () => {
     expect(firstWrite.status).toBe(204);
 
     // A stale writer still holding `base` now tries to advance base → base+1, but
-    // the stored version already moved to base+1 → the atomic slot+meta
-    // transaction's version condition fails → 409 STALE_ENVELOPE_VERSION.
-    // The boundary single-step check passes (base+1 == base + 1);
-    // the conflict surfaces from the conditional transaction, proving the atomic
-    // path, not just the arithmetic guard.
+    // the stored version already moved to base+1, so the version it expects no
+    // longer matches the stored one → 409 STALE_ENVELOPE_VERSION. The boundary
+    // single-step check passes (base+1 == base + 1), so the conflict comes from
+    // the stored-version comparison, not the arithmetic guard. These requests
+    // are sequential, so the write transaction's own version condition (the
+    // backstop for truly concurrent writers) is not what rejects it here.
     const staleWrite = await authedFetch(page, token, apiOrigin, {
       method: 'PUT',
       path: `${KEY_ENVELOPES}/e2e-conflict-b`,
