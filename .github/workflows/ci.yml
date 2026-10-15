@@ -42,9 +42,11 @@
 #                               Moto (the repo's compose file), coverage
 #                               thresholds enforced.
 #   4. e2e                    — Playwright (Chromium) against the Vite dev
-#                               server; traces uploaded on failure
-#                               (temporarily disabled — if: false; re-enable
-#                               per the comment near the e2e job definition).
+#                               server, the API and the emulators; traces
+#                               uploaded. The test step is non-blocking while
+#                               the suite earns trust: a failing test shows in
+#                               the summary, a job-level failure (emulators,
+#                               API start, browser install) fails the run.
 #   5. All checks             — the aggregate: needs every enabled suite above
 #                               and writes a per-suite results table to the
 #                               run's job summary.
@@ -440,16 +442,11 @@ jobs:
   e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # TEMPORARILY DISABLED. The suite was failing every test at the shared
-    # sign-in fixture once an acceptance gate (since removed) began
-    # parking a fresh session before the dashboard. The job stays off until
-    # the suite is confirmed stable, to keep its known flakiness off green
-    # PRs. To re-enable, replace `if: false` with nothing (delete the line, so
-    # it runs on every event like its sibling suites). Then add 'e2e' to the
-    # `all-checks` job's `needs` list and a row for it in that job's summary
-    # table; scripts/test/workflow-trust-boundary.test.mjs fails if an enabled
-    # job is missing from `needs`.
-    if: false
+    outputs:
+      # Outcome of the Playwright step ("success" or "failure"). The step is
+      # non-blocking, so the job result alone cannot show a failed test; read
+      # by `all-checks`.
+      tests: ${{ steps.e2e.outcome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -524,10 +521,11 @@ jobs:
       - run: pnpm --filter @retirement/web exec playwright install chromium --with-deps
       # playwright.config.ts is CI-aware: retries=2, github reporter,
       # forbidOnly, and it boots the Vite dev server itself.
-      # Step-level continue-on-error: the suite is OPTIONAL while it
-      # stabilizes — failures stay visible in the step log + uploaded traces,
-      # but the job and the PR check stay green. Remove the flag to make e2e
-      # blocking again.
+      # Step-level continue-on-error: the suite is non-blocking while it
+      # earns trust on the runner. A failed test stays visible in the step
+      # log, the uploaded traces and the `All checks` summary row, but the
+      # job and the PR check stay green. Remove the flag to make e2e
+      # blocking.
       - run: pnpm --filter @retirement/web test:e2e
         id: e2e
         continue-on-error: true
@@ -563,7 +561,7 @@ jobs:
     name: All checks
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [lint-typecheck-scripts, web-unit, web-coverage, api-integration]
+    needs: [lint-typecheck-scripts, web-unit, web-coverage, api-integration, e2e]
     if: always()
     steps:
       - name: Summarize suite results
@@ -578,6 +576,8 @@ jobs:
           WEB_RERUN_4: ${{ needs.web-unit.outputs.rerun_4 }}
           API_RESULT: ${{ needs.api-integration.result }}
           API_RERUN: ${{ needs.api-integration.outputs.rerun }}
+          E2E_RESULT: ${{ needs.e2e.result }}
+          E2E_TESTS: ${{ needs.e2e.outputs.tests }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -623,6 +623,14 @@ jobs:
           api_note=""
           if [ "$API_RERUN" = "true" ]; then api_note=" emulator start or test run"; fi
 
+          # The Playwright step is non-blocking, so a job that "succeeded"
+          # can still hold failed tests; say so instead of a bare PASS.
+          if [ "$E2E_RESULT" = success ] && [ "$E2E_TESTS" = failure ]; then
+            e2e_row="FAILED, NOT BLOCKING | Browser tests failed; the job stays green while the suite earns trust. See the e2e job log and the playwright-traces artifact."
+          else
+            e2e_row="$(row_for "$E2E_RESULT" "")"
+          fi
+
           case "$AUDIT_RESULT" in
             clean) audit_line="clean" ;;
             advisories-nonblocking) audit_line="advisories found, not blocking: this PR changes no dependencies" ;;
@@ -643,6 +651,7 @@ jobs:
             echo "| Lint / Typecheck / Scripts | $(row_for "$LINT_RESULT" "") |"
             echo "| Web tests (unit shards + coverage) | $(row_for "$web" "$web_note") |"
             echo "| API integration | $(row_for "$API_RESULT" "$api_note") |"
+            echo "| Browser tests (Playwright) | ${e2e_row} |"
             echo
             echo "- Dependency audit: ${audit_line}"
             echo "- Date checks (feature-flag reviewBy): ${date_line}"
@@ -650,7 +659,7 @@ jobs:
             echo "[Run logs](${RUN_URL})"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          for result in "$LINT_RESULT" "$WEB_UNIT_RESULT" "$WEB_COVERAGE_RESULT" "$API_RESULT"; do
+          for result in "$LINT_RESULT" "$WEB_UNIT_RESULT" "$WEB_COVERAGE_RESULT" "$API_RESULT" "$E2E_RESULT"; do
             if [ "$result" != success ]; then
               echo "::error::At least one suite did not succeed (failed, cancelled or skipped); see the summary table."
               exit 1
