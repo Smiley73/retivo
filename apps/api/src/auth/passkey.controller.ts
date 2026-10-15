@@ -382,14 +382,9 @@ export class PasskeyController {
       userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
       metadata: { credentialId: passkey.credentialId, deviceId: body.deviceId },
     });
-    // Map the new profile fields explicitly (same shape as the password
-    // login response) so the SPA can seed the primary HouseholdMember.
     return {
       accessToken: session.accessToken,
       expiresIn: session.expiresInSec,
-      firstName: session.firstName,
-      lastName: session.lastName,
-      birthdate: session.birthdate,
     };
   }
 

@@ -342,15 +342,9 @@ export class AuthController {
 
     res.cookie(REFRESH_COOKIE_NAME, result.refreshToken, refreshCookieOptions(result.refreshExpiresInSec * 1000));
     res.cookie(CSRF_COOKIE_NAME, result.csrfToken, csrfCookieOptions(result.refreshExpiresInSec * 1000));
-    // The new profile fields are not spread automatically — map them
-    // explicitly so the SPA can seed the primary HouseholdMember on first
-    // login. Absent (old account) → undefined, omitted from the JSON.
     return {
       accessToken: result.accessToken,
       expiresIn: result.expiresInSec,
-      firstName: result.firstName,
-      lastName: result.lastName,
-      birthdate: result.birthdate,
     };
   }
 
