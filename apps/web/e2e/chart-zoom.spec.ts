@@ -11,7 +11,7 @@
  * Real SVG layout is required for reliable coordinates — this is why the
  * check lives in Playwright rather than jsdom unit tests.
  */
-import { test, expect, loadDemo } from './fixtures';
+import { test, expect, loadDemo, perYearChartSvg } from './fixtures';
 
 test.describe('Chart drag-zoom + Reset view', () => {
   test('drag inside balance-projection chart zooms; Reset view restores', async ({
@@ -40,14 +40,15 @@ test.describe('Chart drag-zoom + Reset view', () => {
     await expect(
       page.getByRole('region', { name: /monte carlo outcomes/i }),
     ).toContainText(/\$\d/, { timeout: 60_000 });
-    const svg = chartSection.locator('svg').first();
+    const svg = perYearChartSvg(page);
     await expect(svg).toBeVisible({ timeout: 10_000 });
     await expect(svg.locator('path').first()).toBeVisible({ timeout: 10_000 });
 
     // Derive the bounding box of the SVG so we can synthesise a drag
     // that spans from ~20% to ~60% of the plot width. The drag must
-    // land inside the Recharts container div (not the outer section)
-    // so Recharts' onMouseDown fires. Scroll the chart into view first:
+    // land on the chart's own svg (the pointer handlers are bound to it),
+    // not the section around it or the heading's info icon.
+    // Scroll the chart into view first:
     // it sits below the fold, and mouse events at off-viewport
     // coordinates dispatch nowhere — the drag silently never arms.
     // Centre it (`block: 'center'`), not `scrollIntoViewIfNeeded()`'s
@@ -70,7 +71,7 @@ test.describe('Chart drag-zoom + Reset view', () => {
     // minimum enforced by useChartZoom.
     await page.mouse.move(x1, y);
     await page.mouse.down();
-    // Move in small steps so Recharts' onMouseMove fires consistently.
+    // Move in small steps so the chart's pointermove handler fires consistently.
     const steps = 10;
     for (let i = 1; i <= steps; i++) {
       const xi = x1 + ((x2 - x1) * i) / steps;

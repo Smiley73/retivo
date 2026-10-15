@@ -8,7 +8,7 @@
  * chart in a now-hidden panel keeps the same measured width as one in the
  * selected panel (never the 800px jsdom-only fallback, never 0).
  */
-import { test, expect, loadDemo } from './fixtures';
+import { test, expect, loadDemo, perYearChartSvg } from './fixtures';
 
 test.describe('Balance Projection tabbed views + pinned controls strip', () => {
   test('switches tabs, deep-links, keyboard-activates, and keeps the strip pinned while scrolling', async ({
@@ -138,10 +138,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     ).toBeVisible({ timeout: 10_000 });
 
     // Overview's per-year chart, selected.
-    const overviewChart = page
-      .locator('[aria-label="Per-year projection"]')
-      .locator('svg')
-      .first();
+    const overviewChart = perYearChartSvg(page);
     await expect(overviewChart).toBeVisible({ timeout: 10_000 });
     const selectedBox = await overviewChart.boundingBox();
     expect(selectedBox).not.toBeNull();

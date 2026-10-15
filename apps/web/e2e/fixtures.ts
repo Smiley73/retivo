@@ -17,8 +17,25 @@
  *     then lands on the dashboard with zero members, which pops the
  *     first-run "Load demo data?" modal the tests build on.
  */
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, type Locator, type Page } from '@playwright/test';
 import { purgeHouseholdState } from './server-state';
+
+/**
+ * The `<svg>` of the Balance Projection page's per-year projection chart.
+ *
+ * `section.locator('svg').first()` (or a bare `page.locator('svg')`) is the
+ * wrong handle: the section heading's info icon and the sidebar icons are
+ * `<svg>` elements that come first, so it resolves to a small icon and a test
+ * on it never touches the chart. The chart is the `role="img"` frame named by
+ * the chart's `ariaLabel`, matched with CSS so it still resolves while the
+ * Overview panel is force-mounted but hidden (a role query skips hidden
+ * elements).
+ */
+export function perYearChartSvg(page: Page): Locator {
+  return page.locator(
+    '[aria-label="Per-year projection"] [role="img"][aria-label="Balance projection chart"] svg',
+  );
+}
 
 /**
  * Click "Load demo data" on the first-run modal and wait for the seed to
