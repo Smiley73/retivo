@@ -17,17 +17,7 @@ import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The first-run effect only clears the signup-profile handoff (single source of
-// truth in AuthContext; nothing reads it any more). Back it with the real
-// localStorage implementation so the existing localStorage-driven test setup
-// keeps working.
-const SIGNUP_PROFILE_PREFIX = 'retivo:signup-profile:';
-vi.mock('./auth/AuthContext', () => ({
-  useAuth: vi.fn(),
-  clearSignupProfile: (userId: string) => {
-    localStorage.removeItem(`${SIGNUP_PROFILE_PREFIX}${userId}`);
-  },
-}));
+vi.mock('./auth/AuthContext', () => ({ useAuth: vi.fn() }));
 vi.mock('./sync/SyncContext', () => ({ useSync: vi.fn() }));
 vi.mock('./db/store', () => ({ listAggregates: vi.fn() }));
 vi.mock('./pages/LoginPage', () => ({ LoginPage: () => <div data-testid="login-page" /> }));
@@ -110,13 +100,6 @@ function authValue(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-
-const SIGNUP_PROFILE_KEY = 'retivo:signup-profile:u-1';
-const SIGNUP_PROFILE = JSON.stringify({
-  firstName: 'Jane',
-  lastName: 'Smith',
-  birthdate: '1980-04-15',
-});
 
 function setSync(state: SyncState, notifyPending = vi.fn()) {
   // runDestructive fences the post-reload re-seed (scenario + expense
@@ -261,9 +244,6 @@ describe('AppShell first-login household seeding', () => {
   });
 
   it('seeds the primary member from the account record + shows the banner (no modal), once', async () => {
-    // A stale handoff key with DIFFERENT names: a seed that still read it would
-    // queue Jane Smith; the key must also be cleared.
-    localStorage.setItem(SIGNUP_PROFILE_KEY, SIGNUP_PROFILE);
     setSync(SYNCED);
     renderShell();
 
@@ -285,8 +265,7 @@ describe('AppShell first-login household seeding', () => {
     );
     expect(await screen.findByTestId('ready-banner')).toBeInTheDocument();
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
-    // One-shot profile key consumed; reload-banner key armed; seeded flag set.
-    expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBeNull();
+    // Reload-banner key armed; seeded flag set.
     expect(localStorage.getItem(PENDING_BANNER_KEY)).toBe('1');
     expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
     // Silent background check (no wait toast on a 429), and exactly one request
@@ -325,7 +304,6 @@ describe('AppShell first-login household seeding', () => {
 
   it('a failed account fetch shows and writes nothing, is not latched, and has one request in flight', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    localStorage.setItem(SIGNUP_PROFILE_KEY, SIGNUP_PROFILE);
     let rejectFetch: (e: Error) => void = () => {};
     fetchAccountRecordMock.mockImplementation(
       () =>
@@ -355,13 +333,12 @@ describe('AppShell first-login household seeding', () => {
         expect.any(Error),
       ),
     );
-    // Nothing visible, nothing written; the handoff key is untouched.
+    // Nothing visible, nothing written.
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
     expect(screen.queryByTestId('ready-banner')).toBeNull();
     expect(queueLocalMutationMock).not.toHaveBeenCalled();
     expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBeNull();
     expect(localStorage.getItem(PENDING_BANNER_KEY)).toBeNull();
-    expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBe(SIGNUP_PROFILE);
 
     // Not latched: the next natural re-run (another token refresh) retries once.
     fetchAccountRecordMock.mockResolvedValue(FULL_RECORD);
@@ -372,7 +349,6 @@ describe('AppShell first-login household seeding', () => {
   });
 
   it('creates nothing when another tab populated the workspace while the account fetch was pending', async () => {
-    localStorage.setItem(SIGNUP_PROFILE_KEY, SIGNUP_PROFILE);
     let resolveFetch: (r: typeof FULL_RECORD) => void = () => {};
     fetchAccountRecordMock.mockImplementation(
       () =>
@@ -387,9 +363,14 @@ describe('AppShell first-login household seeding', () => {
     // The other tab seeds the primary member and writes the shared flag.
     localStorage.setItem(SEEDED_FLAG_KEY, '1');
     listAggregatesMock.mockResolvedValue([{ id: 'm-1', aggregateType: 'householdMember' }]);
+    const memberReads = () =>
+      listAggregatesMock.mock.calls.filter(([type]) => type === 'householdMember').length;
+    const readsBefore = memberReads();
     resolveFetch(FULL_RECORD);
 
-    await waitFor(() => expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBeNull());
+    // The seed helper re-reads the store before creating anything.
+    await waitFor(() => expect(memberReads()).toBeGreaterThan(readsBefore));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(queueLocalMutationMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId('ready-banner')).toBeNull();
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
@@ -458,10 +439,7 @@ describe('AppShell first-login household seeding', () => {
     expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
   });
 
-  it('clears the signup profile and records the flag when members already exist (returning user)', async () => {
-    // Returning user: a stale one-shot signup profile lingers in localStorage
-    // but the workspace already has a household member, so no seeding occurs.
-    localStorage.setItem(SIGNUP_PROFILE_KEY, SIGNUP_PROFILE);
+  it('records the flag and does not seed when members already exist (returning user)', async () => {
     listAggregatesMock.mockResolvedValue([
       { id: 'm-1', aggregateType: 'householdMember' },
     ]);
@@ -469,10 +447,8 @@ describe('AppShell first-login household seeding', () => {
     renderShell();
 
     await waitFor(() => expect(listAggregatesMock).toHaveBeenCalledWith('householdMember'));
-    // Stale profile cleared (PII not persisted indefinitely)…
-    await waitFor(() => expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBeNull());
-    // …the browser is marked as having seen the workspace populated…
-    expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
+    // The browser is marked as having seen the workspace populated…
+    await waitFor(() => expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1'));
     // …and no re-seeding for the existing-members path.
     expect(queueLocalMutationMock).not.toHaveBeenCalled();
     expect(fetchAccountRecordMock).not.toHaveBeenCalled();

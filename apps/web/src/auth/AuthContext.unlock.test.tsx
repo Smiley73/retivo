@@ -1344,18 +1344,13 @@ describe('AuthContext.signup — request body', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Moved from AuthContext.profile-handoff.test.tsx
+// Sign-in keeps personal data out of browser storage
 // ---------------------------------------------------------------------------
 
 /**
- * Tests for the signup-profile handoff in AuthContext. A successful login
- * that returns `{ firstName, lastName, birthdate }` must persist them to
- * `retivo:signup-profile:<userId>` (keyed by the userId in the access
- * token) so App.tsx's first-run effect can seed the primary HouseholdMember.
- *
- * Two security-relevant negatives are covered: a login with no profile fields
- * never writes the key, and a blocked cross-user IDB reset (which bails before
- * adopting the new claims) never writes user B's PII to localStorage.
+ * The API still returns `{ firstName, lastName, birthdate }` on sign-in (until
+ * it is trimmed), so a login response carrying them must leave no trace of the
+ * name or birthdate in `localStorage` or `sessionStorage`.
  *
  * The API, key-envelope client, HDK cache, key-wrapping, user-transition guard,
  * and WebAuthn shims are mocked at the module boundary so only the context's
@@ -1397,7 +1392,7 @@ function profileWireLogin(loginResponse: Record<string, unknown>): void {
   });
 }
 
-describe('AuthContext — signup-profile handoff', () => {
+describe('AuthContext — sign-in writes nothing personal to browser storage', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     apiRequest.mockReset();
@@ -1418,7 +1413,7 @@ describe('AuthContext — signup-profile handoff', () => {
     vi.clearAllMocks();
   });
 
-  it('login with profile fields writes retivo:signup-profile:<userId> to localStorage', async () => {
+  it('a login response carrying name and birthdate signs in and stores neither', async () => {
     await profileRenderAuth();
     const token = jwt({ userId: 'u-new', householdId: 'hh-new' });
     profileWireLogin({
@@ -1435,47 +1430,17 @@ describe('AuthContext — signup-profile handoff', () => {
       await profileCaptured.login('jane@test.com', 'pw');
     });
 
-    const raw = localStorage.getItem('retivo:signup-profile:u-new');
-    expect(raw).not.toBeNull();
-    expect(JSON.parse(raw as string)).toEqual({
-      firstName: 'Jane',
-      lastName: 'Smith',
-      birthdate: '1990-04-15',
-    });
-  });
-
-  it('login without profile fields does not write the signup-profile key', async () => {
-    await profileRenderAuth();
-    const token = jwt({ userId: 'u-new', householdId: 'hh-new' });
-    profileWireLogin({ accessToken: token, expiresIn: 3600 });
-    loadCachedHdk.mockResolvedValue(null);
-    getKeyEnvelopes.mockResolvedValue({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
-
-    await act(async () => {
-      await profileCaptured.login('jane@test.com', 'pw');
-    });
-
-    expect(localStorage.getItem('retivo:signup-profile:u-new')).toBeNull();
-  });
-
-  it('blocked cross-user IDB reset does not write user B profile to localStorage', async () => {
-    await profileRenderAuth();
-    const bToken = jwt({ userId: 'u-b', householdId: 'hh-b' });
-    // B's IDB drop fails closed → login bails before adopting B's claims.
-    maybeResetForNewUser.mockRejectedValue(new Error('cross-user reset blocked'));
-    profileWireLogin({
-      accessToken: bToken,
-      expiresIn: 3600,
-      firstName: 'Eve',
-      lastName: 'B',
-      birthdate: '1985-07-20',
-    });
-
-    await act(async () => {
-      await profileCaptured.login('b@test.com', 'pw');
-    });
-
-    // B's PII was never persisted — the login bailed at the blocked reset.
-    expect(localStorage.getItem('retivo:signup-profile:u-b')).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByTestId('isAuthenticated').textContent).toBe('true'),
+    );
+    for (const storage of [localStorage, sessionStorage]) {
+      for (let i = 0; i < storage.length; i += 1) {
+        const key = storage.key(i)!;
+        const entry = `${key}=${storage.getItem(key)}`;
+        expect(entry).not.toContain('Jane');
+        expect(entry).not.toContain('Smith');
+        expect(entry).not.toContain('1990-04-15');
+      }
+    }
   });
 });

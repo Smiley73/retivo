@@ -25,9 +25,7 @@ vi.mock('@simplewebauthn/browser', () => ({
   startAuthentication: (...a: unknown[]) => startAuthentication(...a),
 }));
 
-// Mock only `useAuth` — the real `updateSignupProfile` (localStorage
-// read/write) stays live so the handoff-rewrite tests below exercise the
-// actual helper, not a stub.
+// Mock only `useAuth`; the rest of the module stays real.
 vi.mock('../auth/AuthContext', async () => {
   const actual =
     await vi.importActual<typeof import('../auth/AuthContext')>('../auth/AuthContext');
@@ -57,7 +55,6 @@ const RECORD = {
 };
 
 const USER_ID = 'user-1';
-const SIGNUP_PROFILE_KEY = `retivo:signup-profile:${USER_ID}`;
 
 function mockAuth(overrides: Record<string, unknown> = {}) {
   const fns = {
@@ -434,50 +431,34 @@ describe('AccountCard', () => {
       },
     );
 
-    it('handoff: a successful save rewrites an existing signup-profile handoff with the new values', async () => {
-      localStorage.setItem(
-        SIGNUP_PROFILE_KEY,
-        JSON.stringify({ firstName: 'Alice', lastName: 'Smith', birthdate: '1970-04-12' }),
-      );
-      const UPDATED = {
-        email: 'alice@example.test',
-        firstName: 'Alicia',
-        lastName: 'Smith',
-        birthdate: '1970-04-12',
-      };
-      mockAuth({ updateAccountRecord: vi.fn().mockResolvedValue(UPDATED) });
-      renderCard({ email: 'claim@example.test', onError: vi.fn() });
-      await screen.findByText('alice@example.test');
-
-      fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
-      fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Alicia' } });
-      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
-
-      await waitFor(() => {
-        const stored = JSON.parse(localStorage.getItem(SIGNUP_PROFILE_KEY)!);
-        expect(stored).toEqual({
-          firstName: 'Alicia',
-          lastName: 'Smith',
-          birthdate: '1970-04-12',
-        });
-      });
-    });
-
-    it('handoff: a successful save creates no handoff when none was present', async () => {
+    it('a successful save renders the updated record and writes nothing personal to browser storage', async () => {
       mockAuth({
-        updateAccountRecord: vi.fn().mockResolvedValue({ ...RECORD, firstName: 'Alicia' }),
+        updateAccountRecord: vi.fn().mockResolvedValue({
+          ...RECORD,
+          firstName: 'Alicia',
+          lastName: 'Jones',
+        }),
       });
       renderCard({ email: 'claim@example.test', onError: vi.fn() });
       await screen.findByText('alice@example.test');
 
       fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
       fireEvent.change(screen.getByLabelText(/first name/i), { target: { value: 'Alicia' } });
+      fireEvent.change(screen.getByLabelText(/last name/i), { target: { value: 'Jones' } });
       fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
 
       await waitFor(() => {
-        expect(screen.getByText('Alicia Smith')).toBeInTheDocument();
+        expect(screen.getByText('Alicia Jones')).toBeInTheDocument();
       });
-      expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBeNull();
+      for (const storage of [localStorage, sessionStorage]) {
+        for (let i = 0; i < storage.length; i += 1) {
+          const key = storage.key(i)!;
+          const entry = `${key}=${storage.getItem(key)}`;
+          expect(entry).not.toContain('Alicia');
+          expect(entry).not.toContain('Jones');
+          expect(entry).not.toContain('1970-04-12');
+        }
+      }
     });
 
     it('has no a11y violations with the edit form open', async () => {
