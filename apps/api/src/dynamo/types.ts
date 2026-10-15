@@ -167,13 +167,13 @@ export interface UserRow {
   updatedAt: string;
   /** Applicant's given name, captured at signup (optional — old clients /
    * API-direct signups omit it). Surfaced in the owner approval email and
-   * the login response so the SPA can seed the primary HouseholdMember. */
+   * read back through `GET /auth/me`; sign-in responses never carry it. */
   firstName?: string;
   /** Applicant's family name, captured at signup (optional). */
   lastName?: string;
   /** Applicant's birthdate as `YYYY-MM-DD`, captured at signup (optional).
-   * Returned in the login response for HouseholdMember seeding; never
-   * included in the approval email or any auth-event log (PII). */
+   * Read back through `GET /auth/me`; never included in the approval email
+   * or any auth-event log (PII). */
   birthdate?: string;
   // Unverified-signup state. All fields are removed once
   // `emailVerifiedAt` is set.

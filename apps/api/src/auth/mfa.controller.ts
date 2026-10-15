@@ -328,9 +328,6 @@ export class MfaController {
       accessToken: session.accessToken,
       expiresIn: session.expiresInSec,
       deviceRemembered,
-      firstName: session.firstName,
-      lastName: session.lastName,
-      birthdate: session.birthdate,
     };
   }
 

@@ -15,6 +15,7 @@ import { PutCommand, UpdateCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 import {
   STRONG_PASSWORD,
   bootstrapTestApp,
+  completeEmailOtpLogin,
   decodeAccessClaims,
   freshDeviceId,
   freshEmail,
@@ -57,9 +58,6 @@ interface SignupResponse {
 interface LoginResponse {
   accessToken: string;
   expiresIn: number;
-  firstName?: string;
-  lastName?: string;
-  birthdate?: string;
 }
 
 async function signupAndVerify(t: TestApp): Promise<{ email: string; userId: string }> {
@@ -1754,8 +1752,8 @@ describe('auth flow', () => {
   });
 
   // Signup profile fields (firstName / lastName / birthdate) — stored on
-  // the UserRow and surfaced in the login response so the SPA can seed the
-  // primary HouseholdMember.
+  // the UserRow and read back only through `GET /auth/me`; sign-in
+  // responses carry session tokens only.
   describe('signup profile fields', () => {
     const userTable = () =>
       t.module.get(ConfigService).get('TABLE_USER', { infer: true } as never) as string;
@@ -1800,7 +1798,7 @@ describe('auth flow', () => {
       expect(user.birthdate).toBeUndefined();
     });
 
-    it('returns the profile fields in the login response after a verified signup', async () => {
+    it('does not return the signup profile in the login response', async () => {
       const email = freshEmail();
       const signup = await request(t.app.getHttpServer())
         .post('/api/v1/auth/signup')
@@ -1826,23 +1824,54 @@ describe('auth flow', () => {
         .set('Origin', process.env.WEB_ORIGIN!)
         .send({ email, password: STRONG_PASSWORD, deviceId: freshDeviceId() });
       expect(res.status).toBe(200);
-      const login = res.body as LoginResponse;
-      expect(login.firstName).toBe('Jane');
-      expect(login.lastName).toBe('Smith');
-      expect(login.birthdate).toBe('1980-04-15');
+      // Whole-shape: session tokens only, so a renamed profile key fails too.
+      expect(Object.keys(res.body as object).sort()).toEqual(['accessToken', 'expiresIn']);
+      expect(res.body).not.toHaveProperty('firstName');
+      expect(res.body).not.toHaveProperty('lastName');
+      expect(res.body).not.toHaveProperty('birthdate');
     });
 
-    it('omits the profile fields in the login response for an account without them', async () => {
-      const { email } = await signupAndVerify(t);
-      const res = await request(t.app.getHttpServer())
-        .post('/api/v1/auth/login')
-        .set('Origin', process.env.WEB_ORIGIN!)
-        .send({ email, password: STRONG_PASSWORD, deviceId: freshDeviceId() });
-      expect(res.status).toBe(200);
-      const login = res.body as LoginResponse;
-      expect(login.firstName).toBeUndefined();
-      expect(login.lastName).toBeUndefined();
-      expect(login.birthdate).toBeUndefined();
+    it('does not return the signup profile in the MFA verify response', async () => {
+      const priorEnforced = process.env.AUTH_MFA_ENFORCED;
+      process.env.AUTH_MFA_ENFORCED = 'true';
+      let mfaApp: TestApp | undefined;
+      try {
+        mfaApp = await bootstrapTestApp();
+        const email = freshEmail();
+        const signup = await request(mfaApp.app.getHttpServer())
+          .post('/api/v1/auth/signup')
+          .set('Origin', process.env.WEB_ORIGIN!)
+          .send({
+            email,
+            password: STRONG_PASSWORD,
+            firstName: 'Jane',
+            lastName: 'Smith',
+            birthdate: '1980-04-15',
+          });
+        expect(signup.status).toBe(202);
+        const userId = signup.body.userId as string;
+        const verifyRes = await request(mfaApp.app.getHttpServer())
+          .post('/api/v1/auth/verify-email')
+          .set('Origin', process.env.WEB_ORIGIN!)
+          .send({ token: signup.body.verificationToken })
+          .expect(200);
+        await approvePendingSignup(mfaApp, verifyRes.body.approvalToken);
+
+        const verify = await completeEmailOtpLogin(mfaApp, email, userId, freshDeviceId());
+        expect(verify.status).toBe(200);
+        expect(Object.keys(verify.body as object).sort()).toEqual([
+          'accessToken',
+          'deviceRemembered',
+          'expiresIn',
+        ]);
+        expect(verify.body).not.toHaveProperty('firstName');
+        expect(verify.body).not.toHaveProperty('lastName');
+        expect(verify.body).not.toHaveProperty('birthdate');
+      } finally {
+        await mfaApp?.app.close();
+        if (priorEnforced === undefined) delete process.env.AUTH_MFA_ENFORCED;
+        else process.env.AUTH_MFA_ENFORCED = priorEnforced;
+      }
     });
 
     it('replaces stale profile values when a recycled signup re-uses the email', async () => {

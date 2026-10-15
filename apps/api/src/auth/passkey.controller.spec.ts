@@ -266,4 +266,41 @@ describe('PasskeyController.authenticateFinish — session generation pinning', 
     const [assertionVerified] = assertions.verifyLoginAssertion.mock.invocationCallOrder;
     expect(userRead).toBeLessThan(assertionVerified);
   });
+
+  it('returns only the session tokens — a session object carrying the profile is not forwarded', async () => {
+    const { controller, users, passkeys, assertions, loginSvc } = build();
+    assertions.consumeLoginChallenge.mockReturnValue({ challenge: 'login-challenge' });
+    passkeys.find.mockResolvedValue({
+      userId: USER_ID,
+      credentialId: CREDENTIAL_ID,
+      restrictedPostReset: false,
+    });
+    assertions.verifyLoginAssertion.mockResolvedValue({ verified: true });
+    users.findByIdConsistent.mockResolvedValue({
+      userId: USER_ID,
+      householdId: USER_ID,
+      email: 'person@example.test',
+      sessionGeneration: 0,
+    });
+    // The mock is untyped, so it can carry fields the real result no longer
+    // declares: a handler that still mapped them would leak them here.
+    loginSvc.issueSession.mockResolvedValue({
+      accessToken: 'access',
+      expiresInSec: 300,
+      refreshToken: 'refresh',
+      refreshExpiresInSec: 1800,
+      csrfToken: 'csrf',
+      firstName: 'Jane',
+      lastName: 'Smith',
+      birthdate: '1980-04-15',
+    });
+
+    const result = await controller.authenticateFinish(
+      assertionBody(),
+      { ip: '203.0.113.1', headers: {} } as never,
+      { cookie: jest.fn() } as never,
+    );
+
+    expect(result).toEqual({ accessToken: 'access', expiresIn: 300 });
+  });
 });

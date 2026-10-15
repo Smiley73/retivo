@@ -87,12 +87,6 @@ export interface LoginResult {
   refreshToken: string;
   refreshExpiresInSec: number;
   csrfToken: string;
-  /** Profile captured at signup (optional — old accounts omit it).
-   * Surfaced so the SPA can seed the primary HouseholdMember on first
-   * login. Populated by `issueSession` from the UserRow. */
-  firstName?: string;
-  lastName?: string;
-  birthdate?: string;
   /**
    * Present only when this session was issued to a device whose device-trust
    * cookie verified: the matched trust row's
@@ -467,12 +461,6 @@ export class LoginService {
       refreshToken: issued.token,
       refreshExpiresInSec: this.refreshTtlSec,
       csrfToken: randomUUID(),
-      // Surface the signup profile (when present) so the SPA can seed the
-      // primary HouseholdMember. Covers password + passkey paths (both call
-      // issueSession). Absent on old accounts → omitted from the response.
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-      birthdate: user?.birthdate,
     };
   }
 }
