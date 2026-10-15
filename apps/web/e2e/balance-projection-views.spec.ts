@@ -69,6 +69,17 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
       'aria-selected',
       'true',
     );
+    // Settle the embedded stress test before any scroll geometry below is
+    // measured. It auto-runs shortly after load, parks a progress row in the
+    // pinned strip while it runs (removed again when it lands) and keeps the
+    // main thread busy meanwhile. Measured mid-run, the wheel's scroll can land
+    // after the scrollY read, and the strip shrinking under the Overview tab
+    // fails Playwright's click stability check, whose retry scrolls the tab to
+    // the viewport bottom. The outcomes stats flipping from "—" to dollar
+    // values is the completion signal (same wait as chart-zoom.spec.ts).
+    await expect(
+      page.getByRole('region', { name: /monte carlo outcomes/i }),
+    ).toContainText(/\$\d/, { timeout: 60_000 });
     await page.getByRole('tab', { name: 'Overview' }).focus();
     await page.keyboard.press('ArrowRight');
     await expect(cashflowTab).toBeFocused();
@@ -89,8 +100,11 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     await expect(strip).toBeVisible();
     // Prove the page actually scrolled — otherwise a strip that scrolled
     // off with the content (stripBox.y deeply negative) would still
-    // satisfy a one-sided `toBeLessThan(5)` below.
-    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
+    // satisfy a one-sided `toBeLessThan(5)` below. `mouse.wheel` returns
+    // before the scroll lands, so poll for it.
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBeGreaterThan(200);
     const stripBox = await strip.boundingBox();
     expect(stripBox).not.toBeNull();
     expect(stripBox!.y).toBeGreaterThanOrEqual(0);
