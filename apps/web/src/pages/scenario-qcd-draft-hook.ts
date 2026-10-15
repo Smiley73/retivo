@@ -96,7 +96,7 @@ export function useQcdDraft(
     () =>
       (effective.qualifiedCharitableDistributions ?? []).map((q) => ({
         ...q,
-        draftId: cryptoUuid('qcd'),
+        draftId: cryptoUuid(),
       })),
     [], // frozen at mount
   );

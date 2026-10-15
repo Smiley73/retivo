@@ -798,7 +798,7 @@ export const ExpenseFormPage: React.FC = () => {
                 ? { ...payload, _localId: editingAddedLocalId }
                 : a,
             )
-          : [...existingAdded, { ...payload, _localId: cryptoUuid('exp') }];
+          : [...existingAdded, { ...payload, _localId: cryptoUuid() }];
         const nextOverrides: ExpensesOverride = {
           ...existingOverrides,
           added: nextAdded,
@@ -818,7 +818,7 @@ export const ExpenseFormPage: React.FC = () => {
       } else {
         await queueLocalMutation<ExpensePayload>({
           type: 'expense',
-          aggregateId: cryptoUuid('exp'),
+          aggregateId: cryptoUuid(),
           householdId,
           operation: 'create',
           expectedVersion: 0,

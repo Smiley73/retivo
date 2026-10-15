@@ -100,7 +100,7 @@ export function useRothConversionsDraft(
     () =>
       (effective.preRetirementRothConversions ?? []).map((c) => ({
         ...c,
-        draftId: cryptoUuid('prc'),
+        draftId: cryptoUuid(),
       })),
     [], // frozen at mount
   );

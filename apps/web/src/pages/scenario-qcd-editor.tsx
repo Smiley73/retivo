@@ -80,7 +80,7 @@ function defaultQcd(
   return {
     // Stable per-entry key so removing a middle row never mis-associates
     // uncommitted picker UI state. STRIPPED before persist (save helpers).
-    draftId: cryptoUuid('qcd'),
+    draftId: cryptoUuid(),
     memberId,
     sourceAccountId,
     annualAmountDollars: 10000,
