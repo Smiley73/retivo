@@ -8,7 +8,28 @@
  * chart in a now-hidden panel keeps the same measured width as one in the
  * selected panel (never the 800px jsdom-only fallback, never 0).
  */
+import type { Page } from '@playwright/test';
 import { test, expect, loadDemo, perYearChartSvg } from './fixtures';
+
+/**
+ * Waits for the page's embedded stress test to land before the test touches
+ * geometry or clicks. The run auto-starts shortly after load, spawns workers
+ * that pull the engine's modules from Vite and saturates the CI runner's two
+ * vCPUs for tens of seconds: a tab switch then renders slower than an
+ * assertion's 5s window, and the progress row leaving the pinned strip when
+ * the run lands shrinks the strip, which scroll anchoring turns into a
+ * `scrollY` jump. The outcomes stats flipping from "—" to dollar values is the
+ * completion signal. `includeHidden` because the Overview panel that holds
+ * them stays mounted but hidden while another view is selected.
+ */
+async function settleStressTest(page: Page): Promise<void> {
+  await expect(
+    page.getByRole('region', {
+      name: /monte carlo outcomes/i,
+      includeHidden: true,
+    }),
+  ).toContainText(/\$\d/, { timeout: 60_000 });
+}
 
 test.describe('Balance Projection tabbed views + pinned controls strip', () => {
   test('switches tabs, deep-links, keyboard-activates, and keeps the strip pinned while scrolling', async ({
@@ -28,6 +49,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
 
     // Default view is Overview.
     await expect(overviewTab).toHaveAttribute('aria-selected', 'true');
+    await settleStressTest(page);
 
     // Clicking a tab switches the view and rewrites the URL (no reload).
     await cashflowTab.click();
@@ -200,6 +222,9 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
       });
       await expect(disclosure).toBeVisible();
       await expect(strip).toHaveCSS('position', 'sticky');
+      // The strip's height and the document's scroll position are measured
+      // below, so the run's progress row must be gone before the first one.
+      await settleStressTest(page);
 
       // Park focus on the control AFTER the disclosure, then scroll so the
       // disclosure sits 40px below the viewport top — under the stuck strip.
