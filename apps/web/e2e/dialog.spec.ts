@@ -23,8 +23,10 @@ test.describe('dialog (Headless UI) keyboard + focus', () => {
     await loadDemo(page);
 
     await page.goto('/account-balances');
+    // Level 1 = the page title: the page also has an "Account balances over
+    // time" section heading that the bare name pattern would match too.
     await expect(
-      page.getByRole('heading', { name: /account balances/i }),
+      page.getByRole('heading', { level: 1, name: /account balances/i }),
     ).toBeVisible({ timeout: 10_000 });
 
     // Open the per-account balances page via the first Edit/View button.
