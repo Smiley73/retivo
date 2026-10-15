@@ -55,7 +55,7 @@
  * account-snapshot-purge-lambda.handler,
  * health-check-probe-lambda.handler).
  */
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -96,7 +96,7 @@ function removeAllBinDirs(dir) {
 
 step('Building @retirement/contracts (fresh, before nest build typechecks against it)');
 const contractsRoot = resolve(apiRoot, '..', '..', 'packages', 'contracts');
-execSync('pnpm --filter @retirement/contracts run build', {
+execFileSync('pnpm', ['--filter', '@retirement/contracts', 'run', 'build'], {
   cwd: apiRoot,
   stdio: 'inherit',
 });
@@ -107,7 +107,7 @@ if (!existsSync(contractsDist)) {
 }
 
 step('Compiling TypeScript via nest build');
-execSync('pnpm exec nest build', { cwd: apiRoot, stdio: 'inherit' });
+execFileSync('pnpm', ['exec', 'nest', 'build'], { cwd: apiRoot, stdio: 'inherit' });
 if (!existsSync(distDir)) {
   console.error(`error: ${distDir} not produced by nest build`);
   process.exit(1);
@@ -127,8 +127,18 @@ step('Staging prod dependencies via pnpm deploy (lockfile-derived, hoisted, inje
 // (outside CI, where frozen is not the default) fails the build loudly
 // instead of silently re-resolving fresh dependency versions — the
 // committed-lockfile supply-chain guarantee this artifact depends on.
-execSync(
-  `pnpm --filter @retirement/api deploy --prod --frozen-lockfile --config.inject-workspace-packages=true --config.node-linker=hoisted ${JSON.stringify(stagingDir)}`,
+execFileSync(
+  'pnpm',
+  [
+    '--filter',
+    '@retirement/api',
+    'deploy',
+    '--prod',
+    '--frozen-lockfile',
+    '--config.inject-workspace-packages=true',
+    '--config.node-linker=hoisted',
+    stagingDir,
+  ],
   { cwd: repoRoot, stdio: 'inherit' },
 );
 const stagedNodeModules = resolve(stagingDir, 'node_modules');
