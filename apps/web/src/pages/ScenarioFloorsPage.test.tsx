@@ -84,6 +84,8 @@ function setupContexts(): void {
     isBooting: false,
     hasRole: () => true,
     logout: vi.fn(),
+    // The shell's first-run check (never reached here: `lastSyncedAt` is null).
+    fetchAccountRecord: vi.fn().mockResolvedValue({ email: 'me@example.test' }),
   });
   (useSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
     notifyPending: vi.fn(),

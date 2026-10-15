@@ -17,34 +17,13 @@ import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The first-run effect reads/clears the signup-profile handoff via these
-// helpers (single source of truth in AuthContext). Back them with the
-// real localStorage implementation so the existing localStorage-driven test
-// setup keeps working.
+// The first-run effect only clears the signup-profile handoff (single source of
+// truth in AuthContext; nothing reads it any more). Back it with the real
+// localStorage implementation so the existing localStorage-driven test setup
+// keeps working.
 const SIGNUP_PROFILE_PREFIX = 'retivo:signup-profile:';
 vi.mock('./auth/AuthContext', () => ({
   useAuth: vi.fn(),
-  readSignupProfile: (userId: string) => {
-    const raw = localStorage.getItem(`${SIGNUP_PROFILE_PREFIX}${userId}`);
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      if (
-        typeof parsed.firstName === 'string' &&
-        typeof parsed.lastName === 'string' &&
-        typeof parsed.birthdate === 'string'
-      ) {
-        return {
-          firstName: parsed.firstName,
-          lastName: parsed.lastName,
-          birthdate: parsed.birthdate,
-        };
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  },
   clearSignupProfile: (userId: string) => {
     localStorage.removeItem(`${SIGNUP_PROFILE_PREFIX}${userId}`);
   },
@@ -109,6 +88,29 @@ const reconcileScenariosMock = reconcileScenarios as unknown as ReturnType<typeo
 const queueLocalMutationMock = queueLocalMutation as unknown as ReturnType<typeof vi.fn>;
 const shouldShowReadyBannerMock = shouldShowReadyBanner as unknown as ReturnType<typeof vi.fn>;
 
+const fetchAccountRecordMock = vi.fn();
+const SEEDED_FLAG_KEY = 'retivo:primary-member-seeded:hh-1';
+const PENDING_BANNER_KEY = 'retivo:household-ready-banner-pending:hh-1';
+// An account without a profile (old account / API-direct signup).
+const EMAIL_ONLY_RECORD = { email: 'me@example.test' };
+const FULL_RECORD = {
+  email: 'me@example.test',
+  firstName: 'Ada',
+  lastName: 'Lovelace',
+  birthdate: '1985-12-10',
+};
+
+/** The `useAuth` value the shell reads; `me` is a fresh object on every call, like a token refresh. */
+function authValue(overrides: Record<string, unknown> = {}) {
+  return {
+    logout: vi.fn(),
+    householdId: 'hh-1',
+    me: { id: 'u-1', email: 'me@example.test', displayName: 'Me' },
+    fetchAccountRecord: fetchAccountRecordMock,
+    ...overrides,
+  };
+}
+
 const SIGNUP_PROFILE_KEY = 'retivo:signup-profile:u-1';
 const SIGNUP_PROFILE = JSON.stringify({
   firstName: 'Jane',
@@ -148,11 +150,9 @@ function renderShell() {
 
 describe('AppShell first-run demo prompt', () => {
   beforeEach(() => {
-    authMock.mockReturnValue({
-      logout: vi.fn(),
-      householdId: 'hh-1',
-      me: { id: 'u-1', email: 'me@example.test', displayName: 'Me' },
-    });
+    authMock.mockReturnValue(authValue());
+    fetchAccountRecordMock.mockReset();
+    fetchAccountRecordMock.mockResolvedValue(EMAIL_ONLY_RECORD);
     // Empty local workspace — no household members, no scenarios.
     listAggregatesMock.mockResolvedValue([]);
   });
@@ -202,6 +202,10 @@ describe('AppShell first-run demo prompt', () => {
     await waitFor(() =>
       expect(sessionStorage.getItem('suppressDemoModal')).toBeNull(),
     );
+    // A consumed flag proves a deliberate wipe: the per-browser seeded flag is
+    // written so the wipe sticks, and the server is never asked.
+    expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
+    expect(fetchAccountRecordMock).not.toHaveBeenCalled();
   });
 
   it('does not open the demo prompt when local members already exist', async () => {
@@ -238,25 +242,29 @@ describe('AppShell first-run demo prompt', () => {
 });
 
 describe('AppShell first-login household seeding', () => {
+  const SYNCED = { kind: 'synced', lastSyncedAt: '2026-06-04T00:00:00.000Z' } as const;
+
   beforeEach(() => {
-    authMock.mockReturnValue({
-      logout: vi.fn(),
-      householdId: 'hh-1',
-      me: { id: 'u-1', email: 'me@example.test', displayName: 'Me' },
-    });
+    authMock.mockReturnValue(authValue());
+    fetchAccountRecordMock.mockReset();
+    fetchAccountRecordMock.mockResolvedValue(FULL_RECORD);
     listAggregatesMock.mockResolvedValue([]);
     queueLocalMutationMock.mockResolvedValue(undefined);
     shouldShowReadyBannerMock.mockReturnValue(false);
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
+    sessionStorage.clear();
     localStorage.clear();
   });
 
-  it('seeds the primary member + shows the banner (no modal) when the signup profile is present', async () => {
+  it('seeds the primary member from the account record + shows the banner (no modal), once', async () => {
+    // A stale handoff key with DIFFERENT names: a seed that still read it would
+    // queue Jane Smith; the key must also be cleared.
     localStorage.setItem(SIGNUP_PROFILE_KEY, SIGNUP_PROFILE);
-    setSync({ kind: 'synced', lastSyncedAt: '2026-06-04T00:00:00.000Z' });
+    setSync(SYNCED);
     renderShell();
 
     await waitFor(() => expect(queueLocalMutationMock).toHaveBeenCalledTimes(1));
@@ -266,25 +274,47 @@ describe('AppShell first-login household seeding', () => {
         operation: 'create',
         expectedVersion: 0,
         householdId: 'hh-1',
-        payload: expect.objectContaining({
+        payload: {
           isPrimary: true,
-          firstName: 'Jane',
-          lastName: 'Smith',
-          birthdate: '1980-04-15',
-        }),
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          email: 'me@example.test',
+          birthdate: '1985-12-10',
+        },
       }),
     );
     expect(await screen.findByTestId('ready-banner')).toBeInTheDocument();
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
-    // One-shot profile key consumed; reload-banner key armed.
+    // One-shot profile key consumed; reload-banner key armed; seeded flag set.
     expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBeNull();
-    expect(
-      localStorage.getItem('retivo:household-ready-banner-pending:hh-1'),
-    ).toBe('1');
+    expect(localStorage.getItem(PENDING_BANNER_KEY)).toBe('1');
+    expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
+    // Silent background check (no wait toast on a 429), and exactly one request
+    // even though StrictMode mounted the effect twice.
+    expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1);
+    expect(fetchAccountRecordMock).toHaveBeenCalledWith({ raiseWaitNotice: false });
+    expect(queueLocalMutationMock).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the demo modal (no seeding) when the signup profile is absent', async () => {
-    setSync({ kind: 'synced', lastSyncedAt: '2026-06-04T00:00:00.000Z' });
+  it.each([
+    ['firstName', { ...FULL_RECORD, firstName: undefined }],
+    ['lastName', { ...FULL_RECORD, lastName: undefined }],
+    ['birthdate', { ...FULL_RECORD, birthdate: undefined }],
+  ])('falls back to the demo modal (no seeding, no flag) when the record lacks %s', async (_field, record) => {
+    fetchAccountRecordMock.mockResolvedValue(record);
+    setSync(SYNCED);
+    renderShell();
+
+    expect(await screen.findByTestId('first-run-modal')).toBeInTheDocument();
+    expect(queueLocalMutationMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('ready-banner')).toBeNull();
+    expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBeNull();
+    expect(localStorage.getItem(PENDING_BANNER_KEY)).toBeNull();
+  });
+
+  it('falls back to the demo modal for an email-only record', async () => {
+    fetchAccountRecordMock.mockResolvedValue(EMAIL_ONLY_RECORD);
+    setSync(SYNCED);
     renderShell();
 
     await waitFor(() => expect(listAggregatesMock).toHaveBeenCalledWith('householdMember'));
@@ -293,35 +323,159 @@ describe('AppShell first-login household seeding', () => {
     expect(screen.queryByTestId('ready-banner')).toBeNull();
   });
 
-  it('reshows the banner on reload (pending key set, dismissed absent) without re-seeding', async () => {
+  it('a failed account fetch shows and writes nothing, is not latched, and has one request in flight', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    localStorage.setItem(SIGNUP_PROFILE_KEY, SIGNUP_PROFILE);
+    let rejectFetch: (e: Error) => void = () => {};
+    fetchAccountRecordMock.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectFetch = reject;
+        }),
+    );
+    setSync(SYNCED);
+    const memberReads = () =>
+      listAggregatesMock.mock.calls.filter(([type]) => type === 'householdMember').length;
+    const { rerender } = renderShell();
+    await waitFor(() => expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1));
+
+    // A token refresh while the request is pending: a fresh `me` object re-runs
+    // the effect, which must join the request in flight, not start another.
+    const readsBefore = memberReads();
+    authMock.mockReturnValue(authValue());
+    rerender(shellTree());
+    await waitFor(() => expect(memberReads()).toBeGreaterThan(readsBefore));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1);
+
+    rejectFetch(new Error('offline'));
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('[first-run]'),
+        expect.any(Error),
+      ),
+    );
+    // Nothing visible, nothing written; the handoff key is untouched.
+    expect(screen.queryByTestId('first-run-modal')).toBeNull();
+    expect(screen.queryByTestId('ready-banner')).toBeNull();
+    expect(queueLocalMutationMock).not.toHaveBeenCalled();
+    expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBeNull();
+    expect(localStorage.getItem(PENDING_BANNER_KEY)).toBeNull();
+    expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBe(SIGNUP_PROFILE);
+
+    // Not latched: the next natural re-run (another token refresh) retries once.
+    fetchAccountRecordMock.mockResolvedValue(FULL_RECORD);
+    authMock.mockReturnValue(authValue());
+    rerender(shellTree());
+    await waitFor(() => expect(fetchAccountRecordMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(queueLocalMutationMock).toHaveBeenCalledTimes(1));
+  });
+
+  it('creates nothing when another tab populated the workspace while the account fetch was pending', async () => {
+    localStorage.setItem(SIGNUP_PROFILE_KEY, SIGNUP_PROFILE);
+    let resolveFetch: (r: typeof FULL_RECORD) => void = () => {};
+    fetchAccountRecordMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    setSync(SYNCED);
+    renderShell();
+    await waitFor(() => expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1));
+
+    // The other tab seeds the primary member and writes the shared flag.
+    localStorage.setItem(SEEDED_FLAG_KEY, '1');
+    listAggregatesMock.mockResolvedValue([{ id: 'm-1', aggregateType: 'householdMember' }]);
+    resolveFetch(FULL_RECORD);
+
+    await waitFor(() => expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBeNull());
+    expect(queueLocalMutationMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('ready-banner')).toBeNull();
+    expect(screen.queryByTestId('first-run-modal')).toBeNull();
+    expect(localStorage.getItem(PENDING_BANNER_KEY)).toBeNull();
+  });
+
+  it('creates nothing when the seeded flag appeared while the account fetch was pending', async () => {
+    let resolveFetch: (r: typeof FULL_RECORD) => void = () => {};
+    fetchAccountRecordMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    setSync(SYNCED);
+    renderShell();
+    await waitFor(() => expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1));
+
+    localStorage.setItem(SEEDED_FLAG_KEY, '1');
+    resolveFetch(FULL_RECORD);
+
+    expect(await screen.findByTestId('first-run-modal')).toBeInTheDocument();
+    expect(queueLocalMutationMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('ready-banner')).toBeNull();
+  });
+
+  it('shows the prompt with no request when the seeded flag is set and the workspace is empty', async () => {
+    localStorage.setItem(SEEDED_FLAG_KEY, '1');
+    setSync(SYNCED);
+    renderShell();
+
+    expect(await screen.findByTestId('first-run-modal')).toBeInTheDocument();
+    expect(fetchAccountRecordMock).not.toHaveBeenCalled();
+    expect(queueLocalMutationMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('ready-banner')).toBeNull();
+  });
+
+  it('seeds once per browser: a fresh shell with the same localStorage shows the prompt and makes no request', async () => {
+    setSync(SYNCED);
+    const first = renderShell();
+    await waitFor(() => expect(queueLocalMutationMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId('ready-banner')).toBeInTheDocument();
+    first.unmount();
+
+    // Members are still empty in IDB (the mutation is mocked), as after a wipe.
+    renderShell();
+    expect(await screen.findByTestId('first-run-modal')).toBeInTheDocument();
+    expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1);
+    expect(queueLocalMutationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reshows the banner on reload (pending key set, dismissed absent) without re-seeding, and records the seed', async () => {
     shouldShowReadyBannerMock.mockReturnValue(true);
-    setSync({ kind: 'synced', lastSyncedAt: '2026-06-04T00:00:00.000Z' });
+    setSync(SYNCED);
     renderShell();
 
     expect(await screen.findByTestId('ready-banner')).toBeInTheDocument();
     expect(queueLocalMutationMock).not.toHaveBeenCalled();
+    expect(fetchAccountRecordMock).not.toHaveBeenCalled();
     // The reload path returns before the zero-members check, so the
     // householdMember store is never read (the scenarios bootstrap effect
     // still reads 'scenario' — unrelated).
     expect(listAggregatesMock).not.toHaveBeenCalledWith('householdMember');
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
+    // The pending key exists only after a seed, so reaching it proves one.
+    expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
   });
 
-  it('clears the signup profile when members already exist (returning user)', async () => {
+  it('clears the signup profile and records the flag when members already exist (returning user)', async () => {
     // Returning user: a stale one-shot signup profile lingers in localStorage
     // but the workspace already has a household member, so no seeding occurs.
     localStorage.setItem(SIGNUP_PROFILE_KEY, SIGNUP_PROFILE);
     listAggregatesMock.mockResolvedValue([
       { id: 'm-1', aggregateType: 'householdMember' },
     ]);
-    setSync({ kind: 'synced', lastSyncedAt: '2026-06-04T00:00:00.000Z' });
+    setSync(SYNCED);
     renderShell();
 
     await waitFor(() => expect(listAggregatesMock).toHaveBeenCalledWith('householdMember'));
     // Stale profile cleared (PII not persisted indefinitely)…
     await waitFor(() => expect(localStorage.getItem(SIGNUP_PROFILE_KEY)).toBeNull());
+    // …the browser is marked as having seen the workspace populated…
+    expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
     // …and no re-seeding for the existing-members path.
     expect(queueLocalMutationMock).not.toHaveBeenCalled();
+    expect(fetchAccountRecordMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
     expect(screen.queryByTestId('ready-banner')).toBeNull();
   });
@@ -366,6 +520,7 @@ describe('retired legal addresses are unknown addresses', () => {
       logout: vi.fn(),
       householdId: 'hh-1',
       me: { id: 'u-1', email: 'me@example.test', displayName: 'Me' },
+      fetchAccountRecord: fetchAccountRecordMock,
     });
     // A returning user with data: the first-run effects settle without a modal.
     listAggregatesMock.mockResolvedValue([{ id: 'm-1', aggregateType: 'householdMember' }]);
@@ -399,6 +554,63 @@ describe('retired legal addresses are unknown addresses', () => {
 
     expect(await screen.findByTestId('login-page')).toBeInTheDocument();
     expect(requestedUrls().filter((u) => u.includes('/auth/legal-'))).toEqual([]);
+  });
+});
+
+// The first-run check is a background request the person never made: a
+// throttled `GET /auth/me` must not raise the shared "Please wait" toast, show
+// the demo prompt or the banner. `fetchAccountRecord` is the real `apiRequest`
+// forwarding whatever options the shell passed, so a forgotten opt-out fails
+// here (the mocked-wrapper tests above only prove the shell passes it).
+describe('first-run account fetch throttled with a Retry-After', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it('raises no wait notice and shows no prompt or banner', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { code: 'RATE_LIMITED', message: 'Too many requests' } }),
+        { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '5' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    authMock.mockReturnValue(
+      authValue({
+        isBooting: false,
+        isAuthenticated: true,
+        hasRole: () => true,
+        fetchAccountRecord: (opts?: { raiseWaitNotice?: boolean }) =>
+          apiRequest('/api/v1/auth/me', opts),
+      }),
+    );
+    listAggregatesMock.mockResolvedValue([]);
+    shouldShowReadyBannerMock.mockReturnValue(false);
+    setSync({ kind: 'synced', lastSyncedAt: '2026-06-04T00:00:00.000Z' });
+
+    render(
+      <MemoryRouter initialEntries={['/nowhere']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('[first-run]'),
+        expect.anything(),
+      ),
+    );
+    expect(
+      fetchSpy.mock.calls.filter(([url]) => String(url).includes('/auth/me')),
+    ).toHaveLength(1);
+    expect(screen.queryByTestId('wait-notice')).toBeNull();
+    expect(screen.queryByTestId('first-run-modal')).toBeNull();
+    expect(screen.queryByTestId('ready-banner')).toBeNull();
+    expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBeNull();
   });
 });
 

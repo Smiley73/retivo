@@ -29,8 +29,8 @@ const ACTIVITY_STORAGE_KEY = 'retivo.auth.lastActivityAt';
 const BLOCKED_RESET_STORAGE_KEY = 'retivo:blocked-reset:pending';
 // Per-user signup-profile handoff. After a successful login + cross-user
 // IDB reset, the name + birthdate captured at signup are written here keyed by
-// userId. App.tsx's first-run effect reads it to seed the primary
-// HouseholdMember, then removes it (write-once-use-once). Holds birthdate
+// userId. Nothing reads it any more (the first-run seed in App.tsx takes the
+// primary member from `GET /auth/me`); App.tsx still clears it. Holds birthdate
 // (PII) so it is cleared by the wholesale local-data nuke (localStorage.clear).
 const SIGNUP_PROFILE_KEY_PREFIX = 'retivo:signup-profile:';
 
@@ -115,30 +115,6 @@ export function persistSignupProfile(res: LoginResponse): void {
     `${SIGNUP_PROFILE_KEY_PREFIX}${userId}`,
     JSON.stringify({ firstName, lastName, birthdate }),
   );
-}
-
-/**
- * Parse the per-user signup profile, or null when absent / malformed. Read once
- * by App.tsx's first-run seeding effect (single source of truth for the
- * `SIGNUP_PROFILE_KEY_PREFIX` handoff).
- */
-export function readSignupProfile(userId: string): SignupProfile | null {
-  if (typeof localStorage === 'undefined') return null;
-  const raw = localStorage.getItem(`${SIGNUP_PROFILE_KEY_PREFIX}${userId}`);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<SignupProfile>;
-    if (
-      typeof parsed.firstName === 'string' &&
-      typeof parsed.lastName === 'string' &&
-      typeof parsed.birthdate === 'string'
-    ) {
-      return { firstName: parsed.firstName, lastName: parsed.lastName, birthdate: parsed.birthdate };
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 /** Remove the one-shot signup profile after a successful seed (write-once-use-once). */

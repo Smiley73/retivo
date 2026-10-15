@@ -139,8 +139,9 @@ account. See [Start over when you cannot unlock your data](#start-over-when-you-
 ## First run and demo data
 
 When you sign in for the first time after signing up, the app creates your
-household's primary member from the name and date of birth you gave. The
-Dashboard then shows a banner, **Your household is set up.**, with two choices:
+household's primary member from the name and date of birth on your account
+record. The Dashboard then shows a banner, **Your household is set up.**, with
+two choices:
 
 - **Load demo data** fills the workspace with a made-up family of two: accounts,
   ten years of balances, Social Security details, expenses, an income source and a
@@ -163,8 +164,12 @@ deletes only the demo records. Instead:
   confirmation.
 - You can also delete demo items one at a time on the screens that hold them.
 
-After **Delete workspace data**, the app does not offer the demo data again. Go to
-**Your Data → Household** and add yourself as the primary member to start fresh.
+After **Delete workspace data**, the app does not offer the demo data again, and
+does not create your primary member again, on the browser where you deleted it.
+That promise is per browser. Go to **Your Data → Household** and add yourself as
+the primary member to start fresh. A browser that has never opened the populated
+workspace, including one you cleared with **Clear data on this device**, sets the
+primary member up once from your account record.
 
 ## Finding your way around
 

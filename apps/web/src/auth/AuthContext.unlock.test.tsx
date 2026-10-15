@@ -57,6 +57,7 @@ let captured: {
   login: (e: string, p: string) => Promise<void>;
   loginWithPasskey: () => Promise<void>;
   refreshAccessToken: () => Promise<string | null>;
+  fetchAccountRecord: (opts?: { raiseWaitNotice?: boolean }) => Promise<unknown>;
   resetPassword: (token: string, p: string) => Promise<void>;
   unlockWithPassword: (p: string) => Promise<void>;
   unlockWithRecovery: (k: string) => Promise<void>;
@@ -76,6 +77,7 @@ function Probe(): React.ReactElement {
     login: auth.login,
     loginWithPasskey: auth.loginWithPasskey,
     refreshAccessToken: auth.refreshAccessToken,
+    fetchAccountRecord: auth.fetchAccountRecord,
     resetPassword: auth.resetPassword,
     unlockWithPassword: auth.unlockWithPassword,
     unlockWithRecovery: auth.unlockWithRecovery,
@@ -699,6 +701,33 @@ describe('AuthContext — unlock lifecycle', () => {
       auth: false,
       raiseWaitNotice: false,
     });
+  });
+
+  // --- fetchAccountRecord forwards the wait-notice opt-out -------------
+
+  it('fetchAccountRecord forwards the wait-notice opt-out to apiRequest when given one', async () => {
+    await renderAuth();
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ email: 'u@test.com' });
+
+    await act(async () => {
+      await captured.fetchAccountRecord({ raiseWaitNotice: false });
+    });
+
+    expect(apiRequest).toHaveBeenCalledWith('/api/v1/auth/me', { raiseWaitNotice: false });
+  });
+
+  it('fetchAccountRecord passes no options to apiRequest when called bare (the Account card keeps its wait notice)', async () => {
+    await renderAuth();
+    apiRequest.mockReset();
+    apiRequest.mockResolvedValue({ email: 'u@test.com' });
+
+    await act(async () => {
+      await captured.fetchAccountRecord();
+    });
+
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    expect(apiRequest.mock.calls[0]).toEqual(['/api/v1/auth/me']);
   });
 
   // --- Same-session token refresh preserves unlock state --------------
