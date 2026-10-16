@@ -9,7 +9,7 @@
  * `DialogTrigger defaultOpen` wrapper (mirroring how `SyncBadge` mounts
  * it).
  */
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Button, DialogTrigger } from 'react-aria-components';
 import { SyncDetailsPopover } from './SyncDetailsPopover';
@@ -376,9 +376,14 @@ describe('SyncDetailsPopover', () => {
   it('Esc closes the popover', async () => {
     const user = userEvent.setup();
     renderPopover({ state: { kind: 'synced', lastSyncedAt: null } });
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog');
+    // React Aria handles Escape on the popover element, so the key must land
+    // inside it. The dialog takes focus itself on open, but once an earlier
+    // test's `fireEvent.click` has put React Aria in "virtual" mode that move
+    // is deferred a frame, so a keypress straight after render hits `body`.
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   // ── unsynced inspector ───────────────────────────────────────────
