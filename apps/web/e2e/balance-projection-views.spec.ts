@@ -181,6 +181,9 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     await expect(
       page.getByRole('heading', { name: /balance projection/i }),
     ).toBeVisible({ timeout: 10_000 });
+    // The tab switch below renders slower than its 5s assertion window while
+    // the run holds the CPU.
+    await settleStressTest(page);
 
     // Overview's per-year chart, selected.
     const overviewChart = perYearChartSvg(page);
