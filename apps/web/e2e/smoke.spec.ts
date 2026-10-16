@@ -8,15 +8,22 @@
  *   3. Account create flow round-trips a value
  *   4. Balance Projection page renders the chart
  *   5. Plan stress-test page auto-runs and shows result cards
- *   6. Switching the active scenario marks the displayed plan stress-
- *      test result as stale (banner appears)
+ *   6. Switching the active scenario re-runs the plan stress test and the
+ *      new run's result replaces the displayed one
  *
  * Each test runs against a freshly-cleared IndexedDB (see fixtures.ts).
  * The suite is deliberately small — future PRs can layer in deeper
  * coverage now that the framework, fixture, and dev-server lifecycle
  * are proven.
  */
-import { test, expect, loadDemo, perYearChartSvg } from './fixtures';
+import {
+  test,
+  expect,
+  loadDemo,
+  perYearChartSvg,
+  successProbabilityCard,
+  waitForStressTest,
+} from './fixtures';
 
 test.describe('smoke', () => {
   test('app boots and renders the dashboard', async ({ page }) => {
@@ -90,12 +97,8 @@ test.describe('smoke', () => {
     await expect(
       page.getByRole('heading', { name: /balance projection/i }),
     ).toBeVisible({ timeout: 10_000 });
-    // The "Crunching numbers…" badge may flash sub-second on fast
-    // machines; assert the end state (the Success-probability card)
-    // is on screen.
-    await expect(page.getByText(/success probability/i)).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForStressTest(page);
+    await expect(successProbabilityCard(page)).toContainText(/\d+%/);
   });
 
   test('the embedded plan stress-test auto-reruns when the active scenario changes', async ({
@@ -103,24 +106,27 @@ test.describe('smoke', () => {
   }) => {
     await loadDemo(page);
     await page.goto('/balance-projection');
-    await expect(page.getByText(/success probability/i)).toBeVisible({
-      timeout: 15_000,
-    });
-    // Open the sidebar scenario picker, switch to a non-base scenario
-    // if one exists, then assert the auto-rerun kicks (the running
-    // badge appears within the debounce window).
-    const picker = page.getByRole('combobox', { name: /scenario/i });
-    if (await picker.isVisible().catch(() => false)) {
-      const options = await picker.locator('option').allTextContents();
-      const alt = options.find((o, i) => i > 0 && o.trim().length > 0);
-      if (alt) {
-        await picker.selectOption({ label: alt });
-        // Auto-rerun fires after the 800 ms debounce; the success card
-        // re-renders with the new scenario's value when the run lands.
-        await expect(page.getByText(/success probability/i)).toBeVisible({
-          timeout: 15_000,
-        });
-      }
-    }
+    await waitForStressTest(page);
+    const percent = async (): Promise<number> =>
+      Number(
+        /(\d+)%/.exec(await successProbabilityCard(page).innerText())?.[1],
+      );
+    const before = await percent();
+
+    // Switch the sidebar's active scenario to the demo scenario that runs out
+    // of money (about 30% against the base's 100%).
+    await page
+      .getByRole('complementary', { name: 'Primary navigation' })
+      .getByRole('button', { name: /active scenario/i })
+      .click();
+    await page.getByRole('option', { name: /funds run out/i }).click();
+
+    // The success probability is the signal: it holds the superseded run's
+    // value until the debounced auto-rerun lands. The outcomes stats are not —
+    // their "At retirement" row re-reads the old run at the new retirement age
+    // straight away, so it changes whether or not a rerun ever happens. Only
+    // the run-out scenario's run can pull the figure this far down, which a
+    // reseeded rerun of the base plan never would.
+    await expect.poll(percent, { timeout: 60_000 }).toBeLessThan(before - 10);
   });
 });

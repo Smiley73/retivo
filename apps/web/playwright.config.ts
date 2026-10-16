@@ -3,7 +3,7 @@
  *
  * Coverage scope is deliberately small (see `e2e/`): app boot, demo
  * import, account create, Balance Projection render, Plan stress-test
- * auto-run, scenario switch marks results stale, plus two cross-page
+ * auto-run, scenario switch re-runs it, plus two cross-page
  * journeys (scenario edit → projection update; expense → reload
  * persistence). Each test runs against a fresh workspace — the fixture
  * purges the dev household's server rows (DynamoDB Local), clears
