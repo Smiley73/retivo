@@ -1635,8 +1635,39 @@ describe('AccountFormModal — account-type retype block', () => {
   });
 
   // -- Accessibility -------------------------------------------------------
+  //
+  // None of these asserts which element holds focus right after the type
+  // listbox closes inside the modal. React Aria's `useDialog` re-focuses the
+  // dialog from a 500 ms timer whenever focus is on the dialog or `<body>`,
+  // and the listbox's own focus restore runs one animation frame after the
+  // popover is removed — a window in which jsdom reports `<body>`. A test that
+  // closes the listbox about 500 ms after the dialog opened (a slow CI runner
+  // does) can lose that race and end with focus on the dialog. The restore
+  // target itself is covered by `Select.test.tsx`, outside any dialog.
 
-  it('accessibility: the blocked state has no violations, a blocked option is reachable and selectable by keyboard, and the refusal announces without moving focus', async () => {
+  it('accessibility: the open listbox in the blocked state has no axe violations', async () => {
+    const user = userEvent.setup();
+    await seedAccount(true);
+    await seedQualifyingRow();
+    renderAt('/accounts/acc-1/edit');
+    await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
+
+    screen.getByLabelText('Account type').focus();
+    await user.keyboard('{Enter}');
+    const listbox = await screen.findByRole('listbox');
+    // Scan the blocked markup (muted rows, per-option descriptions), not the
+    // pre-verdict markup: wait for the open-time history read to land first.
+    await waitFor(() =>
+      expect(within(listbox).getByRole('option', { name: 'Roth IRA' })).toHaveAccessibleDescription(
+        /already has balance history/i,
+      ),
+    );
+    // React Aria portals the dialog, the type <Select> and its listbox to
+    // `document.body` (see `Modal.tsx`), not RTL's `container`.
+    await expectNoA11yViolations(document.body);
+  });
+
+  it('keyboard: typeahead reaches a blocked option, Enter selects it, and the pick is refused — announced in the status region, the trigger keeps 401(k), nothing is written', async () => {
     const user = userEvent.setup();
     await seedAccount(true);
     await seedQualifyingRow();
@@ -1647,21 +1678,48 @@ describe('AccountFormModal — account-type retype block', () => {
     trigger.focus();
     await user.keyboard('{Enter}');
     await screen.findByRole('listbox');
-    // React Aria portals the dialog, the type <Select> and its listbox to
-    // `document.body` (see `Modal.tsx`), not RTL's `container` — axe must
-    // scan the body so the blocked options' markup is actually inspected.
-    await expectNoA11yViolations(document.body);
 
-    // Keyboard-only: typeahead reaches the blocked "Roth IRA" option — it is
-    // not removed from keyboard navigation — and Enter selects it.
-    await user.keyboard('Roth IRA{Enter}');
+    // Keyboard-only: typeahead lands on the blocked "Roth IRA" option — it is
+    // marked unavailable but not removed from keyboard navigation.
+    await user.keyboard('Roth IRA');
+    const rothIra = screen.getByRole('option', { name: 'Roth IRA' });
+    await waitFor(() => expect(rothIra).toHaveFocus());
+    expect(rothIra.className).toMatch(/text-muted/);
+
+    // Enter selects it: the listbox closes (a real selection, not a no-op) and
+    // the editor refuses the pick.
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent(/already has balance history/i),
     );
     expect(trigger).toHaveTextContent('401(k)');
-    // The refusal did not move focus off the trigger — React Aria's own
-    // selection-close focus restore is the only focus change.
-    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(await listPendingMutations()).toHaveLength(0);
+    // Focus was not dropped to <body>: it stays inside the dialog.
+    await waitFor(() =>
+      expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement),
+    );
+  });
+
+  it('the refusal announces without moving focus: a blocked option picked from the closed trigger leaves focus on the trigger', async () => {
+    const user = userEvent.setup();
+    await seedAccount(true);
+    await seedQualifyingRow();
+    renderAt('/accounts/acc-1/edit');
+    await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
+
+    const trigger = screen.getByLabelText('Account type');
+    trigger.focus();
+    // React Aria's closed-trigger typeahead: "R" selects the first R option
+    // (Roth IRA) without opening the listbox, so no popover opens or closes and
+    // the only code that could move focus is the refusal itself.
+    await user.keyboard('R');
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(/already has balance history/i),
+    );
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(trigger).toHaveTextContent('401(k)');
+    expect(trigger).toHaveFocus();
     expect(await listPendingMutations()).toHaveLength(0);
   });
 });
