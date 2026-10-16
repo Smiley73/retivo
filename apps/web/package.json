@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e/tsconfig.json",
     "lint": "cd ../.. && eslint apps/web/src/**/*.{ts,tsx}",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "VITEST_COVERAGE=1 vitest run --coverage --passWithNoTests",

@@ -228,7 +228,7 @@ and stops at the first failure.
 | `pnpm lint` | ESLint over the API and web sources. |
 | `pnpm depcruise` | Checks module boundaries and import cycles. |
 | `pnpm knip` | Finds unused files, exports and dependencies. |
-| `pnpm typecheck` | Builds the shared `packages/contracts` package, then type-checks every package. |
+| `pnpm typecheck` | Builds the shared `packages/contracts` package, then type-checks every package, including the browser tests in `apps/web/e2e`. |
 | `pnpm test` | Runs each package's tests one package at a time, then the script tests. |
 | `pnpm audit:ci` | `pnpm audit` for known vulnerabilities in dependencies (moderate and above). Needs network access. |
 | `pnpm gate` | All of the above: `lint`, `depcruise`, `knip`, `typecheck`, `test`, `audit:ci`. |
