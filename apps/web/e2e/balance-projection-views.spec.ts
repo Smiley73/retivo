@@ -143,7 +143,22 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
       shell: document.body.scrollHeight,
     }));
     expect(heights.document).toBeLessThanOrEqual(heights.shell + 1);
+    // The sidebar is sticky at the viewport top whether or not the page has
+    // scrolled, and `mouse.wheel` returns before the scroll lands, so reading
+    // it straight away proves nothing: wait for the very bottom first (and for
+    // a document taller than the viewport, so "the bottom" is not trivially
+    // where the page already is).
+    expect(heights.document).toBeGreaterThan(page.viewportSize()!.height);
     await page.mouse.wheel(0, 100_000);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.scrollY + window.innerHeight >=
+            document.documentElement.scrollHeight - 1,
+        ),
+      )
+      .toBe(true);
     const sidebarBox = await page
       .getByRole('complementary', { name: 'Primary navigation' })
       .boundingBox();
