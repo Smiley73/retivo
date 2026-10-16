@@ -8,42 +8,13 @@
  * chart in a now-hidden panel keeps the same measured width as one in the
  * selected panel (never the 800px jsdom-only fallback, never 0).
  */
-import type { Page } from '@playwright/test';
-import { test, expect, loadDemo, perYearChartSvg } from './fixtures';
-
-/**
- * Waits until the page's embedded stress test has landed and nothing is about
- * to start it again, before the test touches geometry or clicks. A run spawns
- * workers that pull the engine's modules from Vite and saturates the CI
- * runner's two vCPUs for tens of seconds: a tab switch then renders slower
- * than an assertion's 5s window, and the progress row leaving the pinned strip
- * when the run lands shrinks the strip, which scroll anchoring turns into a
- * `scrollY` jump. Three conditions, in order:
- * - The sync badge reads "Synced". After a (re)load the page first shows the
- *   result cached by the previous run, then the pull changes the household's
- *   data and a second run starts; the badge reads "Refreshing…" until then.
- * - The outcomes stats read dollar values instead of "—" (`includeHidden`
- *   because the Overview panel that holds them stays mounted but hidden while
- *   another view is selected).
- * - The success card is not `aria-busy`, which it is while a run is in flight
- *   or the shown result is stale for the current inputs.
- */
-async function settleStressTest(page: Page): Promise<void> {
-  await expect(
-    page.getByRole('button', { name: /^synced\b/i }).first(),
-  ).toBeVisible({ timeout: 60_000 });
-  await expect(
-    page.getByRole('region', {
-      name: /monte carlo outcomes/i,
-      includeHidden: true,
-    }),
-  ).toContainText(/\$\d/, { timeout: 60_000 });
-  await expect(
-    page
-      .locator('div[aria-busy="false"]')
-      .filter({ hasText: /^Success probability/i }),
-  ).toHaveCount(1, { timeout: 60_000 });
-}
+import {
+  test,
+  expect,
+  loadDemo,
+  perYearChartSvg,
+  waitForStressTest,
+} from './fixtures';
 
 test.describe('Balance Projection tabbed views + pinned controls strip', () => {
   test('switches tabs, deep-links, keyboard-activates, and keeps the strip pinned while scrolling', async ({
@@ -63,7 +34,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
 
     // Default view is Overview.
     await expect(overviewTab).toHaveAttribute('aria-selected', 'true');
-    await settleStressTest(page);
+    await waitForStressTest(page);
 
     // Clicking a tab switches the view and rewrites the URL (no reload).
     await cashflowTab.click();
@@ -110,7 +81,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     // scroll can land after the scrollY read, and the strip shrinking under
     // the Overview tab fails Playwright's click stability check, whose retry
     // scrolls the tab to the viewport bottom.
-    await settleStressTest(page);
+    await waitForStressTest(page);
     await page.getByRole('tab', { name: 'Overview' }).focus();
     await page.keyboard.press('ArrowRight');
     await expect(cashflowTab).toBeFocused();
@@ -127,6 +98,14 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     await expect(accountsTab).toHaveAttribute('aria-selected', 'true');
     const strip = page.getByRole('group', { name: 'Projection controls' });
     await expect(strip).toBeVisible();
+    // Make the view genuinely long first: settled at 1280x720 with its
+    // disclosures closed, Accounts scrolls only ~206px, so a ">200" check
+    // would pass by a few pixels and break on any small layout change. With
+    // the year-by-year table open it scrolls ~650px.
+    // The button's label flips Show/Hide, so match it by the part that stays.
+    const yearTable = page.getByRole('button', { name: /year-by-year table/i });
+    await yearTable.click();
+    await expect(yearTable).toHaveAttribute('aria-expanded', 'true');
     await page.mouse.wheel(0, 3000);
     await expect(strip).toBeVisible();
     // Prove the page actually scrolled — otherwise a strip that scrolled
@@ -164,7 +143,22 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
       shell: document.body.scrollHeight,
     }));
     expect(heights.document).toBeLessThanOrEqual(heights.shell + 1);
+    // The sidebar is sticky at the viewport top whether or not the page has
+    // scrolled, and `mouse.wheel` returns before the scroll lands, so reading
+    // it straight away proves nothing: wait for the very bottom first (and for
+    // a document taller than the viewport, so "the bottom" is not trivially
+    // where the page already is).
+    expect(heights.document).toBeGreaterThan(page.viewportSize()!.height);
     await page.mouse.wheel(0, 100_000);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            window.scrollY + window.innerHeight >=
+            document.documentElement.scrollHeight - 1,
+        ),
+      )
+      .toBe(true);
     const sidebarBox = await page
       .getByRole('complementary', { name: 'Primary navigation' })
       .boundingBox();
@@ -183,7 +177,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     ).toBeVisible({ timeout: 10_000 });
     // The tab switch below renders slower than its 5s assertion window while
     // the run holds the CPU.
-    await settleStressTest(page);
+    await waitForStressTest(page);
 
     // Overview's per-year chart, selected.
     const overviewChart = perYearChartSvg(page);
@@ -236,7 +230,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
       await expect(strip).toHaveCSS('position', 'sticky');
       // The strip's height and the document's scroll position are measured
       // below, so the run's progress row must be gone before the first one.
-      await settleStressTest(page);
+      await waitForStressTest(page);
 
       // Park focus on the control AFTER the disclosure, then scroll so the
       // disclosure sits 40px below the viewport top — under the stuck strip.
