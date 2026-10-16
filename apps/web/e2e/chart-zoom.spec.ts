@@ -62,9 +62,9 @@ test.describe('Chart drag-zoom + Reset view', () => {
     const box = await svg.boundingBox();
     expect(box).not.toBeNull();
 
-    const x1 = box.x + box.width * 0.2;
-    const x2 = box.x + box.width * 0.6;
-    const y = box.y + box.height * 0.5;
+    const x1 = box!.x + box!.width * 0.2;
+    const x2 = box!.x + box!.width * 0.6;
+    const y = box!.y + box!.height * 0.5;
 
     // Drag: mousedown at x1 → move to x2 → mouseup.
     // The drag span is 40% of the chart width; the demo dataset spans
