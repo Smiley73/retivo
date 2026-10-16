@@ -98,6 +98,14 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     await expect(accountsTab).toHaveAttribute('aria-selected', 'true');
     const strip = page.getByRole('group', { name: 'Projection controls' });
     await expect(strip).toBeVisible();
+    // Make the view genuinely long first: settled at 1280x720 with its
+    // disclosures closed, Accounts scrolls only ~206px, so a ">200" check
+    // would pass by a few pixels and break on any small layout change. With
+    // the year-by-year table open it scrolls ~650px.
+    // The button's label flips Show/Hide, so match it by the part that stays.
+    const yearTable = page.getByRole('button', { name: /year-by-year table/i });
+    await yearTable.click();
+    await expect(yearTable).toHaveAttribute('aria-expanded', 'true');
     await page.mouse.wheel(0, 3000);
     await expect(strip).toBeVisible();
     // Prove the page actually scrolled — otherwise a strip that scrolled
