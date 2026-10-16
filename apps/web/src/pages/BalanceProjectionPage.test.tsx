@@ -1055,6 +1055,14 @@ describe('BalanceProjectionPage — print button + calc-state header', () => {
   });
 
   it('renders the Print / Save as PDF button and calls window.print() on press', async () => {
+    // Print is disabled while the stress run is in flight. The real run starts
+    // ~800 ms after mount (auto-run debounce) and never finishes in jsdom (the
+    // Worker stub never replies), so on a slow machine the click would land on
+    // a disabled button. This test is about the Print wiring; the gate has its
+    // own test below.
+    stressVmOverride.value = {
+      isRunning: false,
+    } as import('../components/PlanStressTestSection').PlanStressTestVm;
     const printSpy = vi.spyOn(window, 'print').mockImplementation(() => undefined);
     const user = userEvent.setup();
     renderPage();

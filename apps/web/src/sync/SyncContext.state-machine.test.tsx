@@ -20,6 +20,18 @@ import { fake, Probe, renderProvider, seedMutation, renderSettled, useSyncTestHo
 
 vi.mock('./mock-sync', async () => (await import('./sync-context.test-fake')).mockSyncModule);
 
+/**
+ * A failed refresh re-arms the poll timer with full-jitter backoff, a draw from
+ * `uniform(0, 15 s)`. A draw near zero fires a pull that succeeds and flips the
+ * badge back to `synced` before the test has seen `error`. Pin the draw to its
+ * ceiling (as `SyncContext.poll-backoff.test.tsx` does) so the retry cannot
+ * fire inside a test that is asserting the error state. `useSyncTestHooks`
+ * restores the spy after each test.
+ */
+function pinRetryJitterToCeiling(): void {
+  vi.spyOn(Math, 'random').mockReturnValue(1);
+}
+
 describe('SyncProvider state machine', () => {
   useSyncTestHooks();
 
@@ -472,6 +484,7 @@ describe('SyncProvider state machine', () => {
 
   it('error transport surfaces the error state from forceRefresh', async () => {
     await renderSettled(renderProvider);
+    pinRetryJitterToCeiling();
     fake.bootstrapImpl = async () => {
       throw new Error('Boom');
     };
@@ -483,6 +496,7 @@ describe('SyncProvider state machine', () => {
 
   it('records exactly one sync-sourced diagnostics entry on an error transition', async () => {
     await renderSettled(renderProvider);
+    pinRetryJitterToCeiling();
     clearDiagnostics();
     fake.bootstrapImpl = async () => {
       throw new Error('Boom');
@@ -501,6 +515,7 @@ describe('SyncProvider state machine', () => {
     // can copy a reportable bundle. If the provider drops any field,
     // the popover degrades to a bare message and reportability dies.
     await renderSettled(renderProvider);
+    pinRetryJitterToCeiling();
     fake.bootstrapImpl = async () => {
       throw new SyncApiError('CONFLICT', 'Aggregate version mismatch', 409, 'trace-xyz');
     };
