@@ -38,6 +38,50 @@ export function perYearChartSvg(page: Page): Locator {
 }
 
 /**
+ * The Balance Projection page's "Success probability" card: its label plus the
+ * rounded percentage ("—" until a run lands), with `aria-busy` set while a run
+ * is in flight or the shown result is stale for the current inputs.
+ */
+export function successProbabilityCard(page: Page): Locator {
+  return page
+    .locator('div[aria-busy]')
+    .filter({ hasText: /^Success probability/i });
+}
+
+/**
+ * Wait until the Balance Projection page's embedded stress test has landed and
+ * nothing is about to start it again, before a test touches geometry or clicks.
+ * A run spawns workers that pull the engine's modules from Vite and saturates
+ * the CI runner's two vCPUs for tens of seconds: a tab switch then renders
+ * slower than an assertion's 5s window, and the progress row leaving the pinned
+ * strip when the run lands shrinks the strip, which scroll anchoring turns into
+ * a `scrollY` jump. Three conditions, in order:
+ * - The sync badge reads "Synced". After a (re)load the page first shows the
+ *   result cached by the previous run, then the pull changes the household's
+ *   data and a second run starts; the badge reads "Refreshing…" until then.
+ * - The outcomes stats read dollar values instead of "—" (`includeHidden`
+ *   because the Overview panel that holds them stays mounted but hidden while
+ *   another view is selected). The "Success probability" label is NOT a
+ *   completion signal: it is on screen from first paint with the value "—".
+ * - The success card is not `aria-busy`, which it is while a run is in flight
+ *   or the shown result is stale for the current inputs.
+ */
+export async function waitForStressTest(page: Page): Promise<void> {
+  await expect(
+    page.getByRole('button', { name: /^synced\b/i }).first(),
+  ).toBeVisible({ timeout: 60_000 });
+  await expect(
+    page.getByRole('region', {
+      name: /monte carlo outcomes/i,
+      includeHidden: true,
+    }),
+  ).toContainText(/\$\d/, { timeout: 60_000 });
+  await expect(
+    successProbabilityCard(page).and(page.locator('[aria-busy="false"]')),
+  ).toHaveCount(1, { timeout: 60_000 });
+}
+
+/**
  * Click "Load demo data" on the first-run modal and wait for the seed to
  * land. The dialog stays open (its button flips to "Loading…") while the
  * loader writes IndexedDB and closes only after every entity has been

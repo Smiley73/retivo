@@ -11,7 +11,13 @@
  * Real SVG layout is required for reliable coordinates — this is why the
  * check lives in Playwright rather than jsdom unit tests.
  */
-import { test, expect, loadDemo, perYearChartSvg } from './fixtures';
+import {
+  test,
+  expect,
+  loadDemo,
+  perYearChartSvg,
+  waitForStressTest,
+} from './fixtures';
 
 test.describe('Chart drag-zoom + Reset view', () => {
   test('drag inside balance-projection chart zooms; Reset view restores', async ({
@@ -33,13 +39,8 @@ test.describe('Chart drag-zoom + Reset view', () => {
     // Settle the page before measuring drag geometry: the chart Inner is
     // lazy (Suspense) and the section runs the MC stress test on mount —
     // while paths stream the page re-renders on every progress tick and a
-    // drag started mid-run never arms the zoom. The "Success probability"
-    // label is on screen from the first paint (its value reads "—"), so it
-    // is NOT a completion signal; the Monte Carlo outcomes stats flipping
-    // from "—" to dollar values is — they populate only when the run lands.
-    await expect(
-      page.getByRole('region', { name: /monte carlo outcomes/i }),
-    ).toContainText(/\$\d/, { timeout: 60_000 });
+    // drag started mid-run never arms the zoom.
+    await waitForStressTest(page);
     const svg = perYearChartSvg(page);
     await expect(svg).toBeVisible({ timeout: 10_000 });
     await expect(svg.locator('path').first()).toBeVisible({ timeout: 10_000 });
