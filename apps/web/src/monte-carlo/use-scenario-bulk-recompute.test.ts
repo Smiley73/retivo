@@ -23,20 +23,25 @@ import { ENGINE_VERSION } from '../lib/monte-carlo';
 import type { MonteCarloInput, MonteCarloSummary } from '../lib/monte-carlo';
 import { MC_PATH_COUNT } from '../lib/monte-carlo-scenario-input';
 
-/** Default seed, bumped before every test so no two tests share a cache key.
- *  The hook's cache write is a fire-and-forget async chain; a write left over
- *  from one test can land after the next test's cache clear, and with a shared
- *  key it would show up as a hit in that test's "was never cached" assertion. */
-let defaultSeed = 42;
+const DEFAULT_SEED = 42;
+
+/** Bumped before every test and folded into `portfolioToday`, so no two tests
+ *  share a cache key. The hook's cache write is a fire-and-forget async chain;
+ *  a write left over from one test can land after the next test's cache clear,
+ *  and with a shared key it would show up as a hit in that test's "was never
+ *  cached" assertion. The seed cannot do this job: `mcCacheKey` drops it, so
+ *  the key has to differ in a field it does include. */
+let testRun = 0;
 beforeEach(() => {
-  defaultSeed += 1;
+  testRun += 1;
 });
 
-/** A minimal `MonteCarloInput` keyed on `scenarioId` so each scenario hashes
- *  to a distinct cache entry; `seed` is set so seed-parity is observable. */
-function inputFor(scenarioId: string, seed = defaultSeed): MonteCarloInput {
+/** A minimal `MonteCarloInput` keyed on `scenarioId` (and the current test) so
+ *  each scenario hashes to a distinct cache entry; `seed` is set so
+ *  seed-parity is observable. */
+function inputFor(scenarioId: string, seed = DEFAULT_SEED): MonteCarloInput {
   return {
-    portfolioToday: 100_000,
+    portfolioToday: 100_000 + testRun,
     accountMcLedger: [{ id: scenarioId } as never],
     annualContribution: 0,
     firstYear: 2026,
@@ -140,7 +145,7 @@ interface Harness {
 function harness(seedById: Record<string, number> = {}): Harness {
   const built: ControlledWorker[] = [];
   return {
-    buildMcInput: (id: string) => inputFor(id, seedById[id] ?? defaultSeed),
+    buildMcInput: (id: string) => inputFor(id, seedById[id] ?? DEFAULT_SEED),
     onResult: vi.fn<(id: string, summary: MonteCarloSummary) => void>(),
     built,
     factory: () => {
