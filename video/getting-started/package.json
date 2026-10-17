@@ -1,0 +1,24 @@
+{
+  "name": "@retivo/video-getting-started",
+  "version": "1.0.0",
+  "description": "Getting Started with Retivo locally",
+  "private": true,
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@remotion/cli": "4.0.536",
+    "@remotion/fonts": "4.0.536",
+    "@remotion/media": "4.0.536",
+    "@remotion/transitions": "4.0.536",
+    "@retivo/video-kit": "*",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.536",
+    "zod": "4.5.4"
+  },
+  "scripts": {
+    "dev": "remotion studio",
+    "build": "remotion bundle",
+    "voiceover": "uv run --python 3.13 ../scripts/generate_voiceover.py",
+    "lint": "eslint src && tsc"
+  }
+}
