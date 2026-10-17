@@ -143,9 +143,9 @@ household's primary member from the name and date of birth on your account
 record. The Dashboard then shows a banner, **Your household is set up.**, with
 two choices:
 
-- **Load demo data** fills the workspace with a made-up family of two: accounts,
-  ten years of balances, Social Security details, expenses, an income source and a
-  few example scenarios. It is a good way to see every screen with realistic
+- **Load demo data** fills the workspace with a made-up family: accounts,
+  balances, Social Security details, expenses, income and a few example
+  scenarios. It is a good way to see every screen with realistic
   numbers.
 - The **×** button dismisses the banner and keeps just your own member.
 

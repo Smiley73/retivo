@@ -846,7 +846,7 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
               This will erase everything in your account (on this device and on our servers) and replace it with demo data for a made-up family. <strong>This can&apos;t be undone.</strong> Only do this if you want to start over with the demo dataset.
             </>
           ) : (
-            "We'll add demo data (a made-up family with two people, ten accounts, ten years of balances, and Social Security details) so you can explore the app."
+            "We'll add demo data (a made-up family with accounts, balances, income, expenses, scenarios, and Social Security details) so you can explore the app."
           )
         }
         confirmLabel={
