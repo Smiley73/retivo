@@ -25,7 +25,6 @@ export const RepairScene: React.FC = () => {
     <StepFrame
       scene="repair"
       timing={T}
-      step={6}
       headline="Conflicts & repair"
       sub="Fix silently where possible. Ask when not."
     >

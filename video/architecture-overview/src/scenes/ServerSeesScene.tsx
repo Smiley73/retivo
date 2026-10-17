@@ -18,7 +18,6 @@ export const ServerSeesScene: React.FC = () => {
     <StepFrame
       scene="see"
       timing={T}
-      step={8}
       headline="What the server sees"
       sub="Metadata, never contents."
     >

@@ -14,7 +14,6 @@ export const LocalFirstScene: React.FC = () => {
     <StepFrame
       scene="local"
       timing={T}
-      step={1}
       headline="Local-first"
       sub="The browser holds the plan and does the math."
     >

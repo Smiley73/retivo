@@ -18,7 +18,6 @@ export const SyncScene: React.FC = () => {
     <StepFrame
       scene="sync"
       timing={T}
-      step={5}
       headline="Sync"
       sub="Queue, encrypt, push, pull."
     >

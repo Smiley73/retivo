@@ -23,7 +23,6 @@ export const LoginScene: React.FC = () => {
     <StepFrame
       scene="login"
       timing={T}
-      step={4}
       headline="Sign in & unlock"
       sub="Signing in proves who you are. Unlocking opens your data."
     >

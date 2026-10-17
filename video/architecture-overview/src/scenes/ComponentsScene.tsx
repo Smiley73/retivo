@@ -14,7 +14,6 @@ export const ComponentsScene: React.FC = () => {
     <StepFrame
       scene="parts"
       timing={T}
-      step={2}
       headline="Components"
       sub="Four packages in one pnpm monorepo."
     >

@@ -1,4 +1,4 @@
-/** The frame every content scene shares: step dots, headline and subhead on the left, the diagram on the right. */
+/** The frame every content scene shares: headline and subhead on the left, the diagram on the right. */
 import React from "react";
 import { Easing, Interactive, interpolate, useCurrentFrame } from "remotion";
 import {
@@ -7,39 +7,28 @@ import {
   Narration,
   RightArea,
   Stage,
-  StepDots,
 } from "@retivo/video-kit";
 import { SCENE_CLIPS, type SceneKey, type SceneTiming } from "./clips";
 import { Canvas } from "./diagram";
-
-/** Number of content scenes, for the step dots. */
-export const TOTAL_STEPS = 8;
 
 const clamp = {
   extrapolateLeft: "clamp",
   extrapolateRight: "clamp",
 } as const;
 
-/** One content scene: step `step`, text on the left, `children` drawn on the canvas. */
+/** One content scene: text on the left, `children` drawn on the canvas. */
 export const StepFrame: React.FC<{
   scene: SceneKey;
   timing: SceneTiming;
-  step: number;
   headline: string;
   sub: string;
   children: React.ReactNode;
-}> = ({ scene, timing, step, headline, sub, children }) => {
+}> = ({ scene, timing, headline, sub, children }) => {
   const frame = useCurrentFrame();
   const rise = Easing.bezier(0.16, 1, 0.3, 1);
   return (
     <Stage>
       <LeftColumn>
-        <Interactive.Div
-          name="Step"
-          style={{ opacity: interpolate(frame, [0, 14], [0, 1], clamp) }}
-        >
-          <StepDots current={step} total={TOTAL_STEPS} />
-        </Interactive.Div>
         <Interactive.Div
           name="Headline"
           style={{

@@ -17,7 +17,6 @@ export const SnapshotsScene: React.FC = () => {
     <StepFrame
       scene="snap"
       timing={T}
-      step={7}
       headline="Snapshots"
       sub="Compact the log, keep restore points."
     >

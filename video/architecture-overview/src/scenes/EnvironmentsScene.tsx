@@ -17,7 +17,6 @@ export const EnvironmentsScene: React.FC = () => {
     <StepFrame
       scene="env"
       timing={T}
-      step={3}
       headline="Local vs Amazon"
       sub="Same API code. Different endpoints."
     >
