@@ -57,8 +57,8 @@ export const FirstRunDemoModal: React.FC<FirstRunDemoModalProps> = ({
     <Modal open={open} onClose={onSkip} title="Try the demo dataset?" size="md">
       <Muted as="p" className="mt-0">
         This looks like a fresh workspace. Load a sample household to see how
-        the app works: 2 members, 11 accounts, 10 years of balances, and Social
-        Security inputs.
+        the app works. It comes with accounts, balances, income, expenses,
+        scenarios, and Social Security details.
       </Muted>
       <Muted as="p" className="text-xs">
         You can always start from scratch instead by skipping this and adding
