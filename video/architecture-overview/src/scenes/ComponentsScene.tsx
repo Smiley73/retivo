@@ -57,7 +57,7 @@ export const ComponentsScene: React.FC = () => {
         w={410}
         h={160}
         title="Infrastructure"
-        sub="Pulumi: builds the Amazon resources"
+        sub="Pulumi: builds the AWS resources"
         tag="infrastructure"
         tone="cipher"
         at={clipAt(T, "parts-4") + 60}

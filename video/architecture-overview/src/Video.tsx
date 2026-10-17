@@ -23,7 +23,7 @@ export const SCENES: {
   { key: "title", name: "Title", component: TitleScene },
   { key: "local", name: "Local-first", component: LocalFirstScene },
   { key: "parts", name: "Components", component: ComponentsScene },
-  { key: "env", name: "Local vs Amazon", component: EnvironmentsScene },
+  { key: "env", name: "Local vs AWS", component: EnvironmentsScene },
   { key: "login", name: "Sign in and unlock", component: LoginScene },
   { key: "sync", name: "Sync", component: SyncScene },
   { key: "repair", name: "Conflicts and repair", component: RepairScene },

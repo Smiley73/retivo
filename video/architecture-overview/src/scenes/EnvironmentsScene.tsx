@@ -1,4 +1,4 @@
-/** Step 3: the same API on a laptop with emulators, and on Amazon. */
+/** Step 3: the same API on a laptop with emulators, and on AWS. */
 import React from "react";
 import { sceneTiming } from "../clips";
 import { Arrow, Box, Chip, Frame, clipAt } from "../diagram";
@@ -7,7 +7,7 @@ import { StepFrame } from "../StepFrame";
 /** Timing of this scene's clips. */
 export const ENV_TIMING = sceneTiming("env");
 
-/** Local versus Amazon scene. */
+/** Local versus AWS scene. */
 export const EnvironmentsScene: React.FC = () => {
   const T = ENV_TIMING;
   const local = clipAt(T, "env-2");
@@ -17,7 +17,7 @@ export const EnvironmentsScene: React.FC = () => {
     <StepFrame
       scene="env"
       timing={T}
-      headline="Local vs Amazon"
+      headline="Local vs AWS"
       sub="Same API code. Different endpoints."
     >
       <Frame x={0} y={0} w={900} h={290} label="ON YOUR MACHINE" at={local} />
@@ -60,7 +60,7 @@ export const EnvironmentsScene: React.FC = () => {
         at={same}
       />
 
-      <Frame x={0} y={400} w={900} h={350} label="ON AMAZON" at={aws} />
+      <Frame x={0} y={400} w={900} h={350} label="ON AWS" at={aws} />
       <Box x={20} y={525} w={150} h={100} title="Browser" at={aws} />
       <Box
         x={200}

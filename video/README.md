@@ -9,7 +9,7 @@ voice and tooling.
 | [kit/](kit/) | The shared look: colour tokens, the app's fonts, the mock-UI pieces (sidebar, buttons, cursor, step dots), the two-column layout, fade and timing constants, the narration player |
 | [template/](template/) | The starter every new video is copied from |
 | [getting-started/](getting-started/README.md) | "Getting Started with Retivo locally", a narrated, under-a-minute first-run walkthrough |
-| [architecture-overview/](architecture-overview/README.md) | "Architecture Overview", a narrated walkthrough for contributors: local-first, components, local vs Amazon, sign-in and unlock, sync, repair, snapshots, what the server sees |
+| [architecture-overview/](architecture-overview/README.md) | "Architecture Overview", a narrated walkthrough for contributors: local-first, components, local vs AWS, sign-in and unlock, sync, repair, snapshots, what the server sees |
 | `voice.json` | Which Kokoro voice, and how fast. Used by every video |
 | `pronunciations.json` | Exact IPA for words the voice gets wrong, e.g. **Retivo** → "reh-TEE-voh" |
 | `scripts/` | `generate_voiceover.py` (narration) and `new-video.mjs` (new video), with their tests |

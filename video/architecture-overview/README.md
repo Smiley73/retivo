@@ -2,7 +2,7 @@
 
 A narrated [Remotion](https://www.remotion.dev) walkthrough of how Retivo fits
 together, for people changing its code. Eight steps: local-first, the
-components, local versus Amazon runs, sign-in and unlocking, sync, conflicts and
+components, local versus AWS runs, sign-in and unlocking, sync, conflicts and
 repair, snapshots, and what the server can see.
 
 The content follows [docs/architecture.md](../../docs/architecture.md) and
