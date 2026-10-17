@@ -9,13 +9,13 @@
   { "id": "parts-1", "text": "The components." },
   { "id": "parts-2", "text": "The web app is React. It owns the storage, the sync client, the encryption, and the calculation engine." },
   { "id": "parts-3", "text": "The API is NestJS, plus the entry points of the background Lambdas." },
-  { "id": "parts-4", "text": "Contracts holds the shared Zod schemas. Infrastructure is a Pulumi program that builds the A W S resources." },
+  { "id": "parts-4", "text": "Contracts holds the shared Zod schemas. Infrastructure is a Pulumi program that builds the A-W-S resources." },
 
-  { "id": "env-1", "text": "Local versus A W S." },
+  { "id": "env-1", "text": "Local versus A-W-S." },
   { "id": "env-2", "text": "Locally, the API is a plain Node process. DynamoDB Local and Moto stand in for the database, storage, and email." },
   { "id": "env-2b", "text": "The emulators keep their data in memory, so a restart wipes it. Local runs are for development and testing only." },
   { "id": "env-3", "text": "Deployed, CloudFront serves the web app from S3, and forwards slash API to API Gateway and a Lambda, backed by DynamoDB and S3." },
-  { "id": "env-4", "text": "The API code is the same. Settings point it at emulators or at A W S. For UI work, a mock transport removes the server entirely." },
+  { "id": "env-4", "text": "The API code is the same. Settings point it at emulators or to A-W-S. For UI work, a mock transport removes the server entirely." },
 
   { "id": "login-1", "text": "Signing in." },
   { "id": "login-2", "text": "The API checks your password against an Argon2id hash, and returns a five-minute access token, kept in memory only." },
