@@ -7,10 +7,13 @@
     "node": "^20.19.0 || ^22.13.0 || >=24"
   },
   "workspaces": [
-    "kit"
+    "kit",
+    "template"
   ],
   "scripts": {
-    "lint": "npm run lint --workspaces --if-present"
+    "new": "node scripts/new-video.mjs",
+    "test": "node --test scripts/*.test.mjs && python3 -m unittest discover -s scripts -p 'test_*.py'",
+    "lint": "eslint scripts && npm run lint --workspaces --if-present"
   },
   "devDependencies": {
     "@remotion/eslint-config-flat": "4.0.536",
