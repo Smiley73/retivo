@@ -108,6 +108,14 @@ updates:
     # Remotion. A Remotion major is a deliberate upgrade: read the upstream
     # licence terms first, then bump it by hand.
     ignore:
+      # TypeScript 7 (the native compiler) can't be adopted yet: ESLint crashes
+      # on start-up (`ts-api-utils` reads a compiler API TypeScript 7 no longer
+      # has, via @remotion/eslint-config-flat's typescript-eslint), so `npm run
+      # lint` is unusable. Skip the major until typescript-eslint supports it;
+      # 5.x minor/patch bumps still come through.
+      - dependency-name: "typescript"
+        update-types:
+          - version-update:semver-major
       - dependency-name: "zod"
       - dependency-name: "remotion"
         update-types:
