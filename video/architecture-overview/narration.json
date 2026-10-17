@@ -1,0 +1,47 @@
+[
+  { "id": "title-1", "text": "Retivo architecture overview. How the pieces fit together." },
+
+  { "id": "local-1", "text": "Step one: Retivo is local-first." },
+  { "id": "local-2", "text": "The working copy of your plan lives in the browser, in IndexedDB." },
+  { "id": "local-3", "text": "Every projection, tax estimate, and Monte Carlo run happens right there, with the heavy runs in web workers." },
+  { "id": "local-4", "text": "The server never computes anything about your plan. If it's unreachable, the app keeps working." },
+
+  { "id": "parts-1", "text": "Step two: the components." },
+  { "id": "parts-2", "text": "The web app is React. It owns the storage, the sync client, the encryption, and the calculation engine." },
+  { "id": "parts-3", "text": "The API is NestJS, plus the entry points of the background Lambdas." },
+  { "id": "parts-4", "text": "Contracts holds the shared Zod schemas. Infrastructure is a Pulumi program that builds the Amazon resources." },
+
+  { "id": "env-1", "text": "Step three: local versus Amazon." },
+  { "id": "env-2", "text": "Locally, the API is a plain Node process. DynamoDB Local and Moto stand in for the database, storage, and email." },
+  { "id": "env-3", "text": "Deployed, CloudFront serves the web app from S3, and forwards slash API to API Gateway and a Lambda, backed by DynamoDB and S3." },
+  { "id": "env-4", "text": "The API code is the same. Settings point it at emulators or at Amazon. For UI work, a mock transport removes the server entirely." },
+
+  { "id": "login-1", "text": "Step four: signing in." },
+  { "id": "login-2", "text": "The API checks your password against an Argon2id hash, and returns a five-minute access token, kept in memory only." },
+  { "id": "login-3", "text": "A refresh token lives in an HttpOnly cookie, and rotates on every use. Deployed stacks also require a second factor." },
+  { "id": "login-4", "text": "Then comes unlocking. The household key is stored on the server only in wrapped form, in slots: password, recovery key, and optionally a passkey." },
+  { "id": "login-5", "text": "Any one slot opens it, in the browser. The server never sees the key." },
+
+  { "id": "sync-1", "text": "Step five: sync." },
+  { "id": "sync-2", "text": "An edit updates IndexedDB first, so the screen reacts at once, and queues a mutation." },
+  { "id": "sync-3", "text": "The sync client encrypts the payload, and pushes the batch." },
+  { "id": "sync-4", "text": "The server checks each record's version, refuses plaintext, and stores only ciphertext." },
+  { "id": "sync-5", "text": "Other devices pull the changes after a cursor. A new device bootstraps from the latest snapshot." },
+
+  { "id": "repair-1", "text": "Step six: when changes collide." },
+  { "id": "repair-2", "text": "If the version the browser saw is stale, the server rejects that change as a conflict." },
+  { "id": "repair-3", "text": "Auto-repair drops duplicates, or re-applies the change on the server's version. Anything else shows in the sync badge, for you to decide." },
+  { "id": "repair-4", "text": "A row that won't decrypt is quarantined on that device, and the rest still loads. A freshness counter catches a server serving older data." },
+
+  { "id": "snap-1", "text": "Step seven: snapshots." },
+  { "id": "snap-2", "text": "The compactor Lambda writes an encrypted snapshot to S3, then trims the part of the mutation log it covers." },
+  { "id": "snap-3", "text": "It only deletes what the snapshot provably contains. A device whose cursor has expired bootstraps again." },
+  { "id": "snap-4", "text": "The janitor deletes old snapshots daily, and you can restore your household to any snapshot that's kept." },
+
+  { "id": "see-1", "text": "Step eight: what the server can see." },
+  { "id": "see-2", "text": "Your account details, and for each change, the record id, type, version, time, and size." },
+  { "id": "see-3", "text": "It cannot read the contents of a plan." },
+  { "id": "see-4", "text": "One caveat: data on your device isn't encrypted at rest, so protect the device itself." },
+
+  { "id": "outro-1", "text": "That's the architecture. Local first, end-to-end encrypted, and synced through a server that can't read your plan." }
+]
