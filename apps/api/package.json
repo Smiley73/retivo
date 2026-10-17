@@ -20,12 +20,12 @@
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --passWithNoTests"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1147.0",
-    "@aws-sdk/client-lambda": "^3.1147.0",
-    "@aws-sdk/client-s3": "^3.1147.0",
-    "@aws-sdk/client-ses": "^3.1147.0",
-    "@aws-sdk/client-ssm": "^3.1147.0",
-    "@aws-sdk/lib-dynamodb": "^3.1147.0",
+    "@aws-sdk/client-dynamodb": "^3.1151.0",
+    "@aws-sdk/client-lambda": "^3.1151.0",
+    "@aws-sdk/client-s3": "^3.1151.0",
+    "@aws-sdk/client-ses": "^3.1151.0",
+    "@aws-sdk/client-ssm": "^3.1151.0",
+    "@aws-sdk/lib-dynamodb": "^3.1151.0",
     "@codegenie/serverless-express": "^5.0.0",
     "@nestjs/common": "^11.2.7",
     "@nestjs/config": "^4.0.4",
@@ -37,7 +37,7 @@
     "argon2": "^0.45.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
-    "express": "5.2.1",
+    "express": "5.3.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
     "ksuid": "^3.0.0",
@@ -47,13 +47,13 @@
     "pino-http": "^11.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",
     "@nestjs/schematics": "^11.1.0",
     "@nestjs/testing": "^11.2.7",
-    "@swc/core": "^1.16.13",
+    "@swc/core": "^1.16.18",
     "@swc/jest": "^0.2.39",
     "@types/aws-lambda": "^8.10.164",
     "@types/express": "^5.0.6",
@@ -61,7 +61,7 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^24",
     "@types/supertest": "^7.2.1",
-    "dotenv": "^18.0.6",
+    "dotenv": "^18.0.7",
     "jest": "^30.5.2",
     "supertest": "~7.2.2",
     "typescript": "^5.9.3"
