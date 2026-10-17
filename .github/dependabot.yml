@@ -85,6 +85,46 @@ updates:
           - minor
           - patch
 
+  # Product videos (video/): an npm workspace of its own, with its own lockfile,
+  # outside the pnpm workspace, so the entry above does not see it. Same weekly
+  # day and wait as that entry. Remotion's packages must all be on one exact
+  # version (its version check complains otherwise), so they are bumped together
+  # in a single PR.
+  - package-ecosystem: npm
+    directory: "/video"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    # zod is an extra Remotion's version check wants at one exact version, the
+    # one its own packages declare, so it is bumped by hand together with
+    # Remotion. A Remotion major is a deliberate upgrade: read the upstream
+    # licence terms first, then bump it by hand.
+    ignore:
+      - dependency-name: "zod"
+      - dependency-name: "remotion"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@remotion/*"
+        update-types:
+          - version-update:semver-major
+    groups:
+      remotion:
+        patterns:
+          - "remotion"
+          - "@remotion/*"
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
   # Every workflow action is pinned to a full commit SHA with the semantic
   # release in a trailing `# vN` comment (supply-chain hardening — a moving tag
   # in a workflow is a hole). The github-actions updater is
