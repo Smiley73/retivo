@@ -1,0 +1,19 @@
+# Applies to every video project in this folder, so a new project is covered
+# without editing anything.
+
+.DS_Store
+.env
+node_modules/
+dist/
+
+# Rendered videos and audio.
+out/
+
+# Generated narration clips (each video's public/voiceover) and the shared Kokoro
+# model files (hundreds of MB).
+**/public/voiceover/
+/models
+
+# Python leftovers.
+__pycache__/
+.venv/
