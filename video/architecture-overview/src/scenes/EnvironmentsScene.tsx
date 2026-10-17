@@ -20,7 +20,15 @@ export const EnvironmentsScene: React.FC = () => {
       headline="Local vs Amazon"
       sub="Same API code. Different endpoints."
     >
-      <Frame x={0} y={0} w={900} h={250} label="ON YOUR MACHINE" at={local} />
+      <Frame x={0} y={0} w={900} h={290} label="ON YOUR MACHINE" at={local} />
+      <Chip
+        x={30}
+        y={222}
+        text="data lost on restart · for development and testing only"
+        tone="warn"
+        mono
+        at={clipAt(T, "env-2b")}
+      />
       <Box x={30} y={70} w={190} h={130} title="Browser" at={local} />
       <Box
         x={300}
@@ -46,7 +54,7 @@ export const EnvironmentsScene: React.FC = () => {
 
       <Chip
         x={0}
-        y={300}
+        y={306}
         text="same API code"
         tone="accent"
         at={same}
@@ -88,7 +96,7 @@ export const EnvironmentsScene: React.FC = () => {
       <Arrow from={[410, 600]} to={[460, 665]} at={aws + 42} label="/api/*" labelOffset={[-70, 20]} />
       <Arrow from={[650, 677]} to={[680, 677]} at={aws + 54} />
 
-      <Chip x={250} y={300} text="UI work: mock transport, no server" tone="cipher" mono at={same + 70} />
+      <Chip x={250} y={306} text="UI work: mock transport, no server" tone="cipher" mono at={same + 70} />
     </StepFrame>
   );
 };

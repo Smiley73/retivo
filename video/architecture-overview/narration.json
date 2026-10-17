@@ -13,6 +13,7 @@
 
   { "id": "env-1", "text": "Local versus Amazon." },
   { "id": "env-2", "text": "Locally, the API is a plain Node process. DynamoDB Local and Moto stand in for the database, storage, and email." },
+  { "id": "env-2b", "text": "The emulators keep their data in memory, so a restart wipes it. Local runs are for development and testing only." },
   { "id": "env-3", "text": "Deployed, CloudFront serves the web app from S3, and forwards slash API to API Gateway and a Lambda, backed by DynamoDB and S3." },
   { "id": "env-4", "text": "The API code is the same. Settings point it at emulators or at Amazon. For UI work, a mock transport removes the server entirely." },
 
