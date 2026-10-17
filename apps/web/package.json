@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "3.1151.0",
-    "@playwright/test": "^1.64.0",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
