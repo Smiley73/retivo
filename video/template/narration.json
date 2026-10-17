@@ -1,0 +1,11 @@
+[
+  {
+    "id": "title-1",
+    "text": "Welcome to Retivo. This is the title of your video."
+  },
+  {
+    "id": "step-1",
+    "text": "Step one. Describe what happens on screen, then click the button."
+  },
+  { "id": "outro-1", "text": "That's it. Thanks for watching." }
+]
