@@ -34,6 +34,7 @@ Universal: CODING_STANDARDS.md *Handle ambiguity explicitly*. Repo deltas:
 - [docs/user-guide.md](docs/user-guide.md) — what each screen does.
 - Math pages: [taxes](docs/math-taxes.md), [Social Security and health](docs/math-social-security-and-health.md), [retirement accounts](docs/math-retirement-accounts.md), [income, expenses and returns](docs/math-income-expenses-and-returns.md), [withdrawals](docs/math-withdrawals.md), [projections](docs/math-projections.md).
 - [docs/PRODUCT.md](docs/PRODUCT.md), [docs/DESIGN.md](docs/DESIGN.md) — see *Design context*.
+- [video/README.md](video/README.md) — product videos: setup, the shared kit.
 
 ## Design context (for any UI / design work)
 
@@ -67,6 +68,7 @@ pnpm workspace; members under `apps/*` + `packages/*` + top-level `infrastructur
 - `apps/web/` — `@retirement/web`. React 19 SPA, IndexedDB working store. Sources in `src/{auth,components,db,layout,lib,pages,sync}` plus `api`, `contexts`, `crypto`, `monte-carlo`, `workers`. Demo dataset: `src/lib/demo-data-loader.ts`.
 - `packages/*` — shared workspace libraries consumed by the apps via `workspace:*`. Convention: each compiles to `dist/` and is consumed from its compiled output (package `exports` → `dist/index.js` + `dist/index.d.ts`); a `prepare` script builds `dist/` on `pnpm install` so consumers resolve without a manual build (`dist/` is gitignored — never commit it). `packages/contracts/` (`@retirement/contracts`) is the first: the single source for the FE/BE sync wire-envelope types + Zod schemas and the `ACTIVE_AGGREGATE_TYPES_LIST` / `AggregateType` inventory (API `sync/aggregate-types.ts` + web `db/types.ts` re-export it). Jest (api) resolves it from source via a `moduleNameMapper` (its ESM-only `exports` map has no `require` condition).
 - `infrastructure/` — Pulumi (TypeScript). `dev` + `prod` stack files. Lambda shells in `lambda-shells/` are only the `pulumi preview` fallback when the API build is missing; a real `pulumi up` needs the full build (`infrastructure/src/lambda-artifact.ts`). Local Docker stack in `docker-compose.yml` (DynamoDB Local + Moto).
+- `video/` — Remotion product videos. Its own npm workspace (`npm install`, `npm run lint` inside `video/`), outside the pnpm workspace, so `pnpm gate` and CI do not check it. `video/kit/` holds the shared look; each video holds only its content. See [video/README.md](video/README.md).
 - Root `.env` (copy from `.env.example`) is the canonical env file (API loads via `node --env-file=../../.env`). No per-app `.env` files.
 
 ## Commands (actual, not aspirational)

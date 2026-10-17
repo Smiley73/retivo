@@ -11,7 +11,7 @@ This product bundles third-party assets. Their attributions follow.
 Hanken Grotesk (font)
 ================================================================================
 
-Bundled file: apps/web/public/fonts/hanken-grotesk-var.woff2
+Bundled files: apps/web/public/fonts/hanken-grotesk-var.woff2 and a byte-identical copy at video/kit/fonts/hanken-grotesk-var.woff2
 Font: Hanken Grotesk, https://github.com/marcologous/hanken-grotesk
 Licensed under the SIL Open Font License, Version 1.1 (full text below).
 The bundled file is a Latin-subset variable font.
@@ -115,7 +115,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 JetBrains Mono (font)
 ================================================================================
 
-Bundled file: apps/web/public/fonts/jetbrains-mono-var.woff2
+Bundled files: apps/web/public/fonts/jetbrains-mono-var.woff2 and a byte-identical copy at video/kit/fonts/jetbrains-mono-var.woff2
 Font: JetBrains Mono, https://github.com/JetBrains/JetBrainsMono
 Licensed under the SIL Open Font License, Version 1.1 (full text below).
 The bundled file is a Latin-subset variable font.
