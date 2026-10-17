@@ -1,5 +1,6 @@
 /** Step 8: what the server can and cannot read, and the on-device caveat. */
 import React from "react";
+import { interpolate, useCurrentFrame } from "remotion";
 import { C, MONO } from "@retivo/video-kit";
 import { sceneTiming } from "../clips";
 import { Box, Chip, clipAt } from "../diagram";
@@ -14,6 +15,11 @@ export const ServerSeesScene: React.FC = () => {
   const sees = clipAt(T, "see-2");
   const blind = clipAt(T, "see-3");
   const caveat = clipAt(T, "see-4");
+  const frame = useCurrentFrame();
+  const cipherIn = interpolate(frame, [blind + 16, blind + 32], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
   return (
     <StepFrame
       scene="see"
@@ -49,7 +55,7 @@ export const ServerSeesScene: React.FC = () => {
           fontFamily: MONO,
           fontSize: 24,
           color: C.stageMuted,
-          opacity: 0.8,
+          opacity: 0.8 * cipherIn,
         }}
       >
         a9f3 c07e 51bd 88e2…
