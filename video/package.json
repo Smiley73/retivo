@@ -9,7 +9,8 @@
   "workspaces": [
     "kit",
     "template",
-    "getting-started"
+    "getting-started",
+    "architecture-overview"
   ],
   "scripts": {
     "new": "node scripts/new-video.mjs",
