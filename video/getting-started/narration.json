@@ -1,0 +1,38 @@
+[
+  {
+    "id": "title-1",
+    "text": "Getting started with Retivo, locally. Four quick steps."
+  },
+  { "id": "start-1", "text": "Step one: start it." },
+  {
+    "id": "start-2",
+    "text": "Install, copy the settings file, start the emulators, and run the app."
+  },
+  { "id": "start-3", "text": "Then open localhost." },
+  {
+    "id": "signin-1",
+    "text": "Step two: sign in. A dev account is already filled in."
+  },
+  {
+    "id": "signin-2",
+    "text": "Then set up encryption, using the same password."
+  },
+  { "id": "key-1", "text": "Step three: save your recovery key." },
+  {
+    "id": "key-2",
+    "text": "It's the only way back in if you forget your password. Nobody can recover it for you."
+  },
+  {
+    "id": "key-3",
+    "text": "Copy it, store it somewhere safe, tick the box, and continue."
+  },
+  { "id": "demo-1", "text": "Step four: load the demo data." },
+  {
+    "id": "demo-2",
+    "text": "It's a ready-made sample household, with accounts, balances, income, expenses, and scenarios."
+  },
+  {
+    "id": "outro-1",
+    "text": "That's it. You're in. Take the tour in the user guide."
+  }
+]
