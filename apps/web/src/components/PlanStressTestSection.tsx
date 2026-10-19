@@ -31,6 +31,7 @@ import type {
 } from '../lib/balance-projection-runner-types';
 import { type CbpValidationResult } from '../lib/cbp-resolution';
 import { seedFromString } from '../lib/sfc32';
+import { successDeltaGate } from '../lib/success-delta-noise';
 import { McProgressBar } from './McProgressBar';
 import type {
   MonteCarloSummary,
@@ -955,7 +956,8 @@ export function usePlanStressTestVm(
  * smaller), so the gate errs CONSERVATIVE — it can only over-suppress a real
  * delta, never manufacture false signal. The delta is rendered as signal only
  * when it exceeds this bound (else "≈ no change"). Returns pending/error states
- * when the sibling run has not settled.
+ * when the sibling run has not settled. The SE formula and verdict live in
+ * `lib/success-delta-noise.ts`; both runs share this path count.
  */
 function buildGuardrailComparison(
   withProbability: number | null,
@@ -974,10 +976,8 @@ function buildGuardrailComparison(
     return { state: 'pending', withPct, withoutPct, deltaPct: null, se: null };
   }
   const n = pathCount && pathCount > 0 ? pathCount : PATH_COUNT;
-  const varWith = (withPct * (1 - withPct)) / n;
-  const varWithout = (withoutPct * (1 - withoutPct)) / n;
-  const se = Math.sqrt(varWith + varWithout);
-  return { state: 'ready', withPct, withoutPct, deltaPct: withPct - withoutPct, se };
+  const { delta, se } = successDeltaGate(withPct, n, withoutPct, n);
+  return { state: 'ready', withPct, withoutPct, deltaPct: delta, se };
 }
 
 /** Empty-state CTA — render in place of the stress-test cards/chart
