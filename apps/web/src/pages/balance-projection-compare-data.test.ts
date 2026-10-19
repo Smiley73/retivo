@@ -14,14 +14,14 @@ import type {
   SocialSecurityBenefitPayload,
 } from '../db/types';
 import { loadDemoData } from '../lib/demo-data-loader';
-import { accountBucket } from '../lib/account-bucket';
+import { accountBucket, type AccountBucket } from '../lib/account-bucket';
 import { buildMonteCarloInputForScenario } from '../lib/monte-carlo-scenario-input';
 import {
   makeAccountBalance,
   makeDrawdownYear,
 } from '../lib/balance-projection-runner-tax-test-fixtures';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
-import { buildCompareData, type CompareDrivers } from './balance-projection-compare-data';
+import { buildCompareData, type CompareData, type CompareDrivers } from './balance-projection-compare-data';
 import {
   buildQcdRows,
   buildRmdRows,
@@ -72,6 +72,23 @@ function childOf(parent: ScenarioAggregate, id: string, overrides: ScenarioOverr
     id,
     payload: { ...parent.payload, name: id, parentScenarioId: parent.id, isPrimary: false, overrides },
   };
+}
+
+/** Every field of `difference` must be `viewed - comparison`, not its negation. */
+function expectDifferenceIsViewedMinusComparison(compare: CompareData): void {
+  const { viewed, comparison, difference } = compare;
+  expect(difference.horizonYear).toBe(viewed.horizonYear! - comparison.horizonYear!);
+  expect(difference.endingBalance).toBe(viewed.endingBalance! - comparison.endingBalance!);
+  const v = viewed.drivers!;
+  const c = comparison.drivers!;
+  const d = difference.drivers!;
+  for (const key of Object.keys(v) as (keyof CompareDrivers)[]) {
+    if (key === 'withdrawalYears') continue;
+    expect(d[key], key).toBe((v[key] as number) - (c[key] as number));
+  }
+  for (const bucket of Object.keys(v.withdrawalYears) as AccountBucket[]) {
+    expect(d.withdrawalYears[bucket], bucket).toBe(v.withdrawalYears[bucket] - c.withdrawalYears[bucket]);
+  }
 }
 
 async function stressKey(scenarioId: string, scenarios: ScenarioAggregate[]): Promise<string> {
@@ -162,6 +179,40 @@ describe('buildCompareData — driver parity with the Taxes tab', () => {
     expect(compare.comparison.drivers!.acaPtcCredit).toBeGreaterThan(0);
     expect(compare.comparison.drivers!.rothConversions).toBeGreaterThan(0);
   });
+
+  it('sums QCDs, which only a scenario override creates, as the page path does', () => {
+    const base = byName.get('Base')!;
+    const owner = inputs.accounts.find((a) => a.payload.type === 'RETIREMENT_IRA' && a.payload.taxTreatment === 'PRE_TAX')!;
+    const qcd = { memberId: owner.payload.ownerId, sourceAccountId: owner.id, annualAmountDollars: 10_000, start: { kind: 'year' as const, year: 2040 }, end: { kind: 'year' as const, year: 2060 } };
+    const scenarios = [...inputs.scenarios, childOf(base, 'child-qcd', { qualifiedCharitableDistributions: [qcd] })];
+    const withQcd = pageData('child-qcd', scenarios);
+    const plain = pageData(base.id, scenarios);
+    const compare = buildCompareData({ viewed: withQcd, comparison: plain, stressCacheKeys: NO_KEYS });
+    const expected = taxesTabDrivers(withQcd);
+    expect(expected.qcds).toBeGreaterThan(0);
+    expect(compare.viewed.drivers!.qcds).toBe(expected.qcds);
+    expect(compare.comparison.drivers!.qcds).toBe(0);
+    expect(compare.difference.drivers!.qcds).toBe(expected.qcds);
+    expect(compare.viewed.drivers!.rmds).toBe(expected.rmds);
+  });
+
+  it('counts RMDs as the gross requirement, so an unfunded shortfall does not shrink them', () => {
+    const base = named('Base');
+    const expected = taxesTabDrivers(base);
+    expect(expected.rmds).toBeGreaterThan(0);
+    const viewedRmds = (data: PipelineData) =>
+      buildCompareData({ viewed: data, comparison: base, stressCacheKeys: NO_KEYS }).viewed.drivers!.rmds;
+    expect(viewedRmds(base)).toBe(expected.rmds);
+
+    const years = base.pageResult!.planned!.years.map((y, i) =>
+      i === 0 || (y.rmdFloorCents ?? 0) <= 0 ? y : { ...y, rmdShortfallCents: Math.round((y.rmdFloorCents ?? 0) * 0.4) },
+    );
+    const planned = { ...base.pageResult!.planned!, years };
+    const shortfalling: PipelineData = { ...base, pageResult: { ...base.pageResult!, planned } };
+    const shortfallDrawdown = drawdownByMethodFromPageResult(shortfalling.pageResult)!.planned!;
+    expect(shortfallDrawdown.years.some((y) => (y.rmdShortfallCents ?? 0) > 0)).toBe(true);
+    expect(viewedRmds(shortfalling)).toBeCloseTo(expected.rmds, 6);
+  });
 });
 
 describe('buildCompareData — headline', () => {
@@ -194,6 +245,8 @@ describe('buildCompareData — headline', () => {
     const forward = buildCompareData({ viewed: base, comparison: delay, stressCacheKeys: NO_KEYS });
     const swapped = buildCompareData({ viewed: delay, comparison: base, stressCacheKeys: NO_KEYS });
     expect(forward.difference.endingBalance).not.toBe(0);
+    expectDifferenceIsViewedMinusComparison(forward);
+    expectDifferenceIsViewedMinusComparison(swapped);
     expect(swapped.difference.endingBalance).toBeCloseTo(-forward.difference.endingBalance!, 6);
     expect(swapped.difference.horizonYear).toBeCloseTo(-forward.difference.horizonYear!, 6);
     for (const key of Object.keys(forward.difference.drivers!) as (keyof CompareDrivers)[]) {
@@ -204,6 +257,19 @@ describe('buildCompareData — headline', () => {
       -forward.difference.drivers!.withdrawalYears.pretax,
       6,
     );
+  });
+});
+
+describe('buildCompareData — difference direction', () => {
+  it('is viewed minus comparison for the ACA credit and Roth conversions, where they are non-zero', () => {
+    const compare = buildCompareData({
+      viewed: named('Base'),
+      comparison: named('Retire early at 62'),
+      stressCacheKeys: NO_KEYS,
+    });
+    expectDifferenceIsViewedMinusComparison(compare);
+    expect(compare.difference.drivers!.acaPtcCredit).toBeLessThan(0);
+    expect(compare.difference.drivers!.rothConversions).toBeLessThan(0);
   });
 });
 
