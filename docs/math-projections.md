@@ -511,6 +511,8 @@ All paths are under `apps/web/src`.
 | `lib/monte-carlo-shard.ts`, `monte-carlo/` | Counting successes, and splitting a run across workers. |
 | `lib/monte-carlo-summary.ts` | Percentiles, the tiers, the example path and the alternatives. |
 | `components/PlanStressTestSection.tsx` | The seed and Recalculate. |
+| `lib/success-delta-noise.ts` | The noise check on a difference between two success probabilities. |
+| `pages/balance-projection-compare-data.ts`, `lib/signed-difference.ts`, `lib/scenario-change-list.ts`, `lib/structural-equality.ts` | The figures two scenarios are compared on, how a difference reads, the list of settings that changed, and the identical-results check. |
 | `db/monte-carlo-cache.ts` | Saved results, checked against the engine version. |
 | `lib/market-stress.ts`, `components/plan-market-stress-comparison.ts` | The four stress tests and their comparison. |
 | `lib/guardrails.ts`, `lib/drawdown-engine-per-account-strategy.ts` | The funded ratio and the yearly guardrail step. |
