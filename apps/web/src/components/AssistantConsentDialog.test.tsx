@@ -49,9 +49,9 @@ describe('AssistantConsentDialog', () => {
   it('describes what each sharing switch does when it is off, under the switch', () => {
     setup();
     for (const definition of SHARING_SWITCHES) {
-      expect(screen.getByRole('switch', { name: definition.label })).toHaveAccessibleDescription(
-        new RegExp(`Off: ${definition.offDescription.replace(/[.$()]/g, '\\$&')}$`),
-      );
+      const description = definition.describe({ idleMinutes: 30 });
+      expect(description.endsWith(` Off: ${definition.offDescription}`)).toBe(true);
+      expect(screen.getByRole('switch', { name: definition.label })).toHaveAccessibleDescription(description);
     }
   });
 
