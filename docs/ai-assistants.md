@@ -68,6 +68,18 @@ are never shared, whatever you choose; the list is under
 4. Start a new assistant session if it does not pick the new server up by itself. The
    assistant starts the bridge; you do not run it yourself.
 
+**The card's launcher is provisional.** The command the card shows starts the bridge
+with `npx -y retivo-mcp-bridge`. That is a placeholder until the bridge is
+distributed, and nothing by that name is published yet, so the command as copied
+will not start a bridge. Until then, build the bridge from a checkout of RETIVO
+([local setup](local-setup.md#connect-a-local-ai-assistant)) and, in the command you
+copy from the card, replace `npx -y retivo-mcp-bridge` with
+`node <checkout>/apps/mcp-bridge/dist/bin.js`, where `<checkout>` is the full path to
+your checkout. Keep everything else in the command as the card gave it, in particular
+`--origin` and, if present, `--port`. For Cursor, set `command` to `node` and
+replace `-y` and `retivo-mcp-bridge` at the start of `args` with the built file's
+path.
+
 **One bridge per assistant session.** The bridge listens on one fixed port and
 serves one browser tab. If a second assistant session starts its own bridge on
 the same port, it exits and says the port is in use; close the first session
@@ -227,7 +239,8 @@ the usual causes.
 
 | What you see | What it means and what to do |
 |---|---|
-| "RETIVO could not reach the bridge. It is either not running or blocked by your browser." | The browser cannot tell an absent bridge from a blocked one. Check that the command was added to your assistant and that the assistant has started a session. Then check the browser's permission for this site ([Browser support](#browser-support)); a denied permission looks exactly like an absent bridge. |
+| The assistant says the `retivo` server failed to start, or cannot be found. | The card's `npx -y retivo-mcp-bridge` launcher is provisional and is not published, so it does not start. Build the bridge from a checkout and use `node <checkout>/apps/mcp-bridge/dist/bin.js` in its place, as described under [Set up with your assistant](#set-up-with-your-assistant). Also check that Node 24 is the one the assistant runs. |
+| "RETIVO could not reach the bridge. It is either not running or blocked by your browser." | The browser cannot tell an absent bridge from a blocked one. Check that the command was added to your assistant, that its launcher starts (see the row above) and that the assistant has started a session. Then check the browser's permission for this site ([Browser support](#browser-support)); a denied permission looks exactly like an absent bridge. |
 | "The bridge is not running." | The browser allowed the connection and nothing answered. Add the command to your assistant, ask a question about your plan, then enter the new code. |
 | "Your browser blocked the connection to the bridge." | The permission was denied. Allow it in the browser's site settings for this site, then try again. |
 | "Something answered, but it is not the Retivo bridge." | Another program holds the port. Close it, or change the port in the build. |
