@@ -128,6 +128,19 @@ describe('AssistantSessionBadge', () => {
     expect(screen.getByRole('button', { name: 'Disconnect assistant' })).toBeInTheDocument();
   });
 
+  it('does not reopen the viewer on the next pairing after the session ended with it open', async () => {
+    const user = userEvent.setup();
+    const { assistants } = setup('banner');
+    await user.click(screen.getByRole('button', { name: /^Assistant connected/ }));
+    await screen.findByRole('dialog', { name: 'Assistant activity' });
+    // The session ends from outside the viewer (the bridge went away).
+    act(() => assistants.set(assistantValue({ phase: 'idle', client: null, pairedAt: null })));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    act(() => assistants.set(assistantValue()));
+    expect(screen.getByRole('button', { name: /^Assistant connected/ })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('disconnects from inside the viewer: closes it, ends the session and keeps focus off the body', async () => {
     const user = userEvent.setup();
     const { disconnect } = setup('banner');

@@ -1,17 +1,25 @@
 /**
  * The in-memory record of what the connected assistant asked for and what the
- * tab answered. Bounded (entry count and a per-entry cap on the retained
- * payload), never persisted, and fed only from settled calls: it has no input
+ * tab answered. Bounded (entry count and a total byte budget on the retained
+ * payloads, evicting whole older entries), never persisted, and fed only from settled calls: it has no input
  * the pairing code, a nonce or a proof could travel in.
  *
  * Cleared when the auth session ends and when a new pairing begins; a plain
  * Disconnect keeps it so the person can still read what was shared.
  */
-import type { ErrorCode } from '@retirement/assistant-protocol';
+import { MAX_TOOL_RESULT_BYTES, type ErrorCode } from '@retirement/assistant-protocol';
 
 export const AUDIT_MAX_ENTRIES = 200;
-/** Largest result (UTF-8 bytes) kept verbatim on an entry; a larger one keeps only its size. */
-export const AUDIT_MAX_PAYLOAD_BYTES = 64 * 1024;
+/**
+ * Largest result (UTF-8 bytes) kept verbatim on an entry. It is the largest result the dispatcher
+ * will send, so every result that reached the bridge keeps its exact text.
+ */
+export const AUDIT_MAX_PAYLOAD_BYTES = MAX_TOOL_RESULT_BYTES;
+/**
+ * Total retained payload bytes across the log. Memory is bounded by evicting whole older entries
+ * (counted in `dropped()`), never by trimming a body; the newest entry is always kept.
+ */
+export const AUDIT_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 
 /** The arguments the bridge sent, as JSON text, are kept to this many characters; a longer one ends in an ellipsis. */
 export const AUDIT_MAX_ARGS_CHARS = 2_000;
@@ -65,6 +73,9 @@ function capArgsText(text: string): string {
 export class AuditLog {
   private list: readonly AuditEntry[] = [];
   private nextId = 1;
+  /** UTF-8 size of each retained payload, in step with `list`. */
+  private sizes: readonly number[] = [];
+  private retainedBytes = 0;
   private droppedCount = 0;
 
   entries(): readonly AuditEntry[] {
@@ -78,7 +89,9 @@ export class AuditLog {
 
   record(input: AuditInput): void {
     const { payload, ...rest } = input;
-    const fits = utf8.encode(payload).length <= AUDIT_MAX_PAYLOAD_BYTES;
+    const size = utf8.encode(payload).length;
+    const fits = size <= AUDIT_MAX_PAYLOAD_BYTES;
+    const kept = fits ? size : 0;
     const entry: AuditEntry = {
       ...rest,
       id: this.nextId,
@@ -88,12 +101,25 @@ export class AuditLog {
     };
     this.nextId += 1;
     const next = [...this.list, entry];
-    this.droppedCount += Math.max(0, next.length - AUDIT_MAX_ENTRIES);
-    this.list = next.slice(-AUDIT_MAX_ENTRIES);
+    const nextSizes = [...this.sizes, kept];
+    let total = this.retainedBytes + kept;
+    let evict = Math.max(0, next.length - AUDIT_MAX_ENTRIES);
+    for (let i = 0; i < evict; i += 1) total -= nextSizes[i]!;
+    // Over the byte budget, whole older entries go too; the entry just recorded stays.
+    while (total > AUDIT_MAX_TOTAL_BYTES && evict < next.length - 1) {
+      total -= nextSizes[evict]!;
+      evict += 1;
+    }
+    this.droppedCount += evict;
+    this.list = next.slice(evict);
+    this.sizes = nextSizes.slice(evict);
+    this.retainedBytes = total;
   }
 
   clear(): void {
     this.droppedCount = 0;
+    this.retainedBytes = 0;
+    this.sizes = [];
     if (this.list.length > 0) this.list = [];
   }
 }

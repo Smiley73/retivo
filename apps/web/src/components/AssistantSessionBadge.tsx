@@ -40,7 +40,10 @@ export const AssistantSessionBadge: React.FC<{ variant: AssistantSessionBadgeVar
   const assistant = useOptionalAssistant();
   const rootRef = useRef<HTMLDivElement>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
-  if (assistant === null || assistant.phase !== 'ready') return null;
+  const connected = assistant !== null && assistant.phase === 'ready';
+  // A session that ended while the viewer was open must not reopen it on the next pairing.
+  if (!connected && viewerOpen) setViewerOpen(false);
+  if (!connected) return null;
   const { client, disconnect } = assistant;
   const banner = variant === 'banner';
   // On the narrow banner the visible words give way to the icon; the accessible name stays whole.
