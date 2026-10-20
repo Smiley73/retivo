@@ -188,6 +188,22 @@ module.exports = {
       },
     },
     {
+      name: 'assistant-protocol-is-a-leaf',
+      severity: 'error',
+      comment:
+        'Architecture rule: packages/assistant-protocol is a leaf shared by ' +
+        'the bridge and the tab. Its runtime code may import only zod and ' +
+        'Node built-ins: never an app, infrastructure, packages/contracts ' +
+        'or any other npm package. Tests may import their test tooling.',
+      from: {
+        path: '^packages/assistant-protocol/src',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        path: '^(apps|infrastructure)/|^packages/contracts/|(^|/)node_modules/(?!.*/zod/|zod/)',
+      },
+    },
+    {
       name: 'db-layering',
       severity: 'error',
       comment:

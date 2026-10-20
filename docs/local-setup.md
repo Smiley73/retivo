@@ -228,7 +228,7 @@ and stops at the first failure.
 | `pnpm lint` | ESLint over the API and web sources. |
 | `pnpm depcruise` | Checks module boundaries and import cycles. |
 | `pnpm knip` | Finds unused files, exports and dependencies. |
-| `pnpm typecheck` | Builds the shared `packages/contracts` package, then type-checks every package, including the browser tests in `apps/web/e2e`. |
+| `pnpm typecheck` | Builds the shared `packages/contracts` and `packages/assistant-protocol` packages, then type-checks every package, including the browser tests in `apps/web/e2e`. |
 | `pnpm test` | Runs each package's tests one package at a time, then the script tests. |
 | `pnpm audit:ci` | `pnpm audit` for known vulnerabilities in dependencies (moderate and above). Needs network access. |
 | `pnpm gate` | All of the above: `lint`, `depcruise`, `knip`, `typecheck`, `test`, `audit:ci`. |
@@ -367,6 +367,7 @@ them. To use a phone or a second laptop on your network:
 | `apps/web` | The web app: React, Vite, and the browser-side storage and encryption. |
 | `apps/api` | The API: NestJS, with the Lambda entry point used when deployed. |
 | `packages/contracts` | Request and response types shared by the web app and the API. |
+| `packages/assistant-protocol` | The messages, tool list and pairing rules shared by the AI assistant bridge and the web app. |
 | `infrastructure` | Pulumi code for the Amazon deployment, and the Docker file for the emulators. |
 | `scripts` | Repo-wide check scripts and their tests. |
 | `docs` | Guides, including this one. |
