@@ -24,4 +24,5 @@ Build it from a checkout with `pnpm --filter @retirement/mcp-bridge build`; the
 bundle and its `THIRD-PARTY-NOTICES.txt` land in `build/`.
 
 Licensed under the Apache License 2.0 (see `LICENSE`). The notices of the
-third-party packages embedded in the bundle are in `THIRD-PARTY-NOTICES.txt`.
+third-party packages embedded in the bundle are in `THIRD-PARTY-NOTICES.txt`
+and at the end of the bundle file itself, so a saved copy carries them.

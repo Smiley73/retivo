@@ -18,6 +18,9 @@
 //     closes. That run is the only proof the embedding is complete;
 //   - every package esbuild bundled is the version the workspace resolved and the
 //     lockfile pins, and the two optional `ws` natives are not embedded;
+//   - the bundle file itself ends in the notices, so the copy a person keeps carries
+//     every embedded package's license and copyright text (the notices file served
+//     beside it never reaches their disk);
 //   - the notices name every embedded package with its license and copyright,
 //     and the set equals the bundler's own package set. The SDK's dist ships
 //     ajv, fast-uri and others already bundled, invisible to esbuild's metafile,
@@ -250,6 +253,22 @@ describe(
         assert.ok(lines.some((line) => /^License: \S+/.test(line)), `${heading} has no license identifier`);
         assert.ok(lines.some((line) => /^Copyright: .*\b(19|20)\d\d\b/.test(line)), `${heading} has no copyright line`);
       }
+    });
+
+    test("the bundle file itself carries every embedded package's notice, so the copy a person keeps does", () => {
+      const bundle = readFileSync(join(artifactDir, BUNDLE), 'utf8');
+      const notices = readFileSync(join(artifactDir, NOTICES), 'utf8');
+      // The trailing comment is the notices file, line for line.
+      const trailing = bundle.slice(bundle.lastIndexOf('\n// ===== Third-party notices'));
+      const carried = trailing.trim().split('\n').slice(1).map((line) => line.replace(/^\/\/ ?/, '')).join('\n');
+      assert.equal(carried.trimEnd(), notices.trimEnd());
+      for (const key of embedded.keys()) {
+        const heading = new RegExp(`^// ${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm');
+        assert.ok(heading.test(bundle), `${key}'s notice is not in the bundle`);
+      }
+      // The license texts themselves, not only the headings.
+      assert.ok(/Permission is hereby granted, free of charge/.test(bundle), 'an MIT license text is in the bundle');
+      assert.ok(/Redistributions in binary form must reproduce the above copyright/.test(bundle.replaceAll('\n// ', ' ')), 'the BSD-3-Clause text of fast-uri is in the bundle');
     });
 
     test('npm pack lists exactly the allowlisted files, and the packed manifest installs nothing', () => {

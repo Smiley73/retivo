@@ -7,7 +7,8 @@
  * Output : apps/mcp-bridge/build/ — or the directory named by
  *          $BRIDGE_BUNDLE_OUTPUT_DIR when set (the artifact-contract test points
  *          this at a temp dir, and build_spa at a stub dir in its own test):
- *            retivo-mcp-bridge.mjs   the bundle (Node shebang, executable, no source map)
+ *            retivo-mcp-bridge.mjs   the bundle (Node shebang, executable, no source map), ending in
+ *                                    a comment that carries the notices below in full
  *            THIRD-PARTY-NOTICES.txt the license and copyright notices of everything embedded
  *          $BRIDGE_BUNDLE_METAFILE, when set, also receives esbuild's metafile
  *          (outside the output directory, which holds exactly the two files).
@@ -27,6 +28,11 @@
  * is read from the pnpm store entry it was bundled from; if that is not on disk
  * the build fails naming the package, and a person supplies its package.json
  * fields and license under third-party/ (see SUPPLIED_DIR).
+ *
+ * The bridge is one file a person downloads and keeps, and the notices file is only served beside
+ * it, so the same notices are also appended to the bundle as a trailing comment (embedNotices): the
+ * kept copy always carries every embedded package's license and copyright text. Any checksum is of
+ * the final bytes, which is why that happens before the build returns.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -175,6 +181,19 @@ export function generateNotices(packages, suppliedDir = SUPPLIED_DIR) {
   return [header, ...[...packages.values()].map((pkg) => noticeFor(pkg, suppliedDir))].join('\n\n') + '\n';
 }
 
+const NOTICES_COMMENT_HEADING = '// ===== Third-party notices (generated; also served as retivo-mcp-bridge-notices.txt) =====';
+
+/**
+ * `bundleText` followed by `notices` as a comment. Every line is a `//` line comment, so no text in a
+ * license can end the comment early, and the line breaks JavaScript knows (CR, U+2028, U+2029) are
+ * normalised to `\n` so none of them can end a comment line and leave license text as code.
+ */
+export function embedNotices(bundleText, notices) {
+  const lines = notices.trimEnd().split(/\r\n|[\n\r\u2028\u2029]/);
+  const comment = lines.map((line) => (line === '' ? '//' : `// ${line}`)).join('\n');
+  return `${bundleText.trimEnd()}\n\n${NOTICES_COMMENT_HEADING}\n${comment}\n`;
+}
+
 /** Bundles into `outDir`; returns the esbuild metafile. */
 export async function buildBundle({ outDir, metafilePath }) {
   const entry = resolve(bridgeRoot, 'dist', 'bin.js');
@@ -202,8 +221,8 @@ export async function buildBundle({ outDir, metafilePath }) {
     // ws and a few embedded packages are CommonJS and `require` Node built-ins.
     banner: {
       js: [
-        '// Retivo bridge. The licenses and copyright notices of the packages embedded below are in',
-        `// ${NOTICES_NAME} (served beside this file as retivo-mcp-bridge-notices.txt).`,
+        '// Retivo bridge. The licenses and copyright notices of the packages embedded below are at the',
+        `// end of this file, and in ${NOTICES_NAME} (served beside it as retivo-mcp-bridge-notices.txt).`,
         "import { createRequire as __retivoCreateRequire } from 'node:module';",
         'const require = __retivoCreateRequire(import.meta.url);',
       ].join('\n'),
@@ -213,8 +232,10 @@ export async function buildBundle({ outDir, metafilePath }) {
   if (result.warnings.length > 0) {
     throw new Error(`esbuild warned: ${result.warnings.map((w) => w.text).join('; ')}`);
   }
+  const notices = generateNotices(embeddedPackages(result.metafile));
+  writeFileSync(outfile, embedNotices(readFileSync(outfile, 'utf8'), notices));
   chmodSync(outfile, 0o755);
-  writeFileSync(join(outDir, NOTICES_NAME), generateNotices(embeddedPackages(result.metafile)));
+  writeFileSync(join(outDir, NOTICES_NAME), notices);
   if (metafilePath !== undefined) writeFileSync(metafilePath, JSON.stringify(result.metafile));
   return result.metafile;
 }

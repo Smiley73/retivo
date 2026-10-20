@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '../..');
 const BRIDGE_ROOT = resolve(REPO_ROOT, 'apps', 'mcp-bridge');
-const { embeddedPackages, generateNotices } = await import(pathToFileURL(resolve(BRIDGE_ROOT, 'scripts', 'build-bundle.mjs')).href);
+const { embedNotices, embeddedPackages, generateNotices } = await import(pathToFileURL(resolve(BRIDGE_ROOT, 'scripts', 'build-bundle.mjs')).href);
 
 const MIT = 'MIT License\n\nCopyright (c) 2020 Some Author\n\nPermission is hereby granted, free of charge';
 const HOST_CHUNK = 'node_modules/.pnpm/host@1.0.0/node_modules/host/dist/chunk.mjs';
@@ -104,4 +104,28 @@ test("the real SDK's pre-bundled packages are all found, each at the version its
   ]) {
     assert.ok(keys.includes(expected), `${expected} is embedded in the SDK chunks but not found: ${keys.join(', ')}`);
   }
+});
+
+test('the notices are embedded in the bundle text as comments no license text can break out of', () => {
+  const notices = `inner@1.0.0\r\nLicense: MIT\n\nend */ \u2028 import 'node:fs'; \u2029 process.exit(1)\rCopyright (c) 2020 A\n`;
+  const text = embedNotices('#!/usr/bin/env node\nconsole.log(1);\n', notices);
+  assert.ok(text.startsWith('#!/usr/bin/env node\nconsole.log(1);\n'));
+  const trailing = text.slice(text.indexOf('\n// ====='));
+  // Every line after the code is a line comment, whatever the license text contains.
+  for (const line of trailing.trim().split(/\r\n|[\n\r\u2028\u2029]/)) assert.match(line, /^\/\/($| )/, line);
+  assert.ok(trailing.includes('// inner@1.0.0\n// License: MIT\n//\n// end */ '));
+  assert.ok(trailing.includes('// Copyright (c) 2020 A\n'));
+  // The bundle is still a program: nothing from the notices runs.
+  assert.doesNotThrow(() => new Function(text.replace(/^#!.*\n/, '')));
+});
+
+test('embedding the real generated notices keeps every embedded package notice in the text', () => {
+  const sdkDist = join(realpathSync(join(BRIDGE_ROOT, 'node_modules', '@modelcontextprotocol', 'server')), 'dist');
+  const input = relative(BRIDGE_ROOT, join(sdkDist, 'ajvProvider-CEoC__sr.mjs'));
+  const metafile = { inputs: { [input]: { bytes: 1 } }, outputs: { 'out.mjs': { inputs: { [input]: { bytesInOutput: 1 } } } } };
+  const packages = embeddedPackages(metafile, BRIDGE_ROOT);
+  const text = embedNotices('export {};\n', generateNotices(packages));
+  assert.ok(packages.size > 1);
+  for (const key of packages.keys()) assert.match(text, new RegExp(`^// ${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+  assert.match(text, /^\/\/ Permission is hereby granted/m);
 });
