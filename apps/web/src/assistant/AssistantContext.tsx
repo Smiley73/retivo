@@ -33,7 +33,7 @@ import { diagnose, readLocalNetworkPermission, type Diagnosis, type PermissionAn
 import type { ToolHandler } from './dispatcher';
 import { readAssistantOptIn, writeAssistantOptIn } from './preference';
 import { AssistantSession, type ConnectResult, type SessionSnapshot } from './session';
-import type { ConsentRequest, ConsentStep, SocketFactory } from './session-types';
+import type { ClientInfo, ConsentRequest, ConsentStep, SocketFactory } from './session-types';
 import type { ConsentAnswer, ConsentRecord } from './sharing/consent';
 
 export interface AssistantContextValue {
@@ -46,6 +46,12 @@ export interface AssistantContextValue {
   setOptedIn: (on: boolean) => void;
   phase: SessionSnapshot['phase'];
   audit: SessionSnapshot['audit'];
+  /** How many older audit entries the bound has dropped since the session began. */
+  auditDropped: number;
+  /** The assistant's self-reported name and version, untrusted; `null` when it sent none or no session runs. */
+  client: ClientInfo | null;
+  /** When the bridge proved itself (epoch ms); `null` while no session runs. */
+  pairedAt: number | null;
   /** What the person allowed for the running session; `null` while none runs or they have yet to decide. */
   consent: ConsentRecord | null;
   /** Set while the consent dialog is due: the bridge proved itself and the person has yet to answer. */
@@ -215,6 +221,9 @@ export const AssistantProvider: React.FC<AssistantProviderProps> = ({
       setOptedIn,
       phase: snapshot.phase,
       audit: snapshot.audit,
+      auditDropped: snapshot.auditDropped,
+      client: snapshot.client,
+      pairedAt: snapshot.pairedAt,
       consent: snapshot.consent,
       pendingConsent: pending?.request ?? null,
       answerConsent,

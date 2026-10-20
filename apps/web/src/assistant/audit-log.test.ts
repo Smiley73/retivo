@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { AUDIT_MAX_ENTRIES, AUDIT_MAX_PAYLOAD_BYTES, AuditLog, summarizeArgs, type AuditInput } from './audit-log';
+import { AUDIT_MAX_ARGS_CHARS, AUDIT_MAX_ENTRIES, AUDIT_MAX_PAYLOAD_BYTES, AuditLog, summarizeArgs, type AuditInput } from './audit-log';
 
 function input(overrides: Partial<AuditInput> = {}): AuditInput {
   return {
     at: 1,
     tool: 'retivo_status',
     argsSummary: '',
+    argsText: '{}',
     outcome: 'ok',
     durationMs: 3,
     bytes: 2,
@@ -38,6 +39,27 @@ describe('AuditLog', () => {
     expect(entries).toHaveLength(AUDIT_MAX_ENTRIES);
     expect(entries[0]!.at).toBe(5);
     expect(entries.at(-1)!.at).toBe(AUDIT_MAX_ENTRIES + 4);
+  });
+
+  it('counts the entries the bound pushed out, and resets the count on clear', () => {
+    const log = new AuditLog();
+    for (let i = 0; i < AUDIT_MAX_ENTRIES; i += 1) log.record(input());
+    expect(log.dropped()).toBe(0);
+    log.record(input());
+    log.record(input());
+    expect(log.dropped()).toBe(2);
+    log.clear();
+    expect(log.dropped()).toBe(0);
+  });
+
+  it('keeps the arguments text whole under the cap and ends a longer one with an ellipsis', () => {
+    const log = new AuditLog();
+    log.record(input({ argsText: '{"a":1.0}' }));
+    log.record(input({ argsText: 'x'.repeat(AUDIT_MAX_ARGS_CHARS + 50) }));
+    const [short, long] = log.entries();
+    expect(short!.argsText).toBe('{"a":1.0}');
+    expect(Array.from(long!.argsText)).toHaveLength(AUDIT_MAX_ARGS_CHARS);
+    expect(long!.argsText.endsWith('…')).toBe(true);
   });
 
   it('hands out a new array per change and clears', () => {

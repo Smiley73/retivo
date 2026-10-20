@@ -34,7 +34,7 @@ import { bridgeSocketUrl } from './bridge-port';
 import { AuditLog, type AuditEntry } from './audit-log';
 import { CallDispatcher, type SettledCall, type Timers, type ToolHandler } from './dispatcher';
 import { createConsentRecord, type ConsentRecord } from './sharing/consent';
-import type { ConsentStep, SessionEnd, SessionPhase, SocketFactory, SocketLike } from './session-types';
+import type { ClientInfo, ConsentStep, SessionEnd, SessionPhase, SocketFactory, SocketLike } from './session-types';
 
 /**
  * How long a socket may stay un-opened before the tab gives up. Long, because a browser keeps a loopback
@@ -83,12 +83,18 @@ export interface SessionSnapshot {
   /** What the person allowed for the running session; `null` until they allow and after the session ends. */
   consent: ConsentRecord | null;
   audit: readonly AuditEntry[];
+  /** How many older audit entries the bound has dropped from the log. */
+  auditDropped: number;
+  /** The assistant's self-reported name and version from `hello`, untrusted; `null` when none was sent or no session is paired. */
+  client: ClientInfo | null;
+  /** When the bridge proved itself, in the session clock's milliseconds; `null` until then and after the session ends. */
+  pairedAt: number | null;
 }
 
 interface HandshakeState {
   bridgeNonce: string;
-  /** The assistant's self-reported name from `hello`: untrusted, shown to the person only after sanitizing. */
-  clientName: string | null;
+  /** The assistant's self-reported identity from `hello`: untrusted, shown to the person only after sanitizing. */
+  client: ClientInfo | null;
   tabNonce: string;
   pairSent: boolean;
   verifying: boolean;
@@ -103,6 +109,9 @@ export class AssistantSession {
   private lastEnd: SessionEnd | null = null;
   /** The one consent record; the dispatcher and the idle hook read it from here, never a copy. */
   private consent: ConsentRecord | null = null;
+  /** The bridge's self-reported identity, kept once it proved itself so the shell can show it. */
+  private client: ClientInfo | null = null;
+  private pairedAt: number | null = null;
   /** Bumped whenever a session ends, so an await that outlives its session knows to stop. */
   private epoch = 0;
   private deadline: unknown = null;
@@ -207,7 +216,15 @@ export class AssistantSession {
   }
 
   private buildSnapshot(): SessionSnapshot {
-    return { phase: this.phase, end: this.lastEnd, consent: this.consent, audit: this.audit.entries() };
+    return {
+      phase: this.phase,
+      end: this.lastEnd,
+      consent: this.consent,
+      audit: this.audit.entries(),
+      auditDropped: this.audit.dropped(),
+      client: this.client,
+      pairedAt: this.pairedAt,
+    };
   }
 
   private armDeadline(ms: number): void {
@@ -234,6 +251,8 @@ export class AssistantSession {
     this.code = null;
     this.handshake = null;
     this.consent = null;
+    this.client = null;
+    this.pairedAt = null;
     this.dispatcher.abortAll();
     this.lastEnd = end;
     this.setPhase('idle');
@@ -278,7 +297,7 @@ export class AssistantSession {
     }
     const frame = decoded.frame;
     if (this.phase === 'awaiting-hello' && frame.type === 'hello') {
-      this.onHello(frame.protocolVersion, frame.bridgeNonce, frame.client?.name ?? null);
+      this.onHello(frame.protocolVersion, frame.bridgeNonce, frame.client ?? null);
     } else if (this.phase === 'awaiting-paired' && frame.type === 'paired' && this.handshake?.pairSent === true && !this.handshake.verifying) {
       void this.onPaired(frame.bridgeProof);
     } else if (this.callsAllowed() && frame.type === 'call') {
@@ -299,7 +318,7 @@ export class AssistantSession {
     return this.phase === 'ready' || this.phase === 'awaiting-consent';
   }
 
-  private onHello(protocolVersion: number, bridgeNonce: string, clientName: string | null): void {
+  private onHello(protocolVersion: number, bridgeNonce: string, client: ClientInfo | null): void {
     if (protocolVersion !== PROTOCOL_VERSION) {
       this.failProtocol('PROTOCOL_VERSION_MISMATCH');
       return;
@@ -307,7 +326,7 @@ export class AssistantSession {
     const code = this.code;
     if (code === null) return;
     const epoch = this.epoch;
-    const handshake: HandshakeState = { bridgeNonce, clientName, tabNonce: generateNonce(), pairSent: false, verifying: false };
+    const handshake: HandshakeState = { bridgeNonce, client, tabNonce: generateNonce(), pairSent: false, verifying: false };
     this.handshake = handshake;
     this.setPhase('awaiting-paired');
     this.armDeadline(PAIRED_TIMEOUT_MS);
@@ -343,7 +362,9 @@ export class AssistantSession {
       return;
     }
     // The bridge proved itself: the code and both nonces have done their job.
-    const clientName = handshake.clientName;
+    const client = handshake.client;
+    this.client = client === null ? null : { name: client.name, version: client.version };
+    this.pairedAt = this.now();
     this.code = null;
     this.handshake = null;
     this.clearDeadline();
@@ -352,7 +373,7 @@ export class AssistantSession {
     this.notify();
     let answer: Awaited<ReturnType<ConsentStep>>;
     try {
-      answer = await this.options.requestConsent({ clientName });
+      answer = await this.options.requestConsent({ clientName: client?.name ?? null });
     } catch {
       answer = 'declined';
     }
@@ -375,6 +396,7 @@ export class AssistantSession {
       at: this.now(),
       tool: call.tool,
       argsSummary: call.argsSummary,
+      argsText: call.argsText,
       outcome: call.outcome,
       durationMs: call.durationMs,
       bytes: call.bytes,

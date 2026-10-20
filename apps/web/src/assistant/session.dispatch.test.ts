@@ -78,15 +78,18 @@ describe('the share view binding', () => {
 
 describe('dispatch and caps', () => {
   it('answers a completed call with the handler result and audits it', async () => {
-    const { session, results, call } = await pairedSession();
+    const { session, socket, results, call } = await pairedSession();
     session.registerHandler('retivo_status', () => OK);
     call('c1', 'retivo_status');
     await vi.waitFor(() => expect(results()).toHaveLength(1));
     expect(results()[0]).toEqual({ type: 'result', id: 'c1', result: OK });
+    // The audited text is the text inside the frame that left on the socket, character for character.
+    expect(socket.sent.at(-1)).toContain(session.getSnapshot().audit[0]!.payload!);
     const [entry] = session.getSnapshot().audit;
     expect(entry).toMatchObject({ tool: 'retivo_status', outcome: 'ok', movedIdleClock: false, payloadTruncated: false });
     expect(JSON.parse(entry!.payload!)).toEqual(OK);
     expect(entry!.bytes).toBe(JSON.stringify(OK).length);
+    expect(entry!.argsText).toBe('{}');
   });
 
   it('answers TOOL_NOT_SUPPORTED, with no data, for a name without a handler', async () => {

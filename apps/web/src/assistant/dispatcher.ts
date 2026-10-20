@@ -55,6 +55,8 @@ export interface Timers {
 export interface SettledCall {
   tool: string;
   argsSummary: string;
+  /** The arguments as received, JSON text. */
+  argsText: string;
   outcome: AuditOutcome;
   durationMs: number;
   bytes: number;
@@ -82,6 +84,7 @@ interface InFlightCall {
   id: string;
   tool: string;
   argsSummary: string;
+  argsText: string;
   startedAt: number;
   controller: AbortController;
   timer: unknown;
@@ -112,7 +115,9 @@ export class CallDispatcher {
     if (this.inFlight.has(frame.id)) return false;
     const startedAt = this.options.now();
     const argsSummary = summarizeArgs(frame.args);
-    const immediate = (result: ToolResult): void => this.answer({ tool: frame.tool, id: frame.id, argsSummary, startedAt }, result, false);
+    const argsText = JSON.stringify(frame.args);
+    const immediate = (result: ToolResult): void =>
+      this.answer({ tool: frame.tool, id: frame.id, argsSummary, argsText, startedAt }, result, false);
 
     if (this.inFlight.size >= MAX_IN_FLIGHT_CALLS) {
       immediate(failureResult('TOO_MANY_IN_FLIGHT', `At most ${MAX_IN_FLIGHT_CALLS} calls can run at once. Wait for one to finish.`));
@@ -145,6 +150,7 @@ export class CallDispatcher {
       id: frame.id,
       tool: frame.tool,
       argsSummary,
+      argsText,
       startedAt,
       controller,
       timer: this.options.timers.set(() => {
@@ -206,7 +212,7 @@ export class CallDispatcher {
     this.answer(call, result, fromHandler);
   }
 
-  private answer(call: { id: string; tool: string; argsSummary: string; startedAt: number }, produced: ToolResult, fromHandler: boolean): void {
+  private answer(call: { id: string; tool: string; argsSummary: string; argsText: string; startedAt: number }, produced: ToolResult, fromHandler: boolean): void {
     const producedBytes = utf8.encode(JSON.stringify(produced)).length;
     const oversize = producedBytes > MAX_TOOL_RESULT_BYTES;
     const result = oversize
@@ -217,6 +223,7 @@ export class CallDispatcher {
     this.options.onSettled({
       tool: call.tool,
       argsSummary: call.argsSummary,
+      argsText: call.argsText,
       outcome,
       durationMs: this.options.now() - call.startedAt,
       bytes: producedBytes,

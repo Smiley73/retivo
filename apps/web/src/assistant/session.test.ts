@@ -92,6 +92,26 @@ describe('pairing with a scripted socket', () => {
     expect(socket.sent.join('')).not.toContain(VECTOR.code);
   });
 
+  it('keeps the bridge-reported client and the pairing time while connected, and drops them at the end', async () => {
+    const { session, sockets } = makeSession({ now: () => 1_700_000_000_000 });
+    session.connect(VECTOR.code);
+    expect(session.getSnapshot()).toMatchObject({ client: null, pairedAt: null });
+    await handshakeScripted(sockets[0]!, VECTOR.code, { name: 'Claude Code', version: '2.1' });
+    await until(() => session.getSnapshot().phase === 'ready', 'ready');
+    expect(session.getSnapshot()).toMatchObject({ client: { name: 'Claude Code', version: '2.1' }, pairedAt: 1_700_000_000_000 });
+    session.disconnect();
+    expect(session.getSnapshot()).toMatchObject({ client: null, pairedAt: null });
+  });
+
+  it('keeps no client when the bridge reported none', async () => {
+    const { session, sockets } = makeSession();
+    session.connect(VECTOR.code);
+    await pairScripted(sockets[0]!, VECTOR.code);
+    await until(() => session.getSnapshot().phase === 'ready', 'ready');
+    expect(session.getSnapshot().client).toBeNull();
+    expect(session.getSnapshot().pairedAt).not.toBeNull();
+  });
+
   it('waits in awaiting-consent: nothing leaves until the person allows, then the record and ready follow', async () => {
     const phases: string[] = [];
     const requests: ConsentRequest[] = [];

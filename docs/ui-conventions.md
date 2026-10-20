@@ -359,6 +359,16 @@ write the number anywhere else. The drawer is not mounted at desktop width,
 because an open React Aria modal traps focus and locks scrolling even when CSS
 hides it.
 
+**Global status indicators.** An indicator that must show on every page, such
+as "Assistant connected", mounts in the sidebar status slot beside `SyncBadge`
+and in the mobile banner between the Menu button and the stress-test chip. It
+never mounts in the drawer, so no width shows two. It returns `null` when idle,
+like `MonteCarloProgressChip`, and its screen-reader announcement comes from one
+permanently mounted `sr-only` `role="status"` region in the shell, not from the
+indicator, because the indicator exists twice. A control that unmounts while
+focused, such as Disconnect, moves focus to the Menu button (banner) or the
+first navigation button (sidebar) before the state changes.
+
 ## Scenario copy
 
 Each scenario setting modal opens with a short intro paragraph: Retirement age,

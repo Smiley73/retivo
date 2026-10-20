@@ -13,6 +13,9 @@ export const AUDIT_MAX_ENTRIES = 200;
 /** Largest result (UTF-8 bytes) kept verbatim on an entry; a larger one keeps only its size. */
 export const AUDIT_MAX_PAYLOAD_BYTES = 64 * 1024;
 
+/** The arguments the bridge sent, as JSON text, are kept to this many characters; a longer one ends in an ellipsis. */
+export const AUDIT_MAX_ARGS_CHARS = 2_000;
+
 const MAX_SUMMARY_CHARS = 200;
 const MAX_SUMMARY_VALUE_CHARS = 40;
 
@@ -26,6 +29,8 @@ export interface AuditEntry {
   tool: string;
   /** Argument names with short scalar values; never nested content. */
   argsSummary: string;
+  /** The arguments as the bridge sent them, JSON text, capped at `AUDIT_MAX_ARGS_CHARS`. */
+  argsText: string;
   outcome: AuditOutcome;
   durationMs: number;
   /** UTF-8 size of the result the call produced. */
@@ -52,12 +57,23 @@ export function summarizeArgs(args: Record<string, unknown>): string {
   return parts.join(', ').slice(0, MAX_SUMMARY_CHARS);
 }
 
+function capArgsText(text: string): string {
+  const characters = Array.from(text);
+  return characters.length <= AUDIT_MAX_ARGS_CHARS ? text : `${characters.slice(0, AUDIT_MAX_ARGS_CHARS - 1).join('')}…`;
+}
+
 export class AuditLog {
   private list: readonly AuditEntry[] = [];
   private nextId = 1;
+  private droppedCount = 0;
 
   entries(): readonly AuditEntry[] {
     return this.list;
+  }
+
+  /** How many older entries the bound has pushed out since the log was last cleared. */
+  dropped(): number {
+    return this.droppedCount;
   }
 
   record(input: AuditInput): void {
@@ -66,14 +82,18 @@ export class AuditLog {
     const entry: AuditEntry = {
       ...rest,
       id: this.nextId,
+      argsText: capArgsText(rest.argsText),
       payload: fits ? payload : null,
       payloadTruncated: !fits,
     };
     this.nextId += 1;
-    this.list = [...this.list, entry].slice(-AUDIT_MAX_ENTRIES);
+    const next = [...this.list, entry];
+    this.droppedCount += Math.max(0, next.length - AUDIT_MAX_ENTRIES);
+    this.list = next.slice(-AUDIT_MAX_ENTRIES);
   }
 
   clear(): void {
+    this.droppedCount = 0;
     if (this.list.length > 0) this.list = [];
   }
 }

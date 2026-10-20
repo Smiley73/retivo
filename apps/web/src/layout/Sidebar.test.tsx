@@ -34,7 +34,14 @@ vi.mock('../contexts/BetaFeaturesContext', () => ({
     isBetaFeatureVisible: () => mockBetaVisible,
   }),
 }));
+// The assistant session the connected indicator reads; `null` is the no-session shell.
+const assistantMock = vi.hoisted(() => ({ value: null as unknown }));
+vi.mock('../assistant/AssistantContext', () => ({
+  useOptionalAssistant: () => assistantMock.value,
+  useAssistant: () => assistantMock.value,
+}));
 import { useAuth } from '../auth/AuthContext';
+import { assistantValue } from '../test/assistant-context';
 import { useSync } from '../sync/SyncContext';
 import { Sidebar } from './Sidebar';
 
@@ -67,6 +74,7 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockBetaVisible = true;
+    assistantMock.value = null;
   });
 
   afterEach(async () => {
@@ -398,5 +406,34 @@ describe('Sidebar', () => {
     expect(
       screen.getByRole('button', { name: 'Workspace' }),
     ).toHaveAttribute('aria-current', 'page');
+  });
+
+  describe('assistant indicator', () => {
+    it('adds nothing without a session', () => {
+      renderSidebar();
+      expect(screen.queryByRole('button', { name: 'Disconnect assistant' })).not.toBeInTheDocument();
+    });
+
+    it('shows beside the sync badge in the desktop column', () => {
+      assistantMock.value = assistantValue();
+      renderSidebar();
+      expect(screen.getByRole('button', { name: /^Assistant connected, reported as Claude Code/ })).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'Disconnect assistant' })).toHaveLength(1);
+    });
+
+    it('is left out of the mobile drawer', () => {
+      assistantMock.value = assistantValue();
+      renderSidebar('/dashboard', { drawer: true });
+      expect(screen.queryByRole('button', { name: 'Disconnect assistant' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Assistant connected/ })).not.toBeInTheDocument();
+    });
+
+    it('moves focus to the first navigation button when Disconnect is pressed', async () => {
+      const user = userEvent.setup();
+      assistantMock.value = assistantValue();
+      renderSidebar();
+      await user.click(screen.getByRole('button', { name: 'Disconnect assistant' }));
+      expect(screen.getByRole('button', { name: 'Dashboard' })).toHaveFocus();
+    });
   });
 });
