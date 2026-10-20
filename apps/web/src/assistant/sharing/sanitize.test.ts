@@ -56,6 +56,22 @@ describe('sanitizers', () => {
     expect(sanitizeLabel('For 李', buildMasker(['李']))).toBe(`For ${MASK}`);
   });
 
+  it('masks a short term only as a whole word, so unrelated words survive', () => {
+    expect(sanitizeLabel('Sam S. Savings', buildMasker(['S']))).toBe(`Sam ${MASK}. Savings`);
+    expect(sanitizeLabel('Savings Schwab', buildMasker(['S']))).toBe('Savings Schwab');
+    expect(sanitizeFreeText('Savings, buying and Ng-led plans', buildMasker(['Ng']))).toBe(
+      `Savings, buying and ${MASK}-led plans`,
+    );
+    expect(sanitizeLabel('Annual dues, Ann and ANN.', buildMasker(['Ann']))).toBe(`Annual dues, ${MASK} and ${MASK}.`);
+    expect(sanitizeLabel('Dollar figures are exact.', buildMasker(['S', 'Ng', 'Ann']))).toBe('Dollar figures are exact.');
+  });
+
+  it('still masks a longer term inside a word and a short CJK term anywhere', () => {
+    expect(sanitizeLabel('TheSmithFamily trust', buildMasker(['Smith']))).toBe(`The${MASK}Family trust`);
+    expect(sanitizeLabel('Smithfield', buildMasker(['Smith']))).toBe(`${MASK}field`);
+    expect(sanitizeLabel('李先生的账户', buildMasker(['李']))).toBe(`${MASK}先生的账户`);
+  });
+
   it('leaves empty text empty', () => {
     expect(sanitizeLabel('', EMPTY_MASKER)).toBe('');
     expect(sanitizeFreeText('   \n ', EMPTY_MASKER)).toBe('');

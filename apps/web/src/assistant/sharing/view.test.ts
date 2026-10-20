@@ -189,6 +189,27 @@ describe('never-shareable fields', () => {
     expect(text).not.toContain('k@x.example');
   });
 
+  it('leave unrelated text alone when a last name or first name is short', () => {
+    const accounts = [
+      aggregate('account', 'acct-1', {
+        name: 'Savings',
+        type: 'SAVINGS',
+        institution: 'Schwab',
+        notes: 'Emergency fund, keep 6 months of expenses; Annual dues',
+      }),
+    ];
+    const expenses = [aggregate('expense', 'exp-1', { name: 'Groceries' })];
+    const members = [aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'Ann', lastName: 'S', email: 'sam@x.example' })];
+    const result = view(choicesWith({ firstNames: false }), { households: [], members, accounts, expenses });
+    expect(result.accounts![0]).toMatchObject({
+      name: 'Savings',
+      institution: 'Schwab',
+      notes: 'Emergency fund, keep 6 months of expenses; Annual dues',
+    });
+    expect(result.expenses!.items[0]).toMatchObject({ name: 'Groceries' });
+    expect(result.rounding.statement).not.toContain(MASK);
+  });
+
   it('are not reachable through a field the maps do not list', () => {
     const extra: ShareSource = {
       ...source,
