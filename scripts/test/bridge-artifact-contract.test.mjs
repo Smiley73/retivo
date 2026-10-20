@@ -16,10 +16,13 @@
 //     answers an MCP `initialize` and `tools/list` over stdio with the manifest's
 //     version and exactly the protocol registry's tools, and exits 0 when stdin
 //     closes. That run is the only proof the embedding is complete;
-//   - every embedded package is the version the workspace resolved and the
+//   - every package esbuild bundled is the version the workspace resolved and the
 //     lockfile pins, and the two optional `ws` natives are not embedded;
 //   - the notices name every embedded package with its license and copyright,
-//     and the set equals the bundler's own package set;
+//     and the set equals the bundler's own package set. The SDK's dist ships
+//     ajv, fast-uri and others already bundled, invisible to esbuild's metafile,
+//     so the set is also checked against the SDK chunks' own source maps, an
+//     inventory the bundler's code did not produce;
 //   - `npm pack --dry-run` of the artifact lists exactly the allowlisted files
 //     and a manifest with no dependencies and no install scripts.
 //
@@ -31,7 +34,7 @@
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -47,6 +50,8 @@ const RUN_TIMEOUT_MS = 20_000;
 // Twice the first measured size (1.54 MB). Raise it only with a reason in the PR.
 const MAX_BUNDLE_BYTES = 3_100_000;
 const OPTIONAL_NATIVES = ['bufferutil', 'utf-8-validate'];
+// `node_modules/.pnpm/<name>@<version>[_peers]/node_modules/<name>/` inside a source map's `sources`.
+const STORE_SOURCE = /node_modules\/\.pnpm\/([^/]+)\/node_modules\/((?:@[^/]+\/)?[^/]+)\//;
 
 const RUN = process.env.RUN_CONTRACT_TESTS === '1';
 
@@ -60,6 +65,30 @@ function freePort() {
       server.close(() => resolvePort(port));
     });
   });
+}
+
+/**
+ * Every `name@version` the bundled files' own source maps say they were built from, for the inputs that
+ * reach the output. Independent of the bundler's code: it reads what the dependencies recorded.
+ */
+function packagesFromSourceMaps(metafile) {
+  const found = new Set();
+  const inputs = new Set(
+    Object.values(metafile.outputs).flatMap((output) =>
+      Object.entries(output.inputs).filter(([, { bytesInOutput }]) => bytesInOutput > 0).map(([input]) => input),
+    ),
+  );
+  for (const input of inputs) {
+    const mapFile = resolve(BRIDGE_ROOT, `${input}.map`);
+    if (!existsSync(mapFile)) continue;
+    for (const source of JSON.parse(readFileSync(mapFile, 'utf8')).sources) {
+      const match = STORE_SOURCE.exec(source);
+      if (match === null) continue;
+      const [, entry, name] = match;
+      found.add(`${name}@${entry.slice(name.replace('/', '+').length + 1).split('_')[0]}`);
+    }
+  }
+  return found;
 }
 
 /**
@@ -167,28 +196,33 @@ describe(
       }
     });
 
-    test('every embedded package is the version the workspace resolved and the lockfile pins', () => {
+    test('every package esbuild bundled is the version the workspace resolved and the lockfile pins', () => {
       const lockfile = readFileSync(join(REPO_ROOT, 'pnpm-lock.yaml'), 'utf8').split('\n').map((line) => line.trim());
       assert.ok(embedded.size > 0);
-      for (const [name, dir] of embedded) {
-        const { version } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
-        // The metafile path names the pnpm store entry, `<name>@<version>`, the build embedded.
-        const storeEntry = `${name.replace('/', '+')}@${version}`;
-        assert.ok(dir.includes(storeEntry), `${name}: ${dir} is not the ${version} store entry`);
+      for (const { name, version, dir, via } of embedded.values()) {
+        if (dir !== null) {
+          // The metafile path names the pnpm store entry, `<name>@<version>`, the build embedded.
+          assert.ok(dir.includes(`${name.replace('/', '+')}@${version}`), `${name}: ${dir} is not the ${version} store entry`);
+        }
+        // A package the SDK ships pre-bundled is whatever that SDK release carries; the workspace's
+        // lockfile does not decide it.
+        if (via !== null) continue;
         assert.ok(
           lockfile.some((line) => line === `${name}@${version}:` || line === `'${name}@${version}':`),
           `${name}@${version} is not pinned in pnpm-lock.yaml`,
         );
       }
       for (const direct of ['@modelcontextprotocol/server', 'ws']) {
-        const { version } = JSON.parse(readFileSync(join(embedded.get(direct), 'package.json'), 'utf8'));
-        assert.equal(version, manifest.devDependencies[direct], `${direct} embedded at ${version}`);
+        assert.ok(
+          embedded.has(`${direct}@${manifest.devDependencies[direct]}`),
+          `${direct} is not embedded at ${manifest.devDependencies[direct]}`,
+        );
       }
     });
 
     test('the optional ws natives are neither embedded nor bundled', () => {
       for (const native of OPTIONAL_NATIVES) {
-        assert.ok(!embedded.has(native), `${native} is embedded`);
+        assert.ok(![...embedded.values()].some(({ name }) => name === native), `${native} is embedded`);
         assert.ok(
           !Object.keys(metafile.inputs).some((input) => input.includes(`node_modules/${native}/`)),
           `${native} appears among the bundle's inputs`,
@@ -206,8 +240,12 @@ describe(
         if (!/^(@[^/\s]+\/)?[^@\s]+@\d+\.\d+\.\d+\S*$/.test(heading)) continue;
         headed.set(heading, lines.slice(1));
       }
-      const expected = [...embedded].map(([name, dir]) => `${name}@${JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version}`);
-      assert.deepEqual([...headed.keys()].sort(), expected.sort());
+      assert.deepEqual([...headed.keys()].sort(), [...embedded.keys()].sort());
+      // The packages the SDK ships pre-bundled (ajv, fast-uri, ...) must be there too: the source maps
+      // of the chunks that reach the output are an inventory the notices generator did not make.
+      const fromMaps = packagesFromSourceMaps(metafile);
+      assert.ok(fromMaps.size > 0, 'the SDK chunks carry source maps to inventory');
+      for (const key of fromMaps) assert.ok(headed.has(key), `${key} is embedded in the bundle but missing from the notices`);
       for (const [heading, lines] of headed) {
         assert.ok(lines.some((line) => /^License: \S+/.test(line)), `${heading} has no license identifier`);
         assert.ok(lines.some((line) => /^Copyright: .*\b(19|20)\d\d\b/.test(line)), `${heading} has no copyright line`);

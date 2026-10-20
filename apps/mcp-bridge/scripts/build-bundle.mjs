@@ -19,7 +19,14 @@
  *
  * The notices are generated from each embedded package's own package.json and
  * license files, never copied by hand, so a new transitive dependency gets its
- * notice or the build fails.
+ * notice or the build fails. Two kinds of package are embedded: those esbuild
+ * bundled from node_modules itself (ws, zod, the SDK), and those the SDK's dist
+ * already carries pre-bundled (ajv, fast-uri, ...), which esbuild's metafile
+ * cannot see and which are found through the `//#region` markers the SDK's
+ * bundler left in each chunk. Nothing is fetched: a pre-bundled package's text
+ * is read from the pnpm store entry it was bundled from; if that is not on disk
+ * the build fails naming the package, and a person supplies its package.json
+ * fields and license under third-party/ (see SUPPLIED_DIR).
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -33,6 +40,15 @@ export const BUNDLE_NAME = 'retivo-mcp-bridge.mjs';
 export const NOTICES_NAME = 'THIRD-PARTY-NOTICES.txt';
 const OPTIONAL_NATIVES = ['bufferutil', 'utf-8-validate'];
 const NODE_MODULES = 'node_modules/';
+// Where a person supplies the license of a pre-bundled package whose own files are not on disk:
+// third-party/<name>@<version>/ holding manifest.json ({ "license", "author" }, copied from that
+// version's package.json) and its LICENSE file, both copied from the published package.
+const SUPPLIED_DIR = resolve(bridgeRoot, 'third-party');
+const SUPPLIED_MANIFEST = 'manifest.json';
+const PNPM_STORE = 'node_modules/.pnpm/';
+// `//#region <path>` comments rolldown leaves in a pre-bundled chunk, one per original module.
+const REGION_PATH = /^\/\/#region (\S+)$/gm;
+const STORE_PACKAGE = /node_modules\/\.pnpm\/([^/]+)\/node_modules\/((?:@[^/]+\/)?[^/]+)\//;
 const LICENSE_FILE = /^(licen[cs]e|notice)(\.|$)/i;
 // A real notice names a year; that rules out Apache's own boilerplate ("Copyright notice that is
 // included in or attached to the work", "Copyright [yyyy] [name of copyright owner]").
@@ -49,12 +65,47 @@ function packageOf(inputPath, workingDir) {
   return { name, dir };
 }
 
-/** Every third-party package the metafile shows embedded, as `Map<name, dir>`. */
+/** The pnpm store entry `<name>@<version>[_peers]` → its version. */
+function versionOfStoreEntry(entry, name) {
+  return entry.slice(name.replace('/', '+').length + 1).split('_')[0];
+}
+
+/**
+ * Every third-party package the metafile shows embedded, as `Map<"name@version", { name, version, dir, via }>`.
+ * `dir` is the package on disk, or null when only its pre-bundled copy inside `via` (the package whose
+ * dist carries it) is there. Packages esbuild bundled itself come from the input paths; packages a
+ * dependency shipped pre-bundled come from the `//#region` markers in the chunks that reach the output.
+ */
 export function embeddedPackages(metafile, workingDir = bridgeRoot) {
   const found = new Map();
+  const add = (name, version, dir, via) => {
+    const key = `${name}@${version}`;
+    if (!found.has(key) || (found.get(key).dir === null && dir !== null)) found.set(key, { name, version, dir, via });
+  };
+  const inOutput = new Set(
+    Object.values(metafile.outputs).flatMap((output) =>
+      Object.entries(output.inputs)
+        .filter(([, { bytesInOutput }]) => bytesInOutput > 0)
+        .map(([input]) => input),
+    ),
+  );
   for (const input of Object.keys(metafile.inputs)) {
     const pkg = packageOf(input, workingDir);
-    if (pkg !== null) found.set(pkg.name, pkg.dir);
+    if (pkg === null) continue;
+    add(pkg.name, JSON.parse(readFileSync(join(pkg.dir, 'package.json'), 'utf8')).version, pkg.dir, null);
+    if (!inOutput.has(input)) continue;
+    const storeAt = input.lastIndexOf(PNPM_STORE);
+    if (storeAt === -1) continue;
+    const storeRoot = input.slice(0, storeAt + PNPM_STORE.length);
+    for (const [, region] of readFileSync(resolve(workingDir, input), 'utf8').matchAll(REGION_PATH)) {
+      const inner = STORE_PACKAGE.exec(region);
+      if (inner === null || inner[2] === pkg.name) continue;
+      const [, entry, name] = inner;
+      const version = versionOfStoreEntry(entry, name);
+      const dir = resolve(workingDir, storeRoot, entry, 'node_modules', name);
+      const onDisk = existsSync(join(dir, 'package.json')) && JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version === version;
+      add(name, version, onDisk ? dir : null, pkg.name);
+    }
   }
   return new Map([...found].sort(([a], [b]) => (a < b ? -1 : 1)));
 }
@@ -74,30 +125,44 @@ function authorOf(manifest) {
   return null;
 }
 
+/** Where to read `pkg`'s manifest fields and license files: the package itself, else what a person supplied. */
+function sourceOf({ name, version, dir, via }, suppliedDir) {
+  if (dir !== null) return { dir, manifestFile: 'package.json' };
+  const supplied = join(suppliedDir, `${name.replace('/', '+')}@${version}`);
+  if (existsSync(join(supplied, SUPPLIED_MANIFEST))) return { dir: supplied, manifestFile: SUPPLIED_MANIFEST };
+  throw new Error(
+    `${name}@${version} is embedded in the bundle (pre-bundled inside ${via}) but its package is not on disk, ` +
+      `so its license text is unavailable. Supply it: copy that version's license/author fields into ` +
+      `${join(supplied, SUPPLIED_MANIFEST)} and its LICENSE file beside it. Nothing is fetched.`,
+  );
+}
+
 /** The notice block for one package: identity, license id, copyright, and every license/NOTICE file in full. */
-function noticeFor(name, dir) {
-  const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+function noticeFor(pkg, suppliedDir) {
+  const { name, version } = pkg;
+  const { dir, manifestFile } = sourceOf(pkg, suppliedDir);
+  const manifest = JSON.parse(readFileSync(join(dir, manifestFile), 'utf8'));
   const license = typeof manifest.license === 'string' ? manifest.license : null;
-  if (license === null) throw new Error(`${name}@${manifest.version} declares no license in its package.json`);
+  if (license === null) throw new Error(`${name}@${version} declares no license in its ${manifestFile}`);
   const files = readdirSync(dir)
     .filter((file) => LICENSE_FILE.test(file))
     .sort()
     .map((file) => ({ file, text: readFileSync(join(dir, file), 'utf8').trimEnd() }));
-  if (files.length === 0) throw new Error(`${name}@${manifest.version} ships no license file; add its notice by hand`);
+  if (files.length === 0) throw new Error(`${name}@${version} ships no license file; add its notice by hand`);
   const copyright = [...new Set(files.flatMap(({ text }) => copyrightLines(text)))];
   const author = authorOf(manifest);
   if (copyright.length === 0 && author === null) {
-    throw new Error(`${name}@${manifest.version} names no copyright holder in its license files or its author field`);
+    throw new Error(`${name}@${version} names no copyright holder in its license files or its author field`);
   }
-  const lines = [RULE, `${name}@${manifest.version}`, `License: ${license}`];
+  const lines = [RULE, `${name}@${version}`, `License: ${license}`];
   if (copyright.length > 0) lines.push(...copyright.map((line) => `Copyright: ${line}`));
-  else lines.push(`Copyright: held by the author named in its package.json, ${author}`);
+  else lines.push(`Copyright: held by the author named in its ${manifestFile}, ${author}`);
   for (const { file, text } of files) lines.push(RULE, `${file}`, '', text);
   return lines.join('\n');
 }
 
-/** The whole notices file for the packages in `packages` (`Map<name, dir>`). */
-export function generateNotices(packages) {
+/** The whole notices file for the packages in `packages` (what `embeddedPackages` returns). */
+export function generateNotices(packages, suppliedDir = SUPPLIED_DIR) {
   const header = [
     'Third-party notices for retivo-mcp-bridge.mjs',
     '',
@@ -107,7 +172,7 @@ export function generateNotices(packages) {
     '',
     `Embedded packages (${packages.size}): ${[...packages.keys()].join(', ')}`,
   ].join('\n');
-  return [header, ...[...packages].map(([name, dir]) => noticeFor(name, dir))].join('\n\n') + '\n';
+  return [header, ...[...packages.values()].map((pkg) => noticeFor(pkg, suppliedDir))].join('\n\n') + '\n';
 }
 
 /** Bundles into `outDir`; returns the esbuild metafile. */
