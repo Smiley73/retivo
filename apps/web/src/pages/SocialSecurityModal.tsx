@@ -43,21 +43,23 @@ import type {
   SocialSecurityClaimAgeOverride,
 } from '../db/types';
 import { DEFAULT_COLA_PCT, DEFAULT_INFLATION_PCT } from '../db/types';
+import {
+  BENEFIT_REDUCTION_MAX,
+  BENEFIT_REDUCTION_MIN,
+  COLA_MAX,
+  COLA_MIN,
+  SS_CLAIM_MAX,
+  SS_CLAIM_MIN,
+} from '../lib/scenario-input-bounds';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 
-const BENEFIT_REDUCTION_MIN = 0;
-const BENEFIT_REDUCTION_MAX = 50;
 const BENEFIT_REDUCTION_STEP = 5;
-const COLA_MIN = 0;
-const COLA_MAX = 5;
 const COLA_STEP = 0.5;
 
-// SS claim age — US SSA legal range (62 = earliest, 70 = max delayed
-// retirement credits). Whole-year-only entry — `ageMonths`
+// SS claim age — US SSA legal range, bounds in `lib/scenario-input-bounds.ts`.
+// Whole-year-only entry — `ageMonths`
 // is always 0 going forward; pre-existing stored months collapse to
 // the nearest whole year on first paint via the formula below.
-const SS_CLAIM_MIN = 62;
-const SS_CLAIM_MAX = 70;
 const SS_CLAIM_STEP = 1;
 
 /** Shared collapse-and-clamp: round a `{ ageYears, ageMonths }`

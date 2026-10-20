@@ -722,7 +722,7 @@ enforces.
   but an assistant may still be swayed by it; that is the assistant's behaviour.
 - The connector relies on the browser's local-network prompt and on your own
   computer being free of other malware.
-- The tools are read-only; there is no write path.
+- The tools are read-only; there is no write path. The what-if tool builds its scenario in memory for the length of one call and writes nothing to storage, the sync queue or the Monte Carlo result cache, and the never-shared list is unchanged (`assistant/tools/what-if.ts` [`tools/what-if.test.ts`: the scenario store, its version, the change event, the result cache and the selected scenario are the same after a success and after each kind of failure]).
 - Only a browser that asks before a site reaches your computer is supported; Safari
   and browsers on an iPhone or iPad are not.
 

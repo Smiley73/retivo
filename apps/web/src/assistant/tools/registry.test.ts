@@ -17,9 +17,9 @@ describe('the tab’s handler map', () => {
     expect(handled.every((name) => registered.includes(name))).toBe(true);
     expect(registered.filter((name) => !handled.includes(name))).toEqual([]);
     expect([...handled].sort()).toEqual([...PLAN_TOOL_NAMES, ...ANALYSIS_TOOL_NAMES].sort());
-    expect(handled).toHaveLength(8);
+    expect(handled).toHaveLength(9);
     expect([...ANALYSIS_TOOL_NAMES].sort()).toEqual(
-      ['retivo_get_projection', 'retivo_get_stress_test', 'retivo_compare_scenarios', 'retivo_explain'].sort(),
+      ['retivo_get_projection', 'retivo_get_stress_test', 'retivo_compare_scenarios', 'retivo_explain', 'retivo_run_what_if'].sort(),
     );
   });
 
@@ -36,10 +36,15 @@ describe('the tab’s handler map', () => {
 describe('the stress test’s limits', () => {
   const entry = TOOL_REGISTRY.find((candidate) => candidate.name === 'retivo_get_stress_test')!;
 
-  it('is the only long-running tool, with a bridge timeout above the tab’s wall clock and inside the clamp', () => {
-    expect(TOOL_REGISTRY.filter((candidate) => candidate.longRunning).map((candidate) => candidate.name)).toEqual(['retivo_get_stress_test']);
+  it('is long-running with a bridge timeout above the tab’s wall clock and inside the clamp, and only the what-if tool shares it', () => {
+    expect(TOOL_REGISTRY.filter((candidate) => candidate.longRunning).map((candidate) => candidate.name)).toEqual([
+      'retivo_get_stress_test',
+      'retivo_run_what_if',
+    ]);
     expect(entry.timeoutMs).toBeGreaterThan(STRESS_TEST_WALL_CLOCK_MS);
     expect(entry.timeoutMs).toBeLessThanOrEqual(MAX_CALL_TIMEOUT_MS);
+    // The what-if can run the same simulation, so it gets the same allowance.
+    expect(TOOL_REGISTRY.find((candidate) => candidate.name === 'retivo_run_what_if')!.timeoutMs).toBe(entry.timeoutMs);
   });
 });
 

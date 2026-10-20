@@ -25,6 +25,12 @@ export const ANALYSIS_TEST_INPUTS: Readonly<Record<string, ReadonlyArray<Record<
     { scenarioId: NO_CONTRIB_ID, otherScenarioId: BASE_ID },
   ],
   retivo_explain: [...EXPLAIN_METRICS.map((metric) => ({ scenarioId: BASE_ID, metric })), { metric: 'ending_balance' }],
+  // No `stressTest: true`: the registry test has no worker to compute one.
+  retivo_run_what_if: [
+    { baseScenarioId: BASE_ID, overrides: {} },
+    { baseScenarioId: BASE_ID, overrides: { retirementAge: { primary: { ageYears: 62 } }, socialSecurity: { primary: { ageYears: 70 } } } },
+    { baseScenarioId: EARLY_ID, overrides: { inflation: { ratePct: 4 } }, fromYear: 2040, toYear: 2045 },
+  ],
 };
 
 /** A saved stress-test summary with distinctive figures, for tests that plant one in the cache. */

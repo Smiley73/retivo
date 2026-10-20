@@ -19,6 +19,7 @@ const ARGS: Record<string, Record<string, unknown>> = {
   retivo_get_stress_test: {},
   retivo_compare_scenarios: { scenarioId: 'demo-scenario-base', otherScenarioId: 'demo-scenario-early' },
   retivo_explain: { metric: 'ending_balance' },
+  retivo_run_what_if: { baseScenarioId: 'demo-scenario-base', overrides: { retirementAge: { primary: { ageYears: 62 } } } },
 };
 
 /** Every tool this version answers. The stress test reads a result planted below, so no call here builds a worker. */
@@ -89,6 +90,10 @@ describe('arguments', () => {
     ['retivo_compare_scenarios', { baseScenarioId: 'a', otherScenarioId: 'b' }],
     ['retivo_explain', {}],
     ['retivo_explain', { metric: 'success rate' }],
+    ['retivo_run_what_if', { overrides: {} }],
+    ['retivo_run_what_if', { baseScenarioId: 'demo-scenario-base', overrides: { expenses: { disabledIds: [] } } }],
+    ['retivo_run_what_if', { baseScenarioId: 'demo-scenario-base', overrides: { withdrawalStrategy: { kind: 'customOrder' } } }],
+    ['retivo_run_what_if', JSON.parse('{"baseScenarioId":"demo-scenario-base","overrides":{"accountReturns":{"perAccount":{"__proto__":{"planningReturnPct":5}}}}}')],
   ])('%s rejects %j as INVALID_ARGS before any read', async (tool, args) => {
     const reads = vi.spyOn(store, 'listAggregates');
     const { call } = harness();
@@ -103,6 +108,7 @@ describe('arguments', () => {
     ['retivo_compare_scenarios', { scenarioId: 'no-such-scenario-zz', otherScenarioId: 'demo-scenario-base' }],
     ['retivo_compare_scenarios', { scenarioId: 'demo-scenario-base', otherScenarioId: 'no-such-scenario-zz' }],
     ['retivo_explain', { scenarioId: 'no-such-scenario-zz', metric: 'plan_success' }],
+    ['retivo_run_what_if', { baseScenarioId: 'no-such-scenario-zz', overrides: {} }],
   ])('answers INVALID_ARGS for a scenario id that does not exist in %s, without echoing it', async (tool, args) => {
     const { call, settled } = harness();
     const result = await call(tool, args);

@@ -40,9 +40,17 @@ export interface StressTestOptions {
   pathCount?: number;
   /** Test-only: the wall clock. */
   wallClockMs?: number;
+  /** The runner to compute on, shared with another tool so the two count as one simulation at a time. */
+  runner?: StressRunner;
 }
 
-export function makeStressTestTool(options: StressTestOptions = {}) {
+/** Runs one simulation under the assistant's caps. Reads and writes no cache; the caller decides what to do with the result. */
+export interface StressRunner {
+  readonly pathCount: number;
+  run(input: MonteCarloInput, env: ToolEnv): Promise<MonteCarloSummary>;
+}
+
+export function makeStressRunner(options: Omit<StressTestOptions, 'runner'> = {}): StressRunner {
   const factory = options.workerFactory ?? ((): MinimalMcWorker => new MCWorker() as unknown as MinimalMcWorker);
   const pathCount = options.pathCount ?? MC_PATH_COUNT;
   const wallClockMs = options.wallClockMs ?? STRESS_TEST_WALL_CLOCK_MS;
@@ -101,14 +109,19 @@ export function makeStressTestTool(options: StressTestOptions = {}) {
     }
   }
 
+  return { pathCount, run: compute };
+}
+
+export function makeStressTestTool(options: StressTestOptions = {}) {
+  const runner = options.runner ?? makeStressRunner(options);
   return defineTool('retivo_get_stress_test', async (args, env) => {
     const scenarioId = resolveScenarioArg(args.scenarioId, env);
-    const input = monteCarloInputFor(scenarioId, env, pathCount);
+    const input = monteCarloInputFor(scenarioId, env, runner.pathCount);
     if (input === null) throw new ToolFailure('INVALID_ARGS', PROJECTION_UNAVAILABLE_MESSAGE);
 
     const cached = await peekSummary(input);
     const source = cached === null ? 'computed' : 'cache';
-    const summary = cached ?? (await compute(input, env));
+    const summary = cached ?? (await runner.run(input, env));
     return {
       data: {
         scenarioId,
@@ -125,4 +138,7 @@ export function makeStressTestTool(options: StressTestOptions = {}) {
   });
 }
 
-export const retivoGetStressTest = makeStressTestTool();
+/** The one runner the shipped stress-test and what-if tools compute on, so a call to either counts against the same single slot. */
+export const stressRunner = makeStressRunner();
+
+export const retivoGetStressTest = makeStressTestTool({ runner: stressRunner });

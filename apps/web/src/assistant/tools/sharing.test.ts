@@ -33,6 +33,11 @@ const CALLS: ReadonlyArray<{ tool: string; args: Record<string, unknown> }> = [
   { tool: 'retivo_get_stress_test', args: {} },
   { tool: 'retivo_compare_scenarios', args: { scenarioId: 'demo-scenario-base', otherScenarioId: SCENARIO_SENTINEL_ID } },
   { tool: 'retivo_explain', args: { scenarioId: SCENARIO_SENTINEL_ID, metric: 'ending_balance' } },
+  // Its echo names the account whose return it changes, and the base scenario by name.
+  {
+    tool: 'retivo_run_what_if',
+    args: { baseScenarioId: SCENARIO_SENTINEL_ID, overrides: { accountReturns: { perAccount: { 'demo-account-john-401k': { planningReturnPct: 4 } } } } },
+  },
 ];
 
 const VARIANTS: ReadonlyArray<{ label: string; choices: SharingChoices }> = [
@@ -84,8 +89,8 @@ describe.each(CALLS)('$tool', ({ tool, args }) => {
     const text = JSON.stringify(result);
     const lower = text.toLowerCase();
     for (const [name, sentinel] of Object.entries(NEVER_SHAREABLE)) expect(lower.includes(sentinel.toLowerCase()), name).toBe(false);
-    for (const { token, requires, tools } of CATEGORY_SENTINELS) {
-      const expected = tools.includes(tool) && requires.every((id) => choices[id]);
+    for (const { token, requires, tools, toolRequires } of CATEGORY_SENTINELS) {
+      const expected = tools.includes(tool) && [...requires, ...(toolRequires?.[tool] ?? [])].every((id) => choices[id]);
       expect(text.includes(token), `${token} with ${requires.join('+')}`).toBe(expected);
     }
   });

@@ -9,6 +9,7 @@ import { TOOL_REGISTRY, failureResult, type ErrorCode, type ToolResult } from '@
 import { ZodError } from 'zod';
 import { CbpUnconfiguredError, NoPrimaryRetirementError } from '../../lib/balance-projection-runner';
 import { friendlyProjectionErrorMessage } from '../../lib/tax-integration';
+import { dangerousKeyMessage, invalidArgsMessage } from '../args-issue';
 import type { ToolCallContext, ToolHandler } from '../dispatcher';
 import type { ShareView } from '../sharing/view';
 import { maskTermsFor } from '../sharing/view';
@@ -81,7 +82,7 @@ function failureFor(tool: string, error: unknown): ToolResult {
   if (error instanceof NoPrimaryRetirementError || error instanceof CbpUnconfiguredError) {
     return failureResult('INVALID_ARGS', friendlyProjectionErrorMessage(error) ?? PROJECTION_UNAVAILABLE_MESSAGE);
   }
-  if (error instanceof ZodError) return failureResult('INVALID_ARGS', `The arguments for ${tool} are not valid.`);
+  if (error instanceof ZodError) return failureResult('INVALID_ARGS', invalidArgsMessage(tool, error));
   return failureResult('INTERNAL', `${tool} failed unexpectedly.`);
 }
 
@@ -90,6 +91,8 @@ export function toHandler(definition: ToolDefinition): ToolHandler {
   if (entry === undefined) throw new Error(`${definition.name} is not a tool in the registry`);
   return async (rawArgs, context) => {
     try {
+      const dangerous = dangerousKeyMessage(definition.name, rawArgs);
+      if (dangerous !== null) throw new ToolArgsError(dangerous);
       const args = entry.inputSchema.parse(rawArgs) as Record<string, unknown>;
       const workspace = await loadWorkspace();
       const { choices } = context.share.consent;

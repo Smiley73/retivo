@@ -35,6 +35,15 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-20',
     kind: 'new',
+    title: 'Your AI assistant can try a what-if without saving it (beta)',
+    blurb:
+      'A connected assistant can now show how a change, such as retiring earlier or claiming ' +
+      'Social Security later, would turn out next to your scenario. The what-if is not saved: ' +
+      'it never appears on the Scenarios page, and you create the real scenario yourself.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'new',
     title: 'Your AI assistant can run the projection and the stress test (beta)',
     blurb:
       'A connected assistant can now read the Balance Projection numbers, the stress test, ' +

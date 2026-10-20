@@ -707,7 +707,7 @@ back and the exact text it sent. **Disconnect** ends the session at once; signin
 out, locking and reloading or closing the tab also end it, and a new
 connection needs a new code.
 
-**What the assistant can ask for today.** Eight read-only tools and one prompt:
+**What the assistant can ask for today.** Nine tools, none of which saves anything, and one prompt:
 
 - **Status**: whether the workspace is ready, the app build, the calculation
   version, the tax-table year, when your data last synced and which sharing
@@ -733,10 +733,29 @@ connection needs a new code.
 - **Explain**: where one headline number comes from: its value, the settings and
   defaults behind it, the assumptions and the page of the math documentation that
   describes it.
+- **Run a what-if**: tries a change on a scenario and shows the result beside
+  that scenario's, with the differences and exactly which values changed from
+  what. See below.
 - **Plan review** (a prompt, not a tool): a short checklist the assistant can use
   to review your plan. It starts with the status tool, never invents an input,
-  cites its assumptions, names the screen where you would make a change, and ends
-  with the not-advice reminder.
+  cites its assumptions, tries a what-if only from values you stated, names the
+  screen where you would make a change, and ends with the not-advice reminder.
+
+**What-ifs are not saved.** When you ask "what if I retire at 62 and claim Social
+Security at 70", the assistant can try it without creating anything. The what-if
+exists only for the length of that one request: it is not a scenario, it does not
+appear on the **Scenarios** page, and nothing is saved or synced, so a reload
+shows no trace of it. The answer lists every value that changed and what it was
+before. It can try the retirement age, the Social Security claim age, benefit cut
+and cost-of-living adjustment, life expectancy, the inflation rate, discretionary
+spending, spending guardrails, stopping contributions, an account's planned
+return and the withdrawal strategy, and nothing else: not expenses, income,
+filing, Roth conversions or health coverage. A value outside the range the
+scenario editors accept is refused rather than adjusted. It can also run the
+stress test for the what-if, which takes up to a minute and is not saved either.
+To keep a what-if, create it yourself: **Planning**, **Scenarios**, **Create
+scenario**, with the scenario it started from as the parent, then set the same
+values. The assistant cannot do that for you.
 
 Every answer repeats what was left out, how amounts were rounded, which tax-table
 year and calculation version it rests on, and that the figures are illustrative

@@ -7,6 +7,7 @@
  * person's choice. Nothing is written.
  */
 import type { ProjectionMethod } from '@retirement/assistant-protocol';
+import type { PageDrawdownMethodResult, RunBalanceProjectionPageResult } from '../../lib/balance-projection-runner';
 import type { DrawdownYear } from '../../lib/drawdown-engine';
 import { realDeflatorAt } from '../../lib/projection-context';
 import { defineTool, ToolArgsError } from './define';
@@ -57,6 +58,19 @@ function rowOf(year: DrawdownYear, deflator: number, dollars: (value: number | n
   };
 }
 
+/** The rows of `slice` between `from` and `to` (either may be open), in the shape the projection tool returns. */
+export function projectionRows(
+  pageResult: RunBalanceProjectionPageResult,
+  slice: PageDrawdownMethodResult,
+  from: number | undefined,
+  to: number | undefined,
+  dollars: (value: number | null | undefined) => number | null,
+) {
+  return slice.years
+    .filter((year) => (from === undefined || year.year >= from) && (to === undefined || year.year <= to))
+    .map((year) => rowOf(year, realDeflatorAt(pageResult.sharedCtx.ctx, year.year, 11), dollars));
+}
+
 export const retivoGetProjection = defineTool('retivo_get_projection', (args, env) => {
   const scenarioId = resolveScenarioArg(args.scenarioId, env);
   const method: ProjectionMethod = args.method === 'historical' ? 'historical' : 'planned';
@@ -75,9 +89,7 @@ export const retivoGetProjection = defineTool('retivo_get_projection', (args, en
 
   const dollars = dollarsFor(env);
   const headline = headlineOf(pageResult, method);
-  const rows = slice.years
-    .filter((year) => (from === undefined || year.year >= from) && (to === undefined || year.year <= to))
-    .map((year) => rowOf(year, realDeflatorAt(pageResult.sharedCtx.ctx, year.year, 11), dollars));
+  const rows = projectionRows(pageResult, slice, from, to, dollars);
   return {
     data: {
       scenarioId,

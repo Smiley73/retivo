@@ -23,6 +23,7 @@ import {
   type ToolEntry,
   type ToolResult,
 } from '@retirement/assistant-protocol';
+import { dangerousKeyMessage, invalidArgsMessage } from './args-issue';
 import { summarizeArgs, type AuditOutcome } from './audit-log';
 import type { ConsentRecord } from './sharing/consent';
 import { buildShareView, type ShareSource, type ShareView } from './sharing/view';
@@ -151,10 +152,14 @@ export class CallDispatcher {
       immediate(toolNotSupported(frame.tool, this.options.appBuildId));
       return true;
     }
+    const dangerous = dangerousKeyMessage(frame.tool, frame.args);
+    if (dangerous !== null) {
+      immediate(failureResult('INVALID_ARGS', dangerous));
+      return true;
+    }
     const parsed = entry.inputSchema.safeParse(frame.args);
     if (!parsed.success) {
-      const path = parsed.error.issues[0]?.path.join('.') ?? '';
-      immediate(failureResult('INVALID_ARGS', `The arguments for ${frame.tool} are not valid (at "${path}").`));
+      immediate(failureResult('INVALID_ARGS', invalidArgsMessage(frame.tool, parsed.error)));
       return true;
     }
 

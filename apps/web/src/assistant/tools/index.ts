@@ -6,7 +6,8 @@
  * walk and the size cap are not something a tool opts into.
  *
  * The plan and status tools read what the person recorded; the analysis tools
- * run what the Balance Projection page runs. Neither kind writes anything.
+ * run what the Balance Projection page runs, and the what-if tool runs it on a
+ * throwaway scenario that is never stored. None of them writes anything.
  */
 import type { ToolHandler } from '../dispatcher';
 import { retivoCompareScenarios } from './compare-scenarios';
@@ -18,13 +19,14 @@ import { retivoGetScenario } from './get-scenario';
 import { retivoGetStressTest } from './stress-test';
 import { retivoListScenarios } from './list-scenarios';
 import { retivoStatus } from './status';
+import { retivoRunWhatIf } from './what-if';
 
 const PLAN_DEFINITIONS: readonly ToolDefinition[] = [retivoStatus, retivoGetPlanData, retivoListScenarios, retivoGetScenario];
-const ANALYSIS_DEFINITIONS: readonly ToolDefinition[] = [retivoGetProjection, retivoGetStressTest, retivoCompareScenarios, retivoExplain];
+const ANALYSIS_DEFINITIONS: readonly ToolDefinition[] = [retivoGetProjection, retivoGetStressTest, retivoCompareScenarios, retivoExplain, retivoRunWhatIf];
 
 /** The plan and status tools this version answers. */
 export const PLAN_TOOL_NAMES: readonly string[] = PLAN_DEFINITIONS.map((definition) => definition.name);
-/** The projection, stress-test, compare and explain tools this version answers. */
+/** The projection, stress-test, compare, explain and what-if tools this version answers. */
 export const ANALYSIS_TOOL_NAMES: readonly string[] = ANALYSIS_DEFINITIONS.map((definition) => definition.name);
 
 export function planToolHandlers(): Map<string, ToolHandler> {
