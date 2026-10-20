@@ -48,8 +48,12 @@ describe('sanitizers', () => {
     expect(sanitizeLabel('a.b+c axbbc', masker)).toBe(`${MASK} axbbc`);
   });
 
-  it('ignores terms too short to mask without shredding words', () => {
-    expect(buildMasker(['x', ' ', '']).pattern).toBeNull();
+  it('ignores terms that are empty once cleaned', () => {
+    expect(buildMasker([' ', '', '\u200B']).pattern).toBeNull();
+  });
+
+  it('masks a single-character term', () => {
+    expect(sanitizeLabel('For 李', buildMasker(['李']))).toBe(`For ${MASK}`);
   });
 
   it('leaves empty text empty', () => {

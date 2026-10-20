@@ -4,7 +4,10 @@
  * out; this walks the result once more and removes any key that is never
  * shareable, and masks any literal occurrence of the terms a tool must not say.
  * If it ever changes something, a field map or a sanitizer let it through.
+ * Ids, enum values and scenario references are left alone: a masked fragment would
+ * break what they point at or name, and a single token cannot hold an email.
  */
+import { isStructuralToken } from './project';
 import { MASK, type Masker } from './sanitize';
 
 /** Key names that never appear in a share view, at any depth. */
@@ -21,7 +24,9 @@ export const FORBIDDEN_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 export function scrubValue(value: unknown, masker: Masker): unknown {
-  if (typeof value === 'string') return masker.pattern === null ? value : value.replace(masker.pattern, MASK);
+  if (typeof value === 'string') {
+    return masker.pattern === null || isStructuralToken(value) ? value : value.replace(masker.pattern, MASK);
+  }
   if (Array.isArray(value)) return (value as unknown[]).map((item) => scrubValue(item, masker));
   if (typeof value === 'object' && value !== null) {
     const entries: [string, unknown][] = [];

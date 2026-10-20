@@ -28,9 +28,6 @@ const LINE_BREAKS = /[\t\n\r\f\v\u0085\u2028\u2029]/g;
  */
 const INVISIBLE = /[\u0000-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\uFFF9-\uFFFB]/g;
 
-/** Terms shorter than this are not masked: a single letter would shred every word. */
-const MIN_NAME_MASK_CHARS = 2;
-
 /** Compiled masker for a set of literal terms. */
 export interface Masker {
   readonly terms: readonly string[];
@@ -50,7 +47,7 @@ export function buildMasker(rawTerms: readonly string[]): Masker {
   const cleaned = new Set<string>();
   for (const raw of rawTerms) {
     const term = cleanText(raw);
-    if (term.length >= MIN_NAME_MASK_CHARS) cleaned.add(term.toLowerCase());
+    if (term !== '') cleaned.add(term.toLowerCase());
   }
   const terms = [...cleaned].sort((a, b) => b.length - a.length);
   const pattern = terms.length === 0 ? null : new RegExp(terms.map(escapeRegExp).join('|'), 'giu');

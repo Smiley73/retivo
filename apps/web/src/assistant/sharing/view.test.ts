@@ -167,6 +167,28 @@ describe('never-shareable fields', () => {
     expect(text).not.toContain('q@x.example');
   });
 
+  it('leave ids, enum values and withheld switch names intact when a last name is a fragment of them', () => {
+    const baseline = json(view(choicesWith({ balances: false })));
+    expect(baseline).toContain('lifetime');
+    for (const surname of ['Li', 'An', 'Lo', 'Abe', 'Dee']) {
+      const members = (source.members ?? []).map((member) => ({ ...member, payload: { ...member.payload, lastName: surname } }));
+      const result = view(choicesWith({ balances: false }), { ...source, members });
+      const text = json(result);
+      expect(result.withheld, surname).toEqual(['balances']);
+      expect(text, surname).toContain('lifetime');
+      for (const account of source.accounts ?? []) expect(text, surname).toContain(`"id":"${account.id}"`);
+      for (const member of source.members ?? []) expect(text, surname).toContain(`"id":"${member.id}"`);
+    }
+  });
+
+  it('masks a single-character last name in prose', () => {
+    const note = aggregate('account', 'acct-1', { name: 'Checking', type: 'SAVINGS', notes: 'For 李; contact k@x.example' });
+    const members = [aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'Kai', lastName: '李', email: 'k@x.example' })];
+    const text = json(view(defaultSharingChoices(), { ...source, members, accounts: [note] }));
+    expect(text).not.toContain('李');
+    expect(text).not.toContain('k@x.example');
+  });
+
   it('are not reachable through a field the maps do not list', () => {
     const extra: ShareSource = {
       ...source,

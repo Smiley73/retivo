@@ -30,6 +30,11 @@ export function isOpaqueId(value: unknown): value is string {
   return typeof value === 'string' && ID_PATTERN.test(value) && !DANGEROUS_CATEGORY_RATE_KEYS.has(value);
 }
 
+/** A string shaped like an opaque id or an enum token: no spaces, no `@`, so never prose and never an email. */
+export function isStructuralToken(value: string): boolean {
+  return ID_PATTERN.test(value) || ENUM_PATTERN.test(value);
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const prototype: unknown = Object.getPrototypeOf(value);
