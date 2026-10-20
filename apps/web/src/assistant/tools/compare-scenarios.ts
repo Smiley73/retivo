@@ -109,7 +109,7 @@ function relationOf(scenarioId: string, otherId: string, env: ToolEnv): Relation
 }
 
 /** `scenario - other` when both exist, else `null` (one side has no such figure). */
-function signedDifference(scenario: number | null, other: number | null, round: (value: number | null) => number | null): number | null {
+export function signedDifference(scenario: number | null, other: number | null, round: (value: number | null) => number | null): number | null {
   if (scenario === null || other === null) return null;
   return round(scenario - other);
 }

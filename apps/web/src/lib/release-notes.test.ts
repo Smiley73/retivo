@@ -51,9 +51,13 @@ describe('release notes', () => {
     }
   });
 
-  it('holds the AI assistant analysis announcement, the assistant announcement, then the open-source one', () => {
-    expect(RELEASE_NOTES).toHaveLength(3);
-    const [analysis, assistant, openSource] = RELEASE_NOTES as [ReleaseNote, ReleaseNote, ReleaseNote];
+  it('holds the AI assistant what-if announcement, the analysis one, the assistant one, then the open-source one', () => {
+    expect(RELEASE_NOTES).toHaveLength(4);
+    const [whatIf, analysis, assistant, openSource] = RELEASE_NOTES as [ReleaseNote, ReleaseNote, ReleaseNote, ReleaseNote];
+    expect(whatIf.kind).toBe('new');
+    expect(whatIf.title).toBe('Your AI assistant can try a what-if without saving it (beta)');
+    expect(whatIf.blurb).toMatch(/not saved/i);
+    expect(whatIf.blurb).toMatch(/Scenarios page/);
     expect(analysis.kind).toBe('new');
     expect(analysis.title).toBe('Your AI assistant can run the projection and the stress test (beta)');
     expect(analysis.blurb).toMatch(/stress test/i);

@@ -20,6 +20,24 @@ import {
   resolveScenario,
 } from '../lib/scenario-resolution';
 import { isGuardrailConfigValid } from '../lib/guardrails';
+import {
+  ADJUSTMENT_MAX,
+  ADJUSTMENT_MIN,
+  DURATION_MAX,
+  DURATION_MIN,
+  GUARDRAIL_DISCRETIONARY_FLOOR_MAX,
+  GUARDRAIL_DISCRETIONARY_FLOOR_MIN,
+  GUARDRAIL_LOWER_BAND_MAX,
+  GUARDRAIL_LOWER_BAND_MIN,
+  GUARDRAIL_MAX_RAISE_MAX,
+  GUARDRAIL_MAX_RAISE_MIN,
+  GUARDRAIL_STEP_MAX,
+  GUARDRAIL_STEP_MIN,
+  GUARDRAIL_UPPER_BAND_MAX,
+  GUARDRAIL_UPPER_BAND_MIN,
+  LIFE_MAX,
+  LIFE_MIN,
+} from '../lib/scenario-input-bounds';
 import { medicalCategoryIdSet } from '../lib/expense-category-resolvers';
 import { Alert } from '../components/Alert';
 import {
@@ -35,7 +53,6 @@ import {
   DEFAULT_DOWNTURN_GUARDRAILS,
   DEFAULT_LIFE_EXPECTANCY_AGE,
   DEFAULT_MEDICAL_INFLATION_SPREAD_PCT,
-  MAX_AGE,
   type DiscretionarySpendingOverride,
   type DownturnGuardrailsOverride,
   type HouseholdMemberPayload,
@@ -59,8 +76,6 @@ function capitaliseFirst(s: string): string {
 
 // ---------- Life Expectancy ----------
 
-const LIFE_MIN = 60;
-const LIFE_MAX = MAX_AGE;
 const LIFE_STEP = 5;
 
 interface LifeExpectancyCardProps {
@@ -384,11 +399,7 @@ interface DiscretionaryModalProps {
   onClose: (saved: boolean) => void;
 }
 
-const ADJUSTMENT_MIN = -100;
-const ADJUSTMENT_MAX = 100;
 const ADJUSTMENT_STEP = 5;
-const DURATION_MIN = 1;
-const DURATION_MAX = 50;
 const DURATION_STEP = 1;
 
 export const DiscretionaryAdjustmentModal: React.FC<DiscretionaryModalProps> = ({
@@ -571,19 +582,9 @@ interface GuardrailsModalProps {
 // actually allows (0 ≤ lowerBandPct < upperBandPct, 0 < stepPct ≤ 100,
 // maxRaisePct ≥ 100); a wider raw text field is unnecessary since a band/step/
 // cap outside these ranges is not a realistic planning choice.
-const GUARDRAIL_LOWER_BAND_MIN = 50;
-const GUARDRAIL_LOWER_BAND_MAX = 100;
-const GUARDRAIL_UPPER_BAND_MIN = 100;
-const GUARDRAIL_UPPER_BAND_MAX = 150;
-const GUARDRAIL_STEP_MIN = 1;
-const GUARDRAIL_STEP_MAX = 50;
-const GUARDRAIL_MAX_RAISE_MIN = 100;
-const GUARDRAIL_MAX_RAISE_MAX = 200;
 const GUARDRAIL_MAX_RAISE_STEP = 5;
 // Discretionary floor: 0 = trim all discretionary in a deep downturn (essentials
 // still never cut), 100 = protect discretionary entirely. Full [0, 100] range.
-const GUARDRAIL_DISCRETIONARY_FLOOR_MIN = 0;
-const GUARDRAIL_DISCRETIONARY_FLOOR_MAX = 100;
 const GUARDRAIL_DISCRETIONARY_FLOOR_STEP = 5;
 
 const formatGuardrailPct = (v: number): string => `${v}%`;

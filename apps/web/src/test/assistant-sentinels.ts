@@ -35,6 +35,8 @@ export interface CategorySentinel {
   requires: readonly SharingSwitchId[];
   /** Tools whose result carries the field the token sits in, under the demo workspace. */
   tools: readonly string[];
+  /** Switches a tool needs on beyond `requires`, because the tool as a whole is gated by them. */
+  toolRequires?: Readonly<Record<string, readonly SharingSwitchId[]>>;
 }
 
 const PLAN = 'retivo_get_plan_data';
@@ -42,11 +44,13 @@ const SCENARIO = 'retivo_get_scenario';
 const LIST = 'retivo_list_scenarios';
 const COMPARE = 'retivo_compare_scenarios';
 const EXPLAIN = 'retivo_explain';
+const WHAT_IF = 'retivo_run_what_if';
 
 export const CATEGORY_SENTINELS: readonly CategorySentinel[] = [
   { token: 'Zqprimaryfirst', requires: ['members', 'firstNames'], tools: [PLAN] },
   { token: 'Zqsecondfirst', requires: ['members', 'firstNames'], tools: [PLAN] },
-  { token: 'Zqacctname', requires: ['accounts'], tools: [PLAN] },
+  // The what-if tool names its base scenario, so it answers only while the scenarios switch is on.
+  { token: 'Zqacctname', requires: ['accounts'], tools: [PLAN, WHAT_IF], toolRequires: { [WHAT_IF]: ['scenarios'] } },
   { token: 'Zqinstitution', requires: ['accounts'], tools: [PLAN] },
   { token: 'Zqacctnote', requires: ['accounts', 'notes'], tools: [PLAN] },
   { token: 'Zqbalcomment', requires: ['balances', 'notes'], tools: [PLAN] },
@@ -56,7 +60,7 @@ export const CATEGORY_SENTINELS: readonly CategorySentinel[] = [
   { token: 'Zqexpdesc', requires: ['expenses', 'notes'], tools: [PLAN] },
   { token: 'Zqcatname', requires: ['expenses'], tools: [PLAN] },
   { token: 'Zqssnote', requires: ['socialSecurity', 'notes'], tools: [PLAN] },
-  { token: 'Zqscnname', requires: ['scenarios'], tools: [PLAN, LIST, SCENARIO, COMPARE, EXPLAIN] },
+  { token: 'Zqscnname', requires: ['scenarios'], tools: [PLAN, LIST, SCENARIO, COMPARE, EXPLAIN, WHAT_IF] },
   { token: 'Zqscndesc', requires: ['scenarios', 'notes'], tools: [PLAN, LIST, SCENARIO] },
   { token: 'Zqscnnote', requires: ['scenarios', 'notes'], tools: [PLAN, SCENARIO] },
   // Names inside the rows a scenario adds follow the scenarios switch and their own category's.
