@@ -34,6 +34,16 @@ export interface ReleaseNote {
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-20',
+    kind: 'improved',
+    title: 'Estimated Marketplace plan price now grows with medical inflation',
+    blurb:
+      'When you have not entered a benchmark plan price, the estimate now grows ' +
+      'every year after 2026 at your scenario\u2019s medical inflation rate, so ' +
+      'later-year health insurance subsidies are no longer overstated or understated. ' +
+      'A price you enter is still used exactly as entered.',
+  },
+  {
+    date: '2026-10-20',
     kind: 'new',
     title: 'Your AI assistant can try a what-if without saving it (beta)',
     blurb:

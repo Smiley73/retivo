@@ -33,6 +33,7 @@ import type {
   SocialSecurityBenefitPayload,
 } from '../db/types';
 import type { ScenarioAggregate } from './scenario-resolution';
+import { ROUGH_BENCHMARK_ASSUMPTIONS } from './aca-ptc';
 
 const HID = 'h1';
 
@@ -1584,6 +1585,18 @@ describe('buildReportData — health assumptions', () => {
     ).toBe(true);
     expect(
       health.disclosures.some((d) => /not a quote from an exchange/i.test(d)),
+    ).toBe(true);
+    // The estimate grows from its base year at the medical rate; an entered
+    // price is used as entered.
+    expect(
+      health.disclosures.some((d) =>
+        d.includes(
+          `From ${ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows every year at the scenario\u2019s medical inflation rate.`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      health.disclosures.some((d) => /benchmark plan price you entered is used exactly as entered/i.test(d)),
     ).toBe(true);
     expect(
       health.disclosures.some((d) => /base Medicare premium.*must be entered/i.test(d)),

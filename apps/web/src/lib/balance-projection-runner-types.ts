@@ -312,6 +312,9 @@ export interface PageSharedContext {
   readonly horizonYear: number;
   readonly ssStartYear: number;
   readonly methodAvailable: boolean;
+  /** The scenario's medical inflation rate (percent): the one rate every engine
+   *  grows the rough ACA benchmark at. `PipelineContext.medicalInflationRatePct`. */
+  readonly medicalInflationRatePct: number;
   /** Non-CBP accounts that lack an empirical TWR rate and so project
    *  on their planned rate inside the Historical view. Drives the inline
    *  disclosure note. Non-optional; `[]` when none fell back. */
@@ -533,6 +536,10 @@ export interface PipelineContext {
   /** Federal-poverty-level region for the ACA FPL denominator. Absent →
    *  `'contiguous'` (48 states + DC). */
   readonly acaFplRegion?: import('./aca-ptc').AcaFplRegion;
+  /** The scenario's medical inflation rate (percent), resolved once from the
+   *  scenario chain. Grows the rough ACA benchmark from its base year in every
+   *  engine; a user-entered benchmark is never scaled. */
+  readonly medicalInflationRatePct: number;
   /** QCD (Qualified Charitable Distributions): resolved + hardened per-member
    *  directives for the scenario — malformed / cross-owner /
    *  non-PRE_TAX-IRA / invalid-window entries already dropped, `start` clamped to

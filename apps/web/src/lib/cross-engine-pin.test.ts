@@ -491,8 +491,8 @@ describe('cross-engine pin — deterministic drawdown vs MC (builder-backed)', (
     assertSeriesEqual(runDrawdownSide(cfg), runMcSide(cfg));
   });
 
-  it('pins the Monte Carlo ENGINE_VERSION at 70 (Roth basis worked out from recorded history — both engines derive a person\u2019s own Roth IRA basis and remaining conversion lots from every non-deleted Roth IRA they own, and an employer Roth plan\u2019s basis is its recorded in-plan-rollover principal alone)', () => {
-    expect(ENGINE_VERSION).toBe(70);
+  it('pins the Monte Carlo ENGINE_VERSION at 71 (the rough ACA benchmark premium grows each year after 2026 at the scenario\u2019s medical inflation rate — both engines price a year\u2019s age-priced benchmark with the same growth factor)', () => {
+    expect(ENGINE_VERSION).toBe(71);
   });
 });
 

@@ -310,7 +310,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v34')).toBeNull();
   });
 
@@ -327,7 +327,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v34')).toBeNull();
   });
 
@@ -344,7 +344,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v35')).toBeNull();
   });
 
@@ -361,7 +361,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v37')).toBeNull();
   });
 
@@ -379,7 +379,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v41')).toBeNull();
   });
 
@@ -397,7 +397,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v43')).toBeNull();
   });
 
@@ -415,7 +415,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v44')).toBeNull();
   });
 
@@ -433,7 +433,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v45')).toBeNull();
   });
 
@@ -452,7 +452,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v46')).toBeNull();
   });
 
@@ -471,7 +471,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v47')).toBeNull();
   });
 
@@ -489,7 +489,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v49')).toBeNull();
   });
 
@@ -508,7 +508,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v50')).toBeNull();
   });
 
@@ -529,7 +529,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v51')).toBeNull();
   });
 
@@ -549,7 +549,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v52')).toBeNull();
   });
 
@@ -570,7 +570,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v52')).toBeNull();
   });
 
@@ -592,7 +592,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v53')).toBeNull();
   });
 
@@ -613,7 +613,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v56')).toBeNull();
   });
 
@@ -635,7 +635,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v57')).toBeNull();
   });
 
@@ -657,7 +657,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v58')).toBeNull();
   });
 
@@ -681,7 +681,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v59')).toBeNull();
   });
 
@@ -708,7 +708,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v60')).toBeNull();
   });
 
@@ -728,7 +728,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v62')).toBeNull();
   });
 
@@ -749,7 +749,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v63')).toBeNull();
   });
 
@@ -770,7 +770,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v66')).toBeNull();
   });
 
@@ -788,7 +788,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(entry);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v67')).toBeNull();
   });
 
@@ -806,7 +806,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(entry);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v68')).toBeNull();
   });
 
@@ -826,8 +826,26 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(entry);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(71);
     expect(await getCached('v69')).toBeNull();
+  });
+
+  it('invalidates a v70-vintage entry after the v71 benchmark-growth bump', async () => {
+    // ENGINE_VERSION 70 → 71: the rough ACA benchmark premium now grows each
+    // year after 2026 at the scenario's medical inflation rate, so a household
+    // on the age-priced fallback must not reuse a summary computed without it.
+    await putCached('v70', fakeSummary(1));
+    const { db } = await import('./store.js');
+    const handle = await db();
+    const tx = handle.transaction('monteCarloResults', 'readwrite');
+    const entry = await tx.store.get('v70');
+    if (entry) {
+      entry.engineVersion = 70;
+      await tx.store.put(entry);
+    }
+    await tx.done;
+    expect(ENGINE_VERSION).toBe(71);
+    expect(await getCached('v70')).toBeNull();
   });
 });
 
@@ -1250,6 +1268,28 @@ describe('health-coverage cache-key inclusion (a)', () => {
     expect(await mcCacheKey(withTaxContext(canonicalAcaBenchmark([])))).toBe(
       await mcCacheKey(withTaxContext({})),
     );
+  });
+
+  it('two different medical inflation rates produce DIFFERENT keys', async () => {
+    // The rough ACA benchmark grows at this fixed scenario rate, so two
+    // households that differ only in it must not share one cached summary.
+    const six = await mcCacheKey(withTaxContext({ medicalInflationRatePct: 6 }));
+    const seven = await mcCacheKey(withTaxContext({ medicalInflationRatePct: 7 }));
+    expect(six).not.toBe(seven);
+    expect(six).not.toBe(await mcCacheKey(withTaxContext({})));
+  });
+
+  it('an absent medical inflation rate reproduces the PRE-FEATURE key byte for byte', async () => {
+    // The runner spreads the field only when set; `undefined` is dropped by
+    // `JSON.stringify`, so an unset rate adds no bytes to the hashed input.
+    expect(await mcCacheKey(withTaxContext({ medicalInflationRatePct: undefined }))).toBe(
+      await mcCacheKey(withTaxContext({})),
+    );
+  });
+
+  it('the medical inflation rate is a plain number that survives JSON (no ordering to canonicalize)', () => {
+    const ctx = { medicalInflationRatePct: 6.5 };
+    expect(JSON.parse(JSON.stringify(ctx))).toEqual(ctx);
   });
 
   // AGENTS.md ENGINE_VERSION checklist — a new serialized MC

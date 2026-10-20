@@ -108,9 +108,11 @@ export const BalanceProjectionEstimateNote: React.FC<
       {ROUGH_BENCHMARK_ASSUMPTIONS.baseAge}-year-old, rising{' '}
       {Math.round(ROUGH_BENCHMARK_ASSUMPTIONS.ageGrowthRate * 100)}% for each year
       of age, counted for each covered person and only for the months they are
-      covered. That is an estimate, not a real quote from your exchange; enter
-      your own benchmark price in the scenario&rsquo;s health coverage settings
-      to replace it. The projection also estimates only the Medicare
+      covered. From {ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows
+      every year at the scenario&rsquo;s medical inflation rate. That is an
+      estimate, not a real quote from your exchange; enter your own benchmark
+      price in the scenario&rsquo;s health coverage settings to replace it, and
+      it is used exactly as entered. The projection also estimates only the Medicare
       income-related surcharge (IRMAA). The base Medicare premium, Medigap,
       Medicare Advantage, and drug-plan premiums are yours to enter as Medical
       expenses — if you have not, your health costs in retirement are

@@ -1545,7 +1545,12 @@ describe('retirement oracle — ACA / Medicare', () => {
       { members: { age: number; marketplaceMonths: number }[] },
       {
         householdAnnualCents: number;
-        assumptions: { baseMonthlyDollars: number; baseAge: number; ageGrowthRate: number };
+        assumptions: {
+          baseMonthlyDollars: number;
+          baseAge: number;
+          ageGrowthRate: number;
+          baseYear: number;
+        };
       }
     >(acaMedicareFixture, 'rough-benchmark-per-member-sum');
 
@@ -1555,7 +1560,9 @@ describe('retirement oracle — ACA / Medicare', () => {
     );
     expect(ROUGH_BENCHMARK_ASSUMPTIONS.baseAge).toBe(expected.assumptions.baseAge);
     expect(ROUGH_BENCHMARK_ASSUMPTIONS.ageGrowthRate).toBe(expected.assumptions.ageGrowthRate);
+    expect(ROUGH_BENCHMARK_ASSUMPTIONS.baseYear).toBe(expected.assumptions.baseYear);
     expect(ROUGH_BENCHMARK_ASSUMPTIONS.disclosure).toContain('not an exchange SLCSP quote');
+    expect(ROUGH_BENCHMARK_ASSUMPTIONS.disclosure).toContain(String(expected.assumptions.baseYear));
 
     // Independent workbook: per-member monthly premium × covered months.
     const a = expected.assumptions;

@@ -35,7 +35,7 @@
 import { computeFederalTax } from './federal-tax';
 import { computeSsTaxation } from './ss-taxation';
 import { computeMonthAwareIrmaa } from './irmaa';
-import { computeAcaPtc, acaPtcEligibleForFilingStatus } from './aca-ptc';
+import { computeAcaPtc, acaPtcEligibleForFilingStatus, growRoughBenchmarkCents } from './aca-ptc';
 import {
   computeRmd,
   rmdDeclaredRothPortionCents,
@@ -564,8 +564,13 @@ export function applyTaxYear(
     } else {
       // The rough fallback is the SUM over covered members of each
       // member's own age-priced monthly premium × their covered months, not the
-      // oldest member's annual premium × the covered-member count.
-      benchmarkSlcspCents = dollarsToCents(healthFacts.defaultBenchmarkAnnualDollars);
+      // oldest member's annual premium × the covered-member count. It then grows
+      // from its 2026 base year at the scenario's medical inflation rate.
+      benchmarkSlcspCents = growRoughBenchmarkCents(
+        dollarsToCents(healthFacts.defaultBenchmarkAnnualDollars),
+        taxYear,
+        input.medicalInflationRatePct,
+      );
     }
     // Deflate MAGI by the inflation factor so the FPL% comparison uses an
     // inflation-consistent poverty line (equivalent to inflating the clamped
@@ -585,12 +590,10 @@ export function applyTaxYear(
         ...(input.acaFplRegion !== undefined ? { fplRegion: input.acaFplRegion } : {}),
         // Re-inflate the expected-contribution OUTPUT back to projection-year
         // dollars (the MAGI input was deflated above for tier classification
-        // only). The benchmark premium is not scaled, and nothing inflates it:
-        // the rough fallback (`healthCoverageYearFacts`) is priced from each
-        // covered member's age alone, so it changes only as members age, and a
-        // user-entered per-year override is a separate input, used as entered
-        // for that year and prorated to coverage months by
-        // `overrideBenchmarkCentsForCoverageMonths`.
+        // only). The benchmark premium follows the medical rate, not general
+        // inflation: the rough fallback is grown above from its base year, and
+        // a user-entered per-year override is used as entered for that year
+        // (prorated to coverage months by `overrideBenchmarkCentsForCoverageMonths`).
         expectedContributionScalingFactor: acaScaling,
         // §36B(b)(2) sums the credit over COVERAGE MONTHS. The benchmark
         // above is already summed over covered member-months, so the expected

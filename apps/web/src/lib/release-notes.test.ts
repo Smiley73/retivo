@@ -51,9 +51,12 @@ describe('release notes', () => {
     }
   });
 
-  it('holds the AI assistant what-if announcement, the analysis one, the assistant one, then the open-source one', () => {
-    expect(RELEASE_NOTES).toHaveLength(4);
-    const [whatIf, analysis, assistant, openSource] = RELEASE_NOTES as [ReleaseNote, ReleaseNote, ReleaseNote, ReleaseNote];
+  it('holds the AI assistant what-if, analysis and assistant announcements, then the open-source one', () => {
+    const at = (title: string): ReleaseNote => RELEASE_NOTES.find((n) => n.title === title)!;
+    const whatIf = at('Your AI assistant can try a what-if without saving it (beta)');
+    const analysis = at('Your AI assistant can run the projection and the stress test (beta)');
+    const assistant = at('Ask an AI assistant about your plan (beta)');
+    const openSource = at('RETIVO is open source');
     expect(whatIf.kind).toBe('new');
     expect(whatIf.title).toBe('Your AI assistant can try a what-if without saving it (beta)');
     expect(whatIf.blurb).toMatch(/not saved/i);
@@ -69,6 +72,13 @@ describe('release notes', () => {
     expect(openSource.kind).toBe('new');
     expect(openSource.title).toBe('RETIVO is open source');
     expect(`${openSource.title} ${openSource.blurb}`).toMatch(/open source/i);
+  });
+
+  it('keeps the open-source announcement as the oldest entry', () => {
+    const entry = RELEASE_NOTES[RELEASE_NOTES.length - 1]!;
+    expect(entry.kind).toBe('new');
+    expect(entry.title).toBe('RETIVO is open source');
+    expect(`${entry.title} ${entry.blurb}`).toMatch(/open source/i);
   });
 
   it('has no advice-toned "Social Security Optimizer" wording in any note', () => {

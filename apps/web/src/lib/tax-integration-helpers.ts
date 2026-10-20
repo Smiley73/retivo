@@ -646,6 +646,12 @@ export interface TaxYearInput {
    */
   readonly inflationRatePct?: number;
   /**
+   * The scenario's medical inflation rate (percent), resolved once by the
+   * runner. Grows the rough age-priced ACA benchmark from its 2026 base year;
+   * a user-entered benchmark is never scaled. Absent → no growth.
+   */
+  readonly medicalInflationRatePct?: number;
+  /**
    * Percentage (0–100) of EMERGENCY HSA withdrawals assumed to be qualified
    * medical expenses (tax-free); modeled medical-qualified withdrawals are
    * always 100% qualified. The remaining nonqualified fraction is ordinary

@@ -33,7 +33,8 @@ import {
   buildRmdEngineFactsFragment,
 } from './balance-projection-runner-context';
 import { buildCashflowSeries } from './balance-projection-runner-cashflow';
-import { runBalanceProjectionMc } from './balance-projection-runner';
+import { runBalanceProjectionForPage, runBalanceProjectionMc } from './balance-projection-runner';
+import { buildMcTaxYearInput, deriveMcSurvivors } from './monte-carlo-tax';
 import { buildMonteCarloInputForScenario } from './monte-carlo-scenario-input';
 import { DEFAULT_GUARDRAIL_CONFIG } from './guardrails';
 import { CbpUnconfiguredError } from './balance-projection-runner-types';
@@ -2617,4 +2618,51 @@ describe('serialized id-keyed dictionaries survive hostile ids', () => {
       );
     },
   );
+});
+
+describe('medical inflation rate plumbing', () => {
+  // The engine tests prove `applyTaxYear` grows the rough benchmark when handed
+  // the rate. These guard the one failure they cannot see: a production path
+  // silently leaving the field absent and reverting to no growth.
+  const argsWith = (inflation: { ratePct: number; categoryRates?: Record<string, number> }) =>
+    buildArgs({ scenario: baseScenario('s-med-rate', 'MedRate', { inflation }) });
+
+  it('buildPipelineContext stores the resolved rate: general + 2 pp, or the explicit Medical rate', () => {
+    expect(buildCtx(argsWith({ ratePct: 4 })).medicalInflationRatePct).toBe(6);
+    expect(
+      buildCtx(argsWith({ ratePct: 4, categoryRates: { 'cat-medical': 7 } }))
+        .medicalInflationRatePct,
+    ).toBe(7);
+  });
+
+  it('PageSharedContext exposes the same rate', () => {
+    const page = runBalanceProjectionForPage(
+      argsWith({ ratePct: 4, categoryRates: { 'cat-medical': 7 } }),
+    );
+    expect(page.sharedCtx.medicalInflationRatePct).toBe(7);
+  });
+
+  it('buildMcTaxContext and buildMcTaxYearInput carry the same number as the context', () => {
+    const ctx = buildCtx(argsWith({ ratePct: 4 }));
+    const taxCtx = buildMcTaxContext(ctx)!;
+    expect(taxCtx.medicalInflationRatePct).toBe(ctx.medicalInflationRatePct);
+    const taxYear = ctx.primaryRetirementYear + 1;
+    const survivors = deriveMcSurvivors(taxCtx, taxYear, ctx.primaryRetirementYear)!;
+    const yearInput = buildMcTaxYearInput(
+      {
+        taxCtx,
+        taxYear,
+        retirementYear: ctx.primaryRetirementYear,
+        grossSsDollars: 0,
+        nominalExpense: 40_000,
+        otherIncome: 0,
+        priorBalance: 800_000,
+        priorPreTaxByOwner: new Map(),
+        magiMinus2: undefined,
+      },
+      survivors,
+      40_000,
+    );
+    expect(yearInput.medicalInflationRatePct).toBe(6);
+  });
 });

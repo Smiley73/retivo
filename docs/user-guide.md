@@ -462,7 +462,10 @@ What the cards do:
 - **Health coverage**: who is on an ACA Marketplace plan before Medicare, a **Where
   you live** setting (Alaska and Hawaii use different poverty guidelines), and
   months of coverage by year. The app asks you to enter the **full, unsubsidized**
-  premium as a Medical expense, because it works out the subsidy itself.
+  premium as a Medical expense, because it works out the subsidy itself. Unless
+  you enter a **Benchmark plan cost for the year**, the benchmark plan price is an
+  estimate that grows every year from 2026 at the scenario's medical inflation
+  rate; an entered price is used as entered.
 - **Pre-retirement Roth conversions**: a **Roth conversion** moves money from a
   pre-tax account into a Roth account and you pay income tax on it now. This card
   models doing that during your working years, and its page is headed "Roth

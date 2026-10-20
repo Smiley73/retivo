@@ -159,6 +159,9 @@ flowchart TD
    - A category with its own inflation rate, such as Medical, keeps its gap
      above or below the general rate on every path. Medical costs move with the
      same sampled inflation. There is no separate medical-cost surprise.
+   - The rough ACA benchmark premium also grows at the scenario's medical
+     inflation rate, but at that fixed rate and not at the path's sampled
+     inflation, so it is the same on every path.
    - Spending is inflated by each path's own inflation. So is Social Security,
      and so is any income stream set to **Use scenario inflation**. Income with
      a fixed raise does not change from path to path.

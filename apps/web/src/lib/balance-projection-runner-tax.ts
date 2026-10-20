@@ -207,6 +207,7 @@ interface TaxYearBuildArgs {
    *  (solver pre-commit path — same documented approximation). */
   readonly cashInterestDollars: number;
   readonly inflationRatePct: number;
+  readonly medicalInflationRatePct: number;
   readonly hsaQualifiedMedicalExpensePct: number;
   readonly earlyWithdrawalPenaltyExemptAccountIds: readonly string[];
   readonly penaltyAccounts: readonly PenaltyAccountSnapshot[];
@@ -255,6 +256,7 @@ function buildTaxYearInput(args: TaxYearBuildArgs): ApplyFilingPlanYearInput {
     acaFplRegion: args.acaFplRegion,
     taxpayersAge65Plus: args.taxpayersAge65Plus,
     inflationRatePct: args.inflationRatePct,
+    medicalInflationRatePct: args.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: args.hsaQualifiedMedicalExpensePct,
     earlyWithdrawalPenaltyExemptAccountIds: args.earlyWithdrawalPenaltyExemptAccountIds,
     penaltyAccounts: args.penaltyAccounts,
@@ -406,6 +408,7 @@ interface TaxLoopShared {
   readonly magiBootstrapMinus1: number | undefined;
   readonly acaPtcBenchmarkOverrides: ReadonlyArray<{ taxYear: number; annualSlcspDollars: number }>;
   readonly inflationRatePct: number;
+  readonly medicalInflationRatePct: number;
   readonly hsaQualifiedMedicalExpensePct: number;
   readonly earlyWithdrawalPenaltyExemptAccountIds: readonly string[];
   readonly primaryDeathYear: number;
@@ -722,6 +725,7 @@ function processTaxYear(
       // IRMAA look-back recompute; computed once above).
       cashInterestDollars,
       inflationRatePct: shared.inflationRatePct,
+      medicalInflationRatePct: shared.medicalInflationRatePct,
       hsaQualifiedMedicalExpensePct: shared.hsaQualifiedMedicalExpensePct,
       earlyWithdrawalPenaltyExemptAccountIds: shared.earlyWithdrawalPenaltyExemptAccountIds,
       // Append the Roth earnings-penalty accounts to the per-year
@@ -836,6 +840,7 @@ export function applyTaxIntegrationToDrawdownYears(
     // and a malformed row cannot price a benchmark.
     acaPtcBenchmarkOverrides: storedAcaBenchmarkOverrides(resolved.acaPtcBenchmark),
     inflationRatePct: ctx.projCtx.inflationPct,
+    medicalInflationRatePct: ctx.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: resolved.hsaQualifiedMedicalExpensePct ?? 100,
     earlyWithdrawalPenaltyExemptAccountIds: resolved.earlyWithdrawalPenaltyExemptAccountIds ?? [],
     // ONE shared derivation with the Monte Carlo twin
@@ -1120,6 +1125,7 @@ function buildTaxLoopShared(
     // and a malformed row cannot price a benchmark.
     acaPtcBenchmarkOverrides: storedAcaBenchmarkOverrides(resolved.acaPtcBenchmark),
     inflationRatePct: ctx.projCtx.inflationPct,
+    medicalInflationRatePct: ctx.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: resolved.hsaQualifiedMedicalExpensePct ?? 100,
     earlyWithdrawalPenaltyExemptAccountIds: resolved.earlyWithdrawalPenaltyExemptAccountIds ?? [],
     // ONE shared derivation with the Monte Carlo twin
@@ -1283,6 +1289,7 @@ function buildSolverYearInput(
     brokerageLikeStartBalanceDollars: 0,
     cashInterestDollars: 0,
     inflationRatePct: shared.inflationRatePct,
+    medicalInflationRatePct: shared.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: shared.hsaQualifiedMedicalExpensePct,
     earlyWithdrawalPenaltyExemptAccountIds: shared.earlyWithdrawalPenaltyExemptAccountIds,
     // PASS 1 leaves `penaltyAccounts` empty (federal tax + IRMAA only).
