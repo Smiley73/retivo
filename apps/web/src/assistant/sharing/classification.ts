@@ -22,7 +22,8 @@
  *  - `id`       an opaque reference to another aggregate.
  *  - `date`     a calendar date or timestamp, validated.
  *  - `firstName` shown as the member's first name, or a role label when first names are off.
- *  - `gated`    a subtree that also needs another category's switch (embedded rows, birth dates on accounts).
+ *  - `gated`    a subtree that also needs another category's switch (embedded rows, birth dates on accounts,
+ *               income figures in scenario overrides).
  */
 import type {
   AccountBalancePayload,
@@ -102,6 +103,12 @@ const gated = (category: SharingCategoryId, inner: Classification): Classificati
  * contains `birth` must use this; `classification.test.ts` walks the maps to prove it.
  */
 const BIRTHDATE: Classification = gated('members', DATE);
+/**
+ * A household income figure stored outside the income streams (prior-year MAGI, working-years taxable
+ * income). The Income switch promises the assistant sees no income when it is off, so these follow it
+ * as well as the switch of the category they are stored in.
+ */
+const INCOME_DOLLARS: Classification = gated('income', DOLLARS);
 
 // ---------- Household ----------
 
@@ -264,7 +271,8 @@ const INCOME_PATCH = shape<IncomeStreamPayload>(INCOME_CLASSIFICATION);
 
 /**
  * The scenario's overrides. Rows embedded in `expenses.added` and `income.added` follow their own
- * category's switch as well as the scenarios switch, and so do the per-account sections.
+ * category's switch as well as the scenarios switch, and so do the per-account sections and the
+ * household income figures.
  */
 const OVERRIDES_CLASSIFICATION = {
   retirementAge: shape<RetirementAgeOverride>({ primary: AGE_PER_MEMBER, secondary: AGE_PER_MEMBER, sameDateAnchor: PLAIN }),
@@ -341,8 +349,8 @@ const OVERRIDES_CLASSIFICATION = {
     incomeOnlyYear: PLAIN,
   }),
   assumedCostBasisFractionOfTaxableWithdrawal: PLAIN,
-  magiBootstrapLookbackMinus2: DOLLARS,
-  magiBootstrapLookbackMinus1: DOLLARS,
+  magiBootstrapLookbackMinus2: INCOME_DOLLARS,
+  magiBootstrapLookbackMinus1: INCOME_DOLLARS,
   acaPtcBenchmark: list(
     shape<NonNullable<ScenarioOverrides['acaPtcBenchmark']>[number]>({ taxYear: PLAIN, annualSlcspDollars: DOLLARS }),
   ),
@@ -393,7 +401,7 @@ const OVERRIDES_CLASSIFICATION = {
     }),
   ),
   preRetirementRothConversionTaxRatePct: PLAIN,
-  preRetirementTaxableIncomeDollars: DOLLARS,
+  preRetirementTaxableIncomeDollars: INCOME_DOLLARS,
   qualifiedCharitableDistributions: list(
     shape<QcdEntry>({ memberId: ID, sourceAccountId: ID, annualAmountDollars: DOLLARS, start: SCHEDULE_START, end: SCHEDULE_END }),
   ),

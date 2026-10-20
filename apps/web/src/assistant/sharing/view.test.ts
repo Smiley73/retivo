@@ -187,14 +187,14 @@ describe('never-shareable fields', () => {
     ];
     const expenses = [aggregate('expense', 'exp-1', { name: 'Rent', frequency: 'ZIMMERMAN', classification: 'ESSENTIAL' })];
     const members = [aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'Kai', lastName: 'Zimmerman', email: 'k@x.example' })];
-    const result = view(defaultSharingChoices(), { members, accounts, expenses });
+    const result = view(defaultSharingChoices(), { households: [], members, accounts, expenses });
     expect(result.accounts).toEqual([{ id: 'acct-zimmerman', name: 'Checking', ownershipType: 'INDIVIDUAL' }]);
     expect(result.expenses!.items).toEqual([{ id: 'exp-1', name: 'Rent', classification: 'ESSENTIAL' }]);
   });
 
   it('does not scrub the generated withheld list and rounding statement', () => {
     const members = [aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'Kai', lastName: 'Dollar', email: 'k@x.example' })];
-    const result = view(choicesWith({ exactDollars: false }), { members });
+    const result = view(choicesWith({ exactDollars: false }), { households: [], members });
     expect(result.rounding.statement).not.toContain(MASK);
     expect(result.rounding.statement).toMatch(/Dollar/);
   });
@@ -205,6 +205,28 @@ describe('never-shareable fields', () => {
     const text = json(view(defaultSharingChoices(), { ...source, members, accounts: [note] }));
     expect(text).not.toContain('李');
     expect(text).not.toContain('k@x.example');
+  });
+
+  it('mask a surname with a dotted capital I in labels and notes', () => {
+    const accounts = [aggregate('account', 'acct-1', { name: 'İpek family savings', type: 'SAVINGS', notes: 'Contact the İpek family' })];
+    const members = [aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'Ada', lastName: 'İpek', email: 'a@x.example' })];
+    const result = view(defaultSharingChoices(), { households: [], members, accounts });
+    expect(result.accounts![0]).toMatchObject({ name: `${MASK} family savings`, notes: `Contact the ${MASK} family` });
+    expect(json(result)).not.toContain('İpek');
+  });
+
+  it('mask the people in a view that lists only accounts', () => {
+    const accounts = [aggregate('account', 'acct-1', { name: 'Doe family trust', type: 'SAVINGS', notes: `Contact ${SPOUSE_EMAIL}` })];
+    const text = json(view(choicesWith({ firstNames: false }), { households: source.households, members: source.members, accounts }));
+    expect(text).not.toContain(SPOUSE_EMAIL);
+    expect(text.toLowerCase()).not.toContain('doe');
+  });
+
+  it('refuse to build a view without the members and households to mask', () => {
+    const accounts = [aggregate('account', 'acct-1', { name: 'Doe family trust', notes: `Contact ${SPOUSE_EMAIL}` })];
+    // @ts-expect-error: members and households are required, so a narrow view cannot forget them.
+    expect(() => view(defaultSharingChoices(), { accounts })).toThrow(TypeError);
+    expect(() => view(defaultSharingChoices(), { members: source.members, accounts } as unknown as ShareSource)).toThrow(TypeError);
   });
 
   it('leave unrelated text alone when a last name or first name is short', () => {
@@ -440,7 +462,7 @@ describe('embedded rows follow their own category switch', () => {
       retirementAge: { primary: { ageYears: 65, ageMonths: 0 } },
     },
   });
-  const from: ShareSource = { ...source, scenarios: [scenario] };
+  const from: ShareSource = { households: [], members: [], scenarios: [scenario] };
 
   it('hides added expenses, income, Social Security and per-account sections when their switch is off', () => {
     for (const [id, absent] of [
@@ -453,6 +475,33 @@ describe('embedded rows follow their own category switch', () => {
       expect(text, id).not.toContain(absent);
       expect(text, id).toContain('"retirementAge"');
     }
+  });
+});
+
+describe('income figures in scenario overrides', () => {
+  const scenario = aggregate('scenario', 'sc-1', {
+    name: 'Base',
+    isPrimary: true,
+    overrides: {
+      preRetirementTaxableIncomeDollars: 184_250,
+      magiBootstrapLookbackMinus2: 212_400,
+      magiBootstrapLookbackMinus1: 205_900,
+      retirementAge: { primary: { ageYears: 65, ageMonths: 0 } },
+    },
+  });
+  const from: ShareSource = { households: [], members: [], scenarios: [scenario] };
+  const INCOME_KEYS = ['preRetirementTaxableIncomeDollars', 'magiBootstrapLookbackMinus2', 'magiBootstrapLookbackMinus1'];
+
+  it('leave the view while Income is off, and ride with the scenario while it is on', () => {
+    const off = view(choicesWith({ income: false }), from);
+    expect(off.withheld).toEqual(['income']);
+    const overrides = off.scenarios![0]!.overrides as Record<string, unknown>;
+    for (const key of INCOME_KEYS) expect(overrides, key).not.toHaveProperty(key);
+    for (const figure of ['184250', '212400', '205900']) expect(json(off), figure).not.toContain(figure);
+    expect(overrides).toHaveProperty('retirementAge');
+
+    const on = view(defaultSharingChoices(), from).scenarios![0]!.overrides as Record<string, unknown>;
+    expect(on).toMatchObject({ preRetirementTaxableIncomeDollars: 184_250, magiBootstrapLookbackMinus2: 212_400, magiBootstrapLookbackMinus1: 205_900 });
   });
 });
 

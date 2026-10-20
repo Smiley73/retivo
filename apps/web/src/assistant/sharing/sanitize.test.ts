@@ -80,6 +80,13 @@ describe('sanitizers', () => {
     expect(sanitizeLabel('Mu\u200B\u0308ller', buildMasker([composed]))).toBe(MASK);
   });
 
+  it('masks a term whose capital has no single-character lower case', () => {
+    const masker = buildMasker(['İpek']);
+    expect(sanitizeLabel('İpek family savings', masker)).toBe(`${MASK} family savings`);
+    expect(sanitizeLabel('İPEK and i̇pek', masker)).toBe(`${MASK} and ${MASK}`);
+    expect(masker.isTerm('İpek')).toBe(true);
+  });
+
   it('treats a combining mark as part of the word a short term would otherwise end', () => {
     expect(sanitizeLabel('Li\u0301 and Li', buildMasker(['Li']))).toBe(`L\u00ed and ${MASK}`);
   });

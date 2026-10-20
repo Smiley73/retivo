@@ -32,11 +32,17 @@ import { withheldSwitches, type SharingChoices, type SharingSwitchId } from './s
 
 type Row = Record<string, unknown> & { id: string };
 
-/** The aggregate lists a tool reads (`listAggregates` output); a list left out reads as empty. */
+/**
+ * The aggregate lists a tool reads (`listAggregates` output); a category list left out reads as empty.
+ * `households` and `members` are required whatever the tool answers: they are where the terms a view
+ * must never say (emails, last names, the household name) come from, so a view built without them
+ * would mask nothing and the final scrub would have nothing to catch. Pass the workspace's full lists.
+ */
 export interface ShareSource {
   /** Read only to mask the household name, which is commonly the family surname. Never emitted. */
-  households?: readonly Aggregate[];
-  members?: readonly Aggregate[];
+  households: readonly Aggregate[];
+  /** Every member of the workspace, even for a tool that answers about something else. */
+  members: readonly Aggregate[];
   accounts?: readonly Aggregate[];
   balances?: readonly Aggregate[];
   socialSecurity?: readonly Aggregate[];
@@ -92,11 +98,11 @@ function stringField(aggregate: Aggregate, key: string): string {
  */
 export function maskTermsFor(source: ShareSource, choices: SharingChoices): string[] {
   const terms: string[] = [];
-  for (const member of source.members ?? []) {
+  for (const member of source.members) {
     terms.push(stringField(member, 'email'), stringField(member, 'lastName'));
     if (!choices.firstNames) terms.push(stringField(member, 'firstName'));
   }
-  for (const household of source.households ?? []) terms.push(stringField(household, 'name'));
+  for (const household of source.households) terms.push(stringField(household, 'name'));
   return terms;
 }
 
@@ -126,12 +132,12 @@ function rowsOf(
 }
 
 function memberRows(
-  members: readonly Aggregate[] | undefined,
+  members: readonly Aggregate[],
   context: ProjectionContext,
   now: Date,
 ): ShareViewMember[] {
   const rows: ShareViewMember[] = [];
-  for (const member of members ?? []) {
+  for (const member of members) {
     if (member.deletedAt !== undefined || !isOpaqueId(member.id)) continue;
     const fields = projectPayload(payloadOf(member), MEMBER_CLASSIFICATION, context);
     const isPrimary = fields.isPrimary === true;
@@ -151,6 +157,10 @@ function memberRows(
 }
 
 export function buildShareView(source: ShareSource, choices: SharingChoices, options: ShareViewOptions): ShareView {
+  // Fail closed for a caller that slipped past the type: without these lists nothing would be masked.
+  if (!Array.isArray(source.members) || !Array.isArray(source.households)) {
+    throw new TypeError('A share view needs the workspace members and households to know what it must never say.');
+  }
   const masker = buildMasker(maskTermsFor(source, choices));
   const context: ProjectionContext = { choices, masker };
   const view: ShareView = {

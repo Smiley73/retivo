@@ -30,7 +30,7 @@ const INVISIBLE = /[\u0000-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u2
 
 /** Compiled masker for a set of literal terms. */
 export interface Masker {
-  /** The cleaned, lower-cased terms, longest first. */
+  /** The cleaned terms as given, with their lower- and upper-cased spellings, longest first. */
   readonly terms: readonly string[];
   readonly pattern: RegExp | null;
   /** True when `token` is, as a whole, one of the terms. For leaves that cannot be masked in part (ids, enum values). */
@@ -79,16 +79,22 @@ function termSource(term: string): string {
  * Builds a masker. Terms are cleaned like the text they will be matched against, so a
  * name stored with odd spacing still matches; the longest term goes first so an email wins over a
  * name it contains. See `termSource` for which terms match only as whole words.
+ *
+ * The pattern holds each term as written, not only lower-cased: the `iu` flags fold case one
+ * character at a time, and some letters have no such fold. `İ` lower-cases to `i` plus a combining
+ * dot, so a lower-cased `İpek` would never match the name as stored. Its lower- and upper-cased
+ * spellings ride along, so a note that wrote the name either way is caught too.
  */
 export function buildMasker(rawTerms: readonly string[]): Masker {
   const cleaned = new Set<string>();
   for (const raw of rawTerms) {
     const term = cleanText(raw);
-    if (term !== '') cleaned.add(term.toLowerCase());
+    if (term === '') continue;
+    for (const spelling of [term, term.toLowerCase(), term.toUpperCase()]) cleaned.add(spelling.normalize('NFC'));
   }
   const terms = [...cleaned].sort((a, b) => b.length - a.length);
   const pattern = terms.length === 0 ? null : new RegExp(terms.map(termSource).join('|'), 'giu');
-  const exact = new Set(terms);
+  const exact = new Set(terms.map((term) => term.toLowerCase()));
   return { terms, pattern, isTerm: (token) => exact.has(cleanText(token).toLowerCase()) };
 }
 

@@ -44,7 +44,7 @@ describe('the share view binding', () => {
     let seen: ToolCallContext['share'] | undefined;
     session.registerHandler('retivo_status', (_args, context) => {
       seen = context.share;
-      return { ok: true, payload: context.share.buildView({ accounts: [aggregate('acct-1', { name: 'IRA', notes: 'private', plannedContributionPreTax: 1499 })] }), disclosure: {} };
+      return { ok: true, payload: context.share.buildView({ households: [], members: [], accounts: [aggregate('acct-1', { name: 'IRA', notes: 'private', plannedContributionPreTax: 1499 })] }), disclosure: {} };
     });
     call('c1', 'retivo_status');
     await vi.waitFor(() => expect(results()).toHaveLength(1));
