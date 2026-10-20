@@ -43,6 +43,23 @@ describe('mergeSsOverride', () => {
     expect(merged.secondary).toEqual({ ageYears: 67, ageMonths: 0 });
   });
 
+  it('should_write_the_winners_months_and_leave_a_searched_member_at_zero', () => {
+    // Secondary-only fallback: the primary is carried through with the
+    // months it was stored with; the searched secondary is a whole year.
+    const merged = mergeSsOverride({
+      currentResolvedOverride: undefined,
+      optimalPair: {
+        primaryAgeYears: 66,
+        primaryAgeMonths: 4,
+        secondaryAgeYears: 68,
+      },
+      hasSecondary: true,
+      secondaryPastWindow: false,
+    });
+    expect(merged.primary).toEqual({ ageYears: 66, ageMonths: 4 });
+    expect(merged.secondary).toEqual({ ageYears: 68, ageMonths: 0 });
+  });
+
   it('should_strip_secondary_for_single_member_households', () => {
     const current: SocialSecurityOverride = {
       primary: { ageYears: 67, ageMonths: 0 },
