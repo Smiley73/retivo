@@ -187,7 +187,7 @@ describe('the browser matrix', () => {
   });
 
   it('records each assistant as verified with a version and date, or as not verified', () => {
-    for (const assistant of ['Claude Code', 'Codex', 'Cursor']) {
+    for (const assistant of ['Claude Code', 'Codex']) {
       const row = guide.split('\n').find((line) => line.startsWith(`| ${assistant} |`));
       expect(row, assistant).toBeDefined();
       expect(verifiedOrNot(tableCells(row!).at(-1)!), assistant).toBe(true);

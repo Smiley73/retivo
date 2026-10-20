@@ -663,7 +663,7 @@ inside a scenario, which is a regular setting and not a beta feature.
 
 *"Can I ask an AI assistant about my plan?"* **Settings → Preferences → AI
 assistants** (a Beta card, shown only when your copy offers it and **Show beta
-features** is on) connects an assistant such as Claude Code, Codex or Cursor that
+features** is on) connects an assistant such as Claude Code or Codex that
 runs on your computer. The assistant asks RETIVO questions; RETIVO answers from
 the tab you have open, and you decide what it may see. The assistant cannot
 change anything: it cannot edit, add or delete your data, and nothing it asks
@@ -673,8 +673,8 @@ is saved.
 
 1. Turn on **Allow AI assistants on this device**. This is stored in this browser
    only.
-2. Copy the command for your assistant (there is one each for Claude Code, Codex
-   and Cursor) and run it where the assistant runs. It adds a small helper
+2. Copy the command for your assistant (there is one each for Claude Code
+   and Codex) and run it where the assistant runs. It adds a small helper
    program to the assistant. The helper listens only on your computer and does
    nothing until you approve.
 3. Ask the assistant something about your plan. The assistant's tools exist from

@@ -1,7 +1,7 @@
 # AI assistants
 
 This guide is for people who want an AI assistant that runs on their own
-computer, such as Claude Code, Codex or Cursor, to read and run their RETIVO plan.
+computer, such as Claude Code or Codex, to read and run their RETIVO plan.
 It covers what the connector is, how to set it up for each assistant, how to
 pair and choose what the assistant may see, what the assistant can ask for, and
 what to check when it does not work. The screens themselves are described in the
@@ -55,16 +55,14 @@ are never shared, whatever you choose; the list is under
    assistants on this device**. This is stored in this browser only; it is off by
    default and per signed-in person.
 2. Copy the command for your assistant from the card: there is one each for Claude
-   Code, Codex and Cursor. **Copy the command from the card instead of typing it.** It
+   Code and Codex. **Copy the command from the card instead of typing it.** It
    already holds this copy's own web address, which the bridge compares exactly: the
    scheme, host and port must match the address in your browser's address bar, with
    no trailing slash. Typed from memory, a small difference makes the bridge refuse
    the tab and the card report that it could not reach the bridge.
 3. Run it where the assistant runs:
-   - **Claude Code** and **Codex**: the card shows a `claude mcp add retivo ...` or
+   - the card shows a `claude mcp add retivo ...` or
      `codex mcp add retivo ...` line to run in a terminal.
-   - **Cursor**: the card shows one line of JSON for Cursor's `mcp.json`, for you to add
-     to the `mcpServers` list there.
 4. Start a new assistant session if it does not pick the new server up by itself. The
    assistant starts the bridge; you do not run it yourself.
 
@@ -76,9 +74,9 @@ will not start a bridge. Until then, build the bridge from a checkout of RETIVO
 copy from the card, replace `npx -y retivo-mcp-bridge` with
 `node <checkout>/apps/mcp-bridge/dist/bin.js`, where `<checkout>` is the full path to
 your checkout. Keep everything else in the command as the card gave it, in particular
-`--origin` and, if present, `--port`. For Cursor, set `command` to `node` and
-replace `-y` and `retivo-mcp-bridge` at the start of `args` with the built file's
-path.
+`--origin` and, if present, `--port`. Give the full path, not `$PWD`: `$PWD` is
+the folder your terminal is in when you run the command, and a wrong path makes the
+assistant report `CONNECTION_CLOSED`.
 
 **One bridge per assistant session.** The bridge listens on one fixed port and
 serves one browser tab. If a second assistant session starts its own bridge on
@@ -97,7 +95,6 @@ the client's behaviour, and no test here proves it. The verification record is:
 |---|---|---|---|
 | Claude Code | not verified | not verified | not verified |
 | Codex | not verified | not verified | not verified |
-| Cursor | not verified | not verified | not verified |
 
 If your assistant hides the tool result, ask it to show you the exact text of the
 last tool result.

@@ -120,9 +120,9 @@ export const PreferencesPage: React.FC = () => {
       </CardPair>
       {/* Absent unless the build carries the bridge port and the beta feature is visible. */}
       {assistantOffered && (
-        <CardPair>
+        <div className="mb-6 [&>*]:mb-0">
           <AssistantSettingsCard />
-        </CardPair>
+        </div>
       )}
     </section>
   );

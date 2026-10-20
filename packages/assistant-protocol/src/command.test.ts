@@ -11,19 +11,9 @@ describe('bridgeCommandFor', () => {
     expect(line).not.toContain('\n');
   });
 
-  it('builds a one-line mcp.json server object for Cursor', () => {
-    const line = bridgeCommandFor('cursor', { origin });
-    expect(line).not.toContain('\n');
-    const [command, ...args] = DEFAULT_BRIDGE_LAUNCHER.split(' ');
-    expect(JSON.parse(line)).toEqual({
-      mcpServers: { retivo: { command, args: [...args, '--origin', origin] } },
-    });
-  });
-
   it('adds --port only for a non-default port', () => {
     expect(bridgeCommandFor('claude', { origin, port: DEFAULT_BRIDGE_PORT })).not.toContain('--port');
     expect(bridgeCommandFor('claude', { origin, port: 30000 })).toMatch(/--port 30000$/);
-    expect(JSON.parse(bridgeCommandFor('cursor', { origin, port: 30000 })).mcpServers.retivo.args).toContain('30000');
   });
 
   it('accepts a loopback http origin', () => {
