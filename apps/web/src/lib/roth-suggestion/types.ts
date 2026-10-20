@@ -93,7 +93,12 @@ export interface BracketLimit {
   readonly seniorBonusDollars: number;
 }
 
-/** Tier-1 IRMAA line of year Y+2, the year that reads year Y's MAGI.
+/** The IRMAA tiers a guard can start under; tier 5 has no line above it. */
+export type IrmaaGuardTier = 'none' | 'tier1' | 'tier2' | 'tier3' | 'tier4';
+
+/** The next IRMAA line of year Y+2 above the reference's tier, year Y+2 being
+ *  the year that reads year Y's MAGI: tier 1's line when the reference sat
+ *  under all of them, tier 2's when it sat in tier 1, and so on.
  *  `valueDollars = floor(thresholdDollars * scalingFactor)`. */
 export type IrmaaLimit =
   | {
@@ -102,6 +107,8 @@ export type IrmaaLimit =
       readonly valueDollars: number;
       readonly lookbackYear: number;
       readonly filingStatus: FilingStatus;
+      /** The reference's Y+2 tier; the line is the one that starts the next tier. */
+      readonly referenceTier: IrmaaGuardTier;
       readonly thresholdDollars: number;
       readonly scalingFactor: number;
     }
@@ -252,6 +259,7 @@ export type RothSuggestionUnsupportedReason =
   | 'no-retirement-window'
   | 'separate-filing-plan'
   | 'filing-unresolved'
+  | 'member-birthdate-missing'
   | 'no-projection';
 
 export interface RothSuggestionOk {

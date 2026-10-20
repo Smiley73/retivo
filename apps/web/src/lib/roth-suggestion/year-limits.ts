@@ -23,13 +23,22 @@ import {
   type TaxCalibrationBundle,
 } from '../tax-integration-helpers';
 import type { LookbackFacts, YearFacts } from './year-facts';
-import type { AcaLimit, BracketLimit, IrmaaLimit, LimitKind, YearLimits } from './types';
+import type {
+  AcaLimit,
+  BracketLimit,
+  IrmaaGuardTier,
+  IrmaaLimit,
+  LimitKind,
+  YearLimits,
+} from './types';
 
 const CENTS_PER_DOLLAR = 100;
 const RATE_EPSILON = 1e-9;
 /** Bisection stops once the bracket on MAGI is narrower than this many dollars. */
 const BISECTION_DOLLARS = 1e-9;
 const BISECTION_MAX_STEPS = 80;
+/** IRMAA tiers from lowest to highest, as the engine's rows name them. */
+const IRMAA_TIER_ORDER = ['none', 'tier1', 'tier2', 'tier3', 'tier4', 'tier5'] as const;
 
 /** What the limits read from the scenario and the year, fixed for a search. */
 export interface LimitEnvironment {
@@ -141,10 +150,18 @@ export function bracketLimit(g: BracketGeometry): BracketLimit {
   };
 }
 
+/** Position of an IRMAA tier in the engine's order, -1 for a name it does not use. */
+export function irmaaTierRank(tier: string): number {
+  return IRMAA_TIER_ORDER.indexOf(tier as (typeof IRMAA_TIER_ORDER)[number]);
+}
+
 /**
- * Tier-1 IRMAA line of year Y+2, rounded DOWN to whole dollars: the engine
- * deflates the MAGI and compares it with the unscaled table, so a rounded-up
- * line could sit cents over. MAGI equal to the threshold is tier `none`. The
+ * The IRMAA line of year Y+2 just above the reference's tier, rounded DOWN to
+ * whole dollars: the engine deflates the MAGI and compares it with the
+ * unscaled table, so a rounded-up line could sit cents over. MAGI equal to a
+ * threshold stays in the tier below it. A reference under every line is held
+ * under tier 1's line; one already in tier N is held under tier N+1's, so a
+ * guarded plan never moves Y+2 up a tier. Tier 5 has no line above it. The
  * schedule follows the filing status of year Y, the return Medicare reads.
  */
 export function irmaaLimit(
@@ -157,7 +174,8 @@ export function irmaaLimit(
     return { kind: 'irmaa', applies: false, reason: 'beyond-horizon' };
   }
   if (!lookback.onMedicare) return { kind: 'irmaa', applies: false, reason: 'no-medicare' };
-  if (reference.lookbackIrmaaTier !== 'none') {
+  const referenceRank = irmaaTierRank(reference.lookbackIrmaaTier);
+  if (referenceRank < 0 || referenceRank >= IRMAA_TIER_ORDER.length - 1) {
     return { kind: 'irmaa', applies: false, reason: 'reference-over-line' };
   }
   const { effectiveYear, thresholdScalingFactor } = resolveSnapshotYear(
@@ -169,13 +187,14 @@ export function irmaaLimit(
     env.bundle.irmaa.values[effectiveYear],
     facts.filingStatus,
   );
-  const thresholdDollars = entries[0].thresholdDollars;
+  const thresholdDollars = entries[referenceRank].thresholdDollars;
   return {
     kind: 'irmaa',
     applies: true,
     valueDollars: Math.floor(thresholdDollars * thresholdScalingFactor),
     lookbackYear: lookback.year,
     filingStatus: facts.filingStatus,
+    referenceTier: IRMAA_TIER_ORDER[referenceRank] as IrmaaGuardTier,
     thresholdDollars,
     scalingFactor: thresholdScalingFactor,
   };

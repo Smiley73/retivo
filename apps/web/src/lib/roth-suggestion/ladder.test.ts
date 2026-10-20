@@ -6,32 +6,45 @@ import { toyAccount } from './test-fixtures';
 describe('conversionWindow', () => {
   it('runs from the retirement year to the year before the RMD trigger age', () => {
     // Born 1977 reaches 75 in 2052.
-    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2042, horizonYear: 2072 })).toEqual({
+    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2042, horizonYear: 2072, todayYear: 2026 })).toEqual({
       startYear: 2042,
       endYear: 2051,
     });
     // Born 1955 reaches 73 in 2028.
-    expect(conversionWindow({ primaryBirthYear: 1955, retirementYear: 2020, horizonYear: 2045 })).toEqual({
+    expect(conversionWindow({ primaryBirthYear: 1955, retirementYear: 2020, horizonYear: 2045, todayYear: 2020 })).toEqual({
       startYear: 2020,
       endYear: 2027,
     });
   });
 
+  it('starts today when retirement is already behind', () => {
+    // Born 1977 retiring in 2015: the rows start in 2026.
+    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2015, horizonYear: 2072, todayYear: 2026 })).toEqual({
+      startYear: 2026,
+      endYear: 2051,
+    });
+  });
+
+  it('is empty when the span ended before today', () => {
+    // Born 1950 reaches 72 in 2022; retired in 2015, the span 2015-2021 is all past.
+    expect(conversionWindow({ primaryBirthYear: 1950, retirementYear: 2015, horizonYear: 2060, todayYear: 2026 })).toBeNull();
+  });
+
   it('is clipped to the horizon', () => {
-    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2042, horizonYear: 2046 })).toEqual({
+    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2042, horizonYear: 2046, todayYear: 2026 })).toEqual({
       startYear: 2042,
       endYear: 2046,
     });
   });
 
   it('is empty when retirement is at or after the RMD trigger year, or past the horizon', () => {
-    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2052, horizonYear: 2072 })).toBeNull();
-    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2060, horizonYear: 2072 })).toBeNull();
-    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2042, horizonYear: 2040 })).toBeNull();
+    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2052, horizonYear: 2072, todayYear: 2026 })).toBeNull();
+    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2060, horizonYear: 2072, todayYear: 2026 })).toBeNull();
+    expect(conversionWindow({ primaryBirthYear: 1977, retirementYear: 2042, horizonYear: 2040, todayYear: 2026 })).toBeNull();
   });
 
   it('is empty when the birth year is unusable', () => {
-    expect(conversionWindow({ primaryBirthYear: Number.NaN, retirementYear: 2042, horizonYear: 2072 })).toBeNull();
+    expect(conversionWindow({ primaryBirthYear: Number.NaN, retirementYear: 2042, horizonYear: 2072, todayYear: 2026 })).toBeNull();
   });
 });
 

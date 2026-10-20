@@ -215,10 +215,29 @@ describe('irmaaLimit', () => {
     ['unguarded', { guarded: false }, 'unguarded'],
     ['beyond the horizon', { lookback: { year: year + 2, withinHorizon: false, onMedicare: false } }, 'beyond-horizon'],
     ['no Medicare month in Y+2', { lookback: { year: year + 2, withinHorizon: true, onMedicare: false } }, 'no-medicare'],
-    ['already over the line in the reference', { reference: { lookbackIrmaaTier: 'tier1', acaPtcTier: 'sliding' } }, 'reference-over-line'],
+    ['already in the top tier in the reference', { reference: { lookbackIrmaaTier: 'tier5', acaPtcTier: 'sliding' } }, 'reference-over-line'],
   ] as const)('does not apply when %s', (_label, override, reason) => {
     const limit: IrmaaLimit = irmaaLimit(inputs({ facts: facts({ year }), ...override }), ENV);
     expect(limit).toEqual({ kind: 'irmaa', applies: false, reason });
+  });
+
+  it.each([
+    ['none', 0],
+    ['tier1', 1],
+    ['tier2', 2],
+    ['tier3', 3],
+    ['tier4', 4],
+  ] as const)('holds a reference in %s under the next line up', (referenceTier, index) => {
+    const limit = irmaaLimit(
+      inputs({ facts: facts({ year }), reference: { lookbackIrmaaTier: referenceTier, acaPtcTier: 'sliding' } }),
+      ENV,
+    );
+    if (!limit.applies) throw new Error('expected the line to apply');
+    const { effectiveYear, thresholdScalingFactor } = resolveSnapshotYear(BUNDLE.irmaa, year + 2, 2.5);
+    const threshold = BUNDLE.irmaa.values[effectiveYear].byMfj[index].thresholdDollars;
+    expect(limit.referenceTier).toBe(referenceTier);
+    expect(limit.thresholdDollars).toBe(threshold);
+    expect(limit.valueDollars).toBe(Math.floor(threshold * thresholdScalingFactor));
   });
 });
 
@@ -289,6 +308,7 @@ describe('pickBindingLimit', () => {
     valueDollars,
     lookbackYear: 2032,
     filingStatus: 'MFJ',
+    referenceTier: 'none',
     thresholdDollars: valueDollars,
     scalingFactor: 1,
   });

@@ -187,6 +187,34 @@ describe('households the search declines', () => {
     expect(await reasonFor({ overrides: { retirementAge: retireAt75 } })).toBe('no-retirement-window');
   });
 
+  it('retired at or past the RMD trigger age, so the span ended before today', async () => {
+    // Born 1950 the trigger age is 72 (2022); retiring at 65 (2015) leaves 2015-2021,
+    // every year of it already past, so there is nothing to convert in.
+    const base = request({ overrides: { retirementAge: { primary: { ageYears: 65, ageMonths: 0 }, secondary: { ageYears: 65, ageMonths: 0 } } } });
+    const projection = {
+      ...base.projection,
+      members: base.projection.members.map((m) => ({ ...m, payload: { ...m.payload, birthdate: '1950-06-15' } })),
+    };
+    expect(await searchRothSuggestions({ ...base, projection })).toEqual({
+      kind: 'unsupported',
+      reason: 'no-retirement-window',
+    });
+  });
+
+  it('has a blank secondary birthdate, which would date the horizon from the clock', async () => {
+    const base = request();
+    const projection = {
+      ...base.projection,
+      members: base.projection.members.map((m) =>
+        m.payload.isPrimary ? m : { ...m, payload: { ...m.payload, birthdate: '' } },
+      ),
+    };
+    expect(await searchRothSuggestions({ ...base, projection })).toEqual({
+      kind: 'unsupported',
+      reason: 'member-birthdate-missing',
+    });
+  });
+
   it('files separate returns', async () => {
     const separate = {
       kind: 'separate',

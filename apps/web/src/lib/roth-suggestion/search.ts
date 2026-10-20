@@ -84,6 +84,13 @@ interface SearchSetup {
   readonly years: readonly Omit<WindowYear, 'reference'>[];
 }
 
+/** Whether a birthdate gives the engine a birth year. Without one it dates the
+ *  horizon from the clock, so the same request would rank differently by year. */
+function hasBirthYear(birthdate: string | null | undefined): boolean {
+  const birthYear = Number((birthdate ?? '').slice(0, 4));
+  return Number.isFinite(birthYear) && birthYear > 0;
+}
+
 /** The window years' filing facts and gross Social Security, or why the
  *  search cannot run on this household. */
 function prepareSetup(request: RothSuggestionRequest): SearchSetup | Unsupported {
@@ -95,6 +102,10 @@ function prepareSetup(request: RothSuggestionRequest): SearchSetup | Unsupported
   const prepared = prepareProjection(buildProjectionArgs(request, undefined));
   if (prepared === null) return unsupported('no-primary-retirement');
   const { ctx, series } = prepared;
+  const members = ctx.secondary === undefined ? [ctx.primary] : [ctx.primary, ctx.secondary];
+  if (!members.every((m) => hasBirthYear(m.payload.birthdate))) {
+    return unsupported('member-birthdate-missing');
+  }
   const cbp = detectUnsupportedScenarioFeatures({
     scenario,
     scenarios: projection.scenarios,
@@ -109,6 +120,7 @@ function prepareSetup(request: RothSuggestionRequest): SearchSetup | Unsupported
     primaryBirthYear: Number((ctx.primary.payload.birthdate ?? '').slice(0, 4)),
     retirementYear: ctx.primaryRetirementYear,
     horizonYear: ctx.horizonYear,
+    todayYear: projection.todayYear,
   });
   if (window === null) return unsupported('no-retirement-window');
   const years: Omit<WindowYear, 'reference'>[] = [];

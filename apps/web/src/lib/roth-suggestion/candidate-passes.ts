@@ -18,6 +18,7 @@ import type { LookbackFacts, YearFacts } from './year-facts';
 import {
   bracketGeometry,
   deriveYearLimits,
+  irmaaTierRank,
   taxableOrdinaryBoundDollars,
   type LimitEnvironment,
   type ReferenceTiers,
@@ -120,8 +121,9 @@ function largestMove(a: readonly YearLimits[], b: readonly YearLimits[]): number
 }
 
 /** Whether the rows kept each guarded year on its side of the line, judged
- *  from the rows rather than from the ceilings. */
-function guardCrossings(
+ *  from the rows rather than from the ceilings: Y+2 may not rank above the
+ *  tier the reference had. */
+export function guardCrossings(
   limits: readonly YearLimits[],
   rows: ReadonlyMap<number, DrawdownYear>,
 ): { year: number; line: 'irmaa' | 'aca' }[] {
@@ -129,7 +131,9 @@ function guardCrossings(
   for (const limit of limits) {
     if (limit.irmaa.applies) {
       const tier = rows.get(limit.irmaa.lookbackYear)?.irmaaTier ?? 'none';
-      if (tier !== 'none') crossings.push({ year: limit.year, line: 'irmaa' });
+      if (irmaaTierRank(tier) > irmaaTierRank(limit.irmaa.referenceTier)) {
+        crossings.push({ year: limit.year, line: 'irmaa' });
+      }
     }
     if (limit.aca.applies && rows.get(limit.year)?.acaPtcTier === 'above-400-cliff') {
       crossings.push({ year: limit.year, line: 'aca' });

@@ -18,20 +18,24 @@ export interface ConversionWindow {
 
 /**
  * Retirement year through the year before the RMD trigger age, clipped to the
- * horizon. The cap window ends at the month the member reaches the trigger
- * age, and the engine collapses that to whole tax years, so the trigger year
- * itself is outside. Null when the span is empty or the birth year is unusable.
+ * horizon and to today (the projection has no row for a year already past, so
+ * a past year cannot be converted in). The cap window ends at the month the
+ * member reaches the trigger age, and the engine collapses that to whole tax
+ * years, so the trigger year itself is outside. Null when the span is empty,
+ * including a span that ended before today, or the birth year is unusable.
  */
 export function conversionWindow(args: {
   readonly primaryBirthYear: number;
   readonly retirementYear: number;
   readonly horizonYear: number;
+  readonly todayYear: number;
 }): ConversionWindow | null {
-  const { primaryBirthYear, retirementYear, horizonYear } = args;
+  const { primaryBirthYear, retirementYear, horizonYear, todayYear } = args;
   if (!Number.isInteger(primaryBirthYear) || !Number.isInteger(retirementYear)) return null;
   const lastBeforeTrigger = primaryBirthYear + rmdTriggerAge(primaryBirthYear) - 1;
   const endYear = Math.min(lastBeforeTrigger, horizonYear);
-  return endYear < retirementYear ? null : { startYear: retirementYear, endYear };
+  const startYear = Math.max(retirementYear, todayYear);
+  return endYear < startYear ? null : { startYear, endYear };
 }
 
 /** True when the engine's Fill step can convert into this account: the same
