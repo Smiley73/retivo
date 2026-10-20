@@ -85,6 +85,25 @@ describe('upgrade gate', () => {
     await expect(h.newTab({ headers: { Host: `localhost:${h.port}` } })).rejects.toThrow('403');
   });
 
+  it('survives a peer that resets the connection while the 403 is being written', async () => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise<void>((resolve) => {
+        const socket = connect(h.port, '127.0.0.1');
+        socket.on('error', () => undefined);
+        socket.on('close', () => resolve());
+        socket.on('connect', () => {
+          socket.write(
+            `GET / HTTP/1.1\r\nHost: 127.0.0.1:${h.port}\r\nOrigin: https://evil.example.com\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`,
+          );
+          socket.resetAndDestroy();
+        });
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const tab = await h.newTab();
+    expect((await tab.next()).type).toBe('hello');
+  });
+
   it('answers a plain HTTP request without upgrading', async () => {
     const response = await fetch(`http://127.0.0.1:${h.port}/`);
     expect(response.status).toBe(426);
@@ -118,6 +137,24 @@ describe('the single tab slot', () => {
     const second = await h.newTab();
     expect(await second.closed).toMatchObject({ code: CLOSE_CODES.ALREADY_CONNECTED });
     expect(second.received).toBe(0);
+    expect(first.socket.readyState).toBe(first.socket.OPEN);
+  });
+
+  it('survives a second socket that sends an unmasked frame while it is being closed', async () => {
+    const first = await h.newTab();
+    expect((await first.next()).type).toBe('hello');
+    await new Promise<void>((resolve) => {
+      const socket = connect(h.port, '127.0.0.1');
+      socket.on('error', () => undefined);
+      socket.on('close', () => resolve());
+      socket.once('data', () => socket.write(Buffer.from([0x81, 0x00])));
+      socket.on('connect', () => {
+        socket.write(
+          `GET / HTTP/1.1\r\nHost: 127.0.0.1:${h.port}\r\nOrigin: ${TEST_ORIGIN}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`,
+        );
+        setTimeout(() => socket.destroy(), 300);
+      });
+    });
     expect(first.socket.readyState).toBe(first.socket.OPEN);
   });
 

@@ -3,7 +3,7 @@
 // it). stdout is the MCP transport, so nothing here may write to it: all
 // diagnostics go through the stderr logger and the lines below.
 import { readFileSync } from 'node:fs';
-import { serveStdio } from '@modelcontextprotocol/server/stdio';
+import { StdioServerTransport, serveStdio } from '@modelcontextprotocol/server/stdio';
 import { USAGE, parseBridgeArgs } from './args.js';
 import { startBridge, type Bridge } from './bridge.js';
 import { createLogger } from './logger.js';
@@ -30,7 +30,9 @@ try {
   process.exit(1);
 }
 
+const transport = new StdioServerTransport();
 const mcp = serveStdio(() => bridge.createMcpServer(), {
+  transport,
   onerror: (error) => logger.log({ event: 'mcp_error', name: error.name }),
 });
 
@@ -44,6 +46,13 @@ async function stop(): Promise<void> {
   process.exitCode = 0;
 }
 
+// The transport closes itself when stdout breaks (EPIPE) or its input fails, and then pauses stdin, so
+// no EOF follows: its closure is the signal that the agent is gone. serveStdio owns `onclose`, so chain it.
+const closeConnection = transport.onclose;
+transport.onclose = () => {
+  closeConnection?.();
+  void stop();
+};
 // stdin EOF: the agent is gone, so the tab's socket closes normally and we exit 0.
 process.stdin.once('end', () => void stop());
 process.stdin.once('close', () => void stop());

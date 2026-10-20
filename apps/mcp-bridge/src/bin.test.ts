@@ -153,4 +153,20 @@ describe('the built bin', () => {
     child.stdin.end();
     expect(await exit).toBe(0);
   });
+
+  it('exits 0 and releases the port when the agent closes its read end of stdout', async () => {
+    const port = await freePort();
+    const { child, exit } = run(['--origin', TEST_ORIGIN, '--port', String(port)]);
+    child.stdout.destroy();
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'bin-test', version: '1.0.0' } },
+      })}\n`,
+    );
+    expect(await exit).toBe(0);
+    await expect(FakeTab.connect(port)).rejects.toThrow();
+  });
 });

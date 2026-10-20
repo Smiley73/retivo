@@ -67,6 +67,8 @@ export function startLoopbackServer(options: LoopbackServerOptions): Promise<Loo
   let expectedHost = '';
 
   http.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    // Node removes its own socket error handler before emitting 'upgrade': a peer reset during the 403 would throw.
+    socket.on('error', () => undefined);
     const origin = request.headers.origin;
     const refusal =
       request.method !== 'GET'
@@ -87,6 +89,9 @@ export function startLoopbackServer(options: LoopbackServerOptions): Promise<Loo
   });
 
   function accept(ws: WebSocket): void {
+    // 'error' always precedes a 'close' that carries the code; it needs a listener so it cannot throw,
+    // on a socket rejected for a taken slot as much as on the session's own.
+    ws.on('error', () => undefined);
     if (slotTaken) {
       logger.log({ event: 'socket_rejected', closeCode: CLOSE_CODES.ALREADY_CONNECTED });
       ws.close(CLOSE_CODES.ALREADY_CONNECTED);
@@ -122,8 +127,6 @@ export function startLoopbackServer(options: LoopbackServerOptions): Promise<Loo
       alive = true;
     });
     ws.on('message', (data, isBinary) => session.handleMessage(data, isBinary));
-    // 'error' always precedes a 'close' that carries the code; it needs a listener so it cannot throw.
-    ws.on('error', () => undefined);
     ws.on('close', (code) => {
       sockets.delete(ws);
       session.handleClose(code);
