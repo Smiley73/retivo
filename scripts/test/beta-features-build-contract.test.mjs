@@ -122,7 +122,7 @@ test('an unknown feature id in the stack config fails the deploy loud', () => {
 test('the registry ids the validator reads match the source of truth', () => {
   const source = readFileSync(resolve(REPO_ROOT, 'apps/web/src/lib/feature-flags.ts'), 'utf8');
   const ids = [...source.matchAll(/^\s*id: '([a-z0-9-]+)',$/gm)].map((m) => m[1]);
-  assert.deepEqual(ids.sort(), ['guardrails', 'projected-withdrawals']);
+  assert.deepEqual(ids.sort(), ['ai-assistants', 'guardrails', 'projected-withdrawals']);
 });
 
 // --- retivo:assistantBridgePort -> VITE_ASSISTANT_BRIDGE_PORT -----------------

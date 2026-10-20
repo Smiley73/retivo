@@ -211,6 +211,9 @@ importers:
       '@internationalized/date':
         specifier: 3.12.4
         version: 3.12.4
+      '@retirement/assistant-protocol':
+        specifier: workspace:*
+        version: link:../../packages/assistant-protocol
       '@retirement/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

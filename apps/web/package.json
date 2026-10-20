@@ -12,12 +12,14 @@
     "lint": "cd ../.. && eslint apps/web/src/**/*.{ts,tsx}",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "VITEST_COVERAGE=1 vitest run --coverage --passWithNoTests",
+    "test:bridge": "vitest run --config vitest.bridge.config.ts",
     "test:bench": "vitest bench --run",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@internationalized/date": "3.12.4",
+    "@retirement/assistant-protocol": "workspace:*",
     "@retirement/contracts": "workspace:*",
     "@simplewebauthn/browser": "^14.0.0",
     "hash-wasm": "4.12.0",

@@ -41,6 +41,21 @@ vi.mock('../contexts/BetaFeaturesContext', () => ({
 }));
 
 
+// The AI assistant card has its own suite (AssistantSettingsCard.test.tsx); here only whether the page shows it.
+let mockAssistantOffered = false;
+vi.mock('../assistant/AssistantContext', () => ({
+  useAssistant: () => ({
+    offered: mockAssistantOffered,
+    port: 24580,
+    optedIn: false,
+    setOptedIn: vi.fn(),
+    phase: 'idle',
+    diagnosis: { kind: 'none' },
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  }),
+}));
+
 import { useAuth } from '../auth/AuthContext';
 
 function renderPage() {
@@ -54,6 +69,7 @@ describe('PreferencesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockShowBeta = false;
+    mockAssistantOffered = false;
     mockOfferedBeta = [
       { id: 'projected-withdrawals', label: 'Projected withdrawals' },
       { id: 'guardrails', label: 'Guardrails today' },
@@ -69,6 +85,15 @@ describe('PreferencesPage', () => {
     expect(toggle).not.toBeChecked();
     expect(toggle).toHaveAccessibleDescription(/may change, or may be removed again/);
     expect(screen.queryByText(/Currently in beta/)).not.toBeInTheDocument();
+  });
+
+  it('shows the AI assistants card only when the assistant is offered', async () => {
+    const { unmount } = renderPage();
+    expect(screen.queryByRole('heading', { level: 2, name: /AI assistants/ })).not.toBeInTheDocument();
+    unmount();
+    mockAssistantOffered = true;
+    renderPage();
+    expect(await screen.findByRole('heading', { level: 2, name: /AI assistants/ })).toBeInTheDocument();
   });
 
   it('flipping the switch writes the new preference', async () => {
