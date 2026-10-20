@@ -2659,7 +2659,7 @@ describe('SsOptimizerPage — month-level claim ages', () => {
   async function runMc(
     outcomes: Record<
       string,
-      | { winner: { primaryAgeYears: number; primaryAgeMonths?: number; secondaryAgeYears: number; metricValue: number } }
+      | { winner: { primaryAgeYears: number; primaryAgeMonths?: number; secondaryAgeYears: number | null; metricValue: number } }
       | 'empty'
     >,
   ): Promise<void> {
@@ -2755,6 +2755,22 @@ describe('SsOptimizerPage — month-level claim ages', () => {
     expect(screen.queryByText('→')).toBeNull();
   });
 
+  it('should_read_Already_set_when_the_stored_primary_wins_and_the_secondary_was_not_searched', async () => {
+    await seedHousehold();
+    await seedWithOverrides('s1', 'Base', { ...STORED_SS, secondary: { ageYears: 72, ageMonths: 0 } });
+    await runMc({
+      s1: {
+        winner: { primaryAgeYears: 66, primaryAgeMonths: 4, secondaryAgeYears: null, metricValue: 0.8 },
+      },
+    });
+    const already = await screen.findByRole(
+      'button',
+      { name: 'Already set' },
+      { timeout: WAIT_TIMEOUT_MS },
+    );
+    expect(already.hasAttribute('disabled')).toBe(true);
+  });
+
   it('should_tell_the_user_the_stored_months_are_replaced_only_for_the_member_that_changes', async () => {
     await seedHousehold();
     await seedWithOverrides('s1', 'Base', STORED_SS);
@@ -2836,6 +2852,56 @@ describe('SsOptimizerPage — month-level claim ages', () => {
         { timeout: WAIT_TIMEOUT_MS },
       );
       expect(screen.queryByRole('button', { name: 'Already set' })).toBeNull();
+    } finally {
+      setOptimizerWorkerRunImpl(null);
+    }
+  });
+
+  it('should_read_Already_set_with_the_stored_age_in_years_and_months_on_both_balance_tab_child_rows', async () => {
+    // The engine flag is false on purpose: the child rows must derive
+    // "Already set" from the stored pair vs the month-level winner.
+    setOptimizerWorkerRunImpl(async (runId, input) => ({
+      kind: 'result',
+      runId,
+      scenarioId: input.scenarioId,
+      winner: {
+        primaryAgeYears: 66,
+        primaryAgeMonths: 4,
+        secondaryAgeYears: 67,
+        metricValue: 1_200_000,
+        alreadyAtOptimum: false,
+      },
+      partial: false,
+      missingPiaMembers: [],
+      baselineMetricValue: 1_200_000,
+    }));
+    try {
+      await seedHousehold();
+      await seedWithOverrides('s1', 'Base', STORED_SS);
+      renderPage();
+      const planned = await screen.findByText('Planned', undefined, {
+        timeout: WAIT_TIMEOUT_MS,
+      });
+      const historical = await screen.findByText('Historical', undefined, {
+        timeout: WAIT_TIMEOUT_MS,
+      });
+      for (const label of [planned, historical]) {
+        const row = label.closest('tr') as HTMLElement;
+        await waitFor(
+          () => {
+            expect(within(row).getByRole('button', { name: 'Already set' })).toBeDefined();
+          },
+          { timeout: WAIT_TIMEOUT_MS },
+        );
+        expect(
+          within(row).getByRole('button', { name: 'Already set' }).hasAttribute('disabled'),
+        ).toBe(true);
+        const cells = within(row)
+          .getAllByRole('gridcell')
+          .map((c) => c.textContent);
+        expect(cells).toContain('66 years 4 months');
+        expect(within(row).queryByText('→')).toBeNull();
+      }
     } finally {
       setOptimizerWorkerRunImpl(null);
     }

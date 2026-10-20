@@ -186,6 +186,7 @@ const ChildResultRow: React.FC<ChildResultRowProps> = ({
   const alreadyAtOptimum =
     claimAgeMatches(current.primary, winner.primaryAgeYears, winner.primaryAgeMonths) &&
     (!hasSecondary ||
+      winner.secondaryAgeYears === null ||
       claimAgeMatches(
         current.secondary,
         winner.secondaryAgeYears,

@@ -316,6 +316,21 @@ describe('buildPairs × the stored claim-age pair (extra candidate)', () => {
     });
   });
 
+  it('resolves an unsearched secondary to null identity, like every candidate of the primary-only fallback', () => {
+    const stored = {
+      primary: { ageYears: 66, ageMonths: 4 },
+      secondary: { ageYears: 72, ageMonths: 0 },
+    };
+    const expected = {
+      primaryAgeYears: 66,
+      primaryAgeMonths: 4,
+      secondaryAgeYears: null,
+      secondaryAgeMonths: undefined,
+    };
+    expect(resolvedSsPair(stored, false)).toEqual(expected);
+    expect(resolvedSsPair({ primary: stored.primary }, false)).toEqual(expected);
+  });
+
   it('keeps empty-grid branches empty', () => {
     const pairs = buildPairs({
       primaryGrid: [],

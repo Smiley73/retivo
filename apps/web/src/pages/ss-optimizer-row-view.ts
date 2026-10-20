@@ -40,7 +40,8 @@ export function resolveCurrentClaimAges(
  * months both count: a current 65 years 6 months is NOT a match for a "65"
  * recommendation, but it is for a recommendation that carries the same 6
  * months (the stored pair ranked highest). A `null` recommendation
- * (secondary past the claim-age window) matches only a `null` current age.
+ * (secondary past the claim-age window) matches only a `null` current age;
+ * callers skip the comparison for such a member, whose stored age Save keeps.
  * Single source of truth for both the "show just the age" display rule and
  * the already-applied button state.
  */
@@ -147,6 +148,7 @@ function deriveRowView(
   const alreadyAtOptimum =
     claimAgeMatches(current.primary, winner.primaryAgeYears, winner.primaryAgeMonths) &&
     (secondary === undefined ||
+      winner.secondaryAgeYears === null ||
       claimAgeMatches(
         current.secondary,
         winner.secondaryAgeYears,

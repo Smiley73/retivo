@@ -472,14 +472,17 @@ function ageYearsToday(
 }
 
 /** The scenario's stored pair in the identity `withStoredPair` gives its
- *  candidate — a two-member plan with no stored secondary age resolves to
- *  the same default the fallbacks bake in. */
+ *  candidate. `secondarySearched` is whether the search varies the
+ *  secondary (two members and a non-empty secondary grid): a two-member
+ *  plan with no stored secondary age then resolves to the same default the
+ *  fallbacks bake in, and an unsearched secondary (single member, or the
+ *  1-D primary-only fallback) keeps `null` identity like every candidate. */
 export function resolvedSsPair(
   override: SocialSecurityOverride | undefined,
-  hasSecondary: boolean,
+  secondarySearched: boolean,
 ): ResolvedPair | null {
   if (!override) return null;
-  const secondary = hasSecondary
+  const secondary = secondarySearched
     ? (override.secondary ?? DEFAULT_SECONDARY_CLAIM_AGE)
     : undefined;
   return {

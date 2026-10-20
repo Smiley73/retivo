@@ -435,6 +435,18 @@ describe('isAlreadyAtOptimum', () => {
     expect(matchesCurrentClaim(66, 67, resolved, 0, 0)).toBe(false);
     expect(matchesCurrentClaim(66, 68, resolved, 4, 0)).toBe(false);
   });
+
+  it('matchesCurrentClaim matches an unsearched (null) secondary on the primary alone', () => {
+    const withSecondary: SocialSecurityOverride = {
+      primary: { ageYears: 66, ageMonths: 4 },
+      secondary: { ageYears: 72, ageMonths: 0 },
+    };
+    const withoutSecondary: SocialSecurityOverride = { primary: { ageYears: 66, ageMonths: 4 } };
+    expect(matchesCurrentClaim(66, null, withSecondary, 4, 0)).toBe(true);
+    expect(matchesCurrentClaim(66, null, withoutSecondary, 4, 0)).toBe(true);
+    expect(matchesCurrentClaim(66, null, withSecondary, 0, 0)).toBe(false);
+    expect(matchesCurrentClaim(67, null, withSecondary, 4, 0)).toBe(false);
+  });
 });
 
 describe('derivePartial', () => {

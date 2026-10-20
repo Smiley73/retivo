@@ -709,4 +709,23 @@ describe('optimiseClaimAgesForScenario — stored month-level claim age', () => 
     expect(merged.primary).toEqual({ ageYears: 70, ageMonths: 0 });
     expect(merged.secondary).toEqual({ ageYears: 67, ageMonths: 3 });
   });
+
+  it('primary-only fallback: a winning stored pair has a baseline and reads already at optimum, with or without a stored secondary age', async () => {
+    const members = [member('m1', true, 'Alex', 1965), member('m2', false, 'Sam', 1955)];
+    const stored = {
+      primary: { ageYears: 66, ageMonths: 4 },
+      secondary: { ageYears: 67, ageMonths: 3 },
+    };
+    for (const ss of [stored, { primary: stored.primary }]) {
+      const best = recordingRunner((c) => (c.primary.ageMonths === 4 ? 0.9 : 0.5));
+      const result = await run(withSs(ss), members, bothBenefits(), best.mcRunner);
+      expect(result.winner).toMatchObject({
+        primaryAgeYears: 66,
+        primaryAgeMonths: 4,
+        secondaryAgeYears: null,
+        alreadyAtOptimum: true,
+      });
+      expect(result.baselineMetricValue).toBe(0.9);
+    }
+  });
 });

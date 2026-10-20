@@ -74,8 +74,8 @@ export interface OptimizerResult {
   /** The metric value (at-horizon balance / MC success) at the scenario's
    *  CURRENT resolved claim ages — the baseline the page renders as
    *  "current → recommended". `undefined` when the current pair isn't a
-   *  candidate (the 1-D primary-only fallback — so there's no exact
-   *  baseline to show). */
+   *  candidate (e.g. no stored claim ages to compare against — so there's
+   *  no exact baseline to show). */
   readonly baselineMetricValue?: number;
   /** True when `projectionMethod === 'twr'` and at least one active
    *  non-CBP account has insufficient (< 2 yr) balance history. The
@@ -100,7 +100,10 @@ export async function optimiseClaimAgesForScenario(
   });
   const grids = buildGrids({ primary, secondary, piaState, today: args.today });
   const resolved = resolveScenario(args.scenario.id, [...args.scenarios]);
-  const resolvedPair = resolvedSsPair(resolved.socialSecurity, secondary !== undefined);
+  const resolvedPair = resolvedSsPair(
+    resolved.socialSecurity,
+    secondary !== undefined && grids.secondary.length > 0,
+  );
   // The independent survivor claim-age dimension for supported
   // two-spouse scenarios (death order from resolved life expectancies —
   // either spouse can be the survivor). Individual own-claim grids stay

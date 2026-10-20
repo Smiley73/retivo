@@ -448,9 +448,11 @@ function appendJointTriples(opts: {
  * Does a candidate sit exactly at the scenario's current (resolved) claim
  * ages? Mirrors the deterministic path's `pairsEqual` (years and months
  * both match, a missing month counting as 0; a two-member plan with no
- * stored secondary age resolves to the fallbacks' default). Used both for
- * `alreadyAtOptimum` and to capture the baseline metric value at the
- * current claim ages.
+ * stored secondary age resolves to the fallbacks' default; a candidate
+ * whose secondary is `null` — the 1-D primary-only fallback, where the
+ * secondary is not searched and Save keeps its stored age — matches on the
+ * primary alone). Used both for `alreadyAtOptimum` and to capture the
+ * baseline metric value at the current claim ages.
  */
 export function matchesCurrentClaim(
   primaryAgeYears: number,
@@ -462,11 +464,10 @@ export function matchesCurrentClaim(
   if (!resolved) return false;
   if (primaryAgeYears !== resolved.primary.ageYears) return false;
   if (primaryAgeMonths !== (resolved.primary.ageMonths ?? 0)) return false;
-  const resSec =
-    resolved.secondary ??
-    (secondaryAgeYears !== null ? DEFAULT_SECONDARY_CLAIM_AGE : undefined);
-  if (secondaryAgeYears !== (resSec?.ageYears ?? null)) return false;
-  if (secondaryAgeMonths !== (resSec?.ageMonths ?? 0)) return false;
+  if (secondaryAgeYears === null) return true;
+  const resSec = resolved.secondary ?? DEFAULT_SECONDARY_CLAIM_AGE;
+  if (secondaryAgeYears !== resSec.ageYears) return false;
+  if (secondaryAgeMonths !== resSec.ageMonths) return false;
   return true;
 }
 
