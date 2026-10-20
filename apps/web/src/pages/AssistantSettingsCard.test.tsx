@@ -7,7 +7,7 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { bridgeCommandFor } from '@retirement/assistant-protocol';
+import { bridgeCommandFor, bridgeInstallCommand } from '@retirement/assistant-protocol';
 import { AssistantProvider } from '../assistant/AssistantContext';
 import { BetaFeaturesProvider } from '../contexts/BetaFeaturesContext';
 import { ScriptedSocket, allowWithDefaults, pairScripted } from '../test/assistant-socket';
@@ -20,7 +20,17 @@ const auth = vi.hoisted(() => ({
 }));
 vi.mock('../auth/AuthContext', () => ({ useAuth: () => auth.value }));
 
+// The bridge file state the card reads; each test sets it before rendering.
+const bridgeFile = vi.hoisted(() => ({
+  state: { status: 'ready', info: { version: '1.2.3', sha256: 'c'.repeat(64), size: 1234 } } as
+    | { status: 'loading' }
+    | { status: 'unavailable' }
+    | { status: 'ready'; info: { version: string; sha256: string; size: number } },
+}));
+vi.mock('../assistant/bridge-file', () => ({ useBridgeFile: () => bridgeFile.state }));
+
 const CODE = '7QW49KXMZ2';
+const SHA = 'c'.repeat(64);
 
 interface Options {
   port?: string;
@@ -53,6 +63,7 @@ const codeField = (): HTMLInputElement => screen.getByLabelText('Pairing code');
 
 beforeEach(() => {
   localStorage.clear();
+  bridgeFile.state = { status: 'ready', info: { version: '1.2.3', sha256: SHA, size: 1234 } };
   auth.value = { me: { id: 'u-1' }, householdId: 'h-1', isUnlocked: true, unlockResolved: true };
 });
 afterEach(() => {
@@ -115,6 +126,43 @@ describe('AssistantSettingsCard gates', () => {
 });
 
 describe('launch commands', () => {
+  it('shows the download command with the checksum, then one add command per agent, in that order', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    setup();
+    const download = bridgeInstallCommand({ origin: window.location.origin, sha256: SHA });
+    // The command holds two spaces (checksum file format); getByText would collapse them.
+    const downloadEl = screen.getByText((_, element) => element?.tagName === 'CODE' && element.textContent === download);
+    expect(downloadEl).toHaveTextContent(SHA);
+    expect(screen.getByText(SHA, { selector: 'code' })).toBeInTheDocument();
+    expect(screen.getByText(/bridge 1\.2\.3/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Licenses of what it contains' })).toHaveAttribute('href', '/retivo-mcp-bridge-notices.txt');
+    const claude = screen.getByText(bridgeCommandFor('claude', { origin: window.location.origin, port: 24580 }));
+    expect(downloadEl.compareDocumentPosition(claude) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(claude).toHaveTextContent('node "$HOME/.retivo/retivo-mcp-bridge.mjs"');
+    expect(screen.queryByText(/npx/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Copy download command' }));
+    expect(writeText).toHaveBeenCalledWith(download);
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+  });
+
+  it('waits for the bridge file check instead of showing commands', () => {
+    bridgeFile.state = { status: 'loading' };
+    setup();
+    expect(screen.getByText('Checking for the bridge file…')).toBeInTheDocument();
+    expect(screen.queryByText(/mcp add/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Copy/ })).not.toBeInTheDocument();
+  });
+
+  it('says so, with no commands, when this copy serves no bridge file', () => {
+    bridgeFile.state = { status: 'unavailable' };
+    setup();
+    expect(screen.getByText(/does not serve the bridge file/)).toBeInTheDocument();
+    expect(screen.queryByText(/mcp add/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Copy/ })).not.toBeInTheDocument();
+    expect(codeField()).toBeInTheDocument();
+  });
+
   it('shows one command per agent for this origin and port, and copies it', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });

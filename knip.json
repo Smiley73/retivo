@@ -23,9 +23,12 @@
       "project": ["src/**/*.ts"]
     },
     "apps/mcp-bridge": {
-      // No `entry`: knip reads the `bin` field of package.json (dist/bin.js,
-      // mapped back to src/bin.ts), the published entry point that agents run
-      // over stdio and the subprocess test spawns, but nothing imports.
+      // src/bin.ts is the entry point that agents run over stdio and the
+      // subprocess test spawns, but nothing imports. It is explicit because the
+      // package.json `bin` points at the bundled build/retivo-mcp-bridge.mjs,
+      // which knip cannot map back to the source (and which does not exist in
+      // a clean checkout).
+      "entry": ["src/bin.ts"],
       "project": ["src/**/*.ts"]
     },
     "apps/api": {
