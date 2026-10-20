@@ -53,13 +53,13 @@ export const CONSENT_SWITCHES: readonly SwitchDefinition[] = [
   sharing(
     'members',
     'Household members',
-    'Birth dates, ages and which member is the primary one.',
+    'Birth dates, wherever they are recorded, ages and which member is the primary one.',
     'the assistant sees no household members.',
   ),
   sharing(
     'accounts',
     'Accounts',
-    'Account names, institutions, types, tax treatment, owners, return and contribution settings, and required-distribution and Roth details.',
+    'Account names, institutions, types, tax treatment, owners, return and contribution settings, and required-distribution and Roth details, except birth dates, which follow Household members.',
     'the assistant sees no accounts.',
   ),
   sharing('balances', 'Account balances', 'The balance and activity recorded for each account, year by year.', 'the assistant sees no balances.'),

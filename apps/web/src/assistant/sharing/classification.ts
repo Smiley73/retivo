@@ -22,7 +22,7 @@
  *  - `id`       an opaque reference to another aggregate.
  *  - `date`     a calendar date or timestamp, validated.
  *  - `firstName` shown as the member's first name, or a role label when first names are off.
- *  - `gated`    a subtree that also needs another category's switch (embedded rows).
+ *  - `gated`    a subtree that also needs another category's switch (embedded rows, birth dates on accounts).
  */
 import type {
   AccountBalancePayload,
@@ -95,6 +95,13 @@ const list = (item: Classification): Classification => ({ kind: 'array', item })
 const byId = (value: Classification): Classification => ({ kind: 'record', keys: 'id', value });
 const byYear = (value: Classification): Classification => ({ kind: 'record', keys: 'year', value });
 const gated = (category: SharingCategoryId, inner: Classification): Classification => ({ kind: 'gated', category, shape: inner });
+/**
+ * A person's birth date, wherever it is stored. The Household members switch promises the assistant
+ * sees no birth dates when it is off, so a birth date on an account row (a beneficiary's, a spouse's,
+ * an original owner's) follows that switch as well as the accounts switch. Every field whose name
+ * contains `birth` must use this; `classification.test.ts` walks the maps to prove it.
+ */
+const BIRTHDATE: Classification = gated('members', DATE);
 
 // ---------- Household ----------
 
@@ -110,7 +117,7 @@ export const MEMBER_CLASSIFICATION = {
   firstName: FIRST_NAME,
   lastName: never('last names are never shared'),
   email: never('email addresses are never shared'),
-  birthdate: DATE,
+  birthdate: BIRTHDATE,
 } satisfies Record<KnownKeys<HouseholdMemberPayload>, Classification>;
 
 // ---------- Schedules (shared by expenses, income and overrides) ----------
@@ -159,12 +166,12 @@ export const ACCOUNT_CLASSIFICATION = {
   rmdPlanRequiresDistributionAtStatutoryAge: PLAIN,
   rmdFirstYearDeferralElected: PLAIN,
   rmdSoleSpouseBeneficiary: PLAIN,
-  rmdSpouseBeneficiaryBirthdate: DATE,
+  rmdSpouseBeneficiaryBirthdate: BIRTHDATE,
   rmdBeneficiaryType: PLAIN,
   rmdInheritedOwnerDeathDate: DATE,
   rmdInheritedOwnerDiedOnOrAfterRbd: PLAIN,
-  rmdOriginalOwnerBirthdate: DATE,
-  rmdBeneficiaryBirthdate: DATE,
+  rmdOriginalOwnerBirthdate: BIRTHDATE,
+  rmdBeneficiaryBirthdate: BIRTHDATE,
   rmdBeneficiaryElection: PLAIN,
 } satisfies Record<KnownKeys<AccountPayload>, Classification>;
 

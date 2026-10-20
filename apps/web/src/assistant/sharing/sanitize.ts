@@ -30,8 +30,11 @@ const INVISIBLE = /[\u0000-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u2
 
 /** Compiled masker for a set of literal terms. */
 export interface Masker {
+  /** The cleaned, lower-cased terms, longest first. */
   readonly terms: readonly string[];
   readonly pattern: RegExp | null;
+  /** True when `token` is, as a whole, one of the terms. For leaves that cannot be masked in part (ids, enum values). */
+  isTerm(token: string): boolean;
 }
 
 function escapeRegExp(text: string): string {
@@ -41,25 +44,34 @@ function escapeRegExp(text: string): string {
 /** Scripts whose words are not separated by spaces, so a name there can only be found as a substring. */
 const UNSPACED_SCRIPT =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
-const WORD_CHARACTER = /^[\p{L}\p{N}]$/u;
+const WORD_CHARACTER = /^[\p{L}\p{N}\p{M}]$/u;
 /** A term shorter than this (in code points) is matched as a whole word, so `Ng` leaves `Savings` alone. */
 const WHOLE_WORD_BELOW_CHARS = 4;
 
 /**
- * The pattern source for one term. A short term in a spaced script (an initial, `Ng`, `Ann`) would
- * otherwise mask that letter sequence inside every unrelated word, so it only matches where letters
- * and digits do not touch it on either side. Longer terms, and terms with a character from a script
- * written without spaces (李), match as plain substrings: there a surrounding letter does not mean
- * a different word, and a name pasted against other text must still be masked.
+ * How a term is found in text. This is the one place the policy lives:
+ *  - `word`       a short term in a spaced script (an initial, `Ng`, `Ann`) matches only where letters
+ *                 and digits do not touch it. Masked as a substring it would garble every unrelated
+ *                 word that contains those letters.
+ *  - `substring`  anything else. A longer name pasted against other text (`TheSmithFamily`,
+ *                 `Smithfield`) must still be caught, and a character from a script written without
+ *                 spaces (李) has no word to be part of. Over-masking here is the safe side of the
+ *                 trade: it can shorten an unrelated word that contains a long name (`Checking` for
+ *                 `King`), never leak one.
  */
+export function matchModeFor(term: string): 'word' | 'substring' {
+  return Array.from(term).length >= WHOLE_WORD_BELOW_CHARS || UNSPACED_SCRIPT.test(term) ? 'substring' : 'word';
+}
+
+/** The pattern source for one term under `matchModeFor`. */
 function termSource(term: string): string {
-  const characters = Array.from(term);
   const escaped = escapeRegExp(term);
-  if (characters.length >= WHOLE_WORD_BELOW_CHARS || UNSPACED_SCRIPT.test(term)) return escaped;
+  if (matchModeFor(term) === 'substring') return escaped;
+  const characters = Array.from(term);
   const first = characters[0] ?? '';
   const last = characters[characters.length - 1] ?? '';
-  const before = WORD_CHARACTER.test(first) ? '(?<![\\p{L}\\p{N}])' : '';
-  const after = WORD_CHARACTER.test(last) ? '(?![\\p{L}\\p{N}])' : '';
+  const before = WORD_CHARACTER.test(first) ? '(?<![\\p{L}\\p{N}\\p{M}])' : '';
+  const after = WORD_CHARACTER.test(last) ? '(?![\\p{L}\\p{N}\\p{M}])' : '';
   return `${before}${escaped}${after}`;
 }
 
@@ -76,15 +88,20 @@ export function buildMasker(rawTerms: readonly string[]): Masker {
   }
   const terms = [...cleaned].sort((a, b) => b.length - a.length);
   const pattern = terms.length === 0 ? null : new RegExp(terms.map(termSource).join('|'), 'giu');
-  return { terms, pattern };
+  const exact = new Set(terms);
+  return { terms, pattern, isTerm: (token) => exact.has(cleanText(token).toLowerCase()) };
 }
 
 /** A masker that masks nothing. */
 export const EMPTY_MASKER: Masker = buildMasker([]);
 
-/** Removes invisible characters and collapses whitespace; the first half of every sanitizer. */
+/**
+ * Removes invisible characters, normalizes to NFC and collapses whitespace; the first half of every
+ * sanitizer and of every term. Both sides of a match go through it, so a name typed precomposed
+ * (`Müller`) is still found in text pasted decomposed (`Mu\u0308ller`).
+ */
 export function cleanText(text: string): string {
-  return text.replace(LINE_BREAKS, ' ').replace(INVISIBLE, '').replace(/\s+/gu, ' ').trim();
+  return text.replace(LINE_BREAKS, ' ').replace(INVISIBLE, '').normalize('NFC').replace(/\s+/gu, ' ').trim();
 }
 
 function capText(text: string, maxChars: number): string {

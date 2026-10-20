@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildMasker, cleanText, EMPTY_MASKER, MASK, sanitizeClientName, sanitizeFreeText, sanitizeLabel } from './sanitize';
+import { buildMasker, cleanText, EMPTY_MASKER, MASK, matchModeFor, sanitizeClientName, sanitizeFreeText, sanitizeLabel } from './sanitize';
 
 describe('sanitizers', () => {
   it('removes control, zero-width and bidirectional characters', () => {
@@ -70,6 +70,37 @@ describe('sanitizers', () => {
     expect(sanitizeLabel('TheSmithFamily trust', buildMasker(['Smith']))).toBe(`The${MASK}Family trust`);
     expect(sanitizeLabel('Smithfield', buildMasker(['Smith']))).toBe(`${MASK}field`);
     expect(sanitizeLabel('李先生的账户', buildMasker(['李']))).toBe(`${MASK}先生的账户`);
+  });
+
+  it('matches a name across Unicode normalization forms', () => {
+    const composed = 'M\u00fcller';
+    const decomposed = 'Mu\u0308ller';
+    expect(sanitizeLabel(`The ${decomposed} trust`, buildMasker([composed]))).toBe(`The ${MASK} trust`);
+    expect(sanitizeLabel(`The ${composed} trust`, buildMasker([decomposed]))).toBe(`The ${MASK} trust`);
+    expect(sanitizeLabel('Mu\u200B\u0308ller', buildMasker([composed]))).toBe(MASK);
+  });
+
+  it('treats a combining mark as part of the word a short term would otherwise end', () => {
+    expect(sanitizeLabel('Li\u0301 and Li', buildMasker(['Li']))).toBe(`L\u00ed and ${MASK}`);
+  });
+
+  it('states one matching policy: whole word below four characters, substring otherwise', () => {
+    expect(matchModeFor('S')).toBe('word');
+    expect(matchModeFor('Ng')).toBe('word');
+    expect(matchModeFor('Ann')).toBe('word');
+    expect(matchModeFor('Smith')).toBe('substring');
+    expect(matchModeFor('李')).toBe('substring');
+    expect(matchModeFor('a@b.c')).toBe('substring');
+  });
+
+  it('tells whether a whole token is one of the terms', () => {
+    const masker = buildMasker(['Zimmerman', 'Müller']);
+    expect(masker.isTerm('zimmerman')).toBe(true);
+    expect(masker.isTerm('ZIMMERMAN')).toBe(true);
+    expect(masker.isTerm('Mu\u0308ller')).toBe(true);
+    expect(masker.isTerm('zimmermann')).toBe(false);
+    expect(masker.isTerm('3f2-zimmerman')).toBe(false);
+    expect(EMPTY_MASKER.isTerm('anything')).toBe(false);
   });
 
   it('leaves empty text empty', () => {

@@ -171,6 +171,8 @@ export function buildShareView(source: ShareSource, choices: SharingChoices, opt
   if (choices.scenarios) view.scenarios = rowsOf(source.scenarios, SCENARIO_CLASSIFICATION, context);
   // Defense in depth: the allowlist is the mechanism, this catches a map or sanitizer that missed something.
   // First names are left to the sanitizers: an aggregate id may legitimately contain one.
+  // `withheld` and `rounding` are generated, not stored, so they are not scrubbed: a short name must not garble them.
   const scrubMasker = buildMasker(maskTermsFor(source, { ...choices, firstNames: true }));
-  return scrubValue(view, scrubMasker) as ShareView;
+  const { withheld, rounding, ...data } = view;
+  return { withheld, rounding, ...(scrubValue(data, scrubMasker) as Omit<ShareView, 'withheld' | 'rounding'>) };
 }

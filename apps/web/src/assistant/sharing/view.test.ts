@@ -181,6 +181,24 @@ describe('never-shareable fields', () => {
     }
   });
 
+  it('drop an id or enum value that is exactly a last name, and leave fragments of ids alone', () => {
+    const accounts = [
+      aggregate('account', 'acct-zimmerman', { name: 'Checking', type: 'Zimmerman', ownershipType: 'INDIVIDUAL', ownerId: 'zimmerman' }),
+    ];
+    const expenses = [aggregate('expense', 'exp-1', { name: 'Rent', frequency: 'ZIMMERMAN', classification: 'ESSENTIAL' })];
+    const members = [aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'Kai', lastName: 'Zimmerman', email: 'k@x.example' })];
+    const result = view(defaultSharingChoices(), { members, accounts, expenses });
+    expect(result.accounts).toEqual([{ id: 'acct-zimmerman', name: 'Checking', ownershipType: 'INDIVIDUAL' }]);
+    expect(result.expenses!.items).toEqual([{ id: 'exp-1', name: 'Rent', classification: 'ESSENTIAL' }]);
+  });
+
+  it('does not scrub the generated withheld list and rounding statement', () => {
+    const members = [aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'Kai', lastName: 'Dollar', email: 'k@x.example' })];
+    const result = view(choicesWith({ exactDollars: false }), { members });
+    expect(result.rounding.statement).not.toContain(MASK);
+    expect(result.rounding.statement).toMatch(/Dollar/);
+  });
+
   it('masks a single-character last name in prose', () => {
     const note = aggregate('account', 'acct-1', { name: 'Checking', type: 'SAVINGS', notes: 'For 李; contact k@x.example' });
     const members = [aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'Kai', lastName: '李', email: 'k@x.example' })];
@@ -435,6 +453,59 @@ describe('embedded rows follow their own category switch', () => {
       expect(text, id).not.toContain(absent);
       expect(text, id).toContain('"retirementAge"');
     }
+  });
+});
+
+describe('birth dates', () => {
+  const BIRTH_KEY = /birth/i;
+  const spouseDate = '1974-03-15';
+  const accounts = [
+    aggregate('account', 'john-ira', { name: 'IRA', type: 'TRADITIONAL_IRA', rmdSpouseBeneficiaryBirthdate: spouseDate }),
+    aggregate('account', 'jane-inh', {
+      name: 'Inherited IRA',
+      type: 'TRADITIONAL_IRA',
+      ownerId: 'm-2',
+      rmdInheritedAccount: true,
+      rmdBeneficiaryBirthdate: spouseDate,
+      rmdOriginalOwnerBirthdate: '1940-01-02',
+    }),
+  ];
+  const members = [
+    aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'John', lastName: 'Doe', email: 'j@x.example', birthdate: '1977-06-15' }),
+    aggregate('householdMember', 'm-2', { isPrimary: false, firstName: 'Jane', lastName: 'Doe', email: 'jd@x.example', birthdate: spouseDate }),
+  ];
+
+  function birthKeys(from: ShareView): string[] {
+    const keys: string[] = [];
+    walk(from, (key) => {
+      if (BIRTH_KEY.test(key)) keys.push(key);
+    });
+    return keys;
+  }
+
+  it('leave the view entirely, from members and from account rows, while Household members is off', () => {
+    const off = view(choicesWith({ members: false }), { ...source, members, accounts });
+    expect(off.withheld).toEqual(['members']);
+    expect(off.accounts).toHaveLength(2);
+    expect(birthKeys(off)).toEqual([]);
+    for (const date of [spouseDate, '1977-06-15', '1940-01-02']) expect(json(off), date).not.toContain(date);
+  });
+
+  it('leave the view, wherever they are stored, while Household members is off in the demo dataset too', () => {
+    const off = view(choicesWith({ members: false }));
+    expect(birthKeys(off)).toEqual([]);
+    for (const member of source.members ?? []) {
+      expect(json(off)).not.toContain(String(member.payload.birthdate));
+    }
+  });
+
+  it('ride with the accounts only while both Household members and Accounts are on', () => {
+    const on = view(defaultSharingChoices(), { ...source, members, accounts });
+    expect(on.accounts![0]).toMatchObject({ rmdSpouseBeneficiaryBirthdate: spouseDate });
+    expect(on.accounts![1]).toMatchObject({ rmdBeneficiaryBirthdate: spouseDate, rmdOriginalOwnerBirthdate: '1940-01-02' });
+    const accountsOff = view(choicesWith({ accounts: false }), { ...source, members, accounts });
+    expect(accountsOff.members![1]).toMatchObject({ birthdate: spouseDate });
+    expect(accountsOff.accounts).toBeUndefined();
   });
 });
 
