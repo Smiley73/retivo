@@ -97,8 +97,11 @@ export const WHAT_IF_OVERRIDES = z.strictObject({
       secondary: whatIfAge.optional(),
       sameDateAnchor: z
         .enum(['primary', 'secondary'])
+        .nullable()
         .optional()
-        .describe('Retire both members on the same date as this one; the other member’s age then follows from the dates of birth.'),
+        .describe(
+          'Retire both members on the same date as this one; the other member’s age then follows from the dates of birth. null lets each member retire on their own date, which is how to try different ages when the base ties them.',
+        ),
     })
     .optional(),
   socialSecurity: z

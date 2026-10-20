@@ -251,7 +251,9 @@ const HANDLERS: { [K in AllowedSection]: Handler<K> } = {
     }
     if (supplied.sameDateAnchor !== undefined) {
       asked.sameDateAnchor = supplied.sameDateAnchor;
-      merged.sameDateAnchor = supplied.sameDateAnchor;
+      // null is the editor's independent mode: the anchor key is absent, and each member keeps their own age.
+      if (supplied.sameDateAnchor === null) delete merged.sameDateAnchor;
+      else merged.sameDateAnchor = supplied.sameDateAnchor;
     }
     const anchor = merged.sameDateAnchor;
     const derived: Array<{ path: Path; value: unknown; reason: string }> = [];
@@ -271,10 +273,10 @@ const HANDLERS: { [K in AllowedSection]: Handler<K> } = {
             const given = defaulted(asked);
             if (given.ageYears !== next.ageYears || given.ageMonths !== next.ageMonths) {
               throw new ToolArgsError(
-                `overrides.retirementAge.${follower} cannot differ from the ${anchor}'s date: both members retire on the same date, which makes the ${follower} ${next.ageYears} years ${next.ageMonths} months old. Set the ${anchor}'s age and the ${follower}'s follows.`,
+                `overrides.retirementAge.${follower} cannot differ from the ${anchor}'s date: both members retire on the same date, which makes the ${follower} ${next.ageYears} years ${next.ageMonths} months old. Set the ${anchor}'s age and the ${follower}'s follows, or set sameDateAnchor to null to let each member retire on their own date.`,
               );
             }
-          } else if (supplied[anchor] !== undefined) {
+          } else if (supplied[anchor] !== undefined || typeof supplied.sameDateAnchor === 'string') {
             merged[follower] = next;
             const reason = `Both members retire on the same date as the ${anchor}.`;
             derived.push({ path: [follower, 'ageYears'], value: next.ageYears, reason }, { path: [follower, 'ageMonths'], value: next.ageMonths, reason });
@@ -360,7 +362,8 @@ const HANDLERS: { [K in AllowedSection]: Handler<K> } = {
     return {
       section: {
         bumpPct: supplied.bumpPct ?? base?.bumpPct ?? 0,
-        durationYears: supplied.durationYears !== undefined ? supplied.durationYears : (base?.durationYears ?? DEFAULT_DISCRETIONARY_DURATION_YEARS),
+        // null is the whole-retirement setting and stays; only an unset duration takes the default.
+        durationYears: supplied.durationYears !== undefined ? supplied.durationYears : base?.durationYears !== undefined ? base.durationYears : DEFAULT_DISCRETIONARY_DURATION_YEARS,
       },
       asked,
     };

@@ -23,6 +23,8 @@ const REDUCED_ID = 't-reduction-20';
 const INFLATION_PARENT_ID = 't-inflation-parent';
 const INFLATION_GRANDCHILD_ID = 't-inflation-grandchild';
 const INACTIVE_ACCOUNT_ID = 't-inactive-account';
+const WHOLE_RETIREMENT_ID = 't-whole-retirement-spending';
+const INDEPENDENT_ID = 't-independent-retirement';
 const ACCOUNT_ID = 'demo-account-john-401k';
 
 let scenarios: Aggregate<ScenarioPayload>[];
@@ -62,6 +64,8 @@ beforeAll(async () => {
   await addScenario(REDUCED_ID, BASE_ID, {
     socialSecurity: { primary: { ageYears: 67, ageMonths: 0 }, secondary: { ageYears: 67, ageMonths: 0 }, benefitReductionPct: 20 },
   });
+  await addScenario(WHOLE_RETIREMENT_ID, BASE_ID, { discretionarySpending: { bumpPct: 10, durationYears: null } });
+  await addScenario(INDEPENDENT_ID, BASE_ID, { retirementAge: { primary: { ageYears: 65, ageMonths: 0 }, secondary: { ageYears: 60, ageMonths: 0 } } });
   await addScenario(INFLATION_PARENT_ID, BASE_ID, { inflation: { ratePct: 4.5 } });
   await addScenario('t-inflation-middle', INFLATION_PARENT_ID, {});
   await addScenario(INFLATION_GRANDCHILD_ID, 't-inflation-middle', { lifeExpectancy: { primary: 90 } });
@@ -300,6 +304,28 @@ describe('merging a section over what the base resolves to', () => {
     await expectRejected({ retirementAge: { primary: { ageYears: 62 }, secondary: { ageYears: 60 } } }, 'overrides.retirementAge.secondary', 'same date');
     // The tied age itself is accepted.
     await expect(build({ retirementAge: { primary: { ageYears: 62 }, secondary: { ageYears: 65, ageMonths: 3 } } })).resolves.toBeDefined();
+  });
+
+  it('keeps an inherited whole-retirement spending duration when only the bump is supplied', async () => {
+    const built = await build({ discretionarySpending: { bumpPct: 20 } }, WHOLE_RETIREMENT_ID);
+    expect(built.overrides.discretionarySpending).toEqual({ bumpPct: 20, durationYears: null });
+    expect(built.kept.find((entry) => entry.path === 'durationYears')).toMatchObject({ value: null });
+  });
+
+  it('ties the ages to a newly chosen anchor even when no age is supplied', async () => {
+    const built = await build({ retirementAge: { sameDateAnchor: 'primary' } }, INDEPENDENT_ID);
+    expect(built.overrides.retirementAge).toMatchObject({ primary: { ageYears: 65, ageMonths: 0 }, sameDateAnchor: 'primary' });
+    const secondary = built.overrides.retirementAge!.secondary!;
+    expect(secondary).not.toEqual({ ageYears: 60, ageMonths: 0 });
+    expect(built.changes.filter((change) => change.derived !== undefined).map((change) => change.path)).toEqual(['secondary.ageYears', 'secondary.ageMonths']);
+  });
+
+  it('lets a null anchor clear an inherited one, so the members can retire on different dates', async () => {
+    await expectRejected({ retirementAge: { secondary: { ageYears: 60 } } }, 'overrides.retirementAge.secondary', 'sameDateAnchor');
+    const built = await build({ retirementAge: { secondary: { ageYears: 60 }, sameDateAnchor: null } });
+    expect(built.overrides.retirementAge).not.toHaveProperty('sameDateAnchor');
+    expect(built.overrides.retirementAge).toMatchObject({ secondary: { ageYears: 60, ageMonths: 0 } });
+    expect(built.changes.find((change) => change.path === 'sameDateAnchor')).toMatchObject({ previous: 'primary', new: null, changed: true });
   });
 
   it('notes that guardrail bands do nothing while guardrails are off', async () => {
