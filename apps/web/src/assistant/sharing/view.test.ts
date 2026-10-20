@@ -196,7 +196,7 @@ describe('never-shareable fields', () => {
     const members = [aggregate('householdMember', 'm-1', { isPrimary: true, firstName: 'Kai', lastName: 'Dollar', email: 'k@x.example' })];
     const result = view(choicesWith({ exactDollars: false }), { households: [], members });
     expect(result.rounding.statement).not.toContain(MASK);
-    expect(result.rounding.statement).toMatch(/Dollar/);
+    expect(result.rounding.statement).toMatch(/dollar figures/);
   });
 
   it('masks a single-character last name in prose', () => {
@@ -355,7 +355,6 @@ describe('sharing switches', () => {
 
 describe('dollar figures', () => {
   const DOLLAR_KEYS = new Set([
-    'amount',
     'startingBalance',
     'endingBalance',
     'distributions',
@@ -363,17 +362,17 @@ describe('dollar figures', () => {
     'totalContributions',
     'plannedContributionPreTax',
     'plannedContributionPostTax',
-    'monthlyBenefit',
     'annualAmount',
     'lumpSumAmount',
     'oneOffAmount',
-    'pia',
   ]);
+  /** Monthly figures round to the nearest $100 so a benefit does not round to nothing. */
+  const MONTHLY_KEYS = new Set(['monthlyBenefit', 'pia']);
 
-  function dollarValues(value: unknown): number[] {
+  function dollarValues(value: unknown, keys: ReadonlySet<string> = DOLLAR_KEYS): number[] {
     const found: number[] = [];
     walk(value, (key, inner) => {
-      if (DOLLAR_KEYS.has(key) && typeof inner === 'number') found.push(inner);
+      if (keys.has(key) && typeof inner === 'number') found.push(inner);
     });
     return found;
   }
@@ -390,7 +389,40 @@ describe('dollar figures', () => {
     expect(values.length).toBeGreaterThan(20);
     for (const value of values) expect(Math.abs(value % 1000), String(value)).toBe(0);
     expect(off.withheld).toEqual(['exactDollars']);
-    expect(off.rounding).toMatchObject({ exact: false, stepDollars: 1000 });
+    expect(off.rounding).toMatchObject({ exact: false, stepDollars: 1000, monthlyStepDollars: 100 });
+  });
+
+  it('round monthly figures to the nearest $100 while it is off, and keep them exact while it is on', () => {
+    const off = dollarValues(view(choicesWith({ exactDollars: false })), MONTHLY_KEYS);
+    expect(off.length).toBeGreaterThan(0);
+    for (const value of off) expect(Math.abs(value % 100), String(value)).toBe(0);
+    expect(off.some((value) => value % 1000 !== 0)).toBe(true);
+    const planted = {
+      ...source,
+      incomeStreams: [aggregate('incomeStream', 'inc-9', { name: 'Pension', monthlyBenefit: 1234.5 })],
+      socialSecurity: [aggregate('socialSecurityBenefit', 'ss-9', { householdMemberId: 'm-1', pia: 2349 })],
+    };
+    const exact = view(defaultSharingChoices(), planted);
+    expect(exact.income![0]).toMatchObject({ monthlyBenefit: 1234.5 });
+    expect(exact.socialSecurity![0]).toMatchObject({ pia: 2349 });
+    const rounded = view(choicesWith({ exactDollars: false }), planted);
+    expect(rounded.income![0]).toMatchObject({ monthlyBenefit: 1200 });
+    expect(rounded.socialSecurity![0]).toMatchObject({ pia: 2300 });
+  });
+
+  it('round an expense amount by its frequency: $100 for a per-period amount, $1,000 for a yearly or one-off one', () => {
+    const rows = [
+      aggregate('expense', 'exp-w', { name: 'Gas', amount: 120, frequency: 'weekly' }),
+      aggregate('expense', 'exp-m', { name: 'Phone', amount: 250, frequency: 'monthly' }),
+      aggregate('expense', 'exp-m2', { name: 'Rent', amount: 600, frequency: 'monthly' }),
+      aggregate('expense', 'exp-q', { name: 'Insurance', amount: 1240, frequency: 'quarterly' }),
+      aggregate('expense', 'exp-y', { name: 'Taxes', amount: 5400, frequency: 'yearly' }),
+      aggregate('expense', 'exp-o', { name: 'Roof', amount: 14_600, frequency: 'oneOff' }),
+    ];
+    const amounts = (choices: SharingChoices): number[] =>
+      view(choices, { ...source, expenses: rows }).expenses!.items.map((row) => row.amount as number);
+    expect(amounts(choicesWith({ exactDollars: false }))).toEqual([100, 300, 600, 1200, 5000, 15_000]);
+    expect(amounts(defaultSharingChoices())).toEqual([120, 250, 600, 1240, 5400, 14_600]);
   });
 
   it('round amounts inside scenario overrides, and leave percentages, years and ages alone', () => {
@@ -416,7 +448,7 @@ describe('dollar figures', () => {
         },
         income: {
           added: [{ _localId: 'tmp-2', name: 'Gig', kind: 'partTime', memberId: 'm-1', annualAmount: -1500, colaPct: 2.5 }],
-          patches: { 'inc-1': { monthlyBenefit: 1500, colaPct: 3 } },
+          patches: { 'inc-1': { monthlyBenefit: 1550, colaPct: 3 } },
         },
         qualifiedCharitableDistributions: [
           { memberId: 'm-1', sourceAccountId: 'acct-1', annualAmountDollars: 4_999, start: { kind: 'age', years: 71, months: 0 }, end: { kind: 'age', years: 90, months: 0 } },
@@ -430,10 +462,10 @@ describe('dollar figures', () => {
     expect(overrides.acaPtcBenchmark[0]).toEqual({ taxYear: 2027, annualSlcspDollars: 9000 });
     expect(overrides.accountContributions.perAccount['acct-1']).toEqual({ plannedContributionPreTax: 1000, contributionGrowthPct: 2.5 });
     expect(overrides.accountFloors.perAccount['acct-1']).toEqual({ floorDollars: 26_000, hsaMode: 'strict' });
-    expect(overrides.expenses.added[0]).toMatchObject({ _localId: 'tmp-1', name: 'Boat', amount: 1000 });
-    expect(overrides.expenses.patches['exp-1']).toEqual({ amount: 3000, hsaQualified: null });
+    expect(overrides.expenses.added[0]).toMatchObject({ _localId: 'tmp-1', name: 'Boat', amount: 1500 });
+    expect(overrides.expenses.patches['exp-1']).toEqual({ amount: 2500, hsaQualified: null });
     expect(overrides.income.added[0]).toMatchObject({ annualAmount: -2000, colaPct: 2.5 });
-    expect(overrides.income.patches['inc-1']).toEqual({ monthlyBenefit: 2000, colaPct: 3 });
+    expect(overrides.income.patches['inc-1']).toEqual({ monthlyBenefit: 1600, colaPct: 3 });
     expect(overrides.qualifiedCharitableDistributions[0].annualAmountDollars).toBe(5000);
     expect(overrides.retirementAge).toEqual({ primary: { ageYears: 62, ageMonths: 6 } });
     expect(overrides.inflation).toEqual({ ratePct: 3.4 });

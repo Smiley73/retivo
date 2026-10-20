@@ -21,6 +21,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 5173;
 const BASE_URL = `http://localhost:${PORT}`;
+/** The loopback port the AI assistant journey's bridge listens on (the same number is in e2e/assistant.spec.ts). */
+const ASSISTANT_BRIDGE_PORT = 24581;
 
 export default defineConfig({
   testDir: './e2e',
@@ -50,6 +52,8 @@ export default defineConfig({
     command: 'pnpm dev',
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
+    // The AI assistant journey needs a build that carries a bridge port (the connector is off without one).
+    env: { VITE_ASSISTANT_BRIDGE_PORT: String(ASSISTANT_BRIDGE_PORT) },
     timeout: 120_000,
     stdout: 'ignore',
     stderr: 'pipe',

@@ -21,6 +21,18 @@ export type ToolEntry = z.infer<typeof toolEntrySchema>;
 
 const scenarioId = z.string().min(1).max(128).describe('Id from retivo_list_scenarios.');
 
+/** The parts of the plan `retivo_get_plan_data` can return; each one follows its own consent switch. */
+export const PLAN_DATA_SECTIONS = [
+  'members',
+  'accounts',
+  'balances',
+  'income',
+  'expenses',
+  'socialSecurity',
+  'scenarios',
+] as const;
+export type PlanDataSection = (typeof PLAN_DATA_SECTIONS)[number];
+
 function readTool(name: string, description: string, inputSchema: z.ZodObject): ToolEntry {
   return toolEntrySchema.parse({ name, description, inputSchema, timeoutMs: DEFAULT_CALL_TIMEOUT_MS, longRunning: false });
 }
@@ -34,17 +46,24 @@ export const TOOL_REGISTRY: readonly ToolEntry[] = [
   ),
   readTool(
     'retivo_get_plan_data',
-    'Returns the plan data the person chose to share: household members, accounts and balances, income, expenses, Social Security and scenarios with their overrides. Use it to explore the plan beyond the prepared results.',
-    z.object({}),
+    'Returns the plan data the person chose to share: household members, accounts and balances, income, expenses, Social Security and scenarios with their overrides. Pass sections to ask for fewer parts; a part the person turned off is left out and named in the result.',
+    z.object({
+      sections: z
+        .array(z.enum(PLAN_DATA_SECTIONS))
+        .min(1)
+        .max(PLAN_DATA_SECTIONS.length)
+        .optional()
+        .describe('Which parts of the plan to return. Defaults to all of them.'),
+    }),
   ),
   readTool(
     'retivo_list_scenarios',
-    'Lists the scenarios in the plan with their ids and names. Use the ids with the other scenario tools.',
+    'Lists the scenarios in the plan with their ids, names, parent scenario, which one is the base scenario and the settings each one changes. Use the ids with the other scenario tools.',
     z.object({}),
   ),
   readTool(
     'retivo_get_scenario',
-    "Returns one scenario's resolved inputs, including which defaults the engine applied for anything left unset.",
+    "Returns one scenario's resolved inputs after inheritance. Each section says which scenario set it or which default the engine applied for anything left unset.",
     z.object({ scenarioId }),
   ),
   readTool(

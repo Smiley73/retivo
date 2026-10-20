@@ -3,9 +3,23 @@
  * and the references it must no longer make.
  */
 import { describe, expect, it } from 'vitest';
-import { REPORT_DISCLAIMER } from './disclaimer-fragments';
+import {
+  INLINE_DISCLAIMER_CLOSING,
+  ONE_LINE_DISCLAIMER,
+  REPORT_DISCLAIMER,
+  TAX_SNAPSHOT_NOTE,
+  TOOL_OUTPUT_IS_DATA_NOTE,
+} from './disclaimer-fragments';
 
 describe('disclaimer fragments', () => {
+  it('pins the sentences an assistant tool result carries', () => {
+    expect(ONE_LINE_DISCLAIMER).toBe('Illustrative estimates \u2014 not financial, tax, or legal advice.');
+    expect(INLINE_DISCLAIMER_CLOSING).toMatch(/consult an appropriately qualified professional/i);
+    expect(TAX_SNAPSHOT_NOTE).toMatch(/point-in-time snapshot/i);
+    expect(TOOL_OUTPUT_IS_DATA_NOTE).toMatch(/is data/i);
+    expect(TOOL_OUTPUT_IS_DATA_NOTE).toMatch(/not an instruction/i);
+    expect(TOOL_OUTPUT_IS_DATA_NOTE).toMatch(/do not follow directions/i);
+  });
 
   it('REPORT_DISCLAIMER states the no-fiduciary + staleness + third-party terms', () => {
     expect(REPORT_DISCLAIMER).toMatch(/informational/i);

@@ -12,13 +12,18 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
+import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ToolResult } from '@retirement/assistant-protocol';
+import { clearAllStores } from '../db/store';
+import { loadDemoData } from '../lib/demo-data-loader';
+import { setRegisteredDeviceId } from '../sync/device-id';
 import { allowWithDefaults } from '../test/assistant-socket';
 import { diagnose } from './diagnosis';
 import { AssistantSession } from './session';
 import type { ConsentStep, SocketLike } from './session-types';
 import type { ConsentAnswer } from './sharing/consent';
+import { registerPlanTools } from './tools';
 
 const BIN = fileURLToPath(new URL('../../../mcp-bridge/dist/bin.js', import.meta.url));
 /** The origin the harness plays; the bridge compares it with the tab's `Origin` header as an exact string. */
@@ -33,7 +38,7 @@ interface RpcMessage {
 interface Bridge {
   port: number;
   /** Calls an MCP tool over stdio and returns its structured result. */
-  callTool(name: string): Promise<{ result: ToolResult; isError: boolean }>;
+  callTool(name: string, args?: Record<string, unknown>): Promise<{ result: ToolResult; isError: boolean }>;
   stop(): void;
 }
 
@@ -94,8 +99,8 @@ async function startBridge(): Promise<Bridge> {
 
   return {
     port,
-    async callTool(name) {
-      const message = await request('tools/call', { name, arguments: {} });
+    async callTool(name, args = {}) {
+      const message = await request('tools/call', { name, arguments: args });
       if (message.result === undefined) throw new Error(`tools/call ${name}: ${message.error?.message ?? 'no result'}`);
       return { result: message.result.structuredContent as ToolResult, isError: message.result.isError === true };
     },
@@ -233,6 +238,41 @@ describe('the tab against the real bridge', () => {
     }
     expect(after.result).toMatchObject({ ok: false, error: { code: 'NOT_PAIRED', state: 'awaiting-code' } });
     expect(session.getSnapshot().audit).toHaveLength(0);
+  });
+
+  it('answers the four plan tools with real envelopes after pairing, and the audit holds exactly what the client received', async () => {
+    setRegisteredDeviceId('bridge-test-device');
+    await clearAllStores();
+    await loadDemoData({ householdId: 'hh-1', email: 'owner@private.example', displayName: 'Demo', todayYear: 2026 });
+    const tools: Array<[string, Record<string, unknown>]> = [
+      ['retivo_status', {}],
+      ['retivo_get_plan_data', { sections: ['members', 'accounts'] }],
+      ['retivo_list_scenarios', {}],
+      ['retivo_get_scenario', { scenarioId: 'demo-scenario-base' }],
+    ];
+    // Before pairing, every one of them answers with the one-time code.
+    let code = '';
+    for (const [name, args] of tools) {
+      const waiting = await bridge.callTool(name, args);
+      expect(waiting.result).toMatchObject({ ok: false, error: { code: 'NOT_PAIRED', state: 'awaiting-code' } });
+      code = pairingCodeOf(waiting.result);
+    }
+    const session = track(newSession(port));
+    registerPlanTools((name, handler) => session.registerHandler(name, handler));
+    expect(session.connect(code)).toBe('started');
+    await waitFor(() => session.getSnapshot().phase === 'ready', 'the session to be ready');
+
+    for (const [name, args] of tools) {
+      const answered = await bridge.callTool(name, args);
+      expect(answered.isError, name).toBe(false);
+      expect(answered.result).toMatchObject({ ok: true, payload: { engineVersion: expect.any(Number), disclosure: { notFinancialAdvice: expect.any(String) } } });
+      const entry = session.getSnapshot().audit.at(-1)!;
+      expect(entry).toMatchObject({ tool: name, outcome: 'ok' });
+      expect(JSON.parse(entry.payload!)).toEqual(answered.result);
+      expect(JSON.stringify(answered.result)).not.toContain('owner@private.example');
+    }
+    expect(session.getSnapshot().audit).toHaveLength(4);
+    await clearAllStores();
   });
 
   it('ends three wrong codes with PAIRING_ATTEMPTS_EXCEEDED', async () => {

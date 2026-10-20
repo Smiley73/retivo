@@ -35,6 +35,7 @@ import { readAssistantOptIn, writeAssistantOptIn } from './preference';
 import { AssistantSession, type ConnectResult, type SessionSnapshot } from './session';
 import type { ClientInfo, ConsentRequest, ConsentStep, SocketFactory } from './session-types';
 import type { ConsentAnswer, ConsentRecord } from './sharing/consent';
+import { registerPlanTools } from './tools';
 
 export interface AssistantContextValue {
   /** The build carries a bridge port and the beta feature is visible: the settings card renders. */
@@ -120,23 +121,25 @@ export const AssistantProvider: React.FC<AssistantProviderProps> = ({
   // The consent step waits here for the dialog the shell host renders; the session holds the promise.
   const [pending, setPending] = useState<PendingConsent | null>(null);
 
-  const [session] = useState(
-    () =>
-      new AssistantSession({
-        port,
-        openSocket,
-        isWorkspaceReady: () => workspaceReadyRef.current,
-        appBuildId: CLIENT_BUILD_ID,
-        noteActivity: recordProgrammaticActivity,
-        requestConsent:
-          requestConsent ??
-          ((request) =>
-            new Promise((resolve) => {
-              setPending({ request, resolve });
-            })),
-        log: (message) => console.info(`[assistant] ${message}`),
-      }),
-  );
+  const [session] = useState(() => {
+    const created = new AssistantSession({
+      port,
+      openSocket,
+      isWorkspaceReady: () => workspaceReadyRef.current,
+      appBuildId: CLIENT_BUILD_ID,
+      noteActivity: recordProgrammaticActivity,
+      requestConsent:
+        requestConsent ??
+        ((request) =>
+          new Promise((resolve) => {
+            setPending({ request, resolve });
+          })),
+      log: (message) => console.info(`[assistant] ${message}`),
+    });
+    // The tools this version answers; any other registry name gets TOOL_NOT_SUPPORTED.
+    registerPlanTools((name, handler) => created.registerHandler(name, handler));
+    return created;
+  });
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
 
   // The dialog is due only while the session waits for it: when the session ends first (Disconnect,

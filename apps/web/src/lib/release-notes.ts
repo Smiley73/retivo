@@ -33,6 +33,15 @@ export interface ReleaseNote {
 /** The full changelog, newest-first. New entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-20',
+    kind: 'new',
+    title: 'Ask an AI assistant about your plan (beta)',
+    blurb:
+      'Where your copy offers it, you can connect an AI assistant such as Claude Code, ' +
+      'Codex or Cursor that runs on your computer: it reads only what you allow, shows ' +
+      'every request in an activity list, and cannot change anything.',
+  },
+  {
     date: '2026-10-04',
     kind: 'new',
     title: 'RETIVO is open source',

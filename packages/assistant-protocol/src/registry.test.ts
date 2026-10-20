@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { DEFAULT_CALL_TIMEOUT_MS, MAX_CALL_TIMEOUT_MS, MIN_CALL_TIMEOUT_MS } from './constants.js';
 import {
+  PLAN_DATA_SECTIONS,
   PROMPTS,
   TOOL_REGISTRY,
   promptEntrySchema,
@@ -61,6 +62,51 @@ describe('tool registry', () => {
     expect(scenario.inputSchema.safeParse({ scenarioId: 's1' }).success).toBe(true);
     expect(scenario.inputSchema.safeParse({}).success).toBe(false);
     expect(toMcpToolDeclaration(scenario).inputSchema.required).toEqual(['scenarioId']);
+  });
+});
+
+describe('the plan and status tools', () => {
+  const NAMES = ['retivo_status', 'retivo_get_plan_data', 'retivo_list_scenarios', 'retivo_get_scenario'];
+  const entry = (name: string) => TOOL_REGISTRY.find((tool) => tool.name === name)!;
+
+  it('parse against the descriptor schema as plain reads on the default timeout', () => {
+    for (const name of NAMES) {
+      const tool = entry(name);
+      expect(toolEntrySchema.safeParse(tool).success, name).toBe(true);
+      expect(tool.name).toMatch(/^retivo_[a-z_]+$/);
+      expect(tool.longRunning).toBe(false);
+      expect(tool.timeoutMs).toBe(DEFAULT_CALL_TIMEOUT_MS);
+    }
+  });
+
+  it('validate the same arguments through the Zod object and the JSON Schema derived from it', () => {
+    const cases: Array<{ tool: string; args: unknown; valid: boolean }> = [
+      { tool: 'retivo_status', args: {}, valid: true },
+      { tool: 'retivo_get_plan_data', args: {}, valid: true },
+      { tool: 'retivo_get_plan_data', args: { sections: ['accounts', 'scenarios'] }, valid: true },
+      { tool: 'retivo_get_plan_data', args: { sections: ['household'] }, valid: false },
+      { tool: 'retivo_get_plan_data', args: { sections: [] }, valid: false },
+      { tool: 'retivo_get_plan_data', args: { sections: 'accounts' }, valid: false },
+      { tool: 'retivo_list_scenarios', args: {}, valid: true },
+      { tool: 'retivo_get_scenario', args: { scenarioId: 's1' }, valid: true },
+      { tool: 'retivo_get_scenario', args: {}, valid: false },
+      { tool: 'retivo_get_scenario', args: { scenarioId: 7 }, valid: false },
+      { tool: 'retivo_get_scenario', args: { scenarioId: '' }, valid: false },
+    ];
+    for (const { tool, args, valid } of cases) {
+      const fromZod = entry(tool).inputSchema.safeParse(args).success;
+      // Rebuilt from the JSON Schema the agent receives, so a hand-edited declaration would disagree.
+      const fromJsonSchema = z.fromJSONSchema(toMcpToolDeclaration(entry(tool)).inputSchema).safeParse(args).success;
+      expect({ tool, args, fromZod }).toEqual({ tool, args, fromZod: valid });
+      expect({ tool, args, fromJsonSchema }).toEqual({ tool, args, fromJsonSchema: valid });
+    }
+  });
+
+  it('advertises the section names the tab understands', () => {
+    const schema = toMcpToolDeclaration(entry('retivo_get_plan_data')).inputSchema as unknown as {
+      properties: { sections: { items: { enum: string[] } } };
+    };
+    expect(schema.properties.sections.items.enum).toEqual([...PLAN_DATA_SECTIONS]);
   });
 });
 
