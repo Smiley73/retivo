@@ -653,7 +653,8 @@ If the build offers none, the **Beta features** card is not shown at all.
 
 - **AI assistants** (Settings → Preferences). Lets an AI assistant that runs on
   your own computer ask RETIVO about your plan, after you approve it. It is a
-  settings card rather than a page; see [AI assistants](#ai-assistants) below.
+  settings card rather than a page; see [AI assistants](#ai-assistants) below and
+  the [AI assistants guide](ai-assistants.md).
 
 The **Guardrails today** page is different from the **Spending guardrails** card
 inside a scenario, which is a regular setting and not a beta feature.
@@ -742,7 +743,8 @@ year and calculation version it rests on, and that the figures are illustrative
 estimates, not advice. The assistant's own replies are its own: RETIVO cannot
 vouch for them. Chrome, Edge, Brave and Firefox on a computer can connect;
 Safari and phones and tablets cannot. The card says what to try when your browser
-blocks the connection.
+blocks the connection. Setup for each assistant, the full tool list and
+troubleshooting are in the [AI assistants guide](ai-assistants.md).
 
 ## Settings, syncing and your data
 
@@ -873,7 +875,10 @@ Three things follow:
 - **Clearing browser data is recoverable only from the server copy.** Edits that
   had not synced yet are lost. Check that the badge reads **Synced** first.
 - **Idle sign-out.** The app signs you out after a period of inactivity (30
-  minutes by default) and tells you so.
+  minutes by default) and tells you so. An AI assistant's activity does not count
+  as yours, unless you turned on **Let assistant activity keep me signed in** when
+  you allowed it; see
+  [the switch](ai-assistants.md#let-assistant-activity-keep-me-signed-in).
 
 ## What the app is not
 

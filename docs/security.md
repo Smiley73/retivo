@@ -124,6 +124,9 @@ a notice email, at most once every 24 hours (`failed-login.service.ts`,
   touch input. After 30 minutes without any it signs you out, and it warns you 2
   minutes before that (`IdleTimer.tsx`; build setting `VITE_IDLE_TIMEOUT_MIN`).
   A deployed stack does not override either default.
+  An AI assistant's activity does not count as input unless the person turned on
+  "Let assistant activity keep me signed in" for that session; see
+  [AI assistants](#ai-assistants).
 - **Ending sessions.** Signing out revokes that session on the server. Changing
   the password or completing a password reset ends every session. Signing out
   does not clear the data kept on the device (see
@@ -435,6 +438,8 @@ and in transit through sync, not on the device.
   different person signing in on the same browser.
 - Protect the device itself: a lock screen and full-disk encryption are what
   guard this copy.
+- A local AI assistant reads this copy only through the open tab and only what the
+  person allowed; see [AI assistants](#ai-assistants).
 
 ## What the server can and cannot see
 
@@ -531,12 +536,195 @@ the web app, including HSTS (use HTTPS only) and a content security policy that
 limits scripts and connections to the app's own address and sets
 `frame-ancestors 'none'` (`infrastructure/src/edge-functions.mjs`). The one
 exception is stack-gated: a stack that sets `assistantBridgePort` also lets the
-browser open a WebSocket connection to `ws://127.0.0.1:<that port>`, a program
-on the same computer, and nothing broader; a stack that leaves it unset has no
-such entry. It also adds a
+browser open a WebSocket connection to exactly one address,
+`ws://127.0.0.1:<that port>`, a program on the same computer, and nothing
+broader; a stack that leaves it unset has no such entry (see
+[AI assistants](#ai-assistants)). It also adds a
 shared secret header (`X-Origin-Verify`) to API calls, and the API rejects calls
 without it (`edge-auth.middleware.ts`). An optional firewall can be switched on with the stack setting
 `enableWaf`. Setup for each belongs to the [deploy guide](deploy.md).
+
+## AI assistants
+
+This section covers the optional connector that lets an AI assistant running on
+your own computer read and run your plan through your open RETIVO tab. How to use
+it is in [ai-assistants.md](ai-assistants.md). It is off unless the stack sets
+`assistantBridgePort` and the person opts in, and what follows describes the code
+as it is today, with the same limits as the rest of this guide. Each claim names
+the file that enforces it and, in brackets, the test that checks it. A claim with
+no test says so.
+
+**The data-egress statement.** Anything the assistant reads goes to its model
+provider, unless it runs a local model. The defaults are generous: everything you
+can share is on. Turn off whatever you would rather the assistant not see. The
+consent dialog and the Settings card say the same thing
+(`apps/web/src/assistant/sharing/sentences.ts`). Once a tool result reaches the
+assistant, it is outside RETIVO's control, and this section's protections end
+there.
+
+### Trust model
+
+Four parties are involved, and each sees different things:
+
+- **The signed-in tab** holds the plan, the household key and the arithmetic. It
+  answers every call and decides what leaves.
+- **The bridge** (`apps/mcp-bridge`) is a program on your computer that the
+  assistant starts. It holds no plan data and writes none to disk. It sees every
+  tool result in passing, because it relays them to the assistant, and keeps none.
+- **The assistant** sees every tool result. It runs with your user's permissions.
+- **The model provider** sees whatever the assistant puts into the conversation,
+  including every tool result.
+
+The RETIVO server is not involved. Nothing about a call passes through it.
+
+### Never shared
+
+No switch releases these. The tab builds each answer field by field from an
+allowlist, so a field with no entry is not shared
+(`apps/web/src/assistant/sharing/classification.ts`, typed so that an unclassified
+payload field fails `pnpm typecheck`). A final pass over every result also removes
+the keys listed after the bullets, at any depth (`sharing/scrub.ts` and
+`tools/envelope.ts`):
+
+- Email addresses (`email`).
+- Last names (`lastName`).
+- Your household name: the household record is not exposed at all (`name`,
+  `currency` and `createdAt` are classified as never shared).
+- Your account record and your sign-in and security history: the tools read only
+  the plan's own records through `tools/workspace.ts`.
+- Encryption keys and encrypted data: the tools read the decrypted local copy of
+  the plan, not the key cache or any ciphertext.
+- Device identifiers (`deviceId`).
+
+Removed from every result at any depth: `email`, `lastName`, `householdId`,
+`deviceId`, `schemaVersion`, `version`, `updatedAt`, `deletedAt`,
+`aggregateType`. A literal occurrence of a member's email or last name, or of the
+household name, inside free text is masked, and first names too while the person
+chose role labels. [`sharing/classification.test.ts`, `sharing/view.test.ts`,
+`tools/sharing.test.ts`, which plants a sentinel in each of last name, email,
+household name, device id, household id and key cache and asserts it is absent
+under every switch setting.] No test plants a value in the account record or the
+sign-in history; that claim rests on what `workspace.ts` reads.
+
+### What the person chooses
+
+At pairing the dialog offers one switch per part of the plan (Household members,
+Accounts, Account balances, Income, Expenses, Social Security, Scenarios, Notes and
+descriptions), one for exact dollar figures and one for first names. All are on by
+default. A part switched off is left out of every answer and named in it. With
+**Exact dollar figures** off, annual figures round to the nearest $1,000 and monthly
+ones to the nearest $100; with **First names** off, members read Primary and
+Secondary. The choices are fixed for the session
+(`sharing/switches.ts`, `sharing/consent.ts`). A separate **Let assistant activity
+keep me signed in** switch is off by default; see [the idle stance](#the-idle-stance).
+
+### Pairing and the loopback checks
+
+- **The bridge listens on `127.0.0.1` only**, bound explicitly, never a wildcard
+  address (`apps/mcp-bridge/src/loopback-server.ts`
+  [`loopback-server.test.ts`]).
+- **The upgrade is the boundary.** Before anything is sent, the `Origin` and `Host`
+  headers are compared as exact strings: `Origin` must be the one address the
+  bridge was started for, `Host` must be `127.0.0.1:<port>`. A missing or `null`
+  `Origin`, another origin, a duplicated header and a DNS-rebinding hostname are
+  refused with a 403 and no greeting. [`loopback-server.test.ts`]
+- **One tab, one session.** A second tab is closed at once with a code that says
+  why. A tab that never completes the handshake in 10 seconds is closed
+  (`loopback-server.ts`, `session.ts` [`loopback-server.test.ts`,
+  `session.test.ts`]).
+- **The pairing code is minted only when an assistant calls a tool**, is 10
+  characters from a 32-symbol alphabet (about 50 bits), lives 5 minutes, allows 3
+  wrong tries counted across connections and is single use
+  (`apps/mcp-bridge/src/pairing-code-store.ts`, `packages/assistant-protocol/src/constants.ts`
+  [`pairing-code-store.test.ts`, `session.test.ts`]).
+- **The code never travels.** The tab and the bridge each prove they know it with an
+  HMAC bound to both sides' fresh nonces, derived with HKDF, and compare proofs in
+  constant time (`packages/assistant-protocol/src/pairing.ts`
+  [`pairing.test.ts`, `session.test.ts`]). A program that grabbed the port first
+  cannot read the code from the traffic, and the tab only continues once the
+  bridge's proof verifies (`apps/web/src/assistant/session.ts`
+  [`assistant/session.test.ts`]). The version check runs before any proof.
+- **Consent comes after pairing and before any data.** The tab sends `ready` only
+  after the person allows, and answers `WORKSPACE_LOCKED` to a call that arrives
+  before then (`assistant/dispatcher.ts` [`assistant/session.test.ts`]).
+- **Logs hold no plan data and no code.** The bridge logs typed events to its
+  standard error; the tab logs state names only
+  (`apps/mcp-bridge/src/logger.ts` [`logger.test.ts`, `relay.test.ts`]).
+
+### What crosses the socket, and what never does
+
+Crossing it: the protocol version, fresh nonces and proofs, the bridge's version and
+the assistant's self-reported name and version (untrusted, shown only after
+cleaning), the single flag saying whether activity keeps you signed in, and for each
+call the tool name, its arguments, progress and the result. Results carry only what
+the switches allow, wrapped in the envelope (`packages/assistant-protocol/src/frames.ts`).
+
+Never crossing it: the pairing code, the household key, any ciphertext, your email
+address, last name, household name, the account record and device identifiers
+(above). A frame is capped at 1 MiB and a result a little below that, with at most 2
+calls at once and 60 per minute on the bridge; a call that runs too long is cancelled
+(`constants.ts`, `relay.ts`, `dispatcher.ts` [`relay.test.ts`,
+`session.dispatch.test.ts`]).
+
+### Session state is in memory only
+
+The session, the consent record, the pairing code and the activity log live in the
+tab's memory and end with the session. Nothing is written to IndexedDB,
+`localStorage` or disk, so "Clear data on this device" has nothing to clear. The
+one stored value is the per-device opt-in, a blanket-cleared `localStorage` key
+(`assistant/preference.ts`). The tab's diagnostics may hold redacted console lines
+naming the session's state, such as the phase it reached, so a diagnostics export
+can contain them; the code, nonces, proofs and payloads are not logged. The bridge
+keeps nothing between runs. Teardown is on Disconnect, a declined dialog, sign-out
+(idle included), locking, a different person signing in and a reload or tab close
+[`AssistantContext.test.tsx`, `session.test.ts`].
+
+### The shared-loopback residual
+
+Port 24580 (the default) on your computer is reachable by any program on it, so
+the loopback address is shared with every other local user. The `Origin` check
+stops a web page; it does not stop a program, which can send any `Origin` it likes.
+What stops another local user from pairing is the code: it is minted only when
+your assistant calls a tool and is delivered through that assistant's output, never
+shown elsewhere, and it takes a proof of the code to pair. Such a user can still
+hold the tab's slot for a few seconds or use up a code's three tries; the cost is a
+new code, not access. A process that takes the port before the bridge does cannot
+prove it knows the code, and the tab stops with a message. A process already
+running as you is a different case: it can read the browser's profile directly,
+which "Data on the device" above already says is possible, so the connector adds
+nothing it could not already do. The connector depends on the browser asking
+before a site reaches your computer and on your own machine being clean; both are
+outside RETIVO's control.
+
+### The idle stance
+
+By default the assistant's activity is not user activity, and an idle sign-out ends
+the session as it always would (`auth/IdleTimer.tsx`). The consent switch **Let
+assistant activity keep me signed in**, off by default and chosen per session, makes
+each completed tool call count as activity: the tab calls `recordProgrammaticActivity`
+for a call whose tool returned data, only while the session is allowed and the
+switch is on, and the idle timer treats that like a click, in every tab through the
+shared last-activity key. Calls that start, fail, are cancelled, time out or are
+refused do not count (`assistant/session.ts`, `dispatcher.ts`
+[`AssistantContext.test.tsx`: the switch off, on and a call of every outcome]). The
+consequence is plain: with it on, an assistant you walked away from keeps the
+session, and every open RETIVO tab in that browser, signed in for as long as it
+keeps calling. Signing out, **Disconnect**, closing the tab and locking still end
+it. The switch changes only the browser's idle timer, not anything the server
+enforces.
+
+### Limits
+
+- The model provider, and everything after a result leaves the tab, are outside
+  RETIVO's control; the data-egress statement above is the whole promise.
+- The assistant reports its own name; RETIVO cannot verify it.
+- Text inside tool results comes from your plan. It is cleaned and marked as data,
+  but an assistant may still be swayed by it; that is the assistant's behaviour.
+- The connector relies on the browser's local-network prompt and on your own
+  computer being free of other malware.
+- The tools are read-only; there is no write path.
+- Only a browser that asks before a site reaches your computer is supported; Safari
+  and browsers on an iPhone or iPad are not.
 
 ## Deleting and exporting your data
 
@@ -565,6 +753,7 @@ without it (`edge-auth.middleware.ts`). An optional firewall can be switched on 
 | Sign-up approval | Shortcuts are shown on screen. | Every sign-up waits for the owner, except one using `approverEmail`. |
 | Test account | A ready-made account exists. | None. |
 | Cookie names | `dev-rt`, `dev-dt` (no `Secure` flag). | `__Secure-rt`, `__Secure-dt`. |
+| AI assistant connector | On when `VITE_ASSISTANT_BRIDGE_PORT` is set; the dev server sends no content security policy. | Only on a stack that sets `assistantBridgePort`, which also adds the one loopback address to the policy. |
 
 The local steps are in [local-setup.md](local-setup.md), and the deployed ones are in
 [deploy.md](deploy.md).
