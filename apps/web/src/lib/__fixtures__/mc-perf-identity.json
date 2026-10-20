@@ -1,6 +1,6 @@
 {
   "caseA": {
-    "engineVersion": 70,
+    "engineVersion": 71,
     "seed": 12345,
     "pathCount": 500,
     "firstYear": 2026,
@@ -11174,7 +11174,7 @@
     }
   },
   "caseB": {
-    "engineVersion": 70,
+    "engineVersion": 71,
     "seed": 12345,
     "pathCount": 200,
     "firstYear": 2026,
@@ -26009,7 +26009,7 @@
     }
   },
   "futureRetirement": {
-    "engineVersion": 70,
+    "engineVersion": 71,
     "seed": 4242,
     "pathCount": 20,
     "firstYear": 2026,
@@ -30763,7 +30763,7 @@
     }
   },
   "alreadyRetired": {
-    "engineVersion": 70,
+    "engineVersion": 71,
     "seed": 4242,
     "pathCount": 20,
     "firstYear": 2026,
@@ -36006,7 +36006,7 @@
     }
   },
   "guardrailsEnabled": {
-    "engineVersion": 70,
+    "engineVersion": 71,
     "seed": 4242,
     "pathCount": 20,
     "firstYear": 2026,
@@ -41045,7 +41045,7 @@
     }
   },
   "qcdEnabled": {
-    "engineVersion": 70,
+    "engineVersion": 71,
     "seed": 4242,
     "pathCount": 20,
     "firstYear": 2026,

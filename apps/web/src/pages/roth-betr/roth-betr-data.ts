@@ -26,6 +26,7 @@ import {
   type ScenarioAggregate,
 } from '../../lib/scenario-resolution';
 import { runBalanceProjectionForPage } from '../../lib/balance-projection-runner';
+import { growRoughBenchmarkCents } from '../../lib/aca-ptc';
 import { carriesTenPercentPenalty } from '../../lib/early-withdrawal-penalty';
 import { retirementDate } from '../../lib/retirement-date-math';
 import { deriveFilingStatus } from '../../lib/filing-status';
@@ -207,12 +208,17 @@ function accountOption(acc: Aggregate<AccountPayload>): AccountOption {
  * `computeAcaPtc` prorates the expected contribution by that month count, so an
  * un-prorated benchmark would make the probe report a larger "lost credit" than
  * the projection could ever lose.
+ *
+ * The rough fallback is grown from its 2026 base year to the retirement year at
+ * `medicalInflationRatePct` (`growRoughBenchmarkCents`); an override is never
+ * scaled.
  */
 function deriveBenchmarkSlcspCents(
   resolved: ScenarioOverrides,
   memberInputs: readonly TaxMemberInput[],
   retirementYear: number,
   coverageMonths: number,
+  medicalInflationRatePct: number,
 ): number {
   // Read through the ONE shared shape-checking enumerator, so an
   // envelope-only-validated import cannot throw out of the probe at `.find` or
@@ -223,7 +229,13 @@ function deriveBenchmarkSlcspCents(
   if (override !== undefined) {
     return overrideBenchmarkCentsForCoverageMonths(override.annualSlcspDollars, coverageMonths);
   }
-  return Math.round(defaultHouseholdSlcspByAge(memberInputs, retirementYear) * CENTS_FACTOR);
+  // The age-priced fallback grows from its base year at the scenario's medical
+  // rate, the same helper and rate the projection's tax pass uses.
+  return growRoughBenchmarkCents(
+    Math.round(defaultHouseholdSlcspByAge(memberInputs, retirementYear) * CENTS_FACTOR),
+    retirementYear,
+    medicalInflationRatePct,
+  );
 }
 
 /** The retirement year's `TaxMemberInput` set for the BETR probe, built
@@ -325,6 +337,7 @@ interface BETRContextAnchors {
   readonly lifeExpectancyAnchorYear: number;
   readonly currentCalendarYear: number;
   readonly inflationRatePct: number;
+  readonly medicalInflationRatePct: number;
 }
 
 /**
@@ -384,6 +397,7 @@ function buildBETRContext(
       healthMemberInputs,
       retirementYear,
       acaCoverageMonths,
+      anchors.medicalInflationRatePct,
     ),
     // The probe prices the household's OWN poverty-guideline
     // schedule and its actual Marketplace coverage months, so its "lost premium
@@ -439,6 +453,7 @@ export function buildRothBETRPageData(input: RothBETRDataInput): RothBETRPageDat
     lifeExpectancyAnchorYear: page.sharedCtx.horizonYear,
     currentCalendarYear,
     inflationRatePct: page.sharedCtx.ctx.inflationPct,
+    medicalInflationRatePct: page.sharedCtx.medicalInflationRatePct,
   });
 
   const workingSummary = computeWorkingYearsBETRSummary(ctx, drawdownYears, bundle);

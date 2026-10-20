@@ -188,7 +188,7 @@ import type { DrawdownYear, DrawdownAccountYear } from './drawdown-engine-types.
  *  update. docs/math-projections.md, under "The Monte Carlo stress test",
  *  explains the version for readers.
  */
-export const ENGINE_VERSION = 70;
+export const ENGINE_VERSION = 71;
 
 /* ---------- engine ---------- */
 

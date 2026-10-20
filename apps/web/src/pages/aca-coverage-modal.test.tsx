@@ -28,6 +28,7 @@ import type {
   ScenarioPayload,
 } from '../db/types';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
+import { ROUGH_BENCHMARK_ASSUMPTIONS } from '../lib/aca-ptc';
 
 const HH = 'hh-test';
 
@@ -327,6 +328,19 @@ describe('AcaCoverageModal — health facts', () => {
     expect(screen.getByText(/\$700 a month for a 60-year-old/i)).toBeInTheDocument();
     expect(screen.getByText(/rising\s+5% for each year of age/i)).toBeInTheDocument();
     expect(screen.getByText(/rough estimate, not a real quote/i)).toBeInTheDocument();
+    // The estimate grows every year from its base year at the scenario's medical
+    // rate, and an entered price is used exactly as entered.
+    expect(
+      screen.getByText(
+        new RegExp(
+          `From ${ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows every year at the scenario.s medical inflation rate`,
+          'i',
+        ),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/used exactly as entered, whatever the medical inflation rate/i),
+    ).toBeInTheDocument();
   });
 
   it('seeds the poverty-guideline region and the stored coverage months', async () => {

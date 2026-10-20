@@ -30,6 +30,7 @@ keyed by year and one `metadata` block: `source`, `asOfDate` and
 | `RMD_JOINT_LIFE_TABLE_II` | `rmd-life-expectancy-tables.ts` | one entry | IRS Pub. 590-B Table II |
 | `SS_TAX_THRESHOLDS` | `ss-taxation-thresholds.ts` | one entry, under 2024 | 26 U.S.C. §86(c) |
 | `DEFAULT_ASSUMED_TAXABLE_YIELD_CONFIG` | `assumed-taxable-yield-config.ts` | one entry, under 2026 | A planning assumption |
+| `ROUGH_BENCHMARK_ASSUMPTIONS` | `aca-ptc.ts` | base year 2026 | A planning assumption |
 
 Three groups:
 
@@ -48,7 +49,12 @@ Three groups:
 - **A planning assumption, not a refresh.** The assumed taxable yield (2% a
   year, half qualified dividends, none tax-exempt) is a modelling choice, set
   centrally. It is not a scenario or household input. Change it only when you
-  decide to change the assumption.
+  decide to change the assumption. The rough ACA benchmark premium ($700 a
+  month at age 60) is also a planning assumption. It is a price for the base
+  year in `ROUGH_BENCHMARK_ASSUMPTIONS` (2026), and later years grow it at the
+  scenario's medical inflation rate. To re-anchor it, move the base amount and
+  the base year together: a new amount with the old year would grow a price that
+  is already current.
 
 Engines never read these constants directly. A run resolves them once and passes
 them through. `DEFAULT_TAX_CALIBRATION_BUNDLE` in
@@ -96,6 +102,7 @@ These tests pin the values, so a refresh breaks them until you update them:
 | `federal-tax-config.test.ts` | The year list, the shape of every table, the senior-deduction bases and some 2026 figures |
 | `irmaa-tiers.test.ts` | The year list and spot-check thresholds |
 | `aca-ptc-parameters.test.ts` | The year list, every band and poverty figure, the source order, and the exact `asOfDate` |
+| `aca-ptc.test.ts` | The rough benchmark's base year (2026), its disclosure, and the growth from the base year |
 | `qcd-limits.test.ts` | The year list, the limits and the exact `asOfDate` |
 | `ss-earnings-test.test.ts` | The published amounts and the exact `asOfDate` |
 | `rmd-divisors.test.ts` | The source links and the divisors and life-expectancy tables |

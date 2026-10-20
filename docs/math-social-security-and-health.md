@@ -458,9 +458,13 @@ app works out the subsidy itself.
    - The **Benchmark plan cost for the year** you entered for that year. It is a
      whole-year figure, so it is cut to the covered months (a 6-month year uses
      half).
-   - Otherwise a rough estimate: **$700 a month at age 60, up 5% for each year
-     of age**, for each covered member and each covered month. The age is the
-     year minus the birth year.
+   - Otherwise a rough estimate: **$700 a month at age 60 in 2026, up 5% for
+     each year of age**, for each covered member and each covered month. The age
+     is the year minus the birth year. For a year after 2026 the household's
+     total is multiplied by (1 + medical inflation rate) for each year past
+     2026, rounded once to the cent. The medical rate is the scenario's
+     inflation rate for the Medical expense category, which is the general
+     inflation rate plus 2 percentage points unless you set it.
 7. **Credit** = benchmark premium minus expected contribution, never below zero.
 
 **How it reaches the numbers.** The credit is counted against that year's
@@ -501,18 +505,17 @@ stays:
   compared with the 2026 poverty line and bands. With zero or negative
   inflation it is not scaled.
 - The expected contribution is multiplied by the same factor afterwards.
-- The benchmark premium is **not** scaled.
+- The benchmark premium is **not** scaled by general inflation. The rough
+  estimate grows at the medical rate instead (step 6), and a premium you
+  entered is used as entered.
 
 The rough benchmark curve ($700 a month at age 60, +5% for each year of age) is
-a fixed rule with no year. It is a planning assumption, not a statutory
-figure.
+a 2026 price, a planning assumption and not a statutory figure. It stays at that
+level in 2026 and earlier, and grows at the medical rate in later years. The
+base amount and the base year (2026) move together when the curve is re-anchored.
 
 ### Simplified or left out
 
-- **The rough benchmark is not inflation-adjusted.** It changes only as the
-  member ages, +5% a year of age. In later years it falls behind real premium
-  growth, which pushes the credit down. Enter your own **Benchmark plan cost
-  for the year** for years where that matters.
 - **Months are counted as a number, not a calendar.** Two spouses covered in
   different parts of the year are credited the larger of their two counts.
 - **Married filing separately** gets no credit, even though a few separated
@@ -569,6 +572,18 @@ applies. Their benchmark plan costs $600 a month, $7,200 a year, for 12 months.
 
 - Expected contribution: $31,300 x 6.60% = **$2,065.80**.
 - Credit: $7,200 - $2,065.80 = **$5,134.20**.
+
+**The same credit in a later year.** A person filing as single in 2028, born
+in 1968, covered for 12 months, has an ACA MAGI of $33,854.08. General
+inflation is 4% and no medical rate is set, so the medical rate is 6%.
+
+- MAGI divided by 1.04 twice (1.0816) is $31,300, exactly 200% of the poverty
+  line, so the 6.60% band applies. Expected contribution:
+  $31,300 x 6.60% x 1.0816 = **$2,234.37**.
+- Benchmark at age 60: $700 x 12 = $8,400 in 2026 prices, times 1.06 twice
+  (1.1236) = **$9,438.24**.
+- Credit: $9,438.24 - $2,234.37 = **$7,203.87**. Without the medical growth it
+  would be $6,165.63.
 
 The credit only counts up to that year's federal tax plus IRMAA cash need. If
 this person's federal tax is about $1,600 and they have no IRMAA, only about

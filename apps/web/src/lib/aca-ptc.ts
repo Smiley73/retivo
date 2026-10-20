@@ -419,8 +419,9 @@ export function computeAcaPtc(
   // `magiCents` input is already deflated to the clamped snapshot year for tier
   // classification, so `MAGI(deflated) × applicableFigure` is in clamped-year
   // dollars; scaling restores projection-year dollars. The benchmark premium is
-  // NOT scaled: nothing inflates it (the rough fallback depends on age alone, and
-  // a user-entered override is used as entered for its year).
+  // NOT scaled here: the caller grows the rough fallback at the scenario's
+  // medical rate before this call (`growRoughBenchmarkCents`), and a
+  // user-entered override is used as entered for its year.
   const contributionScaling =
     input.expectedContributionScalingFactor !== undefined &&
     input.expectedContributionScalingFactor > 0
@@ -502,14 +503,38 @@ export function fplDollarsForRegion(
  * `tax-integration-helpers.ts` derives its base/growth/age from these constants
  * (×12 to annual dollars), so the two curves cannot drift apart. Expressed
  * per member per month so the household benchmark can be summed per member.
+ *
+ * `baseYear` anchors the premium level: the $700 figure is a 2026 price, and
+ * every later tax year multiplies it by `(1 + medical rate)^(taxYear − baseYear)`
+ * (`growRoughBenchmarkCents`). Re-anchor the base amount and `baseYear` together.
  */
 export const ROUGH_BENCHMARK_ASSUMPTIONS = {
   baseMonthlyDollars: 700,
   baseAge: 60,
   ageGrowthRate: 0.05,
+  baseYear: 2026,
   disclosure:
-    'Rough estimate: age-priced benchmark ($700/mo at age 60, +5% per year of age), summed per covered member per covered month — not an exchange SLCSP quote. Editable per year.',
+    "Rough estimate: age-priced benchmark ($700/mo at age 60 in 2026, +5% per year of age), summed per covered member per covered month and grown each year after 2026 at the scenario's medical inflation rate — not an exchange SLCSP quote. Editable per year.",
 } as const;
+
+/**
+ * Grow a rough age-priced annual benchmark (integer cents) from the base year to
+ * `taxYear` at the scenario's medical inflation rate:
+ * `round(cents × (1 + medicalRatePct / 100)^max(0, taxYear − baseYear))`, rounded
+ * once. Years at or before the base year, and an absent rate, return the input
+ * unchanged. Applies to the age-priced fallback ONLY: a user-entered benchmark is
+ * used as entered and never passes through here.
+ */
+export function growRoughBenchmarkCents(
+  annualCents: number,
+  taxYear: number,
+  medicalRatePct: number | undefined,
+): number {
+  if (medicalRatePct === undefined) return annualCents;
+  const years = Math.max(0, taxYear - ROUGH_BENCHMARK_ASSUMPTIONS.baseYear);
+  if (years === 0) return annualCents;
+  return Math.round(annualCents * Math.pow(1 + medicalRatePct / 100, years));
+}
 
 /**
  * Assert a member `age` is usable on the rough age-premium curve. The

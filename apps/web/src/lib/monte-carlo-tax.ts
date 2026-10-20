@@ -309,6 +309,10 @@ export interface McTaxContext {
    * thresholds when the tax year exceeds the latest calibration snapshot.
    */
   readonly inflationRatePct?: number;
+  /** Scenario medical inflation rate (percent) that grows the rough ACA
+   *  benchmark; fixed per scenario, not the path's sampled inflation. Absent →
+   *  no growth. */
+  readonly medicalInflationRatePct?: number;
   /** Calendar year the primary is projected to die. `undefined`
    *  → alive for every projection year. Drives the per-year
    *  filing-status + household-size + Medicare-count recompute. */
@@ -2103,6 +2107,9 @@ export function buildMcTaxYearInput(
           args.irmaaLookbackUnitsMinus2),
     taxpayersAge65Plus: countTaxpayersAge65Plus(survivors, taxYear),
     inflationRatePct: taxCtx.inflationRatePct,
+    ...(taxCtx.medicalInflationRatePct !== undefined
+      ? { medicalInflationRatePct: taxCtx.medicalInflationRatePct }
+      : {}),
     // The scenario's FPL region + the year's annual SLCSP override
     // reach the MC ACA-PTC block exactly as they reach the deterministic one, so
     // the two engines price the same benchmark against the same poverty line.

@@ -839,6 +839,23 @@ export function resolveInflationForScenario(
 }
 
 /**
+ * The scenario's medical inflation rate (percent): the chain's resolved rate for
+ * the seeded Medical category, else general + `DEFAULT_MEDICAL_INFLATION_SPREAD_PCT`.
+ * It depends on the scenario chain alone (never the household's category list),
+ * so every engine that grows the rough ACA benchmark prices a year the same way.
+ */
+export function resolveMedicalInflationPct(
+  scenarioId: string,
+  allScenarios: ScenarioAggregate[],
+): number {
+  const { ratePct, categoryRates } = resolveInflationForScenario(scenarioId, allScenarios);
+  return (
+    categoryRates.get(DEFAULT_EXPENSE_CATEGORY_IDS.Medical) ??
+    ratePct + DEFAULT_MEDICAL_INFLATION_SPREAD_PCT
+  );
+}
+
+/**
  * Returns the scenarios from `scenarioId` walking parent pointers up
  * to the base. The first element is `scenarioId`'s scenario; the last
  * is the base. Throws on unknown id; warns + truncates on a cycle in

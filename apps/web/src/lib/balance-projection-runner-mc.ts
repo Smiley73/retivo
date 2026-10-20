@@ -646,6 +646,9 @@ export function buildMcTaxContext(
     householdSize: ctx.secondary ? 2 : 1,
     assumedCostBasisFraction,
     inflationRatePct: ctx.projCtx.inflationPct,
+    // Fixed scenario rate (not the path's sampled inflation) that grows the
+    // rough ACA benchmark; the deterministic engine reads the same number.
+    medicalInflationRatePct: ctx.medicalInflationRatePct,
     primaryDeathYear,
     secondaryDeathYear,
     filingStatusOverride: resolved.filingStatus ?? undefined,

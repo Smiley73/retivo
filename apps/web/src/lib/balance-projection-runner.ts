@@ -213,6 +213,7 @@ export function runBalanceProjectionForPage(
     retirementYear: ctx.primaryRetirementYear,
     horizonYear: ctx.horizonYear,
     ssStartYear: ctx.ssStartYear,
+    medicalInflationRatePct: ctx.medicalInflationRatePct,
     // Planned is always available; TWR follows the re-derived predicate.
     methodAvailable: twrAvailable,
     // Surface the planned-rate fallback set so the page renders the

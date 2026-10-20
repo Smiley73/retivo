@@ -338,6 +338,12 @@ describe('ReportPage (Export PDF page)', () => {
         'i',
       ),
     );
+    expect(panel).toHaveTextContent(
+      new RegExp(
+        `From ${ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows every year at the scenario.s medical inflation rate`,
+        'i',
+      ),
+    );
   });
 
   it('renders the market-stress assumptions and disclosures', async () => {

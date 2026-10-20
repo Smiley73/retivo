@@ -191,6 +191,7 @@ function makeCtx(args: {
     mixedInPlanConversionBasisCentsByOwner: new Map(),
     preRetirementConversionCentsByYear: new Map(),
     acaMarketplaceOptOutMemberIds: new Set<string>(),
+    medicalInflationRatePct: 5,
     resolvedQcd: { entries: [] },
   };
 }

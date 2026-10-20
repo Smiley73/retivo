@@ -189,6 +189,15 @@ describe('BalanceProjectionEstimateNote', () => {
     expect(note).toHaveTextContent(
       /counted for each covered person and only for the months they are\s+covered/i,
     );
+    // The estimate grows each year from its base year at the scenario's medical
+    // inflation rate, and an entered price is used as entered.
+    expect(note).toHaveTextContent(
+      new RegExp(
+        `From ${ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows\\s+every year at the scenario.s medical inflation rate`,
+        'i',
+      ),
+    );
+    expect(note).toHaveTextContent(/it is used exactly as entered/i);
     // The approximation is never presented as a real exchange quote.
     expect(note).toHaveTextContent(/not a real quote from your exchange/i);
   });
