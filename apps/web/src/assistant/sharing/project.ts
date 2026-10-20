@@ -45,7 +45,16 @@ function ownValue(source: Record<string, unknown>, key: string): unknown {
   return Object.prototype.hasOwnProperty.call(source, key) ? source[key] : undefined;
 }
 
-function project(value: unknown, classification: Classification, context: ProjectionContext): unknown {
+/** Expense frequencies whose amount is an annual or one-time total; every other amount is a per-period figure. */
+const TOTAL_AMOUNT_FREQUENCIES: ReadonlySet<unknown> = new Set(['yearly', 'oneOff']);
+
+function project(
+  value: unknown,
+  classification: Classification,
+  context: ProjectionContext,
+  /** The object the value sits in, for the one kind that reads a sibling field. */
+  parent?: Record<string, unknown>,
+): unknown {
   if (value === undefined) return OMIT;
   switch (classification.kind) {
     case 'never':
@@ -73,6 +82,12 @@ function project(value: unknown, classification: Classification, context: Projec
     case 'monthlyDollars':
       if (typeof value !== 'number' || !Number.isFinite(value)) return OMIT;
       return applyMonthlyRounding(value, context.choices.exactDollars);
+    case 'periodDollars': {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return OMIT;
+      // A patch carries no frequency; its amount is read at the finer step so a small recurring figure is not zeroed.
+      const total = parent !== undefined && TOTAL_AMOUNT_FREQUENCIES.has(ownValue(parent, 'frequency'));
+      return total ? applyRounding(value, context.choices.exactDollars) : applyMonthlyRounding(value, context.choices.exactDollars);
+    }
     case 'label':
       return typeof value === 'string' ? sanitizeLabel(value, context.masker) : OMIT;
     case 'text':
@@ -86,7 +101,7 @@ function project(value: unknown, classification: Classification, context: Projec
       if (!isPlainObject(value)) return OMIT;
       const out: Record<string, unknown> = {};
       for (const [key, inner] of Object.entries(classification.fields)) {
-        const projected = project(ownValue(value, key), inner, context);
+        const projected = project(ownValue(value, key), inner, context, value);
         if (projected !== OMIT) out[key] = projected;
       }
       return out;

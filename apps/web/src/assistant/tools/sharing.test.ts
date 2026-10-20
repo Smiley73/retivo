@@ -35,13 +35,15 @@ const VARIANTS: ReadonlyArray<{ label: string; choices: SharingChoices }> = [
   { label: 'every switch off', choices: choicesWith(Object.fromEntries(SHARING_SWITCH_IDS.map((id) => [id, false]))) },
 ];
 
-/** Every key whose classification is a dollar figure, annual and monthly, at any depth. */
-function dollarKeys(): { annual: Set<string>; monthly: Set<string> } {
+/** Every key whose classification is a dollar figure, annual, monthly and per-period, at any depth. */
+function dollarKeys(): { annual: Set<string>; monthly: Set<string>; period: Set<string> } {
   const annual = new Set<string>();
   const monthly = new Set<string>();
+  const period = new Set<string>();
   const visit = (key: string, classification: Classification): void => {
     if (classification.kind === 'dollars') annual.add(key);
     else if (classification.kind === 'monthlyDollars') monthly.add(key);
+    else if (classification.kind === 'periodDollars') period.add(key);
     else if (classification.kind === 'object') for (const [inner, field] of Object.entries(classification.fields)) visit(inner, field);
     else if (classification.kind === 'array') visit(key, classification.item);
     else if (classification.kind === 'record') visit(key, classification.value);
@@ -50,7 +52,7 @@ function dollarKeys(): { annual: Set<string>; monthly: Set<string> } {
   for (const map of [ACCOUNT_CLASSIFICATION, BALANCE_CLASSIFICATION, EXPENSE_CLASSIFICATION, INCOME_CLASSIFICATION, SOCIAL_SECURITY_CLASSIFICATION, SCENARIO_CLASSIFICATION]) {
     for (const [key, field] of Object.entries(map)) visit(key, field);
   }
-  return { annual, monthly };
+  return { annual, monthly, period };
 }
 
 function numbersAt(value: unknown, keys: ReadonlySet<string>, found: number[] = []): number[] {
@@ -82,16 +84,20 @@ describe.each(CALLS)('$tool', ({ tool, args }) => {
   });
 
   it('rounds annual figures to $1,000 and monthly ones to $100 while exact figures are off', async () => {
-    const { annual, monthly } = dollarKeys();
+    const { annual, monthly, period } = dollarKeys();
     const envelope = envelopeOf(await callPlanTool(tool, args, choicesWith({ exactDollars: false })));
     const annualValues = numbersAt(envelope.data, annual);
     const monthlyValues = numbersAt(envelope.data, monthly);
     for (const value of annualValues) expect(Math.abs(value % 1000), String(value)).toBe(0);
     for (const value of monthlyValues) expect(Math.abs(value % 100), String(value)).toBe(0);
+    // An expense amount is a per-period figure: at least a multiple of $100, whatever its frequency.
+    const periodValues = numbersAt(envelope.data, period);
+    for (const value of periodValues) expect(Math.abs(value % 100), String(value)).toBe(0);
     expect(envelope.rounding).toMatchObject({ exact: false, stepDollars: 1000, monthlyStepDollars: 100 });
     if (tool === 'retivo_get_plan_data') {
       expect(annualValues.length).toBeGreaterThan(20);
       expect(monthlyValues.length).toBeGreaterThan(0);
+      expect(periodValues.length).toBeGreaterThan(0);
     }
   });
 

@@ -2,13 +2,15 @@
  * The provider: the three gates, teardown on every signal (with the D7 switch
  * off and on), and the idle clock through real <IdleTimer> instances.
  */
+import 'fake-indexeddb/auto';
 import React from 'react';
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToolResult } from '@retirement/assistant-protocol';
 import { IdleTimer } from '../auth/IdleTimer';
+import { clearAllStores } from '../db/store';
 import { BetaFeaturesProvider } from '../contexts/BetaFeaturesContext';
-import { ScriptedSocket, allowKeepingSignedIn, pairScripted } from '../test/assistant-socket';
+import { ScriptedSocket, allowKeepingSignedIn, pairScripted, until } from '../test/assistant-socket';
 import { AssistantProvider, useAssistant, type AssistantContextValue } from './AssistantContext';
 
 const auth = vi.hoisted(() => ({
@@ -215,6 +217,26 @@ describe.each([false, true])('teardown (D7 switch %s)', (keepSignedIn) => {
     // A fresh code is needed: nothing reconnects by itself, and a blank code is refused.
     expect(ctx.openSocket).toHaveBeenCalledTimes(1);
     unregister();
+  });
+});
+
+describe('plan tools', () => {
+  it('answers the status and plan tools after pairing, with no handler registered by the test', async () => {
+    await clearAllStores();
+    const ctx = setup();
+    const socket = await pair(ctx.sockets);
+    const resultOf = async (id: string, tool: string, args: Record<string, unknown> = {}): Promise<ToolResult> => {
+      act(() => socket.receive({ type: 'call', id, tool, args }));
+      await until(() => socket.frames.some((frame) => frame.type === 'result' && frame.id === id), `the result of ${tool}`);
+      return socket.frames.find((frame) => frame.type === 'result' && frame.id === id)!.result as ToolResult;
+    };
+    for (const tool of ['retivo_status', 'retivo_get_plan_data', 'retivo_list_scenarios']) {
+      const result = await resultOf(`call-${tool}`, tool);
+      expect(result.ok, tool).toBe(true);
+    }
+    // A tool this version does not answer still gets TOOL_NOT_SUPPORTED.
+    const unsupported = await resultOf('call-compare', 'retivo_compare_scenarios', { baseScenarioId: 'a', otherScenarioId: 'b' });
+    expect(!unsupported.ok && unsupported.error.code).toBe('TOOL_NOT_SUPPORTED');
   });
 });
 

@@ -6,7 +6,9 @@
  *
  * A rule reads the section's EFFECTIVE value the way the engines do: through the
  * hardened per-section resolvers in `lib/scenario-resolution.ts` where one exists
- * (they drop corrupt stored values), and through the merged chain otherwise. The
+ * (they drop corrupt stored values), through `resolveItemState` for the sparse expense and income
+ * sections (a nearer scenario's section does not hide an ancestor's rows or patches), and through
+ * the merged chain otherwise. The
  * value stays in the stored shape so the sharing field model projects it; a rule
  * never decides what may be said. Each default is read from the constant the
  * engine imports, and a setting whose default is a literal inside the engine says
@@ -18,8 +20,10 @@ import {
   DEFAULT_INFLATION_PCT,
   DEFAULT_LIFE_EXPECTANCY_AGE,
   DEFAULT_MEDICAL_INFLATION_SPREAD_PCT,
+  type PatchWithClears,
   type ScenarioOverrides,
 } from '../../db/types';
+import { normalizeOverrideId, resolveItemState } from '../../lib/expense-override-resolution';
 import { summarizeFilingPlan } from '../../lib/filing-status';
 import { DEFAULT_RETIREMENT_AGE, DEFAULT_SOCIAL_SECURITY_CLAIM_AGE } from '../../lib/scenario-bootstrap';
 import {
@@ -101,6 +105,55 @@ function perAccount<T>(accounts: SectionContext['accounts'], pick: (id: string) 
 /** Said beside every per-account section: a scenario that names some accounts leaves the rest as they are. */
 const PER_ACCOUNT_EFFECTIVE =
   'Resolved per account: the first scenario in the chain that sets an account wins, and an account no scenario mentions keeps its own recorded setting.';
+
+/**
+ * The effective `expenses` or `income` section: what the engines resolve through
+ * `resolveItemState`, not the nearest scenario's section. Every scenario in the chain
+ * adds its rows; an id is disabled when the nearest scenario that disables or re-enables
+ * it disables it (a re-enable shows as the id's absence from `disabledIds`); and an id's
+ * patch merges per key, the nearest scenario winning. Ids keep the spelling a scenario
+ * stored them with.
+ */
+/** The shape `ExpensesOverride` and `IncomeOverride` share. */
+interface SparseSection<TPayload> {
+  disabledIds?: string[];
+  added?: Array<TPayload & { _localId: string }>;
+  patches?: Record<string, PatchWithClears<TPayload>>;
+  reEnabledIds?: string[];
+}
+
+function readSparseItems<TPayload>(
+  chain: ScenarioAggregate[],
+  pick: (overrides: ScenarioOverrides) => SparseSection<TPayload> | undefined,
+): SparseSection<TPayload> {
+  const sections = chain.map((scenario) => pick(scenario.payload.overrides));
+  const spellings = new Map<string, string>();
+  const note = (raw: string): string => {
+    const id = normalizeOverrideId(raw);
+    if (!spellings.has(id)) spellings.set(id, raw);
+    return id;
+  };
+  const ids = new Set<string>();
+  for (const section of sections) {
+    for (const raw of section?.disabledIds ?? []) ids.add(note(raw));
+    for (const raw of section?.reEnabledIds ?? []) ids.add(note(raw));
+    for (const raw of Object.keys(section?.patches ?? {})) ids.add(note(raw));
+  }
+  const disabledIds: string[] = [];
+  const patches: Record<string, PatchWithClears<TPayload>> = {};
+  for (const id of ids) {
+    const { disabled, patch } = resolveItemState<TPayload>(id, sections);
+    const raw = spellings.get(id) ?? id;
+    if (disabled) disabledIds.push(raw);
+    if (patch !== undefined) patches[raw] = patch;
+  }
+  const added = sections.flatMap((section) => section?.added ?? []);
+  return {
+    ...(disabledIds.length > 0 && { disabledIds }),
+    ...(added.length > 0 && { added }),
+    ...(Object.keys(patches).length > 0 && { patches }),
+  };
+}
 
 const hasSecondary = (context: SectionContext): boolean => context.members.some((member) => !member.payload.isPrimary);
 
@@ -259,8 +312,14 @@ export const SCENARIO_SECTION_COVERAGE = {
       };
     },
   },
-  expenses: { whenUnset: 'No expense is added, turned off or changed.', read: merged('expenses') },
-  income: { whenUnset: 'No income stream is added, turned off or changed.', read: merged('income') },
+  expenses: {
+    whenUnset: 'No expense is added, turned off or changed.',
+    read: (context) => ({ value: readSparseItems(context.chain, (overrides) => overrides.expenses) }),
+  },
+  income: {
+    whenUnset: 'No income stream is added, turned off or changed.',
+    read: (context) => ({ value: readSparseItems(context.chain, (overrides) => overrides.income) }),
+  },
   withdrawalStrategy: {
     whenUnset: 'The engines draw accounts in the tax-efficient order.',
     read: merged('withdrawalStrategy'),

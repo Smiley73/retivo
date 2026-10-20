@@ -18,6 +18,9 @@
  *  - `plain`    an enum, flag, percentage, year, age or count; a string must be one enum-like token.
  *  - `dollars`  an annual dollar figure; rounded to the nearest $1,000 unless exact figures are on.
  *  - `monthlyDollars` a monthly dollar figure (a benefit estimate, a pension payment); rounded to the nearest $100.
+ *  - `periodDollars` an expense amount, per its `frequency`: rounded to the nearest $100 for a weekly, monthly or
+ *               quarterly amount (or when the frequency is not stored beside it, as in a patch) and to the nearest
+ *               $1,000 for a yearly or one-off amount.
  *  - `label`    a name; governed by its category's switch, sanitized, 60 characters.
  *  - `text`     a note or description; governed by the notes switch, sanitized, 500 characters.
  *  - `id`       an opaque reference to another aggregate.
@@ -66,7 +69,7 @@ import type { SharingCategoryId } from './switches';
 
 export type Classification =
   | { readonly kind: 'never'; readonly reason: string }
-  | { readonly kind: 'plain' | 'dollars' | 'monthlyDollars' | 'label' | 'text' | 'id' | 'date' | 'firstName' }
+  | { readonly kind: 'plain' | 'dollars' | 'monthlyDollars' | 'periodDollars' | 'label' | 'text' | 'id' | 'date' | 'firstName' }
   | { readonly kind: 'object'; readonly fields: Readonly<Record<string, Classification>> }
   | { readonly kind: 'array'; readonly item: Classification }
   | { readonly kind: 'record'; readonly keys: 'id' | 'year'; readonly value: Classification }
@@ -84,6 +87,7 @@ const never = (reason: string): Classification => ({ kind: 'never', reason });
 const PLAIN: Classification = { kind: 'plain' };
 const DOLLARS: Classification = { kind: 'dollars' };
 const MONTHLY_DOLLARS: Classification = { kind: 'monthlyDollars' };
+const PERIOD_DOLLARS: Classification = { kind: 'periodDollars' };
 const LABEL: Classification = { kind: 'label' };
 const TEXT: Classification = { kind: 'text' };
 const ID: Classification = { kind: 'id' };
@@ -219,7 +223,7 @@ export const EXPENSE_CATEGORY_CLASSIFICATION = {
 export const EXPENSE_CLASSIFICATION = {
   name: LABEL,
   description: TEXT,
-  amount: DOLLARS,
+  amount: PERIOD_DOLLARS,
   frequency: PLAIN,
   classification: PLAIN,
   categoryId: ID,
