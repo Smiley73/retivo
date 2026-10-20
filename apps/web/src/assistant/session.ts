@@ -25,12 +25,12 @@ import {
   decodeFrame,
   encodeFrame,
   generateNonce,
-  loopbackWsUrl,
   normalizePairingCode,
   type HandshakeErrorCode,
   type TabCloseReason,
   type TabFrame,
 } from '@retirement/assistant-protocol';
+import { bridgeSocketUrl } from './bridge-port';
 import { AuditLog, type AuditEntry } from './audit-log';
 import { CallDispatcher, type SettledCall, type Timers, type ToolHandler } from './dispatcher';
 import { DEFAULT_CONSENT, type SessionConsent, type SessionEnd, type SessionPhase, type SocketFactory, type SocketLike } from './session-types';
@@ -150,7 +150,7 @@ export class AssistantSession {
     this.setPhase('connecting');
     let socket: SocketLike;
     try {
-      socket = this.options.openSocket(loopbackWsUrl(this.options.port));
+      socket = this.options.openSocket(bridgeSocketUrl(this.options.port));
     } catch {
       this.finish({ phase: 'connecting', close: { kind: 'failed-to-open' } });
       return 'started';

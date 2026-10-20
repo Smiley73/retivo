@@ -9,7 +9,14 @@
  * console warning, never a throw: the app must still boot, and the connector
  * stays off (the `parseBetaFeatureConfig` stance). The deploy's own contract
  * test is what fails loudly on a bad stack value.
+ *
+ * The socket URL is built here too, behind a build-time check, so a production
+ * build without the variable carries no loopback URL at all: the bundler drops
+ * the template with the dead branch (pinned by
+ * `scripts/test/assistant-bridge-bundle-contract.test.mjs`).
  */
+import { loopbackWsUrl } from '@retirement/assistant-protocol';
+
 const MIN_PORT = 1024;
 const MAX_PORT = 65535;
 
@@ -27,4 +34,18 @@ export function readBridgePort(): number | null {
     );
   }
   return null;
+}
+
+/**
+ * The WebSocket URL for the bridge on `port`. In a production build that
+ * carries no `VITE_ASSISTANT_BRIDGE_PORT` the condition is a compile-time
+ * constant, the call below is dead code, and the URL template never reaches the
+ * bundle. No caller can reach this branch there: `readBridgePort()` is `null`
+ * without the variable, and the session never dials without a port.
+ */
+export function bridgeSocketUrl(port: number): string {
+  if (import.meta.env.PROD && import.meta.env.VITE_ASSISTANT_BRIDGE_PORT === undefined) {
+    throw new Error('This build carries no AI assistant bridge port.');
+  }
+  return loopbackWsUrl(port);
 }

@@ -45,3 +45,28 @@ describe('readBridgePort', () => {
     },
   );
 });
+
+describe('bridgeSocketUrl', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('is the loopback WebSocket URL for the port', async () => {
+    const { bridgeSocketUrl } = await import('./bridge-port');
+    expect(bridgeSocketUrl(24580)).toBe('ws://127.0.0.1:24580');
+  });
+
+  it('refuses in a production build that carries no bridge port', async () => {
+    vi.stubEnv('PROD', true);
+    vi.stubEnv('VITE_ASSISTANT_BRIDGE_PORT', undefined as unknown as string);
+    const { bridgeSocketUrl } = await import('./bridge-port');
+    expect(() => bridgeSocketUrl(24580)).toThrow('no AI assistant bridge port');
+  });
+
+  it('builds the URL in a production build that carries one', async () => {
+    vi.stubEnv('PROD', true);
+    vi.stubEnv('VITE_ASSISTANT_BRIDGE_PORT', '24580');
+    const { bridgeSocketUrl } = await import('./bridge-port');
+    expect(bridgeSocketUrl(24580)).toBe('ws://127.0.0.1:24580');
+  });
+});
