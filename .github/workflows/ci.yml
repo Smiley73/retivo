@@ -50,7 +50,8 @@
 #   5. mcp-bridge             — the local AI assistant bridge (apps/mcp-bridge):
 #                               builds it and runs its Vitest suite, including
 #                               the subprocess tests that spawn the built bin,
-#                               with coverage thresholds enforced.
+#                               with coverage thresholds enforced, then the web
+#                               tab's `test:bridge` suite that pairs with it.
 #   6. All checks             — the aggregate: needs every enabled suite above
 #                               and writes a per-suite results table to the
 #                               run's job summary.
@@ -572,6 +573,9 @@ jobs:
       - run: pnpm --filter @retirement/assistant-protocol build
       - run: pnpm --filter @retirement/mcp-bridge build
       - run: pnpm --filter @retirement/mcp-bridge test:coverage
+      # The web tab's session dialed at the real built bridge (the only interop
+      # proof of the wire encoding); needs dist/ from the build step above.
+      - run: pnpm --filter @retirement/web test:bridge
 
   # The one check to require in branch protection. `if: always()` and nothing
   # that can evaluate false (no `!cancelled()`, no `success()`, no event or fork

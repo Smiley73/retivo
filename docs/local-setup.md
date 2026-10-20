@@ -238,6 +238,7 @@ Other scripts:
 | Command | What it does |
 |---|---|
 | `pnpm test:scripts` | Only the script tests (`scripts/test` and `apps/api/scripts`), with Node's built-in test runner. Part of `pnpm test`. |
+| `pnpm --filter @retirement/web test:bridge` | The web tab's AI assistant session against the real, built bridge. Build the shared protocol package and the bridge first (`pnpm --filter @retirement/assistant-protocol build`, then `pnpm --filter @retirement/mcp-bridge build`). Not part of `pnpm test`; CI runs it in the bridge job. |
 | `pnpm test:affected` | Quick loop: runs just the tests related to your uncommitted changes. Add a ref to widen it, for example `pnpm test:affected main`. It is not the full check. |
 | `pnpm test:coverage` | Like `pnpm test`, with coverage measured. Slower. |
 | `pnpm test:e2e` | The end-to-end browser tests (next section). |

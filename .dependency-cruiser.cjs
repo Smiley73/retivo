@@ -189,6 +189,19 @@ module.exports = {
       },
     },
     {
+      name: 'assistant-independent-of-ui',
+      severity: 'error',
+      comment:
+        'Architecture rule: apps/web/src/assistant is the AI assistant ' +
+        'connector\'s logic layer (session state machine, provider and hook, ' +
+        'dispatcher, audit log, diagnosis) and must not import from ' +
+        'components/ or pages/. Every UI piece, the settings card included, ' +
+        'lives in pages/ or components/ and imports from assistant/. No ' +
+        'grandfathered exceptions.',
+      from: { path: '^apps/web/src/assistant' },
+      to: { path: '^apps/web/src/(components|pages)' },
+    },
+    {
       name: 'assistant-protocol-is-a-leaf',
       severity: 'error',
       comment:

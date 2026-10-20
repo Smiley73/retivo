@@ -38,8 +38,10 @@ const libNodeTests = globSync('src/lib/**/*.test.ts', {
 
 // Playwright e2e specs (`e2e/*.spec.ts`) run via `pnpm test:e2e` against a
 // real browser, not vitest's jsdom runner. Exclude them (plus build output)
-// from both projects so `pnpm test` doesn't try to execute them.
-const baseExclude = ['**/node_modules/**', '**/dist/**', 'e2e/**'];
+// from both projects so `pnpm test` doesn't try to execute them. The same goes
+// for the `*.bridge-test.ts` suites: they dial the real, built apps/mcp-bridge,
+// so they run only under `pnpm --filter @retirement/web test:bridge`.
+const baseExclude = ['**/node_modules/**', '**/dist/**', 'e2e/**', '**/*.bridge-test.{ts,tsx}'];
 
 export default defineConfig({
   plugins: [react()],

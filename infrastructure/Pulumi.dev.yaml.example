@@ -68,7 +68,7 @@ config:
   # VITE_BETA_FEATURES by the deploy scripts; see
   # apps/web/src/lib/feature-flags.ts). OPTIONAL; unset ⇒ "all". Values:
   # "all", "none", or comma-separated feature ids (today:
-  # projected-withdrawals, guardrails). An offered
+  # projected-withdrawals, guardrails, ai-assistants). An offered
   # beta feature still stays hidden until a person switches on "Show beta
   # features" in Preferences. Changing it is a config edit + redeploy.
   retivo:betaFeatures: "all"
