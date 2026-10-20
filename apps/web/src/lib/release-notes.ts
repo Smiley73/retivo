@@ -33,6 +33,15 @@ export interface ReleaseNote {
 /** The full changelog, newest-first. New entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-19',
+    kind: 'new',
+    title: 'Compare two scenarios on Projections',
+    blurb:
+      'A new Compare tab sets the scenario you are viewing beside another one, ' +
+      'showing the ending balance at the end of each plan and the year money ' +
+      'runs out, with the difference between them.',
+  },
+  {
     date: '2026-10-04',
     kind: 'new',
     title: 'RETIVO is open source',

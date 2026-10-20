@@ -13,9 +13,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   CASHFLOW_GRANULARITY_STORAGE_KEY,
+  COMPARE_CHOICE_STORAGE_KEY,
   DISPLAY_MODE_STORAGE_KEY,
   buildViewDeflator,
   parseCashflowGranularity,
+  parseCompareChoices,
   parseDisplayMode,
   type CashflowGranularity,
   type DisplayMode,
@@ -321,5 +323,37 @@ describe('localStorage round-trip via CASHFLOW_GRANULARITY_STORAGE_KEY', () => {
     expect(
       parseCashflowGranularity(ls.getItem(CASHFLOW_GRANULARITY_STORAGE_KEY)),
     ).toBe('yearly');
+  });
+});
+
+describe('parseCompareChoices', () => {
+  it('keeps the same retivo.balanceProjection. prefix as the display mode key', () => {
+    expect(COMPARE_CHOICE_STORAGE_KEY.startsWith('retivo.balanceProjection.')).toBe(true);
+  });
+
+  it('reads a viewed-id to comparison-id object as a map', () => {
+    const map = parseCompareChoices('{"a":"b","c":"d"}');
+    expect([...map]).toEqual([
+      ['a', 'b'],
+      ['c', 'd'],
+    ]);
+  });
+
+  it.each([null, '', '{not json', '[]', '["a"]', '7', '"text"', 'null', 'true'])(
+    'reads %j as empty without throwing',
+    (stored) => {
+      expect(parseCompareChoices(stored).size).toBe(0);
+    },
+  );
+
+  it('drops entries whose value is not a string and keeps the rest', () => {
+    const map = parseCompareChoices('{"a":"b","c":7,"d":null,"e":{"x":1}}');
+    expect([...map]).toEqual([['a', 'b']]);
+  });
+
+  it('treats __proto__ as an ordinary key', () => {
+    const map = parseCompareChoices('{"__proto__":"x"}');
+    expect(map.get('__proto__')).toBe('x');
+    expect(({} as Record<string, unknown>).x).toBeUndefined();
   });
 });

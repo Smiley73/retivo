@@ -3,13 +3,13 @@
 This page explains how RETIVO turns a plan into balances over time and into the
 stress-test numbers. It covers the **Planned** and **Historical** projections,
 the Monte Carlo stress test and its **Typical**, **Pessimistic** and
-**Bad-luck** outcomes, the four market stress tests, spending guardrails and the
-safe withdrawal rate comparison. It is for anyone with basic personal-finance
-knowledge. You do not need to read code. For each topic it says what the number
-means, what goes in, the steps in words, the built-in figures and the dates they
-apply to, and what the app simplifies. It is an explanation of the model, not
-advice: the results are estimates built from what you entered, and a simulation
-is not a forecast.
+**Bad-luck** outcomes, the four market stress tests, spending guardrails, the
+safe withdrawal rate comparison and the comparison of two scenarios. It is for
+anyone with basic personal-finance knowledge. You do not need to read code. For
+each topic it says what the number means, what goes in, the steps in words, the
+built-in figures and the dates they apply to, and what the app simplifies. It is
+an explanation of the model, not advice: the results are estimates built from
+what you entered, and a simulation is not a forecast.
 
 It leaves out what other pages cover. The yearly withdrawal order and the tax
 loop are on the [withdrawals page](math-withdrawals.md). Planned return rates,
@@ -20,7 +20,7 @@ rules the projection applies each year are on the [taxes page](math-taxes.md),
 the
 [Social Security and health costs page](math-social-security-and-health.md) and
 the [retirement accounts page](math-retirement-accounts.md). For where the
-controls sit on screen (the **Basis** menu, the five views, the buttons), see
+controls sit on screen (the **Basis** menu, the six views, the buttons), see
 [Reading projections](user-guide.md#reading-projections) in the user guide. For
 how the calculation engine fits into the app, see
 [architecture.md](architecture.md).
@@ -39,6 +39,7 @@ how the calculation engine fits into the app, see
 | **Market stress tests** | The same 10,000 paths rerun with one change each: higher fees, lower returns, higher inflation or a longer life. |
 | **Spending guardrails** | An optional rule that trims spending after a bad stretch and restores it after a good one, inside every stress-test path. |
 | **Safe withdrawal rate** | A comparison of your plan's first full year of withdrawals with the 4% and 4.5% rules of thumb. |
+| **Compare** | The viewed scenario set beside one other scenario on the Planned projection in today's dollars: the ending balance at each one's own horizon and the year money runs out. |
 
 ## Planned and Historical
 
@@ -393,6 +394,35 @@ not shown when there is no retirement age, when the retirement date has already
 passed, when there is no full retirement year in the plan, or when the active
 basis has no result.
 
+## Comparing two scenarios
+
+The **Compare** view sets the scenario you are viewing beside one other scenario
+you choose, starting with the viewed scenario's parent. Each scenario is
+projected on its own, so the two sets of figures come from two separate
+projections and the view reports what each shows and how they differ. It does
+not say why.
+
+- **Always Planned, always today's dollars.** The header **Basis** menu and the
+  Today's and Future dollars switch do not apply. Planned exists for every
+  scenario, so the two sides always rest on the same basis.
+- **Each side keeps its own inflation.** Two scenarios can set different
+  inflation rates, so each side's amounts are divided by that scenario's own
+  rate, compounded from the current month to the December of the amount's year,
+  as under [Today's dollars and Future dollars](#todays-dollars-and-future-dollars).
+- **Each side ends at its own horizon.** A scenario that sets a different life
+  expectancy ends in a different year. The column heads name each scenario's
+  horizon year, and the ending balances are not taken in the same year.
+- **Ending balance.** The Planned balance at the horizon, in today's dollars:
+  the same figure as the **Planned · at horizon** total on the Overview.
+- **Year money runs out.** The first year the Planned projection cannot fund
+  spending plus tax, as described under [Planned and Historical](#planned-and-historical),
+  or "Never" when it always can.
+- **The difference.** Always the viewed scenario minus the other. A positive
+  amount reads "more", a negative one "less", and a year reads "later" or
+  "earlier". An amount that rounds to nothing reads "No difference". When only
+  one scenario runs out, there is no number to subtract and the view says which
+  one does.
+
 ## Built-in figures and years
 
 The market data is the only part of this page tied to dates. Everything else is
@@ -511,6 +541,8 @@ All paths are under `apps/web/src`.
 | `lib/monte-carlo-shard.ts`, `monte-carlo/` | Counting successes, and splitting a run across workers. |
 | `lib/monte-carlo-summary.ts` | Percentiles, the tiers, the example path and the alternatives. |
 | `components/PlanStressTestSection.tsx` | The seed and Recalculate. |
+| `pages/use-balance-projection-compare.ts`, `pages/balance-projection-page-compare.tsx` | Which scenario Compare uses, the second projection that runs only while the tab is open, and the headline table. |
+| `lib/view-deflator.ts` | The remembered Compare choice, one comparison scenario per viewed scenario, kept in your browser beside the display mode. |
 | `lib/success-delta-noise.ts` | The noise check on a difference between two success probabilities. |
 | `pages/balance-projection-compare-data.ts`, `lib/signed-difference.ts`, `lib/scenario-change-list.ts`, `lib/structural-equality.ts` | The figures two scenarios are compared on, how a difference reads, the list of settings that changed, and the identical-results check. |
 | `db/monte-carlo-cache.ts` | Saved results, checked against the engine version. |

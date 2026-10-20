@@ -40,6 +40,7 @@ import type {
   SocialSecurityBenefitPayload,
 } from '../db/types';
 import { loadPageData } from './balance-projection-page-data';
+import { yieldToIdle } from '../lib/yield-to-idle';
 import { useAggregates } from '../lib/use-aggregates';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 import { buildMonteCarloInputForScenario } from '../lib/monte-carlo-scenario-input';
@@ -158,20 +159,6 @@ interface ProjectionInputs {
    *  MC projections so the Scenarios cards apply the flag-derived +2pp
    *  medical-inflation default (else they diverge from BPP). */
   readonly categories: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>;
-}
-
-/** Idle-yield shim: prefer `requestIdleCallback`, fall back to a macrotask. */
-function yieldToIdle(run: () => void): () => void {
-  const ric = (globalThis as { requestIdleCallback?: (cb: () => void) => number })
-    .requestIdleCallback;
-  if (typeof ric === 'function') {
-    const id = ric(run);
-    const cancel = (globalThis as { cancelIdleCallback?: (id: number) => void })
-      .cancelIdleCallback;
-    return () => cancel?.(id);
-  }
-  const id = setTimeout(run, 0);
-  return () => clearTimeout(id);
 }
 
 /**

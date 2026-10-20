@@ -535,7 +535,7 @@ There is no separate Monte Carlo screen: the stress test is a basis on this page
 One is the other adjusted by the scenario's inflation rate. The Expenses screen
 has the same toggle.
 
-### The five views
+### The six views
 
 Tabs under the controls, **Projection views**, split the page:
 
@@ -560,6 +560,21 @@ Tabs under the controls, **Projection views**, split the page:
   portfolio with the "4% rule" and "4.5% rule" lines. These are rules of thumb
   from published research, not forecasts, and the page notes that they are stated
   before tax while the comparison is after tax.
+- **Compare**: sets the scenario you are viewing against one other scenario. Pick
+  it in the **Compare with** list, which shows every other scenario indented the
+  same way as the **Active Scenario** list in the sidebar. It starts on the
+  viewed scenario's parent; on Base, which has no parent, it asks you to pick
+  one, and with only one scenario it says there is nothing to compare with and
+  links to **Scenarios**. The choice is remembered in your browser for each
+  scenario you view, and a link ending `?view=compare&with=` plus a scenario's
+  id opens the tab with that scenario chosen. A table shows both scenarios side
+  by side, each headed by its name and its horizon year: the **ending balance at
+  the horizon**, the year money runs out (or "Never"), and a **Difference**
+  column that is the viewed scenario minus the other, written with a sign and a
+  word such as "more" or "later" so it never relies on colour. Compare always
+  uses the Planned projection in today's dollars, so the **Basis** menu and the
+  **Today's dollars** / **Future dollars** switch in the header do not apply to
+  it.
 
 Most charts and bands have a small **(i)** button that explains what they show.
 

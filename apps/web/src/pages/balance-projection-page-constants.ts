@@ -90,16 +90,17 @@ export const SECTION_H2_CLASS =
   'm-0 text-xl font-semibold text-ink';
 
 /**
- * The five tabbed views the page renders. Order is both the tab row's
+ * The six tabbed views the page renders. Order is both the tab row's
  * left-to-right order AND the DOM/print order — Overview first so
- * printing preserves today's top-of-page content first, `swr` last in both.
+ * printing preserves today's top-of-page content first, `compare` last in both.
  */
 export type BalanceProjectionViewId =
   | 'overview'
   | 'cashflow'
   | 'accounts'
   | 'taxes'
-  | 'swr';
+  | 'swr'
+  | 'compare';
 
 export const VIEW_ORDER: ReadonlyArray<BalanceProjectionViewId> = [
   'overview',
@@ -107,6 +108,7 @@ export const VIEW_ORDER: ReadonlyArray<BalanceProjectionViewId> = [
   'accounts',
   'taxes',
   'swr',
+  'compare',
 ];
 
 /** Tab row + tab-panel labels. The tab row's accessible name is "Projection
@@ -118,6 +120,7 @@ export const VIEW_LABELS: Readonly<Record<BalanceProjectionViewId, string>> = {
   accounts: 'Accounts',
   taxes: 'Taxes & distributions',
   swr: 'Safe withdrawal rate',
+  compare: 'Compare',
 };
 
 /**
