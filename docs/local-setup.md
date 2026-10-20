@@ -97,7 +97,7 @@ commands below. `openssl` and `jq` are needed only for the optional key step.
    pnpm dev
    ```
 
-   This runs the API and the web app together.
+   This runs the API and the web app together. It first rebuilds the shared packages (`packages/*`) and keeps rebuilding them while it runs. The web dev server also reads their source directly, so a pull that changes them never leaves the app running against an old build.
 
    | What | Address |
    |---|---|
