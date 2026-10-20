@@ -40,6 +40,8 @@ export interface CategorySentinel {
 const PLAN = 'retivo_get_plan_data';
 const SCENARIO = 'retivo_get_scenario';
 const LIST = 'retivo_list_scenarios';
+const COMPARE = 'retivo_compare_scenarios';
+const EXPLAIN = 'retivo_explain';
 
 export const CATEGORY_SENTINELS: readonly CategorySentinel[] = [
   { token: 'Zqprimaryfirst', requires: ['members', 'firstNames'], tools: [PLAN] },
@@ -54,12 +56,12 @@ export const CATEGORY_SENTINELS: readonly CategorySentinel[] = [
   { token: 'Zqexpdesc', requires: ['expenses', 'notes'], tools: [PLAN] },
   { token: 'Zqcatname', requires: ['expenses'], tools: [PLAN] },
   { token: 'Zqssnote', requires: ['socialSecurity', 'notes'], tools: [PLAN] },
-  { token: 'Zqscnname', requires: ['scenarios'], tools: [PLAN, LIST, SCENARIO] },
+  { token: 'Zqscnname', requires: ['scenarios'], tools: [PLAN, LIST, SCENARIO, COMPARE, EXPLAIN] },
   { token: 'Zqscndesc', requires: ['scenarios', 'notes'], tools: [PLAN, LIST, SCENARIO] },
   { token: 'Zqscnnote', requires: ['scenarios', 'notes'], tools: [PLAN, SCENARIO] },
   // Names inside the rows a scenario adds follow the scenarios switch and their own category's.
-  { token: 'Zqovrexp', requires: ['scenarios', 'expenses'], tools: [PLAN, SCENARIO] },
-  { token: 'Zqovrinc', requires: ['scenarios', 'income'], tools: [PLAN, SCENARIO] },
+  { token: 'Zqovrexp', requires: ['scenarios', 'expenses'], tools: [PLAN, SCENARIO, COMPARE, EXPLAIN] },
+  { token: 'Zqovrinc', requires: ['scenarios', 'income'], tools: [PLAN, SCENARIO, COMPARE, EXPLAIN] },
 ];
 
 async function rewrite(

@@ -242,6 +242,24 @@ export async function getCached(key: string): Promise<MonteCarloSummary | null> 
   return entry.summary as MonteCarloSummary;
 }
 
+/**
+ * Read the cache entry for a key without touching it. `getCached` is a
+ * read-modify-write: it bumps `lastAccessedAt` (the LRU index `putCached`
+ * evicts by) and deletes an entry stamped with another engine version. A
+ * caller that must leave the cache exactly as it found it (the AI assistant's
+ * tools, which only report what the page already computed) reads through this
+ * instead: a `readonly` transaction, `null` on a miss, and `null` on a stale
+ * entry that is left in place for the page's own `getCached` to drop.
+ */
+export async function peekCached(key: string): Promise<MonteCarloSummary | null> {
+  const handle = await db();
+  const tx = handle.transaction('monteCarloResults', 'readonly');
+  const entry = (await tx.store.get(key)) as MonteCarloCacheEntry | undefined;
+  await tx.done;
+  if (!entry || entry.engineVersion !== ENGINE_VERSION) return null;
+  return entry.summary as MonteCarloSummary;
+}
+
 /** The budget an entry is charged to. A stored entry with no `entryClass` is a
  *  primary one — that is what makes every earlier entry keep its budget without
  *  a migration. */

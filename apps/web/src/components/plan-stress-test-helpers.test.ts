@@ -2,7 +2,8 @@
  * Unit tests for the pure helpers exported by `PlanStressTestSection` (cache signature, longevity anchor).
  */
 import { describe, expect, it } from 'vitest';
-import { taxContextFingerprint, longestLivedBirthYearOf } from './PlanStressTestSection';
+import { longestLivedBirthYearOf } from './PlanStressTestSection';
+import { taxContextFingerprint } from '../lib/monte-carlo-input-signature';
 import type { Aggregate, HouseholdMemberPayload } from '../db/types';
 
 

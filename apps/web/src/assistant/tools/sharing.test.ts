@@ -10,7 +10,7 @@ import 'fake-indexeddb/auto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { clearAllStores, listAggregates } from '../../db/store';
 import { CATEGORY_SENTINELS, NEVER_SHAREABLE, SCENARIO_SENTINEL_ID, seedSentinelWorkspace } from '../../test/assistant-sentinels';
-import { callPlanTool, choicesWith, envelopeOf } from '../../test/assistant-tools';
+import { callPlanTool, choicesWith, envelopeOf, plantSavedStressTest } from '../../test/assistant-tools';
 import {
   ACCOUNT_CLASSIFICATION,
   BALANCE_CLASSIFICATION,
@@ -27,6 +27,12 @@ const CALLS: ReadonlyArray<{ tool: string; args: Record<string, unknown> }> = [
   { tool: 'retivo_get_plan_data', args: {} },
   { tool: 'retivo_list_scenarios', args: {} },
   { tool: 'retivo_get_scenario', args: { scenarioId: SCENARIO_SENTINEL_ID } },
+  { tool: 'retivo_get_projection', args: {} },
+  { tool: 'retivo_get_projection', args: { scenarioId: SCENARIO_SENTINEL_ID } },
+  // A saved result is planted below, so the tool reads the cache and never needs a worker.
+  { tool: 'retivo_get_stress_test', args: {} },
+  { tool: 'retivo_compare_scenarios', args: { scenarioId: 'demo-scenario-base', otherScenarioId: SCENARIO_SENTINEL_ID } },
+  { tool: 'retivo_explain', args: { scenarioId: SCENARIO_SENTINEL_ID, metric: 'ending_balance' } },
 ];
 
 const VARIANTS: ReadonlyArray<{ label: string; choices: SharingChoices }> = [
@@ -69,6 +75,7 @@ function numbersAt(value: unknown, keys: ReadonlySet<string>, found: number[] = 
 beforeAll(async () => {
   await clearAllStores();
   await seedSentinelWorkspace();
+  await plantSavedStressTest('demo-scenario-base');
 });
 
 describe.each(CALLS)('$tool', ({ tool, args }) => {

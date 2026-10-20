@@ -234,8 +234,8 @@ describe('plan tools', () => {
       const result = await resultOf(`call-${tool}`, tool);
       expect(result.ok, tool).toBe(true);
     }
-    // A tool this version does not answer still gets TOOL_NOT_SUPPORTED.
-    const unsupported = await resultOf('call-compare', 'retivo_compare_scenarios', { baseScenarioId: 'a', otherScenarioId: 'b' });
+    // A tool this version does not answer (a newer bridge's) still gets TOOL_NOT_SUPPORTED.
+    const unsupported = await resultOf('call-future', 'retivo_future_tool', { scenarioId: 'a' });
     expect(!unsupported.ok && unsupported.error.code).toBe('TOOL_NOT_SUPPORTED');
   });
 });
@@ -277,7 +277,7 @@ describe('idle', () => {
     await act(async () => void (await vi.advanceTimersByTimeAsync(10_000)));
     await callAndSettle(socket, 'c1', 'retivo_status');
     await callAndSettle(socket, 'c2', 'retivo_get_scenario', { scenarioId: 'a' });
-    await callAndSettle(socket, 'c3', 'retivo_compare_scenarios', { baseScenarioId: 'a', otherScenarioId: 'b' });
+    await callAndSettle(socket, 'c3', 'retivo_future_tool', { scenarioId: 'a' });
     await callAndSettle(socket, 'c4', 'retivo_get_scenario', {});
     expect(localStorage.getItem(ACTIVITY_KEY)).toBe(written);
     expect(socket.frames.filter((frame) => frame.type === 'result')).toHaveLength(4);
@@ -344,7 +344,7 @@ describe('idle', () => {
     await act(async () => void (await vi.advanceTimersByTimeAsync(5_000)));
     await callAndSettle(socket, 'c1', 'retivo_get_projection', { scenarioId: 'a' }); // started, then cancelled
     await callAndSettle(socket, 'c2', 'retivo_get_scenario', { scenarioId: 'a' }); // failed
-    await callAndSettle(socket, 'c3', 'retivo_compare_scenarios', { baseScenarioId: 'a', otherScenarioId: 'b' }); // unsupported (no handler yet)
+    await callAndSettle(socket, 'c3', 'retivo_future_tool', { scenarioId: 'a' }); // unsupported (no handler)
     await callAndSettle(socket, 'c4', 'retivo_get_scenario', {}); // invalid
     act(() => socket.receive({ type: 'cancel', id: 'c1', reason: 'client' }));
     await callAndSettle(socket, 'c5', 'retivo_get_stress_test', { scenarioId: 'a' }); // times out below

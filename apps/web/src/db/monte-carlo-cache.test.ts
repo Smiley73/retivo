@@ -6,6 +6,7 @@ import {
   getCached,
   mcCacheKey,
   monteCarloCacheCount,
+  peekCached,
   putCached,
   MC_CACHE_MAX_ENTRIES,
   MC_PRIMARY_MAX_ENTRIES,
@@ -1411,5 +1412,59 @@ describe('health-coverage cache-key inclusion (a)', () => {
       }),
     );
     expect(new Set([months, region, benchmark, all]).size).toBe(4);
+  });
+});
+
+describe('peekCached — a read that leaves the cache as it found it', () => {
+  beforeEach(async () => {
+    await clearMonteCarloCache();
+  });
+  afterEach(async () => {
+    await clearMonteCarloCache();
+  });
+
+  async function rowOf(key: string) {
+    const { db } = await import('./store.js');
+    return (await db()).get('monteCarloResults', key);
+  }
+
+  it('returns the summary on a hit and changes neither lastAccessedAt nor the entry count', async () => {
+    await putCached('hit', fakeSummary(7));
+    await putCached('other', fakeSummary(8));
+    const before = await rowOf('hit');
+    await new Promise((r) => setTimeout(r, 5));
+    const out = await peekCached('hit');
+    expect(out?.seed).toBe(7);
+    expect((await rowOf('hit'))?.lastAccessedAt).toBe(before?.lastAccessedAt);
+    expect(await monteCarloCacheCount()).toBe(2);
+    // getCached on the same key does touch it, which is the difference peekCached exists for.
+    await getCached('hit');
+    expect((await rowOf('hit'))?.lastAccessedAt).toBeGreaterThan(before!.lastAccessedAt);
+  });
+
+  it('is null on a miss', async () => {
+    expect(await peekCached('nope')).toBeNull();
+    expect(await monteCarloCacheCount()).toBe(0);
+  });
+
+  it('reads a stale-engine entry as a miss and leaves it in place, where getCached deletes it', async () => {
+    await putCached('stale', fakeSummary(1));
+    const { db } = await import('./store.js');
+    const handle = await db();
+    const row = await handle.get('monteCarloResults', 'stale');
+    await handle.put('monteCarloResults', { ...row!, engineVersion: -1 });
+
+    expect(await peekCached('stale')).toBeNull();
+    expect(await monteCarloCacheCount()).toBe(1);
+    expect((await rowOf('stale'))?.engineVersion).toBe(-1);
+
+    expect(await getCached('stale')).toBeNull();
+    expect(await monteCarloCacheCount()).toBe(0);
+  });
+
+  it('does not evict: peeking at a full cache keeps every entry', async () => {
+    for (let i = 1; i <= MC_PRIMARY_MAX_ENTRIES; i++) await putCached(`k${i}`, fakeSummary(i));
+    for (let i = 1; i <= MC_PRIMARY_MAX_ENTRIES; i++) expect(await peekCached(`k${i}`)).not.toBeNull();
+    expect(await monteCarloCacheCount()).toBe(MC_PRIMARY_MAX_ENTRIES);
   });
 });

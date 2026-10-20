@@ -32,6 +32,9 @@ export const MIN_CALL_TIMEOUT_MS = 1_000;
 /** Longest timeout a registry entry may declare (long-running compute tools). */
 export const MAX_CALL_TIMEOUT_MS = 10 * 60_000;
 
+/** Longest text one static prompt message may carry; a prompt is read into the agent's context on every use. */
+export const MAX_PROMPT_TEXT_CHARS = 4_000;
+
 /** Calls the bridge relays at once before answering `TOO_MANY_IN_FLIGHT`. */
 export const MAX_IN_FLIGHT_CALLS = 2;
 /** Calls per minute the bridge relays before answering `RATE_LIMITED`. */

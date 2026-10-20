@@ -51,9 +51,13 @@ describe('release notes', () => {
     }
   });
 
-  it('holds the AI assistant announcement, then the open-source one', () => {
-    expect(RELEASE_NOTES).toHaveLength(2);
-    const [assistant, openSource] = RELEASE_NOTES as [ReleaseNote, ReleaseNote];
+  it('holds the AI assistant analysis announcement, the assistant announcement, then the open-source one', () => {
+    expect(RELEASE_NOTES).toHaveLength(3);
+    const [analysis, assistant, openSource] = RELEASE_NOTES as [ReleaseNote, ReleaseNote, ReleaseNote];
+    expect(analysis.kind).toBe('new');
+    expect(analysis.title).toBe('Your AI assistant can run the projection and the stress test (beta)');
+    expect(analysis.blurb).toMatch(/stress test/i);
+    expect(analysis.blurb).toMatch(/cannot change anything/i);
     expect(assistant.kind).toBe('new');
     expect(assistant.title).toBe('Ask an AI assistant about your plan (beta)');
     expect(assistant.blurb).toMatch(/reads only what you allow/i);
