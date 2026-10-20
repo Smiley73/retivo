@@ -180,6 +180,22 @@ export const BalanceProjectionCompareSection: React.FC<
         project from. Configure it, then come back to compare.
       </EmptyState>
     );
+  } else if (status === 'unavailable') {
+    body = (
+      <EmptyState
+        bare
+        action={
+          <Link to={`/scenarios/${comparisonId}`} className="underline">
+            Review {name}
+          </Link>
+        }
+      >
+        There&rsquo;s no Planned projection to compare for {viewedName} and {name}{' '}
+        with their current settings, for example because a pension election
+        isn&rsquo;t set up yet. Check both scenarios&rsquo; settings, then come
+        back to compare.
+      </EmptyState>
+    );
   } else if (status === 'error') {
     body = (
       <Alert tone="error" className="mb-0">

@@ -208,6 +208,25 @@ describe('BalanceProjectionPage — Compare tab', () => {
       });
     });
 
+    it('re-projects the newly chosen scenario when the selector changes in-session', async () => {
+      const user = userEvent.setup();
+      const { panel } = await renderCompare('/balance-projection?view=compare', EARLY);
+      await within(panel).findByRole('row', { name: /Ending balance/ }, WAIT);
+      const [, before] = headlineCells(panel, /Ending balance/);
+      expect(projectedIds()).not.toContain(DELAY);
+
+      await user.click(selectorTrigger(panel));
+      await user.click(screen.getByRole('option', { name: 'Delay — work to 70' }));
+      await waitFor(() => expect(projectedIds().filter((id) => id === DELAY)).toHaveLength(1), WAIT);
+      await waitFor(() => {
+        const [, after] = headlineCells(panel, /Ending balance/);
+        expect(after).not.toBe(before);
+      }, WAIT);
+      expect(within(panel).getAllByRole('columnheader')[2]).toHaveTextContent('Delay — work to 70');
+      await new Promise((r) => setTimeout(r, 300));
+      expect(projectedIds().filter((id) => id === DELAY)).toHaveLength(1);
+    });
+
     it('reopens on the remembered choice for that viewed scenario when there is no ?with=', async () => {
       window.localStorage.setItem(
         COMPARE_CHOICE_STORAGE_KEY,
@@ -337,6 +356,23 @@ describe('BalanceProjectionPage — Compare tab', () => {
       );
       expect(await screen.findByText('caught: engine bug', undefined, WAIT)).toBeInTheDocument();
       spy.mockRestore();
+    });
+
+    it('does not read a missing Planned projection as "Never runs out"', async () => {
+      loadSpy.mockImplementation((opts) => {
+        const data = actualLoad(opts);
+        return opts.selectedScenarioId === DELAY && data.pageResult
+          ? { ...data, pageResult: { ...data.pageResult, planned: null } }
+          : data;
+      });
+      const { panel } = await renderCompare(
+        `/balance-projection?view=compare&with=${DELAY}`,
+        EARLY,
+      );
+      await within(panel).findByText(/no Planned projection to compare/, undefined, WAIT);
+      expect(within(panel).queryByRole('row')).not.toBeInTheDocument();
+      expect(within(panel).queryByText(/Never|Neither runs out/)).not.toBeInTheDocument();
+      expect(within(panel).queryByRole('alert')).not.toBeInTheDocument();
     });
 
     it('offers a configure link when the comparison has no projection', async () => {

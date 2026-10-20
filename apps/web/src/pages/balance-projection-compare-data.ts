@@ -100,6 +100,16 @@ function plannedYears(data: PipelineData): ReadonlyArray<DrawdownYear> | null {
   return planned && planned.years.length > 0 ? planned.years : null;
 }
 
+/** True when `data` has a Planned projection to compare: a runner result, no
+ *  unconfigured CBP election, and at least one planned year. The same guard
+ *  `buildSide` applies before it reports any figure. */
+export function hasPlannedProjection(data: PipelineData): boolean {
+  return (
+    plannedYears(data) !== null &&
+    drawdownByMethodFromPageResult(data.pageResult)?.planned != null
+  );
+}
+
 function withdrawalYears(
   data: PipelineData,
   years: ReadonlyArray<DrawdownYear>,

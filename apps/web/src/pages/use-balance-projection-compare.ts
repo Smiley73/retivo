@@ -14,11 +14,15 @@
  *
  * Status: `none` (nothing chosen), `pending` (queued or running), `ready`
  * (`comparison` holds the projected scenario), `unprojectable` (no retirement
- * age resolves, so there is no projection and nothing is wrong to report) or
- * `error` (a recognised configuration clash; `errorMessage` says which).
+ * age resolves, so there is no projection and nothing is wrong to report),
+ * `unavailable` (the projection ran but one side has no usable Planned
+ * result, e.g. an unconfigured pension election, so there is nothing to
+ * compare) or `error` (a recognised configuration clash; `errorMessage` says
+ * which).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
+import { hasPlannedProjection } from './balance-projection-compare-data';
 import { loadPageData, type PipelineData } from './balance-projection-page-data';
 import type { UseBalanceProjectionDataResult } from './use-balance-projection-data';
 import { TaxIntegrationInvalidInputError } from '../lib/balance-projection-runner-tax';
@@ -34,7 +38,7 @@ import {
 } from '../lib/view-deflator';
 import { yieldToIdle } from '../lib/yield-to-idle';
 
-type CompareStatus = 'none' | 'pending' | 'ready' | 'unprojectable' | 'error';
+type CompareStatus = 'none' | 'pending' | 'ready' | 'unprojectable' | 'unavailable' | 'error';
 
 interface CompareOption {
   readonly value: string;
@@ -71,6 +75,7 @@ const FALLBACK_ERROR_MESSAGE =
 type Outcome =
   | { readonly status: 'ready'; readonly comparison: PipelineData }
   | { readonly status: 'unprojectable' }
+  | { readonly status: 'unavailable' }
   | { readonly status: 'error'; readonly message: string };
 
 function readRemembered(): ReadonlyMap<string, string> {
@@ -220,9 +225,11 @@ export function useBalanceProjectionCompare(
         });
         setResult({
           inputs,
-          outcome: comparison.pageResult
-            ? { status: 'ready', comparison }
-            : { status: 'unprojectable' },
+          outcome: !comparison.pageResult
+            ? { status: 'unprojectable' }
+            : hasPlannedProjection(comparison)
+              ? { status: 'ready', comparison }
+              : { status: 'unavailable' },
         });
       } catch (e) {
         if (e instanceof TaxIntegrationInvalidInputError) {
@@ -270,12 +277,25 @@ export function useBalanceProjectionCompare(
     setRemembered(next);
   };
 
+  // A ready comparison still needs a usable Planned result on the viewed side;
+  // without one, the headline would read its missing figures as "Never".
+  const readyComparison =
+    outcome?.status === 'ready' && hasPlannedProjection(data) ? outcome.comparison : null;
+  const status: CompareStatus =
+    comparisonId === null
+      ? 'none'
+      : outcome === null
+        ? 'pending'
+        : outcome.status === 'ready' && readyComparison === null
+          ? 'unavailable'
+          : outcome.status;
+
   return {
     options,
     comparisonId,
     comparisonName,
-    status: comparisonId === null ? 'none' : (outcome?.status ?? 'pending'),
-    comparison: outcome?.status === 'ready' ? outcome.comparison : null,
+    status,
+    comparison: readyComparison,
     errorMessage: outcome?.status === 'error' ? outcome.message : null,
     choose,
   };
