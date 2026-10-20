@@ -18,6 +18,9 @@
       // (jest-axe@10 bundles its own axe-core and ships no types).
       "ignoreDependencies": ["tailwindcss", "axe-core"]
     },
+    "packages/assistant-protocol": {
+      "project": ["src/**/*.ts"]
+    },
     "apps/api": {
       // main.ts is the NestJS server; lambda.ts is the API Gateway
       // serverless-express bridge (Pulumi handler "lambda.handler"); the

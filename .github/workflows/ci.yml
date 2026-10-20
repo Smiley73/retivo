@@ -117,6 +117,8 @@ jobs:
       # part of the local `pnpm gate` — this step mirrors it in CI.
       - run: pnpm knip
       - run: pnpm typecheck
+      # The protocol package's tests, with its coverage thresholds.
+      - run: pnpm --filter @retirement/assistant-protocol test:coverage
       # Does this PR change what gets installed? Any package.json, the lockfile
       # or pnpm-workspace.yaml (it holds the overrides and
       # `auditConfig.ignoreGhsas`, so editing it can hide an advisory).

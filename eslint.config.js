@@ -4,6 +4,19 @@ import globals from 'globals';
 
 export default [
   {
+    files: ['packages/*/src/**/*.ts'],
+    languageOptions: {
+      parser,
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+    plugins: { '@typescript-eslint': plugin },
+    rules: {
+      ...plugin.configs.recommended.rules,
+    },
+  },
+  {
     files: ['apps/api/src/**/*.ts'],
     languageOptions: {
       parser,
