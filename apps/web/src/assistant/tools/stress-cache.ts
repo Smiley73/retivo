@@ -16,7 +16,16 @@ export function monteCarloInputFor(scenarioId: string, env: ToolEnv, pathCount: 
   const input = buildMonteCarloInputForScenario({
     scenarioId,
     scenarios: workspace.scenarios,
-    inputs: workspace,
+    // No `categories`: the page's stress run ignores the medical flags and keeps the legacy `cat-medical` set, so the
+    // tool's input, cache key and seed must too (see the follow-up on the page-versus-builder difference).
+    inputs: {
+      members: workspace.members,
+      accounts: workspace.accounts,
+      balances: workspace.balances,
+      expenses: workspace.expenses,
+      incomeStreams: workspace.incomeStreams,
+      ssBenefits: workspace.ssBenefits,
+    },
     todayYear: now.getFullYear(),
     todayMonthIndex: now.getMonth(),
   });

@@ -9,8 +9,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ToolEnv } from '../assistant/tools/define';
 import { monteCarloInputFor } from '../assistant/tools/stress-cache';
 import { mcCacheKey } from '../db/monte-carlo-cache';
-import { clearAllStores, listAggregates } from '../db/store';
-import type { Aggregate, ScenarioPayload } from '../db/types';
+import { clearAllStores, listAggregates, putAggregate } from '../db/store';
+import type { Aggregate, ExpenseCategoryPayload, ScenarioPayload } from '../db/types';
 import { runBalanceProjectionMc, type RunBalanceProjectionArgs } from '../lib/balance-projection-runner';
 import { validateCbpResolution } from '../lib/cbp-resolution';
 import { loadDemoData } from '../lib/demo-data-loader';
@@ -179,5 +179,21 @@ describe('retivo_get_stress_test against the Balance Projection page', () => {
     // The page seeds an auto-run from the signature of its own input, with cbpFailed taken from the CBP check.
     expect(hashMcInput(toolInput, false)).toBe(hashMcInput(page.input, page.cbpFailed));
     expect(autoRunSeed(toolInput, false)).toBe(seedFromString(hashMcInput(page.input, page.cbpFailed)));
+  });
+
+  it('still lands on the page’s key and seed when a category other than cat-medical carries the medical flag', async () => {
+    const categories = (await listAggregates('expenseCategory')) as Aggregate<ExpenseCategoryPayload>[];
+    const original = categories.find((category) => category.id !== 'cat-medical' && category.payload.isMedical !== true)!;
+    await putAggregate('expenseCategory', { ...original, payload: { ...original.payload, isMedical: true } });
+    try {
+      const page = await pageStressInput(BASE_ID);
+      const env = { workspace: { ...page.inputs, scenarios }, now: TEST_NOW } as unknown as ToolEnv;
+      const toolInput = monteCarloInputFor(BASE_ID, env)!;
+      // The page ignores the flags in its stress run, so the tool must too.
+      expect(await mcCacheKey(toolInput)).toBe(await mcCacheKey({ ...page.input, pathCount: toolInput.pathCount }));
+      expect(hashMcInput(toolInput, false)).toBe(hashMcInput(page.input, page.cbpFailed));
+    } finally {
+      await putAggregate('expenseCategory', original);
+    }
   });
 });
