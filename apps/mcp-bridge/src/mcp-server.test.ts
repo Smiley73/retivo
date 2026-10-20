@@ -17,7 +17,7 @@ afterEach(async () => {
   await h.close();
 });
 
-const ARGS: Record<string, unknown> = { scenarioId: 's1', baseScenarioId: 'a', otherScenarioId: 'b', metric: 'success rate' };
+const ARGS: Record<string, unknown> = { scenarioId: 's1', otherScenarioId: 'b', metric: 'plan_success' };
 /** Valid arguments for a registry tool, built from the properties its schema declares. */
 function argsFor(entry: ToolEntry): Record<string, unknown> {
   const properties = Object.keys(toMcpToolDeclaration(entry).inputSchema.properties as Record<string, unknown>);

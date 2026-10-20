@@ -35,6 +35,15 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-20',
     kind: 'new',
+    title: 'Your AI assistant can run the projection and the stress test (beta)',
+    blurb:
+      'A connected assistant can now read the Balance Projection numbers, the stress test, ' +
+      'a comparison of two scenarios and where a headline number comes from. It still cannot ' +
+      'change anything, and a stress test it runs is not saved or shown on the page.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'new',
     title: 'Ask an AI assistant about your plan (beta)',
     blurb:
       'Where your copy offers it, you can connect an AI assistant such as Claude Code, ' +

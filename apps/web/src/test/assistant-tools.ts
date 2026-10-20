@@ -5,10 +5,15 @@
  */
 import type { ToolResult } from '@retirement/assistant-protocol';
 import type { ToolCallContext } from '../assistant/dispatcher';
+import { loadWorkspace } from '../assistant/tools/workspace';
+import { monteCarloInputFor } from '../assistant/tools/stress-cache';
+import { mcCacheKey, putCached } from '../db/monte-carlo-cache';
+import { savedSummary } from './assistant-analysis-inputs';
 import { createConsentRecord } from '../assistant/sharing/consent';
 import { defaultSharingChoices, type SharingChoices } from '../assistant/sharing/switches';
 import { buildShareView } from '../assistant/sharing/view';
 import { planToolHandlers } from '../assistant/tools';
+import { toHandler, type ToolDefinition } from '../assistant/tools/define';
 import type { ToolEnvelope } from '../assistant/tools/envelope';
 
 /** Mid-June 2026 in the local zone: the tab's "today" for these tests. */
@@ -41,7 +46,27 @@ export async function callPlanTool(
   return handler(args, toolContext(choices, now));
 }
 
+/** Runs a tool built outside the shipped list (one with injected workers, say) through the same `toHandler` wrapper. */
+export async function callDefinition(
+  definition: ToolDefinition,
+  args: Record<string, unknown> = {},
+  context: ToolCallContext = toolContext(),
+): Promise<ToolResult> {
+  return toHandler(definition)(args, context);
+}
+
 export function envelopeOf(result: ToolResult): ToolEnvelope {
   if (!result.ok) throw new Error(`expected an envelope, got ${result.error.code}: ${result.error.message}`);
   return result.payload as ToolEnvelope;
+}
+
+/**
+ * Saves a stress-test result for `scenarioId` the way the page would, so a tool that reads the cache has
+ * something to read and one that computes on a miss is not asked to (the test environment has no real worker).
+ */
+export async function plantSavedStressTest(scenarioId: string, seed = 4242, now: Date = TEST_NOW): Promise<void> {
+  const workspace = await loadWorkspace();
+  const input = monteCarloInputFor(scenarioId, { workspace, now } as unknown as Parameters<typeof monteCarloInputFor>[1]);
+  if (input === null) throw new Error(`scenario ${scenarioId} cannot run a stress test`);
+  await putCached(await mcCacheKey(input), savedSummary(seed));
 }

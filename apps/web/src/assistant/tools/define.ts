@@ -5,8 +5,10 @@
  * disclosures, byte cap) and turns a thrown error into a result. Nothing a tool
  * does can reach the wire except through here.
  */
-import { TOOL_REGISTRY, failureResult, type ToolResult } from '@retirement/assistant-protocol';
+import { TOOL_REGISTRY, failureResult, type ErrorCode, type ToolResult } from '@retirement/assistant-protocol';
 import { ZodError } from 'zod';
+import { CbpUnconfiguredError, NoPrimaryRetirementError } from '../../lib/balance-projection-runner';
+import { friendlyProjectionErrorMessage } from '../../lib/tax-integration';
 import type { ToolCallContext, ToolHandler } from '../dispatcher';
 import type { ShareView } from '../sharing/view';
 import { maskTermsFor } from '../sharing/view';
@@ -39,6 +41,29 @@ export type ToolRun = (args: Record<string, unknown>, env: ToolEnv) => Promise<T
 /** Thrown by a tool when the arguments are well-formed but name something that does not exist. */
 export class ToolArgsError extends Error {}
 
+/** The codes a tool may answer with on purpose, beyond `INVALID_ARGS` and the generic `INTERNAL`. */
+type ToolFailureCode = Extract<
+  ErrorCode,
+  'INVALID_ARGS' | 'CANCELLED' | 'TOO_MANY_IN_FLIGHT' | 'COMPUTE_CAP_EXCEEDED' | 'INTERNAL'
+>;
+
+/**
+ * Thrown by a tool to answer with a code of its choosing. The message is the tool's own, so it must be a fixed
+ * sentence or text the tool has already sanitized: nothing from a caught error goes in unread.
+ */
+export class ToolFailure extends Error {
+  constructor(
+    readonly code: ToolFailureCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Said when the plan cannot be projected, for the two runner errors and for a scenario the page's own gates refuse. */
+export const PROJECTION_UNAVAILABLE_MESSAGE =
+  'This scenario cannot be projected yet. The plan needs a primary household member with a retirement age, at least one active account, and a payout election on any cash balance plan account.';
+
 export interface ToolDefinition {
   name: string;
   run: ToolRun;
@@ -48,9 +73,14 @@ export function defineTool(name: string, run: ToolRun): ToolDefinition {
   return { name, run };
 }
 
-/** `INVALID_ARGS` for a rejected argument, `INTERNAL` for anything else, never carrying a message from the failure. */
+/** `INVALID_ARGS` for a rejected argument, the tool's own code for a `ToolFailure`, `INTERNAL` for anything else, never carrying a message from an unexpected failure. */
 function failureFor(tool: string, error: unknown): ToolResult {
   if (error instanceof ToolArgsError) return failureResult('INVALID_ARGS', error.message);
+  if (error instanceof ToolFailure) return failureResult(error.code, error.message);
+  // The two ways the runner says the plan cannot run; the page words them the same way.
+  if (error instanceof NoPrimaryRetirementError || error instanceof CbpUnconfiguredError) {
+    return failureResult('INVALID_ARGS', friendlyProjectionErrorMessage(error) ?? PROJECTION_UNAVAILABLE_MESSAGE);
+  }
   if (error instanceof ZodError) return failureResult('INVALID_ARGS', `The arguments for ${tool} are not valid.`);
   return failureResult('INTERNAL', `${tool} failed unexpectedly.`);
 }

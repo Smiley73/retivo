@@ -706,7 +706,7 @@ back and the exact text it sent. **Disconnect** ends the session at once; signin
 out, locking and reloading or closing the tab also end it, and a new
 connection needs a new code.
 
-**What the assistant can ask for today.** Four read-only tools:
+**What the assistant can ask for today.** Eight read-only tools and one prompt:
 
 - **Status**: whether the workspace is ready, the app build, the calculation
   version, the tax-table year, when your data last synced and which sharing
@@ -717,6 +717,25 @@ connection needs a new code.
   changes.
 - **Get scenario**: one scenario's settings after inheritance, each with where
   it came from: the scenario that set it, or the default RETIVO applied.
+- **Get projection**: the year-by-year projection the Balance Projection page
+  shows for a scenario, Planned or Historical, with the balance in today's and
+  future dollars, withdrawals, growth and the tax figures. It can limit the rows to
+  a range of years.
+- **Get stress test**: the Monte Carlo result the page shows: the chance the
+  money lasts, the Typical, Pessimistic and Bad-luck endings and the balance by
+  year. It reads the result the page already saved; if there is none it runs the
+  10,000 paths in your open tab, which can take up to a minute, and saves
+  nothing. It never changes what the page shows.
+- **Compare scenarios**: how two scenarios relate, which settings differ and how
+  their planned outcomes differ, with each one's saved stress-test result if the
+  page has one. It never runs a simulation.
+- **Explain**: where one headline number comes from: its value, the settings and
+  defaults behind it, the assumptions and the page of the math documentation that
+  describes it.
+- **Plan review** (a prompt, not a tool): a short checklist the assistant can use
+  to review your plan. It starts with the status tool, never invents an input,
+  cites its assumptions, names the screen where you would make a change, and ends
+  with the not-advice reminder.
 
 Every answer repeats what was left out, how amounts were rounded, which tax-table
 year and calculation version it rests on, and that the figures are illustrative

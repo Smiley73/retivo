@@ -55,7 +55,7 @@ describe('relaying a call', () => {
     h = await startHarness();
     const tab = await h.pairedTab();
     const unsupported = toolNotSupported('retivo_explain', 'build-7');
-    const { response } = await callAndAnswer(tab, unsupported, 'retivo_explain', { scenarioId: 's1', metric: 'x' });
+    const { response } = await callAndAnswer(tab, unsupported, 'retivo_explain', { scenarioId: 's1', metric: 'plan_success' });
     expect(response.isError).toBe(true);
     expect(response.structuredContent).toEqual(unsupported);
     expect(response.content[0]!.text).toBe(`TOOL_NOT_SUPPORTED: ${(unsupported as { error: { message: string } }).error.message}`);

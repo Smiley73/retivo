@@ -627,7 +627,7 @@ function buildFilingAssumptions(
  * overrides the engines read, so the report cannot describe a setting the
  * projection did not use.
  */
-function buildHealthAssumptions(
+export function buildHealthAssumptions(
   resolved: ScenarioOverrides,
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
 ): ReportHealthAssumptions {
