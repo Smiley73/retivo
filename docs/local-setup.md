@@ -225,11 +225,11 @@ and stops at the first failure.
 
 | Command | What it does |
 |---|---|
-| `pnpm lint` | ESLint over the API and web sources. |
+| `pnpm lint` | ESLint over the API, web, bridge and shared package sources. |
 | `pnpm depcruise` | Checks module boundaries and import cycles. |
 | `pnpm knip` | Finds unused files, exports and dependencies. |
 | `pnpm typecheck` | Builds the shared `packages/contracts` and `packages/assistant-protocol` packages, then type-checks every package, including the browser tests in `apps/web/e2e`. |
-| `pnpm test` | Runs each package's tests one package at a time, then the script tests. |
+| `pnpm test` | Runs each package's tests one package at a time, then the script tests. The AI assistant bridge's tests build `apps/mcp-bridge/dist` first, because some of them start the built program. |
 | `pnpm audit:ci` | `pnpm audit` for known vulnerabilities in dependencies (moderate and above). Needs network access. |
 | `pnpm gate` | All of the above: `lint`, `depcruise`, `knip`, `typecheck`, `test`, `audit:ci`. |
 
@@ -256,6 +256,7 @@ Where tests live, and what they need:
 |---|---|---|
 | API (Jest) | `apps/api/src/**/*.spec.ts`; integration tests in `apps/api/src/test/` | **Yes.** Run `pnpm emu:up` first. They create their own temporary tables, separate from the ones `pnpm dev` uses. |
 | Web (Vitest) | beside the code, in `apps/web/src` | No |
+| AI assistant bridge (Vitest) | beside the code, in `apps/mcp-bridge/src` | No. Run it with `pnpm --filter @retirement/mcp-bridge test`, which builds the program first. |
 | Script tests | `scripts/test`, `apps/api/scripts` | No |
 | End to end (Playwright) | `apps/web/e2e` | Yes, and `pnpm dev` too |
 
@@ -367,6 +368,7 @@ them. To use a phone or a second laptop on your network:
 | `apps/web` | The web app: React, Vite, and the browser-side storage and encryption. |
 | `apps/api` | The API: NestJS, with the Lambda entry point used when deployed. |
 | `packages/contracts` | Request and response types shared by the web app and the API. |
+| `apps/mcp-bridge` | The AI assistant bridge: a small program an assistant starts over standard input and output, which relays its tool calls to the signed-in browser tab over a local connection. |
 | `packages/assistant-protocol` | The messages, tool list and pairing rules shared by the AI assistant bridge and the web app. |
 | `infrastructure` | Pulumi code for the Amazon deployment, and the Docker file for the emulators. |
 | `scripts` | Repo-wide check scripts and their tests. |
