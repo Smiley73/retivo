@@ -16,7 +16,7 @@ calculations are US-specific: federal income tax, Social Security, Medicare
 
 RETIVO is **local-first**: your data lives in your browser, and the browser
 encrypts it before syncing it to a small server that runs in your own Amazon
-account. A local AI assistant such as Claude Code, Codex or Cursor can read and
+account. A local AI assistant such as Claude Code or Codex can read and
 run your plan through an opt-in connector, with the data staying in your browser
 except for the results you allow; see the
 [AI assistants guide](docs/ai-assistants.md).

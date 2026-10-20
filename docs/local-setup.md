@@ -345,7 +345,7 @@ local accounts and data. Run `pnpm emu:up` from only one of them.
 
 ### Connect a local AI assistant
 
-An AI assistant on your computer (Claude Code, Codex or Cursor) can read your
+An AI assistant on your computer (Claude Code or Codex) can read your
 local plan through the open browser tab. The feature is off until the web build
 carries a bridge port, so:
 
@@ -365,11 +365,12 @@ carries a bridge port, so:
    published bridge, so against a checkout use the built file instead, for example:
 
    ```bash
-   claude mcp add retivo -- node "$PWD/apps/mcp-bridge/dist/bin.js" --origin http://localhost:5173
+   claude mcp add retivo -- node /full/path/to/retivo/apps/mcp-bridge/dist/bin.js --origin http://localhost:5173
    ```
 
-   `codex mcp add retivo -- node ... --origin http://localhost:5173` works the same
-   way. If you changed `VITE_ASSISTANT_BRIDGE_PORT`, add `--port <that number>`. Use
+   Use the full path to your checkout (not `$PWD`, which is wherever your terminal
+   happens to be). `codex mcp add retivo -- node ... --origin http://localhost:5173`
+   works the same way. If you changed `VITE_ASSISTANT_BRIDGE_PORT`, add `--port <that number>`. Use
    `localhost`, not `127.0.0.1`, in the origin: it has to equal the address in your
    browser's address bar.
 4. Ask the assistant a question about your plan, type the code from its answer into

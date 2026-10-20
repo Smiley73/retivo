@@ -59,7 +59,7 @@ The workspace is a pnpm monorepo. `pnpm-workspace.yaml` lists three groups:
 | `@retirement/api` | `apps/api` | The NestJS API, plus the entry points of the background Lambdas. |
 | `@retirement/contracts` | `packages/contracts` | The Zod schemas and types for what travels between web and API (a shared contract), and the list of aggregate types. |
 | `@retirement/assistant-protocol` | `packages/assistant-protocol` | The Zod schemas and constants shared by the local AI assistant bridge and the web app: the messages they exchange, the fixed list of tools, the error codes and the pairing rules. |
-| `@retirement/mcp-bridge` | `apps/mcp-bridge` | A small Node program an AI assistant (Claude Code, Codex, Cursor) starts over standard input and output. It lists the fixed set of Retivo tools to the assistant and relays each call over a local WebSocket (`127.0.0.1` only) to the signed-in browser tab, after a one-time pairing code. It holds no plan data. |
+| `@retirement/mcp-bridge` | `apps/mcp-bridge` | A small Node program an AI assistant (Claude Code or Codex) starts over standard input and output. It lists the fixed set of Retivo tools to the assistant and relays each call over a local WebSocket (`127.0.0.1` only) to the signed-in browser tab, after a one-time pairing code. It holds no plan data. |
 | `@retirement/infrastructure` | `infrastructure` | The Pulumi program that builds the Amazon resources. |
 
 The versions of the main libraries are in each package's `package.json`; this
@@ -340,7 +340,7 @@ new table needs an entry in `local-bootstrap.ts` as well as in
 
 ## The assistant bridge
 
-The connector lets an AI assistant (Claude Code, Codex, Cursor) read and run a
+The connector lets an AI assistant (Claude Code or Codex) read and run a
 plan without the data leaving the browser except as a tool result the person
 allowed. It is made of three pieces in the repo: `packages/assistant-protocol`
 (the messages, the tool list and the pairing rules, shared by both ends),

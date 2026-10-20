@@ -25,7 +25,6 @@ import { btnPrimaryClass, btnSecondaryClass, btnSecondarySmClass, inputClass, Se
 const AGENTS: readonly { agent: AgentName; label: string }[] = [
   { agent: 'claude', label: 'Claude Code' },
   { agent: 'codex', label: 'Codex' },
-  { agent: 'cursor', label: 'Cursor' },
 ];
 
 const COPY_FEEDBACK_MS = 2000;

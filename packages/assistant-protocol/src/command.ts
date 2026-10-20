@@ -1,10 +1,10 @@
-/** The copyable command that starts the bridge in Claude Code, Codex or Cursor. */
+/** The copyable command that starts the bridge in Claude Code or Codex. */
 import { DEFAULT_BRIDGE_PORT } from './constants.js';
 
 /** What the agent runs to start the bridge (a provisional value until the distribution path is decided). */
 export const DEFAULT_BRIDGE_LAUNCHER = 'npx -y retivo-mcp-bridge';
 
-export type AgentName = 'claude' | 'codex' | 'cursor';
+export type AgentName = 'claude' | 'codex';
 
 // The result is pasted into a shell, so the origin is held to a narrow
 // character set on top of being a bare origin.
@@ -27,8 +27,7 @@ export function assertSafePort(port: number): void {
 }
 
 /**
- * One line the person pastes: `claude mcp add` / `codex mcp add` for the CLIs, a
- * one-line `mcp.json` server object for Cursor. Throws on an origin or port that
+ * One line the person pastes: `claude mcp add` / `codex mcp add`. Throws on an origin or port that
  * is unsafe to paste into a shell.
  */
 export function bridgeCommandFor(agent: AgentName, options: { origin: string; port?: number }): string {
@@ -36,9 +35,5 @@ export function bridgeCommandFor(agent: AgentName, options: { origin: string; po
   const port = options.port ?? DEFAULT_BRIDGE_PORT;
   assertSafePort(port);
   const flags = ['--origin', options.origin, ...(port === DEFAULT_BRIDGE_PORT ? [] : ['--port', String(port)])];
-  if (agent === 'cursor') {
-    const [command, ...args] = DEFAULT_BRIDGE_LAUNCHER.split(' ');
-    return JSON.stringify({ mcpServers: { retivo: { command, args: [...args, ...flags] } } });
-  }
   return [agent, 'mcp', 'add', 'retivo', '--', DEFAULT_BRIDGE_LAUNCHER, ...flags].join(' ');
 }

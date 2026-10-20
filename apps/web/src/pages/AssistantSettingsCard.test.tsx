@@ -119,7 +119,7 @@ describe('launch commands', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     setup({ port: '24999' });
-    for (const agent of ['claude', 'codex', 'cursor'] as const) {
+    for (const agent of ['claude', 'codex'] as const) {
       const command = bridgeCommandFor(agent, { origin: window.location.origin, port: 24999 });
       expect(command).toContain(window.location.origin);
       expect(screen.getByText(command)).toBeInTheDocument();
