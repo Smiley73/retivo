@@ -24,6 +24,7 @@ import type { AccountRecord } from './auth/types';
 import { apiRequest } from './api/client';
 import { RequireAuth } from './auth/RequireAuth';
 import { AppToastRegion } from './components/AppToastRegion';
+import { AssistantConsentHost } from './components/AssistantConsentHost';
 import { BetaFeatureGate } from './components/BetaFeatureGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FirstRunDemoModal } from './components/FirstRunDemoModal';
@@ -573,6 +574,9 @@ export const AppShell: React.FC = () => {
         </div>
       </div>
       <VersionBanner />
+      {/* The AI assistant consent dialog: here, not on the Settings page, so it opens on whatever
+          route the person is on when the bridge proves itself. */}
+      <AssistantConsentHost />
       {householdId && me && bannerVisible && (
         <div className="fixed inset-x-0 bottom-0 z-20 mx-auto w-full max-w-2xl p-4">
           <HouseholdReadyBanner

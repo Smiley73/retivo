@@ -33,7 +33,8 @@ import {
 import { bridgeSocketUrl } from './bridge-port';
 import { AuditLog, type AuditEntry } from './audit-log';
 import { CallDispatcher, type SettledCall, type Timers, type ToolHandler } from './dispatcher';
-import { DEFAULT_CONSENT, type SessionConsent, type SessionEnd, type SessionPhase, type SocketFactory, type SocketLike } from './session-types';
+import { createConsentRecord, type ConsentRecord } from './sharing/consent';
+import type { ConsentStep, SessionEnd, SessionPhase, SocketFactory, SocketLike } from './session-types';
 
 /**
  * How long a socket may stay un-opened before the tab gives up. Long, because a browser keeps a loopback
@@ -63,10 +64,10 @@ export interface SessionOptions {
   /** `unlockResolved`, `isUnlocked` and a household, read at call time. */
   isWorkspaceReady: () => boolean;
   appBuildId: string;
-  /** Moves the tab's idle clock; called once per completed call, and only while the consent has the D7 switch on. */
+  /** Moves the tab's idle clock; called once per completed call, and only while the consent record has the D7 switch on. */
   noteActivity: () => void;
-  /** The consent step. The default agrees at once with the default consent (switch off). */
-  requestConsent?: () => Promise<SessionConsent | 'declined'>;
+  /** The consent step, normally the dialog. Required: a session never agrees on the person's behalf. */
+  requestConsent: ConsentStep;
   timers?: Timers;
   now?: () => number;
   /** State names only; never a code, a nonce or a payload. */
@@ -79,12 +80,15 @@ export interface SessionSnapshot {
   phase: SessionPhase;
   /** How the last session ended; `null` before the first one and while a new one runs. */
   end: SessionEnd | null;
-  consent: SessionConsent;
+  /** What the person allowed for the running session; `null` until they allow and after the session ends. */
+  consent: ConsentRecord | null;
   audit: readonly AuditEntry[];
 }
 
 interface HandshakeState {
   bridgeNonce: string;
+  /** The assistant's self-reported name from `hello`: untrusted, shown to the person only after sanitizing. */
+  clientName: string | null;
   tabNonce: string;
   pairSent: boolean;
   verifying: boolean;
@@ -97,7 +101,8 @@ export class AssistantSession {
   private code: string | null = null;
   private handshake: HandshakeState | null = null;
   private lastEnd: SessionEnd | null = null;
-  private consent: SessionConsent = DEFAULT_CONSENT;
+  /** The one consent record; the dispatcher and the idle hook read it from here, never a copy. */
+  private consent: ConsentRecord | null = null;
   /** Bumped whenever a session ends, so an await that outlives its session knows to stop. */
   private epoch = 0;
   private deadline: unknown = null;
@@ -116,6 +121,7 @@ export class AssistantSession {
       timers: this.timers,
       now: this.now,
       isWorkspaceReady: options.isWorkspaceReady,
+      getConsent: () => this.consent,
       appBuildId: options.appBuildId,
       send: (frame) => this.sendFrame(frame),
       onSettled: (call) => this.onSettled(call),
@@ -178,7 +184,9 @@ export class AssistantSession {
   }
 
   /** Ends the session, closing the socket normally with `reason`. Safe to call in any phase. */
-  end(reason: TabCloseReason): void {
+  end(requested: TabCloseReason): void {
+    // Closing the tab with the dialog still open is a decline: the person never agreed.
+    const reason: TabCloseReason = requested === 'pagehide' && this.phase === 'awaiting-consent' ? 'consent-declined' : requested;
     const hadEntries = this.audit.entries().length > 0;
     if (AUTH_ENDING_REASONS.has(reason)) this.audit.clear();
     if (this.phase === 'idle') {
@@ -225,7 +233,7 @@ export class AssistantSession {
     this.socket = null;
     this.code = null;
     this.handshake = null;
-    this.consent = DEFAULT_CONSENT;
+    this.consent = null;
     this.dispatcher.abortAll();
     this.lastEnd = end;
     this.setPhase('idle');
@@ -270,19 +278,28 @@ export class AssistantSession {
     }
     const frame = decoded.frame;
     if (this.phase === 'awaiting-hello' && frame.type === 'hello') {
-      this.onHello(frame.protocolVersion, frame.bridgeNonce);
+      this.onHello(frame.protocolVersion, frame.bridgeNonce, frame.client?.name ?? null);
     } else if (this.phase === 'awaiting-paired' && frame.type === 'paired' && this.handshake?.pairSent === true && !this.handshake.verifying) {
       void this.onPaired(frame.bridgeProof);
-    } else if (this.phase === 'ready' && frame.type === 'call') {
+    } else if (this.callsAllowed() && frame.type === 'call') {
       if (!this.dispatcher.handleCall(frame)) this.failProtocol('PROTOCOL_ERROR');
-    } else if (this.phase === 'ready' && frame.type === 'cancel') {
+    } else if (this.callsAllowed() && frame.type === 'cancel') {
       this.dispatcher.handleCancel(frame.id);
     } else {
       this.failProtocol('PROTOCOL_ERROR');
     }
   }
 
-  private onHello(protocolVersion: number, bridgeNonce: string): void {
+  /**
+   * A `call` is handed to the dispatcher once the bridge has been told `ready`, and also while the
+   * person is still deciding: the bridge relays nothing before `ready`, so a call in `awaiting-consent`
+   * means a bug on one side, and the dispatcher's own consent gate answers it `WORKSPACE_LOCKED`.
+   */
+  private callsAllowed(): boolean {
+    return this.phase === 'ready' || this.phase === 'awaiting-consent';
+  }
+
+  private onHello(protocolVersion: number, bridgeNonce: string, clientName: string | null): void {
     if (protocolVersion !== PROTOCOL_VERSION) {
       this.failProtocol('PROTOCOL_VERSION_MISMATCH');
       return;
@@ -290,7 +307,7 @@ export class AssistantSession {
     const code = this.code;
     if (code === null) return;
     const epoch = this.epoch;
-    const handshake: HandshakeState = { bridgeNonce, tabNonce: generateNonce(), pairSent: false, verifying: false };
+    const handshake: HandshakeState = { bridgeNonce, clientName, tabNonce: generateNonce(), pairSent: false, verifying: false };
     this.handshake = handshake;
     this.setPhase('awaiting-paired');
     this.armDeadline(PAIRED_TIMEOUT_MS);
@@ -326,15 +343,16 @@ export class AssistantSession {
       return;
     }
     // The bridge proved itself: the code and both nonces have done their job.
+    const clientName = handshake.clientName;
     this.code = null;
     this.handshake = null;
     this.clearDeadline();
     this.setPhase('paired');
     this.setPhase('awaiting-consent');
     this.notify();
-    let answer: SessionConsent | 'declined';
+    let answer: Awaited<ReturnType<ConsentStep>>;
     try {
-      answer = await (this.options.requestConsent ?? agreeWithDefaults)();
+      answer = await this.options.requestConsent({ clientName });
     } catch {
       answer = 'declined';
     }
@@ -343,14 +361,15 @@ export class AssistantSession {
       this.end('consent-declined');
       return;
     }
-    this.consent = answer;
+    // The record exists before `ready` leaves, so a call the bridge relays at once finds it.
+    this.consent = createConsentRecord(answer, this.now(), epoch);
     this.setPhase('ready');
-    this.sendFrame({ type: 'ready', keepSignedInWhileActive: answer.keepSignedInWhileActive });
+    this.sendFrame({ type: 'ready', keepSignedInWhileActive: this.consent.keepSignedInWhileActive });
     this.notify();
   }
 
   private onSettled(call: SettledCall): void {
-    const movesIdleClock = call.completed && this.phase === 'ready' && this.consent.keepSignedInWhileActive;
+    const movesIdleClock = call.completed && this.phase === 'ready' && this.consent?.keepSignedInWhileActive === true;
     if (movesIdleClock) this.options.noteActivity();
     this.audit.record({
       at: this.now(),
@@ -364,10 +383,6 @@ export class AssistantSession {
     });
     this.notify();
   }
-}
-
-async function agreeWithDefaults(): Promise<SessionConsent> {
-  return DEFAULT_CONSENT;
 }
 
 function describeClose(end: SessionEnd): string {

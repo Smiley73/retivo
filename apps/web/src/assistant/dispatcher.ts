@@ -5,6 +5,11 @@
  * handler is answered `TOOL_NOT_SUPPORTED` with no data, which is how an older
  * tab stays honest about a newer bridge.
  *
+ * Consent is the second gate (the first is the tab never saying `ready` before the
+ * person allows): a call with no consent record is answered `WORKSPACE_LOCKED`, so even
+ * a bug that sends `ready` early exposes nothing. A handler gets its share view builder,
+ * bound to the record that was current when the call started.
+ *
  * Caps: `MAX_IN_FLIGHT_CALLS` at once, each call under its descriptor's
  * `timeoutMs`, a result over `MAX_TOOL_RESULT_BYTES` becomes `OUTPUT_TOO_LARGE`
  * and is never sent. The per-minute limit is the bridge's alone.
@@ -19,11 +24,23 @@ import {
   type ToolResult,
 } from '@retirement/assistant-protocol';
 import { summarizeArgs, type AuditOutcome } from './audit-log';
+import type { ConsentRecord } from './sharing/consent';
+import { buildShareView, type ShareSource, type ShareView } from './sharing/view';
+
+/** What a handler uses to say anything about the plan: the record's choices, applied. */
+interface ShareBinding {
+  /** The session's consent record: the choices a response must disclose, fixed for the session. */
+  readonly consent: ConsentRecord;
+  /** The share view of `source` under the record's choices, with ages on the dispatcher's clock. */
+  buildView(source: ShareSource): ShareView;
+}
 
 export interface ToolCallContext {
   /** Aborted on `cancel`, on timeout and when the session ends; a handler should stop work when it fires. */
   signal: AbortSignal;
   progress(update: { fraction?: number; message?: string }): void;
+  /** The only way a handler turns plan data into something it may return. */
+  share: ShareBinding;
 }
 
 /** `args` has already been validated against the registry entry's input schema. */
@@ -53,6 +70,8 @@ export interface DispatcherOptions {
   now: () => number;
   /** `unlockResolved`, `isUnlocked` and a household, read at call time. */
   isWorkspaceReady: () => boolean;
+  /** The session's current consent record, read at call time; `null` until the person allows. */
+  getConsent: () => ConsentRecord | null;
   appBuildId: string;
   /** Writes a frame to the socket; failures are the socket's to report. */
   send: (frame: TabFrame) => void;
@@ -103,6 +122,11 @@ export class CallDispatcher {
       immediate(failureResult('WORKSPACE_LOCKED', 'The Retivo workspace is locked. Unlock it in the app and try again.'));
       return true;
     }
+    const consent = this.options.getConsent();
+    if (consent === null) {
+      immediate(failureResult('WORKSPACE_LOCKED', 'The person has not allowed this assistant to read their plan. Ask them to allow it in the Retivo tab.'));
+      return true;
+    }
     const handler = this.handlers.get(frame.tool);
     const entry = this.options.registry.find((candidate) => candidate.name === frame.tool);
     if (handler === undefined || entry === undefined) {
@@ -134,6 +158,10 @@ export class CallDispatcher {
     const context: ToolCallContext = {
       signal: controller.signal,
       progress: (update) => this.sendProgress(call, update),
+      share: {
+        consent,
+        buildView: (source) => buildShareView(source, consent.choices, { now: new Date(this.options.now()) }),
+      },
     };
     void (async () => handler(parsed.data as Record<string, unknown>, context))().then(
       (result) => this.finish(call, result, result.ok),

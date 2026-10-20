@@ -6,7 +6,8 @@
  * disagreement with the real bridge (the `*.bridge-test.ts` suite does).
  */
 import { PROTOCOL_VERSION, computeBridgeProof, generateNonce } from '@retirement/assistant-protocol';
-import type { SocketLike } from '../assistant/session-types';
+import type { ConsentStep, SocketLike } from '../assistant/session-types';
+import { defaultConsentAnswer } from '../assistant/sharing/consent';
 
 // Captured before any test installs fake timers, so waiting stays real.
 const realSetImmediate = globalThis.setImmediate;
@@ -85,17 +86,35 @@ export function bridgeHello(overrides: { protocolVersion?: number; bridgeNonce?:
 }
 
 /**
- * Plays a correct bridge up to `ready`: opens the socket, sends `hello`, waits
- * for the tab's `pair`, answers with a valid proof for `code`, and waits for
- * `ready`. Resolves with the nonces it used.
+ * Plays a correct bridge through `paired`: opens the socket, sends `hello` (with `client` when given),
+ * waits for the tab's `pair`, and answers with a valid proof for `code`. The tab then asks the person
+ * for consent; `pairScripted` goes on to wait for `ready`.
  */
-export async function pairScripted(socket: ScriptedSocket, code: string): Promise<{ bridgeNonce: string; tabNonce: string }> {
+export async function handshakeScripted(
+  socket: ScriptedSocket,
+  code: string,
+  client?: { name: string; version: string },
+): Promise<{ bridgeNonce: string; tabNonce: string }> {
   socket.open();
   const bridgeNonce = generateNonce();
-  socket.receive(bridgeHello({ bridgeNonce }));
+  socket.receive({ ...bridgeHello({ bridgeNonce }), ...(client !== undefined && { client }) });
   await until(() => socket.sentAtLeast(1), 'the pair frame');
   const tabNonce = socket.frames[0]!.tabNonce as string;
   socket.receive({ type: 'paired', bridgeProof: await computeBridgeProof({ code, bridgeNonce, tabNonce }) });
-  await until(() => socket.sentAtLeast(2), 'the ready frame');
   return { bridgeNonce, tabNonce };
+}
+
+/** Plays a correct bridge up to `ready`; resolves with the nonces it used. */
+export async function pairScripted(socket: ScriptedSocket, code: string): Promise<{ bridgeNonce: string; tabNonce: string }> {
+  const nonces = await handshakeScripted(socket, code);
+  await until(() => socket.sentAtLeast(2), 'the ready frame');
+  return nonces;
+}
+
+/** A consent step that allows at once with every switch at its default (keep-signed-in off). */
+export const allowWithDefaults: ConsentStep = async () => defaultConsentAnswer();
+
+/** A consent step that allows at once, with the D7 switch set as given. */
+export function allowKeepingSignedIn(keepSignedInWhileActive: boolean): ConsentStep {
+  return async () => ({ ...defaultConsentAnswer(), keepSignedInWhileActive });
 }
