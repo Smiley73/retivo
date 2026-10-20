@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { clearMonteCarloCache, mcCacheKey, monteCarloCacheCount, putCached } from '../../db/monte-carlo-cache';
-import { clearAllStores, db, listAggregates, putAggregate } from '../../db/store';
+import { clearAllStores, db, deleteAggregateLocally, listAggregates, putAggregate } from '../../db/store';
 import type { Aggregate, ScenarioPayload } from '../../db/types';
 import { loadDemoData } from '../../lib/demo-data-loader';
 import { loadProjectionInputs } from '../../lib/projection-inputs';
@@ -146,6 +146,21 @@ describe('retivo_compare_scenarios: outcomes', () => {
     expect(data.scenario.plannedProjectionAvailable).toBe(true);
     for (const [key, value] of Object.entries(data.outcomeDifferences)) expect(value, key).toBeNull();
     expect(data.settingDifferences.some((entry) => entry.key === 'retirementAge')).toBe(true);
+  });
+
+  it('reads a side whose cash balance plan has no payout election as having no outcomes, not as lasting to the horizon', async () => {
+    const income = (await listAggregates('incomeStream')).find((stream) => stream.id === 'demo-income-cbp-payout')!;
+    await deleteAggregateLocally('incomeStream', income.id);
+    try {
+      const { data } = await compare(BASE_ID, fundsRunOutId);
+      for (const side of [data.scenario, data.other]) {
+        expect(side.plannedProjectionAvailable).toBe(false);
+        expect(side.runOutYear).toBeNull();
+        expect(side.endingBalanceTodayDollars).toBeNull();
+      }
+    } finally {
+      await putAggregate('incomeStream', income);
+    }
   });
 
   it('computes every signed difference as scenario minus other', async () => {

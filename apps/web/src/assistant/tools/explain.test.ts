@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { EXPLAIN_METRICS, type ExplainMetric } from '@retirement/assistant-protocol';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { clearMonteCarloCache, mcCacheKey, monteCarloCacheCount, putCached } from '../../db/monte-carlo-cache';
-import { clearAllStores, listAggregates } from '../../db/store';
+import { clearAllStores, deleteAggregateLocally, listAggregates, putAggregate } from '../../db/store';
 import type { Aggregate, ScenarioPayload } from '../../db/types';
 import type { DrawdownYear } from '../../lib/drawdown-engine';
 import { loadDemoData } from '../../lib/demo-data-loader';
@@ -100,6 +100,23 @@ describe('the metric tables', () => {
     expect(METRIC_INPUT_KEYS.plan_success as readonly string[]).toContain('downturnGuardrails');
   });
 
+  it('names the capital-gains, IRMAA, ACA, HSA and penalty settings for every metric that rests on the tax pass', () => {
+    const taxSettings = [
+      'assumedCostBasisFractionOfTaxableWithdrawal',
+      'magiBootstrapLookbackMinus2',
+      'magiBootstrapLookbackMinus1',
+      'acaPtcBenchmark',
+      'acaFplRegion',
+      'acaMarketplaceOptOutMemberIds',
+      'healthCoverageMonths',
+      'hsaQualifiedMedicalExpensePct',
+      'earlyWithdrawalPenaltyExemptAccountIds',
+    ];
+    for (const metric of EXPLAIN_METRICS.filter((name) => name !== 'portfolio_at_retirement')) {
+      for (const key of taxSettings) expect(METRIC_INPUT_KEYS[metric] as readonly string[], `${metric}: ${key}`).toContain(key);
+    }
+  });
+
   it('points every metric at a heading that exists in the named markdown file', () => {
     const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../../..');
     for (const metric of EXPLAIN_METRICS) {
@@ -137,6 +154,20 @@ describe('deterministic metrics', () => {
     expect(retirement.value).toBe(projection.headline.portfolioAtRetirementNominal);
     expect(retirement.valueTodayDollars).toBe(projection.headline.portfolioAtRetirementTodayDollars);
     expect(retirement.unit).toMatch(/nominal dollars/);
+  });
+
+  it('refuses to explain a run whose cash balance plan has no payout election, since no projection ran', async () => {
+    const income = (await listAggregates('incomeStream')).find((stream) => stream.id === 'demo-income-cbp-payout')!;
+    await deleteAggregateLocally('incomeStream', income.id);
+    try {
+      for (const metric of ['ending_balance', 'run_out_year', 'portfolio_at_retirement'] as const) {
+        const result = await callPlanTool('retivo_explain', { metric }, choicesWith());
+        expect(result, metric).toMatchObject({ ok: false, error: { code: 'INVALID_ARGS' } });
+        expect(JSON.stringify(result), metric).toMatch(/payout election/);
+      }
+    } finally {
+      await putAggregate('incomeStream', income);
+    }
   });
 
   it('defaults to the base scenario and points at the number definitions', async () => {

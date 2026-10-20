@@ -16,7 +16,7 @@ import { structurallyEqual } from '../../lib/structural-equality';
 import { scenarioChain } from '../../lib/scenario-resolution';
 import { defineTool, ToolArgsError, type ToolEnv } from './define';
 import { rowAssumptions } from './projection-assumptions';
-import { assemblePlan, dollarsFor, headlineOf, runPlan, type PlanRun } from './projection-support';
+import { assemblePlan, dollarsFor, hasPlannedProjection, headlineOf, runPlan, type PlanRun } from './projection-support';
 import { gateOf, projectSection, sectionContextFor } from './scenario-report';
 import { SCENARIO_SECTION_COVERAGE } from './scenario-sections';
 import { NOT_COMPUTED, peekStressSummary } from './stress-cache';
@@ -122,10 +122,15 @@ interface Outcomes {
   portfolioAtRetirementTodayDollars: number | null;
 }
 
-/** A side the page could not project reads as no outcomes, not as a failed comparison. */
+/**
+ * A side the page could not project reads as no outcomes, not as a failed comparison. That includes a run that
+ * came back without a Planned projection (a cash balance plan account with no payout election), which is
+ * normalised to `pageResult: null` so the outcomes, the availability flag and the row assumptions agree.
+ */
 function tryRunPlan(scenarioId: string, env: ToolEnv): PlanRun {
   try {
-    return runPlan(scenarioId, env);
+    const run = runPlan(scenarioId, env);
+    return hasPlannedProjection(run.pageResult) ? run : { ...run, pageResult: null };
   } catch (error) {
     if (error instanceof NoPrimaryRetirementError || error instanceof CbpUnconfiguredError) {
       return { scenarioId, pageResult: null, assembly: assemblePlan(scenarioId, env) };
@@ -196,7 +201,7 @@ export const retivoCompareScenarios = defineTool('retivo_compare_scenarios', asy
     const summary = stress[which];
     return {
       ...describe(id),
-      plannedProjectionAvailable: runs[which].pageResult !== null,
+      plannedProjectionAvailable: hasPlannedProjection(runs[which].pageResult),
       endingBalanceTodayDollars: dollars(endingBalanceTodayDollars),
       runOutYear,
       horizonYear,

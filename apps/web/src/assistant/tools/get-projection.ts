@@ -9,9 +9,9 @@
 import type { ProjectionMethod } from '@retirement/assistant-protocol';
 import type { DrawdownYear } from '../../lib/drawdown-engine';
 import { realDeflatorAt } from '../../lib/projection-context';
-import { defineTool, ToolArgsError, ToolFailure } from './define';
+import { defineTool, ToolArgsError } from './define';
 import { deterministicAssumptions } from './projection-assumptions';
-import { dollarsFor, headlineOf, methodSlice, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
+import { dollarsFor, headlineOf, requireMethodSlice, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
 
 /** Tax and benefit figures the engine stamps in integer cents, by the name they leave under. */
 const CENTS_FIELDS = {
@@ -62,22 +62,13 @@ export const retivoGetProjection = defineTool('retivo_get_projection', (args, en
   const method: ProjectionMethod = args.method === 'historical' ? 'historical' : 'planned';
   const run = runPlan(scenarioId, env);
   const pageResult = requirePageResult(run);
-  if (pageResult.sharedCtx.cbpResolution && !pageResult.sharedCtx.cbpResolution.ok) {
-    throw new ToolFailure(
-      'INVALID_ARGS',
-      'This scenario cannot be projected until the payout election on its cash balance plan account is set in Retivo.',
-    );
-  }
   // The page offers Historical exactly when the runner returns a slice for it.
   if (method === 'historical' && pageResult.twr === null) {
     throw new ToolArgsError(
       'The Historical view is not available for this plan: it needs a measured return from at least two years of balance history. Use method planned.',
     );
   }
-  const slice = methodSlice(pageResult, method);
-  if (slice === null) {
-    throw new ToolFailure('INVALID_ARGS', 'The projection could not be completed for this scenario. Check its withdrawal and income settings in Retivo.');
-  }
+  const slice = requireMethodSlice(pageResult, method);
   const from = yearLimit(args.fromYear);
   const to = yearLimit(args.toYear);
   if (from !== undefined && to !== undefined && from > to) throw new ToolArgsError('fromYear is after toYear.');

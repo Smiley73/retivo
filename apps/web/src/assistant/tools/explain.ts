@@ -14,7 +14,7 @@ import type { ScenarioOverrides } from '../../db/types';
 import type { MonteCarloSummary } from '../../lib/monte-carlo';
 import { defineTool, ToolArgsError, type ToolEnv } from './define';
 import { deterministicAssumptions, healthAssumptionLines, taxTableNote } from './projection-assumptions';
-import { assemblePlan, dollarsFor, headlineOf, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
+import { assemblePlan, dollarsFor, headlineOf, requireMethodSlice, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
 import { reportScenarioSections } from './scenario-report';
 import { NOT_COMPUTED, peekStressSummary } from './stress-cache';
 import { monteCarloAssumptions } from './stress-figures';
@@ -27,6 +27,18 @@ const TIMING = ['retirementAge', 'socialSecurity', 'lifeExpectancy', 'inflation'
 const CASHFLOW = ['income', 'expenses', 'discretionarySpending', 'contributions', 'accountContributions'] as const satisfies readonly SettingKey[];
 /** Settings that decide how accounts grow. */
 const GROWTH = ['accountReturns', 'accountAssetMix', 'retirementAllocation'] as const satisfies readonly SettingKey[];
+/** Settings behind the capital-gains, IRMAA, ACA-subsidy, HSA and early-withdrawal-penalty rules the deterministic tax pass applies to each draw. */
+const TAX_AND_BENEFITS = [
+  'assumedCostBasisFractionOfTaxableWithdrawal',
+  'magiBootstrapLookbackMinus2',
+  'magiBootstrapLookbackMinus1',
+  'acaPtcBenchmark',
+  'acaFplRegion',
+  'acaMarketplaceOptOutMemberIds',
+  'healthCoverageMonths',
+  'hsaQualifiedMedicalExpensePct',
+  'earlyWithdrawalPenaltyExemptAccountIds',
+] as const satisfies readonly SettingKey[];
 /** Settings that decide which accounts are drawn on, in what order, and how the draw is taxed. */
 const WITHDRAWAL = [
   'withdrawalStrategy',
@@ -42,8 +54,8 @@ const WITHDRAWAL = [
 
 /** The resolved settings each metric rests on. Pinned by a test so a change is deliberate. */
 export const METRIC_INPUT_KEYS = {
-  ending_balance: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL],
-  run_out_year: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL],
+  ending_balance: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, ...TAX_AND_BENEFITS],
+  run_out_year: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, ...TAX_AND_BENEFITS],
   // The retirement boundary comes before any withdrawal: only what grows and what goes in matters.
   portfolio_at_retirement: [
     'retirementAge',
@@ -54,10 +66,10 @@ export const METRIC_INPUT_KEYS = {
     'preRetirementRothConversionTaxRatePct',
     'preRetirementTaxableIncomeDollars',
   ],
-  plan_success: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, 'downturnGuardrails'],
-  typical_ending_balance: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, 'downturnGuardrails'],
-  pessimistic_ending_balance: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, 'downturnGuardrails'],
-  bad_luck_ending_balance: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, 'downturnGuardrails'],
+  plan_success: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, ...TAX_AND_BENEFITS, 'downturnGuardrails'],
+  typical_ending_balance: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, ...TAX_AND_BENEFITS, 'downturnGuardrails'],
+  pessimistic_ending_balance: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, ...TAX_AND_BENEFITS, 'downturnGuardrails'],
+  bad_luck_ending_balance: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, ...TAX_AND_BENEFITS, 'downturnGuardrails'],
 } as const satisfies Record<ExplainMetric, readonly SettingKey[]>;
 
 const MATH_PAGE = 'docs/math-projections.md';
@@ -149,6 +161,7 @@ export const retivoExplain = defineTool('retivo_explain', async (args, env) => {
   } else {
     const run = runPlan(scenarioId, env);
     const pageResult = requirePageResult(run);
+    requireMethodSlice(pageResult, 'planned');
     const headline = headlineOf(pageResult, 'planned');
     if (metric === 'ending_balance') {
       reading = {

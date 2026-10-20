@@ -1,15 +1,23 @@
 /**
  * The AI assistant's projection numbers are the Balance Projection page's: the same rows, field for field, and
- * the same headline the Scenarios cards derive. This file lives in `pages/` because the page glue it compares
+ * the same headline the Scenarios cards derive, and its stress test reads the page's cache entry and draws the page's
+ * seed. This file lives in `pages/` because the page glue it compares
  * against (`loadPageData`, `deriveScenarioDeterministicMetrics`) is not importable from `assistant/`.
  */
 import 'fake-indexeddb/auto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { ToolEnv } from '../assistant/tools/define';
+import { monteCarloInputFor } from '../assistant/tools/stress-cache';
+import { mcCacheKey } from '../db/monte-carlo-cache';
 import { clearAllStores, listAggregates } from '../db/store';
 import type { Aggregate, ScenarioPayload } from '../db/types';
+import { runBalanceProjectionMc, type RunBalanceProjectionArgs } from '../lib/balance-projection-runner';
+import { validateCbpResolution } from '../lib/cbp-resolution';
 import { loadDemoData } from '../lib/demo-data-loader';
+import { autoRunSeed, hashMcInput } from '../lib/monte-carlo-input-signature';
 import { realDeflatorAt } from '../lib/projection-context';
 import { loadProjectionInputs } from '../lib/projection-inputs';
+import { seedFromString } from '../lib/sfc32';
 import { BASE_ID, EARLY_ID } from '../test/assistant-analysis-inputs';
 import { TEST_NOW, callPlanTool, envelopeOf } from '../test/assistant-tools';
 import { loadPageData } from './balance-projection-page-data';
@@ -136,5 +144,40 @@ describe('retivo_get_projection against the Balance Projection page', () => {
     const runOut = envelopeOf(await callPlanTool('retivo_explain', { scenarioId: EARLY_ID, metric: 'run_out_year' })).data as { value: number | null };
     expect(ending.value).toBe(metrics.endingBalance);
     expect(runOut.value).toBe(page.pageResult!.planned!.depletionYear);
+  });
+});
+
+describe('retivo_get_stress_test against the Balance Projection page', () => {
+  /** The input and cbpFailed flag `usePlanStressTestVm` works from, built the way the view model builds its `runArgs`. */
+  async function pageStressInput(scenarioId: string) {
+    const inputs = await loadProjectionInputs();
+    const page = await pageDataFor(scenarioId);
+    const runArgs: RunBalanceProjectionArgs = {
+      scenarioId,
+      scenarios: page.scenarios,
+      accounts: page.accounts,
+      balances: [...inputs.balances],
+      members: page.members,
+      ssBenefits: [...inputs.ssBenefits],
+      expenses: [...inputs.expenses],
+      incomeStreams: [...inputs.incomeStreams],
+      todayYear: TEST_NOW.getFullYear(),
+      todayMonthIndex: TEST_NOW.getMonth(),
+      method: 'planned',
+    };
+    const cbp = validateCbpResolution({ scenarioId, scenarios: page.scenarios, accounts: page.accounts, incomeStreams: [...inputs.incomeStreams] });
+    return { input: runBalanceProjectionMc(runArgs), cbpFailed: cbp !== null && !cbp.ok, inputs };
+  }
+
+  it.each([BASE_ID, EARLY_ID])('reads the cache entry the page saves and draws the page’s seed for %s', async (scenarioId) => {
+    const page = await pageStressInput(scenarioId);
+    const env = { workspace: { ...page.inputs, scenarios }, now: TEST_NOW } as unknown as ToolEnv;
+    const toolInput = monteCarloInputFor(scenarioId, env)!;
+    expect(page.cbpFailed).toBe(false);
+    // The page keys its saved entry on its own input at its path count; the tool must land on that key.
+    expect(await mcCacheKey(toolInput)).toBe(await mcCacheKey({ ...page.input, pathCount: toolInput.pathCount }));
+    // The page seeds an auto-run from the signature of its own input, with cbpFailed taken from the CBP check.
+    expect(hashMcInput(toolInput, false)).toBe(hashMcInput(page.input, page.cbpFailed));
+    expect(autoRunSeed(toolInput, false)).toBe(seedFromString(hashMcInput(page.input, page.cbpFailed)));
   });
 });

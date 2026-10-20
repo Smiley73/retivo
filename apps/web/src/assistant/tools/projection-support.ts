@@ -66,10 +66,39 @@ export function runPlan(scenarioId: string, env: ToolEnv): PlanRun {
   return { scenarioId, assembly, pageResult: assembly.canRun ? runBalanceProjectionForPage(assembly.args) : null };
 }
 
+/** Whether the runner short-circuited because a cash balance plan account has no payout election, so no slice was projected. */
+function cbpUnconfigured(pageResult: RunBalanceProjectionPageResult): boolean {
+  const { cbpResolution } = pageResult.sharedCtx;
+  return cbpResolution !== null && cbpResolution !== undefined && !cbpResolution.ok;
+}
+
+/**
+ * Whether the run produced a Planned projection. A non-null page result is not enough: with a cash balance plan
+ * account that has no payout election the runner returns a result whose `planned` is `null`.
+ */
+export function hasPlannedProjection(pageResult: RunBalanceProjectionPageResult | null): pageResult is RunBalanceProjectionPageResult {
+  return pageResult !== null && !cbpUnconfigured(pageResult) && pageResult.planned !== null;
+}
+
 /** The run, or the failure the page would explain with an empty state. */
 export function requirePageResult(run: PlanRun): RunBalanceProjectionPageResult {
   if (run.pageResult === null) throw new ToolFailure('INVALID_ARGS', PROJECTION_UNAVAILABLE_MESSAGE);
+  if (cbpUnconfigured(run.pageResult)) {
+    throw new ToolFailure(
+      'INVALID_ARGS',
+      'This scenario cannot be projected until the payout election on its cash balance plan account is set in Retivo.',
+    );
+  }
   return run.pageResult;
+}
+
+/** The slice for `method`, or the failure for a run that produced none. */
+export function requireMethodSlice(pageResult: RunBalanceProjectionPageResult, method: ProjectionMethod): PageDrawdownMethodResult {
+  const slice = methodSlice(pageResult, method);
+  if (slice === null) {
+    throw new ToolFailure('INVALID_ARGS', 'The projection could not be completed for this scenario. Check its withdrawal and income settings in Retivo.');
+  }
+  return slice;
 }
 
 export function methodSlice(
