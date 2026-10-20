@@ -8,9 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToolResult } from '@retirement/assistant-protocol';
 import { IdleTimer } from '../auth/IdleTimer';
 import { BetaFeaturesProvider } from '../contexts/BetaFeaturesContext';
-import { ScriptedSocket, pairScripted } from '../test/assistant-socket';
+import { ScriptedSocket, allowKeepingSignedIn, pairScripted } from '../test/assistant-socket';
 import { AssistantProvider, useAssistant, type AssistantContextValue } from './AssistantContext';
-import type { SessionConsent } from './session-types';
 
 const auth = vi.hoisted(() => ({
   value: {
@@ -52,7 +51,7 @@ function setup(options: SetupOptions = {}) {
     sockets.push(socket);
     return socket;
   });
-  const requestConsent = async (): Promise<SessionConsent> => ({ keepSignedInWhileActive: keepSignedIn });
+  const requestConsent = allowKeepingSignedIn(keepSignedIn);
   const tree = (): React.ReactElement => (
     <>
       <BetaFeaturesProvider userId={auth.value.me?.id ?? null}>
@@ -209,6 +208,8 @@ describe.each([false, true])('teardown (D7 switch %s)', (keepSignedIn) => {
 
     expect(socket.closeCall).toEqual({ code: 1000, reason });
     expect(assistant().phase).toBe('idle');
+    // The consent record dies with the session.
+    expect(assistant().consent).toBeNull();
     act(() => socket.receive({ type: 'call', id: 'late', tool: 'retivo_status', args: {} }));
     expect(handler).not.toHaveBeenCalled();
     // A fresh code is needed: nothing reconnects by itself, and a blank code is refused.

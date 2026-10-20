@@ -10,10 +10,12 @@ import {
   TAB_CLOSE_REASONS,
   type TabCloseReason,
 } from '@retirement/assistant-protocol';
-import { ScriptedSocket, bridgeHello, pairScripted, until } from '../test/assistant-socket';
+import { ScriptedSocket, allowKeepingSignedIn, allowWithDefaults, bridgeHello, handshakeScripted, pairScripted, until } from '../test/assistant-socket';
 import { diagnose } from './diagnosis';
 import { AssistantSession, CONNECT_TIMEOUT_MS, HELLO_TIMEOUT_MS, PAIRED_TIMEOUT_MS, type SessionOptions } from './session';
-import type { SocketLike } from './session-types';
+import type { ConsentRequest, SocketLike } from './session-types';
+import { defaultConsentAnswer, type ConsentAnswer } from './sharing/consent';
+import { defaultSharingChoices } from './sharing/switches';
 
 // Frozen vector from the protocol package: with these nonces the tab's proof is fixed.
 const VECTOR = {
@@ -52,6 +54,7 @@ function makeSession(overrides: Partial<SessionOptions> = {}): Harness {
     isWorkspaceReady: () => true,
     appBuildId: 'test-build',
     noteActivity,
+    requestConsent: allowWithDefaults,
     ...overrides,
   });
   return { session, sockets, noteActivity, openSocket };
@@ -89,16 +92,38 @@ describe('pairing with a scripted socket', () => {
     expect(socket.sent.join('')).not.toContain(VECTOR.code);
   });
 
-  it('passes through awaiting-consent and sends the consent it was given', async () => {
+  it('waits in awaiting-consent: nothing leaves until the person allows, then the record and ready follow', async () => {
     const phases: string[] = [];
+    const requests: ConsentRequest[] = [];
+    let answer: (value: ConsentAnswer | 'declined') => void = () => undefined;
     const { session, sockets } = makeSession({
-      requestConsent: async () => ({ keepSignedInWhileActive: true }),
+      requestConsent: (request) => {
+        requests.push(request);
+        return new Promise((resolve) => {
+          answer = resolve;
+        });
+      },
       log: (message) => phases.push(message),
+      now: () => 1_700_000_000_000,
     });
     session.connect(VECTOR.code);
-    await pairScripted(sockets[0]!, VECTOR.code);
-    expect(sockets[0]!.frames[1]).toEqual({ type: 'ready', keepSignedInWhileActive: true });
-    expect(session.getSnapshot().consent).toEqual({ keepSignedInWhileActive: true });
+    const socket = sockets[0]!;
+    await handshakeScripted(socket, VECTOR.code, { name: 'Claude Code', version: '2.1' });
+    await until(() => requests.length === 1, 'the consent request');
+
+    expect(session.getSnapshot().phase).toBe('awaiting-consent');
+    expect(session.getSnapshot().consent).toBeNull();
+    expect(requests).toEqual([{ clientName: 'Claude Code' }]);
+    expect(socket.frames).toHaveLength(1);
+
+    answer({ choices: { ...defaultSharingChoices(), notes: false }, keepSignedInWhileActive: true });
+    await until(() => session.getSnapshot().phase === 'ready', 'ready');
+    expect(socket.frames[1]).toEqual({ type: 'ready', keepSignedInWhileActive: true });
+    const { consent } = session.getSnapshot();
+    expect(consent).toMatchObject({ keepSignedInWhileActive: true, grantedAt: 1_700_000_000_000 });
+    expect(consent?.choices.notes).toBe(false);
+    expect(consent?.choices.members).toBe(true);
+    expect(Object.isFrozen(consent)).toBe(true);
     expect(phases.filter((entry) => entry.startsWith('phase '))).toEqual([
       'phase connecting',
       'phase awaiting-hello',
@@ -109,6 +134,61 @@ describe('pairing with a scripted socket', () => {
     ]);
     // State names only: nothing in the log carries the code.
     expect(phases.join('\n')).not.toContain(VECTOR.code);
+  });
+
+  it('sends keepSignedInWhileActive false in the ready frame unless the person switched it on', async () => {
+    const { session, sockets } = makeSession({ requestConsent: allowWithDefaults });
+    session.connect(VECTOR.code);
+    await pairScripted(sockets[0]!, VECTOR.code);
+    expect(sockets[0]!.frames[1]).toEqual({ type: 'ready', keepSignedInWhileActive: false });
+    expect(session.getSnapshot().consent?.keepSignedInWhileActive).toBe(false);
+  });
+
+  it('answers a call injected before Allow with WORKSPACE_LOCKED and runs no handler', async () => {
+    const { session, sockets } = makeSession({ requestConsent: () => new Promise(() => undefined) });
+    const handler = vi.fn(() => ({ ok: true as const, payload: {}, disclosure: {} }));
+    session.registerHandler('retivo_status', handler);
+    session.connect(VECTOR.code);
+    const socket = sockets[0]!;
+    await handshakeScripted(socket, VECTOR.code);
+    await until(() => session.getSnapshot().phase === 'awaiting-consent', 'awaiting-consent');
+
+    socket.receive({ type: 'call', id: 'early', tool: 'retivo_status', args: {} });
+    expect(handler).not.toHaveBeenCalled();
+    const result = socket.frames.find((frame) => frame.type === 'result');
+    expect(result).toMatchObject({ id: 'early', result: { ok: false, error: { code: 'WORKSPACE_LOCKED' } } });
+    expect(socket.frames.some((frame) => frame.type === 'ready')).toBe(false);
+  });
+
+  it('reads closing the tab while the dialog is open as a decline', async () => {
+    const { session, sockets } = makeSession({ requestConsent: () => new Promise(() => undefined) });
+    session.connect(VECTOR.code);
+    const socket = sockets[0]!;
+    await handshakeScripted(socket, VECTOR.code);
+    await until(() => session.getSnapshot().phase === 'awaiting-consent', 'awaiting-consent');
+    session.end('pagehide');
+    expect(socket.closeCall).toEqual({ code: 1000, reason: 'consent-declined' });
+    expect(session.getSnapshot().end?.close).toEqual({ kind: 'tab', reason: 'consent-declined' });
+  });
+
+  it('does not answer the consent request twice if the session ended while the dialog was open', async () => {
+    let answer: (value: ConsentAnswer | 'declined') => void = () => undefined;
+    const { session, sockets } = makeSession({
+      requestConsent: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    session.connect(VECTOR.code);
+    const socket = sockets[0]!;
+    await handshakeScripted(socket, VECTOR.code);
+    await until(() => session.getSnapshot().phase === 'awaiting-consent', 'awaiting-consent');
+    session.end('disconnect');
+    answer(defaultConsentAnswer());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(session.getSnapshot().phase).toBe('idle');
+    expect(session.getSnapshot().consent).toBeNull();
+    expect(socket.frames.some((frame) => frame.type === 'ready')).toBe(false);
   });
 
   it('closes with consent-declined when the consent step declines', async () => {
@@ -314,7 +394,7 @@ describe('gates on connect', () => {
 });
 
 describe.each([false, true])('teardown (D7 switch %s)', (keepSignedIn) => {
-  const options = (): Partial<SessionOptions> => ({ requestConsent: async () => ({ keepSignedInWhileActive: keepSignedIn }) });
+  const options = (): Partial<SessionOptions> => ({ requestConsent: allowKeepingSignedIn(keepSignedIn) });
 
   it.each(TAB_CLOSE_REASONS.filter((reason) => reason !== 'consent-declined'))(
     'ends on %s: socket closed with the reason, secrets gone, nothing runs after, a fresh code needed',
@@ -336,6 +416,8 @@ describe.each([false, true])('teardown (D7 switch %s)', (keepSignedIn) => {
       const { phase, end } = session.getSnapshot();
       expect(phase).toBe('idle');
       expect(end).toEqual({ phase: 'ready', close: { kind: 'tab', reason } });
+      // The consent record dies with the session.
+      expect(session.getSnapshot().consent).toBeNull();
       const internals = session as unknown as { code: unknown; handshake: unknown };
       expect(internals.code).toBeNull();
       expect(internals.handshake).toBeNull();
@@ -361,6 +443,7 @@ describe.each([false, true])('teardown (D7 switch %s)', (keepSignedIn) => {
     sockets[0]!.receive({ type: 'call', id: 'c1', tool: 'retivo_status', args: {} });
     sockets[0]!.emitClose(1006);
     expect(session.getSnapshot().end).toEqual({ phase: 'ready', close: { kind: 'remote', code: 1006 } });
+    expect(session.getSnapshot().consent).toBeNull();
     expect(diagnose('ready', { kind: 'remote', code: 1006 }, 'unknown')).toEqual({ kind: 'connection-lost' });
   });
 });

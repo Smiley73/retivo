@@ -33,7 +33,8 @@ import { diagnose, readLocalNetworkPermission, type Diagnosis, type PermissionAn
 import type { ToolHandler } from './dispatcher';
 import { readAssistantOptIn, writeAssistantOptIn } from './preference';
 import { AssistantSession, type ConnectResult, type SessionSnapshot } from './session';
-import type { SessionConsent, SocketFactory } from './session-types';
+import type { ConsentRequest, ConsentStep, SocketFactory } from './session-types';
+import type { ConsentAnswer, ConsentRecord } from './sharing/consent';
 
 export interface AssistantContextValue {
   /** The build carries a bridge port and the beta feature is visible: the settings card renders. */
@@ -45,7 +46,12 @@ export interface AssistantContextValue {
   setOptedIn: (on: boolean) => void;
   phase: SessionSnapshot['phase'];
   audit: SessionSnapshot['audit'];
-  consent: SessionConsent;
+  /** What the person allowed for the running session; `null` while none runs or they have yet to decide. */
+  consent: ConsentRecord | null;
+  /** Set while the consent dialog is due: the bridge proved itself and the person has yet to answer. */
+  pendingConsent: ConsentRequest | null;
+  /** The dialog's answer: what the person allowed, or `'declined'`, which ends the session. */
+  answerConsent: (answer: ConsentAnswer | 'declined') => void;
   /** Why the last connection ended; `none` while one is running or none has happened. */
   diagnosis: Diagnosis;
   connect: (code: string) => ConnectResult;
@@ -60,11 +66,16 @@ interface AssistantProviderProps {
   children: React.ReactNode;
   /** Builds the socket; tests pass a double. The browser's `WebSocket` by default. */
   openSocket?: SocketFactory;
-  /** The consent step (row 5); absent, the session agrees at once with the default consent. */
-  requestConsent?: () => Promise<SessionConsent | 'declined'>;
+  /** Replaces the consent dialog; tests use it to answer without rendering one. */
+  requestConsent?: ConsentStep;
 }
 
 const openBrowserSocket: SocketFactory = (url) => new WebSocket(url);
+
+interface PendingConsent {
+  request: ConsentRequest;
+  resolve: (answer: ConsentAnswer | 'declined') => void;
+}
 
 interface OptInState {
   readonly forUserId: string | null;
@@ -100,6 +111,9 @@ export const AssistantProvider: React.FC<AssistantProviderProps> = ({
     workspaceReadyRef.current = workspaceReady;
   }, [workspaceReady]);
 
+  // The consent step waits here for the dialog the shell host renders; the session holds the promise.
+  const [pending, setPending] = useState<PendingConsent | null>(null);
+
   const [session] = useState(
     () =>
       new AssistantSession({
@@ -108,11 +122,34 @@ export const AssistantProvider: React.FC<AssistantProviderProps> = ({
         isWorkspaceReady: () => workspaceReadyRef.current,
         appBuildId: CLIENT_BUILD_ID,
         noteActivity: recordProgrammaticActivity,
-        requestConsent,
+        requestConsent:
+          requestConsent ??
+          ((request) =>
+            new Promise((resolve) => {
+              setPending({ request, resolve });
+            })),
         log: (message) => console.info(`[assistant] ${message}`),
       }),
   );
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
+
+  // The dialog is due only while the session waits for it: when the session ends first (Disconnect,
+  // sign-out, a socket that closed), drop the dialog and settle its promise so nothing waits on it.
+  useEffect(() => {
+    if (pending !== null && snapshot.phase !== 'awaiting-consent') {
+      pending.resolve('declined');
+      setPending(null);
+    }
+  }, [pending, snapshot.phase]);
+
+  const answerConsent = useCallback(
+    (answer: ConsentAnswer | 'declined') => {
+      if (pending === null) return;
+      setPending(null);
+      pending.resolve(answer);
+    },
+    [pending],
+  );
 
   // Sign-out (idle sign-out and device clear included), lock and user switch all end the session.
   const previousUserIdRef = useRef(userId);
@@ -179,16 +216,23 @@ export const AssistantProvider: React.FC<AssistantProviderProps> = ({
       phase: snapshot.phase,
       audit: snapshot.audit,
       consent: snapshot.consent,
+      pendingConsent: pending?.request ?? null,
+      answerConsent,
       diagnosis,
       connect,
       disconnect: () => session.disconnect(),
       registerHandler: (name, handler) => session.registerHandler(name, handler),
     }),
-    [offered, port, optedIn, setOptedIn, snapshot, diagnosis, connect, session],
+    [offered, port, optedIn, setOptedIn, snapshot, pending, answerConsent, diagnosis, connect, session],
   );
 
   return <AssistantContext.Provider value={value}>{children}</AssistantContext.Provider>;
 };
+
+/** The assistant context, or `null` outside the provider (the shell host renders nothing there). */
+export function useOptionalAssistant(): AssistantContextValue | null {
+  return useContext(AssistantContext);
+}
 
 export function useAssistant(): AssistantContextValue {
   const ctx = useContext(AssistantContext);

@@ -1,11 +1,12 @@
 /** Types shared by the session state machine, the diagnosis and the provider. */
 import type { HandshakeErrorCode, TabCloseReason } from '@retirement/assistant-protocol';
+import type { ConsentAnswer } from './sharing/consent';
 
 /**
  * Where a session is. `paired` (the bridge proved itself) and
  * `awaiting-consent` (the person has yet to agree) are separate on purpose:
- * this row passes through the second at once with the default consent, and the
- * consent step fills it.
+ * nothing but the consent dialog happens in the second, and a decline there
+ * ends the session.
  */
 export type SessionPhase =
   | 'idle'
@@ -35,13 +36,14 @@ export interface SessionEnd {
   close: CloseInfo;
 }
 
-/** What the person agreed to share and keep alive; row 5 fills the real step. */
-export interface SessionConsent {
-  /** The D7 switch: completed calls count as activity. Off unless the consent step says otherwise. */
-  keepSignedInWhileActive: boolean;
+/** What the consent step is shown: the assistant's self-reported name, which is untrusted. */
+export interface ConsentRequest {
+  /** From the `hello` frame's client field; `null` when the bridge reported none. Sanitize before display. */
+  clientName: string | null;
 }
 
-export const DEFAULT_CONSENT: SessionConsent = { keepSignedInWhileActive: false };
+/** The consent step: resolves with what the person allowed, or `'declined'`. */
+export type ConsentStep = (request: ConsentRequest) => Promise<ConsentAnswer | 'declined'>;
 
 /** The slice of a `WebSocket` the session drives; the browser's, `ws` and Node's global one all fit. */
 export interface SocketLike {

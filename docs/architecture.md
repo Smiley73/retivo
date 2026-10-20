@@ -384,6 +384,15 @@ A change to the shape of stored data touches these places, in the same commit:
    `current` also raises the ceiling in the first guard above.
 4. **The demo dataset**, in `apps/web/src/lib/demo-data-loader.ts`: give the
    new field a realistic value.
+5. **The assistant sharing field model**, in
+   `apps/web/src/assistant/sharing/classification.ts`. The AI assistant
+   connector builds what it may say field by field, from an allowlist: a payload
+   field with no entry is never shared. Classify the new field in that payload's
+   map as a label, free text, a dollar figure, an opaque reference, a plain
+   value, or `never`. Each map is typed `satisfies Record<KnownKeys<Payload>,
+   Classification>`, so `pnpm typecheck` fails until the field is classified. A
+   new aggregate type needs its own map and a section in
+   `assistant/sharing/view.ts`.
 
 A new **DynamoDB table** needs more than its definition in
 `infrastructure/src/dynamo.ts` and a repository under `apps/api/src/dynamo/`:

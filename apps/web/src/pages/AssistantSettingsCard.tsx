@@ -13,6 +13,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { bridgeCommandFor, isWellFormedPairingCode, type AgentName } from '@retirement/assistant-protocol';
 import { useAssistant } from '../assistant/AssistantContext';
 import { browserFamily, type BrowserFamily, type Diagnosis } from '../assistant/diagnosis';
+import { GENEROUS_DEFAULTS_STATEMENT, MODEL_PROVIDER_STATEMENT } from '../assistant/sharing/sentences';
 import { Badge } from '../components/Badge';
 import { Field } from '../components/Field';
 import { Muted } from '../components/Muted';
@@ -221,11 +222,15 @@ export const AssistantSettingsCard: React.FC = () => {
         label="Allow AI assistants on this device"
         checked={optedIn}
         onChange={setOptedIn}
-        ariaDescribedBy={noteId}
+        ariaDescribedBy={optedIn ? undefined : noteId}
       />
-      <Muted as="p" id={noteId} className="m-0 mb-4 mt-3 text-xs">
-        What you later agree to share goes to your assistant&rsquo;s model provider, which Retivo does not control.
-      </Muted>
+      {/* Before the opt-in the model-provider sentence sits under the switch; once the commands show, both
+          sentences the consent dialog uses sit under them instead. */}
+      {!optedIn && (
+        <Muted as="p" id={noteId} className="m-0 mb-4 mt-3 text-xs">
+          {MODEL_PROVIDER_STATEMENT}
+        </Muted>
+      )}
       {optedIn && (
         <>
           {family === 'unsupported' && (
@@ -234,6 +239,9 @@ export const AssistantSettingsCard: React.FC = () => {
             </Muted>
           )}
           <LaunchCommands port={port} />
+          <Muted as="p" className="m-0 mb-4 text-xs">
+            {MODEL_PROVIDER_STATEMENT} {GENEROUS_DEFAULTS_STATEMENT}
+          </Muted>
           <p className="m-0 mb-2 text-sm font-medium text-ink">2. Enter the pairing code</p>
           <form ref={formRef} onSubmit={submit} noValidate>
             <Field

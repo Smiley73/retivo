@@ -10,8 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bridgeCommandFor } from '@retirement/assistant-protocol';
 import { AssistantProvider } from '../assistant/AssistantContext';
 import { BetaFeaturesProvider } from '../contexts/BetaFeaturesContext';
-import { ScriptedSocket, pairScripted } from '../test/assistant-socket';
+import { ScriptedSocket, allowWithDefaults, pairScripted } from '../test/assistant-socket';
 import { expectNoA11yViolations } from '../test/a11y';
+import { GENEROUS_DEFAULTS_STATEMENT, MODEL_PROVIDER_STATEMENT } from '../assistant/sharing/sentences';
 import { AssistantSettingsCard } from './AssistantSettingsCard';
 
 const auth = vi.hoisted(() => ({
@@ -39,7 +40,7 @@ function setup({ port = '24580', betaOn = true, optIn = true }: Options = {}) {
   });
   const tree = (): React.ReactElement => (
     <BetaFeaturesProvider userId={auth.value.me?.id ?? null}>
-      <AssistantProvider openSocket={openSocket}>
+      <AssistantProvider openSocket={openSocket} requestConsent={allowWithDefaults}>
         <AssistantSettingsCard />
       </AssistantProvider>
     </BetaFeaturesProvider>
@@ -74,7 +75,7 @@ describe('AssistantSettingsCard gates', () => {
     setup({ optIn: false });
     expect(screen.getByRole('heading', { level: 2, name: /AI assistants/ })).toHaveTextContent('Beta');
     expect(screen.getByRole('switch', { name: 'Allow AI assistants on this device' })).not.toBeChecked();
-    expect(screen.getByRole('switch')).toHaveAccessibleDescription(/model provider/);
+    expect(screen.getByRole('switch')).toHaveAccessibleDescription(MODEL_PROVIDER_STATEMENT);
     expect(screen.queryByLabelText('Pairing code')).not.toBeInTheDocument();
     expect(screen.queryByText(/Claude Code/)).not.toBeInTheDocument();
   });
@@ -85,6 +86,15 @@ describe('AssistantSettingsCard gates', () => {
     expect(codeField()).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Not connected');
     await expectNoA11yViolations(container);
+  });
+
+  it('states the same two sentences as the consent dialog once the commands show, under them', () => {
+    setup();
+    const note = screen.getByText(`${MODEL_PROVIDER_STATEMENT} ${GENEROUS_DEFAULTS_STATEMENT}`);
+    const copyButtons = screen.getAllByRole('button', { name: /^Copy .* command$/ });
+    expect(copyButtons.at(-1)!.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The pre-opt-in note is not repeated beside the same sentence.
+    expect(screen.getAllByText(MODEL_PROVIDER_STATEMENT, { exact: false })).toHaveLength(1);
   });
 
   it('persists the switch per user and re-reads it when the user changes', async () => {

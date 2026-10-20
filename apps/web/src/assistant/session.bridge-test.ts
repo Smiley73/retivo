@@ -14,9 +14,11 @@ import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ToolResult } from '@retirement/assistant-protocol';
+import { allowWithDefaults } from '../test/assistant-socket';
 import { diagnose } from './diagnosis';
 import { AssistantSession } from './session';
-import type { SocketLike } from './session-types';
+import type { ConsentStep, SocketLike } from './session-types';
+import type { ConsentAnswer } from './sharing/consent';
 
 const BIN = fileURLToPath(new URL('../../../mcp-bridge/dist/bin.js', import.meta.url));
 /** The origin the harness plays; the bridge compares it with the tab's `Origin` header as an exact string. */
@@ -108,13 +110,14 @@ function openSocketFor(): (url: string) => SocketLike {
   return (url) => new WebSocket(url, { headers: { Origin: ORIGIN } } as unknown as string);
 }
 
-function newSession(port: number): AssistantSession {
+function newSession(port: number, requestConsent: ConsentStep = allowWithDefaults): AssistantSession {
   return new AssistantSession({
     port,
     openSocket: openSocketFor(),
     isWorkspaceReady: () => true,
     appBuildId: 'bridge-test',
     noteActivity: () => undefined,
+    requestConsent,
   });
 }
 
@@ -196,6 +199,42 @@ describe('the tab against the real bridge', () => {
     expect(['wrong-code', 'code-expired']).toContain(diagnose(refused.phase, refused.close, 'unknown').kind);
   });
 
+  it('holds the agent at NOT_PAIRED until the person allows, and returns it there after a decline', async () => {
+    const code = await freshCode();
+    let answer: (value: ConsentAnswer | 'declined') => void = () => undefined;
+    const session = track(
+      newSession(
+        port,
+        () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      ),
+    );
+    session.registerHandler('retivo_status', () => ({ ok: true, payload: { stub: true }, disclosure: {} }));
+    expect(session.connect(code)).toBe('started');
+    await waitFor(() => session.getSnapshot().phase === 'awaiting-consent', 'the consent step');
+
+    // The bridge relays nothing before `ready`: the agent is told the person has yet to consent.
+    const waiting = await bridge.callTool('retivo_status');
+    expect(waiting.result).toMatchObject({ ok: false, error: { code: 'NOT_PAIRED', state: 'awaiting-consent' } });
+    expect(session.getSnapshot().audit).toHaveLength(0);
+
+    answer('declined');
+    await waitFor(() => session.getSnapshot().phase === 'idle', 'the decline to end the session');
+    expect(session.getSnapshot().end?.close).toEqual({ kind: 'tab', reason: 'consent-declined' });
+    expect(session.getSnapshot().consent).toBeNull();
+
+    // After the decline every tool is NOT_PAIRED again, with a new code to enter.
+    let after = await bridge.callTool('retivo_status');
+    for (let attempt = 0; attempt < 100 && !(!after.result.ok && after.result.error.code === 'NOT_PAIRED' && after.result.error.state === 'awaiting-code'); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      after = await bridge.callTool('retivo_status');
+    }
+    expect(after.result).toMatchObject({ ok: false, error: { code: 'NOT_PAIRED', state: 'awaiting-code' } });
+    expect(session.getSnapshot().audit).toHaveLength(0);
+  });
+
   it('ends three wrong codes with PAIRING_ATTEMPTS_EXCEEDED', async () => {
     await freshCode();
     const kinds: string[] = [];
@@ -218,6 +257,7 @@ describe('the tab against the real bridge', () => {
       isWorkspaceReady: () => true,
       appBuildId: 'bridge-test',
       noteActivity: () => undefined,
+      requestConsent: allowWithDefaults,
     });
     expect(session.connect('0123456789')).toBe('unavailable');
   });

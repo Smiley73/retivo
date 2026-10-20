@@ -1,9 +1,10 @@
 /** Dispatch, caps and the audit log through a paired session on a scripted socket. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MAX_TOOL_RESULT_BYTES, type ToolResult } from '@retirement/assistant-protocol';
-import { ScriptedSocket, pairScripted } from '../test/assistant-socket';
+import { MAX_TOOL_RESULT_BYTES, TOOL_REGISTRY, type TabFrame, type ToolResult } from '@retirement/assistant-protocol';
+import { ScriptedSocket, allowKeepingSignedIn, allowWithDefaults, pairScripted } from '../test/assistant-socket';
 import { AssistantSession, type SessionOptions } from './session';
-import type { ToolCallContext } from './dispatcher';
+import { CallDispatcher, type ToolCallContext } from './dispatcher';
+import { defaultSharingChoices } from './sharing/switches';
 
 const CODE = '7QW49KXMZ2';
 const OK: ToolResult = { ok: true, payload: { status: 'ready' }, disclosure: {} };
@@ -17,6 +18,7 @@ async function pairedSession(overrides: Partial<SessionOptions> = {}) {
     isWorkspaceReady: () => true,
     appBuildId: 'test-build',
     noteActivity,
+    requestConsent: allowWithDefaults,
     ...overrides,
   });
   session.connect(CODE);
@@ -29,6 +31,49 @@ async function pairedSession(overrides: Partial<SessionOptions> = {}) {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('the share view binding', () => {
+  const aggregate = (id: string, payload: Record<string, unknown>) =>
+    ({ id, householdId: 'hh', aggregateType: 'account', schemaVersion: 1, version: 1, updatedAt: '', deviceId: 'd', payload }) as const;
+
+  it('hands the handler a builder bound to the session record, not a copy', async () => {
+    const { session, results, call } = await pairedSession({
+      requestConsent: async () => ({ choices: { ...defaultSharingChoices(), exactDollars: false, notes: false }, keepSignedInWhileActive: false }),
+    });
+    let seen: ToolCallContext['share'] | undefined;
+    session.registerHandler('retivo_status', (_args, context) => {
+      seen = context.share;
+      return { ok: true, payload: context.share.buildView({ accounts: [aggregate('acct-1', { name: 'IRA', notes: 'private', plannedContributionPreTax: 1499 })] }), disclosure: {} };
+    });
+    call('c1', 'retivo_status');
+    await vi.waitFor(() => expect(results()).toHaveLength(1));
+    expect(seen?.consent).toBe(session.getSnapshot().consent);
+    const payload = (results()[0]!.result as { payload: { accounts: unknown[]; withheld: string[] } }).payload;
+    expect(payload.accounts).toEqual([{ id: 'acct-1', name: 'IRA', plannedContributionPreTax: 1000 }]);
+    expect(payload.withheld).toEqual(['notes', 'exactDollars']);
+  });
+
+  it('answers WORKSPACE_LOCKED when no consent record is current, however the call arrived', async () => {
+    const dispatcher = new CallDispatcher({
+      registry: TOOL_REGISTRY,
+      timers: { set: () => 0, clear: () => undefined },
+      now: () => 0,
+      isWorkspaceReady: () => true,
+      getConsent: () => null,
+      appBuildId: 'test',
+      send: (frame) => sent.push(frame),
+      onSettled: () => undefined,
+    });
+    const sent: TabFrame[] = [];
+    const handler = vi.fn(() => OK);
+    dispatcher.register('retivo_status', handler);
+    expect(dispatcher.handleCall({ id: 'c1', tool: 'retivo_status', args: {} })).toBe(true);
+    expect(handler).not.toHaveBeenCalled();
+    expect(sent).toEqual([
+      { type: 'result', id: 'c1', result: expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'WORKSPACE_LOCKED' }) }) },
+    ]);
+  });
 });
 
 describe('dispatch and caps', () => {
@@ -213,7 +258,7 @@ describe('the idle clock', () => {
 
   it('moves once per completed call, and only for completed ones, when the switch is on', async () => {
     const { session, noteActivity, results, call } = await pairedSession({
-      requestConsent: async () => ({ keepSignedInWhileActive: true }),
+      requestConsent: allowKeepingSignedIn(true),
     });
     session.registerHandler('retivo_status', () => OK);
     session.registerHandler('retivo_get_scenario', () => ({ ok: false, error: { code: 'INTERNAL', message: 'nope' } }));
