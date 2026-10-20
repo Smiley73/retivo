@@ -529,7 +529,11 @@ stored data, not of someone who can change the code.
 CloudFront sits in front of the web app and the API. It adds security headers to
 the web app, including HSTS (use HTTPS only) and a content security policy that
 limits scripts and connections to the app's own address and sets
-`frame-ancestors 'none'` (`infrastructure/src/cloudfront.ts`). It also adds a
+`frame-ancestors 'none'` (`infrastructure/src/edge-functions.mjs`). The one
+exception is stack-gated: a stack that sets `assistantBridgePort` also lets the
+browser open a WebSocket connection to `ws://127.0.0.1:<that port>`, a program
+on the same computer, and nothing broader; a stack that leaves it unset has no
+such entry. It also adds a
 shared secret header (`X-Origin-Verify`) to API calls, and the API rejects calls
 without it (`edge-auth.middleware.ts`). An optional firewall can be switched on with the stack setting
 `enableWaf`. Setup for each belongs to the [deploy guide](deploy.md).

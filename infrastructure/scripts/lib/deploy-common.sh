@@ -188,6 +188,15 @@ compute_build_id() {
 # apps/web/src/lib/feature-flags.ts. Flipping it is a config change + a
 # redeploy, no code change.
 #
+# The stack also decides whether the bundle carries the AI assistant
+# connector's bridge port: the optional `retivo:assistantBridgePort` stack
+# config (an integer 1024-65535) is baked in as VITE_ASSISTANT_BRIDGE_PORT,
+# and the same key adds the one `ws://127.0.0.1:<port>` entry to the CloudFront
+# CSP (infrastructure/src/edge-functions.mjs), so the tab can only dial the
+# address the CSP allows. Unlike betaFeatures, a MISSING key means OFF: the
+# build gets no VITE_ASSISTANT_BRIDGE_PORT at all (not an empty one). Any other
+# `pulumi config get` failure, or a value outside the range, aborts the deploy.
+#
 # validate_beta_features <value> — the shared "is this a legal
 # VITE_BETA_FEATURES value" check: `all`, `none`, or a comma-separated list of
 # ids the registry in feature-flags.ts knows. Prints nothing on success;
@@ -235,13 +244,54 @@ resolve_beta_features() {
   echo "$value"
 }
 
+# resolve_assistant_bridge_port <stack> — print the port to bake in, read from
+# the `retivo:assistantBridgePort` Pulumi stack config, or print nothing when
+# the key is missing or blank (the connector is off). Only a "not found"
+# failure counts as missing; any other `pulumi config get` failure (wrong
+# stack, backend/passphrase trouble) aborts rather than silently shipping a
+# stack without the connector its CSP may already allow. The range check
+# mirrors parseAssistantBridgePort in infrastructure/src/config-helpers.mjs:
+# a plain decimal integer, 1024-65535.
+resolve_assistant_bridge_port() {
+  local stack="$1" value="" err
+  err="$(mktemp)"
+  if ! value="$(pulumi config get retivo:assistantBridgePort --stack "$stack" 2>"$err")"; then
+    if grep -qi "not found" "$err"; then
+      value=""
+    else
+      echo "error: could not read retivo:assistantBridgePort for stack '$stack':" >&2
+      cat "$err" >&2
+      rm -f "$err"
+      return 1
+    fi
+  fi
+  rm -f "$err"
+  # Trim surrounding whitespace only; an inner space stays and fails below.
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  [[ -z "$value" ]] && return 0
+  # Strip leading zeros (bash would read 08000 as octal) and cap the length
+  # before the arithmetic comparison.
+  local digits="${value#"${value%%[!0]*}"}"
+  if [[ ! "$value" =~ ^[0-9]+$ || ${#digits} -gt 5 || -z "$digits" ]] \
+    || (( digits < 1024 || digits > 65535 )); then
+    echo "error: retivo:assistantBridgePort must be an integer from 1024 to 65535 (got '$value') for stack '$stack'." >&2
+    echo "       Run: pulumi config set retivo:assistantBridgePort 24580 --stack $stack, or remove it: pulumi config rm retivo:assistantBridgePort --stack $stack" >&2
+    return 1
+  fi
+  echo "$digits"
+}
+
 # build_spa <stack> — build the SPA with the beta features chosen by the
 # stack's `retivo:betaFeatures` config (see resolve_beta_features: a genuinely
-# absent key defaults to `all`).
+# absent key defaults to `all`) and, only when the stack sets
+# `retivo:assistantBridgePort`, the connector's bridge port (see
+# resolve_assistant_bridge_port: a missing key adds nothing to the build).
 build_spa() {
   local stack="$1"
-  local beta_features
+  local beta_features bridge_port
   beta_features="$(resolve_beta_features "$stack")" || exit 1
+  bridge_port="$(resolve_assistant_bridge_port "$stack")" || exit 1
   echo
   echo "==> Building SPA (pnpm --filter @retirement/web build) — same-origin API"
   echo "    VITE_BETA_FEATURES=$beta_features (retivo:betaFeatures)"
@@ -251,5 +301,11 @@ build_spa() {
     VITE_BUILD_ID="$BUILD_ID"
     VITE_BETA_FEATURES="$beta_features"
   )
-  ( cd "$REPO_ROOT" && env "${spa_env[@]}" pnpm --filter @retirement/web build )
+  if [[ -n "$bridge_port" ]]; then
+    echo "    VITE_ASSISTANT_BRIDGE_PORT=$bridge_port (retivo:assistantBridgePort)"
+    spa_env+=(VITE_ASSISTANT_BRIDGE_PORT="$bridge_port")
+  fi
+  # -u: an ambient VITE_ASSISTANT_BRIDGE_PORT in the operator's shell must not
+  # reach a build whose stack leaves the connector off (its CSP would forbid it).
+  ( cd "$REPO_ROOT" && env -u VITE_ASSISTANT_BRIDGE_PORT "${spa_env[@]}" pnpm --filter @retirement/web build )
 }

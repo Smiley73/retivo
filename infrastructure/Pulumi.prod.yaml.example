@@ -130,6 +130,12 @@ config:
   # (retivo:edgeAllowedIps is dev-only — the prod stack refuses it.)
   retivo:apiThrottleRatePerSec: "20"
   retivo:apiThrottleBurst: "50"
+  # Optional: AI assistant connector. Off unless set. Setting it does two
+  # things at once: the SPA build bakes the port in (VITE_ASSISTANT_BRIDGE_PORT)
+  # and the CloudFront CSP gains exactly one entry, connect-src
+  # ws://127.0.0.1:<port>. Leave it commented out unless you run the connector.
+  # An integer from 1024 to 65535; a config edit + redeploy.
+  # retivo:assistantBridgePort: "24580"
   # Optional: ARN of the IAM permissions boundary attached to every role
   # the stack creates, for accounts whose policy requires one. Leave unset
   # otherwise.

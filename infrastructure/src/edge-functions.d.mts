@@ -20,3 +20,7 @@ export declare function gatedSpaRouterCode(
 ): string;
 
 export declare function gateOnlyCode(rules: ReadonlyArray<EdgeGateRule>): string;
+
+export declare function securityHeadersCode(
+  assistantBridgePort?: number,
+): string;
