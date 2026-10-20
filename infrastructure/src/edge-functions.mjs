@@ -1,6 +1,6 @@
 // Source generators for the CloudFront Functions cloudfront.ts publishes:
-// the SPA-route rewrite, the dev-only viewer IP gate, and the combination
-// of the two. Kept as a dependency-free ESM module (like config-helpers.mjs)
+// the SPA-route rewrite, the dev-only viewer IP gate, the combination
+// of the two, and the viewer-response security headers (with the CSP). Kept as a dependency-free ESM module (like config-helpers.mjs)
 // so `node --test` can execute the GENERATED handler code against fake
 // viewer events (scripts/test/edge-functions.test.mjs) without a Pulumi
 // runtime or AWS credentials. cloudfront.ts imports the generators and
@@ -16,6 +16,8 @@
 //     (`gateOnlyCode`) for `/api/*`;
 //   - `event.viewer.ip` is the connecting viewer/proxy address (a VPN or
 //     privacy relay changes it); X-Forwarded-For is never consulted.
+
+import { ASSISTANT_BRIDGE_PORT_RANGE } from "./config-helpers.mjs";
 
 /**
  * Local ceiling on published function size. AWS documents the CloudFront
@@ -168,5 +170,93 @@ function handler(event) {
 }
 `.trim(),
     "api-gate",
+  );
+}
+
+/**
+ * Viewer-response handler for every behavior: HSTS and friends on all
+ * responses, plus a SPA-friendly CSP on responses that do not already carry
+ * one. API responses carry a tight CSP from helmet, so those are left alone;
+ * SPA static responses from S3 carry none, so this attaches one.
+ *
+ * With no `assistantBridgePort` the code is byte-identical to what
+ * cloudfront.ts inlined before this generator existed, so a stack that does
+ * not set `retivo:assistantBridgePort` sees no function update. With a port
+ * the ONLY difference is `connect-src 'self' ws://127.0.0.1:<port>` — the
+ * exact string `loopbackWsUrl(port)` in packages/assistant-protocol returns
+ * (scripts/test/csp-contract.test.mjs pins the two together). The package is
+ * ESM-only and infrastructure is CommonJS, so the entry is formatted here
+ * rather than imported. Never `ws:` or a wildcard.
+ * @param {number | undefined} [assistantBridgePort] loopback port to allow;
+ *   undefined = no WebSocket entry
+ * @returns {string}
+ */
+export function securityHeadersCode(assistantBridgePort) {
+  let connectSrc = "connect-src 'self'";
+  if (assistantBridgePort !== undefined) {
+    const { min, max } = ASSISTANT_BRIDGE_PORT_RANGE;
+    if (
+      typeof assistantBridgePort !== "number" ||
+      !Number.isInteger(assistantBridgePort) ||
+      assistantBridgePort < min ||
+      assistantBridgePort > max
+    ) {
+      throw new Error(
+        `retivo:assistantBridgePort must be an integer from ${min} to ${max} (got ${String(assistantBridgePort)}) — it becomes the one ws://127.0.0.1:<port> entry in the SPA's connect-src.`,
+      );
+    }
+    connectSrc = `connect-src 'self' ws://127.0.0.1:${assistantBridgePort}`;
+  }
+  // Keep this short — CloudFront Functions have a 10 KB compiled limit
+  // and ~1 ms execution budget per request.
+  //
+  // We set HSTS / X-Content-Type-Options / Referrer-Policy /
+  // Permissions-Policy on every response. CSP is more nuanced: API
+  // responses already carry a tight CSP from helmet (defaultSrc 'self',
+  // no inline anything), so we leave those alone. SPA static responses
+  // from S3 carry no CSP, so we attach a SPA-friendly default that
+  // allows same-origin assets + connect (for /api/* fetch) and inline
+  // styles (Vite's CSS hashes are inlined into <style> by some plugins
+  // — staying safe with 'unsafe-inline' on style-src only).
+  return assertFunctionSize(
+    `
+function handler(event) {
+  var response = event.response;
+  var headers = response.headers;
+
+  headers['strict-transport-security'] = {
+    value: 'max-age=63072000; includeSubDomains; preload'
+  };
+  headers['x-content-type-options'] = { value: 'nosniff' };
+  headers['referrer-policy'] = { value: 'same-origin' };
+  headers['permissions-policy'] = {
+    value: 'camera=(), microphone=(), geolocation=()'
+  };
+
+  if (!headers['content-security-policy']) {
+    headers['content-security-policy'] = {
+      value: [
+        "default-src 'self'",
+        // 'wasm-unsafe-eval' permits WebAssembly compilation only (NOT JS
+        // eval) for the Argon2id HDK key-wrapping WASM module (hash-wasm).
+        // The binary is base64-embedded in the JS
+        // bundle at build time — no runtime fetch, so no connect-src/worker-src
+        // change is needed beyond this one directive.
+        "script-src 'self' 'wasm-unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "font-src 'self' data:",
+        "${connectSrc}",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'"
+      ].join('; ')
+    };
+  }
+  return response;
+}
+`.trim(),
+    "security-headers",
   );
 }

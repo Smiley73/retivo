@@ -8,6 +8,7 @@ import {
   assertEdgeAllowedIpsForStack,
   parseAlarmNotificationEmail,
   parseApiThrottle,
+  parseAssistantBridgePort,
   parseEdgeAllowedIps,
   parseLambdaConcurrencyQuota,
   parseLogRetentionDays,
@@ -227,6 +228,16 @@ export interface StackConfig {
    * default) = no boundary.
    */
   readonly iamPermissionsBoundaryArn: string | undefined;
+  /**
+   * AI assistant connector switch (OPTIONAL, default unset = off): the
+   * loopback port of the local bridge. When set, the SPA build bakes it in as
+   * `VITE_ASSISTANT_BRIDGE_PORT` (build_spa in deploy-common.sh) and the
+   * CloudFront security-headers function adds exactly one CSP entry,
+   * `connect-src 'self' ws://127.0.0.1:<port>`. Unset adds nothing to the
+   * build or the CSP, so the published function is unchanged. A config edit
+   * plus a redeploy. Parsed/validated (1024–65535) in config-helpers.mjs.
+   */
+  readonly assistantBridgePort: number | undefined;
 }
 
 const DEFAULT_SES_FROM = "no-reply@example.invalid";
@@ -303,6 +314,7 @@ export function loadConfig(): StackConfig {
   const lambdaConcurrencyQuota = parseLambdaConcurrencyQuota(rawGet);
   const edgeAllowedIps = parseEdgeAllowedIps(rawGet);
   const apiThrottle = parseApiThrottle(rawGet);
+  const assistantBridgePort = parseAssistantBridgePort(rawGet);
 
   // Edge IP gate is dev-only: a non-empty allowlist on prod fails here,
   // before any resource is composed. A stack with neither WAF nor the gate
@@ -400,6 +412,7 @@ export function loadConfig(): StackConfig {
       iamPermissionsBoundaryArn.length > 0
         ? iamPermissionsBoundaryArn
         : undefined,
+    assistantBridgePort,
   };
 }
 
