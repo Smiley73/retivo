@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_BRIDGE_LAUNCHER, bridgeCommandFor, type AgentName } from './command.js';
+import { DEFAULT_BRIDGE_LAUNCHER, assertSafeOrigin, assertSafePort, bridgeCommandFor, type AgentName } from './command.js';
 import { DEFAULT_BRIDGE_PORT } from './constants.js';
 
 const origin = 'https://app.example.com';
@@ -54,5 +54,19 @@ describe('bridgeCommandFor', () => {
     expect(() => bridgeCommandFor('claude', { origin, port: 80 })).toThrow();
     expect(() => bridgeCommandFor('claude', { origin, port: 70000 })).toThrow();
     expect(() => bridgeCommandFor('claude', { origin, port: 1.5 })).toThrow();
+  });
+});
+
+describe('assertSafeOrigin and assertSafePort', () => {
+  it('accept what the command template accepts', () => {
+    expect(() => assertSafeOrigin(origin)).not.toThrow();
+    expect(() => assertSafeOrigin('http://127.0.0.1:5173')).not.toThrow();
+    expect(() => assertSafePort(DEFAULT_BRIDGE_PORT)).not.toThrow();
+  });
+
+  it('refuse what the command template refuses', () => {
+    expect(() => assertSafeOrigin('https://app.example.com/')).toThrow();
+    expect(() => assertSafeOrigin('http://app.example.com')).toThrow();
+    expect(() => assertSafePort(1024)).toThrow();
   });
 });

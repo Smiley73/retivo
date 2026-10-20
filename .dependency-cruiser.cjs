@@ -23,7 +23,8 @@ module.exports = {
       name: 'no-cycles',
       severity: 'error',
       comment:
-        'Architecture rule: no import cycles in apps/web/src or apps/api/src. ' +
+        'Architecture rule: no import cycles in apps/web/src, apps/api/src, ' +
+        'apps/mcp-bridge/src or packages/assistant-protocol/src. ' +
         'Cycles make module boundaries and load order impossible to reason ' +
         'about. Known-gap exceptions below (KNOWN-GAP NOTE, top of file) are ' +
         'pre-existing and grandfathered, not endorsed — do not add new ones; ' +
@@ -202,6 +203,35 @@ module.exports = {
       to: {
         path: '^(apps|infrastructure)/|^packages/contracts/|(^|/)node_modules/(?!.*/zod/|zod/)',
       },
+    },
+    {
+      name: 'mcp-bridge-is-a-leaf',
+      severity: 'error',
+      comment:
+        'Architecture rule: apps/mcp-bridge is a standalone bin that talks to ' +
+        'the app only over the WebSocket protocol. It imports nothing from ' +
+        'apps/web, apps/api, packages/contracts or infrastructure, and from ' +
+        'npm only the MCP SDK, ws and the shared protocol package. Tests may ' +
+        'import their test tooling.',
+      from: {
+        path: '^apps/mcp-bridge/src',
+        pathNot: '\\.test\\.ts$',
+      },
+      to: {
+        path: '^apps/(web|api)/|^packages/contracts/|^infrastructure/|(^|/)node_modules/',
+        pathNot:
+          '(^|/)node_modules/(@modelcontextprotocol/(server|core)|ws|@types/ws|@retirement/assistant-protocol)/',
+      },
+    },
+    {
+      name: 'web-does-not-import-mcp-bridge',
+      severity: 'error',
+      comment:
+        'Architecture rule: the bridge is a separate process the person runs ' +
+        'beside their agent; the web app shares code with it only through ' +
+        'packages/assistant-protocol, never by importing the bridge.',
+      from: { path: '^apps/web/src' },
+      to: { path: '^apps/mcp-bridge/' },
     },
     {
       name: 'db-layering',

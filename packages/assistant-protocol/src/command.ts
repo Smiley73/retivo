@@ -11,7 +11,8 @@ export type AgentName = 'claude' | 'codex' | 'cursor';
 const ORIGIN_PATTERN = /^https?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?$/;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1']);
 
-function assertSafeOrigin(origin: string): void {
+/** Throws unless `origin` is a bare https:// origin or a loopback http:// origin; shared with the bridge's `--origin`. */
+export function assertSafeOrigin(origin: string): void {
   const valid = ORIGIN_PATTERN.test(origin) && URL.canParse(origin);
   const url = valid ? new URL(origin) : null;
   const allowed = url !== null && (url.protocol === 'https:' || LOOPBACK_HOSTS.has(url.hostname));
@@ -20,7 +21,8 @@ function assertSafeOrigin(origin: string): void {
   }
 }
 
-function assertSafePort(port: number): void {
+/** Throws unless `port` is an integer from 1025 to 65535; shared with the bridge's `--port`. */
+export function assertSafePort(port: number): void {
   if (!Number.isInteger(port) || port < 1025 || port > 65535) throw new Error('Port must be an integer from 1025 to 65535');
 }
 

@@ -30,6 +30,31 @@ export default [
     },
   },
   {
+    // The bridge's stdout is the MCP transport: a stray console.log or direct
+    // stdout write corrupts the JSON-RPC stream. Diagnostics go through the
+    // stderr logger (src/logger.ts).
+    files: ['apps/mcp-bridge/src/**/*.ts'],
+    languageOptions: {
+      parser,
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+    plugins: { '@typescript-eslint': plugin },
+    rules: {
+      ...plugin.configs.recommended.rules,
+      'no-console': 'error',
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'process',
+          property: 'stdout',
+          message: 'stdout is the MCP transport. Log through src/logger.ts (stderr).',
+        },
+      ],
+    },
+  },
+  {
     files: ['apps/web/src/**/*.{ts,tsx}'],
     languageOptions: {
       parser,

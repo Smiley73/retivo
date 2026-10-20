@@ -54,6 +54,7 @@ The workspace is a pnpm monorepo. `pnpm-workspace.yaml` lists three groups:
 | `@retirement/api` | `apps/api` | The NestJS API, plus the entry points of the background Lambdas. |
 | `@retirement/contracts` | `packages/contracts` | The Zod schemas and types for what travels between web and API (a shared contract), and the list of aggregate types. |
 | `@retirement/assistant-protocol` | `packages/assistant-protocol` | The Zod schemas and constants shared by the local AI assistant bridge and the web app: the messages they exchange, the fixed list of tools, the error codes and the pairing rules. |
+| `@retirement/mcp-bridge` | `apps/mcp-bridge` | A small Node program an AI assistant (Claude Code, Codex, Cursor) starts over standard input and output. It lists the fixed set of Retivo tools to the assistant and relays each call over a local WebSocket (`127.0.0.1` only) to the signed-in browser tab, after a one-time pairing code. It holds no plan data. |
 | `@retirement/infrastructure` | `infrastructure` | The Pulumi program that builds the Amazon resources. |
 
 The versions of the main libraries are in each package's `package.json`; this
@@ -72,6 +73,7 @@ The folders you will touch most:
 | `apps/web/src/lib/demo-data-loader.ts` | The demo dataset. |
 | `apps/api/src` | One folder per API module: `auth`, `sync`, `dynamo`, `compactor`, `janitor`, `aws`, `common`, `health`, `throttle` and `logger`. The Lambda entry files sit directly in `apps/api/src`. |
 | `packages/contracts/src` | The wire schemas (`sync-envelopes.ts`, `error-envelope.ts`) and `aggregate-types.ts`. |
+| `apps/mcp-bridge/src` | The assistant bridge: the pairing-code store (`pairing-code-store.ts`), the loopback WebSocket server (`loopback-server.ts`), the tab session state machine (`session.ts`), the call relay (`relay.ts`), the MCP tool registration (`mcp-server.ts`) and the entry point (`bin.ts`). |
 | `packages/assistant-protocol/src` | The assistant message frames (`frames.ts`), the tool registry (`registry.ts`), the result envelope (`result.ts`) and the pairing proofs (`pairing.ts`). |
 | `infrastructure/src` | One file per resource group: `dynamo.ts`, `lambda.ts`, `s3.ts`, `cloudfront.ts`, `api-gateway.ts`, `iam.ts` and more. |
 | `scripts` | Repo-wide check scripts and their tests. |
