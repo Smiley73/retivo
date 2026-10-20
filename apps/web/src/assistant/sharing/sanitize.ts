@@ -21,12 +21,14 @@ export const MASK = '[…]';
 /** Whitespace-like controls become a space before the rest are stripped, so words never fuse. */
 const LINE_BREAKS = /[\t\n\r\f\v\u0085\u2028\u2029]/g;
 /**
- * C0 and C1 controls, soft hyphen, Arabic letter mark, Mongolian vowel separator, zero-width
- * and directional marks (U+200B to U+200F), bidi embeddings and overrides (U+202A to U+202E),
- * word joiner and invisible operators (U+2060 to U+2064), bidi isolates (U+2066 to U+2069),
- * the byte-order mark, and the interlinear annotation and specials block.
+ * Controls (C0, C1), format characters (soft hyphen, zero-width and directional marks, bidi
+ * embeddings, overrides and isolates, word joiner and invisible operators, the byte-order mark,
+ * interlinear annotation, and the Tags block U+E0000 to U+E007F that hides text a person cannot see
+ * but a model still reads), and every other default-ignorable code point (variation selectors,
+ * Hangul fillers, the combining grapheme joiner, unassigned tag and ignorable code points). Named by
+ * property rather than listed, so no invisible range is left out.
  */
-const INVISIBLE = /[\u0000-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\uFFF9-\uFFFB]/g;
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u{E0000}-\u{E007F}]/gu;
 
 /** Compiled masker for a set of literal terms. */
 export interface Masker {
