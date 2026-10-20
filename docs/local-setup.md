@@ -258,8 +258,9 @@ Where tests live, and what they need:
 | API (Jest) | `apps/api/src/**/*.spec.ts`; integration tests in `apps/api/src/test/` | **Yes.** Run `pnpm emu:up` first. They create their own temporary tables, separate from the ones `pnpm dev` uses. |
 | Web (Vitest) | beside the code, in `apps/web/src` | No |
 | AI assistant bridge (Vitest) | beside the code, in `apps/mcp-bridge/src` | No. Run it with `pnpm --filter @retirement/mcp-bridge test`, which builds the program first. |
+| AI assistant protocol (Vitest) | beside the code, in `packages/assistant-protocol/src` | No. Run it with `pnpm --filter @retirement/assistant-protocol test`. |
 | Script tests | `scripts/test`, `apps/api/scripts` | No |
-| End to end (Playwright) | `apps/web/e2e` | Yes, and `pnpm dev` too |
+| End to end (Playwright) | `apps/web/e2e` | Yes, and `pnpm dev` too. The AI assistant journey (`assistant.spec.ts`) also starts the built bridge on a loopback port, so build the protocol package and the bridge first; it skips with a reason when `apps/mcp-bridge/dist/bin.js` is missing. |
 
 The API tests read your `.env`. With a `.env` copied unchanged from
 `.env.example`, one of them fails: `src/common/env.config.spec.ts`, "defaults to
@@ -341,6 +342,44 @@ WEB_ALLOWED_ORIGINS=http://localhost:5273
 `VITE_API_BASE_URL` has to be set here. Left blank, the web app assumes the API
 is on port 3001. Both checkouts use the same emulators, so they share the same
 local accounts and data. Run `pnpm emu:up` from only one of them.
+
+### Connect a local AI assistant
+
+An AI assistant on your computer (Claude Code, Codex or Cursor) can read your
+local plan through the open browser tab. The feature is off until the web build
+carries a bridge port, so:
+
+1. Add `VITE_ASSISTANT_BRIDGE_PORT=24580` to `.env` and restart `pnpm dev`. The
+   dev server sends no content security policy, so this variable is all a local
+   copy needs; a deployed stack sets the same port with the `assistantBridgePort`
+   setting, which also adds the one matching entry to its policy ([deploy
+   guide](deploy.md)). The "AI assistants" card then appears under **Settings →
+   Preferences** for a signed-in person who has **Show beta features** on.
+2. Build the bridge once: `pnpm --filter @retirement/assistant-protocol build`, then
+   `pnpm --filter @retirement/mcp-bridge build`. It needs Node 24, like the rest of
+   the repo.
+3. Run the bridge against the dev server's address, which it compares exactly.
+   Loopback addresses may use plain `http`, so this is the one case that works
+   without HTTPS. The card's copy button gives you the command to paste into an
+   assistant; its launcher is a placeholder for the command that will install the
+   published bridge, so against a checkout use the built file instead, for example:
+
+   ```bash
+   claude mcp add retivo -- node "$PWD/apps/mcp-bridge/dist/bin.js" --origin http://localhost:5173
+   ```
+
+   `codex mcp add retivo -- node ... --origin http://localhost:5173` works the same
+   way. If you changed `VITE_ASSISTANT_BRIDGE_PORT`, add `--port <that number>`. Use
+   `localhost`, not `127.0.0.1`, in the origin: it has to equal the address in your
+   browser's address bar.
+4. Ask the assistant a question about your plan, type the code from its answer into
+   the card, and choose what it may see. The rest is in the [AI assistants
+   guide](ai-assistants.md).
+
+Chrome, Edge and Firefox are expected to ask once whether the site may reach your
+computer, and the connection fails until you allow it. Brave needs a setting
+changed and Safari cannot connect; see [Browser
+support](ai-assistants.md#browser-support), which records what has been verified.
 
 ### Open the dev server from another device
 

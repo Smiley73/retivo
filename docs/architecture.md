@@ -22,6 +22,11 @@ RETIVO is **local-first**. That one idea decides where code belongs.
   accounts and sign-in. It cannot read the plan, so it could not run a
   projection even if it tried.
 
+- The optional **AI assistant connector** keeps that shape: an assistant on the
+  same computer talks to a small local program, which talks to the open browser
+  tab, and the tab computes the answers. The server is not involved and sees none
+  of it. See [The assistant bridge](#the-assistant-bridge).
+
 If you are about to put plan logic in the API, stop: it belongs in the web app.
 If you are about to make the web app depend on the server to show a plan, stop
 too: the app must keep working from its local copy when the server is
@@ -68,6 +73,7 @@ The folders you will touch most:
 | `apps/web/src/sync` | The mutation queue, the sync client, the pull-apply logic, auto-repair, quarantine, the sync badge and the mock transport. |
 | `apps/web/src/crypto` | Payload encryption, key wrapping, the key cache, the passkey key derivation and the freshness counter. |
 | `apps/web/src/auth` | Sign-in state, the key-envelope client and the cross-user guard. |
+| `apps/web/src/assistant` | The tab's side of the AI assistant connector: the session state machine (`session.ts`), the call dispatcher (`dispatcher.ts`), the in-memory activity log (`audit-log.ts`), the diagnosis of failed connections (`diagnosis.ts`), the tool handlers (`tools/`) and the field model that decides what a tool may say (`sharing/`). |
 | `apps/web/src/lib/projection-engine` | The yearly projection and Monte Carlo kernels. |
 | `apps/web/src/workers` | The Web Worker entry points (Monte Carlo and the claim-age optimizer). |
 | `apps/web/src/lib/demo-data-loader.ts` | The demo dataset. |
@@ -332,6 +338,81 @@ and bucket in them (`ensureLocalAwsResources` in
 new table needs an entry in `local-bootstrap.ts` as well as in
 `infrastructure/src/dynamo.ts`.
 
+## The assistant bridge
+
+The connector lets an AI assistant (Claude Code, Codex, Cursor) read and run a
+plan without the data leaving the browser except as a tool result the person
+allowed. It is made of three pieces in the repo: `packages/assistant-protocol`
+(the messages, the tool list and the pairing rules, shared by both ends),
+`apps/mcp-bridge` (a Node program the assistant starts) and
+`apps/web/src/assistant` (the tab). How to use it is in
+[ai-assistants.md](ai-assistants.md); what it protects is in the
+[security overview](security.md#ai-assistants).
+
+```
+  Your computer
+ +----------------------------------------------------------------+
+ |  Assistant ---- stdio (MCP) ----> Bridge (apps/mcp-bridge)     |
+ |                                      |                         |
+ |                           ws://127.0.0.1:<port>                |
+ |                                      |                         |
+ |  Browser tab (apps/web) <------------+                         |
+ |   plan, key, engine: answers every call                        |
+ +----------------------------------------------------------------+
+```
+
+The bridge speaks MCP to the assistant over standard input and output (so nothing
+in it may write to standard output) and listens on `127.0.0.1` only for the
+tab. The tab dials out to it; the server is not in the path.
+
+**The frames.** The order is fixed in `packages/assistant-protocol/src/frames.ts`:
+the bridge sends `hello`, the tab answers `pair`, the bridge answers `paired`, the
+tab sends `ready`, and then the bridge sends `call` and `cancel` while the tab
+sends `progress` and `result`. Anything else is a `PROTOCOL_ERROR` and closes the
+socket. The pairing code is never in a frame: `pair` and `paired` carry proofs
+derived from it and both sides' nonces. The bridge is usually older than the tab, so
+the frame schemas drop unknown keys, and an addition within one protocol version is
+an optional field.
+
+**The registry is declared at start and never changes.** The tool list and the
+prompts live in `packages/assistant-protocol/src/registry.ts`. The bridge declares
+all of them to the assistant when it starts and never sends a list-changed
+notification, because some assistants do not pick up tools added mid-session. No
+frame carries a list. Two results come from that choice. Before the tab is paired,
+every tool answers `NOT_PAIRED` with the one-time code and where in the app to type
+it (`result.ts`), so the first question the person asks is the one that carries the
+code. And because the registry ships in the bridge, a new tool needs a bridge
+release; a tab older than the bridge answers a tool it does not implement with
+`TOOL_NOT_SUPPORTED` (`dispatcher.ts`) and no data.
+
+**The caps.** A frame is at most 1 MiB and a result a little under that; the bridge
+relays 2 calls at once and 60 per minute; each registry entry declares a timeout
+(30 seconds for a plain read, 90 for the stress test, whose own wall clock in the
+tab is 60); an oversize result becomes `OUTPUT_TOO_LARGE` and is never sent
+(`constants.ts`, `relay.ts`, `dispatcher.ts`).
+
+**Memory only.** The session, the consent record and the activity log live in the
+tab's memory and end with the session. Nothing is written to storage, so
+`clearAllLocalData()` has nothing new to clear and is untouched. The one stored
+value is the per-device opt-in, a `localStorage` key the blanket clear already
+removes (`assistant/preference.ts`).
+
+**The `lib/`-wrapper rule.** `apps/web/src/assistant` may not import `components/`
+or `pages/` (the `assistant-independent-of-ui` rule in
+`.dependency-cruiser.cjs`, run by `pnpm depcruise`), so it stays headless: a tool
+that needs logic that lives in a page uses a wrapper in `lib/`, and the settings
+card, the consent dialog and the connected indicator in `pages/` and `components/`
+read the session through `useAssistant()`. The protocol package and the bridge are
+leaves under the same tool (`assistant-protocol-is-a-leaf`,
+`mcp-bridge-is-a-leaf`).
+
+**Teardown and the idle hook.** `assistant/AssistantContext.tsx` ends the session on
+sign-out, locking, a different user, a reload or tab close and a closed gate, and
+the session ends itself on Disconnect, a declined dialog and a dropped socket. The
+one place agent traffic can touch the idle timer is `assistant/session.ts`: a call
+whose tool returned data calls `recordProgrammaticActivity` in `auth/IdleTimer.tsx`,
+only while the person's consent has the keep-signed-in switch on.
+
 ## Changing stored data safely
 
 Stored data outlives any one version of the code. Browsers hold records written
@@ -359,6 +440,13 @@ before you change a record's shape.
   the Monte Carlo result cache in IndexedDB (`apps/web/src/db/monte-carlo-cache.ts`).
   Cached results made under another engine version are thrown away and
   recomputed. Raise it when a change alters Monte Carlo output for some input.
+- **`PROTOCOL_VERSION` and `TOOL_NOT_SUPPORTED`.** The assistant bridge and the
+  tab compare `PROTOCOL_VERSION` (`packages/assistant-protocol/src/constants.ts`)
+  for equality before any proof; a mismatch closes the socket and the tab tells the
+  person to update the bridge and reload. Inside one version a tab older than the
+  bridge answers the tools it lacks with `TOOL_NOT_SUPPORTED` and no data. Change
+  the version only for a breaking change to the frames; add optional fields
+  otherwise.
 - **`X-Build-Id`.** The API puts its build id on every response. When it
   differs from the build id baked into the web app,
   `apps/web/src/lib/build-id.ts` shows a banner asking the user to reload.
