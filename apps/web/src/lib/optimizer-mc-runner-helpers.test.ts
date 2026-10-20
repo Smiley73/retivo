@@ -3,6 +3,7 @@ import {
   derivePiaState,
   buildTriples,
   isAlreadyAtOptimum,
+  matchesCurrentClaim,
   derivePartial,
   derivePrecheckEmpty,
 } from './optimizer-mc-runner-helpers';
@@ -250,9 +251,10 @@ describe('buildTriples', () => {
       stepYears: 3,
     });
 
-    // Assert: fewer triples than the full grid; ages match the sub-sample.
+    // Assert: fewer triples than the full grid; ages match the sub-sample,
+    // plus the stored 67 (off the sub-sampled grid) as the extra candidate.
     expect(bundle.list.length).toBeLessThan(FULL_GRID_PAIRS);
-    expect(bundle.list.map((t) => t.primaryAgeYears)).toEqual([62, 65, 68]);
+    expect(bundle.list.map((t) => t.primaryAgeYears)).toEqual([62, 65, 68, 67]);
   });
 
   it('every triple carries the stored survivor claim age VERBATIM', () => {
@@ -313,6 +315,62 @@ describe('buildTriples', () => {
     }
   });
 
+  describe('the stored claim-age pair (extra triple)', () => {
+    const monthLevel: SocialSecurityOverride = {
+      primary: { ageYears: 66, ageMonths: 4 },
+      secondary: { ageYears: 67, ageMonths: 0 },
+    };
+    const build = (
+      stored: SocialSecurityOverride,
+      ss = [ssBenefit('m1', PIA), ssBenefit('m2', PIA)],
+    ) => {
+      const scenario = scenarioFixture('s1');
+      scenario.payload.overrides.socialSecurity = stored;
+      return buildTriples({
+        scenarios: [scenario],
+        members: [member('m1', true, 1965), member('m2', false, 1968)],
+        ssBenefits: ss,
+        today: TODAY,
+        stepYears: 1,
+      });
+    };
+
+    it('appends a month-level stored pair once, counted in pairCount, with verbatim months', () => {
+      const bundle = build(monthLevel);
+      expect(bundle.list).toHaveLength(FULL_GRID_PAIRS * FULL_GRID_PAIRS + 1);
+      expect(bundle.pairCount).toBe(FULL_GRID_PAIRS * FULL_GRID_PAIRS + 1);
+      const last = bundle.list[bundle.list.length - 1];
+      expect(last).toMatchObject({
+        pairIdx: bundle.pairCount,
+        primaryAgeYears: 66,
+        primaryAgeMonths: 4,
+        secondaryAgeYears: 67,
+      });
+      expect(last.overlay.socialSecurity.primary).toEqual({ ageYears: 66, ageMonths: 4 });
+    });
+
+    it('adds nothing for a stored whole-year pair already in the grid', () => {
+      const bundle = build({
+        primary: { ageYears: 66, ageMonths: 0 },
+        secondary: { ageYears: 67, ageMonths: 0 },
+      });
+      expect(bundle.list).toHaveLength(FULL_GRID_PAIRS * FULL_GRID_PAIRS);
+      expect(bundle.pairCount).toBe(FULL_GRID_PAIRS * FULL_GRID_PAIRS);
+    });
+
+    it('secondary-only fallback carries the primary months on every triple', () => {
+      const bundle = build(
+        { ...monthLevel, secondary: { ageYears: 67, ageMonths: 2 } },
+        [ssBenefit('m1', null), ssBenefit('m2', PIA)],
+      );
+      expect(bundle.list).toHaveLength(FULL_GRID_PAIRS + 1);
+      for (const t of bundle.list) {
+        expect(t).toMatchObject({ primaryAgeYears: 66, primaryAgeMonths: 4 });
+        expect(t.overlay.socialSecurity.primary).toEqual({ ageYears: 66, ageMonths: 4 });
+      }
+    });
+  });
+
   it('triples stay survivor-free when no survivor age is stored', () => {
     const members = [member('m1', true, 1965), member('m2', false, 1970)];
     const ss = [ssBenefit('m1', PIA), ssBenefit('m2', 1_000)];
@@ -355,11 +413,27 @@ describe('isAlreadyAtOptimum', () => {
     expect(isAlreadyAtOptimum(winner(67, 65), undefined)).toBe(false);
   });
 
-  it('returns false when the resolved primary carries non-zero ageMonths', () => {
+  it('returns false when the resolved primary carries non-zero ageMonths the winner lacks', () => {
     const resolved: SocialSecurityOverride = {
       primary: { ageYears: 67, ageMonths: 6 },
     };
     expect(isAlreadyAtOptimum(winner(67, null), resolved)).toBe(false);
+  });
+
+  it('returns true for a winner carrying the same months as the resolved pair', () => {
+    const resolved: SocialSecurityOverride = {
+      primary: { ageYears: 67, ageMonths: 6 },
+    };
+    expect(
+      isAlreadyAtOptimum({ ...winner(67, null), primaryAgeMonths: 6 }, resolved),
+    ).toBe(true);
+  });
+
+  it('matchesCurrentClaim resolves a missing stored secondary to the fallback default', () => {
+    const resolved: SocialSecurityOverride = { primary: { ageYears: 66, ageMonths: 4 } };
+    expect(matchesCurrentClaim(66, 67, resolved, 4, 0)).toBe(true);
+    expect(matchesCurrentClaim(66, 67, resolved, 0, 0)).toBe(false);
+    expect(matchesCurrentClaim(66, 68, resolved, 4, 0)).toBe(false);
   });
 });
 

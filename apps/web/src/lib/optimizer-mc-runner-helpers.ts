@@ -69,7 +69,11 @@ export interface Triple {
   readonly scenarioIdx: number;
   readonly pairIdx: number;
   readonly primaryAgeYears: number;
+  /** Months on top of the years; absent or 0 is a whole year. Set for a
+   *  stored month-level pair and for a member the search did not vary. */
+  readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
+  readonly secondaryAgeMonths?: number;
   readonly overlay: {
     readonly socialSecurity: {
       readonly primary: RetirementAgePerMember;
@@ -132,6 +136,7 @@ export function buildTriples(args: BuildTriplesArgs): TriplesBundle {
   const list: Triple[] = [];
   const preSeededOutcomes: PreSeededOutcome[] = [];
   let scenarioIdx = 0;
+  let pairsPerScenario = 1;
   for (const sc of nonDeleted) {
     scenarioIdx += 1;
     // Scenario-aware empty-state routing. When the scenario's
@@ -151,25 +156,10 @@ export function buildTriples(args: BuildTriplesArgs): TriplesBundle {
     });
     // Handle every empty-grid combination explicitly. Mirrors
     // `buildPairs` in claim-age-optimizer/orchestrator-helpers.ts.
-    if (!secondary) {
-      if (primaryGrid.length === 0) {
-        preSeededOutcomes.push({
-          scenarioId: sc.id,
-          outcome: scenarioMissingRetirementDate
-            ? noRetirementDateOutcome()
-            : pastWindowOrMissingPia(piaState),
-        });
-        continue;
-      }
-      appendSingleMemberTriples({
-        list,
-        primaryGrid,
-        scenarioId: sc.id,
-        scenarioIdx,
-      });
-      continue;
-    }
-    if (primaryGrid.length === 0 && secondaryGrid.length === 0) {
+    if (
+      primaryGrid.length === 0 &&
+      (!secondary || secondaryGrid.length === 0)
+    ) {
       preSeededOutcomes.push({
         scenarioId: sc.id,
         outcome: scenarioMissingRetirementDate
@@ -178,66 +168,171 @@ export function buildTriples(args: BuildTriplesArgs): TriplesBundle {
       });
       continue;
     }
-    const resolved = resolveScenario(sc.id, [...args.scenarios]);
-    // The survivor claim-age dimension carries the user's stored
-    // survivor age VERBATIM (at most one candidate; out-of-window → inert,
-    // falling back to the same stored section everywhere) onto every triple
-    // so MC evaluates the SAME plan the deterministic candidates simulate.
-    const survivor = primary
-      ? buildSurvivorDimension({
-          primary,
-          secondary,
-          piaState,
-          resolved,
-        }).candidates[0]?.survivor
-      : undefined;
-    if (secondaryGrid.length === 0) {
-      appendPrimaryOnlyTriples({
-        list,
-        primaryGrid,
-        secondaryFallback:
-          resolved.socialSecurity?.secondary ?? DEFAULT_SECONDARY_CLAIM_AGE,
-        scenarioId: sc.id,
-        scenarioIdx,
-        survivor,
-      });
-      continue;
-    }
-    if (primaryGrid.length === 0) {
-      appendSecondaryOnlyTriples({
-        list,
-        secondaryGrid,
-        primaryFallback:
-          resolved.socialSecurity?.primary ?? DEFAULT_PRIMARY_CLAIM_AGE,
-        scenarioId: sc.id,
-        scenarioIdx,
-        survivor,
-      });
-      continue;
-    }
-    appendJointTriples({
+    const firstIdx = list.length;
+    appendScenarioTriples({
       list,
+      scenario: sc,
+      scenarioIdx,
+      scenarios: args.scenarios,
+      primary,
+      secondary,
+      piaState,
       primaryGrid,
       secondaryGrid,
-      scenarioId: sc.id,
-      scenarioIdx,
-      survivor,
     });
+    pairsPerScenario = Math.max(pairsPerScenario, list.length - firstIdx);
   }
-  const pairsPerScenario = secondary
-    ? Math.max(
-        1,
-        primaryGrid.length * secondaryGrid.length,
-        primaryGrid.length,
-        secondaryGrid.length,
-      )
-    : Math.max(1, primaryGrid.length);
   return {
     list,
     scenarioCount: nonDeleted.length,
     pairCount: pairsPerScenario,
     preSeededOutcomes,
   };
+}
+
+/**
+ * One non-empty scenario's triples: the searched grid (single-member,
+ * joint, or a 1-D fallback) plus the stored claim-age pair as one extra
+ * triple, unless an equal triple is already listed.
+ */
+function appendScenarioTriples(opts: {
+  list: Triple[];
+  scenario: ScenarioAggregate;
+  scenarioIdx: number;
+  scenarios: ReadonlyArray<ScenarioAggregate>;
+  primary: Aggregate<HouseholdMemberPayload> | undefined;
+  secondary: Aggregate<HouseholdMemberPayload> | undefined;
+  piaState: PiaState;
+  primaryGrid: ReadonlyArray<number>;
+  secondaryGrid: ReadonlyArray<number>;
+}): void {
+  const { list, primary, secondary, primaryGrid, secondaryGrid } = opts;
+  const scenarioId = opts.scenario.id;
+  const scenarioIdx = opts.scenarioIdx;
+  const resolved = resolveScenario(scenarioId, [...opts.scenarios]);
+  const firstIdx = list.length;
+  if (!secondary) {
+    appendSingleMemberTriples({ list, primaryGrid, scenarioId, scenarioIdx });
+    appendStoredTriple({
+      list,
+      firstIdx,
+      stored: resolved.socialSecurity,
+      hasSecondary: false,
+      secondarySearched: false,
+      scenarioId,
+      scenarioIdx,
+    });
+    return;
+  }
+  // The survivor claim-age dimension carries the user's stored
+  // survivor age VERBATIM (at most one candidate; out-of-window → inert,
+  // falling back to the same stored section everywhere) onto every triple
+  // so MC evaluates the SAME plan the deterministic candidates simulate.
+  const survivor = primary
+    ? buildSurvivorDimension({
+        primary,
+        secondary,
+        piaState: opts.piaState,
+        resolved,
+      }).candidates[0]?.survivor
+    : undefined;
+  if (secondaryGrid.length === 0) {
+    appendPrimaryOnlyTriples({
+      list,
+      primaryGrid,
+      secondaryFallback:
+        resolved.socialSecurity?.secondary ?? DEFAULT_SECONDARY_CLAIM_AGE,
+      scenarioId,
+      scenarioIdx,
+      survivor,
+    });
+  } else if (primaryGrid.length === 0) {
+    appendSecondaryOnlyTriples({
+      list,
+      secondaryGrid,
+      primaryFallback:
+        resolved.socialSecurity?.primary ?? DEFAULT_PRIMARY_CLAIM_AGE,
+      scenarioId,
+      scenarioIdx,
+      survivor,
+    });
+  } else {
+    appendJointTriples({
+      list,
+      primaryGrid,
+      secondaryGrid,
+      scenarioId,
+      scenarioIdx,
+      survivor,
+    });
+  }
+  appendStoredTriple({
+    list,
+    firstIdx,
+    stored: resolved.socialSecurity,
+    hasSecondary: true,
+    secondarySearched: secondaryGrid.length > 0,
+    scenarioId,
+    scenarioIdx,
+    survivor,
+  });
+}
+
+/**
+ * Append the scenario's stored claim-age pair (both members verbatim,
+ * months included) as one extra triple so a month-level setting has a
+ * baseline and can rank. Mirrors `withStoredPair` in
+ * claim-age-optimizer/orchestrator-helpers.ts: a member with no stored age
+ * uses the fallbacks' default, an unsearched secondary keeps `null`
+ * identity, and an equal triple already in this scenario's slice
+ * (`list[firstIdx..]`) suppresses the duplicate.
+ */
+function appendStoredTriple(opts: {
+  list: Triple[];
+  firstIdx: number;
+  stored: SocialSecurityOverride | undefined;
+  hasSecondary: boolean;
+  secondarySearched: boolean;
+  scenarioId: string;
+  scenarioIdx: number;
+  survivor?: SurvivorClaimAges;
+}): void {
+  const { list, stored } = opts;
+  if (!stored || list.length === opts.firstIdx) return;
+  const secondary = opts.hasSecondary
+    ? (stored.secondary ?? DEFAULT_SECONDARY_CLAIM_AGE)
+    : undefined;
+  const secondaryAgeYears =
+    secondary !== undefined && opts.secondarySearched ? secondary.ageYears : null;
+  const secondaryAgeMonths =
+    secondary !== undefined && opts.secondarySearched ? secondary.ageMonths : 0;
+  for (let i = opts.firstIdx; i < list.length; i += 1) {
+    const t = list[i];
+    if (
+      t.primaryAgeYears === stored.primary.ageYears &&
+      (t.primaryAgeMonths ?? 0) === stored.primary.ageMonths &&
+      t.secondaryAgeYears === secondaryAgeYears &&
+      (t.secondaryAgeMonths ?? 0) === secondaryAgeMonths
+    ) {
+      return;
+    }
+  }
+  list.push({
+    scenarioId: opts.scenarioId,
+    scenarioIdx: opts.scenarioIdx,
+    pairIdx: list.length - opts.firstIdx + 1,
+    primaryAgeYears: stored.primary.ageYears,
+    primaryAgeMonths: stored.primary.ageMonths,
+    secondaryAgeYears,
+    ...(secondaryAgeYears !== null ? { secondaryAgeMonths } : {}),
+    overlay: {
+      socialSecurity: {
+        primary: stored.primary,
+        ...(secondary ? { secondary } : {}),
+        ...(opts.survivor ? { survivor: opts.survivor } : {}),
+      },
+    },
+  });
 }
 
 function appendSingleMemberTriples(opts: {
@@ -306,6 +401,7 @@ function appendSecondaryOnlyTriples(opts: {
       scenarioIdx: opts.scenarioIdx,
       pairIdx,
       primaryAgeYears: opts.primaryFallback.ageYears,
+      primaryAgeMonths: opts.primaryFallback.ageMonths,
       secondaryAgeYears: s,
       overlay: {
         socialSecurity: {
@@ -349,23 +445,28 @@ function appendJointTriples(opts: {
 }
 
 /**
- * Does a whole-year candidate pair sit exactly at the scenario's current
- * (resolved) claim ages? Mirrors the deterministic path's `pairsEqual`
- * (the resolved override's ageMonths must be 0 to match a
- * whole-year candidate). Used both for `alreadyAtOptimum` and to capture
- * the baseline metric value at the current claim ages.
+ * Does a candidate sit exactly at the scenario's current (resolved) claim
+ * ages? Mirrors the deterministic path's `pairsEqual` (years and months
+ * both match, a missing month counting as 0; a two-member plan with no
+ * stored secondary age resolves to the fallbacks' default). Used both for
+ * `alreadyAtOptimum` and to capture the baseline metric value at the
+ * current claim ages.
  */
 export function matchesCurrentClaim(
   primaryAgeYears: number,
   secondaryAgeYears: number | null,
   resolved: SocialSecurityOverride | undefined,
+  primaryAgeMonths = 0,
+  secondaryAgeMonths = 0,
 ): boolean {
   if (!resolved) return false;
   if (primaryAgeYears !== resolved.primary.ageYears) return false;
-  if ((resolved.primary.ageMonths ?? 0) !== 0) return false;
-  const resSec = resolved.secondary?.ageYears ?? null;
-  if (secondaryAgeYears !== resSec) return false;
-  if ((resolved.secondary?.ageMonths ?? 0) !== 0) return false;
+  if (primaryAgeMonths !== (resolved.primary.ageMonths ?? 0)) return false;
+  const resSec =
+    resolved.secondary ??
+    (secondaryAgeYears !== null ? DEFAULT_SECONDARY_CLAIM_AGE : undefined);
+  if (secondaryAgeYears !== (resSec?.ageYears ?? null)) return false;
+  if (secondaryAgeMonths !== (resSec?.ageMonths ?? 0)) return false;
   return true;
 }
 
@@ -377,6 +478,8 @@ export function isAlreadyAtOptimum(
     winner.primaryAgeYears,
     winner.secondaryAgeYears,
     resolved,
+    winner.primaryAgeMonths,
+    winner.secondaryAgeMonths,
   );
 }
 

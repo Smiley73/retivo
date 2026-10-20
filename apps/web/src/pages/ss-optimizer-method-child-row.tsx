@@ -184,8 +184,13 @@ const ChildResultRow: React.FC<ChildResultRowProps> = ({
   // flips the row to "Applied" without trusting the engine's baked flag.
   const current = resolveCurrentClaimAges(row.scenario.id, aggregates.scenarios);
   const alreadyAtOptimum =
-    claimAgeMatches(current.primary, winner.primaryAgeYears) &&
-    (!hasSecondary || claimAgeMatches(current.secondary, winner.secondaryAgeYears));
+    claimAgeMatches(current.primary, winner.primaryAgeYears, winner.primaryAgeMonths) &&
+    (!hasSecondary ||
+      claimAgeMatches(
+        current.secondary,
+        winner.secondaryAgeYears,
+        winner.secondaryAgeMonths,
+      ));
   return (
     <Row id={id}>
       <Cell className={`${tdClass} pl-8`}>{label}</Cell>
@@ -194,6 +199,7 @@ const ChildResultRow: React.FC<ChildResultRowProps> = ({
           hasPia={primaryHasPia}
           current={current.primary}
           age={winner.primaryAgeYears}
+          months={winner.primaryAgeMonths}
         />
       </Cell>
       <Cell className={tdNumClass}>
@@ -202,6 +208,7 @@ const ChildResultRow: React.FC<ChildResultRowProps> = ({
           hasPia={secondaryHasPia}
           current={current.secondary}
           age={winner.secondaryAgeYears}
+          months={winner.secondaryAgeMonths}
         />
       </Cell>
       <Cell className={tdNumClass}>
@@ -230,9 +237,14 @@ const PrimaryAgeChildCell: React.FC<{
   hasPia: boolean;
   current: CurrentClaimAges['primary'];
   age: number;
-}> = ({ hasPia, current, age }) =>
+  months: number | undefined;
+}> = ({ hasPia, current, age, months }) =>
   hasPia ? (
-    <AgeTransition current={current} recommendedYears={age} />
+    <AgeTransition
+      current={current}
+      recommendedYears={age}
+      recommendedMonths={months}
+    />
   ) : (
     <span>
       PIA not set{' '}
@@ -247,7 +259,8 @@ const SecondaryAgeChildCell: React.FC<{
   hasPia: boolean;
   current: CurrentClaimAges['secondary'];
   age: number | null;
-}> = ({ hasSecondary, hasPia, current, age }) => {
+  months: number | undefined;
+}> = ({ hasSecondary, hasPia, current, age, months }) => {
   if (!hasSecondary) return <>—</>;
   if (!hasPia) {
     return (
@@ -260,7 +273,13 @@ const SecondaryAgeChildCell: React.FC<{
     );
   }
   if (age === null) return <>Past claim-age window</>;
-  return <AgeTransition current={current} recommendedYears={age} />;
+  return (
+    <AgeTransition
+      current={current}
+      recommendedYears={age}
+      recommendedMonths={months}
+    />
+  );
 };
 
 interface MethodApplyButtonProps {

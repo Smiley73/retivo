@@ -43,7 +43,13 @@ export interface PairSpec {
    *  `missingPiaMembers` on the OptimizerResult; the page reads those
    *  to render the "PIA not set" callout in the primary cell. */
   readonly primaryAgeYears: number;
+  /** Months on top of `primaryAgeYears`. Set for a stored month-level
+   *  pair and for a primary the search did not vary (the secondary-only
+   *  fallback); absent for a whole-year grid candidate. */
+  readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
+  /** Months on top of `secondaryAgeYears`; same rule as the primary's. */
+  readonly secondaryAgeMonths?: number;
   readonly candidate: {
     readonly primary: RetirementAgePerMember;
     readonly secondary?: RetirementAgePerMember;
@@ -216,6 +222,64 @@ export interface BuildPairsArgs {
 
 export function buildPairs(args: BuildPairsArgs): PairSpec[] {
   const dim = args.survivorDimension ?? NO_SURVIVOR_DIMENSION;
+  return withStoredPair(buildGridPairs(args, dim), args, dim);
+}
+
+/**
+ * Append the scenario's stored claim-age pair (both members verbatim,
+ * months included) as one extra candidate, so a month-level setting has a
+ * baseline and can rank. Skipped when the grid branch is empty (past-window
+ * and missing-PIA outcomes stay as they were) and when an equal candidate
+ * is already listed. A member the search does not vary keeps `null`
+ * secondary identity, like every other pair of its branch. The survivor
+ * dimension is crossed in so the stored pair competes like for like.
+ */
+function withStoredPair(
+  pairs: PairSpec[],
+  args: BuildPairsArgs,
+  dim: SurvivorDimension,
+): PairSpec[] {
+  const stored = args.resolvedOverride;
+  if (!stored || pairs.length === 0) return pairs;
+  const secondary = args.hasSecondary
+    ? (stored.secondary ?? DEFAULT_SECONDARY_CLAIM_AGE)
+    : undefined;
+  const secondarySearched = secondary !== undefined && args.secondaryGrid.length > 0;
+  const identity = {
+    primaryAgeYears: stored.primary.ageYears,
+    primaryAgeMonths: stored.primary.ageMonths,
+    secondaryAgeYears: secondarySearched ? secondary.ageYears : null,
+    ...(secondarySearched ? { secondaryAgeMonths: secondary.ageMonths } : {}),
+  };
+  if (pairs.some((p) => sameClaimIdentity(p, identity))) return pairs;
+  return [
+    ...pairs,
+    ...expandWithSurvivor(
+      {
+        ...identity,
+        candidate: {
+          primary: stored.primary,
+          ...(secondary ? { secondary } : {}),
+        },
+      },
+      dim,
+    ),
+  ];
+}
+
+function sameClaimIdentity(
+  a: Omit<PairSpec, 'candidate'>,
+  b: Omit<PairSpec, 'candidate'>,
+): boolean {
+  return (
+    a.primaryAgeYears === b.primaryAgeYears &&
+    (a.primaryAgeMonths ?? 0) === (b.primaryAgeMonths ?? 0) &&
+    a.secondaryAgeYears === b.secondaryAgeYears &&
+    (a.secondaryAgeMonths ?? 0) === (b.secondaryAgeMonths ?? 0)
+  );
+}
+
+function buildGridPairs(args: BuildPairsArgs, dim: SurvivorDimension): PairSpec[] {
   if (!args.hasSecondary) return buildSingleMemberPairs(args.primaryGrid);
   if (args.primaryGrid.length === 0 && args.secondaryGrid.length === 0) {
     return [];
@@ -316,6 +380,7 @@ function buildSecondaryOnlyPairs(
       ...expandWithSurvivor(
         {
           primaryAgeYears: primaryFallback.ageYears,
+          primaryAgeMonths: primaryFallback.ageMonths,
           secondaryAgeYears: s,
           candidate: {
             primary: primaryFallback,
@@ -406,22 +471,22 @@ function ageYearsToday(
   return completedYears + fraction;
 }
 
+/** The scenario's stored pair in the identity `withStoredPair` gives its
+ *  candidate — a two-member plan with no stored secondary age resolves to
+ *  the same default the fallbacks bake in. */
 export function resolvedSsPair(
   override: SocialSecurityOverride | undefined,
   hasSecondary: boolean,
 ): ResolvedPair | null {
   if (!override) return null;
+  const secondary = hasSecondary
+    ? (override.secondary ?? DEFAULT_SECONDARY_CLAIM_AGE)
+    : undefined;
   return {
     primaryAgeYears: override.primary.ageYears,
     primaryAgeMonths: override.primary.ageMonths,
-    secondaryAgeYears:
-      hasSecondary && override.secondary
-        ? override.secondary.ageYears
-        : null,
-    secondaryAgeMonths:
-      hasSecondary && override.secondary
-        ? override.secondary.ageMonths
-        : undefined,
+    secondaryAgeYears: secondary ? secondary.ageYears : null,
+    secondaryAgeMonths: secondary ? secondary.ageMonths : undefined,
   };
 }
 

@@ -74,7 +74,7 @@ export interface OptimizerResult {
   /** The metric value (at-horizon balance / MC success) at the scenario's
    *  CURRENT resolved claim ages — the baseline the page renders as
    *  "current → recommended". `undefined` when the current pair isn't a
-   *  whole-year candidate in the searched grid (so there's no exact
+   *  candidate (the 1-D primary-only fallback — so there's no exact
    *  baseline to show). */
   readonly baselineMetricValue?: number;
   /** True when `projectionMethod === 'twr'` and at least one active
@@ -184,7 +184,13 @@ async function runCandidates(args: {
     }
     results.push({
       primaryAgeYears: pair.primaryAgeYears,
+      ...(pair.primaryAgeMonths !== undefined
+        ? { primaryAgeMonths: pair.primaryAgeMonths }
+        : {}),
       secondaryAgeYears: pair.secondaryAgeYears,
+      ...(pair.secondaryAgeMonths !== undefined
+        ? { secondaryAgeMonths: pair.secondaryAgeMonths }
+        : {}),
       metricValue: value,
     });
   }

@@ -51,12 +51,10 @@ describe('release notes', () => {
     }
   });
 
-  it('holds exactly the open-source announcement', () => {
-    expect(RELEASE_NOTES).toHaveLength(1);
-    const entry = RELEASE_NOTES[0]!;
-    expect(entry.kind).toBe('new');
-    expect(entry.title).toBe('RETIVO is open source');
-    expect(`${entry.title} ${entry.blurb}`).toMatch(/open source/i);
+  it('keeps the open-source announcement', () => {
+    const entry = RELEASE_NOTES.find((n) => n.title === 'RETIVO is open source');
+    expect(entry?.kind).toBe('new');
+    expect(`${entry?.title} ${entry?.blurb}`).toMatch(/open source/i);
   });
 
   it('has no advice-toned "Social Security Optimizer" wording in any note', () => {

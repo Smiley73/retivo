@@ -33,6 +33,19 @@ export interface ReleaseNote {
 /** The full changelog, newest-first. New entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-19',
+    kind: 'improved',
+    title: 'Claim-age comparison understands months',
+    blurb:
+      'If a scenario\'s Social Security claim age includes months, such as 66 ' +
+      'years 4 months, the comparison now ranks that exact age next to the ' +
+      'whole years, shows it as your current result, and says "Already set" ' +
+      'when it comes out on top. Save to scenario now tells you when your ' +
+      'stored months are being replaced, and keeps the months of a member it ' +
+      'does not change. The page also states that it compares a fixed set of ' +
+      'options at one assumed death age and is not advice.',
+  },
+  {
     date: '2026-10-04',
     kind: 'new',
     title: 'RETIVO is open source',
