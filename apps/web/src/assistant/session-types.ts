@@ -36,6 +36,12 @@ export interface SessionEnd {
   close: CloseInfo;
 }
 
+/** What the bridge said about the assistant that launched it, from `hello`. Untrusted: sanitize before display. */
+export interface ClientInfo {
+  name: string;
+  version: string;
+}
+
 /** What the consent step is shown: the assistant's self-reported name, which is untrusted. */
 export interface ConsentRequest {
   /** From the `hello` frame's client field; `null` when the bridge reported none. Sanitize before display. */

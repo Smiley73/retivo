@@ -32,6 +32,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useBetaFeatures } from '../contexts/BetaFeaturesContext';
 import type { BetaFeatureId } from '../lib/feature-flags';
 import { SyncBadge } from '../sync/SyncBadge';
+import { AssistantSessionBadge } from '../components/AssistantSessionBadge';
 import { Badge } from '../components/Badge';
 import { BrandMark } from '../components/BrandMark';
 import { SidebarScenarioPicker } from '../components/SidebarScenarioPicker';
@@ -341,6 +342,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
         <div className="px-2.5 pb-2">
           <SyncBadge />
+          {/* The drawer never carries it: the mobile banner already does at every narrow width. */}
+          {!drawer && <AssistantSessionBadge variant="sidebar" />}
         </div>
 
         <SidebarScenarioPicker />
