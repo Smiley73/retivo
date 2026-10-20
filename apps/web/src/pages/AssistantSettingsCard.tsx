@@ -28,6 +28,7 @@ const AGENTS: readonly { agent: AgentName; label: string }[] = [
 ];
 
 const COPY_FEEDBACK_MS = 2000;
+const CODE_FIELD_ID = 'ai-assistants-pairing-code';
 
 /** What the status line says while a session is running. */
 const PHASE_TEXT: Record<string, string> = {
@@ -166,10 +167,25 @@ export const AssistantSettingsCard: React.FC = () => {
   const [code, setCode] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
   const noteId = useId();
+  const formRef = useRef<HTMLFormElement>(null);
+  const wasRunning = useRef(false);
+  const running = phase !== 'idle';
+  // The field and Connect are disabled while a session runs and Disconnect only exists then, so the
+  // control that held focus disappears or goes inert. Hand focus to the one that takes its place,
+  // unless the person has already moved on to something outside the form.
+  useEffect(() => {
+    if (running === wasRunning.current) return;
+    wasRunning.current = running;
+    const form = formRef.current;
+    if (form === null) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && !form.contains(active)) return;
+    const next = running ? form.querySelector('[data-assistant-disconnect]') : form.querySelector(`#${CODE_FIELD_ID}`);
+    if (next instanceof HTMLElement) next.focus();
+  }, [running]);
   if (!offered || port === null) return null;
 
   const family = browserFamily(navigator.userAgent, Boolean((navigator as { brave?: unknown }).brave));
-  const running = phase !== 'idle';
 
   const submit = (event: React.FormEvent): void => {
     event.preventDefault();
@@ -219,15 +235,15 @@ export const AssistantSettingsCard: React.FC = () => {
           )}
           <LaunchCommands port={port} />
           <p className="m-0 mb-2 text-sm font-medium text-ink">2. Enter the pairing code</p>
-          <form onSubmit={submit} noValidate>
+          <form ref={formRef} onSubmit={submit} noValidate>
             <Field
-              htmlFor="ai-assistants-pairing-code"
+              htmlFor={CODE_FIELD_ID}
               label="Pairing code"
               hint="Your assistant shows a code like ABCDE-FGHJK the first time it asks for your plan. It works once, for five minutes."
               error={codeError}
             >
               <TextInput
-                id="ai-assistants-pairing-code"
+                id={CODE_FIELD_ID}
                 name="assistant-pairing-code"
                 type="text"
                 value={code}
@@ -248,7 +264,7 @@ export const AssistantSettingsCard: React.FC = () => {
                 Connect
               </button>
               {running && (
-                <button type="button" className={btnSecondaryClass} onClick={disconnect}>
+                <button type="button" className={btnSecondaryClass} onClick={disconnect} data-assistant-disconnect>
                   Disconnect
                 </button>
               )}

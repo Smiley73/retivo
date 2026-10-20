@@ -35,7 +35,12 @@ import { AuditLog, type AuditEntry } from './audit-log';
 import { CallDispatcher, type SettledCall, type Timers, type ToolHandler } from './dispatcher';
 import { DEFAULT_CONSENT, type SessionConsent, type SessionEnd, type SessionPhase, type SocketFactory, type SocketLike } from './session-types';
 
-/** How long a bridge has to send a valid `hello` once the socket is built or open. */
+/**
+ * How long a socket may stay un-opened before the tab gives up. Long, because a browser keeps a loopback
+ * connection pending while its local-network permission prompt is on screen, and a person answers slowly.
+ */
+export const CONNECT_TIMEOUT_MS = 120_000;
+/** How long a bridge has to send a valid `hello` once the socket is open. */
 export const HELLO_TIMEOUT_MS = 5_000;
 /** How long a bridge has to answer `pair` with `paired`. */
 export const PAIRED_TIMEOUT_MS = 10_000;
@@ -151,7 +156,7 @@ export class AssistantSession {
       return 'started';
     }
     this.socket = socket;
-    this.armDeadline(HELLO_TIMEOUT_MS);
+    this.armDeadline(CONNECT_TIMEOUT_MS);
     socket.addEventListener('open', () => {
       if (socket !== this.socket) return;
       this.setPhase('awaiting-hello');

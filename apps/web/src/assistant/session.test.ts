@@ -12,7 +12,7 @@ import {
 } from '@retirement/assistant-protocol';
 import { ScriptedSocket, bridgeHello, pairScripted, until } from '../test/assistant-socket';
 import { diagnose } from './diagnosis';
-import { AssistantSession, HELLO_TIMEOUT_MS, PAIRED_TIMEOUT_MS, type SessionOptions } from './session';
+import { AssistantSession, CONNECT_TIMEOUT_MS, HELLO_TIMEOUT_MS, PAIRED_TIMEOUT_MS, type SessionOptions } from './session';
 import type { SocketLike } from './session-types';
 
 // Frozen vector from the protocol package: with these nonces the tab's proof is fixed.
@@ -192,6 +192,33 @@ describe('pairing with a scripted socket', () => {
     sockets[0]!.emitClose(1006);
     const { end } = session.getSnapshot();
     expect(end).toEqual({ phase: 'connecting', close: { kind: 'remote', code: 1006 } });
+    expect(diagnose(end!.phase, end!.close, 'unknown')).toEqual({ kind: 'unreachable' });
+  });
+
+  it('does not start the hello deadline until the socket opens, so a pending permission prompt can be answered', () => {
+    vi.useFakeTimers();
+    const { session, sockets } = makeSession();
+    session.connect(VECTOR.code);
+    const socket = sockets[0]!;
+    vi.advanceTimersByTime(HELLO_TIMEOUT_MS * 3);
+    expect(session.getSnapshot().phase).toBe('connecting');
+    expect(socket.closeCall).toBeNull();
+    socket.open();
+    expect(session.getSnapshot().phase).toBe('awaiting-hello');
+    vi.advanceTimersByTime(HELLO_TIMEOUT_MS - 1);
+    expect(session.getSnapshot().phase).toBe('awaiting-hello');
+    vi.advanceTimersByTime(2);
+    expect(session.getSnapshot().end).toEqual({ phase: 'awaiting-hello', close: { kind: 'deadline' } });
+  });
+
+  it('still gives up on a socket that never opens, after the longer connect bound', () => {
+    vi.useFakeTimers();
+    const { session, sockets } = makeSession();
+    session.connect(VECTOR.code);
+    vi.advanceTimersByTime(CONNECT_TIMEOUT_MS + 1);
+    expect(sockets[0]!.closeCall).not.toBeNull();
+    const { end } = session.getSnapshot();
+    expect(end).toEqual({ phase: 'connecting', close: { kind: 'deadline' } });
     expect(diagnose(end!.phase, end!.close, 'unknown')).toEqual({ kind: 'unreachable' });
   });
 

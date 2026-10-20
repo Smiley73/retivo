@@ -172,6 +172,44 @@ describe('connecting', () => {
     expect(screen.queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument();
   });
 
+  it('keeps keyboard focus on the control that takes over when a session starts and ends', async () => {
+    const { sockets } = setup();
+    await userEvent.type(codeField(), CODE);
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toHaveFocus();
+    await act(async () => {
+      await pairScripted(sockets[0]!, CODE);
+    });
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument();
+    expect(codeField()).toHaveFocus();
+  });
+
+  it('returns focus to the code field when the bridge refuses the code', async () => {
+    const { sockets } = setup();
+    await userEvent.type(codeField(), CODE);
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toHaveFocus();
+    await act(async () => {
+      sockets[0]!.open();
+      sockets[0]!.emitClose(4002);
+    });
+    expect(codeField()).toHaveFocus();
+  });
+
+  it('does not take focus from something outside the form when the session ends', async () => {
+    const { sockets } = setup();
+    await userEvent.type(codeField(), CODE);
+    await userEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    const outside = screen.getByRole('button', { name: 'Copy Claude Code command' });
+    outside.focus();
+    await act(async () => {
+      sockets[0]!.emitClose(1006);
+    });
+    expect(outside).toHaveFocus();
+  });
+
   it('asks the person to unlock first when the workspace is locked', async () => {
     auth.value = { ...auth.value, isUnlocked: false };
     const { openSocket } = setup();
