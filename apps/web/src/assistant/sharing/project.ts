@@ -7,7 +7,7 @@
  */
 import { DANGEROUS_CATEGORY_RATE_KEYS } from '../../db/types';
 import type { Classification } from './classification';
-import { applyRounding } from './rounding';
+import { applyMonthlyRounding, applyRounding } from './rounding';
 import { sanitizeFreeText, sanitizeLabel, type Masker } from './sanitize';
 import type { SharingChoices } from './switches';
 
@@ -70,6 +70,9 @@ function project(value: unknown, classification: Classification, context: Projec
     case 'dollars':
       if (typeof value !== 'number' || !Number.isFinite(value)) return OMIT;
       return applyRounding(value, context.choices.exactDollars);
+    case 'monthlyDollars':
+      if (typeof value !== 'number' || !Number.isFinite(value)) return OMIT;
+      return applyMonthlyRounding(value, context.choices.exactDollars);
     case 'label':
       return typeof value === 'string' ? sanitizeLabel(value, context.masker) : OMIT;
     case 'text':

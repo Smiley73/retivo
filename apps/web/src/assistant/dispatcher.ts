@@ -35,12 +35,23 @@ interface ShareBinding {
   buildView(source: ShareSource): ShareView;
 }
 
+/** What a status tool may say about the live connection. */
+interface ConnectionInfo {
+  /** The assistant's self-reported name, untrusted: sanitize before saying it. */
+  assistantName: string | null;
+  /** When the bridge proved itself, in the session clock's milliseconds. */
+  pairedAt: number | null;
+}
+
 export interface ToolCallContext {
   /** Aborted on `cancel`, on timeout and when the session ends; a handler should stop work when it fires. */
   signal: AbortSignal;
   progress(update: { fraction?: number; message?: string }): void;
   /** The only way a handler turns plan data into something it may return. */
   share: ShareBinding;
+  /** The tab's clock when the call started: the one "today" every date and age in the answer is read on. */
+  now: Date;
+  connection: ConnectionInfo;
 }
 
 /** `args` has already been validated against the registry entry's input schema. */
@@ -75,6 +86,8 @@ export interface DispatcherOptions {
   /** The session's current consent record, read at call time; `null` until the person allows. */
   getConsent: () => ConsentRecord | null;
   appBuildId: string;
+  /** The live connection's facts, read at call time. */
+  getConnection?: () => ConnectionInfo;
   /** Writes a frame to the socket; failures are the socket's to report. */
   send: (frame: TabFrame) => void;
   onSettled: (call: SettledCall) => void;
@@ -161,13 +174,16 @@ export class CallDispatcher {
     };
     this.inFlight.set(call.id, call);
 
+    const now = new Date(this.options.now());
     const context: ToolCallContext = {
       signal: controller.signal,
       progress: (update) => this.sendProgress(call, update),
       share: {
         consent,
-        buildView: (source) => buildShareView(source, consent.choices, { now: new Date(this.options.now()) }),
+        buildView: (source) => buildShareView(source, consent.choices, { now }),
       },
+      now,
+      connection: this.options.getConnection?.() ?? { assistantName: null, pairedAt: null },
     };
     void (async () => handler(parsed.data as Record<string, unknown>, context))().then(
       (result) => this.finish(call, result, result.ok),

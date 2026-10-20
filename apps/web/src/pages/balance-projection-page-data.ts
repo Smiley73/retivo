@@ -12,22 +12,16 @@
  * non-drawdown surface out of the migration.
  */
 import {
-  type AccountBalancePayload,
   type AccountPayload,
   type Aggregate,
-  type ExpenseCategoryPayload,
-  type ExpensePayload,
   type HouseholdMemberPayload,
-  type IncomeStreamPayload,
   type ScenarioOverrides,
-  type SocialSecurityBenefitPayload,
 } from '../db/types';
+import type { ScenarioAggregate } from '../lib/scenario-resolution';
 import {
-  resolveScenario,
-  type ScenarioAggregate,
-} from '../lib/scenario-resolution';
-import { medicalCategoryIdsFrom } from '../lib/expense-category-resolvers';
-import { resolveMemberRetirementDates } from '../lib/retirement-date-math';
+  assemblePageProjection,
+  type PageProjectionInputs,
+} from '../lib/page-projection-args';
 import {
   runBalanceProjectionForPage,
   type PageDrawdownMethodResult,
@@ -124,101 +118,6 @@ function toBreakdownRow(
   };
 }
 
-/** Resolve the household's primary member and the per-member retirement
- *  dates, then derive the primary's retirement ISO date + its absolute-month
- *  index (`year * 12 + month0`) the page uses to anchor markers. Returns
- *  nulls when there is no primary or its retirement date is unresolved. */
-function derivePrimaryRetirement(
-  retirementAge: ScenarioOverrides['retirementAge'],
-  members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
-): {
-  readonly primaryMember: Aggregate<HouseholdMemberPayload> | null;
-  readonly memberRetirementById: Map<string, string | null>;
-  readonly primaryRetirementIso: string | null;
-  readonly primaryRetirementAbsMonth: number | null;
-} {
-  const primaryMember = members.find((m) => m.payload.isPrimary) ?? null;
-  const memberRetirementById = resolveMemberRetirementDates(
-    retirementAge,
-    members.map((m) => ({
-      id: m.id,
-      isPrimary: m.payload.isPrimary,
-      birthdate: m.payload.birthdate,
-    })),
-  );
-  const primaryRetirementIso = primaryMember
-    ? memberRetirementById.get(primaryMember.id) ?? null
-    : null;
-  const year = primaryRetirementIso
-    ? Number(primaryRetirementIso.slice(0, 4))
-    : null;
-  const month0 = primaryRetirementIso
-    ? Number(primaryRetirementIso.slice(5, 7)) - 1
-    : null;
-  return {
-    primaryMember,
-    memberRetirementById,
-    primaryRetirementIso,
-    primaryRetirementAbsMonth:
-      year !== null && month0 !== null ? year * 12 + month0 : null,
-  };
-}
-
-/**
- * Does a balance row record an actual (non-zero) balance? For a MIXED-treatment
- * account the money can live only in the split fields, so we read
- * `startingBalancePreTax/PostTax` + `endingBalancePreTax/PostTax` with the
- * top-level `startingBalance`/`endingBalance` as a fallback. A row whose
- * every relevant balance field is 0 is NOT real — that includes the auto-$0
- * seed an account picks up at creation.
- */
-function balanceRowIsReal(p: AccountBalancePayload): boolean {
-  const candidates = [
-    p.startingBalance,
-    p.endingBalance,
-    p.startingBalancePreTax ?? 0,
-    p.startingBalancePostTax ?? 0,
-    p.endingBalancePreTax ?? 0,
-    p.endingBalancePostTax ?? 0,
-  ];
-  return candidates.some((v) => v !== 0);
-}
-
-/** Hidden-account footer counts (presentation only): inactive accounts and
- *  active accounts with no **non-zero** balance row (the runner drops both from
- *  `accountProjections`). Re-keyed from "no balance row at all" to "no non-zero
- *  balance row" so the NoAccountState vs NoHistoryState distinction stays
- *  correct once auto-$0 seed accounts always carry a row. Also surfaces
- *  the portfolio-level `hasAnyRealBalance` predicate the empty-state gate reads.
- *  Returned alongside the active-account list the caller uses to decide whether
- *  the runner has anything to project. */
-function deriveHiddenAccountCounts(
-  accounts: ReadonlyArray<Aggregate<AccountPayload>>,
-  balances: ReadonlyArray<Aggregate<AccountBalancePayload>>,
-): {
-  readonly activeAccounts: Aggregate<AccountPayload>[];
-  readonly hiddenInactiveCount: number;
-  readonly hiddenZeroHistoryCount: number;
-  readonly hasAnyRealBalance: boolean;
-} {
-  const realBalanceAccountIds = new Set(
-    balances
-      .filter((b) => balanceRowIsReal(b.payload))
-      .map((b) => b.payload.accountId),
-  );
-  const activeAccounts = accounts.filter((a) => a.payload.active);
-  return {
-    activeAccounts,
-    hiddenInactiveCount: accounts.length - activeAccounts.length,
-    hiddenZeroHistoryCount: activeAccounts.filter(
-      (a) => !realBalanceAccountIds.has(a.id),
-    ).length,
-    hasAnyRealBalance: activeAccounts.some((a) =>
-      realBalanceAccountIds.has(a.id),
-    ),
-  };
-}
-
 /**
  * Run the shared projection once and map its `accountProjections` into the
  * page's sorted `BreakdownAccountRow` set. The runner needs a resolvable
@@ -252,80 +151,30 @@ function runProjectionRows(opts: {
  * via `pageResult`. The hidden-account footer counts are page-side (cheap,
  * presentation-only) since the runner drops zero-history accounts entirely.
  */
-export function loadPageData(opts: {
-  readonly scenarios: ReadonlyArray<ScenarioAggregate>;
-  readonly selectedScenarioId: string;
-  readonly members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
-  readonly accounts: ReadonlyArray<Aggregate<AccountPayload>>;
-  readonly balances: ReadonlyArray<Aggregate<AccountBalancePayload>>;
-  readonly expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
-  readonly incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
-  readonly ssBenefits: ReadonlyArray<Aggregate<SocialSecurityBenefitPayload>>;
-  /** Household expense categories — the source for the flag-derived medical
-   *  set. Omit to keep the legacy `cat-medical` default (back-compat for
-   *  callers that don't load categories). */
-  readonly categories?: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>;
-  readonly todayYear: number;
-  readonly todayMonthIndex: number;
-}): PipelineData {
-  const { scenarios, selectedScenarioId, members, accounts, balances } = opts;
-  const medicalCategoryIds = opts.categories
-    ? medicalCategoryIdsFrom([...opts.categories])
-    : undefined;
-  const resolved = resolveScenario(selectedScenarioId, [...scenarios]);
+export function loadPageData(opts: PageProjectionInputs): PipelineData {
+  const { scenarios, selectedScenarioId, members, accounts } = opts;
+  const assembly = assemblePageProjection(opts);
   const memberById = new Map(members.map((m) => [m.id, m]));
-  const {
-    primaryMember,
-    memberRetirementById,
-    primaryRetirementIso,
-    primaryRetirementAbsMonth,
-  } = derivePrimaryRetirement(resolved.retirementAge, [...members]);
-
-  const {
-    activeAccounts,
-    hiddenInactiveCount,
-    hiddenZeroHistoryCount,
-    hasAnyRealBalance,
-  } = deriveHiddenAccountCounts([...accounts], [...balances]);
-
   const { pageResult, rows } = runProjectionRows({
-    canRun: Boolean(
-      primaryMember &&
-        primaryRetirementIso &&
-        resolved.retirementAge &&
-        activeAccounts.length > 0,
-    ),
-    args: {
-      scenarioId: selectedScenarioId,
-      scenarios: [...scenarios],
-      accounts: [...accounts],
-      balances: [...balances],
-      members: [...members],
-      ssBenefits: [...opts.ssBenefits],
-      expenses: [...opts.expenses],
-      incomeStreams: [...opts.incomeStreams],
-      todayYear: opts.todayYear,
-      todayMonthIndex: opts.todayMonthIndex,
-      method: 'planned',
-      ...(medicalCategoryIds ? { medicalCategoryIds } : {}),
-    },
+    canRun: assembly.canRun,
+    args: assembly.args,
     memberById,
   });
 
   return {
-    medicalCategoryIds,
+    medicalCategoryIds: assembly.medicalCategoryIds,
     scenarios: [...scenarios],
     selectedScenarioId,
-    resolved,
+    resolved: assembly.resolved,
     members: [...members],
-    primaryMember,
-    memberRetirementById,
+    primaryMember: assembly.primaryMember,
+    memberRetirementById: assembly.memberRetirementById,
     rows,
     accounts: [...accounts],
-    hiddenInactiveCount,
-    hiddenZeroHistoryCount,
-    hasAnyRealBalance,
-    primaryRetirementAbsMonth,
+    hiddenInactiveCount: assembly.hiddenInactiveCount,
+    hiddenZeroHistoryCount: assembly.hiddenZeroHistoryCount,
+    hasAnyRealBalance: assembly.hasAnyRealBalance,
+    primaryRetirementAbsMonth: assembly.primaryRetirementAbsMonth,
     pageResult,
   };
 }

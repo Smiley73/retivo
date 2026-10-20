@@ -131,6 +131,7 @@ export class AssistantSession {
       now: this.now,
       isWorkspaceReady: options.isWorkspaceReady,
       getConsent: () => this.consent,
+      getConnection: () => ({ assistantName: this.client?.name ?? null, pairedAt: this.pairedAt }),
       appBuildId: options.appBuildId,
       send: (frame) => this.sendFrame(frame),
       onSettled: (call) => this.onSettled(call),

@@ -82,7 +82,7 @@ export const CONSENT_SWITCHES: readonly SwitchDefinition[] = [
     'exactDollars',
     'Exact dollar figures',
     'Dollar amounts exactly as you entered them.',
-    'every dollar figure is rounded to the nearest $1,000. Percentages, years and ages are not rounded.',
+    'annual dollar figures are rounded to the nearest $1,000 and monthly ones to the nearest $100. Percentages, years and ages are not rounded.',
   ),
   sharing(
     'firstNames',

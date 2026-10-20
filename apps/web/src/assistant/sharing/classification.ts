@@ -16,7 +16,8 @@
  * What a classification means:
  *  - `never`    the field is not shared in any setting.
  *  - `plain`    an enum, flag, percentage, year, age or count; a string must be one enum-like token.
- *  - `dollars`  a dollar figure; rounded to the nearest $1,000 unless exact figures are on.
+ *  - `dollars`  an annual dollar figure; rounded to the nearest $1,000 unless exact figures are on.
+ *  - `monthlyDollars` a monthly dollar figure (a benefit estimate, a pension payment); rounded to the nearest $100.
  *  - `label`    a name; governed by its category's switch, sanitized, 60 characters.
  *  - `text`     a note or description; governed by the notes switch, sanitized, 500 characters.
  *  - `id`       an opaque reference to another aggregate.
@@ -65,7 +66,7 @@ import type { SharingCategoryId } from './switches';
 
 export type Classification =
   | { readonly kind: 'never'; readonly reason: string }
-  | { readonly kind: 'plain' | 'dollars' | 'label' | 'text' | 'id' | 'date' | 'firstName' }
+  | { readonly kind: 'plain' | 'dollars' | 'monthlyDollars' | 'label' | 'text' | 'id' | 'date' | 'firstName' }
   | { readonly kind: 'object'; readonly fields: Readonly<Record<string, Classification>> }
   | { readonly kind: 'array'; readonly item: Classification }
   | { readonly kind: 'record'; readonly keys: 'id' | 'year'; readonly value: Classification }
@@ -82,6 +83,7 @@ type AllKeys<T> = T extends unknown ? keyof T : never;
 const never = (reason: string): Classification => ({ kind: 'never', reason });
 const PLAIN: Classification = { kind: 'plain' };
 const DOLLARS: Classification = { kind: 'dollars' };
+const MONTHLY_DOLLARS: Classification = { kind: 'monthlyDollars' };
 const LABEL: Classification = { kind: 'label' };
 const TEXT: Classification = { kind: 'text' };
 const ID: Classification = { kind: 'id' };
@@ -235,7 +237,7 @@ export const INCOME_CLASSIFICATION = {
   start: SCHEDULE_START,
   end: SCHEDULE_END,
   payoutType: PLAIN,
-  monthlyBenefit: DOLLARS,
+  monthlyBenefit: MONTHLY_DOLLARS,
   lumpSumAmount: DOLLARS,
   jointAndSurvivorPct: PLAIN,
   linkedCbpAccountId: ID,
@@ -250,7 +252,7 @@ export const INCOME_CLASSIFICATION = {
 
 export const SOCIAL_SECURITY_CLASSIFICATION = {
   householdMemberId: ID,
-  pia: DOLLARS,
+  pia: MONTHLY_DOLLARS,
   piaAsOfDate: DATE,
   notes: TEXT,
 } satisfies Record<KnownKeys<SocialSecurityBenefitPayload>, Classification>;
