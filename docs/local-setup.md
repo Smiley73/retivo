@@ -230,6 +230,7 @@ and stops at the first failure.
 | `pnpm knip` | Finds unused files, exports and dependencies. |
 | `pnpm typecheck` | Builds the shared `packages/contracts` and `packages/assistant-protocol` packages, then type-checks every package, including the browser tests in `apps/web/e2e`. |
 | `pnpm test` | Runs each package's tests one package at a time, then the script tests. The AI assistant bridge's tests build `apps/mcp-bridge/dist` first, because some of them start the built program. |
+| `pnpm test:contracts` | Slow checks that are not part of `pnpm test`: builds the Lambda artifact, scans the web bundle for the assistant's loopback address, and builds the AI assistant bridge into its single-file bundle and drives that file alone in an empty folder (it answers an MCP handshake and lists the tools, its notices name everything it contains). Needs network access for the dependency audit. CI runs it as its own step. |
 | `pnpm audit:ci` | `pnpm audit` for known vulnerabilities in dependencies (moderate and above). Needs network access. |
 | `pnpm gate` | All of the above: `lint`, `depcruise`, `knip`, `typecheck`, `test`, `audit:ci`. |
 
@@ -360,12 +361,12 @@ carries a bridge port, so:
    the repo.
 3. Run the bridge against the dev server's address, which it compares exactly.
    Loopback addresses may use plain `http`, so this is the one case that works
-   without HTTPS. The card's copy button gives you the command to paste into an
-   assistant; its launcher is a placeholder for the command that will install the
-   published bridge, so against a checkout use the built file instead, for example:
+   without HTTPS. The dev server does not serve the bridge file (a deployed stack
+   does), so the card has no download to offer here. Use the file the build left in
+   your checkout instead, for example:
 
    ```bash
-   claude mcp add retivo -- node /full/path/to/retivo/apps/mcp-bridge/dist/bin.js --origin http://localhost:5173
+   claude mcp add retivo -- node /full/path/to/retivo/apps/mcp-bridge/build/retivo-mcp-bridge.mjs --origin http://localhost:5173
    ```
 
    Use the full path to your checkout (not `$PWD`, which is wherever your terminal
@@ -409,7 +410,7 @@ them. To use a phone or a second laptop on your network:
 | `apps/web` | The web app: React, Vite, and the browser-side storage and encryption. |
 | `apps/api` | The API: NestJS, with the Lambda entry point used when deployed. |
 | `packages/contracts` | Request and response types shared by the web app and the API. |
-| `apps/mcp-bridge` | The AI assistant bridge: a small program an assistant starts over standard input and output, which relays its tool calls to the signed-in browser tab over a local connection. |
+| `apps/mcp-bridge` | The AI assistant bridge: a small program an assistant starts over standard input and output, which relays its tool calls to the signed-in browser tab over a local connection. `pnpm --filter @retirement/mcp-bridge build` also bundles it into one file, `apps/mcp-bridge/build/retivo-mcp-bridge.mjs`, which a deployed stack serves to the people who set the connector up. |
 | `packages/assistant-protocol` | The messages, tool list and pairing rules shared by the AI assistant bridge and the web app. |
 | `infrastructure` | Pulumi code for the Amazon deployment, and the Docker file for the emulators. |
 | `scripts` | Repo-wide check scripts and their tests. |

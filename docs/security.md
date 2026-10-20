@@ -571,6 +571,14 @@ Four parties are involved, and each sees different things:
 - **The bridge** (`apps/mcp-bridge`) is a program on your computer that the
   assistant starts. It holds no plan data and writes none to disk. It sees every
   tool result in passing, because it relays them to the assistant, and keeps none.
+  It is one file that the deployed site itself serves (a stack that sets
+  `assistantBridgePort` publishes it, with a `bridge.json` naming its SHA-256, at
+  deploy time), and the person downloads it once and has the assistant run it. The
+  download command the card shows checks the file against that checksum before it
+  keeps it, which catches a damaged download and nothing more: both come from the
+  same site, so whoever controls the site controls the bridge. Nothing is
+  installed from a package registry, and the file embeds its dependencies, so
+  nothing else is fetched when the assistant starts it.
 - **The assistant** sees every tool result. It runs with your user's permissions.
 - **The model provider** sees whatever the assistant puts into the conversation,
   including every tool result.

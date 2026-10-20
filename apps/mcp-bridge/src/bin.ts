@@ -14,7 +14,13 @@ if (!parsed.ok) {
   process.exit(2);
 }
 
-const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+// The single-file bundle (scripts/build-bundle.mjs) has no package.json beside it, so the build
+// substitutes the version in; running the compiled files from dist/ reads the manifest instead.
+declare const __BRIDGE_VERSION__: string | undefined;
+const version =
+  typeof __BRIDGE_VERSION__ === 'string'
+    ? __BRIDGE_VERSION__
+    : (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 const logger = createLogger();
 
 let bridge: Bridge;
