@@ -39,7 +39,8 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
     blurb:
       'A new Compare tab sets the scenario you are viewing beside another one, ' +
       'showing the ending balance at the end of each plan and the year money ' +
-      'runs out, with the difference between them.',
+      'runs out, with the difference between them, plus a Drivers table of ' +
+      'lifetime tax, Roth conversion, withdrawal and other totals.',
   },
   {
     date: '2026-10-20',

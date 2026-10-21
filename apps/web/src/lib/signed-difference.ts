@@ -19,6 +19,8 @@ export type SignedDifferenceKind =
   | 'money'
   /** A count of years or a calendar year; `null` means not available. */
   | 'years'
+  /** A count of years, not a calendar year (years of withdrawals): "more"/"less". */
+  | 'yearCount'
   /** The year the money runs out; `null` means it never does. */
   | 'runOutYear'
   /** Probabilities as FRACTIONS (0.9 = 90%); magnitude in whole points. */
@@ -59,6 +61,11 @@ export function formatSignedDifference(
   const diff = viewed - comparison;
   if (!Number.isFinite(diff)) return NOT_AVAILABLE_TEXT;
   if (kind === 'years') return yearsText(diff);
+  if (kind === 'yearCount') {
+    const count = Math.round(Math.abs(diff));
+    if (count === 0) return NO_DIFFERENCE_TEXT;
+    return signed(diff, `${count} ${count === 1 ? 'year' : 'years'}`, 'more', 'less');
+  }
   if (kind === 'percentagePoints') {
     const points = Math.round(Math.abs(diff) * 100);
     if (points === 0) return NO_DIFFERENCE_TEXT;
