@@ -35,30 +35,30 @@ describe('TaxBurdenBand — gate predicate', () => {
 
   it('returns false when all rows have zero tax values', () => {
     const rows: TaxBurdenChartRow[] = [
-      { year: 2030, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: 0 },
-      { year: 2031, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: 0 },
+      { year: 2030, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: 0, acaCreditApplied: 0 },
+      { year: 2031, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: 0, acaCreditApplied: 0 },
     ];
     expect(hasTaxBurdenData(rows)).toBe(false);
   });
 
   it('returns true when any row has non-zero federalTax', () => {
     const rows: TaxBurdenChartRow[] = [
-      { year: 2030, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: 0 },
-      { year: 2031, federalTax: 1500, irmaaSurcharge: 0, acaPtcSubsidy: 0 },
+      { year: 2030, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: 0, acaCreditApplied: 0 },
+      { year: 2031, federalTax: 1500, irmaaSurcharge: 0, acaPtcSubsidy: 0, acaCreditApplied: 0 },
     ];
     expect(hasTaxBurdenData(rows)).toBe(true);
   });
 
   it('returns true when any row has non-zero irmaaSurcharge', () => {
     const rows: TaxBurdenChartRow[] = [
-      { year: 2030, federalTax: 0, irmaaSurcharge: 800, acaPtcSubsidy: 0 },
+      { year: 2030, federalTax: 0, irmaaSurcharge: 800, acaPtcSubsidy: 0, acaCreditApplied: 0 },
     ];
     expect(hasTaxBurdenData(rows)).toBe(true);
   });
 
   it('returns true when any row has non-zero acaPtcSubsidy (negative by convention)', () => {
     const rows: TaxBurdenChartRow[] = [
-      { year: 2030, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -1200 },
+      { year: 2030, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -1200, acaCreditApplied: 0 },
     ];
     expect(hasTaxBurdenData(rows)).toBe(true);
   });
@@ -74,13 +74,14 @@ describe('sumTaxBurden', () => {
       federalTax: 0,
       irmaaSurcharge: 0,
       acaPtcCredit: 0,
+      acaCreditApplied: 0,
     });
   });
 
   it('sums federalTax and irmaaSurcharge across rows', () => {
     const rows: TaxBurdenChartRow[] = [
-      { year: 2030, federalTax: 1000, irmaaSurcharge: 200, acaPtcSubsidy: 0 },
-      { year: 2031, federalTax: 1500, irmaaSurcharge: 300, acaPtcSubsidy: 0 },
+      { year: 2030, federalTax: 1000, irmaaSurcharge: 200, acaPtcSubsidy: 0, acaCreditApplied: 0 },
+      { year: 2031, federalTax: 1500, irmaaSurcharge: 300, acaPtcSubsidy: 0, acaCreditApplied: 0 },
     ];
     const total = sumTaxBurden(rows);
     expect(total.federalTax).toBe(2500);
@@ -91,9 +92,20 @@ describe('sumTaxBurden', () => {
     // ACA-PTC is stored negative (renders below zero on the chart); the tile
     // shows the credit received as a positive figure.
     const rows: TaxBurdenChartRow[] = [
-      { year: 2030, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -1200 },
-      { year: 2031, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -800 },
+      { year: 2030, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -1200, acaCreditApplied: 0 },
+      { year: 2031, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -800, acaCreditApplied: 0 },
     ];
     expect(sumTaxBurden(rows).acaPtcCredit).toBe(2000);
+  });
+
+  it('sums the credit applied to premiums as its own positive figure', () => {
+    // It is part of the ACA credit above, so it never changes that tile.
+    const rows: TaxBurdenChartRow[] = [
+      { year: 2030, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -1200, acaCreditApplied: 700 },
+      { year: 2031, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -800, acaCreditApplied: 300 },
+    ];
+    const total = sumTaxBurden(rows);
+    expect(total.acaCreditApplied).toBe(1000);
+    expect(total.acaPtcCredit).toBe(2000);
   });
 });

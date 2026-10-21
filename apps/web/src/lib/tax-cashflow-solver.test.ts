@@ -296,6 +296,7 @@ describe('solveTaxCashflow', () => {
     expect(result.totalTaxCashflowNeedCents).toBe(0);
     expect(result.taxCashflowShortfallCents).toBe(0);
     expect(result.federalTaxCashNeedCents).toBe(0);
+    expect(result.acaCreditAppliedToPremiumsCents).toBe(0);
   });
 
   it('taxes the SS-withheld IRMAA draw: trial target grosses up by the withheld '
@@ -378,5 +379,126 @@ describe('solveTaxCashflow', () => {
     });
     const result = solveTaxCashflow(args);
     expect(result.totalTaxCashflowNeedCents).toBeGreaterThanOrEqual(0);
+  });
+});
+
+/**
+ * One retired single filer, 2026, with $31,300 of Social Security and a
+ * $7,200 benchmark: ACA MAGI is 200.0% of the $15,650 poverty guideline, so the
+ * expected contribution is 6.60% = $2,065.80 and the credit is $5,134.20 with no
+ * federal tax to offset. A Roth draw adds no income, so the credit does not move
+ * with the draw.
+ */
+function aca2026Input(overrides: Partial<TaxYearInput> = {}): TaxYearInput {
+  return baseTaxInput({
+    taxYear: 2026,
+    grossSsDollars: 31_300,
+    acaBenchmarkSlcspDollars: 7_200,
+    members: [{ memberId: 'p', isoBirthdate: '1963-01-01', onMedicare: false, hasAcaCoverage: true }],
+    ...overrides,
+  });
+}
+
+function allRothClassifier(target: number): WithdrawalClassification {
+  return {
+    preTaxDollars: 0,
+    postTaxNonRothDollars: 0,
+    postTaxCashLikeDollars: 0,
+    rothDollars: target,
+    fundedDollars: target,
+  };
+}
+
+describe('solveTaxCashflow — credit applied to premiums', () => {
+  const rothArgs = (overrides: Partial<TaxCashflowSolveArgs> = {}): TaxCashflowSolveArgs =>
+    baseArgs({
+      ordinaryNetNeedDollars: 39_900,
+      taxInputBase: aca2026Input(),
+      classifyForTarget: allRothClassifier,
+      ...overrides,
+    });
+
+  it('applies the whole excess when the draw and the Medical expenses are larger', () => {
+    const result = solveTaxCashflow(rothArgs({ medicalExpenseCents: 720_000 }));
+    expect(result.taxYearResult.acaPtcSubsidyCents).toBe(513_420);
+    // The need stays at its zero floor and the offset is unchanged.
+    expect(result.totalTaxCashflowNeedCents).toBe(0);
+    expect(result.acaPtcCashflowOffsetCents).toBe(0);
+    expect(result.acaCreditAppliedToPremiumsCents).toBe(513_420);
+  });
+
+  it('is capped by the draw when the year needs less than the credit', () => {
+    const result = solveTaxCashflow(rothArgs({ ordinaryNetNeedDollars: 2_700, medicalExpenseCents: 720_000 }));
+    expect(result.acaCreditAppliedToPremiumsCents).toBe(270_000);
+  });
+
+  it('is capped by the Medical expenses when they are smaller than the excess', () => {
+    const result = solveTaxCashflow(rothArgs({ ordinaryNetNeedDollars: 11_700, medicalExpenseCents: 300_000 }));
+    expect(result.acaCreditAppliedToPremiumsCents).toBe(300_000);
+  });
+
+  it('is zero when Social Security already covers spending', () => {
+    const result = solveTaxCashflow(rothArgs({ ordinaryNetNeedDollars: 0, medicalExpenseCents: 720_000 }));
+    expect(result.acaCreditAppliedToPremiumsCents).toBe(0);
+  });
+
+  it('is zero without a medical cap, and MAGI, taxable SS and fplPercentage do not move with it', () => {
+    const without = solveTaxCashflow(rothArgs());
+    const withCap = solveTaxCashflow(rothArgs({ medicalExpenseCents: 720_000 }));
+    expect(without.acaCreditAppliedToPremiumsCents).toBe(0);
+    for (const key of ['magiCents', 'taxableSsCents', 'fplPercentage', 'federalTaxCents', 'acaPtcSubsidyCents'] as const) {
+      expect(withCap.taxYearResult[key]).toBe(without.taxYearResult[key]);
+    }
+    expect(withCap.totalTaxCashflowNeedCents).toBe(without.totalTaxCashflowNeedCents);
+    expect(withCap.acaPtcCashflowOffsetCents).toBe(without.acaPtcCashflowOffsetCents);
+  });
+
+  it('feeds the line into the next trial target and the convergence test', () => {
+    const targets: number[] = [];
+    const result = solveTaxCashflow(
+      rothArgs({
+        medicalExpenseCents: 720_000,
+        classifyForTarget: (target) => {
+          targets.push(target);
+          return allRothClassifier(target);
+        },
+      }),
+    );
+    // Pass 1 funds the ordinary need alone; pass 2 funds it less the line.
+    expect(targets[0]).toBe(39_900);
+    expect(targets[1]).toBeCloseTo(34_765.8, 6);
+    // The net cost (need minus line) did not move between the passes: converged.
+    expect(result.taxCashflowIterations).toBe(2);
+    expect(result.taxCashflowConverged).toBe(true);
+  });
+
+  it('with a pre-tax draw, converges and reports the final pass\'s line, not the first\'s', () => {
+    // $30,000 of Social Security plus pre-tax draws: the credit moves with the
+    // draw, and the line lowers the draw, which raises the credit again.
+    const input = aca2026Input({ grossSsDollars: 30_000 });
+    const args = baseArgs({
+      ordinaryNetNeedDollars: 15_000,
+      taxInputBase: input,
+      classifyForTarget: allPreTaxClassifier,
+      medicalExpenseCents: 2_000_000,
+    });
+    const result = solveTaxCashflow(args);
+    expect(result.taxCashflowConverged).toBe(true);
+    expect(result.taxCashflowIterations).toBeGreaterThan(1);
+    // Recompute the line from the final pass's own figures.
+    const finalExcess = Math.max(
+      0,
+      result.taxYearResult.acaPtcSubsidyCents - result.acaPtcCashflowOffsetCents,
+    );
+    const remaining =
+      1_500_000 + result.totalTaxCashflowNeedCents + result.irmaaWithheldFromSsCents;
+    expect(result.acaCreditAppliedToPremiumsCents).toBe(Math.min(finalExcess, remaining));
+    // The first pass classified the ordinary need alone, a different MAGI and credit.
+    const firstPass = applyTaxYear(
+      { ...input, preTaxWithdrawalDollars: 15_000 },
+      REAL_BUNDLE,
+    );
+    expect(firstPass.acaPtcSubsidyCents).not.toBe(result.taxYearResult.acaPtcSubsidyCents);
+    expect(result.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
   });
 });

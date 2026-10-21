@@ -42,6 +42,19 @@ export function medicalCategoryIdsFrom(
 }
 
 /**
+ * The predicate for the FULL modeled Medical expenses: a resolved expense whose
+ * `categoryId` is in the `medicalIds` set, HSA-qualified or not. Both engine
+ * builders use it for the cap on the ACA credit applied to premiums, so the
+ * cap and the HSA demand it contains are cut from one set of ids.
+ */
+export function isMedicalExpense(
+  expense: { payload: Pick<ExpensePayload, 'categoryId'> },
+  medicalIds: ReadonlySet<string>,
+): boolean {
+  return medicalIds.has(expense.payload.categoryId);
+}
+
+/**
  * The SINGLE-SOURCE predicate for HSA-qualified medical demand.
  *
  * A resolved expense contributes to HSA medical demand iff:

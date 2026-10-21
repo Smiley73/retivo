@@ -13,10 +13,10 @@ import { expectNoA11yViolations } from '../test/a11y';
 import { CHART_COLORS } from '../lib/tokens';
 
 const rows = [
-  { year: 2026, federalTax: 8000, irmaaSurcharge: 0, acaPtcSubsidy: 0 },
-  { year: 2027, federalTax: 9500, irmaaSurcharge: 800, acaPtcSubsidy: 0 },
-  { year: 2028, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -3200 },
-  { year: 2029, federalTax: 4000, irmaaSurcharge: 600, acaPtcSubsidy: -1500 },
+  { year: 2026, federalTax: 8000, irmaaSurcharge: 0, acaPtcSubsidy: 0, acaCreditApplied: 0 },
+  { year: 2027, federalTax: 9500, irmaaSurcharge: 800, acaPtcSubsidy: 0, acaCreditApplied: 0 },
+  { year: 2028, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -3200, acaCreditApplied: 0 },
+  { year: 2029, federalTax: 4000, irmaaSurcharge: 600, acaPtcSubsidy: -1500, acaCreditApplied: 0 },
 ];
 
 interface BarRect {
@@ -130,6 +130,27 @@ describe('TaxBurdenChartInner — integer death-year terminal bar + marker domai
     expect(
       container.querySelector('[data-marker-label="Pat life expectancy 90"]'),
     ).not.toBeNull();
+  });
+});
+
+describe('TaxBurdenChartInner — credit applied to premiums', () => {
+  // The dollars are already inside the ACA-PTC bar, so the figure rides the
+  // tooltip and the lifetime tiles only: a second negative bar would double
+  // count them.
+  const withCredit = [
+    { year: 2026, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -5134.2, acaCreditApplied: 5134.2 },
+    { year: 2027, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -3000, acaCreditApplied: 2700 },
+  ];
+
+  it('draws no bar of its own and leaves the ACA-PTC bar at the full subsidy', () => {
+    const container = renderWithTheme('light', <InnerChart rows={withCredit} />);
+    expect(getBars(container, 'Credit applied to premiums')).toHaveLength(0);
+    expect(getBars(container, 'ACA-PTC subsidy')).toHaveLength(2);
+  });
+
+  it('renders without a11y violations', async () => {
+    const container = renderWithTheme('light', <InnerChart rows={withCredit} />);
+    await expectNoA11yViolations(container);
   });
 });
 

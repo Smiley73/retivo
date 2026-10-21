@@ -713,7 +713,7 @@ describe("applyTaxForYear's local survivor derivation — precompute present vs 
 
     // Arm A: precompute present (the normal, hoisted path).
     const stateWithPrecompute = newTaxPathState(
-      input, out, stepCount, horizonYears, nominalExpenseByYear, ctx,
+      input, out, stepCount, horizonYears, nominalExpenseByYear, new Float64Array(horizonYears), ctx,
     )!;
     const balNA: number[] = new Array(horizonYears);
     const balRA: number[] = new Array(horizonYears);
@@ -723,7 +723,7 @@ describe("applyTaxForYear's local survivor derivation — precompute present vs 
     // fallback `deriveMcSurvivors` call on every year, exactly like a
     // no-taxContext run.
     const stateNoPrecomputeBase = newTaxPathState(
-      input, out, stepCount, horizonYears, nominalExpenseByYear, ctx,
+      input, out, stepCount, horizonYears, nominalExpenseByYear, new Float64Array(horizonYears), ctx,
     )!;
     const stateNoPrecompute: TaxPathContext = { ...stateNoPrecomputeBase, survivorStateByYear: null };
     const balNB: number[] = new Array(horizonYears);
@@ -764,7 +764,7 @@ describe("applyTaxForYear's local survivor derivation — precompute present vs 
     // it even though the equivalence test above still passes (both arms derive
     // from the same taxCtx and land on the same numbers either way).
     const stateWithPrecompute = newTaxPathState(
-      input, out, stepCount, horizonYears, nominalExpenseByYear, ctx,
+      input, out, stepCount, horizonYears, nominalExpenseByYear, new Float64Array(horizonYears), ctx,
     )!;
     const balNA: number[] = new Array(horizonYears);
     const balRA: number[] = new Array(horizonYears);
@@ -776,7 +776,7 @@ describe("applyTaxForYear's local survivor derivation — precompute present vs 
     // A's silence above is real precompute consumption, not a fixture where
     // the function is simply never reached).
     const stateNoPrecomputeBase = newTaxPathState(
-      input, out, stepCount, horizonYears, nominalExpenseByYear, ctx,
+      input, out, stepCount, horizonYears, nominalExpenseByYear, new Float64Array(horizonYears), ctx,
     )!;
     const stateNoPrecompute: TaxPathContext = { ...stateNoPrecomputeBase, survivorStateByYear: null };
     const balNB: number[] = new Array(horizonYears);

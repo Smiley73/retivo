@@ -405,7 +405,7 @@ describe('buildIncomeBreakdownTableSpec', () => {
 describe('buildTaxBurdenTableSpec', () => {
   it('flips the negative ACA-PTC into a positive credit column', () => {
     const spec = buildTaxBurdenTableSpec([
-      { year: 2040, federalTax: 1000, irmaaSurcharge: 200, acaPtcSubsidy: -300 },
+      { year: 2040, federalTax: 1000, irmaaSurcharge: 200, acaPtcSubsidy: -300, acaCreditApplied: 0 },
     ]);
     expect(spec.head[0]).toEqual([
       'Year',

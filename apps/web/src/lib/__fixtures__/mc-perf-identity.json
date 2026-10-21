@@ -1,6 +1,6 @@
 {
   "caseA": {
-    "engineVersion": 71,
+    "engineVersion": 72,
     "seed": 12345,
     "pathCount": 500,
     "firstYear": 2026,
@@ -998,6 +998,7 @@
             "preTaxCentsByOwnerIdx": [
               152701235
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6298136,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2926524,
@@ -1041,6 +1042,7 @@
             "preTaxCentsByOwnerIdx": [
               159106769
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6443090,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3069798,
@@ -1084,6 +1086,7 @@
             "preTaxCentsByOwnerIdx": [
               169242513
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6947894,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3480686,
@@ -1127,6 +1130,7 @@
             "preTaxCentsByOwnerIdx": [
               169090335
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 7692841,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3939959,
@@ -1170,6 +1174,7 @@
             "preTaxCentsByOwnerIdx": [
               166266792
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 8013760,
             "rmdShortfallCents": 0,
             "federalTaxCents": 4147762,
@@ -1213,6 +1218,7 @@
             "preTaxCentsByOwnerIdx": [
               148157142
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 8231029,
             "rmdShortfallCents": 0,
             "federalTaxCents": 4228435,
@@ -1256,6 +1262,7 @@
             "preTaxCentsByOwnerIdx": [
               143640875
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 7636966,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3903969,
@@ -1299,6 +1306,7 @@
             "preTaxCentsByOwnerIdx": [
               165771473
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 7764372,
             "rmdShortfallCents": 0,
             "federalTaxCents": 4094856,
@@ -1342,6 +1350,7 @@
             "preTaxCentsByOwnerIdx": [
               185454684
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 9365620,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5219268,
@@ -1385,6 +1394,7 @@
             "preTaxCentsByOwnerIdx": [
               187348530
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11038969,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6326860,
@@ -1428,6 +1438,7 @@
             "preTaxCentsByOwnerIdx": [
               192679381
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11709283,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6946693,
@@ -1471,6 +1482,7 @@
             "preTaxCentsByOwnerIdx": [
               195827239
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 12676275,
             "rmdShortfallCents": 0,
             "federalTaxCents": 7871852,
@@ -1514,6 +1526,7 @@
             "preTaxCentsByOwnerIdx": [
               194006965
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 13599114,
             "rmdShortfallCents": 0,
             "federalTaxCents": 8659465,
@@ -1557,6 +1570,7 @@
             "preTaxCentsByOwnerIdx": [
               185604687
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 14161092,
             "rmdShortfallCents": 0,
             "federalTaxCents": 9505887,
@@ -1600,6 +1614,7 @@
             "preTaxCentsByOwnerIdx": [
               166260468
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 14387960,
             "rmdShortfallCents": 0,
             "federalTaxCents": 9299894,
@@ -1643,6 +1658,7 @@
             "preTaxCentsByOwnerIdx": [
               170620646
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 13627907,
             "rmdShortfallCents": 0,
             "federalTaxCents": 8671426,
@@ -1686,6 +1702,7 @@
             "preTaxCentsByOwnerIdx": [
               162325765
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 14836578,
             "rmdShortfallCents": 0,
             "federalTaxCents": 10090011,
@@ -1729,6 +1746,7 @@
             "preTaxCentsByOwnerIdx": [
               159220096
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 15030163,
             "rmdShortfallCents": 0,
             "federalTaxCents": 10020248,
@@ -1772,6 +1790,7 @@
             "preTaxCentsByOwnerIdx": [
               152960391
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 15764366,
             "rmdShortfallCents": 0,
             "federalTaxCents": 10669450,
@@ -1815,6 +1834,7 @@
             "preTaxCentsByOwnerIdx": [
               148869932
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 16101094,
             "rmdShortfallCents": 0,
             "federalTaxCents": 11480111,
@@ -1858,6 +1878,7 @@
             "preTaxCentsByOwnerIdx": [
               140695776
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 16726959,
             "rmdShortfallCents": 0,
             "federalTaxCents": 12434047,
@@ -1901,6 +1922,7 @@
             "preTaxCentsByOwnerIdx": [
               134959852
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 16749497,
             "rmdShortfallCents": 0,
             "federalTaxCents": 13139674,
@@ -1944,6 +1966,7 @@
             "preTaxCentsByOwnerIdx": [
               125391897
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 17302545,
             "rmdShortfallCents": 0,
             "federalTaxCents": 15268979,
@@ -1987,6 +2010,7 @@
             "preTaxCentsByOwnerIdx": [
               126142053
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 17176972,
             "rmdShortfallCents": 0,
             "federalTaxCents": 17790109,
@@ -2030,6 +2054,7 @@
             "preTaxCentsByOwnerIdx": [
               112906843
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 18550302,
             "rmdShortfallCents": 0,
             "federalTaxCents": 22003154,
@@ -2073,6 +2098,7 @@
             "preTaxCentsByOwnerIdx": [
               90927187
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 17641694,
             "rmdShortfallCents": 0,
             "federalTaxCents": 23907823,
@@ -2116,6 +2142,7 @@
             "preTaxCentsByOwnerIdx": [
               78890866
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 15154531,
             "rmdShortfallCents": 0,
             "federalTaxCents": 21249940,
@@ -2159,6 +2186,7 @@
             "preTaxCentsByOwnerIdx": [
               71666180
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 14087655,
             "rmdShortfallCents": 0,
             "federalTaxCents": 22519074,
@@ -2202,6 +2230,7 @@
             "preTaxCentsByOwnerIdx": [
               59115989
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 13781958,
             "rmdShortfallCents": 0,
             "federalTaxCents": 26018936,
@@ -2245,6 +2274,7 @@
             "preTaxCentsByOwnerIdx": [
               47254430
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 12064488,
             "rmdShortfallCents": 0,
             "federalTaxCents": 24809743,
@@ -2288,6 +2318,7 @@
             "preTaxCentsByOwnerIdx": [
               40324300
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10272702,
             "rmdShortfallCents": 0,
             "federalTaxCents": 25255212,
@@ -2331,6 +2362,7 @@
             "preTaxCentsByOwnerIdx": [
               29930836
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 9377744,
             "rmdShortfallCents": 0,
             "federalTaxCents": 27677400,
@@ -2374,6 +2406,7 @@
             "preTaxCentsByOwnerIdx": [
               23801448
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 7300204,
             "rmdShortfallCents": 0,
             "federalTaxCents": 24486750,
@@ -2417,6 +2450,7 @@
             "preTaxCentsByOwnerIdx": [
               17825153
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6102935,
             "rmdShortfallCents": 0,
             "federalTaxCents": 24129462,
@@ -2460,6 +2494,7 @@
             "preTaxCentsByOwnerIdx": [
               13174790
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 4817609,
             "rmdShortfallCents": 0,
             "federalTaxCents": 24201132,
@@ -2503,6 +2538,7 @@
             "preTaxCentsByOwnerIdx": [
               9520833
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 3764226,
             "rmdShortfallCents": 0,
             "federalTaxCents": 25216072,
@@ -2546,6 +2582,7 @@
             "preTaxCentsByOwnerIdx": [
               7046661
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2800245,
             "rmdShortfallCents": 0,
             "federalTaxCents": 25634313,
@@ -2589,6 +2626,7 @@
             "preTaxCentsByOwnerIdx": [
               5082290
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2135352,
             "rmdShortfallCents": 0,
             "federalTaxCents": 26008676,
@@ -2632,6 +2670,7 @@
             "preTaxCentsByOwnerIdx": [
               3834303
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1639448,
             "rmdShortfallCents": 0,
             "federalTaxCents": 26959870,
@@ -2675,6 +2714,7 @@
             "preTaxCentsByOwnerIdx": [
               2722642
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1278101,
             "rmdShortfallCents": 0,
             "federalTaxCents": 29459254,
@@ -2718,6 +2758,7 @@
             "preTaxCentsByOwnerIdx": [
               1857351
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 938842,
             "rmdShortfallCents": 0,
             "federalTaxCents": 31381414,
@@ -4135,6 +4176,7 @@
             "preTaxCentsByOwnerIdx": [
               98957248
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 3979460,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2014509,
@@ -4178,6 +4220,7 @@
             "preTaxCentsByOwnerIdx": [
               105025822
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 4175411,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2122129,
@@ -4221,6 +4264,7 @@
             "preTaxCentsByOwnerIdx": [
               106332397
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 4586280,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2225614,
@@ -4264,6 +4308,7 @@
             "preTaxCentsByOwnerIdx": [
               117461667
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 4833291,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2357482,
@@ -4307,6 +4352,7 @@
             "preTaxCentsByOwnerIdx": [
               113492882
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 5566904,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2588801,
@@ -4350,6 +4396,7 @@
             "preTaxCentsByOwnerIdx": [
               110191172
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 5618460,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2642826,
@@ -4393,6 +4440,7 @@
             "preTaxCentsByOwnerIdx": [
               119277764
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 5679957,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2768208,
@@ -4436,6 +4484,7 @@
             "preTaxCentsByOwnerIdx": [
               119878944
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6447447,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3082913,
@@ -4479,6 +4528,7 @@
             "preTaxCentsByOwnerIdx": [
               124216573
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6772822,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3337970,
@@ -4522,6 +4572,7 @@
             "preTaxCentsByOwnerIdx": [
               109497043
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 7393844,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3544525,
@@ -4565,6 +4616,7 @@
             "preTaxCentsByOwnerIdx": [
               121306715
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6843565,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3617340,
@@ -4608,6 +4660,7 @@
             "preTaxCentsByOwnerIdx": [
               122415615
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 7980705,
             "rmdShortfallCents": 0,
             "federalTaxCents": 4091789,
@@ -4651,6 +4704,7 @@
             "preTaxCentsByOwnerIdx": [
               143256295
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 8501084,
             "rmdShortfallCents": 0,
             "federalTaxCents": 4499794,
@@ -4694,6 +4748,7 @@
             "preTaxCentsByOwnerIdx": [
               138750387
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10456664,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5271352,
@@ -4737,6 +4792,7 @@
             "preTaxCentsByOwnerIdx": [
               133656521
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10755844,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5505146,
@@ -4780,6 +4836,7 @@
             "preTaxCentsByOwnerIdx": [
               122453436
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10955453,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5687868,
@@ -4823,6 +4880,7 @@
             "preTaxCentsByOwnerIdx": [
               118440374
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10648125,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5644486,
@@ -4866,6 +4924,7 @@
             "preTaxCentsByOwnerIdx": [
               119160635
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10966701,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5871597,
@@ -4909,6 +4968,7 @@
             "preTaxCentsByOwnerIdx": [
               154640623
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11798083,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6418426,
@@ -4952,6 +5012,7 @@
             "preTaxCentsByOwnerIdx": [
               147538041
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 16277960,
             "rmdShortfallCents": 0,
             "federalTaxCents": 8096458,
@@ -4995,6 +5056,7 @@
             "preTaxCentsByOwnerIdx": [
               133362804
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 16577308,
             "rmdShortfallCents": 0,
             "federalTaxCents": 8444317,
@@ -5038,6 +5100,7 @@
             "preTaxCentsByOwnerIdx": [
               125837070
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 15876524,
             "rmdShortfallCents": 0,
             "federalTaxCents": 8442023,
@@ -5081,6 +5144,7 @@
             "preTaxCentsByOwnerIdx": [
               118439913
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 16132958,
             "rmdShortfallCents": 0,
             "federalTaxCents": 8657981,
@@ -5124,6 +5188,7 @@
             "preTaxCentsByOwnerIdx": [
               109423603
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 16224646,
             "rmdShortfallCents": 0,
             "federalTaxCents": 9151306,
@@ -5167,6 +5232,7 @@
             "preTaxCentsByOwnerIdx": [
               101650993
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 16091706,
             "rmdShortfallCents": 0,
             "federalTaxCents": 9991886,
@@ -5210,6 +5276,7 @@
             "preTaxCentsByOwnerIdx": [
               92189373
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 15882968,
             "rmdShortfallCents": 0,
             "federalTaxCents": 10894840,
@@ -5253,6 +5320,7 @@
             "preTaxCentsByOwnerIdx": [
               85686162
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 15364895,
             "rmdShortfallCents": 0,
             "federalTaxCents": 11395370,
@@ -5296,6 +5364,7 @@
             "preTaxCentsByOwnerIdx": [
               72359587
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 15301100,
             "rmdShortfallCents": 0,
             "federalTaxCents": 12611137,
@@ -5339,6 +5408,7 @@
             "preTaxCentsByOwnerIdx": [
               61734354
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 13915305,
             "rmdShortfallCents": 0,
             "federalTaxCents": 13146439,
@@ -5382,6 +5452,7 @@
             "preTaxCentsByOwnerIdx": [
               53406319
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 12598848,
             "rmdShortfallCents": 0,
             "federalTaxCents": 13690318,
@@ -5425,6 +5496,7 @@
             "preTaxCentsByOwnerIdx": [
               45023705
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11610069,
             "rmdShortfallCents": 0,
             "federalTaxCents": 14357100,
@@ -5468,6 +5540,7 @@
             "preTaxCentsByOwnerIdx": [
               37278941
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10470629,
             "rmdShortfallCents": 0,
             "federalTaxCents": 14969126,
@@ -5511,6 +5584,7 @@
             "preTaxCentsByOwnerIdx": [
               30148250
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 9092425,
             "rmdShortfallCents": 0,
             "federalTaxCents": 15865940,
@@ -5554,6 +5628,7 @@
             "preTaxCentsByOwnerIdx": [
               23657447
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 7730321,
             "rmdShortfallCents": 0,
             "federalTaxCents": 17087683,
@@ -5597,6 +5672,7 @@
             "preTaxCentsByOwnerIdx": [
               19609702
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6393905,
             "rmdShortfallCents": 0,
             "federalTaxCents": 17690679,
@@ -5640,6 +5716,7 @@
             "preTaxCentsByOwnerIdx": [
               15131261
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 5602772,
             "rmdShortfallCents": 0,
             "federalTaxCents": 19551762,
@@ -5683,6 +5760,7 @@
             "preTaxCentsByOwnerIdx": [
               11862385
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 4450371,
             "rmdShortfallCents": 0,
             "federalTaxCents": 21449038,
@@ -5726,6 +5804,7 @@
             "preTaxCentsByOwnerIdx": [
               8454207
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 3594662,
             "rmdShortfallCents": 0,
             "federalTaxCents": 24103960,
@@ -5769,6 +5848,7 @@
             "preTaxCentsByOwnerIdx": [
               5896751
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2727164,
             "rmdShortfallCents": 0,
             "federalTaxCents": 24663488,
@@ -5812,6 +5892,7 @@
             "preTaxCentsByOwnerIdx": [
               4005840
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1965584,
             "rmdShortfallCents": 0,
             "federalTaxCents": 24938481,
@@ -5855,6 +5936,7 @@
             "preTaxCentsByOwnerIdx": [
               2771481
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1381324,
             "rmdShortfallCents": 0,
             "federalTaxCents": 24838061,
@@ -7272,6 +7354,7 @@
             "preTaxCentsByOwnerIdx": [
               97905045
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 3876388,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1622607,
@@ -7315,6 +7398,7 @@
             "preTaxCentsByOwnerIdx": [
               107012719
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 4131015,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1773788,
@@ -7358,6 +7442,7 @@
             "preTaxCentsByOwnerIdx": [
               110945611
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 4673044,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1970985,
@@ -7401,6 +7486,7 @@
             "preTaxCentsByOwnerIdx": [
               100229797
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 5042982,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2021173,
@@ -7444,6 +7530,7 @@
             "preTaxCentsByOwnerIdx": [
               103721498
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 4750227,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1945215,
@@ -7487,6 +7574,7 @@
             "preTaxCentsByOwnerIdx": [
               113606510
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 5134728,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2121617,
@@ -7530,6 +7618,7 @@
             "preTaxCentsByOwnerIdx": [
               114506422
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 5856006,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2314674,
@@ -7573,6 +7662,7 @@
             "preTaxCentsByOwnerIdx": [
               113394841
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6189536,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2371588,
@@ -7616,6 +7706,7 @@
             "preTaxCentsByOwnerIdx": [
               121216781
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 6406488,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2554387,
@@ -7659,6 +7750,7 @@
             "preTaxCentsByOwnerIdx": [
               136230141
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 7215285,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2882744,
@@ -7702,6 +7794,7 @@
             "preTaxCentsByOwnerIdx": [
               141213271
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 8514384,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3327293,
@@ -7745,6 +7838,7 @@
             "preTaxCentsByOwnerIdx": [
               141890020
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 9290347,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3664126,
@@ -7788,6 +7882,7 @@
             "preTaxCentsByOwnerIdx": [
               133680854
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 9853474,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3887287,
@@ -7831,6 +7926,7 @@
             "preTaxCentsByOwnerIdx": [
               141297265
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 9757727,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3934660,
@@ -7874,6 +7970,7 @@
             "preTaxCentsByOwnerIdx": [
               142830081
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10953276,
             "rmdShortfallCents": 0,
             "federalTaxCents": 4362623,
@@ -7917,6 +8014,7 @@
             "preTaxCentsByOwnerIdx": [
               119655085
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11707384,
             "rmdShortfallCents": 0,
             "federalTaxCents": 4626445,
@@ -7960,6 +8058,7 @@
             "preTaxCentsByOwnerIdx": [
               112462313
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10404790,
             "rmdShortfallCents": 0,
             "federalTaxCents": 4477766,
@@ -8003,6 +8102,7 @@
             "preTaxCentsByOwnerIdx": [
               120460900
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10413177,
             "rmdShortfallCents": 0,
             "federalTaxCents": 4696600,
@@ -8046,6 +8146,7 @@
             "preTaxCentsByOwnerIdx": [
               117034189
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11926822,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5218879,
@@ -8089,6 +8190,7 @@
             "preTaxCentsByOwnerIdx": [
               109472880
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 12319388,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5339681,
@@ -8132,6 +8234,7 @@
             "preTaxCentsByOwnerIdx": [
               111447098
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 12300324,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5588157,
@@ -8175,6 +8278,7 @@
             "preTaxCentsByOwnerIdx": [
               105321121
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 13267512,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6163444,
@@ -8218,6 +8322,7 @@
             "preTaxCentsByOwnerIdx": [
               84780803
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 13502708,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6146764,
@@ -8261,6 +8366,7 @@
             "preTaxCentsByOwnerIdx": [
               82008911
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11613809,
             "rmdShortfallCents": 0,
             "federalTaxCents": 5818710,
@@ -8304,6 +8410,7 @@
             "preTaxCentsByOwnerIdx": [
               73961659
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 12060134,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6195726,
@@ -8347,6 +8454,7 @@
             "preTaxCentsByOwnerIdx": [
               73124271
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11556509,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6321355,
@@ -8390,6 +8498,7 @@
             "preTaxCentsByOwnerIdx": [
               65486851
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 12187378,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6701340,
@@ -8433,6 +8542,7 @@
             "preTaxCentsByOwnerIdx": [
               59437128
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11694081,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6593895,
@@ -8476,6 +8586,7 @@
             "preTaxCentsByOwnerIdx": [
               56261228
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11430217,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6757412,
@@ -8519,6 +8630,7 @@
             "preTaxCentsByOwnerIdx": [
               48709644
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 11481883,
             "rmdShortfallCents": 0,
             "federalTaxCents": 7096224,
@@ -8562,6 +8674,7 @@
             "preTaxCentsByOwnerIdx": [
               36661585
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 10589053,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6989654,
@@ -8605,6 +8718,7 @@
             "preTaxCentsByOwnerIdx": [
               29933189
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 8525950,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6565065,
@@ -8648,6 +8762,7 @@
             "preTaxCentsByOwnerIdx": [
               22606796
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 7300778,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6336449,
@@ -8691,6 +8806,7 @@
             "preTaxCentsByOwnerIdx": [
               18493429
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 5796614,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6157826,
@@ -8734,6 +8850,7 @@
             "preTaxCentsByOwnerIdx": [
               13970803
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 4998224,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6115260,
@@ -8777,6 +8894,7 @@
             "preTaxCentsByOwnerIdx": [
               10532168
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 3991658,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6083812,
@@ -8820,6 +8938,7 @@
             "preTaxCentsByOwnerIdx": [
               8608054
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 3097696,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6285424,
@@ -8863,6 +8982,7 @@
             "preTaxCentsByOwnerIdx": [
               6082903
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2608501,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6231901,
@@ -8906,6 +9026,7 @@
             "preTaxCentsByOwnerIdx": [
               4594452
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1962227,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6112691,
@@ -8949,6 +9070,7 @@
             "preTaxCentsByOwnerIdx": [
               3496259
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1531484,
             "rmdShortfallCents": 0,
             "federalTaxCents": 6233749,
@@ -8992,6 +9114,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1205607,
             "rmdShortfallCents": 0,
             "federalTaxCents": 2230067,
@@ -10790,6 +10913,197 @@
         0
       ]
     },
+    "acaCreditAppliedToPremiumsPercentilesByYear": {
+      "p10": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p25": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p50": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
     "effectiveTaxRatePercentilesByYear": {
       "p10": [
         0,
@@ -11174,7 +11488,7 @@
     }
   },
   "caseB": {
-    "engineVersion": 71,
+    "engineVersion": 72,
     "seed": 12345,
     "pathCount": 200,
     "firstYear": 2026,
@@ -12187,6 +12501,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12257,6 +12572,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12327,6 +12643,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12397,6 +12714,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12467,6 +12785,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12537,6 +12856,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12607,6 +12927,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12677,6 +12998,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12747,6 +13069,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12817,6 +13140,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12886,6 +13210,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -12955,6 +13280,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13024,6 +13350,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13093,6 +13420,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13162,6 +13490,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13231,6 +13560,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13300,6 +13630,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13369,6 +13700,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13438,6 +13770,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13507,6 +13840,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13576,6 +13910,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13645,6 +13980,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13714,6 +14050,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13783,6 +14120,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13852,6 +14190,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13921,6 +14260,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -13990,6 +14330,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14059,6 +14400,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14128,6 +14470,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14197,6 +14540,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14266,6 +14610,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14335,6 +14680,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14404,6 +14750,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14473,6 +14820,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14542,6 +14890,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14611,6 +14960,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14680,6 +15030,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14749,6 +15100,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14818,6 +15170,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14887,6 +15240,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -14950,6 +15304,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -16589,6 +16944,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -16659,6 +17015,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -16729,6 +17086,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -16799,6 +17157,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -16869,6 +17228,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -16939,6 +17299,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17009,6 +17370,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17079,6 +17441,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17149,6 +17512,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17219,6 +17583,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17289,6 +17654,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17358,6 +17724,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17427,6 +17794,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17496,6 +17864,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17565,6 +17934,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17634,6 +18004,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17703,6 +18074,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17772,6 +18144,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17841,6 +18214,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17910,6 +18284,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -17979,6 +18354,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18048,6 +18424,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18117,6 +18494,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18186,6 +18564,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18255,6 +18634,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18324,6 +18704,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18393,6 +18774,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18462,6 +18844,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18531,6 +18914,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18600,6 +18984,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18669,6 +19054,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18738,6 +19124,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18807,6 +19194,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18876,6 +19264,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -18945,6 +19334,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -19014,6 +19404,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -19083,6 +19474,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -19146,6 +19538,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -19209,6 +19602,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -19272,6 +19666,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -19335,6 +19730,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -20974,6 +21370,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21044,6 +21441,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21114,6 +21512,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21184,6 +21583,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21254,6 +21654,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21324,6 +21725,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21394,6 +21796,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21464,6 +21867,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21534,6 +21938,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21603,6 +22008,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21672,6 +22078,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21741,6 +22148,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21810,6 +22218,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21879,6 +22288,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -21948,6 +22358,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22017,6 +22428,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22086,6 +22498,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22155,6 +22568,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22224,6 +22638,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22293,6 +22708,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22362,6 +22778,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22431,6 +22848,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22500,6 +22918,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22570,6 +22989,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22640,6 +23060,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22710,6 +23131,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22780,6 +23202,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22850,6 +23273,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22919,6 +23343,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -22988,6 +23413,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23051,6 +23477,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23109,6 +23536,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23167,6 +23595,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23225,6 +23654,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23283,6 +23713,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23341,6 +23772,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23399,6 +23831,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23457,6 +23890,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23515,6 +23949,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23573,6 +24008,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -23631,6 +24067,7 @@
             "irmaaWithheldFromSsCents": 0,
             "irmaaCashNeedCents": 0,
             "acaPtcCashflowOffsetCents": 0,
+            "acaCreditAppliedToPremiumsCents": 0,
             "totalTaxCashflowNeedCents": 0,
             "taxCashflowIterations": 0,
             "taxCashflowConverged": true,
@@ -25625,6 +26062,197 @@
         0
       ]
     },
+    "acaCreditAppliedToPremiumsPercentilesByYear": {
+      "p10": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p25": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p50": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
     "effectiveTaxRatePercentilesByYear": {
       "p10": [
         0,
@@ -26009,7 +26637,7 @@
     }
   },
   "futureRetirement": {
-    "engineVersion": 71,
+    "engineVersion": 72,
     "seed": 4242,
     "pathCount": 20,
     "firstYear": 2026,
@@ -26629,6 +27257,7 @@
             "preTaxCentsByOwnerIdx": [
               44636437
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2387116,
             "rmdShortfallCents": 0,
             "federalTaxCents": 450911,
@@ -26672,6 +27301,7 @@
             "preTaxCentsByOwnerIdx": [
               42564380
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2412780,
             "rmdShortfallCents": 0,
             "federalTaxCents": 453466,
@@ -26715,6 +27345,7 @@
             "preTaxCentsByOwnerIdx": [
               40605532
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2404767,
             "rmdShortfallCents": 0,
             "federalTaxCents": 445542,
@@ -26758,6 +27389,7 @@
             "preTaxCentsByOwnerIdx": [
               38728457
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2416996,
             "rmdShortfallCents": 0,
             "federalTaxCents": 442559,
@@ -26801,6 +27433,7 @@
             "preTaxCentsByOwnerIdx": [
               37343088
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2420529,
             "rmdShortfallCents": 0,
             "federalTaxCents": 441353,
@@ -26844,6 +27477,7 @@
             "preTaxCentsByOwnerIdx": [
               35988056
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2456782,
             "rmdShortfallCents": 0,
             "federalTaxCents": 450218,
@@ -26887,6 +27521,7 @@
             "preTaxCentsByOwnerIdx": [
               33890701
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2499171,
             "rmdShortfallCents": 0,
             "federalTaxCents": 452109,
@@ -26930,6 +27565,7 @@
             "preTaxCentsByOwnerIdx": [
               31889672
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2473774,
             "rmdShortfallCents": 0,
             "federalTaxCents": 437072,
@@ -26973,6 +27609,7 @@
             "preTaxCentsByOwnerIdx": [
               29949972
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2472068,
             "rmdShortfallCents": 0,
             "federalTaxCents": 426799,
@@ -27016,6 +27653,7 @@
             "preTaxCentsByOwnerIdx": [
               28076491
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2454916,
             "rmdShortfallCents": 0,
             "federalTaxCents": 413526,
@@ -27059,6 +27697,7 @@
             "preTaxCentsByOwnerIdx": [
               26255355
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2441434,
             "rmdShortfallCents": 0,
             "federalTaxCents": 399283,
@@ -27102,6 +27741,7 @@
             "preTaxCentsByOwnerIdx": [
               23937309
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2431051,
             "rmdShortfallCents": 0,
             "federalTaxCents": 374187,
@@ -27145,6 +27785,7 @@
             "preTaxCentsByOwnerIdx": [
               21734903
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2370031,
             "rmdShortfallCents": 0,
             "federalTaxCents": 335312,
@@ -27188,6 +27829,7 @@
             "preTaxCentsByOwnerIdx": [
               17358527
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2287885,
             "rmdShortfallCents": 0,
             "federalTaxCents": 827586,
@@ -27231,6 +27873,7 @@
             "preTaxCentsByOwnerIdx": [
               7247851
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1950396,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1816375,
@@ -27888,6 +28531,7 @@
             "preTaxCentsByOwnerIdx": [
               44636437
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2387116,
             "rmdShortfallCents": 0,
             "federalTaxCents": 450911,
@@ -27931,6 +28575,7 @@
             "preTaxCentsByOwnerIdx": [
               42564380
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2412780,
             "rmdShortfallCents": 0,
             "federalTaxCents": 453466,
@@ -27974,6 +28619,7 @@
             "preTaxCentsByOwnerIdx": [
               40605532
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2404767,
             "rmdShortfallCents": 0,
             "federalTaxCents": 445542,
@@ -28017,6 +28663,7 @@
             "preTaxCentsByOwnerIdx": [
               38728457
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2416996,
             "rmdShortfallCents": 0,
             "federalTaxCents": 442559,
@@ -28060,6 +28707,7 @@
             "preTaxCentsByOwnerIdx": [
               37343088
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2420529,
             "rmdShortfallCents": 0,
             "federalTaxCents": 441353,
@@ -28103,6 +28751,7 @@
             "preTaxCentsByOwnerIdx": [
               35988056
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2456782,
             "rmdShortfallCents": 0,
             "federalTaxCents": 450218,
@@ -28146,6 +28795,7 @@
             "preTaxCentsByOwnerIdx": [
               33890701
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2499171,
             "rmdShortfallCents": 0,
             "federalTaxCents": 452109,
@@ -28189,6 +28839,7 @@
             "preTaxCentsByOwnerIdx": [
               31889672
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2473774,
             "rmdShortfallCents": 0,
             "federalTaxCents": 437072,
@@ -28232,6 +28883,7 @@
             "preTaxCentsByOwnerIdx": [
               29949972
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2472068,
             "rmdShortfallCents": 0,
             "federalTaxCents": 426799,
@@ -28275,6 +28927,7 @@
             "preTaxCentsByOwnerIdx": [
               28076491
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2454916,
             "rmdShortfallCents": 0,
             "federalTaxCents": 413526,
@@ -28318,6 +28971,7 @@
             "preTaxCentsByOwnerIdx": [
               26255355
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2441434,
             "rmdShortfallCents": 0,
             "federalTaxCents": 399283,
@@ -28361,6 +29015,7 @@
             "preTaxCentsByOwnerIdx": [
               23937309
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2431051,
             "rmdShortfallCents": 0,
             "federalTaxCents": 374187,
@@ -28404,6 +29059,7 @@
             "preTaxCentsByOwnerIdx": [
               21734903
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2370031,
             "rmdShortfallCents": 0,
             "federalTaxCents": 335312,
@@ -28447,6 +29103,7 @@
             "preTaxCentsByOwnerIdx": [
               17358527
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2287885,
             "rmdShortfallCents": 0,
             "federalTaxCents": 827586,
@@ -28490,6 +29147,7 @@
             "preTaxCentsByOwnerIdx": [
               7247851
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1950396,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1816375,
@@ -29147,6 +29805,7 @@
             "preTaxCentsByOwnerIdx": [
               44636437
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2387116,
             "rmdShortfallCents": 0,
             "federalTaxCents": 450911,
@@ -29190,6 +29849,7 @@
             "preTaxCentsByOwnerIdx": [
               42564380
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2412780,
             "rmdShortfallCents": 0,
             "federalTaxCents": 453466,
@@ -29233,6 +29893,7 @@
             "preTaxCentsByOwnerIdx": [
               40605532
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2404767,
             "rmdShortfallCents": 0,
             "federalTaxCents": 445542,
@@ -29276,6 +29937,7 @@
             "preTaxCentsByOwnerIdx": [
               38728457
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2416996,
             "rmdShortfallCents": 0,
             "federalTaxCents": 442559,
@@ -29319,6 +29981,7 @@
             "preTaxCentsByOwnerIdx": [
               37343088
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2420529,
             "rmdShortfallCents": 0,
             "federalTaxCents": 441353,
@@ -29362,6 +30025,7 @@
             "preTaxCentsByOwnerIdx": [
               35988056
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2456782,
             "rmdShortfallCents": 0,
             "federalTaxCents": 450218,
@@ -29405,6 +30069,7 @@
             "preTaxCentsByOwnerIdx": [
               33890701
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2499171,
             "rmdShortfallCents": 0,
             "federalTaxCents": 452109,
@@ -29448,6 +30113,7 @@
             "preTaxCentsByOwnerIdx": [
               31889672
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2473774,
             "rmdShortfallCents": 0,
             "federalTaxCents": 437072,
@@ -29491,6 +30157,7 @@
             "preTaxCentsByOwnerIdx": [
               29949972
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2472068,
             "rmdShortfallCents": 0,
             "federalTaxCents": 426799,
@@ -29534,6 +30201,7 @@
             "preTaxCentsByOwnerIdx": [
               28076491
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2454916,
             "rmdShortfallCents": 0,
             "federalTaxCents": 413526,
@@ -29577,6 +30245,7 @@
             "preTaxCentsByOwnerIdx": [
               26255355
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2441434,
             "rmdShortfallCents": 0,
             "federalTaxCents": 399283,
@@ -29620,6 +30289,7 @@
             "preTaxCentsByOwnerIdx": [
               23937309
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2431051,
             "rmdShortfallCents": 0,
             "federalTaxCents": 374187,
@@ -29663,6 +30333,7 @@
             "preTaxCentsByOwnerIdx": [
               21734903
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2370031,
             "rmdShortfallCents": 0,
             "federalTaxCents": 335312,
@@ -29706,6 +30377,7 @@
             "preTaxCentsByOwnerIdx": [
               17358527
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 2287885,
             "rmdShortfallCents": 0,
             "federalTaxCents": 827586,
@@ -29749,6 +30421,7 @@
             "preTaxCentsByOwnerIdx": [
               7247851
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1950396,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1816375,
@@ -30595,6 +31268,89 @@
         0
       ]
     },
+    "acaCreditAppliedToPremiumsPercentilesByYear": {
+      "p10": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p25": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p50": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
     "effectiveTaxRatePercentilesByYear": {
       "p10": [
         0,
@@ -30763,7 +31519,7 @@
     }
   },
   "alreadyRetired": {
-    "engineVersion": 71,
+    "engineVersion": 72,
     "seed": 4242,
     "pathCount": 20,
     "firstYear": 2026,
@@ -31293,6 +32049,7 @@
             "preTaxCentsByOwnerIdx": [
               30250947
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 0,
             "rmdShortfallCents": 0,
             "federalTaxCents": 0,
@@ -31336,6 +32093,7 @@
             "preTaxCentsByOwnerIdx": [
               30595923
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 0,
             "rmdShortfallCents": 0,
             "federalTaxCents": 0,
@@ -31379,6 +32137,7 @@
             "preTaxCentsByOwnerIdx": [
               29866589
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1154563,
             "rmdShortfallCents": 0,
             "federalTaxCents": 31739,
@@ -31422,6 +32181,7 @@
             "preTaxCentsByOwnerIdx": [
               29197036
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1171239,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92777,
@@ -31465,6 +32225,7 @@
             "preTaxCentsByOwnerIdx": [
               28585033
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1186871,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92955,
@@ -31508,6 +32269,7 @@
             "preTaxCentsByOwnerIdx": [
               28024390
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1206120,
             "rmdShortfallCents": 0,
             "federalTaxCents": 93781,
@@ -31551,6 +32313,7 @@
             "preTaxCentsByOwnerIdx": [
               27211920
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1223772,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92397,
@@ -31594,6 +32357,7 @@
             "preTaxCentsByOwnerIdx": [
               26452980
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1236905,
             "rmdShortfallCents": 0,
             "federalTaxCents": 89860,
@@ -31637,6 +32401,7 @@
             "preTaxCentsByOwnerIdx": [
               25739952
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1253696,
             "rmdShortfallCents": 0,
             "federalTaxCents": 87563,
@@ -31680,6 +32445,7 @@
             "preTaxCentsByOwnerIdx": [
               25065374
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1274255,
             "rmdShortfallCents": 0,
             "federalTaxCents": 85592,
@@ -31723,6 +32489,7 @@
             "preTaxCentsByOwnerIdx": [
               24159527
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1292030,
             "rmdShortfallCents": 0,
             "federalTaxCents": 80009,
@@ -31766,6 +32533,7 @@
             "preTaxCentsByOwnerIdx": [
               22225969
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1305920,
             "rmdShortfallCents": 0,
             "federalTaxCents": 211574,
@@ -31809,6 +32577,7 @@
             "preTaxCentsByOwnerIdx": [
               15539059
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1255704,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1040606,
@@ -31852,6 +32621,7 @@
             "preTaxCentsByOwnerIdx": [
               8528854
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 924944,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1103768,
@@ -31895,6 +32665,7 @@
             "preTaxCentsByOwnerIdx": [
               1198466
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 533053,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1166361,
@@ -31938,6 +32709,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 78846,
             "rmdShortfallCents": 0,
             "federalTaxCents": 0,
@@ -31980,7 +32752,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2043,
@@ -32018,7 +32791,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2044,
@@ -32056,7 +32830,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2045,
@@ -32094,7 +32869,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2046,
@@ -32132,7 +32908,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2047,
@@ -32170,7 +32947,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2048,
@@ -32208,7 +32986,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2049,
@@ -32246,7 +33025,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2050,
@@ -32284,7 +33064,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           }
         ],
         "depletionYear": 2041,
@@ -32715,6 +33496,7 @@
             "preTaxCentsByOwnerIdx": [
               30250947
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 0,
             "rmdShortfallCents": 0,
             "federalTaxCents": 0,
@@ -32758,6 +33540,7 @@
             "preTaxCentsByOwnerIdx": [
               30595923
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 0,
             "rmdShortfallCents": 0,
             "federalTaxCents": 0,
@@ -32801,6 +33584,7 @@
             "preTaxCentsByOwnerIdx": [
               29866589
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1154563,
             "rmdShortfallCents": 0,
             "federalTaxCents": 31739,
@@ -32844,6 +33628,7 @@
             "preTaxCentsByOwnerIdx": [
               29197036
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1171239,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92777,
@@ -32887,6 +33672,7 @@
             "preTaxCentsByOwnerIdx": [
               28585033
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1186871,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92955,
@@ -32930,6 +33716,7 @@
             "preTaxCentsByOwnerIdx": [
               28024390
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1206120,
             "rmdShortfallCents": 0,
             "federalTaxCents": 93781,
@@ -32973,6 +33760,7 @@
             "preTaxCentsByOwnerIdx": [
               27211920
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1223772,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92397,
@@ -33016,6 +33804,7 @@
             "preTaxCentsByOwnerIdx": [
               26452980
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1236905,
             "rmdShortfallCents": 0,
             "federalTaxCents": 89860,
@@ -33059,6 +33848,7 @@
             "preTaxCentsByOwnerIdx": [
               25739952
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1253696,
             "rmdShortfallCents": 0,
             "federalTaxCents": 87563,
@@ -33102,6 +33892,7 @@
             "preTaxCentsByOwnerIdx": [
               25065374
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1274255,
             "rmdShortfallCents": 0,
             "federalTaxCents": 85592,
@@ -33145,6 +33936,7 @@
             "preTaxCentsByOwnerIdx": [
               24159527
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1292030,
             "rmdShortfallCents": 0,
             "federalTaxCents": 80009,
@@ -33188,6 +33980,7 @@
             "preTaxCentsByOwnerIdx": [
               22225969
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1305920,
             "rmdShortfallCents": 0,
             "federalTaxCents": 211574,
@@ -33231,6 +34024,7 @@
             "preTaxCentsByOwnerIdx": [
               15539059
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1255704,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1040606,
@@ -33274,6 +34068,7 @@
             "preTaxCentsByOwnerIdx": [
               8528854
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 924944,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1103768,
@@ -33317,6 +34112,7 @@
             "preTaxCentsByOwnerIdx": [
               1198466
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 533053,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1166361,
@@ -33360,6 +34156,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 78846,
             "rmdShortfallCents": 0,
             "federalTaxCents": 0,
@@ -33402,7 +34199,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2043,
@@ -33440,7 +34238,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2044,
@@ -33478,7 +34277,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2045,
@@ -33516,7 +34316,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2046,
@@ -33554,7 +34355,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2047,
@@ -33592,7 +34394,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2048,
@@ -33630,7 +34433,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2049,
@@ -33668,7 +34472,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2050,
@@ -33706,7 +34511,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           }
         ],
         "depletionYear": 2041,
@@ -34137,6 +34943,7 @@
             "preTaxCentsByOwnerIdx": [
               30250947
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 0,
             "rmdShortfallCents": 0,
             "federalTaxCents": 0,
@@ -34180,6 +34987,7 @@
             "preTaxCentsByOwnerIdx": [
               30595923
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 0,
             "rmdShortfallCents": 0,
             "federalTaxCents": 0,
@@ -34223,6 +35031,7 @@
             "preTaxCentsByOwnerIdx": [
               29866589
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1154563,
             "rmdShortfallCents": 0,
             "federalTaxCents": 31739,
@@ -34266,6 +35075,7 @@
             "preTaxCentsByOwnerIdx": [
               29197036
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1171239,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92777,
@@ -34309,6 +35119,7 @@
             "preTaxCentsByOwnerIdx": [
               28585033
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1186871,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92955,
@@ -34352,6 +35163,7 @@
             "preTaxCentsByOwnerIdx": [
               28024390
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1206120,
             "rmdShortfallCents": 0,
             "federalTaxCents": 93781,
@@ -34395,6 +35207,7 @@
             "preTaxCentsByOwnerIdx": [
               27211920
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1223772,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92397,
@@ -34438,6 +35251,7 @@
             "preTaxCentsByOwnerIdx": [
               26452980
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1236905,
             "rmdShortfallCents": 0,
             "federalTaxCents": 89860,
@@ -34481,6 +35295,7 @@
             "preTaxCentsByOwnerIdx": [
               25739952
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1253696,
             "rmdShortfallCents": 0,
             "federalTaxCents": 87563,
@@ -34524,6 +35339,7 @@
             "preTaxCentsByOwnerIdx": [
               25065374
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1274255,
             "rmdShortfallCents": 0,
             "federalTaxCents": 85592,
@@ -34567,6 +35383,7 @@
             "preTaxCentsByOwnerIdx": [
               24159527
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1292030,
             "rmdShortfallCents": 0,
             "federalTaxCents": 80009,
@@ -34610,6 +35427,7 @@
             "preTaxCentsByOwnerIdx": [
               22225969
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1305920,
             "rmdShortfallCents": 0,
             "federalTaxCents": 211574,
@@ -34653,6 +35471,7 @@
             "preTaxCentsByOwnerIdx": [
               15539059
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1255704,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1040606,
@@ -34696,6 +35515,7 @@
             "preTaxCentsByOwnerIdx": [
               8528854
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 924944,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1103768,
@@ -34739,6 +35559,7 @@
             "preTaxCentsByOwnerIdx": [
               1198466
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 533053,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1166361,
@@ -34782,6 +35603,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 78846,
             "rmdShortfallCents": 0,
             "federalTaxCents": 0,
@@ -34824,7 +35646,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2043,
@@ -34862,7 +35685,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2044,
@@ -34900,7 +35724,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2045,
@@ -34938,7 +35763,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2046,
@@ -34976,7 +35802,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2047,
@@ -35014,7 +35841,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2048,
@@ -35052,7 +35880,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2049,
@@ -35090,7 +35919,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2050,
@@ -35128,7 +35958,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           }
         ],
         "depletionYear": 2041,
@@ -35838,6 +36669,89 @@
         0
       ]
     },
+    "acaCreditAppliedToPremiumsPercentilesByYear": {
+      "p10": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p25": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p50": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
     "effectiveTaxRatePercentilesByYear": {
       "p10": [
         0,
@@ -36006,7 +36920,7 @@
     }
   },
   "guardrailsEnabled": {
-    "engineVersion": 71,
+    "engineVersion": 72,
     "seed": 4242,
     "pathCount": 20,
     "firstYear": 2026,
@@ -36581,6 +37495,7 @@
             "preTaxCentsByOwnerIdx": [
               36508132
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1571245,
             "rmdShortfallCents": 0,
             "federalTaxCents": 249830,
@@ -36624,6 +37539,7 @@
             "preTaxCentsByOwnerIdx": [
               35449704
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1594242,
             "rmdShortfallCents": 0,
             "federalTaxCents": 250191,
@@ -36667,6 +37583,7 @@
             "preTaxCentsByOwnerIdx": [
               34461012
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1611350,
             "rmdShortfallCents": 0,
             "federalTaxCents": 249127,
@@ -36710,6 +37627,7 @@
             "preTaxCentsByOwnerIdx": [
               33532133
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1633223,
             "rmdShortfallCents": 0,
             "federalTaxCents": 248524,
@@ -36753,6 +37671,7 @@
             "preTaxCentsByOwnerIdx": [
               32653341
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1660007,
             "rmdShortfallCents": 0,
             "federalTaxCents": 248368,
@@ -36796,6 +37715,7 @@
             "preTaxCentsByOwnerIdx": [
               31473270
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1683162,
             "rmdShortfallCents": 0,
             "federalTaxCents": 247580,
@@ -36839,6 +37759,7 @@
             "preTaxCentsByOwnerIdx": [
               30012257
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1701258,
             "rmdShortfallCents": 0,
             "federalTaxCents": 245500,
@@ -36882,6 +37803,7 @@
             "preTaxCentsByOwnerIdx": [
               28631067
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1695608,
             "rmdShortfallCents": 0,
             "federalTaxCents": 210116,
@@ -36925,6 +37847,7 @@
             "preTaxCentsByOwnerIdx": [
               27307538
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1704230,
             "rmdShortfallCents": 0,
             "federalTaxCents": 205545,
@@ -36968,6 +37891,7 @@
             "preTaxCentsByOwnerIdx": [
               26330710
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1706721,
             "rmdShortfallCents": 0,
             "federalTaxCents": 201883,
@@ -37011,6 +37935,7 @@
             "preTaxCentsByOwnerIdx": [
               25375273
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1732284,
             "rmdShortfallCents": 0,
             "federalTaxCents": 203210,
@@ -37054,6 +37979,7 @@
             "preTaxCentsByOwnerIdx": [
               23896423
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1762172,
             "rmdShortfallCents": 0,
             "federalTaxCents": 199194,
@@ -37097,6 +38023,7 @@
             "preTaxCentsByOwnerIdx": [
               22485493
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1744264,
             "rmdShortfallCents": 0,
             "federalTaxCents": 147882,
@@ -37140,6 +38067,7 @@
             "preTaxCentsByOwnerIdx": [
               21117806
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1743061,
             "rmdShortfallCents": 0,
             "federalTaxCents": 139804,
@@ -37183,6 +38111,7 @@
             "preTaxCentsByOwnerIdx": [
               17904317
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1730968,
             "rmdShortfallCents": 0,
             "federalTaxCents": 438431,
@@ -37226,6 +38155,7 @@
             "preTaxCentsByOwnerIdx": [
               11460995
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1556897,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1008184,
@@ -37269,6 +38199,7 @@
             "preTaxCentsByOwnerIdx": [
               5625977
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1061203,
             "rmdShortfallCents": 0,
             "federalTaxCents": 808925,
@@ -37312,6 +38243,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 557027,
             "rmdShortfallCents": 0,
             "federalTaxCents": 764852,
@@ -37354,7 +38286,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2050,
@@ -37392,7 +38325,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           }
         ],
         "depletionYear": 2048,
@@ -37935,6 +38869,7 @@
             "preTaxCentsByOwnerIdx": [
               36508132
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1571245,
             "rmdShortfallCents": 0,
             "federalTaxCents": 249830,
@@ -37978,6 +38913,7 @@
             "preTaxCentsByOwnerIdx": [
               35449704
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1594242,
             "rmdShortfallCents": 0,
             "federalTaxCents": 250191,
@@ -38021,6 +38957,7 @@
             "preTaxCentsByOwnerIdx": [
               34461012
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1611350,
             "rmdShortfallCents": 0,
             "federalTaxCents": 249127,
@@ -38064,6 +39001,7 @@
             "preTaxCentsByOwnerIdx": [
               33532133
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1633223,
             "rmdShortfallCents": 0,
             "federalTaxCents": 248524,
@@ -38107,6 +39045,7 @@
             "preTaxCentsByOwnerIdx": [
               32653341
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1660007,
             "rmdShortfallCents": 0,
             "federalTaxCents": 248368,
@@ -38150,6 +39089,7 @@
             "preTaxCentsByOwnerIdx": [
               31473270
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1683162,
             "rmdShortfallCents": 0,
             "federalTaxCents": 247580,
@@ -38193,6 +39133,7 @@
             "preTaxCentsByOwnerIdx": [
               30012257
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1701258,
             "rmdShortfallCents": 0,
             "federalTaxCents": 245500,
@@ -38236,6 +39177,7 @@
             "preTaxCentsByOwnerIdx": [
               28631067
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1695608,
             "rmdShortfallCents": 0,
             "federalTaxCents": 210116,
@@ -38279,6 +39221,7 @@
             "preTaxCentsByOwnerIdx": [
               27307538
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1704230,
             "rmdShortfallCents": 0,
             "federalTaxCents": 205545,
@@ -38322,6 +39265,7 @@
             "preTaxCentsByOwnerIdx": [
               26330710
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1706721,
             "rmdShortfallCents": 0,
             "federalTaxCents": 201883,
@@ -38365,6 +39309,7 @@
             "preTaxCentsByOwnerIdx": [
               25375273
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1732284,
             "rmdShortfallCents": 0,
             "federalTaxCents": 203210,
@@ -38408,6 +39353,7 @@
             "preTaxCentsByOwnerIdx": [
               23896423
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1762172,
             "rmdShortfallCents": 0,
             "federalTaxCents": 199194,
@@ -38451,6 +39397,7 @@
             "preTaxCentsByOwnerIdx": [
               22485493
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1744264,
             "rmdShortfallCents": 0,
             "federalTaxCents": 147882,
@@ -38494,6 +39441,7 @@
             "preTaxCentsByOwnerIdx": [
               21117806
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1743061,
             "rmdShortfallCents": 0,
             "federalTaxCents": 139804,
@@ -38537,6 +39485,7 @@
             "preTaxCentsByOwnerIdx": [
               17904317
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1730968,
             "rmdShortfallCents": 0,
             "federalTaxCents": 438431,
@@ -38580,6 +39529,7 @@
             "preTaxCentsByOwnerIdx": [
               11460995
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1556897,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1008184,
@@ -38623,6 +39573,7 @@
             "preTaxCentsByOwnerIdx": [
               5625977
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1061203,
             "rmdShortfallCents": 0,
             "federalTaxCents": 808925,
@@ -38666,6 +39617,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 557027,
             "rmdShortfallCents": 0,
             "federalTaxCents": 764852,
@@ -38708,7 +39660,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2050,
@@ -38746,7 +39699,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           }
         ],
         "depletionYear": 2048,
@@ -39289,6 +40243,7 @@
             "preTaxCentsByOwnerIdx": [
               36508132
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1571245,
             "rmdShortfallCents": 0,
             "federalTaxCents": 249830,
@@ -39332,6 +40287,7 @@
             "preTaxCentsByOwnerIdx": [
               35449704
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1594242,
             "rmdShortfallCents": 0,
             "federalTaxCents": 250191,
@@ -39375,6 +40331,7 @@
             "preTaxCentsByOwnerIdx": [
               34461012
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1611350,
             "rmdShortfallCents": 0,
             "federalTaxCents": 249127,
@@ -39418,6 +40375,7 @@
             "preTaxCentsByOwnerIdx": [
               33532133
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1633223,
             "rmdShortfallCents": 0,
             "federalTaxCents": 248524,
@@ -39461,6 +40419,7 @@
             "preTaxCentsByOwnerIdx": [
               32653341
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1660007,
             "rmdShortfallCents": 0,
             "federalTaxCents": 248368,
@@ -39504,6 +40463,7 @@
             "preTaxCentsByOwnerIdx": [
               31473270
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1683162,
             "rmdShortfallCents": 0,
             "federalTaxCents": 247580,
@@ -39547,6 +40507,7 @@
             "preTaxCentsByOwnerIdx": [
               30012257
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1701258,
             "rmdShortfallCents": 0,
             "federalTaxCents": 245500,
@@ -39590,6 +40551,7 @@
             "preTaxCentsByOwnerIdx": [
               28631067
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1695608,
             "rmdShortfallCents": 0,
             "federalTaxCents": 210116,
@@ -39633,6 +40595,7 @@
             "preTaxCentsByOwnerIdx": [
               27307538
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1704230,
             "rmdShortfallCents": 0,
             "federalTaxCents": 205545,
@@ -39676,6 +40639,7 @@
             "preTaxCentsByOwnerIdx": [
               26330710
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1706721,
             "rmdShortfallCents": 0,
             "federalTaxCents": 201883,
@@ -39719,6 +40683,7 @@
             "preTaxCentsByOwnerIdx": [
               25375273
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1732284,
             "rmdShortfallCents": 0,
             "federalTaxCents": 203210,
@@ -39762,6 +40727,7 @@
             "preTaxCentsByOwnerIdx": [
               23896423
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1762172,
             "rmdShortfallCents": 0,
             "federalTaxCents": 199194,
@@ -39805,6 +40771,7 @@
             "preTaxCentsByOwnerIdx": [
               22485493
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1744264,
             "rmdShortfallCents": 0,
             "federalTaxCents": 147882,
@@ -39848,6 +40815,7 @@
             "preTaxCentsByOwnerIdx": [
               21117806
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1743061,
             "rmdShortfallCents": 0,
             "federalTaxCents": 139804,
@@ -39891,6 +40859,7 @@
             "preTaxCentsByOwnerIdx": [
               17904317
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1730968,
             "rmdShortfallCents": 0,
             "federalTaxCents": 438431,
@@ -39934,6 +40903,7 @@
             "preTaxCentsByOwnerIdx": [
               11460995
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1556897,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1008184,
@@ -39977,6 +40947,7 @@
             "preTaxCentsByOwnerIdx": [
               5625977
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1061203,
             "rmdShortfallCents": 0,
             "federalTaxCents": 808925,
@@ -40020,6 +40991,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 557027,
             "rmdShortfallCents": 0,
             "federalTaxCents": 764852,
@@ -40062,7 +41034,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2050,
@@ -40100,7 +41073,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           }
         ],
         "depletionYear": 2048,
@@ -40877,6 +41851,89 @@
         0
       ]
     },
+    "acaCreditAppliedToPremiumsPercentilesByYear": {
+      "p10": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p25": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p50": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
     "effectiveTaxRatePercentilesByYear": {
       "p10": [
         0,
@@ -41045,7 +42102,7 @@
     }
   },
   "qcdEnabled": {
-    "engineVersion": 71,
+    "engineVersion": 72,
     "seed": 4242,
     "pathCount": 20,
     "firstYear": 2026,
@@ -41626,6 +42683,7 @@
             "preTaxCentsByOwnerIdx": [
               36508132
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1571245,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92188,
@@ -41675,6 +42733,7 @@
             "preTaxCentsByOwnerIdx": [
               35449704
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1594242,
             "rmdShortfallCents": 0,
             "federalTaxCents": 87800,
@@ -41724,6 +42783,7 @@
             "preTaxCentsByOwnerIdx": [
               34461012
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1611350,
             "rmdShortfallCents": 0,
             "federalTaxCents": 81375,
@@ -41773,6 +42833,7 @@
             "preTaxCentsByOwnerIdx": [
               33532133
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1633223,
             "rmdShortfallCents": 0,
             "federalTaxCents": 75675,
@@ -41822,6 +42883,7 @@
             "preTaxCentsByOwnerIdx": [
               32653341
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1660007,
             "rmdShortfallCents": 0,
             "federalTaxCents": 70743,
@@ -41871,6 +42933,7 @@
             "preTaxCentsByOwnerIdx": [
               31473270
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1683162,
             "rmdShortfallCents": 0,
             "federalTaxCents": 62415,
@@ -41920,6 +42983,7 @@
             "preTaxCentsByOwnerIdx": [
               30012257
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1701258,
             "rmdShortfallCents": 0,
             "federalTaxCents": 50335,
@@ -41969,6 +43033,7 @@
             "preTaxCentsByOwnerIdx": [
               28631067
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1695608,
             "rmdShortfallCents": 0,
             "federalTaxCents": 33256,
@@ -42018,6 +43083,7 @@
             "preTaxCentsByOwnerIdx": [
               27307538
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1704230,
             "rmdShortfallCents": 0,
             "federalTaxCents": 18147,
@@ -42067,6 +43133,7 @@
             "preTaxCentsByOwnerIdx": [
               26330710
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1706721,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3873,
@@ -42116,6 +43183,7 @@
             "preTaxCentsByOwnerIdx": [
               24441687
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1732284,
             "rmdShortfallCents": 0,
             "federalTaxCents": 136331,
@@ -42165,6 +43233,7 @@
             "preTaxCentsByOwnerIdx": [
               15307884
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1697339,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1298795,
@@ -42214,6 +43283,7 @@
             "preTaxCentsByOwnerIdx": [
               5791236
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1117364,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1368508,
@@ -42263,6 +43333,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 448933,
             "rmdShortfallCents": 0,
             "federalTaxCents": 544419,
@@ -42305,7 +43376,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2046,
@@ -42343,7 +43415,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2047,
@@ -42381,7 +43454,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2048,
@@ -42419,7 +43493,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2049,
@@ -42457,7 +43532,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2050,
@@ -42495,7 +43571,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           }
         ],
         "depletionYear": 2044,
@@ -43044,6 +44121,7 @@
             "preTaxCentsByOwnerIdx": [
               36508132
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1571245,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92188,
@@ -43093,6 +44171,7 @@
             "preTaxCentsByOwnerIdx": [
               35449704
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1594242,
             "rmdShortfallCents": 0,
             "federalTaxCents": 87800,
@@ -43142,6 +44221,7 @@
             "preTaxCentsByOwnerIdx": [
               34461012
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1611350,
             "rmdShortfallCents": 0,
             "federalTaxCents": 81375,
@@ -43191,6 +44271,7 @@
             "preTaxCentsByOwnerIdx": [
               33532133
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1633223,
             "rmdShortfallCents": 0,
             "federalTaxCents": 75675,
@@ -43240,6 +44321,7 @@
             "preTaxCentsByOwnerIdx": [
               32653341
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1660007,
             "rmdShortfallCents": 0,
             "federalTaxCents": 70743,
@@ -43289,6 +44371,7 @@
             "preTaxCentsByOwnerIdx": [
               31473270
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1683162,
             "rmdShortfallCents": 0,
             "federalTaxCents": 62415,
@@ -43338,6 +44421,7 @@
             "preTaxCentsByOwnerIdx": [
               30012257
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1701258,
             "rmdShortfallCents": 0,
             "federalTaxCents": 50335,
@@ -43387,6 +44471,7 @@
             "preTaxCentsByOwnerIdx": [
               28631067
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1695608,
             "rmdShortfallCents": 0,
             "federalTaxCents": 33256,
@@ -43436,6 +44521,7 @@
             "preTaxCentsByOwnerIdx": [
               27307538
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1704230,
             "rmdShortfallCents": 0,
             "federalTaxCents": 18147,
@@ -43485,6 +44571,7 @@
             "preTaxCentsByOwnerIdx": [
               26330710
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1706721,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3873,
@@ -43534,6 +44621,7 @@
             "preTaxCentsByOwnerIdx": [
               24441687
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1732284,
             "rmdShortfallCents": 0,
             "federalTaxCents": 136331,
@@ -43583,6 +44671,7 @@
             "preTaxCentsByOwnerIdx": [
               15307884
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1697339,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1298795,
@@ -43632,6 +44721,7 @@
             "preTaxCentsByOwnerIdx": [
               5791236
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1117364,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1368508,
@@ -43681,6 +44771,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 448933,
             "rmdShortfallCents": 0,
             "federalTaxCents": 544419,
@@ -43723,7 +44814,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2046,
@@ -43761,7 +44853,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2047,
@@ -43799,7 +44892,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2048,
@@ -43837,7 +44931,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2049,
@@ -43875,7 +44970,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2050,
@@ -43913,7 +45009,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           }
         ],
         "depletionYear": 2044,
@@ -44462,6 +45559,7 @@
             "preTaxCentsByOwnerIdx": [
               36508132
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1571245,
             "rmdShortfallCents": 0,
             "federalTaxCents": 92188,
@@ -44511,6 +45609,7 @@
             "preTaxCentsByOwnerIdx": [
               35449704
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1594242,
             "rmdShortfallCents": 0,
             "federalTaxCents": 87800,
@@ -44560,6 +45659,7 @@
             "preTaxCentsByOwnerIdx": [
               34461012
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1611350,
             "rmdShortfallCents": 0,
             "federalTaxCents": 81375,
@@ -44609,6 +45709,7 @@
             "preTaxCentsByOwnerIdx": [
               33532133
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1633223,
             "rmdShortfallCents": 0,
             "federalTaxCents": 75675,
@@ -44658,6 +45759,7 @@
             "preTaxCentsByOwnerIdx": [
               32653341
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1660007,
             "rmdShortfallCents": 0,
             "federalTaxCents": 70743,
@@ -44707,6 +45809,7 @@
             "preTaxCentsByOwnerIdx": [
               31473270
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1683162,
             "rmdShortfallCents": 0,
             "federalTaxCents": 62415,
@@ -44756,6 +45859,7 @@
             "preTaxCentsByOwnerIdx": [
               30012257
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1701258,
             "rmdShortfallCents": 0,
             "federalTaxCents": 50335,
@@ -44805,6 +45909,7 @@
             "preTaxCentsByOwnerIdx": [
               28631067
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1695608,
             "rmdShortfallCents": 0,
             "federalTaxCents": 33256,
@@ -44854,6 +45959,7 @@
             "preTaxCentsByOwnerIdx": [
               27307538
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1704230,
             "rmdShortfallCents": 0,
             "federalTaxCents": 18147,
@@ -44903,6 +46009,7 @@
             "preTaxCentsByOwnerIdx": [
               26330710
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1706721,
             "rmdShortfallCents": 0,
             "federalTaxCents": 3873,
@@ -44952,6 +46059,7 @@
             "preTaxCentsByOwnerIdx": [
               24441687
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1732284,
             "rmdShortfallCents": 0,
             "federalTaxCents": 136331,
@@ -45001,6 +46109,7 @@
             "preTaxCentsByOwnerIdx": [
               15307884
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1697339,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1298795,
@@ -45050,6 +46159,7 @@
             "preTaxCentsByOwnerIdx": [
               5791236
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 1117364,
             "rmdShortfallCents": 0,
             "federalTaxCents": 1368508,
@@ -45099,6 +46209,7 @@
             "preTaxCentsByOwnerIdx": [
               0
             ],
+            "acaCreditAppliedToPremiumsCents": 0,
             "rmdFloorCents": 448933,
             "rmdShortfallCents": 0,
             "federalTaxCents": 544419,
@@ -45141,7 +46252,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2046,
@@ -45179,7 +46291,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2047,
@@ -45217,7 +46330,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2048,
@@ -45255,7 +46369,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2049,
@@ -45293,7 +46408,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           },
           {
             "year": 2050,
@@ -45331,7 +46447,8 @@
             ],
             "preTaxCentsByOwnerIdx": [
               0
-            ]
+            ],
+            "acaCreditAppliedToPremiumsCents": 0
           }
         ],
         "depletionYear": 2044,
@@ -46026,6 +47143,89 @@
       ]
     },
     "acaPtcSubsidyPercentilesByYear": {
+      "p10": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p25": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "p50": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "acaCreditAppliedToPremiumsPercentilesByYear": {
       "p10": [
         0,
         0,

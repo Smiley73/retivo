@@ -966,6 +966,17 @@ export function mcInputFromBundle(
             : {}),
         }
       : {}),
+    // Every `isMedical` row (the HSA demand above is its qualified subset): caps
+    // the ACA credit applied to premiums on each path.
+    ...(bundle.monthlyMedicalExpenseBase !== undefined
+      ? {
+          monthlyMedicalExpenseBase: bundle.monthlyMedicalExpenseBase,
+          medicalExpenseRatePct: bundle.medicalExpenseRatePct,
+          ...(bundle.monthlyMedicalExpenseBucketsBase !== undefined
+            ? { monthlyMedicalExpenseBucketsBase: bundle.monthlyMedicalExpenseBucketsBase }
+            : {}),
+        }
+      : {}),
     ssByYear: bundle.ssByYear,
     // Fold the rollover-year RMD cash into the per-year non-SS income
     // (spendable + taxable via the kernel's `otherIncome`) so the MC path sees

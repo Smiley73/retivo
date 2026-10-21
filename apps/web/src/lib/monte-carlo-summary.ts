@@ -593,6 +593,9 @@ export function assembleMonteCarloSummary(
           federalTaxPercentilesByYear: percentileSeries(acc.taxAcc.fedTaxByYear),
           irmaaSurchargePercentilesByYear: percentileSeries(acc.taxAcc.irmaaSurchargeByYear),
           acaPtcSubsidyPercentilesByYear: percentileSeries(acc.taxAcc.acaPtcSubsidyByYear),
+          acaCreditAppliedToPremiumsPercentilesByYear: percentileSeries(
+            acc.taxAcc.acaCreditAppliedToPremiumsByYear,
+          ),
           effectiveTaxRatePercentilesByYear: percentileSeries(acc.taxAcc.effectiveTaxRateByYear),
           netAfterTaxPercentilesByYear: percentileSeries(acc.taxAcc.netAfterTaxByYear),
         }

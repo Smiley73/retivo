@@ -48,7 +48,9 @@
  * and surviving-spouse statuses) and the annual cash-like interest ride the
  * same per-year loop and `TaxYearBuildArgs` seam, with the same rolling
  * MAGI-buffer / prior-year-RMD state and no new seam, so this stays a single
- * cohesive deterministic tax post-pass. Recorded future split path: when next
+ * cohesive deterministic tax post-pass. The credit applied to premiums is only
+ * wired here: the hook sums the year's Medical expenses and hands them to the
+ * solver, which computes the line through `credit-applied-to-premiums.ts`. Recorded future split path: when next
  * touched, lift the per-year solver loop (and its MAGI-buffer threading) into a
  * sibling module driven by `computeYearTaxWithMagiLookback`. Trigger: a change
  * adding 5 or more lines here must either refactor the file back under the
@@ -92,6 +94,7 @@ import {
   storedAcaBenchmarkOverrides,
 } from './tax-integration-helpers';
 import { solveTaxCashflow, solveFillConversion } from './tax-cashflow-solver';
+import { sumYearCents } from './credit-applied-to-premiums';
 import {
   advanceBrokerageLikeBasis,
   buildAccountSnapshotsFromPriorYear,
@@ -1150,6 +1153,7 @@ function emptyTaxOutcome(): TaxCashflowYearOutcome {
     irmaaWithheldFromSsCents: 0,
     irmaaCashNeedCents: 0,
     acaPtcCashflowOffsetCents: 0,
+    acaCreditAppliedToPremiumsCents: 0,
     totalTaxCashflowNeedCents: 0,
     taxCashflowIterations: 0,
     taxCashflowConverged: true,
@@ -1323,17 +1327,24 @@ function buildSolverYearInput(
  *  cents into its per-pass trial target (`tax-cashflow-solver.ts`), so the
  *  federal tax inside `totalTaxCashflowNeedCents` reflects the extra
  *  withheld-covering draw. This add-on still counts the withheld PRINCIPAL
- *  exactly once (here); the solver change raises only the tax on it. */
+ *  exactly once (here); the solver change raises only the tax on it.
+ *
+ *  The credit applied to premiums lowers the draw: it is subtracted here, so
+ *  the add-on can be negative (never below minus the year's ordinary need). */
 function toTaxCashflowOutcome(
   result: ReturnType<typeof solveTaxCashflow>,
 ): TaxCashflowYearOutcome {
   return {
     addedNeedDollars:
-      (result.totalTaxCashflowNeedCents + result.irmaaWithheldFromSsCents) / 100,
+      (result.totalTaxCashflowNeedCents +
+        result.irmaaWithheldFromSsCents -
+        result.acaCreditAppliedToPremiumsCents) /
+      100,
     federalTaxCashNeedCents: result.federalTaxCashNeedCents,
     irmaaWithheldFromSsCents: result.irmaaWithheldFromSsCents,
     irmaaCashNeedCents: result.irmaaCashNeedCents,
     acaPtcCashflowOffsetCents: result.acaPtcCashflowOffsetCents,
+    acaCreditAppliedToPremiumsCents: result.acaCreditAppliedToPremiumsCents,
     totalTaxCashflowNeedCents: result.totalTaxCashflowNeedCents,
     taxCashflowIterations: result.taxCashflowIterations,
     taxCashflowConverged: result.taxCashflowConverged,
@@ -1350,6 +1361,10 @@ export function buildTaxCashflowHook(args: {
   readonly retirementYear: number;
   /** Per-calendar-year rolled-CBP RMD ordinary income (dollars). */
   readonly rolledRmdIncomeByYear?: ReadonlyMap<number, number>;
+  /** Monthly modeled Medical expenses (every `isMedical` row), integer cents,
+   *  aligned to (retirementYear, January) — caps the credit applied to premiums.
+   *  Absent → no credit is applied. */
+  readonly medicalExpenseByMonthCents?: ReadonlyArray<number>;
 }): TaxCashflowHook {
   const { ctx, ssRows, nonSsIncomeRows, ledgerAccounts, bundle, retirementYear } = args;
   const shared = buildTaxLoopShared(
@@ -1436,6 +1451,7 @@ export function buildTaxCashflowHook(args: {
       unitRing,
     );
     if (yearInput === null) return emptyTaxOutcome();
+    const medicalExpenseCents = sumYearCents(args.medicalExpenseByMonthCents ?? [], yearIndex);
     // Hybrid IRMAA: each Medicare member's surcharge is withheld only from
     // THAT member's own SS (mirrors CMS per-beneficiary collection). A member
     // on Medicare but not yet claiming their own SS (own SS $0) → full cash
@@ -1454,16 +1470,21 @@ export function buildTaxCashflowHook(args: {
       bundle,
       irmaaPayment: { ownSsDollarsByMemberId: yearInput.ownSsDollarsByMemberId },
       classifyForTarget: classify,
+      medicalExpenseCents,
     });
     // The funded draw `solveTaxCashflow` settles on is
-    // `ordinaryNetNeed + (totalTaxCashflowNeed + irmaaWithheldFromSs)` — the
-    // withheld IRMAA cents are folded into the trial target so the
-    // portfolio covers the SS-check shortfall. The committed classification
-    // must therefore classify that SAME full funded draw; omitting the withheld
-    // cents under-states the Roth / penalty basis in withheld-IRMAA years.
+    // `ordinaryNetNeed + (totalTaxCashflowNeed + irmaaWithheldFromSs −
+    // acaCreditAppliedToPremiums)` — the withheld IRMAA cents are folded into
+    // the trial target so the portfolio covers the SS-check shortfall. The
+    // committed classification must therefore classify that SAME full funded
+    // draw; omitting the withheld cents under-states the Roth / penalty basis in
+    // withheld-IRMAA years.
     const committedTarget =
       ordinaryNetNeedDollars +
-      (pass1.totalTaxCashflowNeedCents + pass1.irmaaWithheldFromSsCents) / 100;
+      (pass1.totalTaxCashflowNeedCents +
+        pass1.irmaaWithheldFromSsCents -
+        pass1.acaCreditAppliedToPremiumsCents) /
+        100;
     const committedSplit = classify(committedTarget);
     const { penaltyAccounts, rothEarningsExcessDollars } = buildSolverPenaltyAccountsForYear({
       ctx,
@@ -1492,6 +1513,7 @@ export function buildTaxCashflowHook(args: {
             bundle,
             irmaaPayment: { ownSsDollarsByMemberId: yearInput.ownSsDollarsByMemberId },
             classifyForTarget: classify,
+            medicalExpenseCents,
           });
     magiBuffer.push(result.taxYearResult.magiCents / 100);
     // The funding solver keeps its own per-return look-back ring in

@@ -1867,7 +1867,7 @@ describe('fillYearBalancesAndTax — threads the after-tax base into the per-yea
       for (let m = y * 12; m < (y + 1) * 12 && m < stepCount; m += 1) s += input.monthlyExpenseBase[m];
       return s;
     });
-    const taxState = newTaxPathState(input, out, stepCount, horizonYears, nominalExpenseByYear, buildRunContext(input))!;
+    const taxState = newTaxPathState(input, out, stepCount, horizonYears, nominalExpenseByYear, new Float64Array(horizonYears), buildRunContext(input))!;
     fillYearBalancesAndTax(out, balN, balR, stepCount, taxState);
 
     // Every year drew a non-zero tax cashflow from the $80k drawdown.

@@ -77,6 +77,7 @@ function fixedConversionHook(convPerYear: number, convTaxRate = 0): {
         irmaaWithheldFromSsCents: 0,
         irmaaCashNeedCents: 0,
         acaPtcCashflowOffsetCents: 0,
+        acaCreditAppliedToPremiumsCents: 0,
         totalTaxCashflowNeedCents: 0,
         taxCashflowIterations: 1,
         taxCashflowConverged: true,

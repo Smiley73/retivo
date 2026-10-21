@@ -400,6 +400,12 @@ function extendOptionalSeries(
   assignExtended(next, 'monthlyMedicalDemandBucketsBase', base.monthlyMedicalDemandBucketsBase, (v) =>
     v.map((b) => ({ ratePct: b.ratePct, amount: extendMonthlySeries(b.amount, extraSteps) })),
   );
+  assignExtended(next, 'monthlyMedicalExpenseBase', base.monthlyMedicalExpenseBase, (v) =>
+    extendMonthlySeries(v, extraSteps),
+  );
+  assignExtended(next, 'monthlyMedicalExpenseBucketsBase', base.monthlyMedicalExpenseBucketsBase, (v) =>
+    v.map((b) => ({ ratePct: b.ratePct, amount: extendMonthlySeries(b.amount, extraSteps) })),
+  );
   assignExtended(next, 'tracksInflationIncomeByYear', base.tracksInflationIncomeByYear, (v) =>
     extendYearlySeries(v, extraYears),
   );

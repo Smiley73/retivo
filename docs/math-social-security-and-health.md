@@ -419,10 +419,12 @@ Security.
 ## ACA premium credits
 
 The **ACA premium tax credit** lowers the cost of a Marketplace plan for people
-who are not yet on Medicare. The app works out the credit and counts it
-against the year's tax and surcharge cash need, up to that need and no further.
-You enter the full, unsubsidized plan price as a medical expense, because the
-app works out the subsidy itself.
+who are not yet on Medicare. The app works out the credit and uses it twice.
+First it goes against the year's federal tax and IRMAA cash need. Whatever is
+left lowers that year's withdrawals as its own line, **Credit applied to
+premiums**, up to your Medical expenses for the year and up to what your
+accounts would otherwise draw. You enter the full, unsubsidized plan price as a
+medical expense, because the app works out the subsidy itself.
 
 ### What goes in
 
@@ -467,11 +469,31 @@ app works out the subsidy itself.
      inflation rate plus 2 percentage points unless you set it.
 7. **Credit** = benchmark premium minus expected contribution, never below zero.
 
-**How it reaches the numbers.** The credit is counted against that year's
-federal tax and IRMAA cash need. It lowers what your accounts must fund for
-those, and it cannot make that need negative. Any credit above that year's
-federal tax plus IRMAA cash need is not counted anywhere, while the full
-premium you entered as a medical expense is still charged.
+**How it reaches the numbers.** The credit is used in two steps.
+
+1. **Against tax and the surcharge.** It is counted against that year's federal
+   tax and IRMAA cash need. It lowers what your accounts must fund for those,
+   and it cannot make that need negative. This part is the **ACA PTC offset**.
+2. **Against your Medical expenses.** What is left of the credit is a cash
+   refund of premiums you already entered as an expense, so it lowers that
+   year's withdrawals. The line is the smallest of three amounts: the credit
+   left after step 1, the Medical expenses modeled for that year (every row in a
+   Medical category, not only the ones marked HSA-qualified), and the amount
+   your accounts would otherwise draw that year. It is never below zero.
+
+The second step can only lower a draw that exists. The app has no place to put
+surplus cash, so a year in which Social Security and pensions already cover
+spending has nothing to lower, and the rest of the credit is dropped. When the
+draw is smaller than the credit left, the line is that draw and the rest is
+dropped too. The line is a separate column in the **Taxes & health costs** table
+and a separate figure on the **Taxes** tab. The dollars are already part of the
+ACA health credits shown there, so they are not added a second time.
+
+The stress test funds the whole IRMAA surcharge, where the projection funds only
+the part not withheld from Social Security, so step 1 uses the whole surcharge
+there. Everything else is the same, and for the same flat household the two
+agree to the cent. Medical expenses are taken before any spending cut from the
+downturn guardrail, because the premium is the amount you entered.
 
 ### Built-in figures and years
 
@@ -522,20 +544,28 @@ base amount and the base year (2026) move together when the curve is re-anchored
   spouses can claim one in practice.
 - **One calculation a year.** The credit is worked out once from that year's
   income. The app does not model advance payments or repayment at tax time.
-- **Credit above the year's tax and surcharge need is dropped.** The credit is
-  only counted against that year's federal tax plus IRMAA cash need. Any part
-  above that is not counted. In the real rules the credit is refundable and
-  lowers the premium in full, whatever the tax. In a low-tax year, which is
-  common before Medicare, the app therefore shows higher health costs than you
-  would actually pay.
+- **A year with no draw cannot be lowered.** The credit is used against tax and
+  the surcharge first, then against the year's Medical expenses, but only up to
+  the draw. The app has no surplus deposit, so credit beyond a year's draw is
+  dropped. In the real rules the credit is refundable and lowers the premium in
+  full. A year in which Social Security and pensions already cover spending
+  therefore shows slightly higher health costs than you would actually pay.
+- **The credit is worked out for the withdrawals that fund the year.** The line
+  is based on that funding calculation. The credit shown for the year can
+  differ from it by a few dollars when a lot of the income comes from taxable
+  brokerage accounts. A Roth conversion sized after the withdrawals are
+  settled does not change the line.
 
 **Code.** All paths are under `apps/web/src`. `lib/aca-ptc.ts` works out the
 credit and holds the rough benchmark curve. `lib/aca-ptc-parameters.ts` has the
 built-in bands and poverty lines. `lib/tax-integration.ts` runs it each year
 and applies the year scaling. `lib/tax-integration-helpers.ts` has the covered
 months and `resolveMemberHealthCoverage`. `lib/tax-cashflow-solver.ts` counts
-the credit against the cash need. `pages/scenario-tax-assumptions-sections.tsx`
-has the **Health coverage** editor.
+the credit against the cash need. `lib/credit-applied-to-premiums.ts` holds the
+one function that works out the line, called by both the projection
+(`lib/tax-cashflow-solver.ts`) and the stress test (`lib/monte-carlo-tax.ts`).
+`pages/scenario-tax-assumptions-sections.tsx` has the **Health coverage**
+editor.
 
 ## Worked example
 
@@ -585,8 +615,23 @@ inflation is 4% and no medical rate is set, so the medical rate is 6%.
 - Credit: $9,438.24 - $2,234.37 = **$7,203.87**. Without the medical growth it
   would be $6,165.63.
 
-The credit only counts up to that year's federal tax plus IRMAA cash need. If
-this person's federal tax is about $1,600 and they have no IRMAA, only about
-$1,600 of the $5,134.20 reduces what their accounts must fund. The rest is not
-counted, and the full $7,200 premium entered as a medical expense is still
-charged.
+**The credit lowering the draw.** Back to the 2026 credit of $5,134.20. This
+person has $31,300 of Social Security, draws only from a Roth IRA, and spends
+$64,000 on everything else plus the $7,200 premium entered as a medical expense.
+Social Security is under the $25,000 base once halved, so none of it is taxed,
+and federal tax is $0. The credit has nothing to offset in step 1.
+
+- Draw before the credit: $64,000 + $7,200 - $31,300 = **$39,900**.
+- Credit applied to premiums: the smallest of $5,134.20 (the credit left),
+  $7,200 (Medical expenses) and $39,900 (the draw) = **$5,134.20**.
+- Draw after the credit: $39,900 - $5,134.20 = **$34,765.80**.
+
+With $26,800 of other spending the draw before the credit is only $2,700, so the
+line is $2,700, the draw falls to $0, and $2,434.20 of the credit is dropped. If
+Social Security covered all spending, the draw would be $0 and the whole credit
+would be dropped.
+
+If this person also had a $20,000 pension, $5,902.50 of Social Security would be
+taxed and federal tax would be $980.25. Their ACA MAGI of $51,300 is 327.8% of
+the poverty line, so the credit falls to $2,090.52. Step 1 uses $980.25 of it
+against the tax, and the line is the $1,110.27 left.

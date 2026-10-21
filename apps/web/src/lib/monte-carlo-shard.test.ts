@@ -223,6 +223,10 @@ describe('assembleAccumulationFromTyped', () => {
           [0, 0, 0, 0],
           [9, 8, 7, 6],
         ]),
+        acaCreditAppliedToPremiumsByYear: mk([
+          [0, 0, 0, 0],
+          [5, 4, 3, 0],
+        ]),
         effectiveTaxRateByYear: mk([
           [0.1, 0.2, 0.3, 0.4],
           [0, 0, 0, 0],
@@ -252,6 +256,7 @@ describe('assembleAccumulationFromTyped', () => {
     expect(acc.endingNominal).toEqual([4, 3, 2, 1]);
     expect(acc.taxAcc?.fedTaxByYear[0]).toEqual([100, 0, 200, 0]);
     expect(acc.taxAcc?.acaPtcSubsidyByYear[1]).toEqual([9, 8, 7, 6]);
+    expect(acc.taxAcc?.acaCreditAppliedToPremiumsByYear[1]).toEqual([5, 4, 3, 0]);
     expect(Array.isArray(acc.taxAcc?.fedTaxByYear[0])).toBe(true);
   });
 
