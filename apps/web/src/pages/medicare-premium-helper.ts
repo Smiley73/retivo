@@ -123,6 +123,28 @@ export function scenarioAddedExpenses(
     }));
 }
 
+/**
+ * The expenses the preview checks for an already-entered premium: the
+ * canonical list plus whatever the selected scenario adds on its own. The
+ * effective scenario is the selected one, or the primary (base) when none is
+ * picked or the pick is gone, as in the projection.
+ */
+export function premiumCheckExpenses(
+  canonical: ReadonlyArray<Aggregate<ExpensePayload>>,
+  scenarios: ReadonlyArray<ScenarioAggregate>,
+  selectedScenarioId: string | null | undefined,
+): ReadonlyArray<Aggregate<ExpensePayload>> {
+  const effectiveId =
+    selectedScenarioId && scenarios.some((s) => s.id === selectedScenarioId)
+      ? selectedScenarioId
+      : (scenarios.find((s) => s.payload.isPrimary)?.id ?? null);
+  if (effectiveId === null) return canonical;
+  return [
+    ...canonical,
+    ...scenarioAddedExpenses(effectiveId, scenarios as ScenarioAggregate[]),
+  ];
+}
+
 /** Same case-folding and trimming the expense form applies to a name. */
 const normalizeName = (name: string): string => name.trim().toLowerCase();
 

@@ -18,6 +18,7 @@ import {
   buildMedicarePremiumPreview,
   buildPremiumPayloads,
   isRowIncluded,
+  premiumCheckExpenses,
   scenarioAddedExpenses,
   type MedicarePremiumPreview,
   type PremiumMemberGroup,
@@ -451,5 +452,19 @@ describe('scenario-only expenses', () => {
       'John Medicare Part B',
     ]);
     expect(scenarioAddedExpenses('missing', scenarios)).toEqual([]);
+  });
+
+  it('should_add_the_selected_scenarios_expenses_and_fall_back_to_the_primary', () => {
+    const scenarios = [
+      scenario('base', null, [partB]),
+      scenario('other', null, []),
+    ];
+    const names = (selected: string | null): string[] =>
+      premiumCheckExpenses([], scenarios, selected).map((e) => e.payload.name);
+    expect(names('base')).toEqual(['John Medicare Part B']);
+    expect(names(null)).toEqual(['John Medicare Part B']);
+    expect(names('gone')).toEqual(['John Medicare Part B']);
+    expect(names('other')).toEqual([]);
+    expect(premiumCheckExpenses([], [], 'base')).toEqual([]);
   });
 });

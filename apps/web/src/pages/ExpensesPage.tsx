@@ -93,7 +93,7 @@ import {
 import { MedicarePremiumsDialog } from './MedicarePremiumsDialog';
 import {
   MEDICARE_PREMIUMS_PARAM,
-  scenarioAddedExpenses,
+  premiumCheckExpenses,
 } from './medicare-premium-helper';
 
 /**
@@ -581,25 +581,16 @@ export const ExpensesPage: React.FC = () => {
 
   const loading = !dataReady;
 
-  // Expenses the preview checks for an already-entered premium: the canonical
-  // list plus whatever the selected scenario (the base when none is picked or
-  // the pick is gone, as in `buildProjection`) adds on its own.
-  const premiumCheckExpenses = useMemo<
-    ReadonlyArray<Aggregate<ExpensePayload>>
-  >(() => {
-    const canonical = expenseQuery.aggregates as ReadonlyArray<
-      Aggregate<ExpensePayload>
-    >;
-    const effectiveId =
-      selectedScenarioId && scenarios.some((s) => s.id === selectedScenarioId)
-        ? selectedScenarioId
-        : (scenarios.find((s) => s.payload.isPrimary)?.id ?? null);
-    if (effectiveId === null) return canonical;
-    return [
-      ...canonical,
-      ...scenarioAddedExpenses(effectiveId, scenarios as ScenarioAggregate[]),
-    ];
-  }, [expenseQuery.aggregates, scenarios, selectedScenarioId]);
+  // Canonical expenses plus the selected scenario's own, for the premium check.
+  const premiumExpenses = useMemo(
+    () =>
+      premiumCheckExpenses(
+        expenseQuery.aggregates as ReadonlyArray<Aggregate<ExpensePayload>>,
+        scenarios,
+        selectedScenarioId,
+      ),
+    [expenseQuery.aggregates, scenarios, selectedScenarioId],
+  );
 
   // Post-load focus restoration: after the first successful data
   // load, read `focusExpenseId` from the URL, validate it against a safe
@@ -797,7 +788,7 @@ export const ExpensesPage: React.FC = () => {
         <MedicarePremiumsDialog
           householdId={householdId}
           members={householdMembers}
-          expenses={premiumCheckExpenses}
+          expenses={premiumExpenses}
           categories={categoryQuery.aggregates as ReadonlyArray<Aggregate<ExpenseCategoryPayload>>}
           onClose={() => setPremiumsOpen(false)}
         />
