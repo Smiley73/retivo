@@ -49,7 +49,12 @@ describe('parseBalanceProjectionView', () => {
     }
   });
 
-  it('places the safe-withdrawal-rate tab last (tab row AND print order)', () => {
-    expect(VIEW_ORDER[VIEW_ORDER.length - 1]).toBe('swr');
+  it('places the compare tab last, after safe withdrawal rate (tab row AND print order)', () => {
+    expect(VIEW_ORDER[VIEW_ORDER.length - 1]).toBe('compare');
+    expect(VIEW_ORDER[VIEW_ORDER.length - 2]).toBe('swr');
+  });
+
+  it('accepts compare', () => {
+    expect(parseBalanceProjectionView('compare')).toBe('compare');
   });
 });

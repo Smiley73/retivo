@@ -6,8 +6,8 @@
  * Surface: a pinned controls strip (Basis select + reroll, Recalculate /
  * progress, Today's/Future dollars toggle, methodology explainer) and a
  * "Projection views" tab row (Overview / Cash flow / Accounts / Taxes &
- * distributions / Safe withdrawal rate, `?view=`-driven) sitting
- * above five force-mounted panels that each compose named section
+ * distributions / Safe withdrawal rate / Compare, `?view=`-driven) sitting
+ * above six force-mounted panels that each compose named section
  * components. Page-owned state
  * (`yScale`, `displayMode`, `activeMethod`, `activeMcBasis`) is read across
  * views and threaded down as props, not re-scoped per panel. One data-load
@@ -83,6 +83,7 @@ import { buildReportTimestamp } from '../lib/report-format';
 import { BalanceProjectionAccountStackSection } from './balance-projection-page-account-stack-section';
 import { BalanceProjectionCharts } from './balance-projection-page-charts';
 import { BalanceProjectionSwrSection } from './balance-projection-page-swr';
+import { BalanceProjectionCompareSection } from './balance-projection-page-compare';
 import { useBalanceProjectionViewModel } from './use-balance-projection-view-model';
 import {
   BalanceProjectionErrorState,
@@ -177,17 +178,12 @@ export const BalanceProjectionPage: React.FC = () => {
   // value renders Overview, and the page never writes the URL on mount to
   // normalise it (a mount-time write would add a replace entry on every load
   // and make deep-link behavior depend on render timing). `scrollAnchorRef`
-  // wraps the pinned strip + the five panels: a sticky element can't scroll
-  // itself into view (once stuck, its rect top is already 0), so a
-  // user-initiated switch scrolls this plain, non-sticky ancestor instead —
-  // its top edge is where the strip sits when unstuck. `stripRef` is the
-  // sticky container itself: while it is stuck it paints over the panel
-  // content beneath, so a control reached by keyboard inside a panel is
+  // wraps the pinned strip + the six panels: a sticky element can't scroll
+  // itself into view, so a user-initiated switch scrolls this plain ancestor
+  // instead. `stripRef` is the sticky container itself: while stuck it paints
+  // over the panel beneath, so a control reached by keyboard inside a panel is
   // scrolled clear of the strip's MEASURED bottom edge (WCAG 2.2 AA 2.4.11 —
-  // see the hook for why a fixed document `scroll-padding` reserve cannot do
-  // this: the strip's height varies with wrapping and the in-flight row, and
-  // a reserve that covers the stuck strip makes the browser scroll the page
-  // every time focus enters one of the strip's own controls).
+  // see the hook for why a fixed `scroll-padding` reserve cannot do this).
   const [searchParams, setSearchParams] = useSearchParams();
   const view = parseBalanceProjectionView(searchParams.get('view'));
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
@@ -522,8 +518,7 @@ export const BalanceProjectionPage: React.FC = () => {
         {/* The scroll anchor for a user-initiated view switch: a sticky
             element can't scroll itself into view (once stuck its rect top is
             already 0), so this plain, non-sticky div — wrapping the pinned
-            strip AND the five panels — is the scroll target instead; its top
-            edge is where the strip sits when unstuck (see
+            strip AND the six panels — is the scroll target instead (see
             `handleViewChange`). It is also the container
             `useFocusClearOfPinnedStrip` watches for keyboard focus landing
             under the stuck strip (`stripRef`, the sticky div just inside). */}
@@ -790,6 +785,12 @@ export const BalanceProjectionPage: React.FC = () => {
               resolvedLabel={activeBasisLabel}
               isMcBasisActive={isMcBasisActive}
               tooltipMembers={tooltipMembers}
+            />
+          </TabPanel>
+          <TabPanel id="compare" shouldForceMount className="bp-view-panel outline-none">
+            <BalanceProjectionCompareSection
+              dataLoad={dataLoad} data={data} isActive={view === 'compare'}
+              nowYear={nowYear} nowMonthIndex={nowMonthIndex}
             />
           </TabPanel>
         </div>

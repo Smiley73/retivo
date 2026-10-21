@@ -35,6 +35,15 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-20',
     kind: 'new',
+    title: 'Compare two scenarios on Projections',
+    blurb:
+      'A new Compare tab sets the scenario you are viewing beside another one, ' +
+      'showing the ending balance at the end of each plan and the year money ' +
+      'runs out, with the difference between them.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'new',
     title: 'Your AI assistant can try a what-if without saving it (beta)',
     blurb:
       'A connected assistant can now show how a change, such as retiring earlier or claiming ' +
