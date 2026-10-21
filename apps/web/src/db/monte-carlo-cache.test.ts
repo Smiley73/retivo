@@ -310,7 +310,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v34')).toBeNull();
   });
 
@@ -327,7 +327,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v34')).toBeNull();
   });
 
@@ -344,7 +344,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v35')).toBeNull();
   });
 
@@ -361,7 +361,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v37')).toBeNull();
   });
 
@@ -379,7 +379,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v41')).toBeNull();
   });
 
@@ -397,7 +397,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v43')).toBeNull();
   });
 
@@ -415,7 +415,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v44')).toBeNull();
   });
 
@@ -433,7 +433,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v45')).toBeNull();
   });
 
@@ -452,7 +452,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v46')).toBeNull();
   });
 
@@ -471,7 +471,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v47')).toBeNull();
   });
 
@@ -489,7 +489,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v49')).toBeNull();
   });
 
@@ -508,7 +508,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v50')).toBeNull();
   });
 
@@ -529,7 +529,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v51')).toBeNull();
   });
 
@@ -549,7 +549,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v52')).toBeNull();
   });
 
@@ -570,7 +570,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v52')).toBeNull();
   });
 
@@ -592,7 +592,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v53')).toBeNull();
   });
 
@@ -613,7 +613,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v56')).toBeNull();
   });
 
@@ -635,7 +635,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v57')).toBeNull();
   });
 
@@ -657,7 +657,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v58')).toBeNull();
   });
 
@@ -681,7 +681,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v59')).toBeNull();
   });
 
@@ -708,7 +708,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v60')).toBeNull();
   });
 
@@ -728,7 +728,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v62')).toBeNull();
   });
 
@@ -749,7 +749,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v63')).toBeNull();
   });
 
@@ -770,7 +770,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(e);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v66')).toBeNull();
   });
 
@@ -788,7 +788,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(entry);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v67')).toBeNull();
   });
 
@@ -806,7 +806,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(entry);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v68')).toBeNull();
   });
 
@@ -826,7 +826,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(entry);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v69')).toBeNull();
   });
 
@@ -844,7 +844,7 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(entry);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v70')).toBeNull();
   });
 
@@ -862,8 +862,27 @@ describe('monte-carlo-cache', () => {
       await tx.store.put(entry);
     }
     await tx.done;
-    expect(ENGINE_VERSION).toBe(72);
+    expect(ENGINE_VERSION).toBe(73);
     expect(await getCached('v71')).toBeNull();
+  });
+
+  it('invalidates a v72-vintage entry after the v73 credit-line pricing bump', async () => {
+    // ENGINE_VERSION 72 → 73: the stress test now counts the early-withdrawal
+    // penalty in what the ACA credit offsets, and the line's poverty-line limit
+    // counts only the gain of a taxable-account draw, so a summary computed before
+    // must not be reused.
+    await putCached('v72', fakeSummary(1));
+    const { db } = await import('./store.js');
+    const handle = await db();
+    const tx = handle.transaction('monteCarloResults', 'readwrite');
+    const entry = await tx.store.get('v72');
+    if (entry) {
+      entry.engineVersion = 72;
+      await tx.store.put(entry);
+    }
+    await tx.done;
+    expect(ENGINE_VERSION).toBe(73);
+    expect(await getCached('v72')).toBeNull();
   });
 });
 
