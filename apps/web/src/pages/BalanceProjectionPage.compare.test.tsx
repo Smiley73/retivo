@@ -23,6 +23,7 @@ import {
 } from '../db/store';
 import type { Aggregate, ScenarioPayload } from '../db/types';
 import { loadDemoData } from '../lib/demo-data-loader';
+import { SELECTED_SCENARIO_CHANGED_EVENT } from '../lib/scenario-mutations';
 import { COMPARE_CHOICE_STORAGE_KEY } from '../lib/view-deflator';
 import { TaxIntegrationInvalidInputError } from '../lib/balance-projection-runner-tax';
 import { MonteCarloProvider } from '../monte-carlo/MonteCarloProvider';
@@ -180,6 +181,47 @@ describe('BalanceProjectionPage — Compare tab', () => {
       );
       expect(selectorTrigger(panel)).toHaveTextContent('Delay — work to 70');
       expect(window.localStorage.getItem(COMPARE_CHOICE_STORAGE_KEY)).toBeNull();
+    });
+
+    it('stops applying ?with= once another scenario is picked in the sidebar', async () => {
+      window.localStorage.setItem(
+        COMPARE_CHOICE_STORAGE_KEY,
+        JSON.stringify({ [BASE]: FUNDS_RUN_OUT }),
+      );
+      const { panel, log } = await renderCompare(
+        `/balance-projection?view=compare&with=${DELAY}`,
+        EARLY,
+      );
+      expect(selectorTrigger(panel)).toHaveTextContent('Delay — work to 70');
+
+      await view(BASE);
+      act(() => {
+        window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
+      });
+      await waitFor(() => expect(selectorTrigger(panel)).toHaveTextContent('Funds Run Out'), WAIT);
+      await waitFor(() => expect(log.at(-1)!.search).toBe('?view=compare'));
+    });
+
+    it('falls back to the default, not ?with=, after a sidebar switch with nothing remembered', async () => {
+      const { panel } = await renderCompare(
+        `/balance-projection?view=compare&with=${BASE}`,
+        EARLY,
+      );
+      expect(selectorTrigger(panel)).toHaveTextContent('Base (Base)');
+
+      await view(DELAY);
+      act(() => {
+        window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
+      });
+      await waitFor(() => expect(selectorTrigger(panel)).toHaveTextContent('Base (Base)'), WAIT);
+      await view(BASE);
+      act(() => {
+        window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
+      });
+      await waitFor(
+        () => expect(selectorTrigger(panel)).toHaveTextContent('Choose a scenario'),
+        WAIT,
+      );
     });
 
     it.each([
