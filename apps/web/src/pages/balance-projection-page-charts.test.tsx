@@ -1241,4 +1241,60 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
     expect(screen.getByText('$50k')).toBeInTheDocument();
     await waitForBars(container, 1);
   });
+
+  describe('Medicaid note', () => {
+    const MEDICAID_COPY = /Medicaid may apply/i;
+
+    it('shows the Medicaid paragraph when a deterministic year is at or below 138% of the poverty line', () => {
+      render(
+        <ThemeProvider>
+          <BalanceProjectionCharts
+            {...baseProps({
+              planned: method([drawdownYear(2030, { fplPercentage: 138 })]),
+              twr: null,
+            })}
+          />
+        </ThemeProvider>,
+      );
+      expect(screen.getByText(MEDICAID_COPY)).toBeInTheDocument();
+    });
+
+    it('omits it when every computed year is above 138% or none was computed', () => {
+      render(
+        <ThemeProvider>
+          <BalanceProjectionCharts
+            {...baseProps({
+              planned: method([
+                drawdownYear(2030, { fplPercentage: 0 }),
+                drawdownYear(2031, { fplPercentage: 250 }),
+                drawdownYear(2032),
+              ]),
+              twr: null,
+            })}
+          />
+        </ThemeProvider>,
+      );
+      expect(screen.queryByText(MEDICAID_COPY)).not.toBeInTheDocument();
+    });
+
+    it('still shows it under a Monte Carlo basis whose representative rows carry no fplPercentage', () => {
+      // The MC tax path never stamps `fplPercentage`; the flag has to come from
+      // the deterministic method's years, not the resolved (MC) basis.
+      const representative = method([drawdownPhaseYear(2030)]);
+      render(
+        <ThemeProvider>
+          <BalanceProjectionCharts
+            {...baseProps({
+              planned: method([drawdownYear(2030, { fplPercentage: 120 })]),
+              twr: null,
+            })}
+            resolvedDrawdown={representative}
+            isMcBasisActive
+            resolvedLabel="Typical"
+          />
+        </ThemeProvider>,
+      );
+      expect(screen.getByText(MEDICAID_COPY)).toBeInTheDocument();
+    });
+  });
 });
