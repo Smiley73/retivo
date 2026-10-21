@@ -281,9 +281,15 @@ describe('arguments a caller should never send', () => {
     ['a death age of 0', { deathAges: { primary: 0, secondary: 90 } }],
     ['a death age past the maximum', { deathAges: { primary: 90, secondary: 101 } }],
     ['a fractional death age', { deathAges: { primary: 80.5, secondary: 90 } }],
-    ['no secondary death age for a couple', { deathAges: { primary: 90 } }],
   ] as const)('rejects %s', async (_label, overrides) => {
     await expect(searchRothSuggestions(request({}, overrides))).rejects.toThrow(RangeError);
+  });
+
+  it('runs a couple with no partner death age, as the page does for a scenario that stores none', TIMEOUT, async () => {
+    const result = await runOk({}, { deathAges: { primary: 90 } });
+    expect(result.candidates[0].id).toBe('current-plan');
+    expect(result.deathAges).toEqual({ primary: 90 });
+    expect(result.candidates.length).toBeGreaterThan(1);
   });
 
   it('rejects an unknown scenario', async () => {
