@@ -103,7 +103,9 @@ is displayed.
   set.
 - **Roth conversions card.** Its bars and its total always show the actual
   dollars converted in each year, in future dollars, whichever way the switch
-  is set. They are not adjusted for inflation.
+  is set. They are not adjusted for inflation. The
+  **Roth conversions** row in the Compare view's Drivers table is the exception:
+  it shows the same conversions in today's dollars.
 - **Safe withdrawal rate lines.** They are built from today's-dollar figures and
   turned back into each year's future dollars when you switch to Future dollars.
 
@@ -423,6 +425,47 @@ not say why.
   one scenario runs out, there is no number to subtract and the view says which
   one does.
 
+### Drivers
+
+Under the headline, a **Drivers** table sets the two scenarios' lifetime totals
+side by side, each with the same viewed-minus-other difference. Every dollar row
+is the Planned total for the years up to the last life-expectancy year, with
+each scenario's amounts divided by its own inflation, so the three tax rows are
+the same figures as the Taxes view's tiles (**Federal income tax**, **Medicare
+surcharges (IRMAA)**, **ACA health credits**, the last as a credit received).
+
+- **Roth conversions** is the one dollar row that differs from the Taxes view,
+  which shows the dollars converted in each year's own (future) dollars. Compare
+  shows them in today's dollars, like every other row.
+- **Required minimum distributions** is the full yearly requirement, the part
+  met plus any shortfall. **Qualified charitable distributions (QCD)** is the
+  amount given, in today's dollars.
+- **Years of withdrawals** has one row per account type (tax-deferred, Roth,
+  taxable, cash, HSA). It counts the Planned years, up to the last
+  life-expectancy year, in which any account of that type withdrew money.
+  Required minimum distributions and the withdrawals that pay a Roth
+  conversion's tax count. The difference reads "more" or "less" years.
+- **Rows that do not apply are left out.** The three tax rows always show. A
+  Roth conversions, RMD, QCD or account-type row that is zero in both scenarios
+  is omitted, as the Taxes view omits those bands when they do not apply.
+- **No attribution.** The table shows the totals of two complete projections.
+  The model does not apportion the gap among the rows, because changing one
+  input usually moves several lines at once (a later retirement age changes tax,
+  conversions, required distributions and which accounts are drawn on together),
+  so there is no decomposition to report, and the rows are not ranked.
+- **Different horizons.** When the two scenarios end in different years, the
+  longer one's lifetime totals cover the extra years, and the view says which
+  scenario runs longer and to which year.
+- **Identical results.** When the two Planned projections match year for year,
+  the headline and the table are replaced by a sentence saying so. For a pair on
+  the same inheritance line it lists the descendant's settings that differ from
+  the ancestor's (every scenario on the chain between them counts), grouped as
+  on the scenario page, or says it changes nothing. The check compares results,
+  not settings, so a scenario that sets a value its parent already has is
+  identical and still listed. The stress test is checked separately: a setting
+  that only the stress test reads, such as spending guardrails, can leave the
+  Planned projections identical.
+
 ## Built-in figures and years
 
 The market data is the only part of this page tied to dates. Everything else is
@@ -543,6 +586,7 @@ All paths are under `apps/web/src`.
 | `lib/monte-carlo-input-signature.ts` | The plan's content signature and the seed an automatic run draws from it. |
 | `components/PlanStressTestSection.tsx` | Using that seed, and Recalculate. |
 | `pages/use-balance-projection-compare.ts`, `pages/balance-projection-page-compare.tsx` | Which scenario Compare uses, the second projection that runs only while the tab is open, and the headline table. |
+| `pages/balance-projection-page-compare-drivers.tsx`, `lib/account-bucket.ts` | The Drivers table, its note and horizon sentence, the identical-results sentence, and the account-type names. |
 | `lib/view-deflator.ts` | The remembered Compare choice, one comparison scenario per viewed scenario, kept in your browser beside the display mode. |
 | `lib/success-delta-noise.ts` | The noise check on a difference between two success probabilities. |
 | `pages/balance-projection-compare-data.ts`, `lib/signed-difference.ts`, `lib/scenario-change-list.ts`, `lib/structural-equality.ts` | The figures two scenarios are compared on, how a difference reads, the list of settings that changed, and the identical-results check. |

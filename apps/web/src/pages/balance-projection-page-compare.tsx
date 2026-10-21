@@ -10,10 +10,11 @@
  * `resolvedBasisLabel` suffix and the panel says the header Basis and
  * Today's/Future dollars controls do not apply.
  *
- * Structure (the drivers and success-rate blocks append below the headline):
- * heading, "Compare with" selector, basis sentence, then one of the states —
- * pick a scenario, nothing to compare with, projecting, cannot be projected,
- * error — or the headline table.
+ * Structure (the success-rate block appends below): heading, "Compare with"
+ * selector, basis sentence, then one of the states — pick a scenario, nothing
+ * to compare with, projecting, cannot be projected, error — or the headline
+ * table with the Drivers table under it, or, when the Planned projections are
+ * identical, the identical-results sentence in place of both.
  */
 import React, { useMemo } from 'react';
 import { Link } from 'react-router';
@@ -24,6 +25,10 @@ import { Select } from '../components/Select';
 import { formatCurrencyShort } from '../lib/format-currency';
 import { formatSignedDifference } from '../lib/signed-difference';
 import { buildCompareData } from './balance-projection-compare-data';
+import {
+  CompareDriversSection,
+  CompareIdentitySection,
+} from './balance-projection-page-compare-drivers';
 import {
   CARD_SECTION_CLASS,
   SECTION_H2_CLASS,
@@ -233,13 +238,30 @@ export const BalanceProjectionCompareSection: React.FC<
               Projecting {name}&hellip;
             </p>
           )}
-          {compare && (
-            <HeadlineTable
-              viewedName={viewedName}
-              comparisonName={name}
-              compare={compare}
-            />
-          )}
+          {/* Identical Planned results swap the headline and the Drivers table
+              for one sentence; anything appended below (the success-rate row)
+              sits outside this choice and stays in both states. */}
+          {compare &&
+            (compare.identity.planned ? (
+              <CompareIdentitySection
+                viewedName={viewedName}
+                comparisonName={name}
+                changes={compare.changes}
+              />
+            ) : (
+              <div className="flex flex-col gap-6">
+                <HeadlineTable
+                  viewedName={viewedName}
+                  comparisonName={name}
+                  compare={compare}
+                />
+                <CompareDriversSection
+                  viewedName={viewedName}
+                  comparisonName={name}
+                  compare={compare}
+                />
+              </div>
+            ))}
         </div>
       )}
     </section>

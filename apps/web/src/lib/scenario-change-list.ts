@@ -5,7 +5,10 @@
  * the descendant's chain sets between itself and the ancestor, the ancestor
  * excluded. The list reports what the user SET (presence, as the scenario
  * detail page counts it), not what moved a result: a child that re-sets
- * `retirementAge` to the inherited values still names it.
+ * `retirementAge` to the inherited values still names it. The list is by
+ * detail-page card (several keys share one), except
+ * `preRetirementTaxableIncomeDollars`, a Roth-comparison-page input that
+ * reaches no projection and is never listed.
  *
  * Every `ScenarioOverrides` key is registered below with `satisfies`, so a
  * future override key fails typecheck instead of silently vanishing from the
@@ -23,50 +26,115 @@ const GROUP_TITLES = [
 ] as const;
 type GroupTitle = (typeof GROUP_TITLES)[number];
 
-const T = GROUP_TITLES;
-/** Group + display label per override key; the label is the detail card's title
- *  where one exists. Order within a group is the order listed here. */
-const SETTINGS = {
-  retirementAge: { group: T[0], label: 'Retirement age' },
-  socialSecurity: { group: T[0], label: 'Social Security' },
-  lifeExpectancy: { group: T[0], label: 'Life expectancy' },
-  income: { group: T[1], label: 'Income' },
-  expenses: { group: T[1], label: 'Expenses' },
-  inflation: { group: T[1], label: 'Inflation' },
-  discretionarySpending: { group: T[1], label: 'Discretionary spending' },
-  downturnGuardrails: { group: T[1], label: 'Spending guardrails' },
-  contributions: { group: T[2], label: 'Future contributions' },
-  accountContributions: { group: T[2], label: 'Account contributions' },
-  accountReturns: { group: T[2], label: 'Planned returns' },
-  retirementAllocation: { group: T[2], label: 'Asset allocation' },
-  // Edited on its own route; the detail page has no card for it.
-  accountAssetMix: { group: T[2], label: 'Account asset mix' },
-  withdrawalStrategy: { group: T[3], label: 'Withdrawal strategy' },
-  customDrawdownOrder: { group: T[3], label: 'Custom drawdown order' },
-  magiCap: { group: T[3], label: 'MAGI cap' },
-  assumedCostBasisFractionOfTaxableWithdrawal: { group: T[3], label: 'Taxable withdrawal cost basis' },
-  magiBootstrapLookbackMinus2: { group: T[3], label: 'MAGI two years before retirement' },
-  magiBootstrapLookbackMinus1: { group: T[3], label: 'MAGI one year before retirement' },
-  hsaQualifiedMedicalExpensePct: { group: T[3], label: 'HSA qualified medical share' },
-  earlyWithdrawalPenaltyExemptAccountIds: { group: T[3], label: 'Early-withdrawal penalty exemptions' },
-  taxFilingPlan: { group: T[3], label: 'Tax filing plan' },
-  filingStatus: { group: T[3], label: 'Filing status' },
-  acaMarketplaceOptOutMemberIds: { group: T[3], label: 'ACA Marketplace opt-outs' },
-  healthCoverageMonths: { group: T[3], label: 'Medicare and Marketplace months' },
-  acaFplRegion: { group: T[3], label: 'ACA poverty-guideline region' },
-  acaPtcBenchmark: { group: T[3], label: 'ACA benchmark plan cost' },
-  preRetirementRothConversions: { group: T[3], label: 'Pre-retirement Roth conversions' },
-  preRetirementRothConversionTaxRatePct: { group: T[3], label: 'Roth conversion tax rate' },
-  preRetirementTaxableIncomeDollars: { group: T[3], label: 'Working-years taxable income' },
-  qualifiedCharitableDistributions: { group: T[3], label: 'Charitable distributions (QCDs)' },
-  accountFloors: { group: T[3], label: 'Account limits' },
-} satisfies Record<keyof ScenarioOverrides, { group: GroupTitle; label: string }>;
+/** Does this scenario's own overrides carry the key, as the detail page counts it? */
+type Counts = (ov: ScenarioOverrides) => boolean;
 
-type SettingKey = keyof typeof SETTINGS;
+interface Setting {
+  readonly group: GroupTitle;
+  /** The detail page card that owns the key; several keys can share one. */
+  readonly card: string;
+  readonly counts: Counts;
+}
+
+/** The key is a Roth-comparison-page input that reaches no projection: never listed. */
+const NOT_LISTED = null;
+
+const T = GROUP_TITLES;
+const present = (key: keyof ScenarioOverrides): Counts => (ov) => ov[key] !== undefined;
+/** Income and expenses count only when something is disabled, patched or added. */
+const inventory =
+  (key: 'income' | 'expenses'): Counts =>
+  (ov) => {
+    const section = ov[key];
+    return (
+      (section?.disabledIds?.length ?? 0) > 0 ||
+      nonEmpty(section?.patches) ||
+      (section?.added?.length ?? 0) > 0
+    );
+  };
+/** The per-account sections count only when `perAccount` has entries. */
+const perAccount =
+  (key: 'accountContributions' | 'accountReturns' | 'accountAssetMix' | 'accountFloors'): Counts =>
+  (ov) =>
+    nonEmpty(ov[key]?.perAccount);
+const setting = (group: GroupTitle, card: string, key: keyof ScenarioOverrides): Setting => ({
+  group,
+  card,
+  counts: present(key),
+});
+
+/** The card titles are the detail page's. The key-to-card mapping lives only
+ *  inline in `ScenarioDetailPage` as predicates (and `ROTH_CONVERSION_OVERRIDE_KEYS`
+ *  / `hasQcdOverride`), restated here because `lib/` cannot import UI; the page
+ *  test pins the titles. Order within a group is the order listed here. */
+export const SCENARIO_CHANGE_SETTINGS = {
+  retirementAge: setting(T[0], 'Retirement age', 'retirementAge'),
+  socialSecurity: setting(T[0], 'Social Security', 'socialSecurity'),
+  lifeExpectancy: setting(T[0], 'Life expectancy', 'lifeExpectancy'),
+  income: { group: T[1], card: 'Income', counts: inventory('income') },
+  expenses: { group: T[1], card: 'Expenses', counts: inventory('expenses') },
+  inflation: setting(T[1], 'Inflation', 'inflation'),
+  discretionarySpending: setting(T[1], 'Discretionary adjustment', 'discretionarySpending'),
+  downturnGuardrails: setting(T[1], 'Spending guardrails', 'downturnGuardrails'),
+  contributions: setting(T[2], 'Future contributions', 'contributions'),
+  accountContributions: {
+    group: T[2],
+    card: 'Account contributions',
+    counts: perAccount('accountContributions'),
+  },
+  accountReturns: { group: T[2], card: 'Planned returns', counts: perAccount('accountReturns') },
+  retirementAllocation: setting(T[2], 'Asset allocation', 'retirementAllocation'),
+  // Edited on its own route; the detail page has no card for it.
+  accountAssetMix: { group: T[2], card: 'Account asset mix', counts: perAccount('accountAssetMix') },
+  withdrawalStrategy: setting(T[3], 'Withdrawal strategy', 'withdrawalStrategy'),
+  customDrawdownOrder: setting(T[3], 'Withdrawal strategy', 'customDrawdownOrder'),
+  magiCap: setting(T[3], 'Withdrawal strategy', 'magiCap'),
+  assumedCostBasisFractionOfTaxableWithdrawal: setting(
+    T[3],
+    'Withdrawal strategy',
+    'assumedCostBasisFractionOfTaxableWithdrawal',
+  ),
+  magiBootstrapLookbackMinus2: setting(T[3], 'Withdrawal strategy', 'magiBootstrapLookbackMinus2'),
+  magiBootstrapLookbackMinus1: setting(T[3], 'Withdrawal strategy', 'magiBootstrapLookbackMinus1'),
+  hsaQualifiedMedicalExpensePct: setting(T[3], 'Tax assumptions', 'hsaQualifiedMedicalExpensePct'),
+  earlyWithdrawalPenaltyExemptAccountIds: setting(
+    T[3],
+    'Tax assumptions',
+    'earlyWithdrawalPenaltyExemptAccountIds',
+  ),
+  taxFilingPlan: setting(T[3], 'Tax assumptions', 'taxFilingPlan'),
+  // The legacy scalar the filing plan supersedes; the card's filing tab resolves it.
+  filingStatus: setting(T[3], 'Tax assumptions', 'filingStatus'),
+  acaMarketplaceOptOutMemberIds: setting(T[3], 'Health coverage', 'acaMarketplaceOptOutMemberIds'),
+  healthCoverageMonths: setting(T[3], 'Health coverage', 'healthCoverageMonths'),
+  acaFplRegion: setting(T[3], 'Health coverage', 'acaFplRegion'),
+  acaPtcBenchmark: setting(T[3], 'Health coverage', 'acaPtcBenchmark'),
+  preRetirementRothConversions: setting(
+    T[3],
+    'Pre-retirement Roth conversions',
+    'preRetirementRothConversions',
+  ),
+  preRetirementRothConversionTaxRatePct: setting(
+    T[3],
+    'Pre-retirement Roth conversions',
+    'preRetirementRothConversionTaxRatePct',
+  ),
+  preRetirementTaxableIncomeDollars: NOT_LISTED,
+  qualifiedCharitableDistributions: setting(
+    T[3],
+    'Charitable distributions (QCDs)',
+    'qualifiedCharitableDistributions',
+  ),
+  accountFloors: { group: T[3], card: 'Account limits', counts: perAccount('accountFloors') },
+} satisfies Record<keyof ScenarioOverrides, Setting | typeof NOT_LISTED>;
+
+type SettingKey = keyof typeof SCENARIO_CHANGE_SETTINGS;
 
 interface ScenarioChange {
-  readonly key: keyof ScenarioOverrides;
-  readonly label: string;
+  /** The detail page card title. */
+  readonly card: string;
+  /** The override keys of that card the chain sets, in table order. */
+  readonly keys: ReadonlyArray<keyof ScenarioOverrides>;
 }
 
 interface ScenarioChangeGroup {
@@ -80,7 +148,8 @@ type ScenarioRelation = 'ancestor' | 'descendant' | 'unrelated';
 export interface ScenarioChangeList {
   /** `descendant` = the viewed scenario inherits from the other one. */
   readonly relation: ScenarioRelation;
-  /** Non-empty groups in the detail page's order; empty when unrelated. */
+  /** Non-empty groups in the detail page's order, one entry per changed card;
+   *  empty when unrelated. */
   readonly groups: ReadonlyArray<ScenarioChangeGroup>;
 }
 
@@ -88,27 +157,12 @@ function nonEmpty(value: object | undefined): boolean {
   return value !== undefined && Object.keys(value).length > 0;
 }
 
-/** Does this scenario's own override section set `key`, as the detail page
- *  would count it? Presence for most keys; the sparse sections only when they
- *  carry something. */
-function isSet(ov: ScenarioOverrides, key: SettingKey): boolean {
-  if (key === 'income' || key === 'expenses') {
-    const section = ov[key];
-    return (
-      (section?.disabledIds?.length ?? 0) > 0 ||
-      nonEmpty(section?.patches) ||
-      (section?.added?.length ?? 0) > 0
-    );
-  }
-  if (
-    key === 'accountContributions' ||
-    key === 'accountReturns' ||
-    key === 'accountAssetMix' ||
-    key === 'accountFloors'
-  ) {
-    return nonEmpty(ov[key]?.perAccount);
-  }
-  return ov[key] !== undefined;
+const LISTED_KEYS = (Object.keys(SCENARIO_CHANGE_SETTINGS) as SettingKey[]).filter(
+  (key) => SCENARIO_CHANGE_SETTINGS[key] !== NOT_LISTED,
+);
+
+function settingOf(key: SettingKey): Setting {
+  return SCENARIO_CHANGE_SETTINGS[key] as Setting;
 }
 
 /** Walk `fromId`'s chain up to, excluding, `stopId`. `null` when `stopId` is
@@ -134,15 +188,20 @@ export function buildScenarioChangeList(
   if (!between) return { relation: 'unrelated', groups: [] };
   const set = new Set<SettingKey>();
   for (const scenario of between) {
-    for (const key of Object.keys(SETTINGS) as SettingKey[]) {
-      if (isSet(scenario.payload.overrides, key)) set.add(key);
+    for (const key of LISTED_KEYS) {
+      if (settingOf(key).counts(scenario.payload.overrides)) set.add(key);
     }
   }
-  const groups = GROUP_TITLES.map((title) => ({
-    title,
-    changes: (Object.keys(SETTINGS) as SettingKey[])
-      .filter((key) => set.has(key) && SETTINGS[key].group === title)
-      .map((key) => ({ key, label: SETTINGS[key].label })),
-  })).filter((g) => g.changes.length > 0);
+  const groups = GROUP_TITLES.map((title) => {
+    const keys = LISTED_KEYS.filter((key) => set.has(key) && settingOf(key).group === title);
+    const cards = [...new Set(keys.map((key) => settingOf(key).card))];
+    return {
+      title,
+      changes: cards.map((card) => ({
+        card,
+        keys: keys.filter((key) => settingOf(key).card === card),
+      })),
+    };
+  }).filter((g) => g.changes.length > 0);
   return { relation: asDescendant ? 'descendant' : 'ancestor', groups };
 }

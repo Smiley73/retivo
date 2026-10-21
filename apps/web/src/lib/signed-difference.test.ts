@@ -13,6 +13,13 @@ describe('formatSignedDifference', () => {
     expect(formatSignedDifference('years', 2041, 2042)).toBe('−1 year earlier');
   });
 
+  it('reads a count of years as more or less, never later or earlier', () => {
+    expect(formatSignedDifference('yearCount', 12, 9)).toBe('+3 years more');
+    expect(formatSignedDifference('yearCount', 8, 9)).toBe('−1 year less');
+    expect(formatSignedDifference('yearCount', 9, 9)).toBe('No difference');
+    expect(formatSignedDifference('yearCount', null, 9)).toBe('Not available');
+  });
+
   it('reads percentage points in both directions from fractions', () => {
     expect(formatSignedDifference('percentagePoints', 0.9, 0.85)).toBe('+5pp higher');
     expect(formatSignedDifference('percentagePoints', 0.7, 0.85)).toBe('−15pp lower');

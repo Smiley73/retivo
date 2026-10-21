@@ -575,6 +575,24 @@ Tabs under the controls, **Projection views**, split the page:
   uses the Planned projection in today's dollars, so the **Basis** menu and the
   **Today's dollars** / **Future dollars** switch in the header do not apply to
   it.
+  Below it a **Drivers** table sets the lifetime totals side by side in today's
+  dollars, each scenario using its own inflation, with the same
+  viewed-minus-other **Difference** column: **Federal income tax**, **Medicare
+  surcharges (IRMAA)**, **ACA health credits**, **Roth conversions**,
+  **Required minimum distributions** and **Qualified charitable distributions
+  (QCD)**, and a **Years of withdrawals** row for each type of account
+  (tax-deferred, Roth, taxable, cash, HSA), counting the years in which any
+  account of that type withdrew, required minimums and conversion-tax funding
+  included. The three tax rows always show; the others appear only when they are
+  not zero in both scenarios. A note under the table says these are differences
+  between the totals of two complete projections and that the model does not
+  split the gap among the rows, since one change usually moves several lines.
+  When one scenario's plan ends later than the other's, the note also says which
+  one runs longer, to which year, and that its totals cover those extra years.
+  When the two Planned projections are identical, one sentence says so in place
+  of the headline and the table, followed by what the child scenario changes
+  from its parent (grouped like the scenario page) or that it changes nothing;
+  the stress test is checked separately.
 
 Most charts and bands have a small **(i)** button that explains what they show.
 

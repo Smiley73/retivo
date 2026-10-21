@@ -304,7 +304,7 @@ describe('buildCompareData — identity', () => {
       },
     });
     expect(compare.identity).toEqual({ planned: true, stress: true });
-    expect(compare.changes.groups.flatMap((g) => g.changes.map((c) => c.key))).toEqual(['retirementAge']);
+    expect(compare.changes.groups.flatMap((g) => g.changes.flatMap((c) => c.keys))).toEqual(['retirementAge']);
   });
 
   it('separates guardrails, which only the stress test reads, from the planned years', async () => {
@@ -370,7 +370,7 @@ describe('buildCompareData — years of withdrawals', () => {
 describe('buildCompareData — change list', () => {
   const keysOf = (viewed: string, other: string) => {
     const list = buildCompareData({ viewed: named(viewed), comparison: named(other), stressCacheKeys: NO_KEYS }).changes;
-    return { list, keys: list.groups.flatMap((g) => g.changes.map((c) => c.key)) };
+    return { list, keys: list.groups.flatMap((g) => g.changes.flatMap((c) => c.keys)) };
   };
   const OWN = ['lifeExpectancy', 'contributions', 'discretionarySpending', 'expenses'];
 
