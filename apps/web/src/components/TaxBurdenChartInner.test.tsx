@@ -5,7 +5,8 @@
  * theme-reactivity for all three series colors.
  */
 import React from 'react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import InnerChart from './TaxBurdenChartInner';
 import { renderWithTheme, seriesColor } from '../test/theme-render';
@@ -13,10 +14,10 @@ import { expectNoA11yViolations } from '../test/a11y';
 import { CHART_COLORS } from '../lib/tokens';
 
 const rows = [
-  { year: 2026, federalTax: 8000, irmaaSurcharge: 0, acaPtcSubsidy: 0 },
-  { year: 2027, federalTax: 9500, irmaaSurcharge: 800, acaPtcSubsidy: 0 },
-  { year: 2028, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -3200 },
-  { year: 2029, federalTax: 4000, irmaaSurcharge: 600, acaPtcSubsidy: -1500 },
+  { year: 2026, federalTax: 8000, irmaaSurcharge: 0, acaPtcSubsidy: 0, acaCreditApplied: 0 },
+  { year: 2027, federalTax: 9500, irmaaSurcharge: 800, acaPtcSubsidy: 0, acaCreditApplied: 0 },
+  { year: 2028, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -3200, acaCreditApplied: 0 },
+  { year: 2029, federalTax: 4000, irmaaSurcharge: 600, acaPtcSubsidy: -1500, acaCreditApplied: 0 },
 ];
 
 interface BarRect {
@@ -130,6 +131,54 @@ describe('TaxBurdenChartInner — integer death-year terminal bar + marker domai
     expect(
       container.querySelector('[data-marker-label="Pat life expectancy 90"]'),
     ).not.toBeNull();
+  });
+});
+
+function hoverTooltip(container: HTMLElement): HTMLElement {
+  const svg = container.querySelector('svg') as SVGSVGElement;
+  vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 0, width: 600, height: 320, top: 0, left: 0, right: 600, bottom: 320,
+    toJSON: () => ({}),
+  } as DOMRect);
+  fireEvent.pointerMove(svg, { clientX: 40 });
+  const tip = container.querySelector('[role="tooltip"]') as HTMLElement;
+  expect(tip).not.toBeNull();
+  return tip;
+}
+
+describe('TaxBurdenChartInner — credit applied to premiums', () => {
+  // The dollars are already inside the ACA-PTC bar, so the figure rides the
+  // tooltip and the lifetime tiles only: a second negative bar would double
+  // count them.
+  const withCredit = [
+    { year: 2026, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -5134.2, acaCreditApplied: 5134.2 },
+    { year: 2027, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -3000, acaCreditApplied: 2700 },
+  ];
+
+  it('draws no bar of its own and leaves the ACA-PTC bar at the full subsidy', () => {
+    const container = renderWithTheme('light', <InnerChart rows={withCredit} />);
+    expect(getBars(container, 'Credit applied to premiums')).toHaveLength(0);
+    expect(getBars(container, 'ACA-PTC subsidy')).toHaveLength(2);
+  });
+
+  it('shows the credit applied as a labelled part of the subsidy in the tooltip', () => {
+    const tip = hoverTooltip(renderWithTheme('light', <InnerChart rows={withCredit} />));
+    expect(tip.textContent).toContain('ACA-PTC subsidy');
+    expect(tip.textContent).toContain('Credit applied to premiums (part of the subsidy above)');
+    expect(tip.textContent).toContain('$5,134');
+    // Left out of the net cost: the whole subsidy is the only benefit counted.
+    expect(tip.textContent).toContain('Net cost');
+    expect(tip.textContent).toContain('-$5,134');
+  });
+
+  it('leaves the credit applied out of the tooltip when none was applied', () => {
+    const tip = hoverTooltip(renderWithTheme('light', <InnerChart rows={rows} />));
+    expect(tip.textContent).not.toContain('Credit applied to premiums');
+  });
+
+  it('renders without a11y violations', async () => {
+    const container = renderWithTheme('light', <InnerChart rows={withCredit} />);
+    await expectNoA11yViolations(container);
   });
 });
 

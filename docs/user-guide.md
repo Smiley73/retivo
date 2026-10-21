@@ -555,7 +555,11 @@ Tabs under the controls, **Projection views**, split the page:
   of balances.
 - **Taxes & distributions**: the **Tax & Health-Cost Burden** chart, which shows
   **Federal income tax**, **Medicare surcharges (IRMAA)** and **ACA health credits**
-  (credits are shown below zero because they reduce your cost). Below it, three
+  (credits are shown below zero because they reduce your cost), plus a fourth
+  total, **Credit applied to premiums**: the part of the ACA credit that lowered
+  your withdrawals because you entered the premium as a Medical expense. It is
+  part of the ACA health credits, so it is not added on top, and the yearly
+  Taxes & health costs table has a column for it. Below it, three
   bands appear only when they apply to your plan: **Required Minimum
   Distributions** (RMDs met, with any shortfall), **Qualified Charitable
   Distributions (QCD)**, and **Roth conversions**.

@@ -406,6 +406,7 @@ function flatTaxHook(taxPerYear: number): TaxCashflowHook {
       irmaaWithheldFromSsCents: 0,
       irmaaCashNeedCents: 0,
       acaPtcCashflowOffsetCents: 0,
+      acaCreditAppliedToPremiumsCents: 0,
       totalTaxCashflowNeedCents: taxPerYear * 100,
       taxCashflowIterations: 2,
       taxCashflowConverged: true,
@@ -555,5 +556,57 @@ describe('RMD overflow carrier — receives ZERO share of real household deposit
       (out.years[1].accountBalances?.get('ira')?.deposit ?? 0) +
       (out.years[1].accountBalances?.get('roth')?.deposit ?? 0);
     expect(realDep(withDeposit) - realDep(noDeposit)).toBeCloseTo(PENSION_LUMP, -1);
+  });
+});
+
+describe('RMD surplus — a negative add-on (credit applied to premiums) is more surplus to put back', () => {
+  const IRA = 1_400_000;
+  const ROTH = 100_000;
+  const EXPENSE = 30_000;
+  const LINE = 5_000;
+  const forcedRmd = Math.round(IRA / DIVISOR_73);
+
+  it('the surplus grows by the line and the forced RMD still leaves the IRA in full', () => {
+    const run = (taxCashflow?: TaxCashflowHook) =>
+      simulateDrawdown({
+        portfolioAtRetirement: IRA + ROTH,
+        ratePct: 0,
+        expensesByMonth: uniform(RETIREMENT_YEAR, RETIREMENT_YEAR, EXPENSE / 12),
+        incomeByMonth: zeros(RETIREMENT_YEAR, RETIREMENT_YEAR),
+        depositsByMonth: zeros(RETIREMENT_YEAR, RETIREMENT_YEAR),
+        retirementYear: RETIREMENT_YEAR,
+        horizonYear: RETIREMENT_YEAR,
+        withdrawalStrategy: { kind: 'taxEfficient' },
+        accounts: [
+          makeAccount({ id: 'ira', initialPre: IRA, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }, RETIREMENT_YEAR, RETIREMENT_YEAR),
+          makeAccount({ id: 'roth', initialPost: ROTH, taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' }, RETIREMENT_YEAR, RETIREMENT_YEAR),
+        ],
+        rmdContext: makeRmdContext(['ira', 'roth']),
+        ...(taxCashflow ? { taxCashflow } : {}),
+      });
+    const surplusOf = (yr: { rmdReinvestedCents?: number; rmdOverflowToCashCents?: number }): number =>
+      ((yr.rmdReinvestedCents ?? 0) + (yr.rmdOverflowToCashCents ?? 0)) / 100;
+    const base = run().years[0];
+    const credited = run({
+      solveForYear: (): TaxCashflowYearOutcome => ({
+        addedNeedDollars: -LINE,
+        federalTaxCashNeedCents: 0,
+        irmaaWithheldFromSsCents: 0,
+        irmaaCashNeedCents: 0,
+        acaPtcCashflowOffsetCents: 0,
+        acaCreditAppliedToPremiumsCents: LINE * 100,
+        totalTaxCashflowNeedCents: 0,
+        taxCashflowIterations: 1,
+        taxCashflowConverged: true,
+        taxCashflowShortfallCents: 0,
+      }),
+    }).years[0];
+    expect(surplusOf(base)).toBeCloseTo(forcedRmd - EXPENSE, -1);
+    expect(surplusOf(credited)).toBeCloseTo(forcedRmd - EXPENSE + LINE, -1);
+    // The forced withdrawal is mandatory, so it leaves the IRA either way.
+    expect(credited.accountBalances?.get('ira')?.withdrawn).toBeCloseTo(
+      base.accountBalances?.get('ira')?.withdrawn ?? 0,
+      6,
+    );
   });
 });

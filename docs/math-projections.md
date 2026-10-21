@@ -222,7 +222,7 @@ flowchart TD
   Saved results stay in your browser only.
 
 **Engine version.** The stress-test calculation carries a version number,
-currently 70. Each saved result is stamped with the version that produced it.
+currently 72. Each saved result is stamped with the version that produced it.
 When the app's version is different, the saved result is discarded and the
 stress test runs again.
 
@@ -383,8 +383,9 @@ not forecasts. The rule lines are the **4% rule** and the **4.5% rule**.
    dollars only shows the same real figure in each year's dollars.
 3. **Your draw.** The plan's gross withdrawal from the portfolio in the first
    full calendar year of retirement, minus that year's federal tax and Medicare
-   surcharge, less any ACA credit. That is the retirement year itself when
-   retirement is January 1, and the next year otherwise. Spending paid by Social
+   surcharge. The ACA credit is already in that tax figure, and the part of it
+   that lowers withdrawals already lowers the withdrawal. That is the retirement
+   year itself when retirement is January 1, and the next year otherwise. Spending paid by Social
    Security, pensions and other income is not in it.
 4. **The difference.** The screen shows how far your draw is above or below each
    rule's amount.
@@ -423,7 +424,7 @@ a fixed rule with no year, and none of it changes with the year.
 | Guardrail discount rate and tax allowance | 1% and 15% | Fixed rule |
 | Guardrails today check | 20 seconds; success flag below 80% | Fixed rule |
 | Safe withdrawal rates | 4% and 4.5% | Fixed rule |
-| Engine version | 70 | Fixed rule |
+| Engine version | 72 | Fixed rule |
 
 ## What is simplified or left out
 

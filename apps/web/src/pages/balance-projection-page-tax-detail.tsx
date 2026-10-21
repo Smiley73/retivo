@@ -1,8 +1,9 @@
 /**
  * Balance Projection page — "Taxes & health costs" year-by-year sub-table.
- * Renders the five visible tax-cashflow fields per retirement
+ * Renders the six visible tax-cashflow fields per retirement
  * year — federal tax, IRMAA withheld from Social Security, IRMAA cash-paid,
- * ACA premium-tax-credit offset, and the total tax-funded withdrawal — in a
+ * ACA premium-tax-credit offset, the total tax-funded withdrawal, and the
+ * credit applied to premiums that lowers the draw — in a
  * dedicated `<TableScroll>` below the main balance table, so the main 8–9
  * column table is not widened.
  *
@@ -45,6 +46,9 @@ interface TaxDetailRow {
   readonly irmaaCashPaid: number;
   readonly acaPtcOffset: number;
   readonly taxFundedWithdrawals: number;
+  /** ACA credit left after the offset that lowered the year's draw because the
+   *  premium is a modeled Medical expense. */
+  readonly acaCreditApplied: number;
   /** Net TAXABLE required minimum distribution after the QCD offset for the year
    *  (`gross IRA-pool RMD − min(Q, gross)`). 0 in years with no QCD. */
   readonly netTaxableRmd: number;
@@ -84,6 +88,7 @@ function buildTaxDetailRows(
       irmaaCashPaid: ((yr.irmaaCashNeedCents ?? 0) / 100) * d,
       acaPtcOffset: ((yr.acaPtcCashflowOffsetCents ?? 0) / 100) * d,
       taxFundedWithdrawals: ((yr.totalTaxCashflowNeedCents ?? 0) / 100) * d,
+      acaCreditApplied: ((yr.acaCreditAppliedToPremiumsCents ?? 0) / 100) * d,
       netTaxableRmd: ((yr.netTaxableRmdCents ?? 0) / 100) * d,
       hasQcd: (yr.qcdCents ?? 0) > 0,
       // A sub-$1 shortfall is fp residue, not a real funding gap.
@@ -131,6 +136,11 @@ const TaxDetailHeader: React.FC<{ readonly showQcdColumn: boolean }> = ({
     <Column className={thStickyNumClass}>
       <Tooltip multiline content="Total extra withdrawal the portfolio funded this year to cover taxes and health costs: federal tax + IRMAA cash-paid − ACA PTC offset.">
         Tax-funded withdrawals
+      </Tooltip>
+    </Column>
+    <Column className={thStickyNumClass}>
+      <Tooltip multiline content="The part of the ACA premium tax credit left after federal tax and IRMAA cash that lowers the year's withdrawal, because you entered the premium as a Medical expense. Never more than that year's Medical expenses or the year's withdrawal. The net change in the withdrawal is Tax-funded withdrawals minus this column.">
+        Credit applied to premiums
       </Tooltip>
     </Column>
   </TableHeader>
@@ -189,6 +199,7 @@ const TaxDetailRows: React.FC<{
         <Cell className={tdNumClass}>{formatCurrency(r.irmaaCashPaid)}</Cell>
         <Cell className={tdNumClass}>{formatCurrency(r.acaPtcOffset)}</Cell>
         <Cell className={tdNumClass}>{formatCurrency(r.taxFundedWithdrawals)}</Cell>
+        <Cell className={tdNumClass}>{formatCurrency(r.acaCreditApplied)}</Cell>
       </AriaRow>
     ))}
   </>
@@ -209,6 +220,7 @@ export const BalanceProjectionTaxDetail: React.FC<
       r.irmaaCashPaid !== 0 ||
       r.acaPtcOffset !== 0 ||
       r.taxFundedWithdrawals !== 0 ||
+      r.acaCreditApplied !== 0 ||
       r.hasQcd,
   );
 
@@ -218,7 +230,7 @@ export const BalanceProjectionTaxDetail: React.FC<
   );
 
   // Show the net-taxable-IRA-RMD-after-QCD column only when a QCD applies
-  // — the common no-QCD projection keeps the original five columns.
+  // — the common no-QCD projection keeps the original six columns.
   const showQcdColumn = rows.some((r) => r.hasQcd);
 
   return (

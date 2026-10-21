@@ -173,6 +173,10 @@ export interface DrawdownYearRow {
   readonly irmaaTier?: 'none' | 'tier1' | 'tier2' | 'tier3' | 'tier4' | 'tier5';
   readonly acaPtcSubsidyCents?: number;
   readonly acaPtcTier?: 'below-fpl' | 'sliding' | 'cap-applies' | 'above-400-cliff';
+  /** Mirrors `DrawdownYear.acaCreditAppliedToPremiumsCents` — the part of the
+   *  ACA credit that lowered this year's draw because the premium is a modeled
+   *  Medical expense (integer cents). */
+  readonly acaCreditAppliedToPremiumsCents?: number;
   /** Mirrors `DrawdownYear.magiCapBreachDollars` — pre-tax dollars exceeding the
    *  MAGI cap this year. Populated by either (1) taxable-depletion breach
    *  (cap-aware tier loop ran out of later taxable balance to absorb the overage),
@@ -592,6 +596,12 @@ export interface CashflowSeries {
    *  to drive the HSA medical pass. Empty / no `isMedical` category ⇒ all-zero
    *  (the medical pass is a no-op; emergency-reserve path intact). */
   readonly medicalDemandByMonth: ReadonlyArray<number>;
+  /** Per-month modeled Medical expenses in INTEGER CENTS: every `isMedical` row,
+   *  HSA-qualified or not, built from the same projection and monthly bucketing
+   *  as `medicalDemandByMonth` (which is its HSA-qualified subset). Caps the ACA
+   *  credit applied to premiums; never reaches the drawdown engine. Same length
+   *  and anchoring as `medicalDemandByMonth`. */
+  readonly medicalExpenseByMonth: ReadonlyArray<number>;
   /** True when the plan models ANY `isMedical` expense at all,
    *  HSA-qualified or not. Deliberately NOT derived from `medicalDemandByMonth`:
    *  that series is pre-filtered to HSA-QUALIFIED rows, and Medicare, Medigap,

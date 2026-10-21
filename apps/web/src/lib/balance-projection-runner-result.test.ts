@@ -55,3 +55,14 @@ describe('buildDrawdownYearRows — RMD surplus passthrough', () => {
     expect(rows[0].rmdOverflowToCashCents).toBe(0);
   });
 });
+
+describe('buildDrawdownYearRows — credit applied to premiums passthrough', () => {
+  it('copies acaCreditAppliedToPremiumsCents through unchanged, undefined included', () => {
+    const rows = buildDrawdownYearRows([
+      makeYear({ year: 2030, acaCreditAppliedToPremiumsCents: 513_420 }),
+      makeYear({ year: 2031 }),
+    ]);
+    expect(rows[0].acaCreditAppliedToPremiumsCents).toBe(513_420);
+    expect(rows[1].acaCreditAppliedToPremiumsCents).toBeUndefined();
+  });
+});

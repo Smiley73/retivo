@@ -63,6 +63,7 @@ export function buildTaxBurdenRows(
       irmaaSurcharge: ((yr.irmaaSurchargeCents ?? 0) / 100) * d,
       // Stored negative: ACA-PTC is a benefit (renders below zero).
       acaPtcSubsidy: -(((yr.acaPtcSubsidyCents ?? 0) / 100) * d),
+      acaCreditApplied: ((yr.acaCreditAppliedToPremiumsCents ?? 0) / 100) * d,
     };
   });
 }

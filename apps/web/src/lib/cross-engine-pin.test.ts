@@ -491,8 +491,8 @@ describe('cross-engine pin — deterministic drawdown vs MC (builder-backed)', (
     assertSeriesEqual(runDrawdownSide(cfg), runMcSide(cfg));
   });
 
-  it('pins the Monte Carlo ENGINE_VERSION at 71 (the rough ACA benchmark premium grows each year after 2026 at the scenario\u2019s medical inflation rate — both engines price a year\u2019s age-priced benchmark with the same growth factor)', () => {
-    expect(ENGINE_VERSION).toBe(71);
+  it('pins the Monte Carlo ENGINE_VERSION at 72 (the ACA credit left after federal tax and IRMAA cash lowers the year\u2019s draw as its own line, up to the year\u2019s Medical expenses and the draw — both engines compute it through one helper)', () => {
+    expect(ENGINE_VERSION).toBe(72);
   });
 });
 

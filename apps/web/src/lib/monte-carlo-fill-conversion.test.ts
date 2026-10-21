@@ -809,7 +809,7 @@ describe('Monte Carlo — committed pass-2 tax reads the SHARED pass-1 QCD offse
 
     // Run A: NO shared QCD-offset array → the committed tax reads the row offset
     // (absent → 0), so the RMD floor grosses the $5k draw up (phantom RMD income).
-    const stateNoShared = newTaxPathState(input, out, 12, horizonYears, new Float64Array([40_000]), buildRunContext(input))!;
+    const stateNoShared = newTaxPathState(input, out, 12, horizonYears, new Float64Array([40_000]), new Float64Array(horizonYears), buildRunContext(input))!;
     fillStrategyYearTax(
       input,
       [buildRow()],
@@ -829,7 +829,7 @@ describe('Monte Carlo — committed pass-2 tax reads the SHARED pass-1 QCD offse
     const sharedQcdRmdOffsetByYearIndex = [
       new Map<string, number>([['primary', hugeOffsetCents]]),
     ];
-    const stateShared = newTaxPathState(input, out, 12, horizonYears, new Float64Array([40_000]), buildRunContext(input))!;
+    const stateShared = newTaxPathState(input, out, 12, horizonYears, new Float64Array([40_000]), new Float64Array(horizonYears), buildRunContext(input))!;
     fillStrategyYearTax(
       input,
       [buildRow()],

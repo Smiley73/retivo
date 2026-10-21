@@ -715,6 +715,15 @@ export interface TaxYearResult {
   readonly acaPtcTier: 'below-fpl' | 'sliding' | 'cap-applies' | 'above-400-cliff';
   /** ACA FPL percentage for the year (0 when not applicable). */
   readonly fplPercentage: number;
+  /**
+   * How many cents of ACA MAGI the household could shed and still reach 100% of
+   * the poverty line, where the credit ends. Read from each return's own ACA MAGI
+   * and poverty line; a multi-return year reports the SMALLEST figure among the
+   * returns that earn a credit, because a lowered draw can come out of any of
+   * them. 0 when no return earns a credit. Projection-year dollars, like the
+   * credit itself.
+   */
+  readonly acaMagiAboveFplCents: number;
   /** Household MAGI for the year, in integer cents. */
   readonly magiCents: number;
   /** Effective federal tax rate: totalTax / grossIncome (0..1). */

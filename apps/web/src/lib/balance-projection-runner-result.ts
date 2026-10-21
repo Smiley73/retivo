@@ -135,6 +135,7 @@ export function buildDrawdownYearRows(
     irmaaTier: y.irmaaTier,
     acaPtcSubsidyCents: y.acaPtcSubsidyCents,
     acaPtcTier: y.acaPtcTier,
+    acaCreditAppliedToPremiumsCents: y.acaCreditAppliedToPremiumsCents,
     magiCents: y.magiCents,
     fplPercentage: y.fplPercentage,
     effectiveTaxRate: y.effectiveTaxRate,

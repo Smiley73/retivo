@@ -12,7 +12,11 @@ import {
 import { resolveExpensesForScenario } from './expense-resolution';
 import { resolveIncomeForScenario } from './income-resolution';
 import { resolveInflationForScenario } from './scenario-resolution';
-import { isHsaQualifiedMedical, medicalCategoryIdSet } from './expense-category-resolvers';
+import {
+  isHsaQualifiedMedical,
+  isMedicalExpense,
+  medicalCategoryIdSet,
+} from './expense-category-resolvers';
 import {
   buildExpenseProjectionContext,
   projectExpensesByCategoryMonth,
@@ -70,6 +74,16 @@ export function buildCashflowSeries(
     resolvedExpenses,
     expenseCtx,
     expensesByMonth.values.length,
+    isHsaQualifiedMedical,
+  );
+  // Every `isMedical` row: the cap on the credit applied to premiums.
+  const medicalExpenseByMonth = buildMedicalDemandByMonth(
+    args,
+    ctx,
+    resolvedExpenses,
+    expenseCtx,
+    expensesByMonth.values.length,
+    isMedicalExpense,
   );
   // Does the plan model ANY medical spending? Read off the same
   // resolved expense projection, but WITHOUT the HSA-qualified filter.
@@ -118,6 +132,7 @@ export function buildCashflowSeries(
     plainPensionPlacementEvents,
     ssRows,
     medicalDemandByMonth,
+    medicalExpenseByMonth,
     // The FULL `isMedical` inventory, not the HSA-qualified subset
     // `medicalDemandByMonth` is filtered to.
     anyMedicalSpendingModeled,
@@ -238,7 +253,9 @@ function buildExpenseRowsFrom(
 }
 
 /**
- * Per-month HSA-qualified medical demand in INTEGER CENTS. Sums the
+ * Per-month medical demand in INTEGER CENTS for the rows `qualifies` admits:
+ * the HSA-qualified subset for the HSA pass, every `isMedical` row for the cap
+ * on the credit applied to premiums. Sums the
  * categories flagged `isMedical` (resolved via `medicalCategoryIdSet`) from the
  * SAME category-month projection that underlies `expensesByMonth`, applying the
  * identical `(recurring − spike)/12 + spike` monthly bucketing
@@ -255,17 +272,16 @@ function buildMedicalDemandByMonth(
   resolvedExpenses: ResolvedExpense[],
   expenseCtx: ProjectionContext,
   length: number,
+  qualifies: (expense: ResolvedExpense, medicalIds: ReadonlySet<string>) => boolean,
 ): number[] {
   const out = new Array<number>(length).fill(0);
   const medicalIds = medicalCategoryIdSet(args.medicalCategoryIds);
   if (medicalIds.size === 0) return out;
-  // Pre-filter to HSA-qualified medical rows only, using the
+  // Pre-filter to the admitted medical rows. The HSA subset uses the
   // SINGLE-SOURCE predicate (isHsaQualifiedMedical). Filtering before
   // projectExpensesByCategoryMonth preserves per-category rounding and the
   // strict-subset invariant. Absent hsaQualified ⇒ not qualified.
-  const qualifiedExpenses = resolvedExpenses.filter((e) =>
-    isHsaQualifiedMedical(e, medicalIds),
-  );
+  const qualifiedExpenses = resolvedExpenses.filter((e) => qualifies(e, medicalIds));
   if (qualifiedExpenses.length === 0) return out;
   const points = projectExpensesByCategoryMonth(
     qualifiedExpenses,

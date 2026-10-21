@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  advanceAfterTaxBase,
   advanceMcTaxableIncomeState,
   applyPerYearTaxForPath,
   buildKernelWholePortfolioPreTaxByOwner,
@@ -400,6 +401,97 @@ describe('applyPerYearTaxForPath — tax cashflow', () => {
     expect(result).not.toBeNull();
     expect(result!.fedTax).toBe(0);
     expect(result!.taxCashflowDollars).toBe(0);
+  });
+});
+
+describe('applyPerYearTaxForPath — credit applied to premiums', () => {
+  // One retired single filer, 2026: $31,300 of Social Security, a $7,200
+  // benchmark, a Roth draw (no income). ACA MAGI is 200.0% of the poverty
+  // guideline, so the credit is $5,134.20 and there is no tax to offset.
+  const ctx = makeMfjTaxContext({
+    filingStatus: 'Single',
+    members: [{ memberId: 'primary', isoBirthdate: '1963-01-01', onMedicare: false, hasAcaCoverage: true }],
+    householdSize: 1,
+    acaPtcBenchmark: [{ taxYear: 2026, annualSlcspDollars: 7_200 }],
+  });
+  const roth = (dollars: number) => ({
+    preTaxDollars: 0,
+    postTaxNonRothDollars: 0,
+    postTaxCashLikeDollars: 0,
+    rothBasisOrderedDollars: 0,
+    rothWholesaleTaxFreeDollars: dollars,
+  });
+  const run = (nominalExpense: number, medicalExpenseDollars?: number) =>
+    applyPerYearTaxForPath({
+      taxCtx: ctx,
+      taxYear: 2026,
+      retirementYear: 2026,
+      grossSsDollars: 31_300,
+      nominalExpense,
+      ...(medicalExpenseDollars !== undefined ? { medicalExpenseDollars } : {}),
+      otherIncome: 0,
+      priorBalance: 1_000_000,
+      priorPreTaxByOwner: new Map<string, number>(),
+      magiMinus2: undefined,
+      classification: roth(Math.max(0, nominalExpense - 31_300)),
+    })!;
+
+  it('lowers the funded cashflow by the excess and reports it as its own figure', () => {
+    const result = run(71_208, 7_200);
+    expect(result.ptc).toBeCloseTo(5_134.2, 2);
+    expect(result.acaCreditAppliedToPremiums).toBeCloseTo(5_134.2, 2);
+    // The tax need keeps its zero floor; the cashflow is that need less the line.
+    expect(result.taxCashflowDollars).toBeCloseTo(-5_134.2, 2);
+  });
+
+  it('is capped by the draw and by the Medical expenses', () => {
+    // Draw: 26,796 + 7,200 − 31,300 = 2,696.
+    expect(run(33_996, 7_200).acaCreditAppliedToPremiums).toBeCloseTo(2_696, 2);
+    expect(run(33_996, 7_200).taxCashflowDollars).toBeCloseTo(-2_696, 2);
+    // Medical: 3,000 against a 11,700 draw.
+    expect(run(43_000, 3_000).acaCreditAppliedToPremiums).toBeCloseTo(3_000, 2);
+    // A year Social Security already covers has no draw to lower.
+    expect(run(30_000, 7_200).acaCreditAppliedToPremiums).toBe(0);
+  });
+
+  it('without the Medical expenses nothing is applied and the zero floor holds', () => {
+    const result = run(71_208);
+    expect(result.acaCreditAppliedToPremiums).toBe(0);
+    expect(result.taxCashflowDollars).toBe(0);
+    expect(result.ptc).toBeCloseTo(5_134.2, 2);
+  });
+
+  it('holds the line to the MAGI above the poverty line, where the credit ends', () => {
+    // No Social Security and a $17,000 pre-tax draw: 108.6% of the $15,650
+    // guideline, so the credit is several thousand dollars. All of it would lower
+    // the draw below the guideline, where the credit is zero, so the line stops
+    // at the $1,350 of MAGI above it.
+    const result = applyPerYearTaxForPath({
+      taxCtx: ctx,
+      taxYear: 2026,
+      retirementYear: 2026,
+      grossSsDollars: 0,
+      nominalExpense: 17_000,
+      medicalExpenseDollars: 7_200,
+      otherIncome: 0,
+      priorBalance: 1_000_000,
+      priorPreTaxByOwner: new Map<string, number>(),
+      magiMinus2: undefined,
+      classification: { ...roth(0), preTaxDollars: 17_000 },
+    })!;
+    expect(result.ptc).toBeGreaterThan(5_000);
+    expect(result.acaCreditAppliedToPremiums).toBeCloseTo(1_350, 1);
+    expect(17_000 - result.acaCreditAppliedToPremiums).toBeGreaterThanOrEqual(15_650);
+    expect(result.taxCashflowDollars).toBeCloseTo(-result.acaCreditAppliedToPremiums, 2);
+  });
+
+  it('keeps a negative cumulative draw from adding balance back to the RMD base', () => {
+    // The credit outran the tax so far (cumulative draw below zero): the
+    // after-tax base is the raw balance, as `applyAfterTaxAdjustment` leaves it.
+    expect(advanceAfterTaxBase({ base: 0, depleted: false }, 500_000, -5_000)).toEqual({
+      base: 500_000,
+      depleted: false,
+    });
   });
 });
 

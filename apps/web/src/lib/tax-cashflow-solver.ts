@@ -41,6 +41,20 @@
  * surcharge is a CONSTANT within-year input (2-year MAGI look-back). The
  * withheld principal is still counted exactly once on the committing draw
  * (in the runner's `addedNeedDollars`); only the federal tax on it rises.
+ *
+ * Credit applied to premiums: when the caller supplies the year's modeled
+ * Medical expenses, the part of the ACA credit left after federal tax and the
+ * IRMAA cash need lowers the year's draw (capped at those expenses and at the
+ * draw itself). Each pass computes it from that pass's own credit, and it
+ * enters the next trial target and the convergence test the same way the tax
+ * need does. The credit is zero below the poverty line, so a line that lowered the
+ * draw below it would be one the draw does not earn, and the loop would cycle
+ * between the two. The first pass runs at the draw before any line; the limit it
+ * sets on how far a draw can fall and still earn the credit (see
+ * `povertyLineLimitCents`) holds for every pass, so every trial draw stays in the
+ * range where a lower draw only raises the credit. The loop stays a contraction:
+ * a lower draw raises the credit by at most the applicable percentage of the MAGI
+ * it removes, and the line is capped. The stress test applies the same limit.
  */
 import { applyTaxYearForFilingPlan } from './tax-integration';
 import type {
@@ -50,6 +64,7 @@ import type {
   TaxYearResult,
 } from './tax-integration';
 import { dollarsToCents } from './tax-integration';
+import { creditAppliedToPremiumsCents, povertyLineLimitCents } from './credit-applied-to-premiums';
 
 /** Shared error `code` thrown by every engine's `UnsupportedTaxYearError`
  *  (federal-tax / ss-taxation / irmaa / aca-ptc / rmd). A projection year
@@ -75,6 +90,7 @@ function zeroTaxCashflowResult(): TaxCashflowResult {
     irmaaWithheldFromSsCents: 0,
     irmaaCashNeedCents: 0,
     acaPtcCashflowOffsetCents: 0,
+    acaCreditAppliedToPremiumsCents: 0,
     totalTaxCashflowNeedCents: 0,
     taxCashflowIterations: 0,
     taxCashflowConverged: true,
@@ -96,6 +112,7 @@ const ZERO_TAX_YEAR_RESULT: TaxYearResult = {
   acaPtcSubsidyCents: 0,
   acaPtcTier: 'below-fpl',
   fplPercentage: 0,
+  acaMagiAboveFplCents: 0,
   magiCents: 0,
   effectiveTaxRate: 0,
   taxYearExtrapolated: false,
@@ -157,6 +174,19 @@ export interface TaxCashflowSolveArgs {
    * once after convergence using the solver's final target.
    */
   readonly classifyForTarget: (totalTargetDollars: number) => WithdrawalClassification;
+  /**
+   * The year's modeled Medical expenses (every `isMedical` row), in integer
+   * cents. Present only on the committing solve; absent means no credit is
+   * applied to premiums (the Roth-conversion funding solves difference two
+   * zero-need solves and must not see the line).
+   */
+  readonly medicalExpenseCents?: number;
+  /**
+   * The taxable Roth earnings already folded into `taxInputBase`'s ordinary
+   * income, in dollars. They are ACA MAGI, so the share of the draw a lower draw
+   * sheds includes them (the Monte Carlo engine adds the same figure). Absent → 0.
+   */
+  readonly rothEarningsIncomeDollars?: number;
 }
 
 /** Per-bucket withdrawal classification returned by the funding callback. */
@@ -185,6 +215,9 @@ export interface TaxCashflowResult {
   readonly irmaaCashNeedCents: number;
   /** ACA PTC offset applied against the tax/health cashflow need, cents. */
   readonly acaPtcCashflowOffsetCents: number;
+  /** The credit left after that offset that lowers the year's draw because the
+   *  premium is a modeled Medical expense, cents. Zero without a medical cap. */
+  readonly acaCreditAppliedToPremiumsCents: number;
   /** Total same-year tax cashflow need the withdrawal target must fund:
    *  `max(0, federalTax + irmaaCash − acaPtcOffset)`, cents. */
   readonly totalTaxCashflowNeedCents: number;
@@ -337,6 +370,10 @@ interface SolverPassState {
   irmaaWithheldCents: number;
   irmaaCashCents: number;
   acaOffsetCents: number;
+  creditAppliedCents: number;
+  /** How far the draw can fall and still earn the credit, set by the first pass
+   *  (the draw before any line) and held for the rest. */
+  povertyLineLimitCents: number;
   /** The target the last classification was run against (shortfall basis). */
   requestedTargetDollars: number;
   classification: WithdrawalClassification | undefined;
@@ -376,6 +413,27 @@ function runOnePass(
   // (floored — never more than federal + IRMAA cash so the need stays ≥ 0).
   state.acaOffsetCents = Math.min(result.acaPtcSubsidyCents, result.federalTaxCents + cashCents);
   state.needCents = totalCashflowNeedCents(result.federalTaxCents, cashCents, result.acaPtcSubsidyCents);
+  // The draw this pass would commit before the line: the ordinary need, the
+  // tax need and the IRMAA withheld from Social Security.
+  if (args.medicalExpenseCents === undefined) {
+    state.creditAppliedCents = 0;
+    return;
+  }
+  if (state.pass === 1) {
+    state.povertyLineLimitCents = povertyLineLimitCents({
+      headroomCents: result.acaMagiAboveFplCents,
+      magiBearingDrawCents: dollarsToCents(
+        cls.preTaxDollars + cls.postTaxNonRothDollars + (args.rothEarningsIncomeDollars ?? 0),
+      ),
+    });
+  }
+  state.creditAppliedCents = creditAppliedToPremiumsCents({
+    creditCents: result.acaPtcSubsidyCents,
+    offsetCents: state.acaOffsetCents,
+    medicalCents: args.medicalExpenseCents,
+    remainingNeedCents: dollarsToCents(args.ordinaryNetNeedDollars) + state.needCents + withheldCents,
+    povertyLineLimitCents: state.povertyLineLimitCents,
+  });
 }
 
 /** Assemble the public result from the final pass state. */
@@ -390,6 +448,7 @@ function buildResult(state: SolverPassState): TaxCashflowResult {
     irmaaWithheldFromSsCents: state.irmaaWithheldCents,
     irmaaCashNeedCents: state.irmaaCashCents,
     acaPtcCashflowOffsetCents: state.acaOffsetCents,
+    acaCreditAppliedToPremiumsCents: state.creditAppliedCents,
     totalTaxCashflowNeedCents: state.needCents,
     taxCashflowIterations: Math.min(state.pass, MAX_PASSES),
     taxCashflowConverged: state.converged,
@@ -403,9 +462,11 @@ function buildResult(state: SolverPassState): TaxCashflowResult {
  * Solve the annual tax/withdrawal feedback loop. Returns the tax cashflow
  * need + diagnostics; never throws (graceful degradation).
  *
- * The per-pass trial target = `ordinaryNetNeed + (needCents + withheldCents)`:
+ * The per-pass trial target =
+ * `ordinaryNetNeed + (needCents + withheldCents − creditAppliedCents)`:
  * the ordinary need, the cash tax need, AND the SS-withheld IRMAA portion,
- * so the federal tax on the withheld-funded draw is included. The
+ * less the credit applied to premiums, so the federal tax on the
+ * withheld-funded draw is included. The
  * initial seed is ordinary-need only (zero tax assumed on pass 1). The
  * withheld addend is a constant within-year offset, so the loop remains a
  * contraction and the `needCents`-keyed convergence test still settles.
@@ -420,6 +481,8 @@ export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult 
     irmaaWithheldCents: 0,
     irmaaCashCents: 0,
     acaOffsetCents: 0,
+    creditAppliedCents: 0,
+    povertyLineLimitCents: Number.POSITIVE_INFINITY,
     requestedTargetDollars: ordinaryNetNeedDollars,
     classification: undefined,
     result: undefined,
@@ -431,13 +494,15 @@ export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult 
   try {
     for (state.pass = 1; state.pass <= MAX_PASSES; state.pass += 1) {
       runOnePass(args, totalTargetDollars, state);
-      // Convergence test on the net tax cost (the quantity the loop drives).
+      // Convergence test on the net cost (the quantity the loop drives): the
+      // tax need less the credit applied to premiums.
+      const netCostCents = state.needCents - state.creditAppliedCents;
       if (Number.isFinite(prevNetCostCents)
-        && Math.abs(state.needCents - prevNetCostCents) < dollarsToCents(CONVERGENCE_DOLLARS)) {
+        && Math.abs(netCostCents - prevNetCostCents) < dollarsToCents(CONVERGENCE_DOLLARS)) {
         state.converged = true;
         break;
       }
-      prevNetCostCents = state.needCents;
+      prevNetCostCents = netCostCents;
       // Next trial: fund the ordinary need plus the latest tax cashflow need
       // AND the IRMAA portion withheld from Social Security.
       // The runner spends GROSS SS but the withheld surcharge shrinks the
@@ -451,7 +516,8 @@ export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult 
       // added to the committing draw exactly once in the runner
       // (`addedNeedDollars`); only the federal tax on it rises here.
       totalTargetDollars =
-        ordinaryNetNeedDollars + (state.needCents + state.irmaaWithheldCents) / 100;
+        ordinaryNetNeedDollars +
+        (state.needCents + state.irmaaWithheldCents - state.creditAppliedCents) / 100;
     }
   } catch (err) {
     if (err === UNSUPPORTED_YEAR_SENTINEL) return zeroTaxCashflowResult();

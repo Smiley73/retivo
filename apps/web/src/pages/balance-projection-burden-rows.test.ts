@@ -84,6 +84,36 @@ describe('buildTaxBurdenRows', () => {
     expect(row.acaPtcSubsidy).toBe(-1200);
   });
 
+  it('carries the credit applied to premiums as a positive, deflated figure', () => {
+    const dd = drawdown([
+      year({ year: 2040, accountBalances: new Map(), acaPtcSubsidyCents: 5_134_20, acaCreditAppliedToPremiumsCents: 2_700_00 }),
+    ]);
+    const [row] = buildTaxBurdenRows({
+      resolvedDrawdown: dd,
+      basisDeflator: () => 0.5,
+      lastDeathFractional: null,
+      isMcBasisActive: false,
+    });
+    expect(row.acaCreditApplied).toBe(1_350);
+    // It is part of the subsidy bar, not an addition to it.
+    expect(row.acaPtcSubsidy).toBeCloseTo(-2_567.1, 6);
+  });
+
+  it('under an MC basis reads the line stamped on the representative rows', () => {
+    // The stress test funds the line per path and stamps it on the captured
+    // rows, so the Taxes tab shows it without a recompute.
+    const dd = drawdown([
+      year({ year: 2040, accountBalances: new Map(), acaPtcSubsidyCents: 5_134_20, acaCreditAppliedToPremiumsCents: 5_134_20 }),
+    ]);
+    const [row] = buildTaxBurdenRows({
+      resolvedDrawdown: dd,
+      basisDeflator: identityDeflator,
+      lastDeathFractional: null,
+      isMcBasisActive: true,
+    });
+    expect(row.acaCreditApplied).toBeCloseTo(5_134.2, 6);
+  });
+
   it('returns [] when there is no drawdown', () => {
     expect(
       buildTaxBurdenRows({

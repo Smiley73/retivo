@@ -267,7 +267,7 @@ flowchart TD
     A["Target = spending need<br/>(first try: no tax)"]
     A --> B["Trial year: which<br/>accounts pay?"]
     B --> C["Work out the tax<br/>on those draws"]
-    C --> D["New target =<br/>need + tax"]
+    C --> D["New target =<br/>need + tax<br/>- credit applied"]
     D --> E{"Tax moved<br/>under $1?"}
     E -- "No, and under 8 passes" --> B
     E -- "Yes, or 8 passes" --> F["Run the real year<br/>with that target"]
@@ -284,17 +284,20 @@ Each pass:
    IRMAA and the ACA credit. Penalties and the HSA additional tax are part of
    the federal figure.
 4. **Set the cash need** to federal tax plus the IRMAA paid in cash, minus the
-   ACA credit, never below zero.
+   ACA credit, never below zero. Then work out the **credit applied to
+   premiums**: the part of the credit left over, capped at the year's Medical
+   expenses and at the draw the year would otherwise make (see
+   [ACA premium credits](math-social-security-and-health.md#aca-premium-credits)).
 5. **Set the next target** to the spending need plus the cash need plus the
-   IRMAA withheld from Social Security.
+   IRMAA withheld from Social Security, minus the credit applied to premiums.
 
 IRMAA is fixed for the year, because it is based on income from two years
 earlier. The part withheld from Social Security still has to be funded by the
 portfolio, and the extra draw that covers it is taxed too. See
 [the IRMAA section](math-social-security-and-health.md#medicare-surcharges-irmaa).
 
-The loop stops when the cash need changes by less than $1 from one pass to the
-next, or after 8 passes. These are fixed rules with no year attached. If it does
+The loop stops when the cash need less the credit applied to premiums changes by
+less than $1 from one pass to the next, or after 8 passes. These are fixed rules with no year attached. If it does
 not settle, the last figures are used and no error is raised. The real year then
 runs once, month by month, to that target.
 
@@ -306,8 +309,14 @@ round's mix of accounts and are not reworked inside the second.
 ### The stress test
 
 The stress test runs no loop. Each path is run once with no tax to estimate each
-year's tax. It is then run again with that tax added to spending. That is two
-passes and the tax is not settled, so it is an estimate. Fill conversions are
+year's tax. It is then run again with that tax added to spending, less the
+credit applied to premiums, which is worked out from the same year's tax and so
+can make the added amount negative. A negative amount is spread across the
+months in proportion to each month's spending that the accounts must cover, so
+it lowers the year's withdrawals by all of it. The credit applied to premiums
+shown for the year is the one added in the second pass, the one that lowered the
+withdrawals. That is two passes and the tax is not
+settled, so it is an estimate. Fill conversions are
 sized and paid for as described under [The MAGI cap](#the-magi-cap).
 
 ## Built-in figures and years
