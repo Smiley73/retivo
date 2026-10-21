@@ -198,6 +198,34 @@ describe('confirming a save', () => {
   });
 });
 
+describe('results that are out of date', () => {
+  function edited() {
+    return { ...projection, expenses: projection.expenses.map((e) => ({ ...e, version: e.version + 1 })) };
+  }
+
+  it('offer no Save action once the data changed after the run', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(panel(vi.fn(async () => true)));
+    await showResults(user, baseResult);
+    expect(screen.getAllByRole('button', { name: SAVE }).length).toBeGreaterThan(0);
+    rerender(panel(vi.fn(async () => true), edited()));
+    expect(screen.getByText(/Your data changed after this comparison ran/)).toBeInTheDocument();
+    expect(screen.queryAllByRole('button', { name: SAVE })).toHaveLength(0);
+  });
+
+  it('are not saved when the data changes under an open dialog, and no marker is written', async () => {
+    const user = userEvent.setup();
+    const persist = vi.fn<Persist>(async () => true);
+    const { rerender } = render(panel(persist));
+    await showResults(user, baseResult);
+    await user.click(screen.getAllByRole('button', { name: SAVE })[0]);
+    rerender(panel(persist, edited()));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save to scenario' }));
+    expect(persist).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(`${SAVE_PREFIX}toy`)).toBeNull();
+  });
+});
+
 const SAVE_PREFIX = SAVED_PLAN_STORAGE_PREFIX;
 
 describe('the saved-plan marker', () => {

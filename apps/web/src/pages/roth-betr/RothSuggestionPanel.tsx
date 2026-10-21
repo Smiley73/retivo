@@ -97,10 +97,14 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
     [scenarios, selectedScenarioId, members],
   );
   const { state, run, cancel } = useRothSuggestion(selectedScenarioId, signature);
+  // The results were computed on data that has since changed; their ladders
+  // must not be saved as if they fit the data now.
+  const resultsStale = state.phase === 'done' && state.signature !== signature;
   const save = useRothSuggestionSave({
     pageData,
     data,
     selectedScenarioId,
+    resultsStale,
     persistOverrides,
     onError,
   });
@@ -192,7 +196,7 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
                 The comparison could not finish: {state.message}
               </Alert>
             )}
-            {state.phase === 'done' && state.signature !== signature && (
+            {resultsStale && (
               <Alert tone="warning" role="status">
                 Your data changed after this comparison ran, so the rows below may be out of
                 date. Press &ldquo;Compare conversion plans&rdquo; to run it again.
@@ -212,7 +216,7 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
               <RothSuggestionTable
                 rows={table.rows}
                 leftoverTaxPct={leftoverTaxPct}
-                onSave={save.openFor}
+                onSave={resultsStale ? undefined : save.openFor}
               />
             )}
             {/* Always mounted so a screen reader hears the text arrive; the other

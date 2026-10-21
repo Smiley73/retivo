@@ -25,8 +25,9 @@ interface RothSuggestionTableProps {
   /** The leftover-tax rate the after-tax balance used, in percent. */
   readonly leftoverTaxPct: number;
   /** Opens the save dialog for a row. Rows that cannot be saved (the current
-   *  plan, a plan whose cap was not met) get no action. */
-  readonly onSave: (row: RothSuggestionRow) => void;
+   *  plan, a plan whose cap was not met) get no action, and none do while this
+   *  is absent (the results are out of date). */
+  readonly onSave?: (row: RothSuggestionRow) => void;
 }
 
 const TABLE_LABEL = 'Roth conversion plan comparison';
@@ -134,7 +135,7 @@ export const RothSuggestionTable: React.FC<RothSuggestionTableProps> = ({
                     >
                       Why each year
                     </button>
-                    {canSaveRow(row) && (
+                    {onSave !== undefined && canSaveRow(row) && (
                       <button
                         type="button"
                         className={btnSecondarySmClass}
