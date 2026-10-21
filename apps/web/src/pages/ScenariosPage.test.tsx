@@ -21,14 +21,16 @@
 import 'fake-indexeddb/auto';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearAllStores,
   clearSelectedScenario,
   putAggregate,
+  readSelectedScenario,
   writeSelectedScenario,
 } from '../db/store';
+import * as store from '../db/store';
 import { clearMonteCarloCache } from '../db/monte-carlo-cache';
 import { notifySelectedScenarioChanged } from '../lib/scenario-mutations';
 import type { Aggregate, ScenarioPayload } from '../db/types';
@@ -786,5 +788,139 @@ describe('ScenariosPage — reactive reads', () => {
       expect(within(childRow).getByText('Active')).toBeInTheDocument(),
     );
     expect(within(baseRow).queryByText('Active')).toBeNull();
+  });
+});
+
+describe('ScenariosPage — Compare with parent', () => {
+  let lastLocation = '';
+  const LocationProbe: React.FC = () => {
+    const loc = useLocation();
+    lastLocation = loc.pathname + loc.search;
+    return null;
+  };
+
+  function renderWithRoutes(): ReturnType<typeof render> {
+    return render(
+      <MemoryRouter initialEntries={['/scenarios']}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/scenarios" element={<ScenariosPage />} />
+          <Route path="/balance-projection" element={<div>projection page</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  async function seedPair(): Promise<void> {
+    await seedScenario({ id: 'sc-base', name: 'Base', isPrimary: true, parentScenarioId: null });
+    await seedScenario({
+      id: 'sc-child',
+      name: 'Retire at 67',
+      isPrimary: false,
+      parentScenarioId: 'sc-base',
+    });
+  }
+
+  const childLink = (): Promise<HTMLElement> =>
+    screen.findByRole('button', { name: 'Compare Retire at 67 with parent Base' });
+
+  beforeEach(() => {
+    setupContexts();
+    lastLocation = '';
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await clearAllStores();
+    await clearSelectedScenario();
+    await clearMonteCarloCache();
+    mocks.runCalls.length = 0;
+    vi.clearAllMocks();
+  });
+
+  it('switches the active scenario then opens the Compare tab against the parent', async () => {
+    await seedPair();
+    const user = userEvent.setup();
+    renderWithRoutes();
+
+    const link = await childLink();
+    expect(link).toHaveTextContent('Compare with parent');
+    await user.click(link);
+
+    await screen.findByText('projection page');
+    expect(lastLocation).toBe('/balance-projection?view=compare&with=sc-base');
+    expect((await readSelectedScenario())?.scenarioId).toBe('sc-child');
+  });
+
+  it('moves the Active chip to the card (the changed event fires)', async () => {
+    await seedPair();
+    const user = userEvent.setup();
+    // No <Routes>: the page stays mounted through the navigation, so the
+    // chip can only move through the changed event.
+    renderPage();
+    await user.click(await childLink());
+    const childRow = (await screen.findByText('Retire at 67')).closest(
+      '.scenario-tree__row',
+    ) as HTMLElement;
+    await waitFor(() =>
+      expect(within(childRow).getByText('Active')).toBeInTheDocument(),
+    );
+  });
+
+  it('does not navigate until the pointer write has resolved', async () => {
+    await seedPair();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const realWrite = store.writeSelectedScenario;
+    const spy = vi
+      .spyOn(store, 'writeSelectedScenario')
+      .mockImplementation(async (selected) => {
+        await gate;
+        await realWrite(selected);
+      });
+    const user = userEvent.setup();
+    renderWithRoutes();
+
+    await user.click(await childLink());
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    // Write still pending: the page has not moved.
+    expect(lastLocation).toBe('/scenarios');
+    expect(screen.queryByText('projection page')).toBeNull();
+
+    await act(async () => {
+      release();
+    });
+    await screen.findByText('projection page');
+    expect(lastLocation).toBe('/balance-projection?view=compare&with=sc-base');
+  });
+
+  it('stays put and shows the error when the pointer write rejects', async () => {
+    await seedPair();
+    vi.spyOn(store, 'writeSelectedScenario').mockRejectedValue(new Error('IDB is down'));
+    const user = userEvent.setup();
+    renderWithRoutes();
+
+    await user.click(await childLink());
+
+    expect(await screen.findByText('IDB is down')).toBeInTheDocument();
+    expect(lastLocation).toBe('/scenarios');
+    expect(screen.queryByText('projection page')).toBeNull();
+  });
+
+  it('renders no control on Base or on a card whose parent is missing', async () => {
+    await seedScenario({ id: 'sc-base', name: 'Base', isPrimary: true, parentScenarioId: null });
+    await seedScenario({
+      id: 'sc-orphan',
+      name: 'Orphan',
+      isPrimary: false,
+      parentScenarioId: 'sc-gone',
+    });
+    renderWithRoutes();
+
+    await screen.findByText('Base');
+    expect(screen.queryByText('Compare with parent')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Compare .* with parent/ })).toBeNull();
   });
 });

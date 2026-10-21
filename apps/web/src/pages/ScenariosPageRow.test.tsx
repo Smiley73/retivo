@@ -9,8 +9,10 @@
  * household + deterministic projection).
  */
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { expectNoA11yViolations } from '../test/a11y';
 import { ScenariosPageRow } from './ScenariosPageRow';
 import type { ScenarioCardMetrics } from './scenarios-page-metrics';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
@@ -54,11 +56,15 @@ function metricsWith(
   };
 }
 
-function renderRow(metrics: ScenarioCardMetrics | undefined): HTMLElement {
+function renderRow(
+  metrics: ScenarioCardMetrics | undefined,
+  compareWithParent: { parentName: string; onActivate: () => void } | null = null,
+  scenario: ScenarioAggregate = SCENARIO,
+): HTMLElement {
   render(
     <MemoryRouter>
       <ScenariosPageRow
-        scenario={SCENARIO}
+        scenario={scenario}
         ancestorIsLast={[true]}
         isSelected={false}
         metrics={metrics}
@@ -67,10 +73,11 @@ function renderRow(metrics: ScenarioCardMetrics | undefined): HTMLElement {
         isRecalculating={false}
         recalcDone={0}
         recalcTotal={0}
+        compareWithParent={compareWithParent}
       />
     </MemoryRouter>,
   );
-  return screen.getByText('Historical row').closest(
+  return screen.getByText(scenario.payload.name).closest(
     '.scenario-tree__row',
   ) as HTMLElement;
 }
@@ -98,5 +105,47 @@ describe('ScenariosPageRow — Historical column', () => {
     expect(within(group).queryByText(/\$/)).toBeNull();
     // Empty series → the sparkline is not painted.
     expect(group.querySelector('svg')).toBeNull();
+  });
+});
+
+describe('ScenariosPageRow — Compare with parent', () => {
+  const CHILD = {
+    ...SCENARIO,
+    id: 'sc-2',
+    payload: { ...SCENARIO.payload, name: 'Retire at 67', parentScenarioId: 'sc-1', isPrimary: false },
+  } as unknown as ScenarioAggregate;
+
+  it('renders the visible control with an accessible name naming both scenarios', () => {
+    const row = renderRow(undefined, { parentName: 'Historical row', onActivate: vi.fn() }, CHILD);
+    const button = within(row).getByRole('button', {
+      name: 'Compare Retire at 67 with parent Historical row',
+    });
+    expect(button).toHaveTextContent('Compare with parent');
+    // Always visible: not inside the hover-revealed icon cluster.
+    expect(button.closest('.row-actions')).toBeNull();
+  });
+
+  it('renders nothing when no handler is supplied (Base card)', () => {
+    const row = renderRow(undefined);
+    expect(within(row).queryByText('Compare with parent')).toBeNull();
+    expect(within(row).queryByRole('button', { name: /Compare/ })).toBeNull();
+  });
+
+  it('calls the handler on click and on keyboard activation', async () => {
+    const onActivate = vi.fn();
+    const user = userEvent.setup();
+    const row = renderRow(undefined, { parentName: 'Historical row', onActivate }, CHILD);
+    const button = within(row).getByRole('button', { name: /Compare Retire at 67/ });
+    await user.click(button);
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    button.focus();
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+    expect(onActivate).toHaveBeenCalledTimes(3);
+  });
+
+  it('has no a11y violations with the control present', async () => {
+    renderRow(undefined, { parentName: 'Historical row', onActivate: vi.fn() }, CHILD);
+    await expectNoA11yViolations(document.body);
   });
 });

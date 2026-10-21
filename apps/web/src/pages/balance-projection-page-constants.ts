@@ -135,3 +135,19 @@ export function parseBalanceProjectionView(raw: string | null): BalanceProjectio
     ? (raw as BalanceProjectionViewId)
     : 'overview';
 }
+
+/** Search param carrying the comparison scenario id on the Compare tab. */
+export const COMPARE_WITH_PARAM = 'with';
+
+/**
+ * Deep link to the Compare tab with `comparisonId` preselected as the
+ * comparison scenario. The tab compares the *viewed* scenario with this one,
+ * so callers that mean a specific pair switch the active scenario first.
+ */
+export function compareDeepLink(comparisonId: string): string {
+  const params = new URLSearchParams({
+    view: 'compare',
+    [COMPARE_WITH_PARAM]: comparisonId,
+  });
+  return `/balance-projection?${params.toString()}`;
+}
