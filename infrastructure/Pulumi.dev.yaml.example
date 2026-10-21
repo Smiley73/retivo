@@ -140,7 +140,9 @@ config:
   # Optional: AI assistant connector. Off unless set. Setting it does two
   # things at once: the SPA build bakes the port in (VITE_ASSISTANT_BRIDGE_PORT)
   # and the CloudFront CSP gains exactly one entry, connect-src
-  # ws://127.0.0.1:<port>. Leave it commented out unless you run the connector.
+  # ws://127.0.0.1:<port>. The deploy also serves the bridge program as a file
+  # from the site (/retivo-mcp-bridge.mjs) for people to download. Leave it
+  # commented out unless you run the connector.
   # An integer from 1024 to 65535; a config edit + redeploy.
   # retivo:assistantBridgePort: "24580"
   # Optional: ARN of the IAM permissions boundary attached to every role

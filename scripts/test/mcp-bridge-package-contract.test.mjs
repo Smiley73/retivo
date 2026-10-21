@@ -8,8 +8,12 @@
 //   - no preinstall / install / postinstall script, so installing it runs no
 //     code beyond its dependencies' own (and `ws`'s optional natives are not
 //     declared);
-//   - the published files are exactly dist/, the bin lives under dist/, and the
-//     package is ESM on the same Node range as the repo;
+//   - there are no runtime `dependencies`: everything the bridge needs is
+//     embedded in the single-file bundle (scripts/build-bundle.mjs), so what it
+//     embeds sits in `devDependencies` where `audit:ci` still audits it;
+//   - the `files` allowlist is exactly the bundle, its notices, the README and
+//     the license, the bin is the bundle, the package stays `private`, and it is
+//     ESM on the same Node range as the repo;
 //   - the dependency names equal a frozen allowlist: a new dependency fails here
 //     until the list below is edited WITH a reason, which makes adding one a
 //     visible, reviewed decision.
@@ -30,15 +34,16 @@ const ROOT_MANIFEST = resolve(__dirname, '../../package.json');
 
 // Frozen allowlists, by dependency field. Edit only with a reason in the PR.
 const ALLOWED_NAMES = Object.freeze({
-  dependencies: Object.freeze([
-    // The MCP server SDK (v2): the stdio transport and tool/prompt registration.
-    '@modelcontextprotocol/server',
-    // The shared frames, registry and pairing rules (workspace package).
-    '@retirement/assistant-protocol',
-    // The loopback WebSocket server the tab dials.
-    'ws',
-  ]),
+  dependencies: Object.freeze([]),
   devDependencies: Object.freeze([
+    // Embedded in the bundle. The MCP server SDK (v2): the stdio transport and tool/prompt registration.
+    '@modelcontextprotocol/server',
+    // Embedded in the bundle. The shared frames, registry and pairing rules (workspace package).
+    '@retirement/assistant-protocol',
+    // Embedded in the bundle. The loopback WebSocket server the tab dials.
+    'ws',
+    // Builds the single-file bundle; already resolved in the lockfile for the web build.
+    'esbuild',
     '@types/node',
     // `ws` ships no types.
     '@types/ws',
@@ -52,6 +57,8 @@ const ALLOWED_NAMES = Object.freeze({
 
 const DEPENDENCY_FIELDS = Object.keys(ALLOWED_NAMES);
 const LIFECYCLE_SCRIPTS = ['preinstall', 'install', 'postinstall'];
+const BUNDLE = 'build/retivo-mcp-bridge.mjs';
+const EXPECTED_FILES = [BUNDLE, 'build/THIRD-PARTY-NOTICES.txt', 'README.md', 'LICENSE'];
 const EXACT_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 
 /** Every rule violation in `manifest`, each prefixed with the rule id. */
@@ -73,14 +80,20 @@ function violations(manifest, rootManifest) {
     }
   }
 
-  if (JSON.stringify(manifest.files) !== JSON.stringify(['dist'])) {
-    found.push(`files: expected ["dist"], got ${JSON.stringify(manifest.files)}`);
+  if (Object.keys(manifest.dependencies ?? {}).length > 0) {
+    found.push(`no-runtime-dependencies: dependencies is ${JSON.stringify(manifest.dependencies)}; the bundle embeds them`);
+  }
+
+  if (manifest.private !== true) found.push('private: the package must stay private (nothing is published to npm)');
+
+  if (JSON.stringify(manifest.files) !== JSON.stringify(EXPECTED_FILES)) {
+    found.push(`files: expected ${JSON.stringify(EXPECTED_FILES)}, got ${JSON.stringify(manifest.files)}`);
   }
 
   const bins = typeof manifest.bin === 'string' ? { bin: manifest.bin } : (manifest.bin ?? {});
   if (Object.keys(bins).length === 0) found.push('bin: no bin entry');
   for (const [name, path] of Object.entries(bins)) {
-    if (!/^(\.\/)?dist\//.test(path)) found.push(`bin: ${name} points at "${path}", not under dist/`);
+    if (path !== BUNDLE) found.push(`bin: ${name} points at "${path}", not at the bundle ${BUNDLE}`);
   }
 
   if (manifest.type !== 'module') found.push(`type: expected "module", got ${JSON.stringify(manifest.type)}`);
@@ -124,23 +137,26 @@ function broken(mutate) {
 }
 
 const BREAKING_MANIFESTS = [
-  ['a caret range', (m) => { m.dependencies.ws = '^8.22.0'; }, /exact-pin: dependencies\.ws/],
-  ['a tilde range', (m) => { m.dependencies.ws = '~8.22.0'; }, /exact-pin: dependencies\.ws/],
-  ['a tag', (m) => { m.dependencies['@modelcontextprotocol/server'] = 'latest'; }, /exact-pin: dependencies\.@modelcontextprotocol\/server/],
+  ['a caret range', (m) => { m.devDependencies.ws = '^8.22.0'; }, /exact-pin: devDependencies\.ws/],
+  ['a tilde range', (m) => { m.devDependencies.ws = '~8.22.0'; }, /exact-pin: devDependencies\.ws/],
+  ['a tag', (m) => { m.devDependencies['@modelcontextprotocol/server'] = 'latest'; }, /exact-pin: devDependencies\.@modelcontextprotocol\/server/],
   ['a comparator range', (m) => { m.devDependencies.vitest = '>=5.0.4'; }, /exact-pin: devDependencies\.vitest/],
   ['a preinstall script', (m) => { m.scripts.preinstall = 'node x.js'; }, /no-lifecycle-scripts: scripts\.preinstall/],
   ['an install script', (m) => { m.scripts.install = 'node x.js'; }, /no-lifecycle-scripts: scripts\.install/],
   ['a postinstall script', (m) => { m.scripts.postinstall = 'node x.js'; }, /no-lifecycle-scripts: scripts\.postinstall/],
-  ['extra published files', (m) => { m.files = ['dist', 'src']; }, /files: expected \["dist"\]/],
-  ['no files field', (m) => { delete m.files; }, /files: expected \["dist"\]/],
-  ['a bin outside dist', (m) => { m.bin = { 'retivo-mcp-bridge': 'src/bin.ts' }; }, /bin: retivo-mcp-bridge points at "src\/bin.ts"/],
+  ['extra published files', (m) => { m.files = [...m.files, 'src']; }, /files: expected/],
+  ['the unbundled dist published', (m) => { m.files = ['dist']; }, /files: expected/],
+  ['no files field', (m) => { delete m.files; }, /files: expected/],
+  ['a bin outside the bundle', (m) => { m.bin = { 'retivo-mcp-bridge': 'dist/bin.js' }; }, /bin: retivo-mcp-bridge points at "dist\/bin.js"/],
+  ['a runtime dependency', (m) => { m.dependencies = { ws: '8.22.0' }; }, /no-runtime-dependencies/],
+  ['a publishable package', (m) => { m.private = false; }, /private: the package must stay private/],
   ['no bin', (m) => { delete m.bin; }, /bin: no bin entry/],
   ['CommonJS', (m) => { delete m.type; }, /type: expected "module"/],
   ['another Node range', (m) => { m.engines.node = '>=20'; }, /engines: node is ">=20"/],
-  ['a new dependency', (m) => { m.dependencies.zod = '4.6.7'; }, /allowlist: dependencies has zod/],
+  ['a new dependency', (m) => { m.dependencies = { zod: '4.6.7' }; }, /allowlist: dependencies has zod/],
   ['a new dev dependency', (m) => { m.devDependencies['left-pad'] = '1.3.0'; }, /allowlist: devDependencies has left-pad/],
   ['an optional dependency', (m) => { m.optionalDependencies = { bufferutil: '4.0.9' }; }, /allowlist: optionalDependencies has bufferutil/],
-  ['a dropped dependency', (m) => { delete m.dependencies.ws; }, /allowlist: dependencies lacks ws/],
+  ['a dropped dependency', (m) => { delete m.devDependencies.ws; }, /allowlist: devDependencies lacks ws/],
 ];
 
 for (const [name, mutate, expected] of BREAKING_MANIFESTS) {
@@ -154,6 +170,6 @@ for (const [name, mutate, expected] of BREAKING_MANIFESTS) {
 }
 
 test('workspace dependencies are exempt from the exact-pin rule', () => {
-  assert.equal(realManifest.dependencies['@retirement/assistant-protocol'], 'workspace:*');
+  assert.equal(realManifest.devDependencies['@retirement/assistant-protocol'], 'workspace:*');
   assert.deepEqual(violations(realManifest, rootManifest), []);
 });

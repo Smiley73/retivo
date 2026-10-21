@@ -14,7 +14,11 @@
 // Runs the real shell function under bash with `pulumi` and `pnpm` replaced by
 // stub executables on PATH — no Pulumi runtime, no AWS, no build. The stubbed
 // `pulumi` answers `config get retivo:<key>` per key; the stubbed `pnpm`
-// records the environment it was invoked with. Runs under `pnpm test:scripts`.
+// records the environment the web build was invoked with. A stack that sets the
+// bridge port also serves the bridge file (`stage_bridge_bundle`): the stubs
+// record that second build and the staging call, and a stack without the port
+// makes neither. The staging script itself is tested in
+// stage-bridge-bundle.test.mjs. Runs under `pnpm test:scripts`.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -54,6 +58,8 @@ function runBuildSpa(answers = {}, ambient = {}) {
   mkdirSync(bin);
   const envDump = join(dir, 'env.txt');
   const asked = join(dir, 'asked.txt');
+  const calls = join(dir, 'calls.txt');
+  const bridgeOutDump = join(dir, 'bridge-out.txt');
   const cases = ['betaFeatures', 'assistantBridgePort']
     .map((key) => {
       const a = answers[key] ?? NOT_FOUND(key);
@@ -64,9 +70,14 @@ function runBuildSpa(answers = {}, ambient = {}) {
     join(bin, 'pulumi'),
     `#!/usr/bin/env bash\necho "$3" >> ${JSON.stringify(asked)}\ncase "$3" in\n${cases}\n  *) echo "unexpected pulumi call: $*" >&2; exit 99 ;;\nesac\n`,
   );
-  writeFileSync(join(bin, 'pnpm'), `#!/usr/bin/env bash\nenv > ${JSON.stringify(envDump)}\n`);
-  chmodSync(join(bin, 'pulumi'), 0o755);
-  chmodSync(join(bin, 'pnpm'), 0o755);
+  // Every pnpm call is logged; only the web build's environment is kept (the bridge build follows it).
+  writeFileSync(
+    join(bin, 'pnpm'),
+    `#!/usr/bin/env bash\necho "pnpm $*" >> ${JSON.stringify(calls)}\ncase "$*" in\n  *@retirement/web*) env > ${JSON.stringify(envDump)} ;;\n  *@retirement/mcp-bridge*) echo "\${BRIDGE_BUNDLE_OUTPUT_DIR-unset}" > ${JSON.stringify(bridgeOutDump)} ;;\nesac\n`,
+  );
+  // The staging script runs under node; record its arguments instead of running it.
+  writeFileSync(join(bin, 'node'), `#!/usr/bin/env bash\necho "node $*" >> ${JSON.stringify(calls)}\n`);
+  for (const name of ['pulumi', 'pnpm', 'node']) chmodSync(join(bin, name), 0o755);
   const scriptEnv = { ...process.env, ...ambient, PATH: `${bin}:${process.env.PATH}` };
   const script = `set -e; INFRA_DIR=${JSON.stringify(resolve(REPO_ROOT, 'infrastructure'))}; REPO_ROOT=${JSON.stringify(REPO_ROOT)}; BUILD_ID=test; source ${JSON.stringify(DEPLOY_COMMON)}; build_spa dev`;
   const result = spawnSync('bash', ['-c', script], {
@@ -82,8 +93,10 @@ function runBuildSpa(answers = {}, ambient = {}) {
   };
   const env = read(envDump);
   const keys = (read(asked) ?? '').split('\n').filter(Boolean);
+  const callLog = (read(calls) ?? '').split('\n').filter(Boolean);
+  const bridgeOut = (read(bridgeOutDump) ?? '').trim();
   rmSync(dir, { recursive: true, force: true });
-  return { ...result, env, keys };
+  return { ...result, env, keys, calls: callLog, bridgeOut };
 }
 
 function bakedValue(env, name = 'VITE_BETA_FEATURES') {
@@ -136,6 +149,14 @@ test('a missing assistantBridgePort key leaves the connector OFF: no VITE_ASSIST
   assert.deepEqual(r.keys.sort(), ['retivo:assistantBridgePort', 'retivo:betaFeatures']);
 });
 
+test('a stack without the bridge port serves no bridge file: the bridge is not built or staged', () => {
+  const r = runBuildSpa();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.calls.length, 1, `only the web build runs, got ${JSON.stringify(r.calls)}`);
+  assert.match(r.calls[0], /@retirement\/web build$/);
+  assert.doesNotMatch(r.stdout, /bridge file/);
+});
+
 test('a blank assistantBridgePort value is the same as a missing key', () => {
   const r = runBuildSpa({ assistantBridgePort: { stdout: '' } });
   assert.equal(r.status, 0, r.stderr);
@@ -166,6 +187,23 @@ for (const [stdout, baked] of [
     assert.equal(bakedValue(r.env), 'guardrails', 'the beta-features knob is unaffected');
   });
 }
+
+test('a stack with the bridge port builds the bridge after the SPA and stages it into the SPA dist', () => {
+  const r = runBuildSpa({ assistantBridgePort: { stdout: '24580' } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.calls.length, 3, JSON.stringify(r.calls));
+  assert.match(r.calls[0], /@retirement\/web build$/, 'the SPA build comes first: it empties dist/');
+  assert.match(r.calls[1], /@retirement\/assistant-protocol --filter @retirement\/mcp-bridge run build$/);
+  assert.equal(r.calls[2], 'node scripts/stage-bridge-bundle.mjs apps/mcp-bridge/build apps/web/dist');
+  assert.match(r.stdout, /Building the bridge file this site serves/);
+});
+
+test('an ambient bridge output directory cannot redirect the bridge build of a deploy', () => {
+  const r = runBuildSpa({ assistantBridgePort: { stdout: '24580' } }, { BRIDGE_BUNDLE_OUTPUT_DIR: '/somewhere/else' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.calls[2], 'node scripts/stage-bridge-bundle.mjs apps/mcp-bridge/build apps/web/dist');
+  assert.equal(r.bridgeOut, 'unset', 'the bridge build never sees the ambient directory');
+});
 
 for (const bad of ['24580.5', 'abc', '80', '1023', '65536', '0', '0x6004', '-24580', '24 580', '1e4', '99999999999999999999']) {
   test(`assistantBridgePort ${JSON.stringify(bad)} aborts before the build runs`, () => {
