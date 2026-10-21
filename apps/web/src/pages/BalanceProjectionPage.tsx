@@ -790,7 +790,7 @@ export const BalanceProjectionPage: React.FC = () => {
           <TabPanel id="compare" shouldForceMount className="bp-view-panel outline-none">
             <BalanceProjectionCompareSection
               dataLoad={dataLoad} data={data} isActive={view === 'compare'}
-              nowYear={nowYear} nowMonthIndex={nowMonthIndex}
+              nowYear={nowYear} nowMonthIndex={nowMonthIndex} stressVm={stressVm}
             />
           </TabPanel>
         </div>

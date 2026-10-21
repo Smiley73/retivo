@@ -10,11 +10,14 @@
  * `resolvedBasisLabel` suffix and the panel says the header Basis and
  * Today's/Future dollars controls do not apply.
  *
- * Structure (the success-rate block appends below): heading, "Compare with"
- * selector, basis sentence, then one of the states — pick a scenario, nothing
- * to compare with, projecting, cannot be projected, error — or the headline
- * table with the Drivers table under it, or, when the Planned projections are
- * identical, the identical-results sentence in place of both.
+ * Structure: heading, "Compare with" selector, basis sentence, then one of the
+ * states — pick a scenario, nothing to compare with, projecting, cannot be
+ * projected, error — or the headline table, the Plan success row and the
+ * Drivers table, or, when the Planned projections are identical, the
+ * identical-results sentence in place of the headline and the Drivers table.
+ * The Plan success row (the stress test of each side, which never delays the
+ * rest) stays in both, and is dropped only when the stress-test inputs are
+ * identical too, since its answer is then known.
  */
 import React, { useMemo } from 'react';
 import { Link } from 'react-router';
@@ -24,11 +27,14 @@ import { EmptyState } from '../components/EmptyState';
 import { Select } from '../components/Select';
 import { formatCurrencyShort } from '../lib/format-currency';
 import { formatSignedDifference } from '../lib/signed-difference';
+import type { ScenarioMcInputs } from '../lib/monte-carlo-scenario-input';
+import { useCompareStress, type CompareStressViewed } from '../monte-carlo/use-compare-stress';
 import { buildCompareData } from './balance-projection-compare-data';
 import {
   CompareDriversSection,
   CompareIdentitySection,
 } from './balance-projection-page-compare-drivers';
+import { CompareStressRow } from './balance-projection-page-compare-stress';
 import {
   CARD_SECTION_CLASS,
   SECTION_H2_CLASS,
@@ -119,9 +125,12 @@ const HeadlineTable: React.FC<{
 };
 
 export const BalanceProjectionCompareSection: React.FC<
-  UseBalanceProjectionCompareInput
-> = (props) => {
-  const { data } = props;
+  UseBalanceProjectionCompareInput & {
+    /** The page's own stress-test view model: the viewed side's result. */
+    readonly stressVm: CompareStressViewed;
+  }
+> = ({ stressVm, ...props }) => {
+  const { data, dataLoad } = props;
   const {
     options,
     comparisonId,
@@ -134,16 +143,50 @@ export const BalanceProjectionCompareSection: React.FC<
   const viewedName =
     data.scenarios.find((s) => s.id === data.selectedScenarioId)?.payload.name ??
     'this scenario';
+  const {
+    scenarios,
+    members,
+    accounts,
+    balances,
+    expenses,
+    expenseCategories,
+    incomeStreams,
+    ssBenefits,
+  } = dataLoad;
+  // The slices the page's own stress test is built from, categories included,
+  // so the comparison's cache key equals the one the Projections page writes.
+  const mcInputs = useMemo<ScenarioMcInputs>(
+    () => ({
+      members,
+      accounts,
+      balances,
+      expenses,
+      incomeStreams,
+      ssBenefits,
+      categories: expenseCategories,
+    }),
+    [members, accounts, balances, expenses, incomeStreams, ssBenefits, expenseCategories],
+  );
+  const stress = useCompareStress({
+    viewed: stressVm,
+    viewedScenarioId: data.selectedScenarioId,
+    comparisonId,
+    scenarios,
+    inputs: mcInputs,
+    nowYear: props.nowYear,
+    nowMonthIndex: props.nowMonthIndex,
+    isActive: props.isActive,
+  });
   const compare = useMemo(
     () =>
       comparison
         ? buildCompareData({
             viewed: data,
             comparison,
-            stressCacheKeys: { viewed: null, comparison: null },
+            stressCacheKeys: stress.cacheKeys ?? { viewed: null, comparison: null },
           })
         : null,
-    [data, comparison],
+    [data, comparison, stress.cacheKeys],
   );
   const name = comparisonName ?? 'the other scenario';
   // Queued while another tab is showing is not "projecting": the run starts
@@ -239,29 +282,43 @@ export const BalanceProjectionCompareSection: React.FC<
             </p>
           )}
           {/* Identical Planned results swap the headline and the Drivers table
-              for one sentence; anything appended below (the success-rate row)
-              sits outside this choice and stays in both states. */}
-          {compare &&
-            (compare.identity.planned ? (
-              <CompareIdentitySection
-                viewedName={viewedName}
-                comparisonName={name}
-                changes={compare.changes}
-              />
-            ) : (
-              <div className="flex flex-col gap-6">
+              for one sentence; the Plan success row sits outside that choice
+              and stays in both states unless the stress tests match too. */}
+          {compare && (
+            <div className="flex flex-col gap-6">
+              {compare.identity.planned ? (
+                <CompareIdentitySection
+                  viewedName={viewedName}
+                  comparisonName={name}
+                  changes={compare.changes}
+                  stressMatches={compare.identity.stress === true}
+                />
+              ) : (
                 <HeadlineTable
                   viewedName={viewedName}
                   comparisonName={name}
                   compare={compare}
                 />
+              )}
+              {/* Hidden until the cache keys are known, so a pair that is
+                  identical on both counts never flashes a row it then removes. */}
+              {stress.cacheKeys !== null &&
+                !(compare.identity.planned && compare.identity.stress === true) && (
+                <CompareStressRow
+                  viewedName={viewedName}
+                  comparisonName={name}
+                  stress={stress}
+                />
+              )}
+              {!compare.identity.planned && (
                 <CompareDriversSection
                   viewedName={viewedName}
                   comparisonName={name}
                   compare={compare}
                 />
-              </div>
-            ))}
+              )}
+            </div>
+          )}
         </div>
       )}
     </section>

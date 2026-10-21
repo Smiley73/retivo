@@ -466,6 +466,44 @@ surcharges (IRMAA)**, **ACA health credits**, the last as a credit received).
   that only the stress test reads, such as spending guardrails, can leave the
   Planned projections identical.
 
+### Plan success in Compare
+
+Between the headline and the Drivers table, the **Plan success** row sets the
+two scenarios' stress-test success probabilities side by side.
+
+- **Rule.** The two runs are separate samples, so the error of their difference
+  is the independent two-proportion standard error,
+  `se = sqrt(p1(1−p1)/n1 + p2(1−p2)/n2)`, where `p` is each success probability
+  and `n` the number of paths behind it (10,000 each today, read from each
+  result). A difference is shown only when `|p1 − p2| > se`; otherwise the row
+  reads "about the same" and says the gap is within the stress test's sampling
+  noise. A gap that clears the noise but rounds to zero percentage points at
+  whole-point precision also reads "about the same", the rule the guardrail
+  comparison uses, so a row can read "92% vs 91%, about the same": the figures
+  shown are rounded, the difference is taken from the unrounded probabilities.
+  A difference that is shown is the viewed scenario minus the other, as a sign,
+  whole percentage points and a word ("higher" or "lower").
+- **Why this error.** The two runs share no per-path outcomes (the result keeps
+  summaries only), so the paired error is not available. The independent error
+  is the right one for independent draws and conservative if the two seeds
+  happen to match: it can hide a real gap, never invent one.
+- **Your scenario's figure** is the stress test the page already runs, and is
+  shown only once a completed run for the plan on screen has finished. Until
+  then, and again after any edit, it reads "—".
+- **The other scenario's figure** comes from its saved result when one exists
+  (the same one the Projections page and the Scenarios page use), and otherwise
+  from a run of the same 10,000 paths on a background worker, started once your
+  scenario's own run has finished so the two do not compete for the same cores.
+  A finished run is saved for the next visit. Leaving the tab does not stop it;
+  changing the other scenario, or an edit that changes its inputs, does.
+- **Recalculate** on either scenario draws a new sample for that scenario only,
+  so it can move the gap by noise alone.
+- **When there is no row.** If both scenarios would run exactly the same stress
+  test (identical inputs) and their Planned projections are identical, the row
+  is left out: the answer is the same by construction. A scenario that cannot
+  run the stress test (no retirement age, no active account, an incomplete
+  setup) shows "—" for its side and a short note.
+
 ## Built-in figures and years
 
 The market data is the only part of this page tied to dates. Everything else is
@@ -588,7 +626,8 @@ All paths are under `apps/web/src`.
 | `pages/use-balance-projection-compare.ts`, `pages/balance-projection-page-compare.tsx` | Which scenario Compare uses, the second projection that runs only while the tab is open, and the headline table. |
 | `pages/balance-projection-page-compare-drivers.tsx`, `lib/account-bucket.ts` | The Drivers table, its note and horizon sentence, the identical-results sentence, and the account-type names. |
 | `lib/view-deflator.ts` | The remembered Compare choice, one comparison scenario per viewed scenario, kept in your browser beside the display mode. |
-| `lib/success-delta-noise.ts` | The noise check on a difference between two success probabilities. |
+| `lib/success-delta-noise.ts` | The noise check on a difference between two success probabilities, and what the Plan success row prints for it. |
+| `monte-carlo/use-compare-stress.ts`, `pages/balance-projection-page-compare-stress.tsx` | The Plan success row: your scenario's result from the page, the other scenario's from the saved result or one background run, and the row's rendering. |
 | `pages/balance-projection-compare-data.ts`, `lib/signed-difference.ts`, `lib/scenario-change-list.ts`, `lib/structural-equality.ts` | The figures two scenarios are compared on, how a difference reads, the list of settings that changed, and the identical-results check. |
 | `db/monte-carlo-cache.ts` | Saved results, checked against the engine version, and a read that leaves them untouched. |
 | `assistant/tools/stress-test.ts` | The AI assistant's stress test: the saved result if there is one, otherwise the page's 10,000 paths and seed, run in the open tab and saved nowhere. |

@@ -318,7 +318,9 @@ describe('BalanceProjectionPage — Compare tab', () => {
 
       act(() => queued.splice(0).forEach((run) => run()));
       await within(panel).findByRole('row', { name: /Ending balance/ }, WAIT);
-      expect(within(panel).queryByRole('status')).not.toBeInTheDocument();
+      // The Plan success row owns a status region of its own once the tab is
+      // ready; the projecting message is the one that must be gone.
+      expect(within(panel).queryByText(/^Projecting/)).not.toBeInTheDocument();
     });
   });
 

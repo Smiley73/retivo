@@ -8,6 +8,7 @@
  */
 import { act } from '@testing-library/react';
 import { ENGINE_VERSION, type MonteCarloInput, type MonteCarloSummary } from '../lib/monte-carlo';
+import type { MinimalMcWorker } from './mc-worker-pool';
 
 const HORIZON = 8;
 
@@ -99,4 +100,58 @@ export function neverRepliesWorkerModule(sink: { workers: Array<{ terminated: bo
     }
   }
   return { default: FakeMcWorker };
+}
+
+/**
+ * A fake `MinimalMcWorker` whose reply timing the test controls, for the
+ * `createMcPool` consumers (`use-scenario-bulk-recompute`, `use-compare-stress`):
+ * `posted` records every `{ kind: 'run' }` input, and `resolveResult` /
+ * `emitError` / `emitProgress` deliver the reply by hand.
+ */
+export interface ControlledWorker extends MinimalMcWorker {
+  resolveResult(summary: MonteCarloSummary): void;
+  emitError(message: string): void;
+  emitProgress(done: number, total: number): void;
+  readonly posted: ReadonlyArray<MonteCarloInput>;
+  readonly terminated: boolean;
+}
+
+export function controlledWorker(): ControlledWorker {
+  const listeners = new Set<(ev: MessageEvent) => void>();
+  const posted: MonteCarloInput[] = [];
+  let terminated = false;
+  const emit = (data: unknown): void => {
+    const ev = { data } as MessageEvent;
+    listeners.forEach((fn) => fn(ev));
+  };
+  return {
+    posted,
+    get terminated() {
+      return terminated;
+    },
+    addEventListener(t, fn) {
+      // Only the pool's `message` listener drives this fake; the `error`
+      // listener is never emitted here, so keep it out of the set.
+      if (t !== 'error') listeners.add(fn);
+    },
+    removeEventListener(t, fn) {
+      if (t !== 'error') listeners.delete(fn);
+    },
+    postMessage(msg: unknown) {
+      const m = msg as { kind: 'run'; input: MonteCarloInput };
+      posted.push(m.input);
+    },
+    terminate() {
+      terminated = true;
+    },
+    resolveResult(summary: MonteCarloSummary) {
+      emit({ kind: 'result', summary });
+    },
+    emitError(message: string) {
+      emit({ kind: 'error', message });
+    },
+    emitProgress(done: number, total: number) {
+      emit({ kind: 'progress', done, total });
+    },
+  };
 }

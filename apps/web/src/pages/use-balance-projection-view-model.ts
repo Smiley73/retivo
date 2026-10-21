@@ -477,6 +477,12 @@ export function useBalanceProjectionViewModel(
       todayYear: nowYear,
       todayMonthIndex: nowMonthIndex,
       method: 'planned',
+      // The same flag-derived medical set the page's deterministic run uses;
+      // without it the stress test falls back to the legacy `cat-medical`
+      // default and grows a custom medical category at general inflation.
+      ...(data.medicalCategoryIds
+        ? { medicalCategoryIds: data.medicalCategoryIds }
+        : {}),
     };
   }, [
     data,
