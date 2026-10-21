@@ -45,10 +45,13 @@ interface PovertyLineLimitArgs {
   /** ACA MAGI above the poverty line at the draw the credit was priced on
    *  (`TaxYearResult.acaMagiAboveFplCents`). */
   readonly headroomCents: number;
-  /** The part of that draw that is ACA MAGI: pre-tax and taxable-account
-   *  withdrawals, plus the taxable Roth earnings. Qualified Roth and cash-like
-   *  dollars are not. */
-  readonly magiBearingDrawCents: number;
+  /** The part of that draw taken from accounts whose withdrawals are income:
+   *  pre-tax and taxable-account withdrawals, plus the taxable Roth earnings.
+   *  Qualified Roth and cash-like dollars are not (see {@link drawIncomeCents}). */
+  readonly incomeDrawCents: number;
+  /** How much ACA MAGI that income draw carries: all of a pre-tax withdrawal or of
+   *  Roth earnings, but only the gain in a taxable-account one. */
+  readonly magiOfDrawCents: number;
 }
 
 /**
@@ -58,17 +61,41 @@ interface PovertyLineLimitArgs {
  * Above the line the credit only grows as MAGI falls, so a line priced at the
  * higher draw never overstates the credit at the lower one.
  *
- * Lowering the draw by L lowers ACA MAGI by at most `min(L, magiBearingDraw)`:
- * ACA MAGI adds back all Social Security, so a dollar of draw counts once, and a
- * dollar that is not income (a qualified Roth or cash-like withdrawal) does not
- * count at all. So the draw can fall by the whole MAGI-bearing amount when the
- * headroom covers it, and by the headroom otherwise. Both engines price the
- * credit on the draw before the line and apply this one limit to it.
+ * Lowering the draw by L lowers ACA MAGI by at most `L × magiOfDraw / incomeDraw`:
+ * ACA MAGI adds back all Social Security, so a dollar of draw counts once, a dollar
+ * that is not income (a qualified Roth or cash-like withdrawal) does not count at
+ * all, and a taxable-account dollar counts as its gain. So the draw can fall by the
+ * whole income draw when the headroom covers its MAGI, and by the headroom scaled
+ * back by that MAGI per dollar otherwise. Both engines price the credit on the draw
+ * before the line and apply this one limit to it.
  */
 export function povertyLineLimitCents(args: PovertyLineLimitArgs): number {
-  return args.magiBearingDrawCents <= args.headroomCents
-    ? Number.POSITIVE_INFINITY
-    : Math.max(0, args.headroomCents);
+  if (args.magiOfDrawCents <= args.headroomCents) return Number.POSITIVE_INFINITY;
+  return Math.floor((Math.max(0, args.headroomCents) * args.incomeDrawCents) / args.magiOfDrawCents);
+}
+
+/** Dollars of one year's draw, by what they do to ACA MAGI. */
+interface DrawIncomeArgs {
+  readonly preTaxDollars: number;
+  readonly taxableAccountDollars: number;
+  /** The taxable earnings of a nonqualified Roth draw. */
+  readonly rothEarningsDollars: number;
+  /** The share of a taxable-account withdrawal that is basis, which is not income. */
+  readonly costBasisFraction: number;
+}
+
+/** The income draw and the ACA MAGI it carries, in integer cents, for
+ *  {@link povertyLineLimitCents}. */
+export function drawIncomeCents(
+  args: DrawIncomeArgs,
+): Pick<PovertyLineLimitArgs, 'incomeDrawCents' | 'magiOfDrawCents'> {
+  const toCents = (dollars: number): number => Math.round(dollars * 100);
+  const wholeCents = toCents(args.preTaxDollars + args.rothEarningsDollars);
+  const taxableCents = toCents(args.taxableAccountDollars);
+  return {
+    incomeDrawCents: wholeCents + taxableCents,
+    magiOfDrawCents: wholeCents + Math.round(taxableCents * (1 - args.costBasisFraction)),
+  };
 }
 
 /**

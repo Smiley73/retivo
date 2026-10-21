@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   creditAppliedToPremiumsCents,
+  drawIncomeCents,
   foldYearDrawIntoExpense,
   povertyLineLimitCents,
   sumPositiveNeed,
@@ -70,22 +71,55 @@ describe('creditAppliedToPremiumsCents, poverty-line limit', () => {
 });
 
 describe('povertyLineLimitCents', () => {
+  // `incomeDrawCents` is the draw from accounts whose withdrawals are income and
+  // `magiOfDrawCents` the ACA MAGI it carries (all of a pre-tax dollar).
+  const income = (cents: number, magiCents = cents) => ({ incomeDrawCents: cents, magiOfDrawCents: magiCents });
+
   it('is the headroom when the draw is MAGI the lowered draw would shed', () => {
     // $22,000 of pre-tax draw at 140.6% of $15,650: $6,350 above the line.
-    expect(povertyLineLimitCents({ headroomCents: 635_000, magiBearingDrawCents: 2_200_000 })).toBe(635_000);
+    expect(povertyLineLimitCents({ headroomCents: 635_000, ...income(2_200_000) })).toBe(635_000);
   });
 
   it('is no limit when the draw sheds no more MAGI than the headroom', () => {
     // A $15,650 pension on the line, drawing qualified Roth only: nothing to shed.
-    expect(povertyLineLimitCents({ headroomCents: 0, magiBearingDrawCents: 0 })).toBe(Number.POSITIVE_INFINITY);
+    expect(povertyLineLimitCents({ headroomCents: 0, ...income(0) })).toBe(Number.POSITIVE_INFINITY);
     // $3,000 of pre-tax inside $6,350 of headroom: the line can take it all.
-    expect(povertyLineLimitCents({ headroomCents: 635_000, magiBearingDrawCents: 300_000 })).toBe(
+    expect(povertyLineLimitCents({ headroomCents: 635_000, ...income(300_000) })).toBe(
       Number.POSITIVE_INFINITY,
     );
   });
 
   it('is zero on the line with MAGI-bearing draws', () => {
-    expect(povertyLineLimitCents({ headroomCents: 0, magiBearingDrawCents: 1 })).toBe(0);
+    expect(povertyLineLimitCents({ headroomCents: 0, ...income(1) })).toBe(0);
+  });
+
+  it('lets a draw that is half gain fall by twice the headroom', () => {
+    // $8,000 from a brokerage account at half basis: $4,000 of MAGI against $2,350 of
+    // headroom, so the draw can fall by $4,700 (each dollar sheds 50 cents of MAGI).
+    expect(povertyLineLimitCents({ headroomCents: 235_000, ...income(800_000, 400_000) })).toBe(470_000);
+    // And by all of it when the gain fits inside the headroom.
+    expect(povertyLineLimitCents({ headroomCents: 400_000, ...income(800_000, 400_000) })).toBe(
+      Number.POSITIVE_INFINITY,
+    );
+  });
+});
+
+describe('drawIncomeCents', () => {
+  it('counts pre-tax and Roth earnings whole, and only the gain of a taxable-account draw', () => {
+    expect(
+      drawIncomeCents({
+        preTaxDollars: 1_000,
+        taxableAccountDollars: 2_000,
+        rothEarningsDollars: 500,
+        costBasisFraction: 0.25,
+      }),
+    ).toEqual({ incomeDrawCents: 350_000, magiOfDrawCents: 300_000 });
+  });
+
+  it('carries no MAGI for a draw with no income dollars', () => {
+    expect(
+      drawIncomeCents({ preTaxDollars: 0, taxableAccountDollars: 0, rothEarningsDollars: 0, costBasisFraction: 0.5 }),
+    ).toEqual({ incomeDrawCents: 0, magiOfDrawCents: 0 });
   });
 });
 

@@ -1472,19 +1472,19 @@ export function buildTaxCashflowHook(args: {
       classifyForTarget: classify,
       medicalExpenseCents,
     });
-    // The funded draw `solveTaxCashflow` settles on is
+    // The draw `solveTaxCashflow` funds is
     // `ordinaryNetNeed + (totalTaxCashflowNeed + irmaaWithheldFromSs −
     // acaCreditAppliedToPremiums)` — the withheld IRMAA cents are folded into
     // the trial target so the portfolio covers the SS-check shortfall. The
-    // committed classification must therefore classify that SAME full funded
-    // draw; omitting the withheld cents under-states the Roth / penalty basis in
-    // withheld-IRMAA years.
+    // committed classification classifies that draw BEFORE the credit lowers it:
+    // the credit is priced on that draw, and the Roth earnings and penalties it
+    // fixes are income and tax of the same draw, the way the stress test takes
+    // them. Taking them from the lowered draw would price a line on a MAGI the
+    // earnings no longer have and overstate what the credit earns. Omitting the
+    // withheld cents under-states the Roth / penalty basis in withheld-IRMAA years.
     const committedTarget =
       ordinaryNetNeedDollars +
-      (pass1.totalTaxCashflowNeedCents +
-        pass1.irmaaWithheldFromSsCents -
-        pass1.acaCreditAppliedToPremiumsCents) /
-        100;
+      (pass1.totalTaxCashflowNeedCents + pass1.irmaaWithheldFromSsCents) / 100;
     const committedSplit = classify(committedTarget);
     const { penaltyAccounts, rothEarningsExcessDollars } = buildSolverPenaltyAccountsForYear({
       ctx,

@@ -176,6 +176,10 @@ export interface FilingPlanTaxYearInput extends TaxYearInput {
   readonly irmaaLookbackMfsLivedWithSpouse?: boolean;
 }
 
+/** The share of a taxable-account withdrawal that is basis, not income, when the
+ *  caller states none. */
+export const DEFAULT_ASSUMED_COST_BASIS_FRACTION = 0.5;
+
 /**
  * Apply all five tax engines to a single projection year.
  *
@@ -223,7 +227,7 @@ export function applyTaxYear(
     taxExemptInterestDollars,
     cashInterestDollars = 0,
     qcdIncomeExclusionDollars = 0,
-    assumedCostBasisFraction = 0.5,
+    assumedCostBasisFraction = DEFAULT_ASSUMED_COST_BASIS_FRACTION,
     brokerageLikeStartBalanceDollars = 0,
     householdSize,
     members,
