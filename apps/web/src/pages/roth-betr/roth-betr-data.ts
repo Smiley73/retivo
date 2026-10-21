@@ -84,6 +84,9 @@ export interface RothBETRPageData {
   /** Roth IRA accounts (Apply target). Empty → Apply is blocked / errored. */
   readonly rothIraAccounts: readonly AccountOption[];
   readonly currentCalendarYear: number;
+  /** The month index (0-11) the projection was run at, so a second projection
+   *  of the same household (the suggestion search) can be dated identically. */
+  readonly todayMonthIndex: number;
   readonly retirementAge: number;
   /** The latest calendar year a penalty-carrying convertible-source owner crosses
    *  59½, plus that owner's first name — drives the from-IRA before/after-59½
@@ -455,6 +458,7 @@ export function buildRothBETRPageData(input: RothBETRDataInput): RothBETRPageDat
     sourceAccounts,
     rothIraAccounts,
     currentCalendarYear,
+    todayMonthIndex: input.todayMonthIndex,
     retirementAge: Math.max(0, retirementYear - ownerBirthYear),
     iraConversionOwnerBoundary: deriveIraConversionOwnerBoundary(
       sourceAccounts,

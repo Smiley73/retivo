@@ -39,7 +39,8 @@ export interface RothSuggestionProjectionInput {
 /** Whole-year death age per household member, an explicit assumption. */
 export interface RothSuggestionDeathAges {
   readonly primary: number;
-  /** Required when the household has a secondary member. */
+  /** Left unset when the scenario stores no partner age: the engine then reads
+   *  the gap as the page's own projection does, so the reference row matches it. */
   readonly secondary?: number;
 }
 
