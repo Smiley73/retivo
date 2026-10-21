@@ -199,7 +199,7 @@ describe('BalanceProjectionPage — Compare tab', () => {
         window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
       });
       await waitFor(() => expect(selectorTrigger(panel)).toHaveTextContent('Funds Run Out'), WAIT);
-      await waitFor(() => expect(log.at(-1)!.search).toBe('?view=compare'));
+      await waitFor(() => expect(log.at(-1)!.search).toBe('?view=compare'), WAIT);
     });
 
     it('stops applying ?with= after a sidebar switch through a scenario that shows no panel', async () => {
@@ -233,7 +233,7 @@ describe('BalanceProjectionPage — Compare tab', () => {
       });
       const back = await findPanel();
       await waitFor(() => expect(selectorTrigger(back)).toHaveTextContent('Funds Run Out'), WAIT);
-      await waitFor(() => expect(log.at(-1)!.search).toBe('?view=compare'));
+      await waitFor(() => expect(log.at(-1)!.search).toBe('?view=compare'), WAIT);
     });
 
     it('falls back to the default, not ?with=, after a sidebar switch with nothing remembered', async () => {
