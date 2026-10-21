@@ -32,9 +32,20 @@ const ACA_TIERS = {
 } as const;
 
 const NOT_APPLIED = 'Not applied';
+const NO_MARKETPLACE = 'No Marketplace coverage';
 
 function line(value: number | null): string {
   return value === null ? NOT_APPLIED : formatCurrency(value);
+}
+
+/** The premium credit, with the income tier that set it only in a year the
+ *  household had Marketplace coverage: the engine's tier reads "below the
+ *  poverty line" by default in every other year. A year whose coverage is not
+ *  worked out (past the window) shows the credit alone. */
+function creditText(row: YearDetailRow): string {
+  const amount = formatCurrency(row.acaCreditDollars);
+  if (row.marketplaceMonths === null) return amount;
+  return `${amount} (${row.marketplaceMonths > 0 ? ACA_TIERS[row.acaTier] : NO_MARKETPLACE})`;
 }
 
 /** What the engine did with spending withdrawals in the year, in words. */
@@ -113,7 +124,7 @@ export function toYearDetailView(row: YearDetailRow): YearDetailView {
     taxableSs: `${formatCurrency(row.taxableSsDollars)} (${SS_TIERS[row.ssTier]})`,
     surchargePaid: formatCurrency(row.irmaaPaidDollars),
     surchargeSet: row.irmaaSetDollars === null ? '—' : formatCurrency(row.irmaaSetDollars),
-    credit: `${formatCurrency(row.acaCreditDollars)} (${ACA_TIERS[row.acaTier]})`,
+    credit: creditText(row),
     preTaxEnd: formatCurrency(row.preTaxEndDollars),
     crossing: crossingView(row),
   };

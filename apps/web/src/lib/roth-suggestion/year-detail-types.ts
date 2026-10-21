@@ -70,6 +70,10 @@ export interface YearDetailRow {
   readonly irmaaPaidDollars: number;
   readonly irmaaSetDollars: number | null;
   readonly acaCreditDollars: number;
+  /** Months of Marketplace coverage in the year; the engine's tier below means
+   *  something only when this is above 0. Null where the year's facts are not
+   *  worked out (outside the window). */
+  readonly marketplaceMonths: number | null;
   readonly acaTier: NonNullable<DrawdownYear['acaPtcTier']>;
   /** Pre-tax and mixed account money at year end. */
   readonly preTaxEndDollars: number;

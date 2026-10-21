@@ -526,8 +526,8 @@ $144,455.21 of income before conversion, no extra Social Security (benefits are
 already 85% taxable) and $2.72 kept under. The row then says what the next dollars
 over the cliff would have cost: the plan without the guard would have converted
 another $25,836 (the room up to the bracket line), which would have added
-$4,027.45 of Medicare surcharge two years later, priced for the household members
-on Medicare then and the year's own filing status. It also shows the premium
+$4,027.45 of Medicare surcharge two years later, priced for the months each
+household member is on Medicare then and the year's own filing status. It also shows the premium
 credit that would have been lost, at full value. The projection credits the
 premium credit only up to that year's federal tax plus the Medicare surcharge it
 offsets, so the plan that does cross shows a smaller loss on its own row. Here the

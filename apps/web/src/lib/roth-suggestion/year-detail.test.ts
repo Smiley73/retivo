@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountPayload } from '../../db/types';
 import type { DrawdownYear } from '../drawdown-engine-types';
+import type { FilingStatus } from '../federal-tax';
 import { computeAllInConversionCost } from '../conversion-cost-calculator';
 import { DEFAULT_TAX_CALIBRATION_BUNDLE } from '../tax-integration-helpers';
 import { toyAccount } from './test-fixtures';
@@ -70,11 +71,20 @@ function limits(binding: 'bracket' | 'irmaa'): YearLimits {
   };
 }
 
-function yearInput(medicareBeneficiaries: 0 | 1 | 2): DetailYearInput {
+function yearInput(
+  medicareBeneficiaries: 0 | 1 | 2,
+  months = 12,
+  social: { grossSsDollars: number; filingStatus: FilingStatus } = { grossSsDollars: 0, filingStatus: 'MFJ' },
+): DetailYearInput {
   return {
-    facts: { year: YEAR, filingStatus: 'MFJ', householdSize: 2, age65Count: 2, members: [] },
-    lookback: { year: YEAR + 2, withinHorizon: true, medicareBeneficiaries },
-    grossSsDollars: 0,
+    facts: { year: YEAR, filingStatus: social.filingStatus, householdSize: 2, age65Count: 2, members: [] },
+    lookback: {
+      year: YEAR + 2,
+      withinHorizon: true,
+      medicareBeneficiaries,
+      irmaaBeneficiaries: Array.from({ length: medicareBeneficiaries }, () => ({ partBMonths: months, partDMonths: months })),
+    },
+    grossSsDollars: social.grossSsDollars,
     benchmarkSlcspCents: 2_000_000,
   };
 }
@@ -83,9 +93,12 @@ function detail(args: {
   readonly engineRow: DrawdownYear;
   readonly limitSet?: YearLimits | null;
   readonly medicare?: 0 | 1 | 2;
+  /** Part B and Part D months each beneficiary is enrolled in year Y+2. */
+  readonly medicareMonths?: number;
+  readonly social?: { grossSsDollars: number; filingStatus: FilingStatus };
   readonly window?: { startYear: number; endYear: number };
 }) {
-  const { engineRow, limitSet = limits('bracket'), medicare = 2, window = { startYear: YEAR, endYear: YEAR } } = args;
+  const { engineRow, limitSet = limits('bracket'), medicare = 2, medicareMonths = 12, social, window = { startYear: YEAR, endYear: YEAR } } = args;
   const records: YearRecord[] = buildYearRecords({
     years: [engineRow],
     window,
@@ -95,7 +108,7 @@ function detail(args: {
   return buildYearDetail({
     records,
     rows: [engineRow],
-    years: new Map([[YEAR, yearInput(medicare)]]),
+    years: new Map([[YEAR, yearInput(medicare, medicareMonths, social)]]),
     accounts: ACCOUNTS,
     env: ENV,
   });
@@ -192,6 +205,39 @@ describe('the crossing-cost note', () => {
     expect(twoMembers?.medicareSurchargeDollars).toBeGreaterThan(oneMember?.medicareSurchargeDollars ?? Infinity);
   });
 
+  it('prices the surcharge for the months each member is enrolled in the year it is billed', () => {
+    const engineRow = row(CLIFF_YEAR);
+    const full = detail({ engineRow, limitSet: limits('irmaa'), medicareMonths: 12 })[0].crossingNote;
+    const sevenMonths = detail({ engineRow, limitSet: limits('irmaa'), medicareMonths: 7 })[0].crossingNote;
+    const direct = (months: number): number =>
+      computeAllInConversionCost(
+        {
+          year: YEAR,
+          filingStatus: 'MFJ',
+          conversionCents: (BRACKET_TOP - IRMAA_LINE) * 100,
+          taxableIncomeCents: 0,
+          magiCents: CLIFF_YEAR.magiCents,
+          taxableSsCents: 0,
+          grossSsAnnualCents: 0,
+          taxExemptInterestCents: 0,
+          beneficiariesOnMedicareCount: 2,
+          irmaaBeneficiaries: [
+            { partBMonths: months, partDMonths: months },
+            { partBMonths: months, partDMonths: months },
+          ],
+          householdSize: 2,
+          benchmarkAnnualSlcspCents: 2_000_000,
+          acaCoverageMonths: 0,
+          inflationRatePct: 2,
+        },
+        ENV.bundle,
+      ).irmaaDeltaCents / 100;
+    expect(full?.medicareSurchargeDollars).toBeGreaterThan(0);
+    expect(sevenMonths?.medicareSurchargeDollars).toBeCloseTo(direct(7), 2);
+    // Seven of twelve months, not a whole year of surcharge.
+    expect(sevenMonths?.medicareSurchargeDollars).toBeCloseTo((full?.medicareSurchargeDollars ?? NaN) * (7 / 12), 0);
+  });
+
   it('probes at least $1 when the cliff sits on the bracket line', () => {
     const tied: YearLimits = { ...limits('irmaa'), limitDollars: BRACKET_TOP };
     const [only] = detail({ engineRow: row(CLIFF_YEAR), limitSet: tied });
@@ -206,5 +252,38 @@ describe('the income on the limit line', () => {
     expect(only.incomeAfterDollars).toBe(200_000);
     expect(only.extraTaxableSsDollars).toBe(0);
     expect(only.filingStatus).toBe('MFJ');
+  });
+
+  // §86 worked by hand: provisional income = other income + half the benefit.
+  // $30,000 of benefits, $20,000 of other income, then a $40,000 conversion.
+  //   Before: $20,000 + $15,000 = $35,000.
+  //   After:  $60,000 + $15,000 = $75,000, past both tiers, so 85% of the benefit
+  //           is taxable: $25,500.
+  const AFTER = { magiCents: 8_550_000, rothConvertedCents: 4_000_000, taxableSsCents: 2_550_000 };
+  const GROSS_SS = 30_000;
+
+  it('takes the benefit taxed before the conversion from the joint thresholds on a joint return', () => {
+    // Joint: 50% of the $3,000 above $32,000 is $1,500 taxable before.
+    const [only] = detail({ engineRow: row(AFTER), social: { grossSsDollars: GROSS_SS, filingStatus: 'MFJ' } });
+    expect(only.incomeBeforeDollars).toBe(21_500);
+    expect(only.incomeAfterDollars).toBe(85_500);
+    expect(only.extraTaxableSsDollars).toBe(24_000);
+  });
+
+  it('takes the benefit taxed before the conversion from the single thresholds on a single return', () => {
+    // Single: 85% of the $1,000 above $34,000 plus the $4,500 from the 50% tier is $5,350.
+    const [only] = detail({ engineRow: row(AFTER), social: { grossSsDollars: GROSS_SS, filingStatus: 'Single' } });
+    expect(only.incomeBeforeDollars).toBe(25_350);
+    expect(only.extraTaxableSsDollars).toBe(20_150);
+  });
+
+  it('taxes none of the benefit before a conversion that starts under the base amount', () => {
+    // Single, $10,000 of other income: provisional income $25,000 is at the base amount.
+    const [only] = detail({
+      engineRow: row({ magiCents: 6_235_000, rothConvertedCents: 3_000_000, taxableSsCents: 2_235_000 }),
+      social: { grossSsDollars: GROSS_SS, filingStatus: 'Single' },
+    });
+    expect(only.incomeBeforeDollars).toBe(10_000);
+    expect(only.extraTaxableSsDollars).toBe(22_350);
   });
 });

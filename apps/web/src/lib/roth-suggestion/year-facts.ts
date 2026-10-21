@@ -7,11 +7,12 @@ import type { PipelineContext } from '../balance-projection-runner-types';
 import { buildMemberInputs, resolveHouseholdDeathYears } from '../balance-projection-runner-tax-helpers';
 import { age65PlusMemberIdsForYear, resolveTaxUnitsForYear } from '../balance-projection-runner-tax';
 import type { FilingStatus } from '../federal-tax';
+import type { IrmaaBeneficiaryEnrollment } from '../irmaa';
 import {
   defaultHouseholdSlcspByAge,
   householdMarketplaceCoverageMonths,
+  irmaaBeneficiaryEnrollments,
   overrideBenchmarkCentsForCoverageMonths,
-  resolveCoverageMonths,
   storedAcaBenchmarkOverrides,
   type TaxMemberInput,
 } from '../tax-integration-helpers';
@@ -32,6 +33,9 @@ export interface LookbackFacts {
   readonly withinHorizon: boolean;
   /** Members with a Medicare month in year Y+2, the count IRMAA is billed for. */
   readonly medicareBeneficiaries: 0 | 1 | 2;
+  /** Each of them with the Part B and Part D months enrolled in year Y+2, the
+   *  months the surcharge for that year is prorated by. */
+  readonly irmaaBeneficiaries: readonly IrmaaBeneficiaryEnrollment[];
 }
 
 export type YearFactsResult =
@@ -84,18 +88,16 @@ export function resolveYearFacts(ctx: PipelineContext, year: number): YearFactsR
 export function resolveLookbackFacts(ctx: PipelineContext, year: number): LookbackFacts {
   const lookbackYear = year + 2;
   if (lookbackYear > ctx.horizonYear) {
-    return { year: lookbackYear, withinHorizon: false, medicareBeneficiaries: 0 };
+    return { year: lookbackYear, withinHorizon: false, medicareBeneficiaries: 0, irmaaBeneficiaries: [] };
   }
   const { primaryAlive, secondaryAlive } = aliveFlags(ctx, lookbackYear);
   const members = buildMemberInputs(ctx, lookbackYear, primaryAlive, secondaryAlive);
-  const onMedicare = members.filter((m) => {
-    const { partBMonths, partDMonths } = resolveCoverageMonths(m);
-    return partBMonths > 0 || partDMonths > 0;
-  });
+  const irmaaBeneficiaries = irmaaBeneficiaryEnrollments(members);
   return {
     year: lookbackYear,
     withinHorizon: true,
-    medicareBeneficiaries: Math.min(2, onMedicare.length) as 0 | 1 | 2,
+    medicareBeneficiaries: irmaaBeneficiaries.length as 0 | 1 | 2,
+    irmaaBeneficiaries,
   };
 }
 

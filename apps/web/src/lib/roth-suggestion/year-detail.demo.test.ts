@@ -15,7 +15,7 @@ import {
 import { searchRothSuggestions } from './search';
 import type { RothCandidate, RothSuggestionOk, RothSuggestionRequest } from './types';
 import type { YearDetailRow } from './year-detail-types';
-import { zeroPointByYear, type ZeroPoint } from './zero-point-fixture';
+import { gapsFromZeroPoint, zeroPointByYear, type ZeroPoint } from './zero-point-fixture';
 
 /** The search keeps this many dollars under a limit (its margin plus the $1
  *  step), so the hand check closes to within it and the column names it. */
@@ -70,17 +70,27 @@ describe('year detail on the demo household', () => {
       }
     }, 120_000);
 
-    it('is never below what the engine reports for the year with no conversion', () => {
+    it('differs from what the engine reports for the year with no conversion only by income the conversion tax draw added', () => {
       expect(pairs.length).toBeGreaterThan(50);
       for (const { row, zero } of pairs) {
-        expect((row.incomeBeforeDollars ?? NaN) - zero.incomeDollars).toBeGreaterThan(-0.005);
+        const { otherDollars, socialSecurityDollars } = gapsFromZeroPoint(row, zero);
+        // The other income before can only be higher, by the income of the extra withdrawals
+        // that paid the conversion tax, and that is less than the tax.
+        expect(otherDollars).toBeGreaterThan(-0.005);
+        expect(otherDollars).toBeLessThanOrEqual(row.incomeTaxDollars);
+        // Social Security taxed before differs by what that income pulled in: at most 85 cents
+        // of each dollar, and none where the zero point is already at the cap. A wrong
+        // filing status or benefit can fall outside that.
+        expect(socialSecurityDollars).toBeGreaterThan(-0.005);
+        expect(socialSecurityDollars).toBeLessThanOrEqual(0.85 * otherDollars + 0.005);
       }
     });
 
     it('equals it to the cent wherever paying the conversion tax added no income', () => {
-      const exact = pairs.filter(({ row, zero }) => Math.abs((row.incomeBeforeDollars ?? NaN) - zero.incomeDollars) < 0.005);
-      const converted = exact.filter(({ row }) => row.amountDollars > 0);
-      expect(converted.length).toBeGreaterThan(5);
+      const allConverted = pairs.filter(({ row }) => row.amountDollars > 0);
+      const converted = allConverted.filter(({ row, zero }) => Math.abs((row.incomeBeforeDollars ?? NaN) - zero.incomeDollars) < 0.005);
+      // A quarter of the converted years or more are exact; the rest are the explained gap above.
+      expect(converted.length).toBeGreaterThanOrEqual(allConverted.length / 4);
       for (const { row, zero } of converted) {
         // The Social Security taxable before is the engine's, and the extra is the rest.
         expect(row.taxableSsDollars - (row.extraTaxableSsDollars ?? NaN)).toBeCloseTo(zero.taxableSsDollars, 2);
@@ -101,14 +111,11 @@ describe('year detail on the demo household', () => {
         expect(row.taxableSsDollars - (row.extraTaxableSsDollars ?? NaN)).toBeCloseTo(zero.taxableSsDollars, 2);
       }
     });
-
-    it('differs only by the income the conversion tax draw added, never by more than the tax', () => {
-      for (const { row, zero } of pairs) {
-        expect((row.incomeBeforeDollars ?? NaN) - zero.incomeDollars).toBeLessThanOrEqual(row.incomeTaxDollars);
-      }
-    });
   });
 
+  // The sum closes by construction once the margin is named, so this checks the
+  // margin is small and the three lines and kinds appear; the derived figures are
+  // checked against the engine above.
   it('closes the hand check to the dollar in every limit-stopped year of every plan', () => {
     let checked = 0;
     const lines = new Set<string>();

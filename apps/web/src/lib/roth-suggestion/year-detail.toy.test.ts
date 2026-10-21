@@ -8,7 +8,7 @@ import { searchRothSuggestions } from './search';
 import { TOY_ROTH_ID, toyProjection, type ToyOptions } from './test-fixtures';
 import type { RothCandidate, RothSuggestionOk, RothSuggestionRequest } from './types';
 import type { YearDetailRow } from './year-detail-types';
-import { zeroPointByYear } from './zero-point-fixture';
+import { gapsFromZeroPoint, zeroPointByYear, type ZeroPoint } from './zero-point-fixture';
 
 const TIMEOUT = { timeout: 60_000 };
 /** Born 1966, the secondary dies at 70: the death year is 2036, inside 2028-2040. */
@@ -30,6 +30,19 @@ function limitStopped(candidates: readonly RothCandidate[]): { id: string; row: 
       .filter((r) => r.limitKind === 'bracket' || r.limitKind === 'irmaa' || r.limitKind === 'aca')
       .map((row) => ({ id: c.id, row })),
   );
+}
+
+/** The derived figures against the engine's own zero point: other income before
+ *  can only be higher, by the income of the withdrawals that paid the
+ *  conversion tax (less than the tax), and the Social Security taxed before by at
+ *  most 85 cents of each such dollar. */
+function expectNearZeroPoint(row: YearDetailRow, zero: ZeroPoint | undefined): void {
+  if (zero === undefined) throw new Error(`${row.year} has no zero point`);
+  const { otherDollars, socialSecurityDollars } = gapsFromZeroPoint(row, zero);
+  expect(otherDollars).toBeGreaterThan(-0.005);
+  expect(otherDollars).toBeLessThanOrEqual(row.incomeTaxDollars);
+  expect(socialSecurityDollars).toBeGreaterThan(-0.005);
+  expect(socialSecurityDollars).toBeLessThanOrEqual(0.85 * otherDollars + 0.005);
 }
 
 function expectHandCheck(row: YearDetailRow): void {
@@ -55,6 +68,13 @@ describe('a couple whose spouse dies inside the window', () => {
     const stopped = limitStopped(plans).filter(({ row }) => row.year >= SURVIVOR_FIRST_YEAR);
     expect(stopped.length).toBeGreaterThan(0);
     for (const { row } of stopped) expectHandCheck(row);
+    // The Single years' Social Security comes from the Single thresholds.
+    for (const plan of plans) {
+      const zero = await zeroPointByYear(req, plan.ladder);
+      for (const row of plan.yearDetail.filter((r) => r.year >= SURVIVOR_FIRST_YEAR && r.inWindow)) {
+        expectNearZeroPoint(row, zero.get(row.year));
+      }
+    }
   });
 
   it('reads the income before a Single-year conversion off the Single Social Security thresholds', TIMEOUT, async () => {
@@ -65,21 +85,28 @@ describe('a couple whose spouse dies inside the window', () => {
     expect(survivorYears.length).toBeGreaterThan(0);
     for (const row of survivorYears) {
       const engine = zero.get(row.year);
-      // Never below the engine's own figure; equal where the conversion tax added no income.
-      expect((row.incomeBeforeDollars ?? NaN) - (engine?.incomeDollars ?? NaN)).toBeGreaterThan(-0.005);
+      expectNearZeroPoint(row, engine);
+      // Equal to the cent where the conversion tax added no income.
+      if (engine !== undefined && Math.abs((row.incomeBeforeDollars ?? NaN) - engine.incomeDollars) < 0.005) {
+        expect(row.taxableSsDollars - (row.extraTaxableSsDollars ?? NaN)).toBeCloseTo(engine.taxableSsDollars, 2);
+      }
     }
   });
 });
 
 describe('a couple before Medicare, on the Marketplace', () => {
   it('closes the hand check on the premium credit line, with the non-taxable Social Security taken off it', TIMEOUT, async () => {
-    const result = await search(request({ iraBalance: 3_000_000 }, { primary: 90, secondary: 90 }));
+    const req = request({ iraBalance: 3_000_000 }, { primary: 90, secondary: 90 });
+    const result = await search(req);
     const acaYears = result.candidates
       .filter((c) => c.guarded === true)
       .flatMap((c) => c.yearDetail.filter((r) => r.limitKind === 'aca').map((row) => ({ c, row })));
     expect(acaYears.length).toBeGreaterThan(0);
+    const zeroByPlan = new Map<string, Map<number, ZeroPoint>>();
     for (const { c, row } of acaYears) {
       expectHandCheck(row);
+      if (!zeroByPlan.has(c.id)) zeroByPlan.set(c.id, await zeroPointByYear(req, c.ladder));
+      expectNearZeroPoint(row, zeroByPlan.get(c.id)?.get(row.year));
       const aca = c.years.find((y) => y.year === row.year)?.limits?.aca;
       expect(aca?.applies).toBe(true);
       expect(row.lines?.acaDollars).toBe(aca?.applies === true ? aca.valueDollars : NaN);

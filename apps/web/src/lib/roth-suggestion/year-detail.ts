@@ -134,7 +134,8 @@ function limitKindOf(record: YearRecord, preTaxEndDollars: number): YearLimitKin
 
 /** What converting the room the unguarded sibling would have taken would have
  *  cost: the bracket-top line less the cliff line, in the year's own filing
- *  status, with the Medicare count of year Y+2 and the Marketplace months of Y. */
+ *  status, with the Medicare enrolment months of year Y+2 and the Marketplace
+ *  months of Y. */
 function crossingNote(
   record: YearRecord,
   limits: YearLimits,
@@ -161,6 +162,7 @@ function crossingNote(
       grossSsAnnualCents: cents(input.grossSsDollars),
       taxExemptInterestCents: env.taxExemptInterestCents,
       beneficiariesOnMedicareCount: input.lookback.medicareBeneficiaries,
+      irmaaBeneficiaries: input.lookback.irmaaBeneficiaries,
       householdSize: input.facts.householdSize,
       benchmarkAnnualSlcspCents: input.benchmarkSlcspCents,
       ...(env.acaFplRegion !== undefined ? { acaFplRegion: env.acaFplRegion } : {}),
@@ -210,6 +212,7 @@ function detailRow(
     irmaaSetDollars:
       record.lookbackIrmaaSurchargeCents === null ? null : dollars(record.lookbackIrmaaSurchargeCents),
     acaCreditDollars: dollars(record.acaPtcSubsidyCents),
+    marketplaceMonths: input === undefined ? null : householdMarketplaceCoverageMonths(input.facts.members),
     acaTier: record.acaPtcTier,
     preTaxEndDollars,
     crossingNote:

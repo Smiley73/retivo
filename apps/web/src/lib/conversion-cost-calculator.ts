@@ -22,7 +22,7 @@
  */
 
 import { computeSsTaxation } from './ss-taxation';
-import { computeIrmaa } from './irmaa';
+import { computeIrmaa, computeMonthAwareIrmaa, type IrmaaBeneficiaryEnrollment } from './irmaa';
 import { computeAcaPtc, type AcaFplRegion } from './aca-ptc';
 import { federalOrdinaryTaxCents, type FilingStatus } from './federal-tax';
 import {
@@ -72,6 +72,13 @@ export interface AllInConversionCostInput {
   readonly taxExemptInterestCents: number;
   /** Household members enrolled in Medicare — required by `computeIrmaa`. */
   readonly beneficiariesOnMedicareCount: 0 | 1 | 2;
+  /**
+   * Each beneficiary's Part B / Part D enrolment months in year `year + 2`, the
+   * year the surcharge is billed. When present the surcharge is priced
+   * month-aware, as `applyTaxYear` prices it, and replaces the whole-year
+   * count above; absent → every counted beneficiary is billed all 12 months.
+   */
+  readonly irmaaBeneficiaries?: readonly IrmaaBeneficiaryEnrollment[];
   /** `members.length` — required by `computeAcaPtc`. */
   readonly householdSize: number;
   /** User override else `defaultHouseholdSlcspByAge`, integer cents. */
@@ -151,14 +158,14 @@ function irmaaSurchargeAt(
   bundle: TaxCalibrationBundle,
   magiCents: number,
 ): number {
-  // Known limitation: the surcharge at `year` is priced from the `year + 2` MAGI
-  // (the 2-years-prior rule), but `beneficiariesOnMedicareCount` is the flat
-  // scenario-level count — it is NOT re-derived for Medicare enrollees AT
-  // `year + 2`. For a row whose household is not yet (or only partly) Medicare-
-  // enrolled at `year + 2`, this can OVERSTATE the IRMAA delta. `AllInConversion
-  // CostInput` carries no per-beneficiary birth-year / enrollment data, so an
-  // age-accurate count can't be derived here. Accepted as a known limitation.
-  if (input.beneficiariesOnMedicareCount === 0) return 0;
+  // The surcharge at `year` is priced from the `year + 2` MAGI (the 2-years-
+  // prior rule). With `irmaaBeneficiaries` the enrolment months of year
+  // `year + 2` price it, as `applyTaxYear` does. Without them the flat
+  // `beneficiariesOnMedicareCount` bills every beneficiary all 12 months, which
+  // can OVERSTATE the delta for a household only partly enrolled that year.
+  const { irmaaBeneficiaries } = input;
+  if (irmaaBeneficiaries === undefined && input.beneficiariesOnMedicareCount === 0) return 0;
+  if (irmaaBeneficiaries !== undefined && irmaaBeneficiaries.length === 0) return 0;
   // Resolve the SURCHARGE year's table (year + 2) + its scaling. Passing the
   // resolved/clamped effectiveYear as taxYear keeps computeIrmaa's strict lookup
   // from throwing for future rows (the raw year + 2 may not exist in the table).
@@ -167,18 +174,29 @@ function irmaaSurchargeAt(
     input.year + 2,
     input.inflationRatePct,
   );
-  const result = computeIrmaa(
-    {
-      taxYear: effectiveYear,
-      magiTwoYearsPriorCents: roundCents(Math.max(0, magiCents) / thresholdScalingFactor),
-      filingStatus: input.filingStatus,
-      beneficiariesOnMedicareCount: input.beneficiariesOnMedicareCount,
-    },
-    bundle.irmaa,
-  );
+  const magiTwoYearsPriorCents = roundCents(Math.max(0, magiCents) / thresholdScalingFactor);
+  const totalHouseholdAnnualCents =
+    irmaaBeneficiaries === undefined
+      ? computeIrmaa(
+          {
+            taxYear: effectiveYear,
+            magiTwoYearsPriorCents,
+            filingStatus: input.filingStatus,
+            beneficiariesOnMedicareCount: input.beneficiariesOnMedicareCount,
+          },
+          bundle.irmaa,
+        ).totalHouseholdAnnualCents
+      : computeMonthAwareIrmaa(
+          {
+            taxYear: effectiveYear,
+            lookback: { magiCents: magiTwoYearsPriorCents, filingStatus: input.filingStatus },
+            beneficiaries: irmaaBeneficiaries,
+          },
+          bundle.irmaa,
+        ).totalHouseholdAnnualCents;
   // Re-inflate the surcharge dollars to projection-year dollars (the MAGI was
   // deflated above for tier classification only), mirroring applyTaxYear.
-  return Math.round(result.totalHouseholdAnnualCents * thresholdScalingFactor);
+  return Math.round(totalHouseholdAnnualCents * thresholdScalingFactor);
 }
 
 /** ACA PTC subsidy (integer cents) for a given ACA MAGI (full-SS add-back already
