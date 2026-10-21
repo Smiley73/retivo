@@ -303,15 +303,18 @@ runs once, month by month, to that target.
 
 If the settled year includes draws that carry a penalty, such as an early
 withdrawal, a non-medical HSA draw or Roth earnings, the loop runs a second time
-with those penalties included. The penalty amounts are taken from the first
-round's mix of accounts and are not reworked inside the second.
+with those penalties included. The penalty amounts, and the taxable earnings of
+a Roth draw that is not yet qualified, are taken from the first round's mix of
+accounts, as it stood before the credit applied to premiums lowered the draw,
+and are not reworked inside the second.
 
 ### The stress test
 
 The stress test runs no loop. Each path is run once with no tax to estimate each
 year's tax. It is then run again with that tax added to spending, less the
-credit applied to premiums, which is worked out from the same year's tax and so
-can make the added amount negative. A negative amount is spread across the
+credit applied to premiums, which is worked out from the same year's tax (the
+early-withdrawal penalty counts as tax, as in the loop) and so can make the
+added amount negative. A negative amount is spread across the
 months in proportion to each month's spending that the accounts must cover, so
 it lowers the year's withdrawals by all of it. The credit applied to premiums
 shown for the year is the one added in the second pass, the one that lowered the

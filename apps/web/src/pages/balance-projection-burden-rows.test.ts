@@ -10,6 +10,7 @@ import {
   buildRmdRows,
   buildRothConversionsSeries,
   buildQcdRows,
+  hasMedicaidRangeYear,
 } from './balance-projection-burden-rows';
 import type { DrawdownByMethodResult } from './balance-projection-page-data';
 import type { DrawdownYear } from '../lib/drawdown-engine-types';
@@ -697,5 +698,36 @@ describe('buildQcdRows', () => {
       displayMode: 'today',
     });
     expect(row.rmdOffsetDollars).toBeCloseTo(12_345.67 * 0.837, 6);
+  });
+});
+
+describe('hasMedicaidRangeYear', () => {
+  const fires = (fplPercentage?: number): boolean =>
+    hasMedicaidRangeYear([year({ year: 2040, fplPercentage })]);
+
+  it('fires at exactly 138 and stops a hair above', () => {
+    expect(fires(138)).toBe(true);
+    expect(fires(138.01)).toBe(false);
+  });
+
+  it('fires below the poverty line itself', () => {
+    expect(fires(60)).toBe(true);
+    expect(fires(0.5)).toBe(true);
+  });
+
+  it('does not fire for 0 ("not computed") or an absent field', () => {
+    expect(fires(0)).toBe(false);
+    expect(fires(undefined)).toBe(false);
+    expect(hasMedicaidRangeYear([])).toBe(false);
+  });
+
+  it('fires when only one of several years is in range', () => {
+    expect(
+      hasMedicaidRangeYear([
+        year({ year: 2040, fplPercentage: 0 }),
+        year({ year: 2041, fplPercentage: 250 }),
+        year({ year: 2042, fplPercentage: 120 }),
+      ]),
+    ).toBe(true);
   });
 });

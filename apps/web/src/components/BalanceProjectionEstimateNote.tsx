@@ -63,6 +63,13 @@ export interface BalanceProjectionEstimateNoteProps {
    * readiness warning below. Defaults to false.
    */
   readonly medicareBasePremiumMissing?: boolean;
+  /**
+   * True when at least one projection year has a household income at or below
+   * 138% of the federal poverty line while someone is on a Marketplace plan,
+   * so Medicaid may cover the household instead. Adds the Medicaid paragraph.
+   * Defaults to false.
+   */
+  readonly medicaidMayApply?: boolean;
 }
 
 export const BalanceProjectionEstimateNote: React.FC<
@@ -71,6 +78,7 @@ export const BalanceProjectionEstimateNote: React.FC<
   magiEstimatedFromProjection = false,
   isMcBasisActive = false,
   medicareBasePremiumMissing = false,
+  medicaidMayApply = false,
 }) => (
   <div
     className="my-3 rounded-lg border border-line bg-surface-raised p-5 shadow-sm"
@@ -133,6 +141,21 @@ export const BalanceProjectionEstimateNote: React.FC<
         pay for health care.{' '}
         <TextLink to={MEDICARE_PREMIUMS_URL}>Add Medicare premiums</TextLink>{' '}
         to review the standard Part B and Part D amounts and add them.
+      </p>
+    )}
+    {medicaidMayApply && (
+      <p className="m-0 mt-3 text-sm text-muted">
+        <strong className="text-ink">
+          Medicaid may apply.
+        </strong>{' '}
+        In at least one year your income is at or below 138% of the federal
+        poverty line while you are on a Marketplace plan. Depending on your
+        state, Medicaid may cover your household instead of a Marketplace plan
+        in that year. Retivo does not model states or Medicaid, so the figures
+        shown here do not assume Medicaid; the Marketplace credit shown between
+        100% and 138% of the poverty line is what a state that did not expand
+        Medicaid would give. Medicaid is not free money: states seek repayment
+        from the estates of people who received it at 55 or older.
       </p>
     )}
     <p className="m-0 mt-3 text-sm text-muted">

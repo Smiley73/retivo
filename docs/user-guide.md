@@ -482,6 +482,8 @@ What the cards do:
   you enter a **Benchmark plan cost for the year**, the benchmark plan price is an
   estimate that grows every year from 2026 at the scenario's medical inflation
   rate; an entered price is used as entered.
+  Medicaid and state rules are not modeled; the projections show a note when a
+  year's income is at or below 138% of the poverty line.
   A link opens the **Add Medicare premiums** preview on the Expenses page, and
   asks before leaving if you have unsaved changes.
 - **Pre-retirement Roth conversions**: a **Roth conversion** moves money from a
@@ -568,7 +570,10 @@ Tabs under the controls, **Projection views**, split the page:
   re-runs the same plan with **Higher fees**, **Lower returns**, **Higher
   inflation** and **Longer life**, and shows the change in success.
 - **Cash flow**: expected income against spending, an income breakdown, and
-  yearly money flowing in and out of the portfolio.
+  yearly money flowing in and out of the portfolio. In a year the ACA credit
+  lowered your withdrawals, the Taxes band dips below zero by that amount (the
+  tooltip names it **Credit applied to premiums**), so income still meets
+  spending.
 - **Accounts**: a per-account breakdown, a year-by-year table, and a stacked chart
   of balances.
 - **Taxes & distributions**: the **Tax & Health-Cost Burden** chart, which shows

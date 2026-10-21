@@ -42,7 +42,9 @@ export interface CashflowMonthlyPoint {
   essential: number;
   discretionary: number;
   /** Portfolio tax cash (federal tax + IRMAA surcharge − ACA-PTC) at
-   *  this sample — the Taxes band atop essential/discretionary. */
+   *  this sample — the Taxes band atop essential/discretionary. Negative
+   *  (minus the credit applied to premiums) in a year the credit lowered the
+   *  draw, so the stack top still equals what income covers. */
   taxes: number;
   /** Essential + discretionary + taxes — drives the expense-stack top
    *  and the shortfall comparison. */

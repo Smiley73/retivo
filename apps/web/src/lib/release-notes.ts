@@ -43,6 +43,16 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       'and your actual drug-plan price stay yours to enter.',
   },
   {
+    date: '2026-10-21',
+    kind: 'improved',
+    title: 'Projections now flag years when Medicaid may apply',
+    blurb:
+      'When a year with a Marketplace plan has income at or below 138% of the ' +
+      'federal poverty line, a note under the charts says Medicaid may cover ' +
+      'you instead, depending on your state. Retivo still does not model ' +
+      'states or Medicaid, and no projected number changes.',
+  },
+  {
     date: '2026-10-20',
     kind: 'improved',
     title: 'Your Marketplace credit now lowers your withdrawals',
@@ -50,8 +60,8 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       'When the ACA premium credit is larger than your tax and Medicare surcharge, ' +
       'the extra now lowers that year\u2019s withdrawals, up to the Medical expenses ' +
       'you entered and what you would otherwise withdraw, instead of disappearing. ' +
-      'It shows as Credit applied to premiums on the Taxes tab and in the yearly ' +
-      'table. Projections and stress tests change when you update.',
+      'It shows as Credit applied to premiums on the Taxes tab, in the yearly ' +
+      'table and on the Cash flow tab. Projections and stress tests change when you update.',
   },
   {
     date: '2026-10-20',

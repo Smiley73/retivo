@@ -56,6 +56,7 @@ import {
   bootstrapLookbackRing,
   centsToDollars,
   computeRmdFloorCents,
+  DEFAULT_ASSUMED_COST_BASIS_FRACTION,
   dollarsToCents,
 } from './tax-integration';
 import type {
@@ -73,7 +74,11 @@ import {
   type PenaltyAccountInput,
 } from './early-withdrawal-penalty';
 import type { AccountType, AccountTaxTreatment } from '../db/types';
-import { creditAppliedToPremiumsCents, povertyLineLimitCents } from './credit-applied-to-premiums';
+import {
+  creditAppliedToPremiumsCents,
+  drawIncomeCents,
+  povertyLineLimitCents,
+} from './credit-applied-to-premiums';
 import type { AcaFplRegion } from './aca-ptc';
 import { isQualifyingAccount } from './rmd';
 import type { DrawdownAccountYear } from './drawdown-engine-types';
@@ -549,9 +554,9 @@ export interface McTaxYearResult {
   readonly filingUnitMagi: readonly FilingUnitMagi[];
   /**
    * Same-year tax cashflow the portfolio must fund: federal tax +
-   * IRMAA surcharge − ACA PTC offset, floored at zero, plus the funded penalty,
-   * less the credit applied to premiums, in dollars. Negative when the credit
-   * applied exceeds the tax need and penalty (it lowers the year's draw). The
+   * IRMAA surcharge + the penalty − ACA PTC offset, floored at zero, less the
+   * credit applied to premiums, in dollars. Negative when a credit applied
+   * lowers the year's draw (it is only applied past the tax and penalty). The
    * caller subtracts this from the path's balance trajectory so taxes affect
    * MC depletion / success / percentiles. The FULL IRMAA surcharge is funded
    * (cash + the portion withheld from Social Security) because the spendable
@@ -1118,9 +1123,15 @@ export function applyPerYearTaxForPathWithConversion(
     args.drawNeedDollars,
     // The dollars of the draw that are ACA MAGI, which a lowered draw sheds:
     // pre-tax and taxable-account withdrawals and the taxable Roth earnings.
-    preTaxWithdrawalDollars +
-      (classification?.postTaxNonRothDollars ?? 0) +
-      rothEarnings.earningsExcessDollars,
+    drawIncomeCents({
+      preTaxDollars: preTaxWithdrawalDollars,
+      taxableAccountDollars: classification?.postTaxNonRothDollars ?? 0,
+      rothEarningsDollars: rothEarnings.earningsExcessDollars,
+      costBasisFraction:
+        args.costBasisFraction ??
+        taxCtx.assumedCostBasisFraction ??
+        DEFAULT_ASSUMED_COST_BASIS_FRACTION,
+    }),
   );
 
   // The ring sample is conversion-INCLUSIVE so Y+2 IRMAA is funded. With no
@@ -2199,7 +2210,7 @@ function assembleMcTaxResult(
   penaltyDollars = 0,
   medicalExpenseDollars?: number,
   drawNeedDollars?: number,
-  magiBearingDrawDollars = 0,
+  drawIncome: ReturnType<typeof drawIncomeCents> = { incomeDrawCents: 0, magiOfDrawCents: 0 },
 ): McTaxYearResult {
   const fedTax = centsToDollars(taxResult.federalTaxCents);
   const irmaa = centsToDollars(taxResult.irmaaSurchargeCents);
@@ -2213,11 +2224,11 @@ function assembleMcTaxResult(
   // on the path), so it funds the whole surcharge — the conservative direction.
   //
   // Mirror of the deterministic engine: the early-withdrawal / HSA /
-  // Roth-earnings penalty is funded per path (added to the cashflow) so it
-  // reduces the path's balance via the absorbing after-tax adjustment. The
-  // ACA PTC offsets only the federal tax + IRMAA, never the penalty (a penalty
-  // is a Form 5329 additional tax, not PTC-offsettable).
-  const taxNeedDollars = Math.max(0, fedTax + irmaa - ptc);
+  // Roth-earnings penalty is funded per path so it reduces the path's balance via
+  // the absorbing after-tax adjustment. The credit is a refundable payment against
+  // the whole bill, penalty included (the deterministic engine's federal tax
+  // carries it too), so the penalty is part of the tax the credit offsets first.
+  const taxNeedDollars = Math.max(0, fedTax + irmaa + penaltyDollars - ptc);
 
   // Credit applied to premiums: the excess over federal tax and the whole
   // surcharge lowers this year's draw, up to the year's Medical expenses and the
@@ -2233,17 +2244,17 @@ function assembleMcTaxResult(
           creditCents: taxResult.acaPtcSubsidyCents,
           offsetCents: Math.min(
             taxResult.acaPtcSubsidyCents,
-            taxResult.federalTaxCents + taxResult.irmaaSurchargeCents,
+            taxResult.federalTaxCents + taxResult.irmaaSurchargeCents + dollarsToCents(penaltyDollars),
           ),
           medicalCents: dollarsToCents(medicalExpenseDollars),
           remainingNeedCents: dollarsToCents((drawNeedDollars ?? drawdown) + taxNeedDollars),
           povertyLineLimitCents: povertyLineLimitCents({
             headroomCents: taxResult.acaMagiAboveFplCents,
-            magiBearingDrawCents: dollarsToCents(magiBearingDrawDollars),
+            ...drawIncome,
           }),
         });
   const acaCreditAppliedToPremiums = centsToDollars(creditCents);
-  const taxCashflowDollars = taxNeedDollars + penaltyDollars - acaCreditAppliedToPremiums;
+  const taxCashflowDollars = taxNeedDollars - acaCreditAppliedToPremiums;
 
   return {
     fedTax,

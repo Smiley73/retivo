@@ -63,8 +63,12 @@ import type {
   TaxMemberInput,
   TaxYearResult,
 } from './tax-integration';
-import { dollarsToCents } from './tax-integration';
-import { creditAppliedToPremiumsCents, povertyLineLimitCents } from './credit-applied-to-premiums';
+import { DEFAULT_ASSUMED_COST_BASIS_FRACTION, dollarsToCents } from './tax-integration';
+import {
+  creditAppliedToPremiumsCents,
+  drawIncomeCents,
+  povertyLineLimitCents,
+} from './credit-applied-to-premiums';
 
 /** Shared error `code` thrown by every engine's `UnsupportedTaxYearError`
  *  (federal-tax / ss-taxation / irmaa / aca-ptc / rmd). A projection year
@@ -422,9 +426,12 @@ function runOnePass(
   if (state.pass === 1) {
     state.povertyLineLimitCents = povertyLineLimitCents({
       headroomCents: result.acaMagiAboveFplCents,
-      magiBearingDrawCents: dollarsToCents(
-        cls.preTaxDollars + cls.postTaxNonRothDollars + (args.rothEarningsIncomeDollars ?? 0),
-      ),
+      ...drawIncomeCents({
+        preTaxDollars: cls.preTaxDollars,
+        taxableAccountDollars: cls.postTaxNonRothDollars,
+        rothEarningsDollars: args.rothEarningsIncomeDollars ?? 0,
+        costBasisFraction: taxInputBase.assumedCostBasisFraction ?? DEFAULT_ASSUMED_COST_BASIS_FRACTION,
+      }),
     });
   }
   state.creditAppliedCents = creditAppliedToPremiumsCents({

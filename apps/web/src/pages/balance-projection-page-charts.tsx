@@ -25,6 +25,7 @@ import {
   buildRmdRows,
   buildRothConversionsSeries,
   buildQcdRows,
+  hasMedicaidRangeYear,
 } from './balance-projection-burden-rows';
 import { TaxBurdenBand } from './balance-projection-page-tax-burden';
 import { RmdBand } from './balance-projection-page-rmd-band';
@@ -136,6 +137,16 @@ export const BalanceProjectionCharts: React.FC<BalanceProjectionChartsProps> = (
         (yr) => yr.medicareBasePremiumMissing === true,
       ) || drawdownYears.some((yr) => yr.medicareBasePremiumMissing === true),
     [drawdownByMethod, activeMethod, drawdownYears],
+  );
+
+  /** True when any projection year has a household income at or below 138% of
+   *  the federal poverty line while on a Marketplace plan. Drives the Medicaid
+   *  paragraph in the standing estimate note. Read off the DETERMINISTIC
+   *  drawdown for the same reason as `medicareBasePremiumMissing`: the Monte
+   *  Carlo representative run never stamps `fplPercentage`. */
+  const medicaidMayApply = useMemo(
+    () => hasMedicaidRangeYear(drawdownByMethod?.[activeMethod]?.years ?? []),
+    [drawdownByMethod, activeMethod],
   );
 
   /** Per-year tax / health-cost burden rows for TaxBurdenBand,
@@ -482,6 +493,7 @@ export const BalanceProjectionCharts: React.FC<BalanceProjectionChartsProps> = (
         magiEstimatedFromProjection={isMcBasisActive ? false : magiEstimatedFromProjection}
         isMcBasisActive={isMcBasisActive}
         medicareBasePremiumMissing={medicareBasePremiumMissing}
+        medicaidMayApply={medicaidMayApply}
       />
     </>
   );
