@@ -550,7 +550,10 @@ Tabs under the controls, **Projection views**, split the page:
   re-runs the same plan with **Higher fees**, **Lower returns**, **Higher
   inflation** and **Longer life**, and shows the change in success.
 - **Cash flow**: expected income against spending, an income breakdown, and
-  yearly money flowing in and out of the portfolio.
+  yearly money flowing in and out of the portfolio. In a year the ACA credit
+  lowered your withdrawals, the Taxes band dips below zero by that amount (the
+  tooltip names it **Credit applied to premiums**), so income still meets
+  spending.
 - **Accounts**: a per-account breakdown, a year-by-year table, and a stacked chart
   of balances.
 - **Taxes & distributions**: the **Tax & Health-Cost Burden** chart, which shows

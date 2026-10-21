@@ -472,8 +472,10 @@ medical expense, because the app works out the subsidy itself.
 **How it reaches the numbers.** The credit is used in two steps.
 
 1. **Against tax and the surcharge.** It is counted against that year's federal
-   tax and IRMAA cash need. It lowers what your accounts must fund for those,
-   and it cannot make that need negative. This part is the **ACA PTC offset**.
+   tax and IRMAA cash need. The 10% early-withdrawal penalty is part of that
+   tax, so the credit pays it before anything else. It lowers what your
+   accounts must fund for those, and it cannot make that need negative. This
+   part is the **ACA PTC offset**.
 2. **Against your Medical expenses.** What is left of the credit is a cash
    refund of premiums you already entered as an expense, so it lowers that
    year's withdrawals. The line is the smallest of three amounts: the credit
@@ -497,9 +499,14 @@ the draw may fall by at most the income that draw adds above the poverty line,
 counted for each return that earns a credit and taking the narrowest. Only
 withdrawals that count as income can pull income down: a qualified Roth or
 savings withdrawal does not, so a household that draws only those is not
-limited. Above the poverty line a lower draw only raises the credit, so a line
-priced on the higher draw is never more than the household earns at the lower
-one.
+limited. A withdrawal from a taxable brokerage account counts only as its gain,
+so each dollar of it pulls income down by less than a dollar and the draw can
+fall by more than the income above the line. Above the poverty line a lower
+draw only raises the credit, so a line priced on the higher draw is never more
+than the household earns at the lower one. Both engines take the earnings of a
+Roth withdrawal that is not yet qualified, and the early-withdrawal penalty,
+from that same draw before the line, so the line is never priced on income the
+lowered draw no longer has.
 
 The stress test funds the whole IRMAA surcharge, where the projection funds only
 the part not withheld from Social Security, so step 1 uses the whole surcharge
@@ -507,10 +514,12 @@ there. Both cap the line at the year's draw, which is the sum of the months in
 which spending is above income, so a year with a few expensive months can carry
 the whole line. Everything else is the same, and for the same flat household
 whose credit does not move with the draw (qualified Roth withdrawals, say) the
-two agree to the cent. When the credit does move with the draw, the projection
-settles on the line the lowered draw earns, and the stress test keeps the line
-priced on the draw before it, so the stress test's line is the smaller by a
-little. Medical expenses are taken before any spending cut from the
+two agree to the cent, and so do they when the draw is Roth earnings. When the
+credit moves with a pre-tax draw, the projection settles on the line the
+lowered draw earns, and the stress test keeps the line priced on the draw
+before it, so the stress test's line is smaller, by about a quarter to two
+fifths in the households checked, and its withdrawals are a little higher.
+Medical expenses are taken before any spending cut from the
 downturn guardrail, because the premium is the amount you entered.
 
 ### Built-in figures and years

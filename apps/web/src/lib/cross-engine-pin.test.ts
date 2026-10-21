@@ -491,8 +491,8 @@ describe('cross-engine pin — deterministic drawdown vs MC (builder-backed)', (
     assertSeriesEqual(runDrawdownSide(cfg), runMcSide(cfg));
   });
 
-  it('pins the Monte Carlo ENGINE_VERSION at 72 (the ACA credit left after federal tax and IRMAA cash lowers the year\u2019s draw as its own line, up to the year\u2019s Medical expenses and the draw — both engines compute it through one helper)', () => {
-    expect(ENGINE_VERSION).toBe(72);
+  it('pins the Monte Carlo ENGINE_VERSION at 73 (the stress test offsets the early-withdrawal penalty with the ACA credit as the projection does, and the line\u2019s poverty-line limit counts only the gain of a taxable-account draw)', () => {
+    expect(ENGINE_VERSION).toBe(73);
   });
 });
 

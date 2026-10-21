@@ -424,7 +424,7 @@ a fixed rule with no year, and none of it changes with the year.
 | Guardrail discount rate and tax allowance | 1% and 15% | Fixed rule |
 | Guardrails today check | 20 seconds; success flag below 80% | Fixed rule |
 | Safe withdrawal rates | 4% and 4.5% | Fixed rule |
-| Engine version | 72 | Fixed rule |
+| Engine version | 73 | Fixed rule |
 
 ## What is simplified or left out
 

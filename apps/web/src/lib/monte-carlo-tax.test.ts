@@ -485,6 +485,36 @@ describe('applyPerYearTaxForPath — credit applied to premiums', () => {
     expect(result.taxCashflowDollars).toBeCloseTo(-result.acaCreditAppliedToPremiums, 2);
   });
 
+  it('counts the early-withdrawal penalty in what the credit offsets, as the projection does', () => {
+    // A 55-year-old draws $30,000 from a traditional IRA: the 10% penalty is $3,000
+    // on top of the federal tax. The credit is a refundable payment against the
+    // whole bill, so it pays that penalty before any of it lowers the draw.
+    const earlyCtx = makeMfjTaxContext({
+      filingStatus: 'Single',
+      members: [{ memberId: 'primary', isoBirthdate: '1971-01-01', onMedicare: false, hasAcaCoverage: true }],
+      householdSize: 1,
+      acaPtcBenchmark: [{ taxYear: 2026, annualSlcspDollars: 7_200 }],
+    });
+    const result = applyPerYearTaxForPath({
+      taxCtx: earlyCtx,
+      taxYear: 2026,
+      retirementYear: 2026,
+      grossSsDollars: 0,
+      nominalExpense: 30_000,
+      medicalExpenseDollars: 7_200,
+      otherIncome: 0,
+      priorBalance: 1_000_000,
+      priorPreTaxByOwner: new Map<string, number>(),
+      magiMinus2: undefined,
+      classification: { ...roth(0), preTaxDollars: 30_000 },
+    })!;
+    const penalty = 3_000;
+    expect(result.acaCreditAppliedToPremiums).toBeCloseTo(result.ptc - result.fedTax - penalty, 2);
+    expect(result.acaCreditAppliedToPremiums).toBeGreaterThan(0);
+    // The bill the credit covers is paid out of it, so only the line moves the draw.
+    expect(result.taxCashflowDollars).toBeCloseTo(-result.acaCreditAppliedToPremiums, 2);
+  });
+
   it('keeps a negative cumulative draw from adding balance back to the RMD base', () => {
     // The credit outran the tax so far (cumulative draw below zero): the
     // after-tax base is the raw balance, as `applyAfterTaxAdjustment` leaves it.
@@ -889,8 +919,13 @@ describe('creditMcConversionToBasisCarrier — Fill conversion → §408A basis'
     const sameYear = applyPerYearTaxForPath({ ...yearArgs(2025), taxCtx: ctx(), rothBasisCarrier: carrier });
     creditMcConversionToBasisCarrier(carrier, 30_000 * 100); // year-END, after ordering
     expect(sameYear).not.toBeNull();
-    // The same-year draw saw 0 basis → fully earnings → taxed + penalized.
-    expect(sameYear!.taxCashflowDollars).toBeGreaterThan(0);
+    // The same-year draw saw 0 basis → fully earnings → taxed + penalized. The credit
+    // offsets that bill (penalty included) before any cash is needed.
+    expect(sameYear!.fedTax).toBeGreaterThan(0);
+    expect(sameYear!.taxCashflowDollars).toBeCloseTo(
+      Math.max(0, sameYear!.fedTax + 2_000 - sameYear!.ptc),
+      2,
+    );
     // The converted principal is now available for NEXT year only.
     expect(carrier.get(MC_AGGREGATE_ROTH_OWNER_KEY)!.rothBasisRemainingCents).toBe(30_000 * 100);
   });

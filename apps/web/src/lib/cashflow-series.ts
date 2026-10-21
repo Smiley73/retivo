@@ -106,8 +106,9 @@ export interface CashflowSeriesInput {
    *  !yearRow.depleted`. Drives the funded-year reconcile (Yearly +
    *  today-mode Monthly per-year gate). */
   fundedByYear: Map<number, boolean>;
-  /** Per-year portfolio tax cash = `(federalTax + irmaaSurcharge −
-   *  acaPtcSubsidy)`, dollars, nominal, clamped ≥ 0. Stacked as the
+  /** Per-year portfolio tax cash = `max(0, federalTax + irmaaSurcharge −
+   *  acaPtcSubsidy)` less the credit applied to premiums, dollars, nominal.
+   *  Negative only in a year the credit lowered the draw. Stacked as the
    *  Taxes band atop
    *  essential/discretionary AND added to the funded reconcile's expense
    *  so the displayed withdrawal grosses up to cover expenses + taxes

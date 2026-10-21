@@ -50,14 +50,18 @@ vi.mock('./ss-projection', async (importOriginal) => {
   };
 });
 
+const GUIDELINE_DOLLARS = 15_650;
+
 const BASE = { householdId: 'h', schemaVersion: 1, version: 1, updatedAt: '2026-01-01T00:00:00Z', deviceId: 'd' };
 
-function member(): Aggregate<HouseholdMemberPayload> {
+function member(age = 63): Aggregate<HouseholdMemberPayload> {
   return {
     ...BASE,
     id: 'm1',
     aggregateType: 'householdMember',
-    payload: { isPrimary: true, firstName: 'Pat', lastName: 'Doe', email: 'm1@example.test', birthdate: '1963-01-01' },
+    payload: {
+      isPrimary: true, firstName: 'Pat', lastName: 'Doe', email: 'm1@example.test', birthdate: `${2026 - age}-01-01`,
+    },
   };
 }
 
@@ -127,6 +131,12 @@ interface Household {
   /** A Roth IRA first funded in 2025, so its withdrawals are nonqualified and the
    *  earnings are taxable income. */
   readonly nonqualifiedRoth?: boolean;
+  /** Age at retirement on 2026-01-01 (default 63, which is also when Social Security starts).
+   *  Under 59½ a pre-tax draw carries the 10% early-withdrawal penalty. */
+  readonly age?: number;
+  /** A taxable brokerage account of this balance instead of the Roth IRA: only the
+   *  gain in a draw is income. */
+  readonly brokerageBalance?: number;
 }
 
 function args(h: Household): RunBalanceProjectionArgs {
@@ -137,7 +147,7 @@ function args(h: Household): RunBalanceProjectionArgs {
     payload: {
       name: 'Credit', description: '', parentScenarioId: null, isPrimary: true, notes: '',
       overrides: {
-        retirementAge: { primary: { ageYears: 63, ageMonths: 0 } },
+        retirementAge: { primary: { ageYears: h.age ?? 63, ageMonths: 0 } },
         socialSecurity: { primary: { ageYears: 63, ageMonths: 0 }, colaPct: 0 },
         inflation: { ratePct: 0, categoryRates: { 'cat-medical': 0 } },
         lifeExpectancy: { primary: 70 },
@@ -152,13 +162,15 @@ function args(h: Household): RunBalanceProjectionArgs {
     aggregateType: 'account',
     payload: {
       name: 'roth',
-      type: h.preTax === true ? 'RETIREMENT_IRA' : 'RETIREMENT_ROTH_IRA',
+      type: h.brokerageBalance !== undefined ? 'BROKERAGE' : h.preTax === true ? 'RETIREMENT_IRA' : 'RETIREMENT_ROTH_IRA',
       ownershipType: 'INDIVIDUAL',
-      taxTreatment: h.preTax === true ? 'PRE_TAX' : 'ROTH',
+      taxTreatment: h.brokerageBalance !== undefined ? 'POST_TAX' : h.preTax === true ? 'PRE_TAX' : 'ROTH',
       ownerId: 'm1', institution: 'V', notes: '', planningReturnPct: 0, active: true,
       plannedContributionPreTax: 0, plannedContributionPostTax: 0,
       assetMix: { stocksPct: 60, bondsPct: 30, cashPct: 10 },
-      ...(h.preTax === true ? {} : { rothIraFirstContributionTaxYear: h.nonqualifiedRoth === true ? 2025 : 2015 }),
+      ...(h.preTax === true || h.brokerageBalance !== undefined
+        ? {}
+        : { rothIraFirstContributionTaxYear: h.nonqualifiedRoth === true ? 2025 : 2015 }),
     },
   };
   const balance: Aggregate<AccountBalancePayload> = {
@@ -166,10 +178,10 @@ function args(h: Household): RunBalanceProjectionArgs {
     id: 'b-roth',
     aggregateType: 'accountBalance',
     payload: {
-      accountId: 'roth', year: 2025, lastUpdated: '2025-12-31', startingBalance: 2_000_000,
+      accountId: 'roth', year: 2025, lastUpdated: '2025-12-31', startingBalance: h.brokerageBalance ?? 2_000_000,
       startingBalancePreTax: null, startingBalancePostTax: null, contributionsPreTax: null,
       contributionsPostTax: null, companyContributions: 0, companyContributionsPreTax: null,
-      companyContributionsPostTax: null, rollover: 0, distributions: 0, endingBalance: 2_000_000,
+      companyContributionsPostTax: null, rollover: 0, distributions: 0, endingBalance: h.brokerageBalance ?? 2_000_000,
       endingBalancePreTax: null, endingBalancePostTax: null, totalContributions: 0, comment: null,
     },
   };
@@ -184,7 +196,7 @@ function args(h: Household): RunBalanceProjectionArgs {
     scenarios: [scenario],
     accounts: [account],
     balances: [balance],
-    members: [member()],
+    members: [member(h.age)],
     ssBenefits: h.noSocialSecurity === true ? [] : [ss],
     expenses: [
       ...(h.medicalMonthly === undefined
@@ -485,5 +497,62 @@ describe('credit applied to premiums, taxable Roth earnings', () => {
     expect(det.acaCreditAppliedToPremiumsCents).toBe(row.acaCreditAppliedToPremiumsCents);
     expect(Math.round(det.withdrawn * 100)).toBe(Math.round(row.withdrawn * 100));
     expect(det.acaPtcSubsidyCents).toBeGreaterThan(0);
+  });
+});
+
+describe('credit applied to premiums, nonqualified Roth above the poverty line', () => {
+  // A $20,000 pension and a Roth IRA first funded in 2025, so every dollar drawn is
+  // taxable earnings and ACA MAGI is 20,000 plus the draw. The draw before any line
+  // is 17,200; the lowered draw has less MAGI, so earns more credit than the line.
+  const h: Household = {
+    medical: 7_200, other: 30_000, pensionAnnual: 20_000, nonqualifiedRoth: true, noSocialSecurity: true,
+  };
+
+  it('the line never exceeds what the credit earns at the draw the row reports', () => {
+    const det = detRow(h);
+    const earned = (det.acaPtcSubsidyCents ?? 0) - (det.federalTaxCents ?? 0);
+    expect(det.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
+    expect(det.acaCreditAppliedToPremiumsCents ?? 0).toBeLessThanOrEqual(Math.max(0, earned));
+  });
+
+  it('both engines price it on the draw before the line: same line and withdrawal to the cent', () => {
+    const det = detRow(h);
+    const { row } = mcFirstRow(h);
+    expect(row.acaCreditAppliedToPremiumsCents).toBe(det.acaCreditAppliedToPremiumsCents);
+    expect(Math.round(row.withdrawn * 100)).toBe(Math.round(det.withdrawn * 100));
+  });
+});
+
+describe('credit applied to premiums, early-withdrawal penalty years', () => {
+  it('the stress test counts the penalty in the offset as the projection does, so its line is not the larger', () => {
+    // A 55-year-old draws a traditional IRA: the 10% penalty is a refundable credit's
+    // first call, so the line is what is left after federal tax AND the penalty. The
+    // stress test prices the credit once on the draw before the line, so it stays the
+    // smaller of the two, where it used to exceed the projection by about the penalty.
+    const h: Household = { medical: 7_200, other: 22_800, preTax: true, noSocialSecurity: true, age: 55 };
+    const det = detRow(h);
+    const { row } = mcFirstRow(h);
+    expect(row.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
+    expect(row.acaCreditAppliedToPremiumsCents ?? 0).toBeLessThanOrEqual(det.acaCreditAppliedToPremiumsCents ?? 0);
+  });
+});
+
+describe('credit applied to premiums, taxable brokerage near the poverty line', () => {
+  it('only the gain in a brokerage draw is MAGI, so the draw can fall further before the credit ends', () => {
+    // A $14,000 pension and a brokerage account at the default half basis: ACA MAGI is
+    // the pension plus half of what is drawn. The $8,000 draw before the line puts MAGI
+    // 2,350 over the guideline, so a whole dollar of draw per dollar of MAGI would stop
+    // the line there, where the draw can fall by 4,700 before MAGI reaches it.
+    const h: Household = {
+      medical: 7_200, other: 14_796, pensionAnnual: 14_000, brokerageBalance: 100_000, noSocialSecurity: true,
+    };
+    const det = detRow(h);
+    const { row } = mcFirstRow(h);
+    for (const r of [det, row]) {
+      expect(r.acaCreditAppliedToPremiumsCents).toBeGreaterThan(cents(4_600));
+      // The lowered draw still earns a credit: its gain keeps MAGI at the guideline.
+      expect(14_000 + r.withdrawn / 2).toBeGreaterThanOrEqual(GUIDELINE_DOLLARS - 0.01);
+    }
+    expect(Math.abs(row.acaCreditAppliedToPremiumsCents! - det.acaCreditAppliedToPremiumsCents!)).toBeLessThanOrEqual(2);
   });
 });
