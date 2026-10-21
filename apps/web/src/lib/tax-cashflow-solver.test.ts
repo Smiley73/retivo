@@ -562,6 +562,27 @@ describe('solveTaxCashflow — credit applied to premiums', () => {
       expect(result.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
     });
 
+    it('counts the taxable Roth earnings as MAGI the lowered draw sheds', () => {
+      // A nonqualified Roth draw: its earnings are already in the ordinary income
+      // and are ACA MAGI, so the line stops at the poverty guideline as with a
+      // pre-tax draw. Without the earnings the Roth draw looks MAGI-free.
+      const earningsArgs = (overrides: Partial<TaxCashflowSolveArgs> = {}): TaxCashflowSolveArgs =>
+        baseArgs({
+          ordinaryNetNeedDollars: 18_000,
+          taxInputBase: aca2026Input({ grossSsDollars: 0, otherOrdinaryIncomeDollars: 18_000 }),
+          classifyForTarget: allRothClassifier,
+          medicalExpenseCents: 720_000,
+          ...overrides,
+        });
+      const result = solveTaxCashflow(earningsArgs({ rothEarningsIncomeDollars: 18_000 }));
+      expect(result.acaCreditAppliedToPremiumsCents).toBe((18_000 - 15_650) * 100);
+      expect(result.taxYearResult.fplPercentage).toBeGreaterThanOrEqual(100);
+      const unmodeled = solveTaxCashflow(earningsArgs());
+      expect(unmodeled.acaCreditAppliedToPremiumsCents).toBeGreaterThan(
+        result.acaCreditAppliedToPremiumsCents,
+      );
+    });
+
     it('keeps a line whose lowered draw still earns the credit', () => {
       // $30,000 is 191.7% of the poverty guideline; the line lowers it to
       // about $24,000, still above 100%, so the loop settles with the line on.

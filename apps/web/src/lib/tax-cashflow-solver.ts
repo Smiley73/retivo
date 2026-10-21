@@ -181,6 +181,12 @@ export interface TaxCashflowSolveArgs {
    * zero-need solves and must not see the line).
    */
   readonly medicalExpenseCents?: number;
+  /**
+   * The taxable Roth earnings already folded into `taxInputBase`'s ordinary
+   * income, in dollars. They are ACA MAGI, so the share of the draw a lower draw
+   * sheds includes them (the Monte Carlo engine adds the same figure). Absent → 0.
+   */
+  readonly rothEarningsIncomeDollars?: number;
 }
 
 /** Per-bucket withdrawal classification returned by the funding callback. */
@@ -416,7 +422,9 @@ function runOnePass(
   if (state.pass === 1) {
     state.povertyLineLimitCents = povertyLineLimitCents({
       headroomCents: result.acaMagiAboveFplCents,
-      magiBearingDrawCents: dollarsToCents(cls.preTaxDollars + cls.postTaxNonRothDollars),
+      magiBearingDrawCents: dollarsToCents(
+        cls.preTaxDollars + cls.postTaxNonRothDollars + (args.rothEarningsIncomeDollars ?? 0),
+      ),
     });
   }
   state.creditAppliedCents = creditAppliedToPremiumsCents({

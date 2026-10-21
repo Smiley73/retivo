@@ -124,6 +124,9 @@ interface Household {
   readonly noMedicalCategory?: boolean;
   /** No Social Security at all, so ACA MAGI is only the draw and the pension. */
   readonly noSocialSecurity?: boolean;
+  /** A Roth IRA first funded in 2025, so its withdrawals are nonqualified and the
+   *  earnings are taxable income. */
+  readonly nonqualifiedRoth?: boolean;
 }
 
 function args(h: Household): RunBalanceProjectionArgs {
@@ -155,7 +158,7 @@ function args(h: Household): RunBalanceProjectionArgs {
       ownerId: 'm1', institution: 'V', notes: '', planningReturnPct: 0, active: true,
       plannedContributionPreTax: 0, plannedContributionPostTax: 0,
       assetMix: { stocksPct: 60, bondsPct: 30, cashPct: 10 },
-      ...(h.preTax === true ? {} : { rothIraFirstContributionTaxYear: 2015 }),
+      ...(h.preTax === true ? {} : { rothIraFirstContributionTaxYear: h.nonqualifiedRoth === true ? 2025 : 2015 }),
     },
   };
   const balance: Aggregate<AccountBalancePayload> = {
@@ -468,5 +471,19 @@ describe('credit applied to premiums, near the poverty line', () => {
     expect(Math.round(row.withdrawn * 100)).toBe(Math.round(det.withdrawn * 100));
     const p50 = summary.acaCreditAppliedToPremiumsPercentilesByYear?.p50[0] ?? Number.NaN;
     expect(p50 * 100).toBeCloseTo(det.acaCreditAppliedToPremiumsCents ?? 0, 0);
+  });
+});
+
+describe('credit applied to premiums, taxable Roth earnings', () => {
+  it('a nonqualified Roth draw sheds its earnings as MAGI: both engines hold the line to the guideline', () => {
+    // No Social Security, a Roth IRA first funded in 2025: the $7,200 of Medical
+    // and $10,800 of other spending is $18,000 of need, and the taxable earnings
+    // are ACA MAGI, so a draw lowered below the guideline earns no credit.
+    const h: Household = { medical: 7_200, other: 10_800, nonqualifiedRoth: true, noSocialSecurity: true };
+    const det = detRow(h);
+    const { row } = mcFirstRow(h);
+    expect(det.acaCreditAppliedToPremiumsCents).toBe(row.acaCreditAppliedToPremiumsCents);
+    expect(Math.round(det.withdrawn * 100)).toBe(Math.round(row.withdrawn * 100));
+    expect(det.acaPtcSubsidyCents).toBeGreaterThan(0);
   });
 });

@@ -1514,6 +1514,7 @@ export function buildTaxCashflowHook(args: {
             irmaaPayment: { ownSsDollarsByMemberId: yearInput.ownSsDollarsByMemberId },
             classifyForTarget: classify,
             medicalExpenseCents,
+            rothEarningsIncomeDollars: rothEarningsExcessDollars,
           });
     magiBuffer.push(result.taxYearResult.magiCents / 100);
     // The funding solver keeps its own per-return look-back ring in
