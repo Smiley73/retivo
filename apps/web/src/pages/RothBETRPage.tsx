@@ -6,11 +6,12 @@
  * working-years conversion schedule or a pre-RMD MAGI-cap Fill window to the
  * active scenario.
  *
- * Read-only by default; the two mutation paths (the taxable-income field, and
+ * Read-only by default; the mutation paths (the taxable-income field, and
  * the two Apply dialogs) write through `saveScenario` / `queueLocalMutation`
  * with `expectedVersion`. Deterministic projection only — no Monte Carlo. The
  * plan-comparison panel runs its own search in a Web Worker, on request, and
- * writes nothing.
+ * writes nothing until the user confirms Save on a ranked plan, which goes
+ * through the same `persistOverrides`.
  *
  * Subcomponents + the projection/context build live under `./roth-betr/` so
  * this shell stays within the ≤400-line shape cap; it owns state + the React
@@ -116,10 +117,11 @@ export const RothBETRPage: React.FC = () => {
   ]);
 
   // Persist the whole scenario payload with the merged override fragment. One
-  // path for the taxable-income field and both Apply dialogs.
+  // path for the taxable-income field, both Apply dialogs and the plan
+  // comparison's save. Resolves true when the scenario was written.
   const persistOverrides = useCallback(
-    async (fragment: Partial<ScenarioPayload['overrides']>): Promise<void> => {
-      if (!householdId || selectedScenario === null) return;
+    async (fragment: Partial<ScenarioPayload['overrides']>): Promise<boolean> => {
+      if (!householdId || selectedScenario === null) return false;
       const payload: ScenarioPayload = {
         ...selectedScenario.payload,
         overrides: { ...selectedScenario.payload.overrides, ...fragment },
@@ -129,8 +131,10 @@ export const RothBETRPage: React.FC = () => {
         // doesn't leave the error pinned.
         setError(null);
         await saveScenario({ scenario: selectedScenario, payload, householdId });
+        return true;
       } catch (e) {
         setError((e as Error).message ?? 'Failed to save.');
+        return false;
       }
     },
     [householdId, selectedScenario],
@@ -335,6 +339,8 @@ export const RothBETRPage: React.FC = () => {
             data={data}
             selectedScenarioId={selectedScenarioId}
             leftoverTaxPct={leftoverTaxPct}
+            persistOverrides={persistOverrides}
+            onError={setError}
           />
 
           <ApplyWorkingYearsDialog

@@ -5,7 +5,7 @@
  */
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { formatCurrencyExact } from '../../lib/format-currency';
 import { searchRothSuggestions } from '../../lib/roth-suggestion/search';
 import { TOY_ROTH_ID, toyProjection } from '../../lib/roth-suggestion/test-fixtures';
@@ -56,7 +56,7 @@ const GUARDED_22 = 'Fill the 22% bracket, kept under both lines';
 describe('the year-by-year toggle', () => {
   it('is reached from the table with the arrow keys, opens with Enter, announces its state, and closes with a second Enter', async () => {
     const user = userEvent.setup();
-    render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} />);
+    render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} onSave={vi.fn()} />);
     const toggle = toggleFor(GUARDED_22);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await focusWithKeyboard(user, toggle);
@@ -71,7 +71,7 @@ describe('the year-by-year toggle', () => {
 
   it('closes on Escape from inside the detail and gives focus back to its toggle', async () => {
     const user = userEvent.setup();
-    render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} />);
+    render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} onSave={vi.fn()} />);
     await user.click(toggleFor(GUARDED_22));
     const grid = screen.getByRole('grid', { name: /Year by year/ });
     await user.click(within(grid).getAllByRole('rowheader')[0]);
@@ -83,7 +83,7 @@ describe('the year-by-year toggle', () => {
 
   it('opens one plan at a time', async () => {
     const user = userEvent.setup();
-    render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} />);
+    render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} onSave={vi.fn()} />);
     await user.click(toggleFor(GUARDED_22));
     await user.click(toggleFor('Current plan'));
     expect(toggleFor(GUARDED_22)).toHaveAttribute('aria-expanded', 'false');
@@ -94,7 +94,7 @@ describe('the year-by-year toggle', () => {
   it('opens a plan whose cap could not be met', async () => {
     const user = userEvent.setup();
     const breached = rows.map((row) => (row.id === 'bracket-12-guarded' ? { ...row, notRanked: 'Not ranked: cap not met in 2 years', rank: null } : row));
-    render(<RothSuggestionTable rows={breached} leftoverTaxPct={20} />);
+    render(<RothSuggestionTable rows={breached} leftoverTaxPct={20} onSave={vi.fn()} />);
     await user.click(toggleFor('Fill the 12% bracket, kept under both lines'));
     expect(screen.getByRole('grid', { name: /Year by year: Fill the 12% bracket/ })).toBeInTheDocument();
   });
@@ -103,7 +103,7 @@ describe('the year-by-year toggle', () => {
 describe('the year-by-year table', () => {
   async function openDetail(plan: string): Promise<HTMLElement> {
     const user = userEvent.setup();
-    render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} />);
+    render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} onSave={vi.fn()} />);
     await user.click(toggleFor(plan));
     return screen.getByRole('grid', { name: `Year by year: ${plan}` });
   }
@@ -174,7 +174,7 @@ describe('the year-by-year table', () => {
 
   it('passes the accessibility smoke with a plan open', async () => {
     const user = userEvent.setup();
-    const { container } = render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} />);
+    const { container } = render(<RothSuggestionTable rows={rows} leftoverTaxPct={20} onSave={vi.fn()} />);
     await user.click(toggleFor(GUARDED_22));
     await expectNoA11yViolations(container);
   });

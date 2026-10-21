@@ -174,7 +174,8 @@ export function magiCapWindowTimeframeError(
  * with no birthdate) falls back to `Window <n>`. The resolved interval is
  * half-open `[startYear, endYear)`, so the last capped year shown is
  * `endYear - 1` — a window the user enters as 2050→2055 reads back as
- * `2050 - 2055`. `anchor` is the scenario's real primary retirement year/month
+ * `2050 - 2055`. A one-year window (a saved Roth conversion plan is a list of
+ * them) is labelled by its year alone. `anchor` is the scenario's real primary retirement year/month
  * — same baseline the overlap check uses.
  */
 export function magiCapWindowTabLabels(
@@ -189,6 +190,7 @@ export function magiCapWindowTabLabels(
     const endMonth = resolveEndMonth(w.end, startMonth, ctx);
     // Half-open [startYear, endYear): the last capped year is endYear - 1.
     const lastYear = endMonth ? endMonth.year - 1 : null;
+    if (lastYear === startMonth.year) return `${startMonth.year}`;
     return lastYear !== null && lastYear >= startMonth.year
       ? `${startMonth.year} - ${lastYear}`
       : `From ${startMonth.year}`;

@@ -17,6 +17,7 @@ import type {
   ExpensePayload,
   HouseholdMemberPayload,
   IncomeStreamPayload,
+  MagiCapWindow,
   SocialSecurityBenefitPayload,
 } from '../../db/types';
 import { DEFAULT_LIFE_EXPECTANCY_AGE } from '../../db/types';
@@ -309,6 +310,9 @@ export interface RothSuggestionRow {
   readonly detailLabel: string;
   /** The plan's year-by-year rows, nominal dollars. */
   readonly detail: readonly YearDetailRow[];
+  /** The ladder the plan was ranked with, as the search persisted it; saving the
+   *  row stores exactly this. The current plan's row carries the scenario's own. */
+  readonly ladder: readonly MagiCapWindow[];
 }
 
 function plural(count: number, noun: string): string {
@@ -379,6 +383,7 @@ function toRow(candidate: RothSuggestionWorkerCandidate): RothSuggestionRow {
     notRanked: describeNotRanked(candidate.unranked),
     detailLabel: `${labelText(candidate)}, ${cliffsText(candidate).toLowerCase()}`,
     detail: candidate.yearDetail,
+    ladder: candidate.ladder,
   };
 }
 

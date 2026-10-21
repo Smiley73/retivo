@@ -34,6 +34,17 @@ export interface ReleaseNote {
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-21',
+    kind: 'new',
+    title: 'Save a Roth conversion plan to a scenario',
+    blurb:
+      'Each ranked plan in the Roth conversion comparison now has a "Save plan to scenario" ' +
+      'button. It writes the plan as one income cap window per year on the scenario\'s Withdrawal ' +
+      'strategy, with the fixed dollar ceilings the comparison used, and says what it replaces ' +
+      'first. The card then shows which plan you saved and the date, and marks it out of date ' +
+      'when your data changes; that marker stays on this device only.',
+  },
+  {
+    date: '2026-10-21',
     kind: 'improved',
     title: 'See why each year of a Roth conversion plan converts what it does',
     blurb:

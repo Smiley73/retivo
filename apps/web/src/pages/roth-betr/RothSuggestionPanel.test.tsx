@@ -9,6 +9,7 @@
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ScenarioPayload } from '../../db/types';
 import { toyProjection } from '../../lib/roth-suggestion/test-fixtures';
 import { expectNoA11yViolations } from '../../test/a11y';
 import {
@@ -95,6 +96,7 @@ interface PanelProps {
   data?: typeof projection;
   selectedScenarioId?: string;
   leftoverTaxPct?: number;
+  persistOverrides?: (fragment: Partial<ScenarioPayload['overrides']>) => Promise<boolean>;
 }
 
 function panel(props: PanelProps = {}): React.ReactElement {
@@ -105,6 +107,8 @@ function panel(props: PanelProps = {}): React.ReactElement {
       data={{ ...data, scenarios: [...data.scenarios, { ...data.scenarios[0], id: 'other' }] }}
       selectedScenarioId={props.selectedScenarioId ?? 'toy'}
       leftoverTaxPct={props.leftoverTaxPct ?? 20}
+      persistOverrides={props.persistOverrides ?? vi.fn(async () => true)}
+      onError={vi.fn()}
     />
   );
 }
