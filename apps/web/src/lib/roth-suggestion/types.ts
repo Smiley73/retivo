@@ -17,6 +17,7 @@ import type { DrawdownYear } from '../drawdown-engine-types';
 import type { FilingStatus } from '../federal-tax';
 import type { ScenarioAggregate } from '../scenario-resolution';
 import type { TaxCalibrationBundle } from '../tax-integration-helpers';
+import type { YearDetailRow } from './year-detail-types';
 
 /** The projection inputs the Roth conversion comparison page already assembles
  *  (the shape `buildRothBETRPageData` takes), so the page passes them as is. */
@@ -169,7 +170,9 @@ export type YearStop =
   /** MAGI stayed under the ceiling for a reason the row does not name. */
   | 'unused-headroom'
   /** The year after the window: no cap, no Fill conversion. */
-  | 'window-ended';
+  | 'window-ended'
+  /** The engine found no target Roth for the window, so it converted $0. */
+  | 'no-target';
 
 /** One year's record, nominal cents (the tax tables a person checks against
  *  are nominal). Ceiling, binding limit, limits and stop are null on the
@@ -239,6 +242,8 @@ export interface RothCandidate {
   readonly ladder: readonly MagiCapWindow[];
   readonly drawdownYears: readonly DrawdownYear[];
   readonly years: readonly YearRecord[];
+  /** The year-by-year table the page opens for this plan, nominal dollars. */
+  readonly yearDetail: readonly YearDetailRow[];
   readonly totals: CandidateTotals;
   readonly deltaVsReference: CandidateTotals;
   readonly afterTax: CandidateAfterTax;

@@ -117,6 +117,10 @@ describe('buildYearRecords', () => {
     expect(stopFor(row(2030, { magiCents: 10_300_000, rothConvertedCents: 1, magiCapBreachDollars: 12_000 }))).toBe('breach');
   });
 
+  it('says the engine found no target Roth ahead of every other reason', () => {
+    expect(stopFor(row(2030, { magiCents: 10_050_000, rothConversionDegradedNoTarget: true }))).toBe('no-target');
+  });
+
   it('allows a $2 slack around the ceiling for the conversion solver tolerance', () => {
     expect(stopFor(row(2030, { magiCents: 9_999_900, rothConvertedCents: 5_000 }))).toBe('limit');
     expect(stopFor(row(2030, { magiCents: 9_990_000, rothConvertedCents: 5_000 }))).toBe('unused-headroom');

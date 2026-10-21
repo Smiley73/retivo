@@ -33,6 +33,17 @@ export interface ReleaseNote {
 /** The full changelog, newest-first. New entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-21',
+    kind: 'improved',
+    title: 'See why each year of a Roth conversion plan converts what it does',
+    blurb:
+      'Each plan in the Roth conversion comparison now has a "Why each year" button that opens a ' +
+      'year-by-year table: the amount converted, the limit that stopped it, the figures that give ' +
+      'the amount, and what the year cost in income tax, taxable Social Security, the Medicare ' +
+      'surcharge and the health-insurance premium credit. A year that a Medicare surcharge or ' +
+      'premium-credit line stopped also shows what crossing it would have cost.',
+  },
+  {
     date: '2026-10-20',
     kind: 'improved',
     title: 'Claim-age comparison understands months',

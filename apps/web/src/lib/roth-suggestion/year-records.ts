@@ -36,6 +36,7 @@ function classifyStop(
   ceilingDollars: number,
   accounts: AccountsById,
 ): YearStop {
+  if (row.rothConversionDegradedNoTarget === true) return 'no-target';
   if ((row.magiCapBreachDollars ?? 0) > 0) return 'breach';
   const magiDollars = (row.magiCents ?? 0) / CENTS_PER_DOLLAR;
   const exhausted = preTaxDollarsAtRowEnd(row, accounts) < EXHAUSTED_DOLLARS;

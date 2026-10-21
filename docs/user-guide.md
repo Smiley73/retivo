@@ -655,7 +655,17 @@ sign, and a plan that converts less than the current one can show less tax. A
 row marked **†** moved spending withdrawals to a later account to stay under its
 ceiling, so part of its result comes from a change in withdrawal order. A plan
 whose ceiling could not be kept is listed last and is not ranked. If no bracket
-had room, the page says so instead of listing identical rows. If the results were
+had room, the page says so instead of listing identical rows.
+
+Each row has a **Why each year** button. It opens a year-by-year table for that
+plan, one plan at a time: for each year of the window, what was converted, what
+stopped it, the figures that give the amount, and what the year cost (income tax,
+taxable Social Security, the Medicare surcharge and the premium credit). A year a
+Medicare surcharge or premium-credit line stopped also says what crossing it would
+have cost. The table is in each year's own dollars. Reach the button from the
+keyboard by tabbing into the table and moving to the last cell of the row with the
+arrow keys, then press Enter; Escape closes it. A worked year is in [Why each year
+in the Roth conversion maths](math-retirement-accounts.md#why-each-year). If the results were
 computed before you changed your data, the page says they may be out of date and
 asks you to run it again; it never runs on its own.
 

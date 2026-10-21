@@ -173,7 +173,7 @@ export function irmaaLimit(
   if (!lookback.withinHorizon || reference.lookbackIrmaaTier === null) {
     return { kind: 'irmaa', applies: false, reason: 'beyond-horizon' };
   }
-  if (!lookback.onMedicare) return { kind: 'irmaa', applies: false, reason: 'no-medicare' };
+  if (lookback.medicareBeneficiaries === 0) return { kind: 'irmaa', applies: false, reason: 'no-medicare' };
   const referenceRank = irmaaTierRank(reference.lookbackIrmaaTier);
   if (referenceRank < 0 || referenceRank >= IRMAA_TIER_ORDER.length - 1) {
     return { kind: 'irmaa', applies: false, reason: 'reference-over-line' };

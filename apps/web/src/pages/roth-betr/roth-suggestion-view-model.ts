@@ -26,6 +26,7 @@ import { memberLabel } from '../../lib/expense-format';
 import { resolveFilingPlanForYear } from '../../lib/filing-status';
 import { conversionWindow } from '../../lib/roth-suggestion/ladder';
 import { rankedOrder } from '../../lib/roth-suggestion/ranking';
+import type { YearDetailRow } from '../../lib/roth-suggestion/year-detail-types';
 import type {
   RothSuggestionDeathAges,
   RothSuggestionUnsupportedReason,
@@ -304,6 +305,10 @@ export interface RothSuggestionRow {
   readonly reroutedYears: readonly number[];
   /** Why the row is not ranked, empty when it is. */
   readonly notRanked: string;
+  /** Names the plan for the year-by-year table: bracket and cliffs. */
+  readonly detailLabel: string;
+  /** The plan's year-by-year rows, nominal dollars. */
+  readonly detail: readonly YearDetailRow[];
 }
 
 function plural(count: number, noun: string): string {
@@ -372,6 +377,8 @@ function toRow(candidate: RothSuggestionWorkerCandidate): RothSuggestionRow {
     acaCreditChange: formatSignedDollars(deltaVsReference.acaCreditTodayDollars),
     reroutedYears: candidate.reroutedYears,
     notRanked: describeNotRanked(candidate.unranked),
+    detailLabel: `${labelText(candidate)}, ${cliffsText(candidate).toLowerCase()}`,
+    detail: candidate.yearDetail,
   };
 }
 
