@@ -206,7 +206,6 @@ describe('empty states', () => {
       { ctx: { retirementYear: 2041 } },
       /no retirement year before required minimum distributions/,
     ],
-    ['married filing separately', { ctx: { filingStatus: 'MFS' } }, /married filing separately/],
   ])('explains why for %s and offers no action', (_name, patch, message) => {
     const patched = {
       ...pageData,
@@ -215,6 +214,28 @@ describe('empty states', () => {
     } as RothBETRPageData;
     render(panel({ pageData: patched }));
     expect(screen.getByText(message)).toBeInTheDocument();
+    expect(screen.queryByRole('button', ACTION)).toBeNull();
+  });
+});
+
+describe('a scenario that files separate returns', () => {
+  it('explains why and offers no action', () => {
+    const couple = toyProjection({
+      couple: true,
+      overrides: {
+        taxFilingPlan: {
+          kind: 'separate',
+          units: [
+            { memberId: 'primary', filingStatus: 'MFS', householdSize: 1 },
+            { memberId: 'secondary', filingStatus: 'MFS', householdSize: 1 },
+          ],
+        },
+      },
+    });
+    const built = buildRothBETRPageData(couple);
+    if (built === null) throw new Error('couple page data is null');
+    render(panel({ pageData: built, data: couple }));
+    expect(screen.getByText(/married filing separately/)).toBeInTheDocument();
     expect(screen.queryByRole('button', ACTION)).toBeNull();
   });
 });
@@ -267,6 +288,21 @@ describe('a run', () => {
     expect(names.some((n) => n.startsWith('Current plan'))).toBe(true);
     expect(names[0]).toContain('Highest after-tax ending balance');
     expect(screen.getByRole('button', ACTION)).toBeInTheDocument();
+  });
+
+  it('announces the finished comparison in a live region that was already mounted', async () => {
+    const user = userEvent.setup();
+    render(panel());
+    const live = document.querySelector('[aria-live="polite"]');
+    expect(live).not.toBeNull();
+    expect(live).toHaveTextContent('');
+    const w = await start(user);
+    expect(live).toHaveTextContent('');
+    await release(w);
+    expect(live).toBeInTheDocument();
+    expect(live).toHaveTextContent(
+      `Comparison finished: ${baseResult.candidates.length} plans listed below.`,
+    );
   });
 
   it('labels the rerouted and not-ranked rows as text, with the unranked one last', async () => {

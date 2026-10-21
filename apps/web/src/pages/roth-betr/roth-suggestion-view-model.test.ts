@@ -118,15 +118,15 @@ describe('leftoverTaxFraction', () => {
 
 describe('suggestionAvailability', () => {
   const roth: AccountOption = { id: 'roth', name: 'My Roth', type: 'RETIREMENT_ROTH_IRA', ownerId: 'm1' };
+  const couple = toyProjection({ couple: true });
 
   function page(over: {
-    filingStatus?: string;
     retirementYear?: number;
     rothIraAccounts?: AccountOption[];
   }): RothBETRPageData {
     return {
       ctx: {
-        filingStatus: over.filingStatus ?? 'MFJ',
+        filingStatus: 'MFJ',
         ownerBirthYear: 1966,
         retirementYear: over.retirementYear ?? 2028,
         lifeExpectancyAnchorYear: 2056,
@@ -137,11 +137,11 @@ describe('suggestionAvailability', () => {
   }
 
   it('is ready with the first Roth IRA as the target', () => {
-    expect(suggestionAvailability(page({}))).toEqual({ kind: 'ready', targetRoth: roth });
+    expect(suggestionAvailability(page({}), couple, 'toy')).toEqual({ kind: 'ready', targetRoth: roth });
   });
 
   it('explains that no own Roth IRA is on file', () => {
-    expect(suggestionAvailability(page({ rothIraAccounts: [] }))).toEqual({
+    expect(suggestionAvailability(page({ rothIraAccounts: [] }), couple, 'toy')).toEqual({
       kind: 'unavailable',
       reason: 'no-roth-ira',
     });
@@ -149,16 +149,41 @@ describe('suggestionAvailability', () => {
 
   it('explains that no retirement year falls before the RMD age', () => {
     // Born 1966: the RMD trigger age is 75, so 2041 is the first year past it.
-    expect(suggestionAvailability(page({ retirementYear: 2041 }))).toEqual({
+    expect(suggestionAvailability(page({ retirementYear: 2041 }), couple, 'toy')).toEqual({
       kind: 'unavailable',
       reason: 'no-retirement-window',
     });
   });
 
-  it('declines married filing separately, ahead of the other reasons', () => {
-    expect(suggestionAvailability(page({ filingStatus: 'MFS', rothIraAccounts: [] }))).toEqual({
-      kind: 'unavailable',
-      reason: 'separate-filing',
+  describe('a scenario whose filing plan files separate returns', () => {
+    const separate = toyProjection({
+      couple: true,
+      overrides: {
+        taxFilingPlan: {
+          kind: 'separate',
+          units: [
+            { memberId: 'primary', filingStatus: 'MFS', householdSize: 1 },
+            { memberId: 'secondary', filingStatus: 'MFS', householdSize: 1 },
+          ],
+        },
+      },
+    });
+
+    it('declines, ahead of the other reasons', () => {
+      expect(suggestionAvailability(page({ rothIraAccounts: [] }), separate, 'toy')).toEqual({
+        kind: 'unavailable',
+        reason: 'separate-filing',
+      });
+    });
+
+    it('declines on page data built from the scenario, whose scalar filing status is never MFS', () => {
+      const built = buildRothBETRPageData(separate);
+      if (built === null) throw new Error('separate-filing page data is null');
+      expect(built.ctx.filingStatus).not.toBe('MFS');
+      expect(suggestionAvailability(built, separate, 'toy')).toEqual({
+        kind: 'unavailable',
+        reason: 'separate-filing',
+      });
     });
   });
 });

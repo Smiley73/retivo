@@ -76,7 +76,10 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
       }),
     [scenarios, accounts, balances, members, ssBenefits, expenses, incomeStreams],
   );
-  const availability = useMemo(() => suggestionAvailability(pageData), [pageData]);
+  const availability = useMemo(
+    () => suggestionAvailability(pageData, { scenarios, members }, selectedScenarioId),
+    [pageData, scenarios, members, selectedScenarioId],
+  );
   const deathAges = useMemo(
     () => describeDeathAges(resolveAssumedDeathAges(scenarios, selectedScenarioId, members), members),
     [scenarios, selectedScenarioId, members],
@@ -188,6 +191,14 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
             {table?.kind === 'rows' && (
               <RothSuggestionTable rows={table.rows} leftoverTaxPct={leftoverTaxPct} />
             )}
+            {/* Always mounted so a screen reader hears the text arrive; the other
+                outcomes carry their own Alerts. */}
+            <div aria-live="polite" className="sr-only">
+              {table?.kind === 'rows' &&
+                `Comparison finished: ${table.rows.length} ${
+                  table.rows.length === 1 ? 'plan' : 'plans'
+                } listed below.`}
+            </div>
           </>
         )}
       </Card>

@@ -23,6 +23,7 @@ import { DEFAULT_LIFE_EXPECTANCY_AGE } from '../../db/types';
 import { formatCurrency } from '../../lib/format-currency';
 import { idVersionSignature } from '../../lib/aggregate-signature';
 import { memberLabel } from '../../lib/expense-format';
+import { resolveFilingPlanForYear } from '../../lib/filing-status';
 import { conversionWindow } from '../../lib/roth-suggestion/ladder';
 import { rankedOrder } from '../../lib/roth-suggestion/ranking';
 import type {
@@ -62,13 +63,40 @@ export type SuggestionAvailability =
   | { readonly kind: 'ready'; readonly targetRoth: AccountOption }
   | { readonly kind: 'unavailable'; readonly reason: SuggestionUnavailableReason };
 
+/** True when the scenario's saved filing plan files two returns while both
+ *  spouses are alive: the search's own test (`resolveYearFacts`), read from the
+ *  same resolver. The page's `ctx.filingStatus` cannot say so, since the legacy
+ *  scalar it is built from never names married filing separately. */
+function filesSeparateReturns(
+  data: Pick<RothSuggestionData, 'scenarios' | 'members'>,
+  selectedScenarioId: string,
+  taxYear: number,
+): boolean {
+  const taxFilingPlan = resolveScenario(selectedScenarioId, [...data.scenarios]).taxFilingPlan;
+  if (taxFilingPlan === undefined) return false;
+  const resolution = resolveFilingPlanForYear({
+    taxFilingPlan,
+    hasSecondaryMember: data.members.some((m) => !m.payload.isPrimary),
+    primaryAlive: true,
+    secondaryAlive: true,
+    taxYear,
+  });
+  return resolution.kind === 'resolved' && resolution.taxUnits.length > 1;
+}
+
 /** Whether a search can run on this page's data, and why not. Separate filing
  *  is checked first: it cannot be fixed by adding an account. The conversion
  *  window is the search's own (`conversionWindow`), so the page and the search
  *  agree on when it is empty. */
-export function suggestionAvailability(pageData: RothBETRPageData): SuggestionAvailability {
+export function suggestionAvailability(
+  pageData: RothBETRPageData,
+  data: Pick<RothSuggestionData, 'scenarios' | 'members'>,
+  selectedScenarioId: string,
+): SuggestionAvailability {
   const { ctx } = pageData;
-  if (ctx.filingStatus === 'MFS') return { kind: 'unavailable', reason: 'separate-filing' };
+  if (filesSeparateReturns(data, selectedScenarioId, ctx.currentCalendarYear)) {
+    return { kind: 'unavailable', reason: 'separate-filing' };
+  }
   const window = conversionWindow({
     primaryBirthYear: ctx.ownerBirthYear,
     retirementYear: ctx.retirementYear,
