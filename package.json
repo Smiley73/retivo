@@ -21,7 +21,7 @@
     "test:e2e": "pnpm --filter @retirement/web test:e2e",
     "knip": "knip",
     "depcruise": "depcruise --config .dependency-cruiser.cjs apps/web/src apps/api/src apps/mcp-bridge/src packages/assistant-protocol/src",
-    "test:contracts": "RUN_CONTRACT_TESTS=1 node --test scripts/test/lambda-artifact-contract.test.mjs scripts/test/schema-ahead-guard.test.mjs scripts/test/assistant-bridge-bundle-contract.test.mjs",
+    "test:contracts": "RUN_CONTRACT_TESTS=1 node --test scripts/test/lambda-artifact-contract.test.mjs scripts/test/schema-ahead-guard.test.mjs scripts/test/assistant-bridge-bundle-contract.test.mjs scripts/test/bridge-artifact-contract.test.mjs",
     "test:scripts": "node --test \"scripts/test/**/*.test.mjs\" \"apps/api/scripts/**/*.test.mjs\"",
     "emu:up": "docker compose --env-file .env -f infrastructure/docker-compose.yml up -d",
     "emu:down": "docker compose --env-file .env -f infrastructure/docker-compose.yml down",

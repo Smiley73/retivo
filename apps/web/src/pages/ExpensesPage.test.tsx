@@ -232,7 +232,7 @@ describe('ExpensesPage — empty state', () => {
     await waitFor(() => {
       const addCtas = screen
         .getAllByRole('button')
-        .filter((b) => /add/i.test(b.textContent ?? ''));
+        .filter((b) => /add expense/i.test(b.textContent ?? ''));
       expect(addCtas).toHaveLength(1);
     });
     const addBtn = screen.getByRole('button', { name: 'Add expense' });
@@ -642,5 +642,66 @@ describe('ExpensesPage — focus restore', () => {
     await waitFor(() => {
       expect(capturedLocation).toBe('/expenses/new');
     });
+  });
+});
+
+describe('ExpensesPage — Add Medicare premiums', () => {
+  beforeEach(async () => {
+    setupContexts();
+    await seedMember();
+    await seedCategory();
+    const medical: Aggregate<ExpenseCategoryPayload> = {
+      id: 'cat-medical',
+      householdId: HH,
+      aggregateType: 'expenseCategory',
+      schemaVersion: 2,
+      version: 1,
+      updatedAt: '2026-05-01T00:00:00Z',
+      deviceId: 'dev-1',
+      payload: { name: 'Medical', isMedical: true },
+    };
+    await putAggregate('expenseCategory', medical);
+  });
+
+  afterEach(async () => {
+    await clearAllStores();
+    vi.clearAllMocks();
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('opens the preview from the header action', async () => {
+    renderPageAt('/expenses');
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Add Medicare premiums' }),
+    );
+    expect(
+      await screen.findByRole('dialog', { name: 'Add Medicare premiums' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Alex Medicare Part B' })).toBeChecked();
+  });
+
+  it('does not open the preview on a plain load', async () => {
+    renderPageAt('/expenses');
+    await screen.findByText(/No expenses yet/i);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('opens the preview from the entry-point parameter and strips it from the URL', async () => {
+    // The real URL carries the parameter so the strip has something to remove;
+    // MemoryRouter never writes to window.location.
+    window.history.replaceState(null, '', '/expenses?medicarePremiums=1');
+    renderPageAt('/expenses?medicarePremiums=1');
+    expect(
+      await screen.findByRole('dialog', { name: 'Add Medicare premiums' }),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.location.search).not.toContain('medicarePremiums');
+    });
+  });
+
+  it('stays closed after Cancel even though the router still holds the parameter', async () => {
+    renderPageAt('/expenses?medicarePremiums=1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });

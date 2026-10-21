@@ -367,6 +367,22 @@ Two optional extras:
 - For a medical expense, **Can be paid tax-free from an HSA** says whether the
   expense is paid from an HSA.
 
+**Add Medicare premiums** opens a preview with a Part B row and a Part D row for
+each household member who has a birthdate. Each row shows the built-in monthly
+amount from the Centers for Medicare & Medicaid Services (the standard Part B
+premium and the national base Part D premium, for the year the dialog names), a
+switch to include it and an amount you can edit. Nothing is saved until you
+confirm. Confirming adds one ordinary monthly, essential Medical expense per
+row you kept, named like "John Medicare Part B", that can be paid from an HSA
+and runs from that person's 65th birthday for life. Like any Medical expense, it
+grows with the scenario's medical inflation rate. A row whose premium looks
+already entered (an expense with "Medicare", "Part B" or "Part D" in its name)
+reads **Looks already entered**, names that expense and starts switched off; a
+row cannot be added when an expense already has its exact name. Your actual Part
+D plan price, Medigap and Medicare Advantage premiums stay yours to enter as
+Medical expenses. The same preview opens from the "Medicare premiums are
+missing" note under the Projections charts and from the Health coverage card.
+
 ### Expense Categories
 
 The categories expenses are grouped under. You can add, rename and delete them;
@@ -468,6 +484,8 @@ What the cards do:
   rate; an entered price is used as entered.
   Medicaid and state rules are not modeled; the projections show a note when a
   year's income is at or below 138% of the poverty line.
+  A link opens the **Add Medicare premiums** preview on the Expenses page, and
+  asks before leaving if you have unsaved changes.
 - **Pre-retirement Roth conversions**: a **Roth conversion** moves money from a
   pre-tax account into a Roth account and you pay income tax on it now. This card
   models doing that during your working years, and its page is headed "Roth
@@ -685,10 +703,13 @@ is saved.
 
 1. Turn on **Allow AI assistants on this device**. This is stored in this browser
    only.
-2. Copy the command for your assistant (there is one each for Claude Code
-   and Codex) and run it where the assistant runs. It adds a small helper
-   program to the assistant. The helper listens only on your computer and does
-   nothing until you approve.
+2. Copy the download command from the card and run it in a terminal where the
+   assistant runs. It saves a small helper program from this copy of RETIVO to
+   your computer after checking its checksum. Then copy the command for your
+   assistant (there is one each for Claude Code and Codex) and run it too. It adds
+   the helper to the assistant. The helper listens only on your computer and does
+   nothing until you approve. To update the helper later, run the download
+   command again.
 3. Ask the assistant something about your plan. The assistant's tools exist from
    the start, but until you pair they answer with a one-time pairing code and
    where to type it instead of with data.

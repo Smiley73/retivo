@@ -5,13 +5,18 @@
  * announcement, plus the shared-component axe rule (AGENTS mandate).
  */
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render as renderBare, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { BalanceProjectionEstimateNote } from './BalanceProjectionEstimateNote';
 import { MonteCarloMethodologyModal } from './MonteCarloMethodologyModal';
 import { expectNoA11yViolations } from '../test/a11y';
 import { ROUGH_BENCHMARK_ASSUMPTIONS } from '../lib/aca-ptc';
+
+// The missing-premium paragraph links to the Expenses page, so the note needs a router.
+const render = (ui: React.ReactElement): ReturnType<typeof renderBare> =>
+  renderBare(<MemoryRouter>{ui}</MemoryRouter>);
 
 describe('BalanceProjectionEstimateNote', () => {
   it('discloses that tax/IRMAA/ACA figures are balance-affecting estimates', () => {
@@ -257,6 +262,30 @@ describe('BalanceProjectionEstimateNote', () => {
         isMcBasisActive
       />,
     );
+    await expectNoA11yViolations(container);
+  });
+
+  it('links the always-on health paragraph to the Add Medicare premiums helper in words only', () => {
+    render(<BalanceProjectionEstimateNote />);
+    expect(screen.getByRole('note')).toHaveTextContent(
+      /Expenses page can add the standard Part B and Part D\s+amounts for you/i,
+    );
+    expect(screen.queryByRole('link', { name: 'Add Medicare premiums' })).toBeNull();
+  });
+
+  it('shows the Add Medicare premiums link only when the base premium is missing', () => {
+    const { unmount } = render(<BalanceProjectionEstimateNote />);
+    expect(screen.queryByRole('link', { name: 'Add Medicare premiums' })).toBeNull();
+    unmount();
+    render(<BalanceProjectionEstimateNote medicareBasePremiumMissing />);
+    expect(screen.getByRole('link', { name: 'Add Medicare premiums' })).toHaveAttribute(
+      'href',
+      '/expenses?medicarePremiums=1',
+    );
+  });
+
+  it('the missing-premium link renders with no a11y violations', async () => {
+    const { container } = render(<BalanceProjectionEstimateNote medicareBasePremiumMissing />);
     await expectNoA11yViolations(container);
   });
 });

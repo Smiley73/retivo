@@ -196,6 +196,7 @@ compute_build_id() {
 # address the CSP allows. Unlike betaFeatures, a MISSING key means OFF: the
 # build gets no VITE_ASSISTANT_BRIDGE_PORT at all (not an empty one). Any other
 # `pulumi config get` failure, or a value outside the range, aborts the deploy.
+# The same key makes the build serve the bridge itself (stage_bridge_bundle).
 #
 # validate_beta_features <value> — the shared "is this a legal
 # VITE_BETA_FEATURES value" check: `all`, `none`, or a comma-separated list of
@@ -282,6 +283,22 @@ resolve_assistant_bridge_port() {
   echo "$digits"
 }
 
+# stage_bridge_bundle — build the local AI assistant bridge as one file and put it
+# into the SPA's dist/ (retivo-mcp-bridge.mjs, its notices, and bridge.json with
+# its SHA-256), so the deploy scripts' catch-all `aws s3 sync` of dist/ uploads it
+# with the rest of the site. The Settings card tells the person to download the
+# file from this site, check its checksum and have the agent run it with node. The
+# protocol package is rebuilt first because the bridge embeds it. Output goes to
+# the bridge's default build/ directory: an ambient BRIDGE_BUNDLE_OUTPUT_DIR (the
+# contract test's hook) must not redirect a real deploy.
+stage_bridge_bundle() {
+  echo
+  echo "==> Building the bridge file this site serves (pnpm --filter @retirement/mcp-bridge build)"
+  ( cd "$REPO_ROOT" && env -u BRIDGE_BUNDLE_OUTPUT_DIR -u BRIDGE_BUNDLE_METAFILE \
+      pnpm --filter @retirement/assistant-protocol --filter @retirement/mcp-bridge run build )
+  ( cd "$REPO_ROOT" && node scripts/stage-bridge-bundle.mjs apps/mcp-bridge/build apps/web/dist )
+}
+
 # build_spa <stack> — build the SPA with the beta features chosen by the
 # stack's `retivo:betaFeatures` config (see resolve_beta_features: a genuinely
 # absent key defaults to `all`) and, only when the stack sets
@@ -308,4 +325,9 @@ build_spa() {
   # -u: an ambient VITE_ASSISTANT_BRIDGE_PORT in the operator's shell must not
   # reach a build whose stack leaves the connector off (its CSP would forbid it).
   ( cd "$REPO_ROOT" && env -u VITE_ASSISTANT_BRIDGE_PORT "${spa_env[@]}" pnpm --filter @retirement/web build )
+  # Only a stack that carries the bridge port serves the bridge file, after the
+  # web build (which empties dist/). With the connector off, dist/ is unchanged.
+  if [[ -n "$bridge_port" ]]; then
+    stage_bridge_bundle
+  fi
 }

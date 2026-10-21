@@ -14,7 +14,7 @@
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AcaCoverageCard,
@@ -506,5 +506,70 @@ describe('ACA coverage — a11y smoke', () => {
     );
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
     await expectNoA11yViolations(container);
+  });
+});
+
+describe('AcaCoverageModal — Medicare premiums link', () => {
+  const LocationProbe: React.FC = () => {
+    const loc = useLocation();
+    return <div data-testid="location">{`${loc.pathname}${loc.search}`}</div>;
+  };
+
+  function renderWithRoutes(scenarioId: string): void {
+    const scenario = makeScenario(scenarioId);
+    render(
+      <MemoryRouter initialEntries={['/scenarios/x']}>
+        <Routes>
+          <Route
+            path="/scenarios/x"
+            element={
+              <AcaCoverageModal
+                open
+                scenario={scenario}
+                scenarios={[scenario]}
+                householdId={HH}
+                members={MEMBERS}
+                onClose={vi.fn()}
+              />
+            }
+          />
+          <Route path="/expenses" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it('navigates straight to the preview when the draft is clean', async () => {
+    renderWithRoutes('sc-link-clean');
+    await userEvent.click(
+      await screen.findByRole('link', { name: 'Add Part B and Part D premiums' }),
+    );
+    expect(await screen.findByTestId('location')).toHaveTextContent(
+      '/expenses?medicarePremiums=1',
+    );
+  });
+
+  it('asks Stay or Leave when the draft is dirty, and only Leave navigates', async () => {
+    renderWithRoutes('sc-link-dirty');
+    await userEvent.click(
+      await screen.findByRole('switch', { name: /Jane is on the ACA Marketplace/i }),
+    );
+    await userEvent.click(
+      screen.getByRole('link', { name: 'Add Part B and Part D premiums' }),
+    );
+    expect(await screen.findByText(/You have unsaved changes/)).toBeInTheDocument();
+    expect(screen.queryByTestId('location')).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stay' }));
+    await waitFor(() => expect(screen.queryByText(/You have unsaved changes/)).toBeNull());
+    expect(screen.queryByTestId('location')).toBeNull();
+
+    await userEvent.click(
+      screen.getByRole('link', { name: 'Add Part B and Part D premiums' }),
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    expect(await screen.findByTestId('location')).toHaveTextContent(
+      '/expenses?medicarePremiums=1',
+    );
   });
 });

@@ -682,7 +682,7 @@ export function buildHealthAssumptions(
       // prices from, so a recalibration can never leave this disclosure quoting
       // a number the projection no longer charges.
       `The Marketplace subsidy is a rough estimate. Unless you entered a benchmark plan price, the projection prices a benchmark plan at $${ROUGH_BENCHMARK_ASSUMPTIONS.baseMonthlyDollars.toLocaleString('en-US')} a month for a ${ROUGH_BENCHMARK_ASSUMPTIONS.baseAge}-year-old, rising ${Math.round(ROUGH_BENCHMARK_ASSUMPTIONS.ageGrowthRate * 100)}% for each year of age, counted for each covered person and only for the months they are covered. From ${ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows every year at the scenario\u2019s medical inflation rate. A benchmark plan price you entered is used exactly as entered. It is not a quote from an exchange.`,
-      'Only the Medicare income-related monthly adjustment amount (IRMAA) is estimated. The base Medicare premium and any Medigap, Medicare Advantage, or drug-plan premiums must be entered as Medical expenses; if they are missing, this plan understates your health costs.',
+      'Only the Medicare income-related monthly adjustment amount (IRMAA) is estimated. The base Medicare premium and any Medigap, Medicare Advantage, or drug-plan premiums must be entered as Medical expenses (the Expenses page can add the standard Part B and Part D amounts for you, and your actual Part D plan price, Medigap and Medicare Advantage premiums stay yours to enter); if they are missing, this plan understates your health costs.',
       'Health coverage figures are planning estimates, not an eligibility determination or an offer of coverage.',
     ],
   };
