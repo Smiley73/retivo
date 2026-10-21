@@ -7,7 +7,7 @@
  * and that every strategy renders the chart + sub-table. A11y assertion per
  * the project shared-component rule.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
@@ -75,6 +75,18 @@ async function openTaxBurdenInfo(): Promise<HTMLElement> {
   const name = /About the Tax & Health-Cost Burden chart/i;
   await user.click(screen.getByRole('button', { name }));
   return screen.getByRole('dialog', { name });
+}
+
+/** The summary tile (a label div plus a value div) whose label is `label`. The
+ *  year-by-year table can repeat a label as a column header, so pick the tile
+ *  by its shape rather than by text alone. */
+function summaryTile(label: string): HTMLElement {
+  const tile = screen
+    .getAllByText(label)
+    .map((el) => el.parentElement)
+    .find((el) => el?.children.length === 2 && el.firstElementChild?.textContent === label);
+  if (tile === undefined || tile === null) throw new Error(`no summary tile labelled ${label}`);
+  return tile;
 }
 
 const NO_SIGNAL_COPY = /No taxable retirement events in this projection/;
@@ -270,6 +282,45 @@ describe('BalanceProjectionCharts', () => {
     expect(screen.getByText('$16k')).toBeInTheDocument();
     expect(screen.getByText('$3k')).toBeInTheDocument();
     expect(screen.getByText('$5k')).toBeInTheDocument();
+  });
+
+  it('renders the credit applied to premiums tile with its lifetime total (deterministic basis)', () => {
+    // 2030: $5,000 credit of which $3,000 lowered the withdrawal; 2031: another
+    // $1,000 of $2,000. The tile sums the part applied ($4,000), distinct from
+    // the ACA health credits tile ($7,000).
+    const years = [
+      drawdownYear(2030, { acaPtcSubsidyCents: 500_000, acaCreditAppliedToPremiumsCents: 300_000 }),
+      drawdownYear(2031, { acaPtcSubsidyCents: 200_000, acaCreditAppliedToPremiumsCents: 100_000 }),
+    ];
+    render(
+      <ThemeProvider>
+        <BalanceProjectionCharts
+          {...baseProps({ planned: method(years), twr: null })}
+        />
+      </ThemeProvider>,
+    );
+    expect(within(summaryTile('Credit applied to premiums')).getByText('$4k')).toBeInTheDocument();
+    expect(within(summaryTile('ACA health credits')).getByText('$7k')).toBeInTheDocument();
+  });
+
+  it('renders the credit applied to premiums tile under an MC basis', () => {
+    const years = [
+      drawdownPhaseYear(2030, {
+        acaPtcSubsidyCents: 500_000,
+        acaCreditAppliedToPremiumsCents: 300_000,
+      }),
+    ];
+    render(
+      <ThemeProvider>
+        <BalanceProjectionCharts
+          {...baseProps({ planned: method(years), twr: null })}
+          isMcBasisActive
+          resolvedLabel="Typical"
+        />
+      </ThemeProvider>,
+    );
+    expect(within(summaryTile('Credit applied to premiums')).getByText('$3k')).toBeInTheDocument();
+    expect(within(summaryTile('ACA health credits')).getByText('$5k')).toBeInTheDocument();
   });
 
   it('keeps the death-year tax-burden row FULL and drops rows past the death year', () => {

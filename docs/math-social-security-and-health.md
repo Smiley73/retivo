@@ -491,8 +491,10 @@ ACA health credits shown there, so they are not added a second time.
 
 The stress test funds the whole IRMAA surcharge, where the projection funds only
 the part not withheld from Social Security, so step 1 uses the whole surcharge
-there. Everything else is the same, and for the same flat household the two
-agree to the cent. Medical expenses are taken before any spending cut from the
+there. Both cap the line at the year's draw, which is the sum of the months in
+which spending is above income, so a year with a few expensive months can carry
+the whole line. Everything else is the same, and for the same flat household the
+two agree to the cent. Medical expenses are taken before any spending cut from the
 downturn guardrail, because the premium is the amount you entered.
 
 ### Built-in figures and years

@@ -53,7 +53,9 @@
  *  - The credit applied to premiums rides the same seams: the per-year medical
  *    cap sits on `TaxPathContext` beside `nominalExpenseByYear`, the funded line
  *    accumulates on `PathTaxAcc` and is stamped on the captured rows from there;
- *    the minimum itself lives in `credit-applied-to-premiums.ts`.
+ *    the minimum itself lives in `credit-applied-to-premiums.ts`, and so does
+ *    the monthly spread of a negative tax draw (proportional to each month's
+ *    need) the strategy path folds into the expense slice.
  *  - The taxable-income accumulator (`advanceMcTaxableIncomeState`) runs ONLY in
  *    the representative display post-pass (`monte-carlo-tax-burden.ts`), never
  *    in the funded per-path loop; its math lives in the shared deterministic
@@ -134,6 +136,7 @@ export { priorYearTaxBases } from './monte-carlo-tax.js';
 import type { RothBasisCarrier } from './balance-projection-runner-roth-basis.js';
 import type { StepOutcome } from './projection-engine/kernel.js';
 import { buildMcFillConversionHook } from './monte-carlo-fill-conversion.js';
+import { foldYearDrawIntoExpense, sumPositiveNeed } from './credit-applied-to-premiums.js';
 // Sharding: the per-path loop lives in the sibling
 // `monte-carlo-shard.ts`, which imports `runOnePath` back as a value. All
 // cross-module references are call-site bindings (never module-eval-time), so
@@ -433,6 +436,11 @@ export interface TaxPathContext {
    *  row, before any guardrail scaling or tax fold): the cap on the ACA credit
    *  applied to premiums. */
   readonly nominalMedicalExpenseByYear: Float64Array;
+  /** Per-year draw need before any tax is folded in (the sum of the positive
+   *  monthly needs the strategy engine draws), indexed like `taxDrawByYear`: the
+   *  cap on the credit applied to premiums. Absent on the no-ledger kernel path,
+   *  where the year's net expense stands in. */
+  readonly drawNeedByYear?: Float64Array;
   /** The run's precomputed per-year survivor state (from
    *  `RunContext.survivorStateByYear`), `null` when no `taxContext` was
    *  supplied for the run. Index = year offset from `firstYear`. */
@@ -670,6 +678,8 @@ export function newTaxPathState(
   // metadata + the precomputed per-year survivor state, both hoisted out of
   // the per-path build.
   ctx: RunContext,
+  // The per-year pre-fold draw need (strategy path only).
+  drawNeedByYear?: Float64Array,
 ): TaxPathContext | null {
   if (input.taxContext === undefined) return null;
   return {
@@ -693,6 +703,7 @@ export function newTaxPathState(
       seedMcDesignatedRothPool(input.taxContext.rothOrderedProfile) ?? null,
     nominalExpenseByYear,
     nominalMedicalExpenseByYear,
+    ...(drawNeedByYear !== undefined ? { drawNeedByYear } : {}),
     survivorStateByYear: ctx.survivorStateByYear,
   };
 }
@@ -1380,6 +1391,9 @@ export function fillStrategyYearTax(
       // The windowed nominal expense at this year-END step.
       nominalExpense: taxState.nominalExpenseByYear[y] ?? 0,
       medicalExpenseDollars: taxState.nominalMedicalExpenseByYear[y] ?? 0,
+      ...(taxState.drawNeedByYear !== undefined
+        ? { drawNeedDollars: taxState.drawNeedByYear[y] ?? 0 }
+        : {}),
       otherIncome: input.incomeByYear[y] ?? 0,
       // The conversion is ADDITIONAL ordinary income for MAGI — it drives only the
       // ring (conversion-inclusive MAGI), never the funded same-year cashflow.
@@ -1478,16 +1492,38 @@ export function fillStrategyYearTax(
 /** Fold the per-year same-year tax draw into the SLICED retirement-phase
  *  expense array the strategy engine actually receives. `expense` is
  *  retirement-year-relative (index 0 = first retirement month), so year `y`'s
- *  monthly tax lands at `i*12 + m` for `i` = the retirement-relative year. */
+ *  monthly tax lands at `i*12 + m` for `i` = the retirement-relative year. A
+ *  negative draw (the credit applied to premiums) follows each month's need. */
 function foldTaxIntoStrategyExpense(
   expense: Float64Array,
+  income: Float64Array,
   taxDrawByYear: number[],
   preRetirementYears: number,
 ): void {
-  for (let i = 0; i < expense.length; i += 1) {
-    const y = preRetirementYears + Math.floor(i / 12);
-    expense[i] += (taxDrawByYear[y] ?? 0) / 12;
+  for (let start = 0; start < expense.length; start += 12) {
+    const y = preRetirementYears + start / 12;
+    foldYearDrawIntoExpense(
+      expense, income, start, Math.min(start + 12, expense.length), taxDrawByYear[y] ?? 0,
+    );
   }
+}
+
+/** Per-year draw need before any tax is folded in, indexed by the full-horizon
+ *  year like `taxDrawByYear`: the sum of the positive monthly needs of the
+ *  (guardrail-scaled) retirement slice. Years before retirement stay 0. */
+function drawNeedByYearFromSlice(
+  expense: Float64Array,
+  income: Float64Array,
+  preRetirementYears: number,
+  horizonYears: number,
+): Float64Array {
+  const needByYear = new Float64Array(horizonYears);
+  for (let start = 0; start < expense.length; start += 12) {
+    const y = preRetirementYears + start / 12;
+    if (y >= horizonYears) break;
+    needByYear[y] = sumPositiveNeed(expense, income, start, Math.min(start + 12, expense.length));
+  }
+  return needByYear;
 }
 
 /** Reset the per-path Roth-basis carrier IN PLACE before the pass-2 tax
@@ -2085,6 +2121,9 @@ function runOnePathViaStrategyEngine(
   const taxState = newTaxPathState(
     input, kernelOut, stepCount, horizonYears, taxNominalExpenseByYear,
     nominalMedicalExpenseByYear, ctx,
+    // The guardrail has scaled `expense` in place on pass 1 and the tax is not
+    // folded in yet: this is the draw both passes make before the tax.
+    drawNeedByYearFromSlice(expense, income, preRetirementYears, horizonYears),
   );
   let years = pass1.years;
   let depletionYear = pass1.depletionYear;
@@ -2109,7 +2148,11 @@ function runOnePathViaStrategyEngine(
       undefined,
       priorPreTaxByOwnerByYearIndex,
     );
-    foldTaxIntoStrategyExpense(expense, taxState.taxDrawByYear, preRetirementYears);
+    foldTaxIntoStrategyExpense(expense, income, taxState.taxDrawByYear, preRetirementYears);
+    // The credit applied to premiums is what pass 1 folded into the expense: it
+    // is what lowered pass 2's draw. The pass-2 fill taxes the lowered draw and
+    // would restate it from a lower MAGI, a figure that never funded anything.
+    const creditFundedByYear = taxState.acc.credit.slice();
     // Restart §408A ordering from full basis before the pass-2 tax fill.
     reseedRothBasisCarrier(taxState);
     // Reset the per-path accumulators + tax draw so the pass-2 fill repopulates.
@@ -2212,6 +2255,9 @@ function runOnePathViaStrategyEngine(
       // here: this branch only runs when fillConversionHook is defined).
       sharedQcdRmdOffsetByYearIndex,
     );
+    for (let y = 0; y < creditFundedByYear.length; y += 1) {
+      taxState.acc.credit[y] = creditFundedByYear[y];
+    }
   }
 
   // Stamp priorPreEnd on the first drawdown row so that
@@ -2538,8 +2584,14 @@ function runOnePathKernel(
 
     // Augment the expense series with the estimated monthly tax cost so pass 2
     // funds it in-step. `step.expense` is a fresh Float64Array per path — safe to mutate.
-    for (let i = retirementStepIdx; i < stepCount; i += 1) {
-      step.expense[i] += taxState.taxDrawByYear[Math.floor(i / 12)] / 12;
+    for (let yearStart = Math.floor(retirementStepIdx / 12) * 12; yearStart < stepCount; yearStart += 12) {
+      foldYearDrawIntoExpense(
+        step.expense,
+        step.income,
+        Math.max(yearStart, retirementStepIdx),
+        Math.min(yearStart + 12, stepCount),
+        taxState.taxDrawByYear[yearStart / 12],
+      );
     }
 
     // Pass 2: re-run the kernel with tax folded into expenses.

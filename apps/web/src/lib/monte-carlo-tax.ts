@@ -44,7 +44,8 @@
  * (monte-carlo-tax.test.ts), so refactors here are checked against a frozen
  * numeric baseline. `assembleMcTaxResult` applies the credit applied to
  * premiums because it needs the very tax result the per-year apply builds; the
- * minimum itself lives in `credit-applied-to-premiums.ts`.
+ * minimum itself lives in `credit-applied-to-premiums.ts`, and so does the
+ * monthly spread of the year's draw that the strategy path folds back in.
  * Trigger: a change adding 5 or more lines here must either refactor the file
  * back under 800 lines or re-justify this exception in this note.
  */
@@ -807,6 +808,13 @@ export interface PerYearTaxArgs {
    * Fill-conversion funding solves and the display post-pass omit it).
    */
   readonly medicalExpenseDollars?: number;
+  /**
+   * The year's draw need before any tax is folded in, in nominal dollars: the
+   * sum of the positive monthly needs the strategy engine will actually draw,
+   * the cap on the ACA credit applied to premiums. Absent → the year's net
+   * `nominalExpense − SS − otherIncome` stands in (the no-ledger kernel path).
+   */
+  readonly drawNeedDollars?: number;
   /** Non-SS non-portfolio ordinary income for this year. Offsets the year's
    *  spendable expense (reduces the computed drawdown) AND adds to taxable
    *  ordinary income. */
@@ -1101,7 +1109,13 @@ export function applyPerYearTaxForPathWithConversion(
     rothEarnings.additionalTaxBaseDollars,
   );
 
-  const result = assembleMcTaxResult(taxResult, drawdown, penaltyDollars, args.medicalExpenseDollars);
+  const result = assembleMcTaxResult(
+    taxResult,
+    drawdown,
+    penaltyDollars,
+    args.medicalExpenseDollars,
+    args.drawNeedDollars,
+  );
 
   // The ring sample is conversion-INCLUSIVE so Y+2 IRMAA is funded. With no
   // conversion this is the funded MAGI; with a conversion, recompute MAGI on the
@@ -2178,6 +2192,7 @@ function assembleMcTaxResult(
   drawdown: number,
   penaltyDollars = 0,
   medicalExpenseDollars?: number,
+  drawNeedDollars?: number,
 ): McTaxYearResult {
   const fedTax = centsToDollars(taxResult.federalTaxCents);
   const irmaa = centsToDollars(taxResult.irmaaSurchargeCents);
@@ -2199,7 +2214,7 @@ function assembleMcTaxResult(
 
   // Credit applied to premiums: the excess over federal tax and the whole
   // surcharge lowers this year's draw, up to the year's Medical expenses and the
-  // draw (spending draw plus the tax need). The stress test funds the whole
+  // draw (the year's draw need, plus the tax need). The stress test funds the whole
   // surcharge, so its offset uses the whole surcharge, where the deterministic
   // engine's uses only the IRMAA cash part.
   const creditCents =
@@ -2212,7 +2227,7 @@ function assembleMcTaxResult(
             taxResult.federalTaxCents + taxResult.irmaaSurchargeCents,
           ),
           medicalCents: dollarsToCents(medicalExpenseDollars),
-          remainingNeedCents: dollarsToCents(drawdown + taxNeedDollars),
+          remainingNeedCents: dollarsToCents((drawNeedDollars ?? drawdown) + taxNeedDollars),
         });
   const acaCreditAppliedToPremiums = centsToDollars(creditCents);
   const taxCashflowDollars = taxNeedDollars + penaltyDollars - acaCreditAppliedToPremiums;

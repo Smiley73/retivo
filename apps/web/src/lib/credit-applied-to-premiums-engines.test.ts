@@ -73,6 +73,26 @@ function expense(id: string, categoryId: string, amount: number): Aggregate<Expe
   };
 }
 
+/** A monthly expense: for life, or for its first `months` retirement months only
+ *  (an uneven year, as a one-off bill or a benefit that starts mid-year makes). */
+function monthlyExpense(
+  id: string,
+  categoryId: string,
+  monthly: number,
+  months?: number,
+): Aggregate<ExpensePayload> {
+  return {
+    ...BASE,
+    id,
+    aggregateType: 'expense',
+    payload: {
+      name: id, categoryId, amount: monthly, frequency: 'monthly', classification: 'essential',
+      start: { kind: 'retirementStart' },
+      end: months === undefined ? { kind: 'lifetime', whose: 'last' } : { kind: 'durationFromStart', months },
+    },
+  };
+}
+
 /** A fixed pension with no COLA, paid from the first retirement month: ordinary
  *  income for case E. */
 function pension(annual: number): Aggregate<IncomeStreamPayload> {
@@ -94,6 +114,14 @@ interface Household {
   /** Everything else, dollars a year. */
   readonly other: number;
   readonly pensionAnnual?: number;
+  /** Extra non-medical monthly spending in the first `months` months only. */
+  readonly shortMonthly?: { readonly amount: number; readonly months: number };
+  /** Medical dollars a month for life, instead of the yearly `medical` row. */
+  readonly medicalMonthly?: number;
+  /** A pre-tax IRA instead of the Roth IRA (taxable draws). */
+  readonly preTax?: boolean;
+  /** Leave the plan with no Medical category, so no credit can be applied. */
+  readonly noMedicalCategory?: boolean;
 }
 
 function args(h: Household): RunBalanceProjectionArgs {
@@ -118,11 +146,14 @@ function args(h: Household): RunBalanceProjectionArgs {
     id: 'roth',
     aggregateType: 'account',
     payload: {
-      name: 'roth', type: 'RETIREMENT_ROTH_IRA', ownershipType: 'INDIVIDUAL', taxTreatment: 'ROTH',
+      name: 'roth',
+      type: h.preTax === true ? 'RETIREMENT_IRA' : 'RETIREMENT_ROTH_IRA',
+      ownershipType: 'INDIVIDUAL',
+      taxTreatment: h.preTax === true ? 'PRE_TAX' : 'ROTH',
       ownerId: 'm1', institution: 'V', notes: '', planningReturnPct: 0, active: true,
       plannedContributionPreTax: 0, plannedContributionPostTax: 0,
       assetMix: { stocksPct: 60, bondsPct: 30, cashPct: 10 },
-      rothIraFirstContributionTaxYear: 2015,
+      ...(h.preTax === true ? {} : { rothIraFirstContributionTaxYear: 2015 }),
     },
   };
   const balance: Aggregate<AccountBalancePayload> = {
@@ -151,9 +182,15 @@ function args(h: Household): RunBalanceProjectionArgs {
     members: [member()],
     ssBenefits: [ss],
     expenses: [
-      expense('medical', 'cat-medical', h.medical),
-      expense('living', 'cat-housing', h.other),
+      ...(h.medicalMonthly === undefined
+        ? [expense('medical', 'cat-medical', h.medical)]
+        : [monthlyExpense('medical', 'cat-medical', h.medicalMonthly)]),
+      ...(h.other > 0 ? [expense('living', 'cat-housing', h.other)] : []),
+      ...(h.shortMonthly === undefined
+        ? []
+        : [monthlyExpense('short', 'cat-housing', h.shortMonthly.amount, h.shortMonthly.months)]),
     ],
+    ...(h.noMedicalCategory === true ? { medicalCategoryIds: [] } : {}),
     incomeStreams: h.pensionAnnual === undefined ? [] : [pension(h.pensionAnnual)],
     todayYear: 2026,
     todayMonthIndex: 0,
@@ -219,23 +256,23 @@ describe('credit applied to premiums, deterministic engine', () => {
   });
 });
 
-describe('credit applied to premiums, deterministic versus Monte Carlo', () => {
-  /** One injected-flat path, zero CPI: the representative first retirement row. */
-  function mcFirstRow(h: Household) {
-    const input = runBalanceProjectionMc(args(h));
-    const steps = (input.horizonYear - input.firstYear + 1) * 12;
-    const summary = runMonteCarlo({
-      ...input,
-      pathCount: 1,
-      seed: 1,
-      injectedReturns: new Float64Array(steps),
-      injectedCpi: new Float64Array(steps),
-    });
-    const row = summary.representativeByBasis?.['mc-typical']?.years.find((y) => y.year === 2026);
-    if (row === undefined) throw new Error('expected a first retirement row');
-    return { row, summary };
-  }
+/** One injected-flat path, zero CPI: the representative first retirement row. */
+function mcFirstRow(h: Household) {
+  const input = runBalanceProjectionMc(args(h));
+  const steps = (input.horizonYear - input.firstYear + 1) * 12;
+  const summary = runMonteCarlo({
+    ...input,
+    pathCount: 1,
+    seed: 1,
+    injectedReturns: new Float64Array(steps),
+    injectedCpi: new Float64Array(steps),
+  });
+  const row = summary.representativeByBasis?.['mc-typical']?.years.find((y) => y.year === 2026);
+  if (row === undefined) throw new Error('expected a first retirement row');
+  return { row, summary };
+}
 
+describe('credit applied to premiums, deterministic versus Monte Carlo', () => {
   // The stress test rounds each month's expense base to the cent while the
   // deterministic series does not, so these households spend a whole number of
   // cents a month (annual figures divisible by 12) to compare to the cent.
@@ -331,5 +368,60 @@ describe('credit applied to premiums, Monte Carlo input', () => {
     for (const b of stressed.monthlyMedicalExpenseBucketsBase ?? []) expect(b.amount).toHaveLength(steps);
     expect(() => validateMonteCarloInput(stressed)).not.toThrow();
     expect(() => runMonteCarlo({ ...stressed, pathCount: 3, seed: 1 })).not.toThrow();
+  });
+});
+
+describe('credit applied to premiums, uneven months and the funded draw', () => {
+  it('uneven year: Monte Carlo lowers the draw by the whole line, as the deterministic engine does', () => {
+    // Jan-Jun spend 10,668 + 600 a month, Jul-Dec 600: the draw is 51,958 before
+    // the line, and only the six deficit months can carry it.
+    const h: Household = {
+      medical: 0, other: 0, medicalMonthly: 600, shortMonthly: { amount: 10_668, months: 6 },
+    };
+    const det = detRow(h);
+    const { row } = mcFirstRow(h);
+    expect(det.acaCreditAppliedToPremiumsCents).toBe(cents(5_134.2));
+    expect(det.withdrawn).toBeCloseTo(46_823.8, 2);
+    expect(row.acaCreditAppliedToPremiumsCents).toBe(det.acaCreditAppliedToPremiumsCents);
+    expect(Math.round(row.withdrawn * 100)).toBe(Math.round(det.withdrawn * 100));
+  });
+
+  it('uneven year: the cap is the draw the months make, not the year net of income', () => {
+    // Annual spending 30,000 is below Social Security 31,300, but Jan-Jun draw
+    // 6 x (4,400 - 2,608.33) = 10,750 and the surplus months do not offset it.
+    const h: Household = {
+      medical: 0, other: 0, medicalMonthly: 600, shortMonthly: { amount: 3_800, months: 6 },
+    };
+    const det = detRow(h);
+    const { row } = mcFirstRow(h);
+    expect(det.acaCreditAppliedToPremiumsCents).toBe(cents(5_134.2));
+    expect(det.withdrawn).toBeCloseTo(5_615.8, 2);
+    expect(row.acaCreditAppliedToPremiumsCents).toBe(det.acaCreditAppliedToPremiumsCents);
+    expect(Math.round(row.withdrawn * 100)).toBe(Math.round(det.withdrawn * 100));
+  });
+
+  it('reports the line that funded the draw, not one restated after the draw fell', () => {
+    // A pre-tax IRA: the lower pass-2 draw lowers MAGI and would restate a larger
+    // credit, which never funded anything. The reported line is the whole fall in
+    // the draw against the same plan with no Medical category.
+    const h: Household = { medical: 20_000, other: 25_000, preTax: true };
+    const { row } = mcFirstRow(h);
+    const { row: without } = mcFirstRow({ ...h, noMedicalCategory: true });
+    expect(row.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
+    expect(without.acaCreditAppliedToPremiumsCents ?? 0).toBe(0);
+    expect(Math.round((without.withdrawn - row.withdrawn) * 100)).toBe(
+      row.acaCreditAppliedToPremiumsCents,
+    );
+  });
+
+  it('funds the deterministic draw on the lowered amount it commits', () => {
+    // A pre-tax IRA: the solver's own credit (the line plus the part spent on
+    // tax) matches the credit on the draw the engine commits.
+    const row = detRow({ medical: 20_000, other: 25_000, preTax: true });
+    expect(row.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
+    // The solver stops within its convergence tolerance, so allow a cent or two.
+    expect(
+      (row.acaCreditAppliedToPremiumsCents ?? 0) + (row.acaPtcCashflowOffsetCents ?? 0),
+    ).toBeCloseTo(row.acaPtcSubsidyCents ?? 0, -1);
   });
 });

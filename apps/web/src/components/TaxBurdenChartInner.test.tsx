@@ -5,7 +5,8 @@
  * theme-reactivity for all three series colors.
  */
 import React from 'react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import InnerChart from './TaxBurdenChartInner';
 import { renderWithTheme, seriesColor } from '../test/theme-render';
@@ -133,6 +134,18 @@ describe('TaxBurdenChartInner — integer death-year terminal bar + marker domai
   });
 });
 
+function hoverTooltip(container: HTMLElement): HTMLElement {
+  const svg = container.querySelector('svg') as SVGSVGElement;
+  vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 0, width: 600, height: 320, top: 0, left: 0, right: 600, bottom: 320,
+    toJSON: () => ({}),
+  } as DOMRect);
+  fireEvent.pointerMove(svg, { clientX: 40 });
+  const tip = container.querySelector('[role="tooltip"]') as HTMLElement;
+  expect(tip).not.toBeNull();
+  return tip;
+}
+
 describe('TaxBurdenChartInner — credit applied to premiums', () => {
   // The dollars are already inside the ACA-PTC bar, so the figure rides the
   // tooltip and the lifetime tiles only: a second negative bar would double
@@ -146,6 +159,21 @@ describe('TaxBurdenChartInner — credit applied to premiums', () => {
     const container = renderWithTheme('light', <InnerChart rows={withCredit} />);
     expect(getBars(container, 'Credit applied to premiums')).toHaveLength(0);
     expect(getBars(container, 'ACA-PTC subsidy')).toHaveLength(2);
+  });
+
+  it('shows the credit applied as a labelled part of the subsidy in the tooltip', () => {
+    const tip = hoverTooltip(renderWithTheme('light', <InnerChart rows={withCredit} />));
+    expect(tip.textContent).toContain('ACA-PTC subsidy');
+    expect(tip.textContent).toContain('Credit applied to premiums (part of the subsidy above)');
+    expect(tip.textContent).toContain('$5,134');
+    // Left out of the net cost: the whole subsidy is the only benefit counted.
+    expect(tip.textContent).toContain('Net cost');
+    expect(tip.textContent).toContain('-$5,134');
+  });
+
+  it('leaves the credit applied out of the tooltip when none was applied', () => {
+    const tip = hoverTooltip(renderWithTheme('light', <InnerChart rows={rows} />));
+    expect(tip.textContent).not.toContain('Credit applied to premiums');
   });
 
   it('renders without a11y violations', async () => {

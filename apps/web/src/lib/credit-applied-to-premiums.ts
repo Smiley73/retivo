@@ -39,3 +39,42 @@ export function sumYearCents(monthlyCents: ReadonlyArray<number>, yearIndex: num
   for (let m = 0; m < 12; m += 1) total += monthlyCents[yearIndex * 12 + m] ?? 0;
   return total;
 }
+
+/**
+ * A year's draw need on a monthly series: the sum over the months
+ * `[start, end)` of `max(0, expense − income)`. This is the draw the year makes
+ * before any tax is folded in, and the cap on the credit applied to premiums.
+ */
+export function sumPositiveNeed(
+  expense: ArrayLike<number>,
+  income: ArrayLike<number>,
+  start: number,
+  end: number,
+): number {
+  let need = 0;
+  for (let i = start; i < end; i += 1) need += Math.max(0, expense[i] - income[i]);
+  return need;
+}
+
+/**
+ * Fold one year's tax draw (`drawDollars`) into the monthly `expense` series
+ * over the months `[start, end)`. A positive draw is spread evenly over twelve
+ * months. A negative draw (the credit applied to premiums outweighing the tax
+ * need) is spread in proportion to each month's need, `max(0, expense − income)`,
+ * so no month's draw drops below zero and the year's draw falls by the whole
+ * amount; an even split would lose the share of any month whose need is smaller.
+ * A year with no need falls back to the even split.
+ */
+export function foldYearDrawIntoExpense(
+  expense: Float64Array,
+  income: ArrayLike<number>,
+  start: number,
+  end: number,
+  drawDollars: number,
+): void {
+  const need = drawDollars < 0 ? sumPositiveNeed(expense, income, start, end) : 0;
+  for (let i = start; i < end; i += 1) {
+    expense[i] +=
+      need > 0 ? (drawDollars * Math.max(0, expense[i] - income[i])) / need : drawDollars / 12;
+  }
+}

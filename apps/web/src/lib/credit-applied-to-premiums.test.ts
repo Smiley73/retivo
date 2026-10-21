@@ -6,7 +6,12 @@
  * least one row.
  */
 import { describe, expect, it } from 'vitest';
-import { creditAppliedToPremiumsCents, sumYearCents } from './credit-applied-to-premiums';
+import {
+  creditAppliedToPremiumsCents,
+  foldYearDrawIntoExpense,
+  sumPositiveNeed,
+  sumYearCents,
+} from './credit-applied-to-premiums';
 
 describe('creditAppliedToPremiumsCents', () => {
   it.each([
@@ -55,5 +60,59 @@ describe('sumYearCents', () => {
 
   it('reads months past the end of the series as zero', () => {
     expect(sumYearCents([100, 100], 3)).toBe(0);
+  });
+});
+
+describe('sumPositiveNeed', () => {
+  it('sums the months that draw and ignores the surplus months', () => {
+    const expense = Float64Array.from([100, 100, 100, 100]);
+    const income = Float64Array.from([40, 160, 100, 0]);
+    expect(sumPositiveNeed(expense, income, 0, 4)).toBe(60 + 0 + 0 + 100);
+    expect(sumPositiveNeed(expense, income, 2, 4)).toBe(100);
+  });
+});
+
+describe('foldYearDrawIntoExpense', () => {
+  /** The year's draw: the sum of the months' positive need. */
+  const draw = (expense: Float64Array, income: Float64Array): number =>
+    sumPositiveNeed(expense, income, 0, expense.length);
+
+  it('spreads a positive draw evenly over twelve months', () => {
+    const expense = new Float64Array(12).fill(100);
+    foldYearDrawIntoExpense(expense, new Float64Array(12), 0, 12, 1_200);
+    expect(Array.from(expense)).toEqual(new Array(12).fill(200));
+  });
+
+  it('spreads a negative draw in proportion to each month need, lowering the draw by all of it', () => {
+    // One 10,000 month among eleven months income covers: an even split would
+    // lose eleven twelfths of the 6,000 to the zero floors.
+    const expense = new Float64Array(12).fill(1_000);
+    const income = new Float64Array(12).fill(1_000);
+    expense[2] = 11_000;
+    foldYearDrawIntoExpense(expense, income, 0, 12, -6_000);
+    expect(draw(expense, income)).toBeCloseTo(4_000, 9);
+    expect(expense[2]).toBeCloseTo(5_000, 9);
+    expect(expense[0]).toBe(1_000);
+  });
+
+  it('keeps every month at or above zero when the draw takes the whole need', () => {
+    const expense = Float64Array.from([300, 0, 700, 0]);
+    const income = new Float64Array(4);
+    foldYearDrawIntoExpense(expense, income, 0, 4, -1_000);
+    expect(Array.from(expense).every((v) => v >= 0)).toBe(true);
+    expect(draw(expense, income)).toBeCloseTo(0, 9);
+  });
+
+  it('falls back to an even split when the year has no need', () => {
+    const expense = new Float64Array(12);
+    foldYearDrawIntoExpense(expense, new Float64Array(12).fill(5), 0, 12, -120);
+    expect(Array.from(expense)).toEqual(new Array(12).fill(-10));
+  });
+
+  it('only touches the months in the range', () => {
+    const expense = new Float64Array(24).fill(100);
+    foldYearDrawIntoExpense(expense, new Float64Array(24), 12, 24, -600);
+    expect(expense[11]).toBe(100);
+    expect(expense[12]).toBeCloseTo(50, 9);
   });
 });
