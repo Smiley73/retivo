@@ -4,9 +4,10 @@
  * Flags are text (a badge, or a `†` with sr-only words plus a footnote), never
  * colour alone. Rows are keyed by the search's candidate id.
  */
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { Cell, Column, Row, Table, TableBody, TableHeader } from 'react-aria-components';
 import { Badge } from '../../components/Badge';
+import { btnSecondarySmClass } from '../../components/dialog-chrome';
 import { TableScroll } from '../../components/TableScroll';
 import {
   tableClass,
@@ -15,6 +16,7 @@ import {
   thStickyClass,
   thStickyNumClass,
 } from '../accounts-page-chrome';
+import { RothSuggestionYearDetail } from './RothSuggestionYearDetail';
 import type { RothSuggestionRow } from './roth-suggestion-view-model';
 
 interface RothSuggestionTableProps {
@@ -24,6 +26,10 @@ interface RothSuggestionTableProps {
 }
 
 const TABLE_LABEL = 'Roth conversion plan comparison';
+
+function detailId(rowId: string): string {
+  return `roth-suggestion-detail-${rowId}`;
+}
 
 function yearList(years: readonly number[]): string {
   return years.join(', ');
@@ -51,6 +57,16 @@ export const RothSuggestionTable: React.FC<RothSuggestionTableProps> = ({
   leftoverTaxPct,
 }) => {
   const anyRerouted = rows.some((row) => row.reroutedYears.length > 0);
+  // One plan's years open at a time. Closing from inside the detail hands focus
+  // back to the toggle that opened it, so the keyboard does not lose its place.
+  const [openId, setOpenId] = useState<string | null>(null);
+  const toggles = useRef(new Map<string, HTMLButtonElement>());
+  const open = rows.find((row) => row.id === openId);
+  const close = (): void => {
+    if (openId === null) return;
+    setOpenId(null);
+    toggles.current.get(openId)?.focus();
+  };
   return (
     <>
       <TableScroll label={TABLE_LABEL}>
@@ -68,6 +84,7 @@ export const RothSuggestionTable: React.FC<RothSuggestionTableProps> = ({
             <Column className={thStickyNumClass}>Extra income tax</Column>
             <Column className={thStickyNumClass}>Medicare surcharges</Column>
             <Column className={thStickyNumClass}>Health-subsidy credit change</Column>
+            <Column className={thStickyClass}>Years</Column>
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
@@ -93,11 +110,38 @@ export const RothSuggestionTable: React.FC<RothSuggestionTableProps> = ({
                 <Cell className={tdNumClass}>{row.extraIncomeTax}</Cell>
                 <Cell className={tdNumClass}>{row.irmaaSurcharges}</Cell>
                 <Cell className={tdNumClass}>{row.acaCreditChange}</Cell>
+                <Cell className={tdClass}>
+                  <button
+                    type="button"
+                    ref={(el) => {
+                      if (el === null) toggles.current.delete(row.id);
+                      else toggles.current.set(row.id, el);
+                    }}
+                    className={btnSecondarySmClass}
+                    aria-label={`Why each year for ${row.detailLabel}`}
+                    aria-expanded={openId === row.id}
+                    aria-controls={openId === row.id ? detailId(row.id) : undefined}
+                    onClick={() => setOpenId(openId === row.id ? null : row.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape' && openId === row.id) close();
+                    }}
+                  >
+                    Why each year
+                  </button>
+                </Cell>
               </Row>
             ))}
           </TableBody>
         </Table>
       </TableScroll>
+      {open !== undefined && (
+        <RothSuggestionYearDetail
+          id={detailId(open.id)}
+          label={open.detailLabel}
+          rows={open.detail}
+          onClose={close}
+        />
+      )}
       <dl className="mt-3 space-y-1 text-xs text-muted">
         <div>
           <dt className="inline font-medium text-ink">Rank</dt>{' '}
@@ -143,6 +187,13 @@ export const RothSuggestionTable: React.FC<RothSuggestionTableProps> = ({
             lost. These are the projection&rsquo;s credits, which it limits to the tax and
             Medicare surcharges they offset, so they can be smaller than the credit lost on
             paper.
+          </dd>
+        </div>
+        <div>
+          <dt className="inline font-medium text-ink">Why each year</dt>{' '}
+          <dd className="inline">
+            — opens a year-by-year table for the plan: what each year converted, what stopped
+            it and what the year cost.
           </dd>
         </div>
         {anyRerouted && (

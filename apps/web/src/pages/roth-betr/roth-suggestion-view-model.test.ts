@@ -63,6 +63,7 @@ function candidate(spec: CandidateSpec): RothSuggestionWorkerCandidate {
     guarded: isReference ? null : (spec.guarded ?? true),
     ladder: [],
     years: [],
+    yearDetail: [],
     totals: { ...ZERO_TOTALS, yearsConverted: 3, totalConvertedTodayDollars: 100_000, ...spec.totals },
     deltaVsReference: { ...ZERO_TOTALS, ...spec.delta },
     afterTax,
@@ -309,8 +310,10 @@ describe('buildSuggestionTable', () => {
     expect(rows.map((r) => r.isTop)).toEqual([true, false, false, false]);
     expect(rows[2].isReference).toBe(true);
     expect(rows[2].label).toBe('Current plan');
+    expect(rows[2].detailLabel).toBe('Current plan, not assessed');
     expect(rows[3].notRanked).toBe('Not ranked: cap not met in 2 years');
     expect(rows[0].notRanked).toBe('');
+    expect(rows[0].detailLabel).toBe('Fill the 12% bracket, kept under both lines');
   });
 
   it('shows the current plan with zero differences and signed values elsewhere', () => {

@@ -52,7 +52,11 @@ function facts(overrides: Partial<YearFacts> & { year: number }): YearFacts {
 const MEDICARE_LOOKBACK = (year: number): LookbackFacts => ({
   year: year + 2,
   withinHorizon: true,
-  onMedicare: true,
+  medicareBeneficiaries: 2,
+  irmaaBeneficiaries: [
+    { partBMonths: 12, partDMonths: 12 },
+    { partBMonths: 12, partDMonths: 12 },
+  ],
 });
 
 function inputs(overrides: Partial<YearLimitInputs> & { facts: YearFacts }): YearLimitInputs {
@@ -213,8 +217,8 @@ describe('irmaaLimit', () => {
 
   it.each([
     ['unguarded', { guarded: false }, 'unguarded'],
-    ['beyond the horizon', { lookback: { year: year + 2, withinHorizon: false, onMedicare: false } }, 'beyond-horizon'],
-    ['no Medicare month in Y+2', { lookback: { year: year + 2, withinHorizon: true, onMedicare: false } }, 'no-medicare'],
+    ['beyond the horizon', { lookback: { year: year + 2, withinHorizon: false, medicareBeneficiaries: 0, irmaaBeneficiaries: [] } }, 'beyond-horizon'],
+    ['no Medicare month in Y+2', { lookback: { year: year + 2, withinHorizon: true, medicareBeneficiaries: 0, irmaaBeneficiaries: [] } }, 'no-medicare'],
     ['already in the top tier in the reference', { reference: { lookbackIrmaaTier: 'tier5', acaPtcTier: 'sliding' } }, 'reference-over-line'],
   ] as const)('does not apply when %s', (_label, override, reason) => {
     const limit: IrmaaLimit = irmaaLimit(inputs({ facts: facts({ year }), ...override }), ENV);

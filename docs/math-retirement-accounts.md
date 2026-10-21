@@ -464,6 +464,84 @@ the search; `candidate-grid.ts` lists the plans, `year-limits.ts` works out the
 three limits, `candidate-passes.ts` is the settle loop, `summarise.ts` and
 `ranking.ts` score and rank. `workers/roth-suggestion.worker.ts` runs it in the
 background and `pages/roth-betr/RothSuggestionPanel.tsx` shows it.
+`year-detail.ts` builds each plan's year-by-year table and
+`pages/roth-betr/RothSuggestionYearDetail.tsx` shows it.
+
+#### Why each year
+
+The **Why each year** button on a row opens a table with one line per year of the
+window, then the year after it, for that plan. It uses each year's own (future)
+dollars, because the limits and cliffs are fixed amounts for the year; the
+comparison above is in today's dollars. The columns are:
+
+- *Converted*, and *Stopped by*: the bracket top, the Medicare surcharge line,
+  the health-subsidy line, the end of the window, withdrawals that had already
+  reached the ceiling (a year the ceiling moved spending withdrawals, or could
+  not be held, is listed here), or no pre-tax money left to convert.
+- *Bracket line*, *Medicare surcharge line* and *Health-subsidy line*: the three
+  limits on the income line. *Limit* is the lowest that applies.
+- *Income before conversion*, *Extra Social Security taxed*, *Income from paying
+  the tax* and *Kept under the limit*, which give the amount below. The first two
+  are the projection's own figures for the same year with the conversion left out:
+  for every year it converts, the projection prices the year a second time with no
+  conversion and none of the extra withdrawals that paid the conversion's tax, and
+  keeps the income and the taxable Social Security from that run. Nothing is worked
+  back from the converted year.
+- *Income tax*, *Taxable Social Security*, *Surcharge paid*, *Surcharge it sets*,
+  *ACA credit* and *Pre-tax at year end*: what the year cost and left.
+
+**One year by hand.** Take 2039 for the "Fill the 12% bracket" plan that stays
+under both lines, a married couple filing jointly.
+
+1. The three lines. *Bracket line* $197,700: the 12% bracket top of $148,000 plus
+   the $47,300 standard deduction and the $2,400 extra deduction for the member
+   who is 65. *Medicare surcharge line* $339,636: the first surcharge threshold,
+   $218,000, scaled to 2041, the year that reads 2039's income. *Health-subsidy
+   line* $121,554: four times the poverty guideline for two ($21,150, scaled to
+   2039) is $124,237.95, less the $2,683.01 of Social Security that is not
+   taxable, because the ACA income adds it back, is $121,554.94, rounded down. The
+   lowest is the health-subsidy line, so the *Limit* is $121,554 and *Stopped by*
+   says so.
+2. *Income before conversion*, $43,268.84. This is the year's income on that line
+   with no conversion: the projection's own figure for 2039 with the conversion
+   left out, withdrawals the same.
+3. *Extra Social Security taxed*, $8,187.31: $15,203.73 taxable now less $7,016.42
+   taxable with no conversion (the same rule that taxes up to 50% or 85% of
+   benefits). Each converted dollar raises provisional income, and in the 50% and
+   85% tiers it pulls more benefit into taxable income too, so it uses up room on
+   the line twice.
+4. *Income from paying the tax*, $334.99. The conversion's own tax is paid from
+   savings-type accounts, Roth money and the health savings account, and any part
+   of those withdrawals that is taxable income lands on the same line. It is the year's income after
+   ($121,551.29) less the income before, the conversion and the extra Social
+   Security.
+5. The amount. The conversion fills the room that is left, to within one dollar:
+
+   *$121,554 − $43,268.84 − $8,187.31 − $334.99 = $69,762.86*
+
+   and the table shows $69,760.15. The $2.71 between them is *Kept under the
+   limit*, the limit less the year's income after ($121,554 − $121,551.29): the
+   search leaves a couple of dollars under each limit, plus the dollar the solver
+   rounds down by, so that the income never lands above it. In a year no limit
+   stopped, the same column is the room the plan did not use (and negative where
+   income was already over the limit). $121,554 − $43,268.84 − $8,187.31 −
+   $334.99 − $2.71 = $69,760.15, the *Converted* column.
+
+**A year a cliff stopped.** In 2043 the "Fill the 22% bracket" plan that stays
+under both lines has a *Bracket line* of $408,100 and a *Medicare surcharge line*
+of $382,264; the health-subsidy line does not apply (no Marketplace coverage), so
+the surcharge line is the limit. It converts $237,806.07, which is $382,264 less
+$140,075.72 of income before conversion, no extra Social Security (benefits are
+already 85% taxable), $4,379.49 of income from paying the tax and $2.72 kept
+under. The row then says what the next dollars
+over the cliff would have cost: the plan without the guard would have converted
+another $25,836 (the room up to the bracket line), which would have added
+$4,027.45 of Medicare surcharge two years later, priced for the months each
+household member is on Medicare then and the year's own filing status. It also shows the premium
+credit that would have been lost, at full value. The projection credits the
+premium credit only up to that year's federal tax plus the Medicare surcharge it
+offsets, so the plan that does cross shows a smaller loss on its own row. Here the
+credit lost is $0.
 
 ### Simplified or left out
 

@@ -38,7 +38,8 @@ import {
   measureDraft,
   type CandidateDraft,
 } from './summarise';
-import { resolveLookbackFacts, resolveYearFacts } from './year-facts';
+import { buildYearDetail, type DetailYearInput, type YearDetailEnvironment } from './year-detail';
+import { benchmarkSlcspCentsForYear, resolveLookbackFacts, resolveYearFacts } from './year-facts';
 import type { LimitEnvironment, ReferenceTiers } from './year-limits';
 import { buildYearRecords, type AccountsById } from './year-records';
 import type {
@@ -46,6 +47,7 @@ import type {
   RothSuggestionRequest,
   RothSuggestionResult,
   RothSuggestionUnsupportedReason,
+  YearLimits,
 } from './types';
 
 /** Projections a full search can run at most: the reference once, then each
@@ -80,6 +82,9 @@ interface SearchSetup {
   readonly limitEnv: LimitEnvironment;
   readonly accountsById: AccountsById;
   readonly years: readonly Omit<WindowYear, 'reference'>[];
+  /** What each window year's detail reads that no candidate changes. */
+  readonly detailYears: ReadonlyMap<number, DetailYearInput>;
+  readonly detailEnv: YearDetailEnvironment;
 }
 
 /** Whether a birthdate gives the engine a birth year. Without one it dates the
@@ -122,24 +127,34 @@ function prepareSetup(request: RothSuggestionRequest): SearchSetup | Unsupported
   });
   if (window === null) return unsupported('no-retirement-window');
   const years: Omit<WindowYear, 'reference'>[] = [];
+  const detailYears = new Map<number, DetailYearInput>();
   for (let year = window.startYear; year <= window.endYear; year += 1) {
     const resolved = resolveYearFacts(ctx, year);
     if (resolved.kind === 'unsupported') return unsupported(resolved.reason);
-    years.push({
+    const windowYear = {
       facts: resolved.facts,
       lookback: resolveLookbackFacts(ctx, year),
       grossSsDollars: grossSsForYear(series.ssRows, year),
+    };
+    years.push(windowYear);
+    detailYears.set(year, {
+      ...windowYear,
+      benchmarkSlcspCents: benchmarkSlcspCentsForYear(ctx, resolved.facts),
     });
   }
+  const limitEnv: LimitEnvironment = {
+    bundle: projection.bundle ?? DEFAULT_TAX_CALIBRATION_BUNDLE,
+    inflationPct: ctx.projCtx.inflationPct,
+    acaFplRegion: ctx.acaFplRegion,
+  };
   return {
     prepared,
     window,
     years,
-    limitEnv: {
-      bundle: projection.bundle ?? DEFAULT_TAX_CALIBRATION_BUNDLE,
-      inflationPct: ctx.projCtx.inflationPct,
-      acaFplRegion: ctx.acaFplRegion,
-    },
+    limitEnv,
+    detailYears,
+    // The projection models tax-exempt interest as zero (`applyTaxYear` input).
+    detailEnv: { ...limitEnv, taxExemptInterestCents: 0 },
     accountsById: new Map(projection.accounts.map((a) => [a.id, a.payload])),
   };
 }
@@ -164,6 +179,28 @@ function resolvedLadder(ctx: PipelineContext): MagiCapWindow[] {
   return cap === undefined || isMagiCapDisabled(cap) ? [] : [...cap.windows];
 }
 
+/** A candidate's per-year records and the table opened from them. */
+function recordsFor(
+  setup: SearchSetup,
+  plan: PlannedProjection,
+  limits: readonly YearLimits[] | null,
+): Pick<CandidateDraft, 'years' | 'yearDetail'> {
+  const years = buildYearRecords({
+    years: plan.years,
+    window: setup.window,
+    limits,
+    accounts: setup.accountsById,
+  });
+  const yearDetail = buildYearDetail({
+    records: years,
+    rows: plan.years,
+    years: setup.detailYears,
+    accounts: setup.accountsById,
+    env: setup.detailEnv,
+  });
+  return { years, yearDetail };
+}
+
 function referenceDraft(
   spec: CandidateSpec,
   plan: PlannedProjection,
@@ -174,12 +211,7 @@ function referenceDraft(
     spec,
     ladder: resolvedLadder(setup.prepared.ctx),
     plan,
-    years: buildYearRecords({
-      years: plan.years,
-      window: setup.window,
-      limits: null,
-      accounts: setup.accountsById,
-    }),
+    ...recordsFor(setup, plan, null),
     unranked: breached.length > 0 ? [{ kind: 'cap-breached', years: breached }] : [],
     passes: 1,
     converged: true,
@@ -247,12 +279,7 @@ async function runSearch(
       spec,
       ladder: outcome.ladder,
       plan: outcome.plan,
-      years: buildYearRecords({
-        years: outcome.plan.years,
-        window: setup.window,
-        limits: outcome.limits,
-        accounts: setup.accountsById,
-      }),
+      ...recordsFor(setup, outcome.plan, outcome.limits),
       unranked: outcome.unranked,
       passes: outcome.passes,
       converged: outcome.converged,

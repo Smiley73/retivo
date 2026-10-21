@@ -13,6 +13,9 @@ import type { YearLimits, YearRecord, YearStop } from './types';
 const CENTS_PER_DOLLAR = 100;
 /** Fill bisects to $1 and rounds, so MAGI within this of the ceiling is "at" it. */
 const AT_CEILING_SLACK_DOLLARS = 2;
+/** The search leaves at most this many dollars of the row's MAGI under the
+ *  limit it lands on: the offset margin, the solver's $1 step and rounding. */
+const AT_LIMIT_SLACK_DOLLARS = 6;
 /** Pre-tax money below this many dollars counts as exhausted. */
 const EXHAUSTED_DOLLARS = 1;
 
@@ -31,16 +34,24 @@ export function preTaxDollarsAtRowEnd(row: DrawdownYear, accounts: AccountsById)
   return total;
 }
 
+/** `ceilingDollars` is what the Fill step compares the MAGI it can see with;
+ *  the row's MAGI also carries the taxable-account interest and dividends it
+ *  cannot see, so it lands at `limitDollars` instead. That is the line a year
+ *  that ran out of pre-tax money has to be at to count as stopped by a limit. */
 function classifyStop(
   row: DrawdownYear,
-  ceilingDollars: number,
+  limits: YearLimits,
   accounts: AccountsById,
 ): YearStop {
+  if (row.rothConversionDegradedNoTarget === true) return 'no-target';
   if ((row.magiCapBreachDollars ?? 0) > 0) return 'breach';
   const magiDollars = (row.magiCents ?? 0) / CENTS_PER_DOLLAR;
   const exhausted = preTaxDollarsAtRowEnd(row, accounts) < EXHAUSTED_DOLLARS;
-  if (magiDollars >= ceilingDollars - AT_CEILING_SLACK_DOLLARS) {
-    if ((row.rothConvertedCents ?? 0) > 0) return 'limit';
+  if (magiDollars >= limits.ceilingDollars - AT_CEILING_SLACK_DOLLARS) {
+    if ((row.rothConvertedCents ?? 0) > 0) {
+      const atLimit = magiDollars >= limits.limitDollars - AT_LIMIT_SLACK_DOLLARS;
+      return exhausted && !atLimit ? 'pre-tax-exhausted' : 'limit';
+    }
     return exhausted ? 'pre-tax-exhausted' : 'withdrawals-at-ceiling';
   }
   return exhausted ? 'pre-tax-exhausted' : 'unused-headroom';
@@ -56,7 +67,7 @@ function buildRecord(args: {
   const { row, lookbackRow, inWindow, limits, accounts } = args;
   let stop: YearStop | null = null;
   if (!inWindow) stop = 'window-ended';
-  else if (limits !== undefined) stop = classifyStop(row, limits.ceilingDollars, accounts);
+  else if (limits !== undefined) stop = classifyStop(row, limits, accounts);
   return {
     year: row.year,
     inWindow,

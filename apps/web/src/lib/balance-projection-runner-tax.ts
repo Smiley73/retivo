@@ -52,7 +52,10 @@
  * touched, lift the per-year solver loop (and its MAGI-buffer threading) into a
  * sibling module driven by `computeYearTaxWithMagiLookback`. Trigger: a change
  * adding 5 or more lines here must either refactor the file back under the
- * limit or re-justify this exception in this note.
+ * limit or re-justify this exception in this note. The Fill-converted year's
+ * zero-conversion repricing (`stampZeroConversionPoint`, a few lines in the
+ * loop) lives in `./balance-projection-runner-tax-zero-point` and reuses this
+ * file's per-year pass on copies of the loop state, so it cannot move out.
  */
 
 import type {
@@ -113,6 +116,7 @@ import {
   splitWithdrawalsByTaxTreatment,
   type BrokerageLikeBasisState,
 } from './balance-projection-runner-tax-helpers';
+import { stampZeroConversionPoint } from './balance-projection-runner-tax-zero-point';
 import {
   applyRothBasisOrdering,
   creditRothConversionToBasisCarrier,
@@ -901,6 +905,11 @@ export function applyTaxIntegrationToDrawdownYears(
     seedBasisFraction,
   };
   for (let i = 0; i < years.length; i += 1) {
+    // A Fill-converted year is priced again without its conversion first, on
+    // copies of the running state, so the row's own pass below is unchanged.
+    stampZeroConversionPoint(years[i], (copy) =>
+      processTaxYear(copy, i, years, shared, [...magiBuffer], [...unitRing],
+        structuredClone(rothBasisCarrier), structuredClone(designatedRothCarrier), structuredClone(basisState)));
     const processed = processTaxYear(
       years[i],
       i,
@@ -1648,5 +1657,10 @@ export function buildTaxCashflowHook(args: {
     return Math.max(0, withConvCents - withoutConvCents) / 100;
   };
 
-  return { solveForYear, solveFillConversionForYear, fundConversionTaxForYear };
+  return {
+    recordsConversionZeroPoint: true,
+    solveForYear,
+    solveFillConversionForYear,
+    fundConversionTaxForYear,
+  };
 }

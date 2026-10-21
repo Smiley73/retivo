@@ -218,6 +218,14 @@ export interface TaxCashflowYearOutcome {
  * throws (graceful degradation).
  */
 export type TaxCashflowHook = {
+  /**
+   * True when the runner will price each Fill-converted year again without its
+   * conversion (see `DrawdownYear.rothZeroConversionMagiCents`). The engine
+   * then records, per account, the draws that paid the conversion's tax, which
+   * that repricing has to take back out. The deterministic hook sets it; the
+   * Monte Carlo hook does not, so simulation rows are unchanged.
+   */
+  readonly recordsConversionZeroPoint?: boolean;
   readonly solveForYear: (
     yearIndex: number,
     ordinaryNetNeedDollars: number,
@@ -624,6 +632,23 @@ export interface DrawdownYear {
    * RMD-breach year.
    */
   rothConvertedCents?: number;
+  /**
+   * Cents drawn from each account to pay the year's conversion tax, by account
+   * id; accounts with no such draw are absent. Recorded only when the tax hook
+   * asks (`TaxCashflowHook.recordsConversionZeroPoint`), as the input the tax
+   * post-pass needs to price the year without its conversion.
+   */
+  rothConversionTaxFundingCentsByAccount?: ReadonlyMap<string, number>;
+  /**
+   * The year's federal/IRMAA MAGI with the conversion taken out, in integer
+   * cents: the year priced again by the tax post-pass with no conversion and
+   * none of the draws that paid its tax, so it is the income the conversion was
+   * added to. Stamped only on the deterministic path for a year that converted.
+   * Read by the Roth suggestion's year table and nothing else.
+   */
+  rothZeroConversionMagiCents?: number;
+  /** Taxable Social Security of the same repricing, in integer cents. */
+  rothZeroConversionTaxableSsCents?: number;
   /**
    * True for a year where Fill mode was active with leftover cap headroom but
    * NO target Roth could be resolved (none designated, or the designated id is

@@ -8,6 +8,7 @@ import type { DrawdownYear } from '../drawdown-engine-types';
 import { realDeflatorAt } from '../projection-context';
 import type { CandidateSpec } from './candidate-grid';
 import type { PlannedProjection } from './projection';
+import type { YearDetailRow } from './year-detail-types';
 import { preTaxDollarsAtRowEnd, type AccountsById } from './year-records';
 import type {
   CandidateAfterTax,
@@ -27,6 +28,7 @@ export interface CandidateDraft {
   readonly ladder: readonly MagiCapWindow[];
   readonly plan: PlannedProjection;
   readonly years: readonly YearRecord[];
+  readonly yearDetail: readonly YearDetailRow[];
   readonly unranked: readonly UnrankedReason[];
   readonly passes: number;
   readonly converged: boolean;
@@ -135,6 +137,7 @@ export function finalizeCandidate(
     ladder: draft.ladder,
     drawdownYears: draft.plan.years,
     years: draft.years,
+    yearDetail: draft.yearDetail,
     totals,
     deltaVsReference: subtractTotals(totals, reference.totals),
     afterTax: {

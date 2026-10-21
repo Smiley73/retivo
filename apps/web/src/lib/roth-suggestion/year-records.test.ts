@@ -37,12 +37,13 @@ function row(year: number, overrides: Partial<DrawdownYear> = {}, preTax = 500_0
   };
 }
 
-function limits(year: number, ceilingDollars: number): YearLimits {
+function limits(year: number, ceilingDollars: number, engineOffsetDollars = 0): YearLimits {
+  const limitDollars = ceilingDollars + engineOffsetDollars;
   return {
     year,
     bracket: {
       kind: 'bracket',
-      valueDollars: ceilingDollars,
+      valueDollars: limitDollars,
       bracketRate: 0.22,
       filingStatus: 'MFJ',
       bracketTopDollars: 0,
@@ -52,9 +53,9 @@ function limits(year: number, ceilingDollars: number): YearLimits {
     },
     irmaa: { kind: 'irmaa', applies: false, reason: 'unguarded' },
     aca: { kind: 'aca', applies: false, reason: 'unguarded' },
-    limitDollars: ceilingDollars,
+    limitDollars,
     binding: 'bracket',
-    engineOffsetDollars: 0,
+    engineOffsetDollars,
     ceilingDollars,
   };
 }
@@ -83,11 +84,11 @@ describe('preTaxDollarsAtRowEnd', () => {
 });
 
 describe('buildYearRecords', () => {
-  function stopFor(r: DrawdownYear, ceiling = 100_000): string | null {
+  function stopFor(r: DrawdownYear, ceiling = 100_000, offset = 0): string | null {
     const records = buildYearRecords({
       years: [r],
       window: { startYear: r.year, endYear: r.year },
-      limits: [limits(r.year, ceiling)],
+      limits: [limits(r.year, ceiling, offset)],
       accounts: ACCOUNTS,
     });
     return records[0].stop;
@@ -105,6 +106,25 @@ describe('buildYearRecords', () => {
     expect(stopFor(row(2030, { magiCents: 6_000_000, rothConvertedCents: 3_000_000 }, 0))).toBe('pre-tax-exhausted');
   });
 
+  describe('with taxable-account interest the Fill step cannot see (an engine offset of $3,000)', () => {
+    // Limit $100,000, ceiling $97,000: the row's MAGI lands at the limit, not the ceiling.
+    const OFFSET = 3_000;
+    const CEILING = 97_000;
+
+    it('says pre-tax money ran out when the last of it converted well short of the limit', () => {
+      // The Fill step saw $95,500 and the offset made the row $98,500: $1,500 under the limit.
+      expect(stopFor(row(2030, { magiCents: 9_850_000, rothConvertedCents: 4_000_000 }, 0), CEILING, OFFSET)).toBe('pre-tax-exhausted');
+    });
+
+    it('still says the limit bound a year that landed on it as the last pre-tax dollars converted', () => {
+      expect(stopFor(row(2030, { magiCents: 9_999_700, rothConvertedCents: 4_000_000 }, 0), CEILING, OFFSET)).toBe('limit');
+    });
+
+    it('says the limit bound a year at the limit with pre-tax money left', () => {
+      expect(stopFor(row(2030, { magiCents: 9_999_700, rothConvertedCents: 4_000_000 }), CEILING, OFFSET)).toBe('limit');
+    });
+  });
+
   it('does not call a year with nothing left to convert a cliff', () => {
     expect(stopFor(row(2030, { magiCents: 10_050_000 }, 0))).toBe('pre-tax-exhausted');
   });
@@ -115,6 +135,10 @@ describe('buildYearRecords', () => {
 
   it('says the ceiling was breached ahead of every other reason', () => {
     expect(stopFor(row(2030, { magiCents: 10_300_000, rothConvertedCents: 1, magiCapBreachDollars: 12_000 }))).toBe('breach');
+  });
+
+  it('says the engine found no target Roth ahead of every other reason', () => {
+    expect(stopFor(row(2030, { magiCents: 10_050_000, rothConversionDegradedNoTarget: true }))).toBe('no-target');
   });
 
   it('allows a $2 slack around the ceiling for the conversion solver tolerance', () => {

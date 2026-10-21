@@ -193,6 +193,24 @@ describe('Fill-mode Roth conversion fill (engine)', () => {
     expect(minimize.years[0].balance - fill.years[0].balance).toBeCloseTo(6_250, 0);
   });
 
+  it('should_record_the_draws_that_paid_the_conversion_tax_only_when_the_hook_asks', () => {
+    const mk = (): DrawdownAccountInput[] => [
+      account({ id: 'ira', initialPre: 500_000 }, 2040, 2040),
+      account({ id: 'cash', initialPost: 200_000, taxTreatment: 'POST_TAX', accountType: 'SAVINGS' }, 2040, 2040),
+      account({ id: 'roth', initialPost: 0, taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' }, 2040, 2040),
+    ];
+    const plain = fixedConversionHook(30_000, 0.2).hook;
+    const asked = { ...plain, recordsConversionZeroPoint: true };
+    const without = simulateDrawdown(baseInput(mk(), 2040, 2040, 1_000, plain, FILL_CAP('roth'), 2050));
+    const withIt = simulateDrawdown(baseInput(mk(), 2040, 2040, 1_000, asked, FILL_CAP('roth'), 2050));
+    // $30k at 20% is $6k of tax, all of it drawn from the cash-like account.
+    expect([...(withIt.years[0].rothConversionTaxFundingCentsByAccount ?? [])]).toEqual([['cash', 600_000]]);
+    // A hook that does not ask leaves the row exactly as it was.
+    expect(without.years[0].rothConversionTaxFundingCentsByAccount).toBeUndefined();
+    expect(withIt.years[0].balance).toBe(without.years[0].balance);
+    expect(withIt.years[0].rothConvertedCents).toBe(without.years[0].rothConvertedCents);
+  });
+
   it('should_exclude_the_conversion_from_the_year_withdrawal_total_so_§72t_basis_excludes_it', () => {
     const accts = [
       account({ id: 'ira', initialPre: 500_000 }, 2040, 2040),
