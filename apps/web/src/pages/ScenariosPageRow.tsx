@@ -7,8 +7,12 @@
  *  - **Top zone** (`.scn-top`): the scenario name + an inline "Active"
  *    chip on the active card, an optional description sub-line + the
  *    notes presentation, and a right-side hover-revealed icon-action
- *    cluster — Edit (pencil), Delete (trash). Switching the active
- *    scenario lives only in the sidebar Active-Scenario picker.
+ *    cluster — Edit (pencil), Delete (trash). A card with a parent also
+ *    carries an always-visible "Compare with parent" link-styled button
+ *    under the name (outside the hover-revealed cluster); the page builds
+ *    its handler, which makes the card active and opens the Compare tab.
+ *    Switching the active scenario otherwise lives in the sidebar
+ *    Active-Scenario picker.
  *  - **Footer zone** (`.scn-foot`): a "Plan success" metric leads, then four
  *    graph+value groups — **Planned** (deterministic), **Historical**
  *    (deterministic TWR), **Typical** (MC P50), **Pessimistic** (MC P25) —
@@ -51,6 +55,7 @@ import {
 import { ScenarioSparkline } from './scenarios-page-sparkline';
 import { McProgressBar } from '../components/McProgressBar';
 import { btnSecondarySmClass } from '../components/dialog-chrome';
+import { textLinkClass } from '../components/TextLink';
 import type { ScenarioCardMetrics } from './scenarios-page-metrics';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 
@@ -74,6 +79,10 @@ export interface ScenariosPageRowProps {
    *  Ignored unless `isRecalculating`. */
   recalcDone: number;
   recalcTotal: number;
+  /** "Compare with parent" control: the parent's name (for the accessible
+   *  name) and the activation handler. `null` for the base scenario and for
+   *  a card whose parent is not in the loaded list — no control renders. */
+  compareWithParent: { parentName: string; onActivate: () => void } | null;
 }
 
 export const ScenariosPageRow: React.FC<ScenariosPageRowProps> = ({
@@ -86,6 +95,7 @@ export const ScenariosPageRow: React.FC<ScenariosPageRowProps> = ({
   isRecalculating,
   recalcDone,
   recalcTotal,
+  compareWithParent,
 }) => {
   const navigate = useNavigate();
   const depth = ancestorIsLast.length;
@@ -179,6 +189,18 @@ export const ScenariosPageRow: React.FC<ScenariosPageRowProps> = ({
             </div>
             {description.length > 0 && (
               <Muted className="text-sm">{description}</Muted>
+            )}
+            {compareWithParent && (
+              <div>
+                <button
+                  type="button"
+                  className={`${textLinkClass} text-sm`}
+                  onClick={compareWithParent.onActivate}
+                  aria-label={`Compare with parent: ${name} with ${compareWithParent.parentName}`}
+                >
+                  Compare with parent
+                </button>
+              </div>
             )}
           </div>
           <div className="row-actions flex-shrink-0">

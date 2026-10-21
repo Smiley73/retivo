@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { hasPlannedProjection } from './balance-projection-compare-data';
+import { COMPARE_WITH_PARAM } from './balance-projection-page-constants';
 import { loadPageData, type PipelineData } from './balance-projection-page-data';
 import type { UseBalanceProjectionDataResult } from './use-balance-projection-data';
 import { TaxIntegrationInvalidInputError } from '../lib/balance-projection-runner-tax';
@@ -137,7 +138,7 @@ export function useBalanceProjectionCompare(
   } = dataLoad;
   const viewedId = data.selectedScenarioId;
   const [searchParams, setSearchParams] = useSearchParams();
-  const withParam = searchParams.get('with');
+  const withParam = searchParams.get(COMPARE_WITH_PARAM);
   const [remembered, setRemembered] = useState(readRemembered);
 
   const options = useMemo(
@@ -266,7 +267,7 @@ export function useBalanceProjectionCompare(
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.set('with', id);
+        next.set(COMPARE_WITH_PARAM, id);
         return next;
       },
       { replace: true },

@@ -395,8 +395,11 @@ A scenario is a "what if?" version of your plan. Open **Planning → Scenarios**
   [Reading projections](#reading-projections). **Recalculate** (or **Recalculate
   all**) refreshes the stress-test numbers.
 - The **Active** badge marks the scenario that is active. Change it with the
-  **Active Scenario** picker in the sidebar. The choice is stored per device, in
-  that browser.
+  **Active Scenario** picker in the sidebar, or with **Compare with parent** on a
+  card. The choice is stored per device, in that browser.
+- A scenario with a parent has a **Compare with parent** link under its name. It
+  makes that scenario the active one and opens **Projections** on the **Compare**
+  view against its parent. The base scenario has no parent, so no link.
 - Use the pencil icon to open a scenario. The active scenario and the base
   scenario cannot be deleted. Deleting a scenario with children deletes them too.
 

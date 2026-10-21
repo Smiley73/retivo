@@ -6,9 +6,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  COMPARE_WITH_PARAM,
   MC_BASIS_LABELS,
   METHOD_LABELS,
   VIEW_ORDER,
+  compareDeepLink,
   parseBalanceProjectionView,
   resolvedBasisLabel,
 } from './balance-projection-page-constants';
@@ -56,5 +58,19 @@ describe('parseBalanceProjectionView', () => {
 
   it('accepts compare', () => {
     expect(parseBalanceProjectionView('compare')).toBe('compare');
+  });
+});
+
+describe('compareDeepLink', () => {
+  it('targets the Compare view with the comparison id in the shared param', () => {
+    const url = new URL(compareDeepLink('sc-base'), 'http://x');
+    expect(url.pathname).toBe('/balance-projection');
+    expect(parseBalanceProjectionView(url.searchParams.get('view'))).toBe('compare');
+    expect(url.searchParams.get(COMPARE_WITH_PARAM)).toBe('sc-base');
+  });
+
+  it('encodes an id that needs escaping', () => {
+    const url = new URL(compareDeepLink('a&b=c'), 'http://x');
+    expect(url.searchParams.get(COMPARE_WITH_PARAM)).toBe('a&b=c');
   });
 });
