@@ -301,6 +301,18 @@ describe('useCompareStress — comparison side', () => {
     expect(result.current.verdict).toMatchObject({ kind: 'same' });
   });
 
+  it('keeps the cache keys object identity across renders while the keys do not change', async () => {
+    const { result, rerender } = setup({ viewed: settled(0.9), comparisonId: BASE });
+    await waitFor(() => expect(result.current.cacheKeys).not.toBeNull(), WAIT);
+    const first = result.current.cacheKeys;
+    // A different viewed state (the page ticking its progress) re-renders the
+    // hook with the same keys; the object must be the same one.
+    rerender({ viewed: settled(0.8), comparisonId: BASE });
+    expect(result.current.cacheKeys).toBe(first);
+    rerender({ viewed: { ...settled(0.8), progressDone: 5 }, comparisonId: BASE });
+    expect(result.current.cacheKeys).toBe(first);
+  });
+
   it('reads a comparison that cannot run the stress test as unavailable, with no worker', async () => {
     const { result, built } = setup({ viewed: settled(), comparisonId: 'no-such-scenario' });
     await waitFor(() => expect(result.current.comparison.state).toBe('unavailable'), WAIT);
