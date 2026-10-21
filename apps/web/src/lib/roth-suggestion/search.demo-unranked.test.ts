@@ -1,7 +1,9 @@
 /**
  * Candidates that cannot be ranked, on the demo scenario whose spending runs
- * the portfolio out: a plan whose cap was not met, and a guarded plan that
- * still crosses a guarded line, are returned with the reason and no rank.
+ * the portfolio out: a plan whose cap was not met is returned with the reason
+ * and no rank. (A guarded plan that still crosses a guarded line is covered on
+ * a toy household: the guards are held to zero conversion, which this
+ * household's guarded plans no longer cross.)
  */
 import 'fake-indexeddb/auto';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -33,23 +35,6 @@ describe('unranked candidates on the funds-run-out demo scenario', () => {
     expect(reference.unranked).toEqual([{ kind: 'cap-breached', years: breached }]);
     expect(reference.rank).toBeNull();
     expect(result.rankedIds).not.toContain(reference.id);
-  });
-
-  it('returns a guarded plan that crosses a line unranked, naming the year and the line', () => {
-    const crossed = result.candidates.filter((c) => c.unranked.some((u) => u.kind === 'guard-crossed'));
-    expect(crossed.length).toBeGreaterThan(0);
-    for (const candidate of crossed) {
-      expect(candidate.guarded).toBe(true);
-      expect(candidate.rank).toBeNull();
-      expect(result.rankedIds).not.toContain(candidate.id);
-      const reasons = candidate.unranked.flatMap((u) => (u.kind === 'guard-crossed' ? u.crossings : []));
-      const rows = new Map(candidate.drawdownYears.map((r) => [r.year, r]));
-      for (const { year, line } of reasons) {
-        // The crossing is real: the rows, not the ceilings, show it.
-        if (line === 'aca') expect(rows.get(year)?.acaPtcTier).toBe('above-400-cliff');
-        else expect(rows.get(year + 2)?.irmaaTier ?? 'none').not.toBe('none');
-      }
-    }
   });
 
   it('never ranks an unguarded plan out for crossing a line it was not asked to hold', () => {
