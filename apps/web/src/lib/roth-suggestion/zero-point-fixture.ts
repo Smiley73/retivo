@@ -10,7 +10,6 @@ import type { MagiCapWindow } from '../../db/types';
 import type { DrawdownYear } from '../drawdown-engine-types';
 import { createProjectionRunner } from './projection';
 import type { RothSuggestionRequest } from './types';
-import type { YearDetailRow } from './year-detail-types';
 
 const MISSING_TARGET = 'no-such-roth';
 
@@ -44,26 +43,4 @@ export async function zeroPointByYear(
     });
   }
   return out;
-}
-
-/** How far a plan row's derived income before the conversion sits from the
- *  engine's own zero point, split into the two parts it is made of. */
-export interface ZeroPointGaps {
-  /** Other income before the conversion (income on the line less taxable Social
-   *  Security): the part the conversion's tax draw can add to. */
-  readonly otherDollars: number;
-  /** Taxable Social Security before the conversion: the §86 rule on that other income. */
-  readonly socialSecurityDollars: number;
-}
-
-export function gapsFromZeroPoint(
-  row: Pick<YearDetailRow, 'incomeBeforeDollars' | 'extraTaxableSsDollars' | 'taxableSsDollars'>,
-  zero: ZeroPoint,
-): ZeroPointGaps {
-  const ssBefore = row.taxableSsDollars - (row.extraTaxableSsDollars ?? NaN);
-  const otherBefore = (row.incomeBeforeDollars ?? NaN) - ssBefore;
-  return {
-    otherDollars: otherBefore - (zero.incomeDollars - zero.taxableSsDollars),
-    socialSecurityDollars: ssBefore - zero.taxableSsDollars,
-  };
 }

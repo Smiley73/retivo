@@ -14,6 +14,7 @@ function detailRow(overrides: Partial<YearDetailRow> = {}): YearDetailRow {
     incomeBeforeDollars: 144_455.21,
     incomeAfterDollars: 382_261.28,
     extraTaxableSsDollars: 0,
+    taxPaymentIncomeDollars: 4_379.49,
     keptUnderDollars: 2.72,
     reroutedDollars: 0,
     breachedDollars: 0,

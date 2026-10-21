@@ -78,6 +78,7 @@ export interface YearDetailView {
   readonly limit: string;
   readonly incomeBefore: string;
   readonly extraSs: string;
+  readonly taxPaymentIncome: string;
   readonly keptUnder: string;
   readonly withdrawals: string;
   readonly incomeTax: string;
@@ -118,6 +119,7 @@ export function toYearDetailView(row: YearDetailRow): YearDetailView {
     limit: row.limitDollars === null ? '—' : formatCurrency(row.limitDollars),
     incomeBefore: exactOrDash(row.incomeBeforeDollars),
     extraSs: exactOrDash(row.extraTaxableSsDollars),
+    taxPaymentIncome: exactOrDash(row.taxPaymentIncomeDollars),
     keptUnder: exactOrDash(row.keptUnderDollars),
     withdrawals: withdrawalText(row),
     incomeTax: formatCurrency(row.incomeTaxDollars),

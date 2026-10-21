@@ -1,16 +1,22 @@
 /**
  * The year-by-year table behind a plan. Everything is read off the plan's
- * records and engine rows; the one figure the engine does not stamp, the
- * income on the limit's line before the conversion, is derived from the row
- * with the engine's own Social Security rule:
+ * records and engine rows. The two figures that need the year without its
+ * conversion, the income on the limit's line before the conversion and the
+ * Social Security the conversion pulled into tax, are the engine's own: the
+ * tax pass prices every year the Fill step converts a second time with no
+ * conversion and none of the draws that paid its tax, and stamps the result on
+ * the row. So a person can check
  *
- *   other income before = income after - taxable SS after - conversion
- *   taxable SS before   = the §86 rule on that other income
- *   income before       = other income before + taxable SS before
+ *   amount = limit - income before - extra taxable SS - income from paying the
+ *            tax - kept under
  *
- * so a person can check `amount = limit - income before - extra taxable SS -
- * kept under`, where `kept under` is the few dollars the search leaves under
- * the limit. Nominal dollars throughout: the limits are nominal for the year.
+ * where `income from paying the tax` is what the row's income carries beyond
+ * the zero point, the conversion and the extra Social Security (taxable income
+ * from the withdrawals that paid the conversion's tax), and `kept under` is the
+ * limit less the income after the conversion. A row without the engine's
+ * figures (the current plan, which converts nothing) has no conversion to take
+ * out, so its income before is its income after. Nominal dollars throughout:
+ * the limits are nominal for the year.
  */
 import type { AccountsById } from './year-records';
 import { preTaxDollarsAtRowEnd } from './year-records';
@@ -76,8 +82,25 @@ function dollars(valueCents: number): number {
 }
 
 /** Income on the limit's line before and after the conversion, and the Social
- *  Security the conversion pulled into taxable income. */
-function incomeFlow(record: YearRecord, input: DetailYearInput, env: YearDetailEnvironment): IncomeFlow {
+ *  Security the conversion pulled into taxable income. A converted year reads
+ *  the "before" side from the engine's zero-conversion figures on the row. A
+ *  row without them converted nothing (or is not a projected year), so the
+ *  conversion is backed out of its income with the engine's Social Security
+ *  rule, which there changes nothing. */
+function incomeFlow(
+  record: YearRecord,
+  row: DrawdownYear,
+  input: DetailYearInput,
+  env: YearDetailEnvironment,
+): IncomeFlow {
+  const { rothZeroConversionMagiCents: zeroMagiCents, rothZeroConversionTaxableSsCents: zeroSsCents } = row;
+  if (zeroMagiCents !== undefined && zeroSsCents !== undefined) {
+    return {
+      beforeCents: zeroMagiCents,
+      afterCents: record.magiCents,
+      extraTaxableSsCents: record.taxableSsCents - zeroSsCents,
+    };
+  }
   const exempt = env.taxExemptInterestCents;
   const otherBefore = Math.max(
     0,
@@ -188,7 +211,7 @@ function detailRow(
   const preTaxEndDollars = preTaxDollarsAtRowEnd(row, args.accounts);
   const limitKind = limitKindOf(record, preTaxEndDollars);
   const { limits } = record;
-  const flow = record.inWindow && input !== undefined ? incomeFlow(record, input, args.env) : null;
+  const flow = record.inWindow && input !== undefined ? incomeFlow(record, row, input, args.env) : null;
   const limitDollars = limits === null ? null : limits.limitDollars;
   return {
     year: record.year,
@@ -201,6 +224,10 @@ function detailRow(
     incomeBeforeDollars: flow === null ? null : dollars(flow.beforeCents),
     incomeAfterDollars: flow === null ? null : dollars(flow.afterCents),
     extraTaxableSsDollars: flow === null ? null : dollars(flow.extraTaxableSsCents),
+    taxPaymentIncomeDollars:
+      flow === null
+        ? null
+        : dollars(flow.afterCents - flow.beforeCents - record.convertedCents - flow.extraTaxableSsCents),
     keptUnderDollars:
       flow === null || limitDollars === null ? null : limitDollars - dollars(flow.afterCents),
     reroutedDollars: record.reroutedDollars,

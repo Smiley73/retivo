@@ -45,18 +45,25 @@ const DEFINITIONS: readonly (readonly [string, string])[] = [
   ],
   [
     'Income before conversion',
-    'the year’s income on that line apart from the conversion and the Social Security it ' +
-      'made taxable. It includes any small income from extra withdrawals that pay the ' +
-      'conversion’s own tax.',
+    'the year’s income on that line with no conversion: the projection’s own figure for the ' +
+      'same year with the conversion left out.',
   ],
   [
     'Extra Social Security taxed',
     'the Social Security the conversion pulled into taxable income that was not taxed without it.',
   ],
   [
+    'Income from paying the tax',
+    'taxable income from the extra withdrawals that pay the conversion’s own tax, which the ' +
+      'year’s income carries on top of the income before, the conversion and the extra Social Security.',
+  ],
+  [
     'Kept under the limit',
-    'the few dollars the search leaves under the limit. The check: limit − income before − ' +
-      'extra Social Security taxed − kept under the limit = converted.',
+    'the limit less the income after the conversion, which includes the income from paying the ' +
+      'tax. In a year a limit stopped it is the few dollars the search leaves under that limit; ' +
+      'in any other year it is the room the plan did not use, and negative where income was ' +
+      'already over the limit. The check: limit − income before − extra Social Security taxed − ' +
+      'income from paying the tax − kept under the limit = converted.',
   ],
   [
     'Spending withdrawals',
@@ -101,6 +108,7 @@ const YearCells: React.FC<{ view: YearDetailView }> = ({ view }) => (
     <Cell className={tdNumClass}>{view.limit}</Cell>
     <Cell className={tdNumClass}>{view.incomeBefore}</Cell>
     <Cell className={tdNumClass}>{view.extraSs}</Cell>
+    <Cell className={tdNumClass}>{view.taxPaymentIncome}</Cell>
     <Cell className={tdNumClass}>{view.keptUnder}</Cell>
     <Cell className={tdClass}>{view.withdrawals}</Cell>
     <Cell className={tdNumClass}>{view.incomeTax}</Cell>
@@ -150,6 +158,7 @@ export const RothSuggestionYearDetail: React.FC<RothSuggestionYearDetailProps> =
             <Column className={thStickyNumClass}>Limit</Column>
             <Column className={thStickyNumClass}>Income before conversion</Column>
             <Column className={thStickyNumClass}>Extra Social Security taxed</Column>
+            <Column className={thStickyNumClass}>Income from paying the tax</Column>
             <Column className={thStickyNumClass}>Kept under the limit</Column>
             <Column className={thStickyClass}>Spending withdrawals</Column>
             <Column className={thStickyNumClass}>Income tax</Column>

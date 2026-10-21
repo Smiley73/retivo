@@ -59,7 +59,12 @@ export interface YearDetailRow {
   readonly incomeAfterDollars: number | null;
   /** Social Security the conversion made taxable that was not before. */
   readonly extraTaxableSsDollars: number | null;
-  /** Limit less income after: the search's few dollars of margin. */
+  /** Income after the conversion beyond the income before, the conversion and
+   *  the extra Social Security: taxable income from the withdrawals that paid
+   *  the conversion's tax. */
+  readonly taxPaymentIncomeDollars: number | null;
+  /** Limit less income after: the search's few dollars of margin in a year a
+   *  limit stopped, the room left unused in a year none did. */
   readonly keptUnderDollars: number | null;
   readonly reroutedDollars: number;
   readonly breachedDollars: number;

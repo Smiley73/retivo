@@ -116,10 +116,27 @@ describe('the year-by-year table', () => {
     expect(detail.some((r) => r.amountDollars === 0)).toBe(true);
     const lastRow = body[body.length - 1];
     expect(within(lastRow).getByText('Outside the window, no conversion tried')).toBeInTheDocument();
-    const zero = body.filter((r) => within(r).queryByText('$0.00') !== null);
-    expect(zero.length).toBeGreaterThan(0);
+    // Each row whose Converted cell reads $0.00 names its reason in the Stopped by cell.
+    const headers = within(grid).getAllByRole('columnheader').map((h) => h.textContent ?? '');
+    const converted = headers.indexOf('Converted');
+    const stoppedBy = headers.indexOf('Stopped by');
+    expect(converted).toBeGreaterThan(-1);
+    expect(stoppedBy).toBeGreaterThan(converted);
+    const cellsOf = (r: HTMLElement): string[] =>
+      Array.from(r.querySelectorAll('[role="rowheader"], [role="gridcell"]')).map((c) => c.textContent ?? '');
+    const zero = body.filter((r) => cellsOf(r)[converted] === '$0.00');
+    expect(zero).toHaveLength(detail.filter((r) => r.amountDollars === 0).length);
+    const reasons: Partial<Record<(typeof detail)[number]['limitKind'], string>> = {
+      'already-over': 'Already over the ceiling',
+      'pre-tax-ran-out': 'Pre-tax money ran out',
+      'outside-window': 'Outside the window, no conversion tried',
+    };
     for (const r of zero) {
-      expect(within(r).getAllByRole('gridcell')[3].textContent ?? '').not.toBe('');
+      const cells = cellsOf(r);
+      const year = detail.find((d) => String(d.year) === cells[0]);
+      const reason = year === undefined ? undefined : reasons[year.limitKind];
+      expect(reason, `year ${cells[0]}`).toBeDefined();
+      expect(cells[stoppedBy]).toBe(reason);
     }
   });
 

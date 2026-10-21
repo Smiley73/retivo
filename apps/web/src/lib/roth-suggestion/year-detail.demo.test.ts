@@ -1,8 +1,7 @@
 /**
  * The year-by-year table on the demo household: every figure on a row is
  * enough to arrive at the row's conversion amount, and the income before the
- * conversion, which the engine does not stamp, equals the engine's own zero
- * point.
+ * conversion equals the engine's own zero point.
  */
 import 'fake-indexeddb/auto';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -15,7 +14,7 @@ import {
 import { searchRothSuggestions } from './search';
 import type { RothCandidate, RothSuggestionOk, RothSuggestionRequest } from './types';
 import type { YearDetailRow } from './year-detail-types';
-import { gapsFromZeroPoint, zeroPointByYear, type ZeroPoint } from './zero-point-fixture';
+import { zeroPointByYear, type ZeroPoint } from './zero-point-fixture';
 
 /** The search keeps this many dollars under a limit (its margin plus the $1
  *  step), so the hand check closes to within it and the column names it. */
@@ -70,63 +69,68 @@ describe('year detail on the demo household', () => {
       }
     }, 120_000);
 
-    it('differs from what the engine reports for the year with no conversion only by income the conversion tax draw added', () => {
+    it('equals what the engine reports for the year with no conversion, to the cent, in every window year of every plan', () => {
       expect(pairs.length).toBeGreaterThan(50);
-      for (const { row, zero } of pairs) {
-        const { otherDollars, socialSecurityDollars } = gapsFromZeroPoint(row, zero);
-        // The other income before can only be higher, by the income of the extra withdrawals
-        // that paid the conversion tax, and that is less than the tax.
-        expect(otherDollars).toBeGreaterThan(-0.005);
-        expect(otherDollars).toBeLessThanOrEqual(row.incomeTaxDollars);
-        // Social Security taxed before differs by what that income pulled in: at most 85 cents
-        // of each dollar, and none where the zero point is already at the cap. A wrong
-        // filing status or benefit can fall outside that.
-        expect(socialSecurityDollars).toBeGreaterThan(-0.005);
-        expect(socialSecurityDollars).toBeLessThanOrEqual(0.85 * otherDollars + 0.005);
-      }
-    });
-
-    it('equals it to the cent wherever paying the conversion tax added no income', () => {
-      const allConverted = pairs.filter(({ row }) => row.amountDollars > 0);
-      const converted = allConverted.filter(({ row, zero }) => Math.abs((row.incomeBeforeDollars ?? NaN) - zero.incomeDollars) < 0.005);
-      // A quarter of the converted years or more are exact; the rest are the explained gap above.
-      expect(converted.length).toBeGreaterThanOrEqual(allConverted.length / 4);
-      for (const { row, zero } of converted) {
-        // The Social Security taxable before is the engine's, and the extra is the rest.
-        expect(row.taxableSsDollars - (row.extraTaxableSsDollars ?? NaN)).toBeCloseTo(zero.taxableSsDollars, 2);
+      expect(pairs.some(({ row }) => row.amountDollars > 0)).toBe(true);
+      for (const { candidate, row, zero } of pairs) {
+        const label = `${candidate.id} ${row.year}`;
+        expect(row.incomeBeforeDollars, label).toBeCloseTo(zero.incomeDollars, 2);
+        // The Social Security taxed before is the engine's, and the extra is the rest.
+        expect(row.taxableSsDollars - (row.extraTaxableSsDollars ?? NaN), label).toBeCloseTo(zero.taxableSsDollars, 2);
       }
     });
 
     it('is exact in a year the Social Security tier moves from fifty to eighty-five', () => {
       const moved = pairs.filter(
-        ({ row, zero }) =>
-          row.amountDollars > 0 &&
-          zero.ssTier === 'fifty' &&
-          row.ssTier === 'eighty-five' &&
-          Math.abs((row.incomeBeforeDollars ?? NaN) - zero.incomeDollars) < 0.005,
+        ({ row, zero }) => row.amountDollars > 0 && zero.ssTier === 'fifty' && row.ssTier === 'eighty-five',
       );
       expect(moved.length).toBeGreaterThan(0);
       for (const { row, zero } of moved) {
+        expect(row.incomeBeforeDollars).toBeCloseTo(zero.incomeDollars, 2);
         expect(row.extraTaxableSsDollars).toBeGreaterThan(0);
         expect(row.taxableSsDollars - (row.extraTaxableSsDollars ?? NaN)).toBeCloseTo(zero.taxableSsDollars, 2);
       }
     });
+
+    it('is exact in a year the withdrawals that paid the conversion tax added income, which the row names', () => {
+      // The converted row's own income runs above the zero point plus the conversion and the
+      // extra Social Security by the income of those withdrawals. Backing the conversion out of
+      // that row alone could not tell the two apart.
+      const drawn = pairs.filter(({ row }) => row.amountDollars > 0 && (row.taxPaymentIncomeDollars ?? 0) > 1);
+      expect(drawn.length).toBeGreaterThan(0);
+      for (const { row, zero } of drawn) {
+        expect(row.incomeBeforeDollars).toBeCloseTo(zero.incomeDollars, 2);
+        expect(row.incomeAfterDollars).toBeCloseTo(
+          (row.incomeBeforeDollars ?? NaN) + row.amountDollars + (row.extraTaxableSsDollars ?? NaN) + (row.taxPaymentIncomeDollars ?? NaN),
+          2,
+        );
+      }
+    });
   });
 
-  // The sum closes by construction once the margin is named, so this checks the
-  // margin is small and the three lines and kinds appear; the derived figures are
-  // checked against the engine above.
+  // The sum closes by construction once the income of the tax-paying withdrawals and the room
+  // left are named, so this checks the search left only its margin under the limit and the
+  // three lines appear; the derived figures are checked against the engine above.
   it('closes the hand check to the dollar in every limit-stopped year of every plan', () => {
     let checked = 0;
     const lines = new Set<string>();
     for (const candidate of planCandidates()) {
       for (const row of candidate.yearDetail) {
         if (row.limitKind !== 'bracket' && row.limitKind !== 'irmaa' && row.limitKind !== 'aca') continue;
-        const { limitDollars, incomeBeforeDollars, extraTaxableSsDollars, keptUnderDollars } = row;
-        if (limitDollars === null || incomeBeforeDollars === null || extraTaxableSsDollars === null || keptUnderDollars === null) {
+        const { limitDollars, incomeBeforeDollars, extraTaxableSsDollars, taxPaymentIncomeDollars, keptUnderDollars } = row;
+        if (
+          limitDollars === null ||
+          incomeBeforeDollars === null ||
+          extraTaxableSsDollars === null ||
+          taxPaymentIncomeDollars === null ||
+          keptUnderDollars === null
+        ) {
           throw new Error(`${candidate.id} ${row.year} lacks a figure`);
         }
-        expect(limitDollars - incomeBeforeDollars - extraTaxableSsDollars - keptUnderDollars).toBeCloseTo(row.amountDollars, 2);
+        expect(
+          limitDollars - incomeBeforeDollars - extraTaxableSsDollars - taxPaymentIncomeDollars - keptUnderDollars,
+        ).toBeCloseTo(row.amountDollars, 2);
+        expect(taxPaymentIncomeDollars).toBeGreaterThanOrEqual(-0.005);
         expect(keptUnderDollars).toBeGreaterThanOrEqual(0);
         expect(keptUnderDollars).toBeLessThanOrEqual(MAX_KEPT_UNDER_DOLLARS);
         lines.add(row.limitKind);

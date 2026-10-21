@@ -8,7 +8,7 @@ import { searchRothSuggestions } from './search';
 import { TOY_ROTH_ID, toyProjection, type ToyOptions } from './test-fixtures';
 import type { RothCandidate, RothSuggestionOk, RothSuggestionRequest } from './types';
 import type { YearDetailRow } from './year-detail-types';
-import { gapsFromZeroPoint, zeroPointByYear, type ZeroPoint } from './zero-point-fixture';
+import { zeroPointByYear, type ZeroPoint } from './zero-point-fixture';
 
 const TIMEOUT = { timeout: 60_000 };
 /** Born 1966, the secondary dies at 70: the death year is 2036, inside 2028-2040. */
@@ -32,25 +32,28 @@ function limitStopped(candidates: readonly RothCandidate[]): { id: string; row: 
   );
 }
 
-/** The derived figures against the engine's own zero point: other income before
- *  can only be higher, by the income of the withdrawals that paid the
- *  conversion tax (less than the tax), and the Social Security taxed before by at
- *  most 85 cents of each such dollar. */
-function expectNearZeroPoint(row: YearDetailRow, zero: ZeroPoint | undefined): void {
+/** The derived figures equal the engine's own zero point to the cent. */
+function expectZeroPoint(row: YearDetailRow, zero: ZeroPoint | undefined): void {
   if (zero === undefined) throw new Error(`${row.year} has no zero point`);
-  const { otherDollars, socialSecurityDollars } = gapsFromZeroPoint(row, zero);
-  expect(otherDollars).toBeGreaterThan(-0.005);
-  expect(otherDollars).toBeLessThanOrEqual(row.incomeTaxDollars);
-  expect(socialSecurityDollars).toBeGreaterThan(-0.005);
-  expect(socialSecurityDollars).toBeLessThanOrEqual(0.85 * otherDollars + 0.005);
+  expect(row.incomeBeforeDollars).toBeCloseTo(zero.incomeDollars, 2);
+  expect(row.taxableSsDollars - (row.extraTaxableSsDollars ?? NaN)).toBeCloseTo(zero.taxableSsDollars, 2);
 }
 
 function expectHandCheck(row: YearDetailRow): void {
-  const { limitDollars, incomeBeforeDollars, extraTaxableSsDollars, keptUnderDollars } = row;
-  if (limitDollars === null || incomeBeforeDollars === null || extraTaxableSsDollars === null || keptUnderDollars === null) {
+  const { limitDollars, incomeBeforeDollars, extraTaxableSsDollars, taxPaymentIncomeDollars, keptUnderDollars } = row;
+  if (
+    limitDollars === null ||
+    incomeBeforeDollars === null ||
+    extraTaxableSsDollars === null ||
+    taxPaymentIncomeDollars === null ||
+    keptUnderDollars === null
+  ) {
     throw new Error(`${row.year} lacks a figure`);
   }
-  expect(limitDollars - incomeBeforeDollars - extraTaxableSsDollars - keptUnderDollars).toBeCloseTo(row.amountDollars, 2);
+  expect(
+    limitDollars - incomeBeforeDollars - extraTaxableSsDollars - taxPaymentIncomeDollars - keptUnderDollars,
+  ).toBeCloseTo(row.amountDollars, 2);
+  expect(taxPaymentIncomeDollars).toBeGreaterThanOrEqual(-0.005);
   expect(keptUnderDollars).toBeGreaterThanOrEqual(0);
   expect(keptUnderDollars).toBeLessThanOrEqual(6);
 }
@@ -72,7 +75,7 @@ describe('a couple whose spouse dies inside the window', () => {
     for (const plan of plans) {
       const zero = await zeroPointByYear(req, plan.ladder);
       for (const row of plan.yearDetail.filter((r) => r.year >= SURVIVOR_FIRST_YEAR && r.inWindow)) {
-        expectNearZeroPoint(row, zero.get(row.year));
+        expectZeroPoint(row, zero.get(row.year));
       }
     }
   });
@@ -84,12 +87,7 @@ describe('a couple whose spouse dies inside the window', () => {
     const survivorYears = (plan?.yearDetail ?? []).filter((r) => r.year >= SURVIVOR_FIRST_YEAR && r.amountDollars > 0);
     expect(survivorYears.length).toBeGreaterThan(0);
     for (const row of survivorYears) {
-      const engine = zero.get(row.year);
-      expectNearZeroPoint(row, engine);
-      // Equal to the cent where the conversion tax added no income.
-      if (engine !== undefined && Math.abs((row.incomeBeforeDollars ?? NaN) - engine.incomeDollars) < 0.005) {
-        expect(row.taxableSsDollars - (row.extraTaxableSsDollars ?? NaN)).toBeCloseTo(engine.taxableSsDollars, 2);
-      }
+      expectZeroPoint(row, zero.get(row.year));
     }
   });
 });
@@ -106,7 +104,7 @@ describe('a couple before Medicare, on the Marketplace', () => {
     for (const { c, row } of acaYears) {
       expectHandCheck(row);
       if (!zeroByPlan.has(c.id)) zeroByPlan.set(c.id, await zeroPointByYear(req, c.ladder));
-      expectNearZeroPoint(row, zeroByPlan.get(c.id)?.get(row.year));
+      expectZeroPoint(row, zeroByPlan.get(c.id)?.get(row.year));
       const aca = c.years.find((y) => y.year === row.year)?.limits?.aca;
       expect(aca?.applies).toBe(true);
       expect(row.lines?.acaDollars).toBe(aca?.applies === true ? aca.valueDollars : NaN);

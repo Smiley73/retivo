@@ -136,6 +136,36 @@ describe('limit that stopped the year', () => {
     expect(only.keptUnderDollars).toBeGreaterThan(50_000);
   });
 
+  it('reads the income before and the extra Social Security off the engine\'s zero-conversion figures when the row has them', () => {
+    // Income after $300,000: $60,000 converted, $40,000 more from the withdrawals that paid the
+    // tax, and a zero point of $190,000 of which $30,000 is taxable Social Security. Backing the
+    // conversion out of the row would give $240,000.
+    const [only] = detail({
+      engineRow: row({
+        magiCents: 30_000_000,
+        taxableSsCents: 5_000_000,
+        rothConvertedCents: 6_000_000,
+        rothZeroConversionMagiCents: 19_000_000,
+        rothZeroConversionTaxableSsCents: 3_000_000,
+      }),
+      social: { grossSsDollars: 60_000, filingStatus: 'MFJ' },
+    });
+    expect(only.incomeBeforeDollars).toBe(190_000);
+    expect(only.incomeAfterDollars).toBe(300_000);
+    expect(only.extraTaxableSsDollars).toBe(20_000);
+    expect(only.taxPaymentIncomeDollars).toBe(30_000);
+    expect(only.keptUnderDollars).toBe(BRACKET_TOP - 300_000);
+  });
+
+  it('falls back to backing the conversion out of the row when it carries no zero-conversion figures', () => {
+    const [only] = detail({
+      engineRow: row({ magiCents: 20_000_000, rothConvertedCents: 5_000_000 }),
+    });
+    expect(only.incomeBeforeDollars).toBe(150_000);
+    expect(only.extraTaxableSsDollars).toBe(0);
+    expect(only.taxPaymentIncomeDollars).toBe(0);
+  });
+
   it('keeps the year after the window as a row that says no conversion was attempted', () => {
     const rows = buildYearDetail({
       records: buildYearRecords({
