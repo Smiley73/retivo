@@ -79,6 +79,7 @@ function drawdownYear(opts: {
   federalTaxCents?: number;
   irmaaSurchargeCents?: number;
   acaPtcSubsidyCents?: number;
+  acaCreditAppliedToPremiumsCents?: number;
   rmdReinvestedCents?: number;
   rmdOverflowToCashCents?: number;
   rothConvertedCents?: number;
@@ -94,6 +95,7 @@ function drawdownYear(opts: {
     federalTaxCents: opts.federalTaxCents,
     irmaaSurchargeCents: opts.irmaaSurchargeCents,
     acaPtcSubsidyCents: opts.acaPtcSubsidyCents,
+    acaCreditAppliedToPremiumsCents: opts.acaCreditAppliedToPremiumsCents,
     rmdReinvestedCents: opts.rmdReinvestedCents,
     rmdOverflowToCashCents: opts.rmdOverflowToCashCents,
     rothConvertedCents: opts.rothConvertedCents,
@@ -819,10 +821,11 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
     fromYear: number;
     drawdownEndYear: number;
     expenseRows: ExpenseProjectionPoint[];
+    socialSecurity?: number;
   }): CashflowSeriesPipelineResult {
     const sourceSplitByYear = new Map<number, { ss: number; pensionAnnuity: number; partTime: number; oneOff: number }>();
     for (let y = opts.fromYear; y <= opts.drawdownEndYear; y += 1) {
-      sourceSplitByYear.set(y, { ss: 0, pensionAnnuity: 0, partTime: 0, oneOff: 0 });
+      sourceSplitByYear.set(y, { ss: opts.socialSecurity ?? 0, pensionAnnuity: 0, partTime: 0, oneOff: 0 });
     }
     return {
       fromYear: opts.fromYear,
@@ -840,12 +843,14 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
     expenseRows: ExpenseProjectionPoint[];
     fromYear: number;
     drawdownEndYear: number;
+    socialSecurity?: number;
   }): IncomeView | null {
     return buildIncomeView({
       cashflowSeries: incomeViewCashflowSeries({
         fromYear: opts.fromYear,
         drawdownEndYear: opts.drawdownEndYear,
         expenseRows: opts.expenseRows,
+        socialSecurity: opts.socialSecurity,
       }),
       drawdownByMethod: { planned: opts.drawdown, twr: null },
       activeMethod: 'planned',
@@ -970,6 +975,40 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
     const row = view!.cashflowChartRows.find((r) => r.year === 2031);
     // (1_000_00 + 0 − 3_000_00) / 100 = −2_000 → clamped to 0.
     expect(row?.taxes).toBe(0);
+  });
+
+  it('(e) a year that applies credit to premiums shows the lowered draw and still ties out', () => {
+    // $71,200 of spending, $31,300 of Social Security, no federal tax and a
+    // $5,134.20 credit that all goes to premiums: the engine draws 34,765.80
+    // (39,900 less the line). The band shows that draw, with the line netted in
+    // the Taxes band, so income meets expenses and no shortfall appears.
+    const drawdown: DrawdownByMethodResult = {
+      years: [
+        drawdownYear({
+          year: 2031,
+          growth: 0,
+          withdrawn: 34_765.8,
+          federalTaxCents: 0,
+          irmaaSurchargeCents: 0,
+          acaPtcSubsidyCents: 5_134_20,
+          acaCreditAppliedToPremiumsCents: 5_134_20,
+        }),
+      ],
+      depletionYear: null,
+      perMonthWithdrawal: new Float64Array(),
+    };
+    const view = run({
+      drawdown,
+      expenseRows: [expenseRow(2031, 71_200)],
+      fromYear: 2031,
+      drawdownEndYear: 2031,
+      socialSecurity: 31_300,
+    });
+    const row = view!.cashflowChartRows.find((r) => r.year === 2031)!;
+    expect(row.withdrawal).toBeCloseTo(34_765.8, 2);
+    expect(row.taxes).toBeCloseTo(-5_134.2, 2);
+    expect(row.totalIncome).toBeCloseTo(row.total, 2);
+    expect(row.shortfallHeight).toBe(0);
   });
 });
 

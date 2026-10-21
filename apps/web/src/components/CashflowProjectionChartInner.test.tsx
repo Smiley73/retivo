@@ -86,6 +86,21 @@ describe('CashflowProjectionChartInner — tooltip granularity', () => {
     expect(label.parentElement?.textContent).toContain('$7,000');
   });
 
+  it('names a negative Taxes band the credit applied to premiums', () => {
+    const tip = makeCashflowTooltip(
+      MEMBERS,
+      'yearly',
+      CHART_COLORS.light,
+      CHART_CHROME.light,
+    );
+    const credited: CashflowMonthlyPoint = { ...POINT, taxes: -5_134.2, total: 34_865.8 };
+    const node = tip({ ...credited, x: credited.fractionalYear } as unknown as ChartDatum);
+    const { getByText, queryByText } = render(<>{node}</>);
+    const label = getByText('Credit applied to premiums');
+    expect(label.parentElement?.textContent).toContain('$5,134');
+    expect(queryByText('Taxes')).toBeNull();
+  });
+
   it('category mode lists per-category rows + Taxes + Total income (no essential/discretionary)', () => {
     const tip = makeCashflowTooltip(
       MEMBERS,
