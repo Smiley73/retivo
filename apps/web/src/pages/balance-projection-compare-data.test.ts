@@ -322,6 +322,43 @@ describe('buildCompareData — identity', () => {
     expect(compare.identity).toEqual({ planned: true, stress: false });
   });
 
+  it('does not read an inflation-only change as identical when only the deflated balance differs', () => {
+    const base = byName.get('Base')!;
+    const primary = inputs.members.find((m) => m.payload.isPrimary)!;
+    const roth = inputs.accounts.find((a) => a.payload.taxTreatment === 'ROTH')!;
+    const balance = inputs.balances.find((b) => b.payload.accountId === roth.id)!;
+    // One flat Roth balance and nothing else: no growth, income or expenses,
+    // so inflation cannot touch a nominal year, only the deflated figures.
+    const flat: Inputs = {
+      ...inputs,
+      members: [
+        { ...primary, payload: { ...primary.payload, birthdate: '1959-01-01' } },
+      ],
+      accounts: [
+        { ...roth, payload: { ...roth.payload, ownerId: primary.id, planningReturnPct: 0, plannedContributionPreTax: 0, plannedContributionPostTax: 0 } },
+      ],
+      balances: [
+        { ...balance, payload: { ...balance.payload, startingBalance: 100_000 } },
+      ],
+      expenses: [],
+      incomeStreams: [],
+      ssBenefits: [],
+    };
+    const scenarios = [
+      base,
+      childOf(base, 'zero-inflation', { inflation: { ratePct: 0 } }),
+      childOf(base, 'five-inflation', { inflation: { ratePct: 5 } }),
+    ];
+    const load = (id: string) => loadPageData({ ...flat, scenarios, selectedScenarioId: id, ...TODAY });
+    const compare = buildCompareData({
+      viewed: load('five-inflation'),
+      comparison: load('zero-inflation'),
+      stressCacheKeys: NO_KEYS,
+    });
+    expect(compare.difference.endingBalance).toBeLessThan(0);
+    expect(compare.identity.planned).toBe(false);
+  });
+
   it('leaves stress unknown when a key is missing and planned false for different plans', () => {
     const compare = buildCompareData({
       viewed: named('Base'),

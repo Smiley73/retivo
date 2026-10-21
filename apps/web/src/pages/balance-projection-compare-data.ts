@@ -80,7 +80,10 @@ export interface CompareData {
     readonly drivers: CompareDrivers | null;
   };
   readonly identity: {
-    /** The two planned year-by-year results are structurally equal. */
+    /** The two planned year-by-year results are structurally equal AND every
+     *  figure compared (horizon, ending balance in today's dollars, run-out
+     *  year, drivers) agrees: scenario inflation deflates those figures, so
+     *  equal nominal years alone can still hide a difference. */
     readonly planned: boolean;
     /** The two stress-test cache keys are equal; `null` when either is unknown. */
     readonly stress: boolean | null;
@@ -236,7 +239,11 @@ export function buildCompareData(args: {
       drivers: diffDrivers(v.drivers, c.drivers),
     },
     identity: {
-      planned: vYears !== null && cYears !== null && structurallyEqual(vYears, cYears),
+      planned:
+        vYears !== null &&
+        cYears !== null &&
+        structurallyEqual(vYears, cYears) &&
+        structurallyEqual(v, c),
       stress:
         stressCacheKeys.viewed === null || stressCacheKeys.comparison === null
           ? null
