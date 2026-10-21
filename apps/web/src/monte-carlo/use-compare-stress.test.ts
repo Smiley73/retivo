@@ -8,7 +8,7 @@
  */
 import 'fake-indexeddb/auto';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearAllStores, listAggregates } from '../db/store';
 import { clearMonteCarloCache, getCached, mcCacheKey, putCached } from '../db/monte-carlo-cache';
 import { loadDemoData } from '../lib/demo-data-loader';
@@ -86,9 +86,11 @@ const settled = (successProbability = 0.9): CompareStressViewed => ({
   hasNoAccounts: false,
   cbpValidation: { ok: true },
   stressPairSignature: 'sig',
+  runPending: false,
   result: summaryAt(successProbability),
   progressDone: 0,
   progressTotal: 0,
+  recalculate: () => undefined,
 });
 
 interface Props {
@@ -186,15 +188,36 @@ describe('useCompareStress — comparison side', () => {
       progress: { done: 100, total: 10_000 },
     });
 
-    // Not running, but not settled either (the page's own run is still behind
-    // its debounce): the pool must keep waiting, or it would overlap that run.
-    rerender({ viewed: { ...running, isRunning: false }, comparisonId: EARLY });
+    // Not running, but a run is still to come (the page's own run is still
+    // behind its debounce): the pool must keep waiting, or it would overlap it.
+    rerender({ viewed: { ...running, isRunning: false, runPending: true }, comparisonId: EARLY });
     await flush();
     expect(built).toHaveLength(0);
     expect(result.current.viewed.state).toBe('pending');
 
     rerender({ viewed: settled(), comparisonId: EARLY });
     await waitFor(() => expect(built).toHaveLength(1), WAIT);
+  });
+
+  it('starts when the page run was cancelled (not running, none queued, no pair, no error)', async () => {
+    const running: CompareStressViewed = {
+      ...settled(),
+      isRunning: true,
+      runPending: true,
+      stressPairSignature: null,
+      result: null,
+    };
+    const { result, built, rerender } = setup({ viewed: running, comparisonId: EARLY });
+    await waitFor(() => expect(result.current.cacheKeys).not.toBeNull(), WAIT);
+    await flush();
+    expect(built).toHaveLength(0);
+
+    // The Cancel shape: the run ends, nothing settles, nothing is re-queued.
+    rerender({ viewed: { ...running, isRunning: false, runPending: false }, comparisonId: EARLY });
+    await waitFor(() => expect(built).toHaveLength(1), WAIT);
+    expect(built[0]!.posted).toEqual([expectedInput(EARLY)]);
+    expect(result.current.viewed.state).toBe('stopped');
+    expect(result.current.comparison.state).toBe('running');
   });
 
   it('starts when the page run failed, so one failure does not hold the other side back', async () => {
@@ -301,10 +324,11 @@ describe('useCompareStress — comparison side', () => {
 describe('useCompareStress — viewed side', () => {
   const base = settled();
   it.each([
-    ['pending with nothing in flight', { ...base, stressPairSignature: null, result: null }, 'pending'],
+    ['pending with nothing in flight yet', { ...base, runPending: true, stressPairSignature: null, result: null }, 'pending'],
+    ['stopped when nothing is running or queued and no pair settled', { ...base, stressPairSignature: null, result: null }, 'stopped'],
     // A result is on screen but is not the settled pair for this plan: it may
     // belong to another scenario or an older plan, so it is never read.
-    ['pending with a result but no settled signature', { ...base, stressPairSignature: null }, 'pending'],
+    ['pending with a result but no settled signature', { ...base, runPending: true, stressPairSignature: null }, 'pending'],
     ['running', { ...base, stressPairSignature: null, isRunning: true }, 'running'],
     ['ready', base, 'ready'],
     ['an error', { ...base, error: 'boom', stressPairSignature: null }, 'error'],
@@ -327,8 +351,15 @@ describe('useCompareStress — viewed side', () => {
   it('returns to pending when an edit clears the settled signature', () => {
     const { result, rerender } = setup({ viewed: base, comparisonId: null });
     expect(result.current.viewed.state).toBe('ready');
-    rerender({ viewed: { ...base, stressPairSignature: null }, comparisonId: null });
+    rerender({ viewed: { ...base, runPending: true, stressPairSignature: null }, comparisonId: null });
     expect(result.current.viewed.state).toBe('pending');
     expect(result.current.viewed.probability).toBeNull();
+  });
+
+  it('hands the page recalculate to runViewed', () => {
+    const recalculate = vi.fn();
+    const { result } = setup({ viewed: { ...base, stressPairSignature: null, result: null, recalculate }, comparisonId: null });
+    result.current.runViewed();
+    expect(recalculate).toHaveBeenCalledTimes(1);
   });
 });

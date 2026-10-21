@@ -10,7 +10,7 @@
  * painted. A difference is a sign glyph plus a direction word, or "about the
  * same" with the reason; the text carries every distinction, never colour.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { McProgressBar } from '../components/McProgressBar';
 import { Muted } from '../components/Muted';
@@ -62,20 +62,73 @@ const Figure: React.FC<{
   </div>
 );
 
+const isBusy = (side: CompareStressSide): boolean =>
+  side.state === 'pending' || side.state === 'running';
+
+const SideProgress: React.FC<{ readonly name: string; readonly side: CompareStressSide }> = ({
+  name,
+  side,
+}) => (
+  <McProgressBar
+    label={`Stress test for ${name}`}
+    done={side.progress?.done ?? 0}
+    total={side.progress?.total ?? 0}
+  />
+);
+
 /** One side's note: progress while it is working, a sentence when it cannot show a figure. */
 const SideStatus: React.FC<{
   readonly name: string;
   readonly side: CompareStressSide;
   readonly viewed: boolean;
   readonly onRetry?: () => void;
-}> = ({ name, side, viewed, onRetry }) => {
-  if (side.state === 'pending' || side.state === 'running') {
+  readonly onRun?: () => void;
+}> = ({ name, side, viewed, onRetry, onRun }) => {
+  // The Try again button stays MOUNTED, disabled, through the retry it started
+  // (as the market-stress retry does): unmounting it under the pointer dropped
+  // keyboard focus to `document.body` at the moment the user acted.
+  const [retried, setRetried] = useState(false);
+  useEffect(() => {
+    if (side.state !== 'error' && !isBusy(side)) setRetried(false);
+  }, [side]);
+  if (!viewed && onRetry && (side.state === 'error' || (retried && isBusy(side)))) {
+    const retrying = side.state !== 'error';
     return (
-      <McProgressBar
-        label={`Stress test for ${name}`}
-        done={side.progress?.done ?? 0}
-        total={side.progress?.total ?? 0}
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        {retrying ? (
+          <SideProgress name={name} side={side} />
+        ) : (
+          <p className="m-0 text-sm text-muted">
+            {side.message ?? `Couldn't calculate the stress test for ${name}.`}
+          </p>
+        )}
+        <Button
+          type="button"
+          className={`${btnSecondarySmClass} disabled:cursor-not-allowed disabled:opacity-50`}
+          isDisabled={retrying}
+          onPress={() => {
+            setRetried(true);
+            onRetry();
+          }}
+        >
+          Try again
+        </Button>
+      </div>
+    );
+  }
+  if (isBusy(side)) return <SideProgress name={name} side={side} />;
+  if (side.state === 'stopped') {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="m-0 text-sm text-muted">
+          The stress test for {name} was stopped before it finished.
+        </p>
+        {onRun && (
+          <Button type="button" className={btnSecondarySmClass} onPress={onRun}>
+            Run the stress test
+          </Button>
+        )}
+      </div>
     );
   }
   if (side.state === 'unavailable') {
@@ -87,23 +140,19 @@ const SideStatus: React.FC<{
       </p>
     );
   }
-  if (side.state === 'error') {
-    return viewed ? (
+  if (side.state === 'error' && viewed) {
+    return (
       <p className="m-0 text-sm text-muted">
         The stress test for {name} didn&rsquo;t finish. Use Try again in the
         stress test controls at the top of the page.
       </p>
-    ) : (
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="m-0 text-sm text-muted">
-          {side.message ?? `Couldn't calculate the stress test for ${name}.`}
-        </p>
-        {onRetry && (
-          <Button type="button" className={btnSecondarySmClass} onPress={onRetry}>
-            Try again
-          </Button>
-        )}
-      </div>
+    );
+  }
+  if (side.state === 'error') {
+    return (
+      <p className="m-0 text-sm text-muted">
+        {side.message ?? `Couldn't calculate the stress test for ${name}.`}
+      </p>
     );
   }
   return null;
@@ -115,7 +164,7 @@ export const CompareStressRow: React.FC<{
   readonly stress: CompareStressVm;
 }> = ({ viewedName, comparisonName, stress }) => {
   const { viewed, comparison, verdict } = stress;
-  const busy = [viewed, comparison].some((s) => s.state === 'pending' || s.state === 'running');
+  const busy = isBusy(viewed) || isBusy(comparison);
   let difference = '—';
   if (verdict !== null && viewed.probability !== null && comparison.probability !== null) {
     difference =
@@ -153,8 +202,13 @@ export const CompareStressRow: React.FC<{
         <p className="m-0 text-sm text-muted">{reasonLine(verdict)}</p>
       )}
       <div role="status" aria-live="polite" className="flex flex-col gap-2">
-        <SideStatus name={viewedName} side={viewed} viewed />
-        <SideStatus name={comparisonName} side={comparison} viewed={false} onRetry={stress.retry} />
+        <SideStatus name={viewedName} side={viewed} viewed onRun={stress.runViewed} />
+        <SideStatus
+          name={comparisonName}
+          side={comparison}
+          viewed={false}
+          onRetry={stress.retry}
+        />
       </div>
     </section>
   );

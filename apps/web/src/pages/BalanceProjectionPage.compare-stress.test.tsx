@@ -21,7 +21,8 @@ import {
 import { clearMonteCarloCache, mcCacheKey, putCached } from '../db/monte-carlo-cache';
 import type { Aggregate, ScenarioOverrides, ScenarioPayload } from '../db/types';
 import { loadDemoData } from '../lib/demo-data-loader';
-import type { MonteCarloSummary } from '../lib/monte-carlo';
+import type { MonteCarloInput, MonteCarloSummary } from '../lib/monte-carlo';
+import { runBalanceProjectionMc } from '../lib/balance-projection-runner';
 import {
   buildMonteCarloInputForScenario,
   MC_PATH_COUNT,
@@ -38,7 +39,9 @@ import { BalanceProjectionPage } from './BalanceProjectionPage';
 // real hook's value through.
 const stressVmOverride = vi.hoisted<{
   value: Partial<import('../components/PlanStressTestSection').PlanStressTestVm> | null;
-}>(() => ({ value: null }));
+  /** The run args the page hands its own stress test, as last rendered. */
+  runArgs: import('../lib/balance-projection-runner-types').RunBalanceProjectionArgs | null;
+}>(() => ({ value: null, runArgs: null }));
 vi.mock('../components/PlanStressTestSection', async () => {
   const actual = await vi.importActual<typeof import('../components/PlanStressTestSection')>(
     '../components/PlanStressTestSection',
@@ -46,6 +49,7 @@ vi.mock('../components/PlanStressTestSection', async () => {
   return {
     ...actual,
     usePlanStressTestVm: (...args: Parameters<typeof actual.usePlanStressTestVm>) => {
+      stressVmOverride.runArgs = args[0];
       const real = actual.usePlanStressTestVm(...args);
       return stressVmOverride.value ? { ...real, ...stressVmOverride.value } : real;
     },
@@ -67,6 +71,7 @@ const settled = (successProbability: number) => ({
   isRunning: false,
   error: null,
   stressPairSignature: 'settled-signature',
+  runPending: false,
   result: summaryAt(successProbability),
   progressDone: 0,
   progressTotal: 0,
@@ -77,12 +82,13 @@ const unsettled = {
   isRunning: false,
   error: null,
   stressPairSignature: null,
+  runPending: true,
   result: summaryAt(0.97),
   progressDone: 0,
   progressTotal: 0,
 };
 
-async function cacheFor(scenarioId: string, successProbability: number): Promise<void> {
+async function mcInputFor(scenarioId: string): Promise<MonteCarloInput> {
   const now = new Date();
   async function list<T>(type: string): Promise<T[]> {
     return (await listAggregates(type as never)) as T[];
@@ -96,14 +102,17 @@ async function cacheFor(scenarioId: string, successProbability: number): Promise
     ssBenefits: await list('socialSecurityBenefit'),
     categories: await list('expenseCategory'),
   };
-  const input = buildMonteCarloInputForScenario({
+  return buildMonteCarloInputForScenario({
     scenarioId,
     scenarios: await list<ScenarioAggregate>('scenario'),
     inputs,
     todayYear: now.getFullYear(),
     todayMonthIndex: now.getMonth(),
   })!;
-  await putCached(await mcCacheKey(input), summaryAt(successProbability));
+}
+
+async function cacheFor(scenarioId: string, successProbability: number): Promise<void> {
+  await putCached(await mcCacheKey(await mcInputFor(scenarioId)), summaryAt(successProbability));
 }
 
 async function seedChild(
@@ -164,6 +173,7 @@ describe('Compare tab — Plan success row', () => {
     await clearMonteCarloCache();
     window.localStorage.clear();
     stressVmOverride.value = null;
+    stressVmOverride.runArgs = null;
     await loadDemoData({ householdId: 'hh-test', email: 'demo@example.test', displayName: 'Demo User' });
   });
   afterEach(async () => {
@@ -279,6 +289,43 @@ describe('Compare tab — Plan success row', () => {
     const { panel } = await renderCompare('plain-child', BASE);
     await within(panel).findByText(/Their stress tests use the same inputs too/, undefined, WAIT);
     expect(within(panel).queryByRole('region', { name: 'Plan success' })).toBeNull();
+  });
+
+  it('runs the viewed stress test on the same input, medical categories included, that the comparison keys against', async () => {
+    // A custom category flagged medical grows at the medical rate in the
+    // comparison's builder; the page's own run must resolve the same set, or the
+    // two sides compare different assumptions and the cached result is missed.
+    const [template] = await listAggregates('expenseCategory');
+    await putAggregate('expenseCategory', {
+      ...template!,
+      id: 'cat-custom-medical',
+      payload: { name: 'Dental plan', isMedical: true },
+    } as never);
+    stressVmOverride.value = { ...settled(0.9) };
+    const { panel } = await renderCompare(EARLY, BASE);
+    await findRow(panel);
+    await waitFor(() => expect(stressVmOverride.runArgs).not.toBeNull(), WAIT);
+    const pageInput = {
+      ...runBalanceProjectionMc(stressVmOverride.runArgs!),
+      pathCount: MC_PATH_COUNT,
+    };
+    expect(stressVmOverride.runArgs!.medicalCategoryIds).toContain('cat-custom-medical');
+    expect(await mcCacheKey(pageInput)).toBe(await mcCacheKey(await mcInputFor(EARLY)));
+  });
+
+  it('says so, and offers to run it, when the viewed run was stopped, while the comparison still calculates', async () => {
+    const recalculate = vi.fn();
+    // The Cancel shape: not running, nothing queued, no pair, no error.
+    stressVmOverride.value = { ...unsettled, runPending: false, result: null, recalculate };
+    await cacheFor(BASE, 0.8);
+    const { panel } = await renderCompare(EARLY, BASE);
+    const row = await findRow(panel);
+    await waitFor(() => expect(figures(row).Base).toBe('80%'), WAIT);
+    expect(within(row).getByText(/The stress test for Retire early at 62 was stopped/)).toBeInTheDocument();
+    expect(within(row).queryByRole('progressbar')).toBeNull();
+    expect(row.querySelector('dl')).toHaveAttribute('aria-busy', 'false');
+    within(row).getByRole('button', { name: 'Run the stress test' }).click();
+    expect(recalculate).toHaveBeenCalledTimes(1);
   });
 
   it('points at the page controls when the viewed run failed, without a second retry button', async () => {

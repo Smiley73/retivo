@@ -19,9 +19,12 @@
  *
  * Sequencing: the cache keys and the cache read start as soon as the tab is
  * selected (deferred to an idle slice, as the Compare tab's second projection
- * is). The pool run starts only when the page's own run has settled, because
- * the provider shards that run across cores-1 workers and a second pool at the
- * same moment makes the page hitch. Once started a run is not aborted by
+ * is). The pool run starts only when no run of the page's own is in flight or
+ * still to come (`isRunning`, `runPending`), because the provider shards that
+ * run across cores-1 workers and a second pool at the same moment makes the
+ * page hitch. The gate is "nothing more is coming", not "the page has a settled
+ * pair": a page run the user cancelled never settles and is not restarted, and
+ * waiting for it would strand the comparison forever. Once started a run is not aborted by
  * leaving the tab (the result is cached and cheap to finish); it is aborted by
  * unmount, by a change of comparison scenario and by a change of the
  * comparison's cache key.
@@ -56,12 +59,19 @@ export interface CompareStressViewed {
   readonly cbpValidation: { readonly ok: boolean } | null;
   /** Non-null only once a completed run for the plan on screen produced `result`. */
   readonly stressPairSignature: string | null;
+  /** A run for the plan on screen is queued behind the auto-run debounce or has
+   *  been requested and not ended. False after a cancel: nothing is coming. */
+  readonly runPending: boolean;
   readonly result: MonteCarloSummary | null;
   readonly progressDone: number;
   readonly progressTotal: number;
+  /** Start the page's own run again (the controls strip's Recalculate). */
+  readonly recalculate: () => void;
 }
 
-type CompareStressState = 'pending' | 'running' | 'ready' | 'error' | 'unavailable';
+/** `stopped`: the page's run is not running, nothing is queued, and it never
+ *  produced a result for the plan on screen (cancelled or superseded). */
+type CompareStressState = 'pending' | 'running' | 'ready' | 'error' | 'unavailable' | 'stopped';
 
 export interface CompareStressSide {
   readonly state: CompareStressState;
@@ -85,6 +95,8 @@ export interface CompareStressVm {
   readonly cacheKeys: { readonly viewed: string | null; readonly comparison: string | null } | null;
   /** Re-run a failed comparison side (a new token, so a late reply of the failed run is ignored). */
   readonly retry: () => void;
+  /** Start the viewed scenario's stress test again, for a viewed side that `stopped`. */
+  readonly runViewed: () => void;
 }
 
 export interface UseCompareStressArgs {
@@ -153,7 +165,7 @@ function viewedSide(v: CompareStressViewed): CompareStressSide {
   if (v.isRunning) {
     return side('running', { progress: { done: v.progressDone, total: v.progressTotal } });
   }
-  return PENDING;
+  return v.runPending ? PENDING : side('stopped');
 }
 
 function sample(s: CompareStressSide): SuccessSample | null {
@@ -263,10 +275,11 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
     };
   }, [targetKey]);
 
-  // 3. A miss runs on the pool, but only once the page's own run has settled.
+  // 3. A miss runs on the pool, but only once the page's own run is out of the
+  // way: not in flight and none queued (cancelled and failed runs both count as
+  // out of the way, so the comparison never waits on a run that will not come).
   const viewedState = viewedSide(viewed);
-  const viewedSettled =
-    !viewed.isRunning && viewedState.state !== 'pending' && viewedState.state !== 'running';
+  const viewedSettled = !viewed.isRunning && !viewed.runPending;
   const comparisonInput = live?.comparisonInput ?? null;
   useEffect(() => {
     if (!isActive || targetKey === null || comparisonInput === null) return;
@@ -342,5 +355,6 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
     verdict: successDeltaVerdict(sample(viewedState), sample(comparison)),
     cacheKeys: live !== null ? { viewed: live.viewedKey, comparison: live.comparisonKey } : null,
     retry,
+    runViewed: viewed.recalculate,
   };
 }
