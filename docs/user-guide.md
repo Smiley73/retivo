@@ -617,6 +617,45 @@ Two buttons write results back to the selected scenario: **Save working-years
 conversions to scenario** and **Save retirement Fill window to scenario** (a
 pre-RMD MAGI-cap "Fill" window, set up on the scenario's **Withdrawal strategy**).
 
+**Compare conversion plans** (below the Retirement years table) tries a fixed set
+of conversion plans for the selected scenario and lists them next to its current
+plan. Each plan fills up to one tax bracket (12%, 22%, 24% or 32%) every year from
+retirement until required minimum distributions begin, with or without staying
+under the line where Medicare surcharges step up and the line where the
+health-insurance premium credit ends. Press the button to run it. A progress bar
+shows how many plans are done, and **Cancel** stops the run and throws its partial
+work away; nothing is kept, and you can run it again. The run happens in your
+browser, in the background, so the page stays usable, and nothing is sent to the
+server or saved to the scenario.
+
+The table ranks the plans by **After-tax ending balance**: the balance at the end
+of the projection in today's dollars, after taking the **Leftover-tax rate** off
+money still in pre-tax accounts. The rate is an input next to the other controls
+at the top of the page. It starts at the average rate the break-even uses for the
+years when required withdrawals begin (22% when that is not available), is not
+saved, and resets when you pick another scenario. Changing it re-ranks the rows
+you already have without running again. Roth and already-taxed balances count in
+full.
+
+Each row also shows the years converted, the total converted, the extra income
+tax and the Medicare surcharges compared with the current plan, and how much of
+the premium credit the plan keeps or loses. Differences carry a plus or minus
+sign, and a plan that converts less than the current one can show less tax. A
+row marked **†** moved spending withdrawals to a later account to stay under its
+ceiling, so part of its result comes from a change in withdrawal order. A plan
+whose ceiling could not be kept is listed last and is not ranked. If no bracket
+had room, the page says so instead of listing identical rows. If the results were
+computed before you changed your data, the page says they may be out of date and
+asks you to run it again; it never runs on its own.
+
+The comparison is not available when the scenario has no Roth IRA of your own
+(not an inherited one), when there is no retirement year before required
+distributions begin, or when it files married filing separately. It is a search
+over a fixed set of bracket targets at one assumed death age (the scenario's
+life-expectancy setting), on the planned basis and with federal tax only. The top
+row is the highest after-tax ending balance among those plans, not a proven
+optimum, and the page does not say which plan to pick.
+
 ### Report
 
 *"Can I get all of this on paper?"* The page is headed "Export PDF". Pick a

@@ -35,6 +35,17 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-20',
     kind: 'new',
+    title: 'Compare Roth conversion plans on the Roth conversion comparison page',
+    blurb:
+      'A new panel tries filling the 12%, 22%, 24% and 32% brackets each year before required ' +
+      'withdrawals begin, with and without staying under the Medicare surcharge and ' +
+      'health-insurance premium credit lines, and lists each next to your current plan by ' +
+      'after-tax ending balance. It shows what each plan does in the model, not which one to pick, ' +
+      'and you can cancel a run at any time.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'new',
     title: 'Your AI assistant can try a what-if without saving it (beta)',
     blurb:
       'A connected assistant can now show how a change, such as retiring earlier or claiming ' +

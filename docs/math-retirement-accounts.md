@@ -367,6 +367,103 @@ reach the ceiling, or when no window covers the year. With no valid target Roth
 IRA, Fill only limits withdrawals, and the scenario shows a notice. Fill
 conversions also run in the stress test, with the same sizing on each path.
 
+### Comparing conversion plans
+
+The **Compare conversion plans** panel on the Roth conversion comparison page
+tries a fixed set of Fill plans for the selected scenario and ranks them by what
+is left at the end. It only reads your data: nothing it finds is saved to the
+scenario.
+
+**What goes in.** The same accounts, balances, members, Social Security,
+expenses and income the page's own planned projection uses, today's date, and
+three more things.
+
+- A **target Roth IRA**: an active Roth IRA of your own, never an inherited one.
+  The panel uses the first one on the page's list and names it.
+- The **leftover-tax rate**, an input on the page. It starts at the average
+  marginal rate the break-even uses for the years when required withdrawals
+  begin, rounded to a whole percent, and is 22% when there are no such years.
+- An **assumed death age** for each household member: the scenario's
+  life-expectancy setting, or 95 where it sets none. This is the same age the
+  page's own projection ends at.
+
+A scenario that files married filing separately is left out, because the ACA
+premium credit is never available on separate returns.
+
+**How it is worked out.**
+
+1. **Find the window.** It runs from the primary member's retirement year (or
+   this year, if later) through the year before they reach their RMD trigger age,
+   cut off at the end of the projection. With no such year there is nothing to
+   compare.
+2. **List the plans.** The current plan, as the scenario has it, plus four
+   target brackets (12%, 22%, 24% and 32%) each with and without the cliff
+   guards: nine plans.
+3. **Set a ceiling for each year.** A plan's ceiling for a window year is the
+   smallest of up to three limits, all measured on the MAGI line the Fill
+   ceiling uses.
+   - *Bracket top.* The floor of the next bracket up, plus the year's standard
+     deduction, the extra deduction for each member who turns 65 by year end and
+     the senior bonus deduction where it applies. The senior bonus shrinks as
+     income rises, so it is worked out at the ceiling itself.
+   - *Medicare surcharge line* (guarded plans only). A year's income sets the
+     surcharge two years later, so this is the next surcharge line above the tier
+     the current plan sat in that later year. It applies when someone is on
+     Medicare then.
+   - *Premium credit line* (guarded plans only). Four times the poverty
+     guideline for the household less the Social Security that is not taxable,
+     because the ACA income adds that back. It applies in years with Marketplace
+     coverage while the credit has a cliff at that line. A guard only holds a
+     plan under a line the current plan was under.
+
+   The Fill step cannot see the interest and dividends that taxable accounts
+   throw off while it sizes a conversion, so the ceiling is the limit less that
+   gap, measured from the previous projection.
+4. **Project and settle.** Each plan is projected with one Fill window per year
+   at its ceilings. The ceilings are then worked out again from the new
+   projection, and this repeats until no ceiling moves by more than a dollar, at
+   most ten projections per plan. Each year is filled on its own, with no
+   look-ahead to later years.
+5. **Rank.** The score is the **after-tax ending balance**:
+
+   *ending balance in today's dollars − pre-tax and mixed balances left in
+   today's dollars × leftover-tax rate.*
+
+   Roth, brokerage and cash balances count in full. Ties go to fewer dollars
+   converted, then the lower bracket, then the order above. Totals shown beside
+   the score (converted, income tax, Medicare surcharges, premium credit) are
+   each year's figure brought to today's dollars with that year's December
+   deflator, so they share a basis with the ending balance. Changing the rate
+   re-ranks from the stored balances without projecting again.
+6. **Flag.** A plan whose cap could not be kept (the engine had no taxable money
+   left to move spending to, an RMD alone sat above the ceiling, income stayed
+   above the bracket top, or a guarded plan still crossed its line) is shown but
+   not ranked. A plan in which the
+   ceiling moved spending withdrawals to a later taxable account is ranked and
+   marked, because part of its result is a change in withdrawal order.
+
+The search runs at most 500 projections and stops with an error beyond that;
+nine plans at ten projections each stay far below it.
+
+**Simplified or left out.**
+
+- **One death age.** Every plan is scored at the assumed death ages. It is not a
+  forecast and not the stress test; no Monte Carlo runs.
+- **Planned basis, federal tax only.** No state tax, and the IRA pro-rata rule is
+  not modeled.
+- **A fixed set of targets.** Four brackets, guarded or not, held for the whole
+  window. The top row is the highest score among them, not a proven optimum.
+- **Capital gains and qualified dividends** are not counted in the bracket top,
+  so the ceiling is a little conservative.
+- **One flat leftover-tax rate** for everything still in pre-tax accounts.
+- It shows what each plan does in this model and does not say which to pick.
+
+**Code.** Paths are under `apps/web/src`. `lib/roth-suggestion/search.ts` runs
+the search; `candidate-grid.ts` lists the plans, `year-limits.ts` works out the
+three limits, `candidate-passes.ts` is the settle loop, `summarise.ts` and
+`ranking.ts` score and rank. `workers/roth-suggestion.worker.ts` runs it in the
+background and `pages/roth-betr/RothSuggestionPanel.tsx` shows it.
+
 ### Simplified or left out
 
 - **The whole converted amount is taxable.** After-tax money already in your

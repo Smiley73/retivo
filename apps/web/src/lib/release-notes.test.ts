@@ -51,9 +51,19 @@ describe('release notes', () => {
     }
   });
 
-  it('holds the AI assistant what-if announcement, the analysis one, the assistant one, then the open-source one', () => {
-    expect(RELEASE_NOTES).toHaveLength(4);
-    const [whatIf, analysis, assistant, openSource] = RELEASE_NOTES as [ReleaseNote, ReleaseNote, ReleaseNote, ReleaseNote];
+  it('holds the Roth plan comparison announcement, the AI assistant what-if one, the analysis one, the assistant one, then the open-source one', () => {
+    expect(RELEASE_NOTES).toHaveLength(5);
+    const [rothPlans, whatIf, analysis, assistant, openSource] = RELEASE_NOTES as [
+      ReleaseNote,
+      ReleaseNote,
+      ReleaseNote,
+      ReleaseNote,
+      ReleaseNote,
+    ];
+    expect(rothPlans.kind).toBe('new');
+    expect(rothPlans.title).toBe('Compare Roth conversion plans on the Roth conversion comparison page');
+    expect(rothPlans.blurb).toMatch(/not which one to pick/i);
+    expect(`${rothPlans.title} ${rothPlans.blurb}`).not.toMatch(/recommend|best|optimal|\bIRMAA\b|\bMAGI\b/i);
     expect(whatIf.kind).toBe('new');
     expect(whatIf.title).toBe('Your AI assistant can try a what-if without saving it (beta)');
     expect(whatIf.blurb).toMatch(/not saved/i);
