@@ -129,7 +129,7 @@ export function scenarioAddedExpenses(
  * Medicare Part B"; the canonical name alone would hide that premium from the
  * check. Each keeps its canonical id so the preview points at the same row.
  */
-export function scenarioRenamedExpenses(
+function scenarioRenamedExpenses(
   scenarioId: string,
   scenarios: ScenarioAggregate[],
   canonical: ReadonlyArray<Aggregate<ExpensePayload>>,
