@@ -35,7 +35,7 @@ export type PreRetirementRothConversionWindow = NonNullable<
 
 const CENTS_FACTOR = 100;
 /** ACA subsidy cliff — the §36B 400%-of-FPL boundary used by the retirement Fill window. */
-const ACA_FPL_CLIFF_MULTIPLE = 4;
+export const ACA_FPL_CLIFF_MULTIPLE = 4;
 
 /**
  * One flat working-years conversion window from the IRA-source tranche set.

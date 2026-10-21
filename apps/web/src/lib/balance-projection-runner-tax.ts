@@ -1069,7 +1069,7 @@ function resolveYearFiling(args: {
 
 /** Member ids that attain age 65 by the END of `taxYear` (IRS born-Jan-1 rule),
  *  so the age add-on and senior bonus land on the return that claims them. */
-function age65PlusMemberIdsForYear(
+export function age65PlusMemberIdsForYear(
   ctx: PipelineContext,
   taxYear: number,
   primaryAlive: boolean,
