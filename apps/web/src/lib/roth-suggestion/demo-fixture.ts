@@ -56,6 +56,6 @@ export function resolvedDeathAges(projection: RothSuggestionProjectionInput): Ro
   const life = resolveScenario(projection.selectedScenarioId, [...projection.scenarios]).lifeExpectancy;
   return {
     primary: life?.primary ?? DEFAULT_LIFE_EXPECTANCY_AGE,
-    secondary: life?.secondary ?? DEFAULT_LIFE_EXPECTANCY_AGE,
+    ...(life?.secondary !== undefined ? { secondary: life.secondary } : {}),
   };
 }

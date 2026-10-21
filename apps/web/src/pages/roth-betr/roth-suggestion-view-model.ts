@@ -137,8 +137,8 @@ export function suggestionDataSignature(data: RothSuggestionData): string {
 }
 
 /** The scenario's resolved life expectancies, the ages the page's own
- *  projection ends at (the engine falls back to the default age per member).
- *  The partner's age is sent only when the household has one. */
+ *  projection ends at. A partner age the scenario does not store stays unset,
+ *  so the search reads the gap exactly as the page's projection does. */
 export function resolveAssumedDeathAges(
   scenarios: readonly ScenarioAggregate[],
   scenarioId: string,
@@ -146,8 +146,8 @@ export function resolveAssumedDeathAges(
 ): RothSuggestionDeathAges {
   const life = resolveScenario(scenarioId, [...scenarios]).lifeExpectancy;
   const primary = life?.primary ?? DEFAULT_LIFE_EXPECTANCY_AGE;
-  if (!members.some((m) => !m.payload.isPrimary)) return { primary };
-  return { primary, secondary: life?.secondary ?? DEFAULT_LIFE_EXPECTANCY_AGE };
+  if (!members.some((m) => !m.payload.isPrimary) || life?.secondary === undefined) return { primary };
+  return { primary, secondary: life.secondary };
 }
 
 /** The disclaimer's naming of the assumed death age(s). */
@@ -157,7 +157,13 @@ export function describeDeathAges(
 ): string {
   const primary = members.find((m) => m.payload.isPrimary);
   const secondary = members.find((m) => !m.payload.isPrimary);
-  if (ages.secondary === undefined) return `age ${ages.primary}`;
+  if (ages.secondary === undefined) {
+    if (secondary === undefined) return `age ${ages.primary}`;
+    return (
+      `age ${ages.primary} for ${memberLabel(primary, members, 'primary')} and the age your ` +
+      `projection assumes for ${memberLabel(secondary, members, 'secondary')}`
+    );
+  }
   return (
     `age ${ages.primary} for ${memberLabel(primary, members, 'primary')} and ` +
     `${ages.secondary} for ${memberLabel(secondary, members, 'secondary')}`

@@ -61,16 +61,14 @@ function unsupported(reason: RothSuggestionUnsupportedReason): Unsupported {
 
 /** Throws `RangeError` on a rate or death age a caller should never send. */
 function validateRequest(request: RothSuggestionRequest): void {
-  const { leftoverTaxRate, deathAges, projection } = request;
+  const { leftoverTaxRate, deathAges } = request;
   if (!Number.isFinite(leftoverTaxRate) || leftoverTaxRate < 0 || leftoverTaxRate >= 1) {
     throw new RangeError(`leftoverTaxRate must be a fraction in [0, 1); got ${leftoverTaxRate}`);
   }
-  const ages: (number | undefined)[] = [deathAges.primary];
-  if (deathAges.secondary !== undefined || projection.members.some((m) => !m.payload.isPrimary)) {
-    ages.push(deathAges.secondary);
-  }
+  const ages: number[] = [deathAges.primary];
+  if (deathAges.secondary !== undefined) ages.push(deathAges.secondary);
   for (const age of ages) {
-    if (age === undefined || !Number.isInteger(age) || age < 1 || age > MAX_AGE) {
+    if (!Number.isInteger(age) || age < 1 || age > MAX_AGE) {
       throw new RangeError(`death ages must be whole years in [1, ${MAX_AGE}]; got ${String(age)}`);
     }
   }

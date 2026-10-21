@@ -188,6 +188,20 @@ describe('resolveAssumedDeathAges and describeDeathAges', () => {
     expect(resolveAssumedDeathAges([bare], 'toy', projection.members)).toEqual({ primary: 95 });
   });
 
+  it('leaves the partner age unset for a couple whose scenario stores only the primary age', () => {
+    const projection = toyProjection({ couple: true });
+    const scenario = toyScenario();
+    const primaryOnly = {
+      ...scenario,
+      payload: { ...scenario.payload, overrides: { ...scenario.payload.overrides, lifeExpectancy: { primary: 85 } } },
+    };
+    const ages = resolveAssumedDeathAges([primaryOnly], 'toy', projection.members);
+    expect(ages).toEqual({ primary: 85 });
+    expect(describeDeathAges(ages, projection.members)).toBe(
+      'age 85 for m1 and the age your projection assumes for m2',
+    );
+  });
+
   it('names members by first name when they have one', () => {
     const projection = toyProjection({ couple: true });
     const named = projection.members.map(
