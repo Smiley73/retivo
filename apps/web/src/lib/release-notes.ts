@@ -40,8 +40,8 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       'When the ACA premium credit is larger than your tax and Medicare surcharge, ' +
       'the extra now lowers that year\u2019s withdrawals, up to the Medical expenses ' +
       'you entered and what you would otherwise withdraw, instead of disappearing. ' +
-      'It shows as Credit applied to premiums on the Taxes tab and in the yearly ' +
-      'table. Projections and stress tests change when you update.',
+      'It shows as Credit applied to premiums on the Taxes tab, in the yearly ' +
+      'table and on the Cash flow tab. Projections and stress tests change when you update.',
   },
   {
     date: '2026-10-20',
