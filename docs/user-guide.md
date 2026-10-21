@@ -454,7 +454,9 @@ What the cards do:
   HSA handled separately), **Proportional**, **Roth first** and **Custom order**.
   Tabs add a **MAGI cap** (a limit on pre-tax withdrawals; MAGI is the modified
   adjusted gross income figure that Medicare surcharges and ACA subsidies are
-  based on) and **Advanced** settings.
+  based on) and **Advanced** settings. A plan saved from the **Roth conversion
+  comparison** appears there as one cap window per year, each tab labelled with
+  its year.
 - **Tax assumptions**: tabs for **HSA** (how much emergency HSA spending still goes
   to medical care), **Penalty exemptions** (accounts that skip the 10% penalty on
   withdrawals before age 59½) and **Filing** (how your household files its tax
@@ -637,7 +639,8 @@ health-insurance premium credit ends. Press the button to run it. A progress bar
 shows how many plans are done, and **Cancel** stops the run and throws its partial
 work away; nothing is kept, and you can run it again. The run happens in your
 browser, in the background, so the page stays usable, and nothing is sent to the
-server or saved to the scenario.
+server. Running it saves nothing to the scenario; only **Save plan to scenario**
+(below) does.
 
 The table ranks the plans by **After-tax ending balance**: the balance at the end
 of the projection in today's dollars, after taking the **Leftover-tax rate** off
@@ -668,6 +671,32 @@ arrow keys, then press Enter; Escape closes it. A worked year is in [Why each ye
 in the Roth conversion maths](math-retirement-accounts.md#why-each-year). If the results were
 computed before you changed your data, the page says they may be out of date and
 asks you to run it again; it never runs on its own.
+
+**Save plan to scenario** appears on every ranked row (not on the current plan,
+and not on a plan whose ceiling could not be kept). A confirmation says what it
+writes: one cap window on the scenario's **Withdrawal strategy** for each year of
+the plan's window, each set to the fixed dollar ceiling the comparison worked out
+for that year, converting into the Roth IRA the comparison used (you cannot pick
+another here). It replaces every cap window the scenario has today, and the
+confirmation counts them, and says which scenario they come from when the
+scenario inherits them. Nothing else on the scenario changes. On a scenario that
+inherits its cap from a parent, saving a plan equal to the parent's leaves the
+scenario inheriting, and any other plan is saved on that scenario only; the parent
+is not touched. A window is a cap on pre-tax income, not an instruction to
+convert: in a year when your spending needs more pre-tax money than the ceiling
+allows, the projection draws on taxable or Roth accounts instead, and records
+that the cap could not be met when none are left. The confirmation names the years
+where that happens for the plan. The ceilings are fixed dollar amounts and do not
+rise with inflation.
+
+After a save, the card shows a line naming the saved plan and the date. It reads
+**Out of date** once anything the comparison used has changed since (accounts,
+balances, members, expenses, Social Security, or the scenario's settings, or a
+parent scenario's), because the fixed ceilings no longer match your data; run the
+comparison again to see how the plan looks now. The line goes away if the
+scenario's cap windows no longer match the saved plan, for example after you edit
+them by hand or save another plan. The line is remembered on this device only: it
+is not synced, and it does not appear on another device or browser.
 
 The comparison is not available when the scenario has no Roth IRA of your own
 (not an inherited one), when there is no retirement year before required

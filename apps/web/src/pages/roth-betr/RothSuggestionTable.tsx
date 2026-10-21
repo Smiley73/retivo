@@ -17,12 +17,16 @@ import {
   thStickyNumClass,
 } from '../accounts-page-chrome';
 import { RothSuggestionYearDetail } from './RothSuggestionYearDetail';
+import { canSaveRow } from './roth-suggestion-save-view';
 import type { RothSuggestionRow } from './roth-suggestion-view-model';
 
 interface RothSuggestionTableProps {
   readonly rows: readonly RothSuggestionRow[];
   /** The leftover-tax rate the after-tax balance used, in percent. */
   readonly leftoverTaxPct: number;
+  /** Opens the save dialog for a row. Rows that cannot be saved (the current
+   *  plan, a plan whose cap was not met) get no action. */
+  readonly onSave: (row: RothSuggestionRow) => void;
 }
 
 const TABLE_LABEL = 'Roth conversion plan comparison';
@@ -55,6 +59,7 @@ const PlanCell: React.FC<{ row: RothSuggestionRow }> = ({ row }) => (
 export const RothSuggestionTable: React.FC<RothSuggestionTableProps> = ({
   rows,
   leftoverTaxPct,
+  onSave,
 }) => {
   const anyRerouted = rows.some((row) => row.reroutedYears.length > 0);
   // One plan's years open at a time. Closing from inside the detail hands focus
@@ -111,23 +116,35 @@ export const RothSuggestionTable: React.FC<RothSuggestionTableProps> = ({
                 <Cell className={tdNumClass}>{row.irmaaSurcharges}</Cell>
                 <Cell className={tdNumClass}>{row.acaCreditChange}</Cell>
                 <Cell className={tdClass}>
-                  <button
-                    type="button"
-                    ref={(el) => {
-                      if (el === null) toggles.current.delete(row.id);
-                      else toggles.current.set(row.id, el);
-                    }}
-                    className={btnSecondarySmClass}
-                    aria-label={`Why each year for ${row.detailLabel}`}
-                    aria-expanded={openId === row.id}
-                    aria-controls={openId === row.id ? detailId(row.id) : undefined}
-                    onClick={() => setOpenId(openId === row.id ? null : row.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape' && openId === row.id) close();
-                    }}
-                  >
-                    Why each year
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      ref={(el) => {
+                        if (el === null) toggles.current.delete(row.id);
+                        else toggles.current.set(row.id, el);
+                      }}
+                      className={btnSecondarySmClass}
+                      aria-label={`Why each year for ${row.detailLabel}`}
+                      aria-expanded={openId === row.id}
+                      aria-controls={openId === row.id ? detailId(row.id) : undefined}
+                      onClick={() => setOpenId(openId === row.id ? null : row.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape' && openId === row.id) close();
+                      }}
+                    >
+                      Why each year
+                    </button>
+                    {canSaveRow(row) && (
+                      <button
+                        type="button"
+                        className={btnSecondarySmClass}
+                        aria-label={`Save plan to scenario: ${row.detailLabel}`}
+                        onClick={() => onSave(row)}
+                      >
+                        Save plan to scenario
+                      </button>
+                    )}
+                  </div>
                 </Cell>
               </Row>
             ))}

@@ -14,6 +14,9 @@
  *    SECURE 2.0 §107), filling up to the chosen MAGI line's cliff (the IRMAA
  *    tier-1 threshold or the ACA 400%-FPL boundary), routed through
  *    `buildNextMagiCap` (the single MAGI-cap persistence rule).
+ *  - `buildSuggestionCapWindows` / `buildSuggestionCap` — a ranked suggestion's
+ *    ladder as the scenario's whole MAGI-cap ladder (one year-anchored Fill
+ *    window per searched year), routed through `buildNextMagiCap` the same way.
  */
 
 import type {
@@ -179,6 +182,81 @@ export function buildRetirementFillWindow(args: {
   // false; with it true the result is the real `{ windows }` override or `{}`
   // (inheritance preserved). Narrow out the never-reached sentinel branch so the
   // caller's merge type stays a real MagiCapOverride.
+  if ('magiCap' in fragment && fragment.magiCap !== undefined && 'disabled' in fragment.magiCap) {
+    return {};
+  }
+  return fragment as
+    | { magiCap: MagiCapOverride }
+    | { magiCap?: undefined }
+    | Record<string, never>;
+}
+
+/**
+ * A ranked suggestion's ladder in the stored shape: one Fill window per searched
+ * year, `year` anchors on both ends with equal years (the end resolves to the
+ * exclusive boundary the next year starts at, so adjacent windows do not
+ * overlap), ascending, each ceiling a whole non-negative dollar never above the
+ * search's figure. The line and target Roth ride along per window, unchanged:
+ * the line picks the MAGI definition the Fill step sizes against and the target
+ * decides whether a conversion happens at all, so dropping either would convert
+ * different amounts than the row showed. This is the only place the saved shape
+ * is decided; the dialog and the saved-plan marker reuse its output.
+ *
+ * @throws {Error} on an empty ladder, a window that is not a one-year Fill
+ *   window on a year anchor with a target Roth, or two windows for one year
+ *   (the search never produces any of them; saving anything else would store a
+ *   ladder that was not ranked).
+ */
+export function buildSuggestionCapWindows(ladder: readonly MagiCapWindow[]): MagiCapWindow[] {
+  if (ladder.length === 0) throw new Error('This plan has no years to save.');
+  const windows = ladder.map((w): MagiCapWindow => {
+    if (
+      w.start.kind !== 'year' ||
+      w.end.kind !== 'year' ||
+      w.start.year !== w.end.year ||
+      w.capMode !== 'fill' ||
+      w.targetRothAccountId === undefined
+    ) {
+      throw new Error('This plan is not a list of one-year Fill windows, so it cannot be saved.');
+    }
+    return {
+      start: { kind: 'year', year: w.start.year },
+      end: { kind: 'year', year: w.end.year },
+      magiCeilingAnnualDollars: Math.max(0, Math.floor(w.magiCeilingAnnualDollars)),
+      capMode: 'fill',
+      capMagiLine: w.capMagiLine,
+      targetRothAccountId: w.targetRothAccountId,
+    };
+  });
+  const yearOf = (w: MagiCapWindow): number => (w.start.kind === 'year' ? w.start.year : 0);
+  windows.sort((a, b) => yearOf(a) - yearOf(b));
+  for (let i = 1; i < windows.length; i += 1) {
+    if (yearOf(windows[i]) === yearOf(windows[i - 1])) {
+      throw new Error('This plan has two windows for the same year, so it cannot be saved.');
+    }
+  }
+  return windows;
+}
+
+/**
+ * The `magiCap` fragment that saves a suggestion's ladder as the scenario's
+ * whole ladder, through `buildNextMagiCap` so it obeys the same inheritance
+ * rule as every other cap edit (omits the key when a child with no local cap
+ * saves the parent's ladder; writes a local ladder over an explicit-disable
+ * sentinel). Existing windows are replaced, as `buildRetirementFillWindow`
+ * replaces them. Narrows the never-reached disable-sentinel branch the same way.
+ */
+export function buildSuggestionCap(args: {
+  ladder: readonly MagiCapWindow[];
+  localOverrides: ScenarioOverrides;
+  parentCap: MagiCapOverride | undefined;
+}): { magiCap: MagiCapOverride } | { magiCap?: undefined } | Record<string, never> {
+  const fragment = buildNextMagiCap({
+    magiCapEnabled: true,
+    magiCapWindows: buildSuggestionCapWindows(args.ladder),
+    localOverrides: args.localOverrides,
+    parentCap: args.parentCap,
+  });
   if ('magiCap' in fragment && fragment.magiCap !== undefined && 'disabled' in fragment.magiCap) {
     return {};
   }

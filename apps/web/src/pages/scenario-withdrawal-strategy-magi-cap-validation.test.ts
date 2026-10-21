@@ -151,6 +151,17 @@ describe('magiCapWindowTabLabels — tab titles', () => {
     ]);
   });
 
+  it('labels a one-year window by its year alone', () => {
+    const oneYear = (year: number): DraftMagiCapWindow => ({
+      ...yearWindow(year, year + 1),
+      capMode: 'fill',
+    });
+    expect(magiCapWindowTabLabels([oneYear(2031), oneYear(2032)], primaryOnly, anchor)).toEqual([
+      '2031',
+      '2032',
+    ]);
+  });
+
   it('labels each window independently, in order', () => {
     const windows = [yearWindow(2031, 2035), yearWindow(2035, 2040)];
     expect(magiCapWindowTabLabels(windows, primaryOnly, anchor)).toEqual([

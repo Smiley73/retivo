@@ -3,7 +3,8 @@
  * suggestion search (`lib/roth-suggestion`) in a Web Worker on request, shows
  * a determinate progress bar with Cancel, and lists each candidate plan next to
  * the scenario's current one. It sends nothing to the server and writes no
- * scenario field.
+ * scenario field until the user confirms Save on a ranked row (the page's own
+ * save path), after which a marker names the saved plan.
  *
  * Never auto-runs: a run costs seconds and the user asks for it. A result is
  * tagged with the aggregate signature it ran on and marked out of date when the
@@ -16,8 +17,11 @@ import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { InlineDisclaimerCard } from '../../components/InlineDisclaimerCard';
 import { btnDangerToolbarClass, btnPrimaryToolbarClass } from '../accounts-page-chrome';
+import { RothSavedPlanMarker } from './RothSavedPlanMarker';
 import { RothSuggestionProgressBar } from './RothSuggestionProgressBar';
+import { RothSuggestionSaveDialog } from './RothSuggestionSaveDialog';
 import { RothSuggestionTable } from './RothSuggestionTable';
+import type { ScenarioPayload } from '../../db/types';
 import type { RothBETRPageData } from './roth-betr-data';
 import {
   SEARCH_UNSUPPORTED_MESSAGES,
@@ -32,6 +36,7 @@ import {
   type RothSuggestionData,
 } from './roth-suggestion-view-model';
 import { useRothSuggestion } from './use-roth-suggestion';
+import { useRothSuggestionSave } from './use-roth-suggestion-save';
 
 interface RothSuggestionPanelProps {
   readonly pageData: RothBETRPageData;
@@ -40,6 +45,11 @@ interface RothSuggestionPanelProps {
   readonly selectedScenarioId: string;
   /** Leftover-tax rate in percent: the rate on money still in pre-tax accounts. */
   readonly leftoverTaxPct: number;
+  /** The page's save path: writes the override fragment, resolves true when the
+   *  scenario was written (a failure is on the page's error banner). */
+  readonly persistOverrides: (fragment: Partial<ScenarioPayload['overrides']>) => Promise<boolean>;
+  /** The page's error banner. */
+  readonly onError: (message: string) => void;
 }
 
 const NO_ROOM_MESSAGE =
@@ -61,6 +71,8 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
   data,
   selectedScenarioId,
   leftoverTaxPct,
+  persistOverrides,
+  onError,
 }) => {
   const { scenarios, accounts, balances, members, ssBenefits, expenses, incomeStreams } = data;
   const signature = useMemo(
@@ -85,6 +97,13 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
     [scenarios, selectedScenarioId, members],
   );
   const { state, run, cancel } = useRothSuggestion(selectedScenarioId, signature);
+  const save = useRothSuggestionSave({
+    pageData,
+    data,
+    selectedScenarioId,
+    persistOverrides,
+    onError,
+  });
 
   const rate = leftoverTaxFraction(leftoverTaxPct);
   const table = useMemo(
@@ -134,6 +153,7 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
           {availability.kind === 'ready' &&
             ` Conversions go into ${availability.targetRoth.name}.`}
         </p>
+        <RothSavedPlanMarker status={save.status} />
         {availability.kind === 'unavailable' ? (
           <EmptyState bare>{UNAVAILABLE_MESSAGES[availability.reason]}</EmptyState>
         ) : (
@@ -189,7 +209,11 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
               </Alert>
             )}
             {table?.kind === 'rows' && (
-              <RothSuggestionTable rows={table.rows} leftoverTaxPct={leftoverTaxPct} />
+              <RothSuggestionTable
+                rows={table.rows}
+                leftoverTaxPct={leftoverTaxPct}
+                onSave={save.openFor}
+              />
             )}
             {/* Always mounted so a screen reader hears the text arrive; the other
                 outcomes carry their own Alerts. */}
@@ -202,6 +226,12 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
           </>
         )}
       </Card>
+      <RothSuggestionSaveDialog
+        {...save.dialog}
+        onClose={save.close}
+        onConfirm={save.confirm}
+        deathAges={deathAges}
+      />
       <RothSuggestionDisclaimer deathAges={deathAges} />
     </>
   );
