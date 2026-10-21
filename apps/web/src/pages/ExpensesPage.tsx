@@ -91,7 +91,10 @@ import {
   type ExpenseRow,
 } from './expense-group-card';
 import { MedicarePremiumsDialog } from './MedicarePremiumsDialog';
-import { MEDICARE_PREMIUMS_PARAM } from './medicare-premium-helper';
+import {
+  MEDICARE_PREMIUMS_PARAM,
+  scenarioAddedExpenses,
+} from './medicare-premium-helper';
 
 /**
  * Compute per-year canonical-expense rows + life-expectancy markers
@@ -578,6 +581,26 @@ export const ExpensesPage: React.FC = () => {
 
   const loading = !dataReady;
 
+  // Expenses the preview checks for an already-entered premium: the canonical
+  // list plus whatever the selected scenario (the base when none is picked or
+  // the pick is gone, as in `buildProjection`) adds on its own.
+  const premiumCheckExpenses = useMemo<
+    ReadonlyArray<Aggregate<ExpensePayload>>
+  >(() => {
+    const canonical = expenseQuery.aggregates as ReadonlyArray<
+      Aggregate<ExpensePayload>
+    >;
+    const effectiveId =
+      selectedScenarioId && scenarios.some((s) => s.id === selectedScenarioId)
+        ? selectedScenarioId
+        : (scenarios.find((s) => s.payload.isPrimary)?.id ?? null);
+    if (effectiveId === null) return canonical;
+    return [
+      ...canonical,
+      ...scenarioAddedExpenses(effectiveId, scenarios as ScenarioAggregate[]),
+    ];
+  }, [expenseQuery.aggregates, scenarios, selectedScenarioId]);
+
   // Post-load focus restoration: after the first successful data
   // load, read `focusExpenseId` from the URL, validate it against a safe
   // format, scroll the matching row into view, focus its Edit button,
@@ -774,7 +797,7 @@ export const ExpensesPage: React.FC = () => {
         <MedicarePremiumsDialog
           householdId={householdId}
           members={householdMembers}
-          expenses={expenseQuery.aggregates as ReadonlyArray<Aggregate<ExpensePayload>>}
+          expenses={premiumCheckExpenses}
           categories={categoryQuery.aggregates as ReadonlyArray<Aggregate<ExpenseCategoryPayload>>}
           onClose={() => setPremiumsOpen(false)}
         />

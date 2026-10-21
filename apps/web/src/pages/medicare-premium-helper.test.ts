@@ -13,10 +13,12 @@ import type {
 } from '../db/types';
 import { demoExpenseDefs } from '../lib/demo-data-defs';
 import { latestMedicarePremiums } from '../lib/medicare-premiums';
+import type { ScenarioAggregate } from '../lib/scenario-resolution';
 import {
   buildMedicarePremiumPreview,
   buildPremiumPayloads,
   isRowIncluded,
+  scenarioAddedExpenses,
   type MedicarePremiumPreview,
   type PremiumMemberGroup,
   type PremiumRow,
@@ -386,5 +388,68 @@ describe('buildPremiumPayloads', () => {
       p.members.flatMap((g) => g.rows).map((r) => [r.key, false]),
     );
     expect(buildPremiumPayloads(p, off, {})).toEqual([]);
+  });
+});
+
+describe('scenario-only expenses', () => {
+  const scenario = (
+    id: string,
+    parentScenarioId: string | null,
+    added: Array<ExpensePayload & { _localId: string }>,
+  ): ScenarioAggregate =>
+    aggregate(id, 'scenario', {
+      name: id,
+      description: '',
+      parentScenarioId,
+      isPrimary: parentScenarioId === null,
+      notes: '',
+      overrides: { expenses: { added } },
+    }) as unknown as ScenarioAggregate;
+  const partB = {
+    _localId: 'loc-1',
+    name: 'John Medicare Part B',
+    amount: 202.9,
+    frequency: 'monthly',
+    classification: 'essential',
+    categoryId: 'cat-medical',
+    start: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
+  } as ExpensePayload & { _localId: string };
+
+  it('should_block_a_row_whose_name_a_scenario_only_expense_already_uses', () => {
+    const scenarios = [scenario('base', null, [partB])];
+    const withoutScenario = preview([]);
+    expect(row(withoutScenario, 'm-john', 'B').block).toBeNull();
+
+    const p = preview(scenarioAddedExpenses('base', scenarios));
+    const johnB = row(p, 'm-john', 'B');
+    expect(johnB.block).toMatchObject({
+      kind: 'nameTaken',
+      expense: { name: 'John Medicare Part B', categoryName: 'Medical' },
+    });
+    expect(johnB.defaultIncluded).toBe(false);
+    expect(buildPremiumPayloads(p, {}, {}).map((x) => x.name)).not.toContain(
+      'John Medicare Part B',
+    );
+  });
+
+  it('should_flag_a_differently_named_scenario_only_premium_as_already_entered', () => {
+    const scenarios = [
+      scenario('base', null, [{ ...partB, name: 'John Part B' }]),
+    ];
+    const p = preview(scenarioAddedExpenses('base', scenarios));
+    expect(row(p, 'm-john', 'B').alreadyEntered).toHaveLength(1);
+    expect(row(p, 'm-john', 'B').defaultIncluded).toBe(false);
+    expect(row(p, 'm-john', 'D').alreadyEntered).toEqual([]);
+  });
+
+  it('should_include_expenses_a_parent_scenario_adds_and_ignore_unknown_scenarios', () => {
+    const scenarios = [
+      scenario('base', null, [partB]),
+      scenario('child', 'base', []),
+    ];
+    expect(scenarioAddedExpenses('child', scenarios).map((e) => e.payload.name)).toEqual([
+      'John Medicare Part B',
+    ]);
+    expect(scenarioAddedExpenses('missing', scenarios)).toEqual([]);
   });
 });

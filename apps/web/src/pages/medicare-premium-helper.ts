@@ -19,10 +19,12 @@ import type {
 } from '../db/types';
 import { medicalCategoryIdsFrom } from '../lib/expense-category-resolvers';
 import { memberLabel } from '../lib/expense-format';
+import { resolveExpensesForScenarioSparse } from '../lib/expense-override-resolution';
 import {
   latestMedicarePremiums,
   type LatestMedicarePremiums,
 } from '../lib/medicare-premiums';
+import type { ScenarioAggregate } from '../lib/scenario-resolution';
 
 /** Query parameter that opens the preview when the Expenses page loads. */
 export const MEDICARE_PREMIUMS_PARAM = 'medicarePremiums';
@@ -92,6 +94,33 @@ export interface PremiumPreviewInput {
   categories: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>;
   /** Defaults to the newest year of the built-in snapshot. */
   premiums?: LatestMedicarePremiums;
+}
+
+/**
+ * The expenses the selected scenario adds on top of the canonical list
+ * (its own and its ancestors'), shaped as expense aggregates so the preview
+ * checks them for an already-entered premium or a name clash like any other
+ * expense. Scenario-only expenses are not in the canonical list, so without
+ * this a premium entered only in a scenario would be added a second time.
+ */
+export function scenarioAddedExpenses(
+  scenarioId: string,
+  scenarios: ScenarioAggregate[],
+): Aggregate<ExpensePayload>[] {
+  const scenario = scenarios.find((s) => s.id === scenarioId);
+  if (!scenario) return [];
+  return resolveExpensesForScenarioSparse(scenarioId, scenarios, [])
+    .filter((e) => e.source === 'added')
+    .map((e) => ({
+      id: e.id,
+      householdId: scenario.householdId,
+      aggregateType: 'expense',
+      schemaVersion: scenario.schemaVersion,
+      version: 1,
+      updatedAt: scenario.updatedAt,
+      deviceId: scenario.deviceId,
+      payload: e.payload,
+    }));
 }
 
 /** Same case-folding and trimming the expense form applies to a name. */
