@@ -467,4 +467,55 @@ describe('scenario-only expenses', () => {
     expect(names('other')).toEqual([]);
     expect(premiumCheckExpenses([], [], 'base')).toEqual([]);
   });
+
+  describe('a canonical expense the scenario renames', () => {
+    const healthInsurance = expense('e-health', {
+      name: 'Health insurance',
+      amount: 202.9,
+    });
+    const renaming = (
+      id: string,
+      parentScenarioId: string | null,
+      name: string,
+    ): ScenarioAggregate =>
+      aggregate(id, 'scenario', {
+        name: id,
+        description: '',
+        parentScenarioId,
+        isPrimary: parentScenarioId === null,
+        notes: '',
+        overrides: {
+          expenses: { patches: { 'aggregate:e-health': { name } } },
+        },
+      }) as unknown as ScenarioAggregate;
+    const scenarios = [
+      renaming('base', null, 'Health insurance'),
+      renaming('renamed', 'base', 'John Medicare Part B'),
+    ];
+
+    it('should_block_and_flag_the_row_the_scenario_name_already_covers', () => {
+      const p = preview(
+        premiumCheckExpenses([healthInsurance], scenarios, 'renamed'),
+      );
+      const johnB = row(p, 'm-john', 'B');
+      expect(johnB.block).toMatchObject({
+        kind: 'nameTaken',
+        expense: { id: 'e-health', name: 'John Medicare Part B' },
+      });
+      expect(names(johnB)).toEqual(['John Medicare Part B']);
+      expect(johnB.defaultIncluded).toBe(false);
+      expect(buildPremiumPayloads(p, {}, {}).map((x) => x.name)).not.toContain(
+        'John Medicare Part B',
+      );
+    });
+
+    it('should_keep_the_canonical_name_and_skip_unrenamed_patches', () => {
+      const names = (selected: string): string[] =>
+        premiumCheckExpenses([healthInsurance], scenarios, selected).map(
+          (e) => e.payload.name,
+        );
+      expect(names('renamed')).toEqual(['Health insurance', 'John Medicare Part B']);
+      expect(names('base')).toEqual(['Health insurance']);
+    });
+  });
 });

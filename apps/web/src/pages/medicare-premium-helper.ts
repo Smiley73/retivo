@@ -124,10 +124,44 @@ export function scenarioAddedExpenses(
 }
 
 /**
+ * The canonical expenses the selected scenario renames, under the name the
+ * scenario gives them. A scenario can patch "Health insurance" to "John
+ * Medicare Part B"; the canonical name alone would hide that premium from the
+ * check. Each keeps its canonical id so the preview points at the same row.
+ */
+export function scenarioRenamedExpenses(
+  scenarioId: string,
+  scenarios: ScenarioAggregate[],
+  canonical: ReadonlyArray<Aggregate<ExpensePayload>>,
+): Aggregate<ExpensePayload>[] {
+  const byId = new Map(canonical.map((c) => [`aggregate:${c.id}`, c]));
+  const out: Aggregate<ExpensePayload>[] = [];
+  for (const e of resolveExpensesForScenarioSparse(
+    scenarioId,
+    scenarios,
+    canonical,
+  )) {
+    if (e.source !== 'patched') continue;
+    const original = byId.get(e.id);
+    if (!original) continue;
+    if (
+      normalizeName(e.payload.name ?? '') ===
+      normalizeName(original.payload.name ?? '')
+    ) {
+      continue;
+    }
+    out.push({ ...original, payload: e.payload });
+  }
+  return out;
+}
+
+/**
  * The expenses the preview checks for an already-entered premium: the
- * canonical list plus whatever the selected scenario adds on its own. The
- * effective scenario is the selected one, or the primary (base) when none is
- * picked or the pick is gone, as in the projection.
+ * canonical list (under its own names, which stay taken household-wide), the
+ * canonical expenses the selected scenario renames under their scenario
+ * names, and whatever the selected scenario adds on its own. The effective
+ * scenario is the selected one, or the primary (base) when none is picked or
+ * the pick is gone, as in the projection.
  */
 export function premiumCheckExpenses(
   canonical: ReadonlyArray<Aggregate<ExpensePayload>>,
@@ -139,9 +173,11 @@ export function premiumCheckExpenses(
       ? selectedScenarioId
       : (scenarios.find((s) => s.payload.isPrimary)?.id ?? null);
   if (effectiveId === null) return canonical;
+  const chain = scenarios as ScenarioAggregate[];
   return [
     ...canonical,
-    ...scenarioAddedExpenses(effectiveId, scenarios as ScenarioAggregate[]),
+    ...scenarioRenamedExpenses(effectiveId, chain, canonical),
+    ...scenarioAddedExpenses(effectiveId, chain),
   ];
 }
 
