@@ -47,10 +47,17 @@ interface CompareOption {
   readonly depth: number;
 }
 
+export interface CompareWithAnchor {
+  readonly withParam: string;
+  readonly viewedId: string;
+}
+
 export interface UseBalanceProjectionCompareInput {
   readonly dataLoad: UseBalanceProjectionDataResult;
   /** The viewed scenario's projection — the page's own `data`. */
   readonly data: PipelineData;
+  /** The page's `?with=` anchor: which scenario was viewed when it arrived. */
+  readonly withAnchor: CompareWithAnchor | null;
   /** True while the Compare tab is the selected view. */
   readonly isActive: boolean;
   readonly nowYear: number;
@@ -121,10 +128,52 @@ function sameInputs(a: ReadonlyArray<unknown>, b: ReadonlyArray<unknown>): boole
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
+/**
+ * `?with=` names a partner for the scenario that was viewed when it arrived (a
+ * "Compare with parent" link, or a selector choice). Once a different scenario
+ * is viewed (a sidebar switch) it no longer applies, so it stops overriding
+ * that scenario's remembered choice and default, and is dropped from the URL.
+ *
+ * Called by the page itself, above its early returns, with the sidebar's
+ * selected id: the Compare panel unmounts for a scenario with no projection to
+ * show, and an anchor kept inside it would miss that switch. Nothing is
+ * anchored until a scenario id is known.
+ */
+export function useCompareWithAnchor(
+  viewedId: string | null,
+): CompareWithAnchor | null {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawWithParam = searchParams.get(COMPARE_WITH_PARAM);
+  const [anchor, setAnchor] = useState<CompareWithAnchor | null>(null);
+  if (rawWithParam === null) {
+    if (anchor !== null) setAnchor(null);
+  } else if (viewedId !== null && anchor?.withParam !== rawWithParam) {
+    setAnchor({ withParam: rawWithParam, viewedId });
+  }
+  const stale =
+    anchor !== null &&
+    rawWithParam === anchor.withParam &&
+    viewedId !== null &&
+    anchor.viewedId !== viewedId;
+  // Drop the spent parameter so the URL matches what the tab resolves.
+  useEffect(() => {
+    if (!stale) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(COMPARE_WITH_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [stale, setSearchParams]);
+  return rawWithParam !== null && anchor?.withParam === rawWithParam ? anchor : null;
+}
+
 export function useBalanceProjectionCompare(
   input: UseBalanceProjectionCompareInput,
 ): UseBalanceProjectionCompareResult {
-  const { dataLoad, data, isActive, nowYear, nowMonthIndex } = input;
+  const { dataLoad, data, withAnchor, isActive, nowYear, nowMonthIndex } = input;
   const {
     scenarios,
     ready,
@@ -137,26 +186,12 @@ export function useBalanceProjectionCompare(
     ssBenefits,
   } = dataLoad;
   const viewedId = data.selectedScenarioId;
-  const [searchParams, setSearchParams] = useSearchParams();
-  const rawWithParam = searchParams.get(COMPARE_WITH_PARAM);
-  // `?with=` names a partner for the scenario that was viewed when it arrived
-  // (a "Compare with parent" link, or a selector choice). Once a different
-  // scenario is viewed (a sidebar switch) it no longer applies, so it stops
-  // overriding that scenario's remembered choice and default.
-  const [withAnchor, setWithAnchor] = useState<{
-    readonly withParam: string;
-    readonly viewedId: string;
-  } | null>(null);
-  if (rawWithParam === null) {
-    if (withAnchor !== null) setWithAnchor(null);
-  } else if (withAnchor?.withParam !== rawWithParam) {
-    setWithAnchor({ withParam: rawWithParam, viewedId });
-  }
-  const withParamStale =
-    rawWithParam !== null &&
-    withAnchor?.withParam === rawWithParam &&
-    withAnchor.viewedId !== viewedId;
-  const withParam = withParamStale ? null : rawWithParam;
+  const [, setSearchParams] = useSearchParams();
+  // The anchor is owned by the page (see `useCompareWithAnchor`), which stays
+  // mounted when this panel does not, so a sidebar switch through a scenario
+  // that renders no panel still spends the parameter.
+  const withParam =
+    withAnchor !== null && withAnchor.viewedId === viewedId ? withAnchor.withParam : null;
   const [remembered, setRemembered] = useState(readRemembered);
 
   const options = useMemo(
@@ -178,18 +213,6 @@ export function useBalanceProjectionCompare(
         : null,
     [ready, scenarios, viewedId, withParam, remembered],
   );
-  // Drop the spent parameter so the URL matches what the tab resolves.
-  useEffect(() => {
-    if (!withParamStale) return;
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete(COMPARE_WITH_PARAM);
-        return next;
-      },
-      { replace: true },
-    );
-  }, [withParamStale, setSearchParams]);
   const comparisonName =
     scenarios.find((s) => s.id === comparisonId)?.payload.name ?? null;
 

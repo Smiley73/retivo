@@ -202,6 +202,40 @@ describe('BalanceProjectionPage — Compare tab', () => {
       await waitFor(() => expect(log.at(-1)!.search).toBe('?view=compare'));
     });
 
+    it('stops applying ?with= after a sidebar switch through a scenario that shows no panel', async () => {
+      window.localStorage.setItem(
+        COMPARE_CHOICE_STORAGE_KEY,
+        JSON.stringify({ [BASE]: FUNDS_RUN_OUT }),
+      );
+      loadSpy.mockImplementation((opts) => {
+        if (opts.selectedScenarioId === FUNDS_RUN_OUT) {
+          throw new TaxIntegrationInvalidInputError('bad config');
+        }
+        return actualLoad(opts);
+      });
+      const { panel, log } = await renderCompare(
+        `/balance-projection?view=compare&with=${DELAY}`,
+        EARLY,
+      );
+      expect(selectorTrigger(panel)).toHaveTextContent('Delay — work to 70');
+
+      await view(FUNDS_RUN_OUT);
+      act(() => {
+        window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
+      });
+      await waitFor(
+        () => expect(screen.queryByRole('region', { name: 'Compare scenarios' })).toBeNull(),
+        WAIT,
+      );
+      await view(BASE);
+      act(() => {
+        window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
+      });
+      const back = await findPanel();
+      await waitFor(() => expect(selectorTrigger(back)).toHaveTextContent('Funds Run Out'), WAIT);
+      await waitFor(() => expect(log.at(-1)!.search).toBe('?view=compare'));
+    });
+
     it('falls back to the default, not ?with=, after a sidebar switch with nothing remembered', async () => {
       const { panel } = await renderCompare(
         `/balance-projection?view=compare&with=${BASE}`,
