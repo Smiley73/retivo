@@ -21,6 +21,7 @@ keyed by year and one `metadata` block: `source`, `asOfDate` and
 |---|---|---|---|
 | `FEDERAL_TAX_CONFIG` | `federal-tax-config.ts` | 2024, 2025, 2026 | IRS Rev. Proc. each Oct–Nov, plus the 2025 law for the standard deduction and senior deduction |
 | `IRMAA_TIERS` | `irmaa-tiers.ts` | 2024, 2025, 2026 | CMS Medicare Part B premium fact sheet each Nov |
+| `MEDICARE_PREMIUMS` | `medicare-premiums.ts` | 2024, 2025, 2026 | CMS Part B premium fact sheet each Nov (Part B standard premium); CMS annual Part D bid information each July (Part D national base premium) |
 | `ACA_PTC_PARAMETERS` | `aca-ptc-parameters.ts` | 2024, 2025, 2026 | IRS Rev. Proc. applicable-percentage table, plus HHS poverty guidelines each Jan |
 | `SSA_EARNINGS_TEST` | `ss-earnings-test.ts` | 2024, 2025, 2026 | SSA cost-of-living notice each Oct |
 | `QCD_LIMITS` | `qcd-limits.ts` | 2024, 2025, 2026 | IRS Pub. 590-B, which indexes the limit each year |
@@ -34,8 +35,9 @@ keyed by year and one `metadata` block: `source`, `asOfDate` and
 
 Three groups:
 
-- **Follow an agency cycle.** The first five rows. Refresh them when the
-  agency publishes: IRS Rev. Proc. in October or November, CMS in November,
+- **Follow an agency cycle.** The first six rows. Refresh them when the
+  agency publishes: IRS Rev. Proc. in October or November, CMS in November
+  (and in July for the Part D base premium),
   the SSA cost-of-living notice in October, HHS poverty guidelines in January.
   The QCD limit changes when the IRS publishes the next indexed amount. The ACA applicable percentages come from a Rev. Proc. published in the summer
   (the 2026 one in August 2025). Each ACA year uses the **previous** year's HHS
@@ -55,6 +57,12 @@ Three groups:
   scenario's medical inflation rate. To re-anchor it, move the base amount and
   the base year together: a new amount with the old year would grow a price that
   is already current.
+
+`MEDICARE_PREMIUMS` is read by no engine. Only the Expenses page's Add Medicare
+premiums helper imports it, to offer the newest year's Part B and Part D amounts
+as ordinary expenses, so it is not in the bundle below. It has two CMS series in
+one snapshot, so `source` lists both publications of each year in the order they
+were published.
 
 Engines never read these constants directly. A run resolves them once and passes
 them through. `DEFAULT_TAX_CALIBRATION_BUNDLE` in
@@ -101,6 +109,7 @@ These tests pin the values, so a refresh breaks them until you update them:
 |---|---|
 | `federal-tax-config.test.ts` | The year list, the shape of every table, the senior-deduction bases and some 2026 figures |
 | `irmaa-tiers.test.ts` | The year list and spot-check thresholds |
+| `medicare-premiums.test.ts` | The year list, every Part B and Part D figure, the source order, the exact `asOfDate`, and the match with each year's IRMAA tier 2 Part B amount |
 | `aca-ptc-parameters.test.ts` | The year list, every band and poverty figure, the source order, and the exact `asOfDate` |
 | `aca-ptc.test.ts` | The rough benchmark's base year (2026), its disclosure, and the growth from the base year |
 | `qcd-limits.test.ts` | The year list, the limits and the exact `asOfDate` |

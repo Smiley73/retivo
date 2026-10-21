@@ -367,6 +367,22 @@ Two optional extras:
 - For a medical expense, **Can be paid tax-free from an HSA** says whether the
   expense is paid from an HSA.
 
+**Add Medicare premiums** opens a preview with a Part B row and a Part D row for
+each household member who has a birthdate. Each row shows the built-in monthly
+amount from the Centers for Medicare & Medicaid Services (the standard Part B
+premium and the national base Part D premium, for the year the dialog names), a
+switch to include it and an amount you can edit. Nothing is saved until you
+confirm. Confirming adds one ordinary monthly, essential Medical expense per
+row you kept, named like "John Medicare Part B", that can be paid from an HSA
+and runs from that person's 65th birthday for life. Like any Medical expense, it
+grows with the scenario's medical inflation rate. A row whose premium looks
+already entered (an expense with "Medicare", "Part B" or "Part D" in its name)
+reads **Looks already entered**, names that expense and starts switched off; a
+row cannot be added when an expense already has its exact name. Your actual Part
+D plan price, Medigap and Medicare Advantage premiums stay yours to enter as
+Medical expenses. The same preview opens from the "Medicare premiums are
+missing" note under the Projections charts and from the Health coverage card.
+
 ### Expense Categories
 
 The categories expenses are grouped under. You can add, rename and delete them;
@@ -466,6 +482,8 @@ What the cards do:
   you enter a **Benchmark plan cost for the year**, the benchmark plan price is an
   estimate that grows every year from 2026 at the scenario's medical inflation
   rate; an entered price is used as entered.
+  A link opens the **Add Medicare premiums** preview on the Expenses page, and
+  asks before leaving if you have unsaved changes.
 - **Pre-retirement Roth conversions**: a **Roth conversion** moves money from a
   pre-tax account into a Roth account and you pay income tax on it now. This card
   models doing that during your working years, and its page is headed "Roth

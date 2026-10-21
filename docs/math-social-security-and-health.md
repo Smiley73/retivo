@@ -326,7 +326,9 @@ the files in `lib/claim-age-optimizer/` build the age lists
 on Medicare Part B (doctor and outpatient cover) and Part D (drug cover) for
 people with higher income. The app works out only the **surcharge**. It does not
 model the base Part B premium. Enter that as a medical expense if you want it
-counted.
+counted. The Expenses page **Add Medicare premiums** action adds the standard
+Part B and Part D amounts as ordinary medical expenses, which then grow at the
+scenario's medical inflation rate like any other medical expense.
 
 ### What goes in
 
@@ -401,7 +403,10 @@ fixed rules with no year.
 
 ### Simplified or left out
 
-- **Surcharge only.** The base Part B and Part D premiums are not modeled.
+- **Surcharge only.** The base Part B and Part D premiums are not modeled. The
+  Expenses page **Add Medicare premiums** action adds them as medical expenses,
+  so they grow at medical inflation; Medigap, Medicare Advantage and your actual
+  Part D plan price stay yours to enter.
 - **A stand-in for the first two retirement years.** After that the look-back is
   the projection's own MAGI.
 - **Year scaling.** Past 2026 it uses the scenario's general inflation rate, the

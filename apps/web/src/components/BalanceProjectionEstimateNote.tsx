@@ -37,6 +37,8 @@ import React from 'react';
 // The single source of truth for the rough age-premium curve, so this
 // disclosure can never quote a price the engine no longer charges.
 import { ROUGH_BENCHMARK_ASSUMPTIONS } from '../lib/aca-ptc';
+import { MEDICARE_PREMIUMS_URL } from '../pages/medicare-premium-helper';
+import { TextLink } from './TextLink';
 
 export interface BalanceProjectionEstimateNoteProps {
   /**
@@ -115,7 +117,8 @@ export const BalanceProjectionEstimateNote: React.FC<
       it is used exactly as entered. The projection also estimates only the Medicare
       income-related surcharge (IRMAA). The base Medicare premium, Medigap,
       Medicare Advantage, and drug-plan premiums are yours to enter as Medical
-      expenses — if you have not, your health costs in retirement are
+      expenses (the Expenses page can add the standard Part B and Part D
+      amounts for you) — if you have not, your health costs in retirement are
       understated.
     </p>
     {medicareBasePremiumMissing && (
@@ -127,7 +130,9 @@ export const BalanceProjectionEstimateNote: React.FC<
         medical spending at all. The base Medicare premium and any Medigap,
         Medicare Advantage, or drug-plan premiums are yours to enter as Medical
         expenses — until you do, this plan understates what you will actually
-        pay for health care.
+        pay for health care.{' '}
+        <TextLink to={MEDICARE_PREMIUMS_URL}>Add Medicare premiums</TextLink>{' '}
+        to review the standard Part B and Part D amounts and add them.
       </p>
     )}
     <p className="m-0 mt-3 text-sm text-muted">

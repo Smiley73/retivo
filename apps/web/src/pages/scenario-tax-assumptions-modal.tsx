@@ -24,9 +24,14 @@
  */
 import React, { useMemo, useState } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
+import { useNavigate } from 'react-router';
 import { Modal } from '../components/Modal';
 import { Alert } from '../components/Alert';
-import { useDirtyModalClose } from '../components/UnsavedChangesGuard';
+import { TextLink } from '../components/TextLink';
+import {
+  useDirtyDiscardAction,
+  useDirtyModalClose,
+} from '../components/UnsavedChangesGuard';
 import { saveScenario } from '../lib/scenario-mutations';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 import type {
@@ -53,6 +58,7 @@ import {
   HsaQualifiedSection,
   PenaltyExemptionsSection,
 } from './scenario-tax-assumptions-sections';
+import { MEDICARE_PREMIUMS_URL } from './medicare-premium-helper';
 import {
   useAcaCoverageDraft,
   useTaxAssumptionsDraft,
@@ -360,6 +366,11 @@ export const AcaCoverageModal: React.FC<AcaCoverageModalProps> = ({
     isDirty,
     () => onClose(false),
   );
+  // The Medicare premiums link leaves this page, so it asks first while the
+  // draft has unsaved changes (the close guard above covers only X / Esc / scrim).
+  const navigate = useNavigate();
+  const { runGuarded, confirmModal: leaveConfirmModal } =
+    useDirtyDiscardAction(isDirty);
 
   // A row that states nothing is dropped on save; block instead of
   // silently discarding it, so the user is told rather than surprised.
@@ -420,6 +431,22 @@ export const AcaCoverageModal: React.FC<AcaCoverageModalProps> = ({
           benchmarkRows={benchmarkRows}
           onChangeBenchmarkRows={(next) => setBenchmarkRows([...next])}
         />
+        <p className="m-0 text-sm text-muted">
+          The base Medicare premium is yours to enter as a Medical expense.{' '}
+          <TextLink
+            to={MEDICARE_PREMIUMS_URL}
+            onClick={(e) => {
+              // Let a new-tab click through; only an in-place navigation
+              // discards the draft.
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              runGuarded(() => navigate(MEDICARE_PREMIUMS_URL));
+            }}
+          >
+            Add Part B and Part D premiums
+          </TextLink>{' '}
+          from the Expenses page.
+        </p>
         {error && <Alert tone="error">{error}</Alert>}
         {blockReason !== null && isDirty ? (
           <Alert tone="warning">{blockReason}</Alert>
@@ -440,6 +467,7 @@ export const AcaCoverageModal: React.FC<AcaCoverageModalProps> = ({
         </div>
       </div>
       {confirmModal}
+      {leaveConfirmModal}
     </Modal>
   );
 };

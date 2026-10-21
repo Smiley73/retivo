@@ -33,6 +33,16 @@ export interface ReleaseNote {
 /** The full changelog, newest-first. New entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-21',
+    kind: 'new',
+    title: 'Add Medicare premiums to your expenses in one step',
+    blurb:
+      'The Expenses page has an Add Medicare premiums action. It previews a Part B and ' +
+      'a Part D premium for each person, with the current Medicare amounts you can edit, ' +
+      'and adds them as monthly Medical expenses from age 65. Medigap, Medicare Advantage ' +
+      'and your actual drug-plan price stay yours to enter.',
+  },
+  {
     date: '2026-10-20',
     kind: 'improved',
     title: 'Your Marketplace credit now lowers your withdrawals',

@@ -90,6 +90,8 @@ import {
   type CategoryGroup,
   type ExpenseRow,
 } from './expense-group-card';
+import { MedicarePremiumsDialog } from './MedicarePremiumsDialog';
+import { MEDICARE_PREMIUMS_PARAM } from './medicare-premium-helper';
 
 /**
  * Compute per-year canonical-expense rows + life-expectancy markers
@@ -469,6 +471,10 @@ export const ExpensesPage: React.FC = () => {
       : null;
   // Run-once guard: restore fires at most once per navigation.
   const focusRestoredRef = useRef(false);
+  // The "Add Medicare premiums" preview, opened by the header action or by the
+  // entry-point query parameter (read once, like the focus restore below).
+  const [premiumsOpen, setPremiumsOpen] = useState(false);
+  const premiumsEntryReadRef = useRef(false);
   // Selected-scenario pointer: not a store-subscription slice, so it is read
   // from the local pointer store and refreshed when the sidebar switches the
   // active scenario or the scenario list changes.
@@ -601,6 +607,19 @@ export const ExpensesPage: React.FC = () => {
     editBtn?.focus({ preventScroll: true });
   }, [loading, searchParams]);
 
+  // Entry points (the Projections note, the Health coverage dialog) land here
+  // with `medicarePremiums=1`: open the preview once data is ready and strip
+  // the parameter so a reload does not reopen it.
+  useEffect(() => {
+    if (loading || premiumsEntryReadRef.current) return;
+    premiumsEntryReadRef.current = true;
+    if (searchParams.get(MEDICARE_PREMIUMS_PARAM) === null) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete(MEDICARE_PREMIUMS_PARAM);
+    window.history.replaceState(null, '', url.pathname + url.search);
+    setPremiumsOpen(true);
+  }, [loading, searchParams]);
+
   const onDelete = async (row: ExpenseRow): Promise<void> => {
     if (!householdId) return;
     const ok = await confirm(
@@ -641,6 +660,13 @@ export const ExpensesPage: React.FC = () => {
           ariaLabel: 'Add expense',
         }}
         actionIcon={<PlusIcon />}
+        secondaryActions={[
+          {
+            key: 'add-medicare-premiums',
+            label: 'Add Medicare premiums',
+            onClick: () => setPremiumsOpen(true),
+          },
+        ]}
       />
 
       {error && <Alert tone="error">{error}</Alert>}
@@ -744,6 +770,15 @@ export const ExpensesPage: React.FC = () => {
       )}
 
       {dialog}
+      {premiumsOpen && householdId && (
+        <MedicarePremiumsDialog
+          householdId={householdId}
+          members={householdMembers}
+          expenses={expenseQuery.aggregates as ReadonlyArray<Aggregate<ExpensePayload>>}
+          categories={categoryQuery.aggregates as ReadonlyArray<Aggregate<ExpenseCategoryPayload>>}
+          onClose={() => setPremiumsOpen(false)}
+        />
+      )}
     </section>
   );
 };
