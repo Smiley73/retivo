@@ -54,29 +54,45 @@ are never shared, whatever you choose; the list is under
 1. Open **Settings → Preferences**. In the **AI assistants** card, turn on **Allow AI
    assistants on this device**. This is stored in this browser only; it is off by
    default and per signed-in person.
-2. Copy the command for your assistant from the card: there is one each for Claude
+2. **Download the bridge.** The bridge is one file, and this copy of RETIVO serves it
+   from its own address. The card shows a download command; copy it from the card and
+   run it in a terminal on the computer where your assistant runs. It saves the file
+   as `.retivo/retivo-mcp-bridge.mjs` in your home folder, checks it against the
+   SHA-256 shown under the command, and moves it into place only if it matches. If
+   the checksum does not match, it says `FAILED` and keeps nothing where the
+   assistant would run it; do not run the file anyway. The command needs `curl` and
+   `shasum` and a shell that expands `$HOME` (macOS, Linux, and Windows through WSL
+   or Git Bash). The card also links the licenses and copyright notices of the
+   software the bridge contains.
+3. Copy the command for your assistant from the card: there is one each for Claude
    Code and Codex. **Copy the command from the card instead of typing it.** It
    already holds this copy's own web address, which the bridge compares exactly: the
    scheme, host and port must match the address in your browser's address bar, with
    no trailing slash. Typed from memory, a small difference makes the bridge refuse
    the tab and the card report that it could not reach the bridge.
-3. Run it where the assistant runs:
-   - the card shows a `claude mcp add retivo ...` or
-     `codex mcp add retivo ...` line to run in a terminal.
-4. Start a new assistant session if it does not pick the new server up by itself. The
+4. Run it where the assistant runs: the card shows a `claude mcp add retivo ...` or
+   `codex mcp add retivo ...` line to run in a terminal. It tells the assistant to
+   start `node` on the file you downloaded.
+5. Start a new assistant session if it does not pick the new server up by itself. The
    assistant starts the bridge; you do not run it yourself.
 
-**The card's launcher is provisional.** The command the card shows starts the bridge
-with `npx -y retivo-mcp-bridge`. That is a placeholder until the bridge is
-distributed, and nothing by that name is published yet, so the command as copied
-will not start a bridge. Until then, build the bridge from a checkout of RETIVO
-([local setup](local-setup.md#connect-a-local-ai-assistant)) and, in the command you
-copy from the card, replace `npx -y retivo-mcp-bridge` with
-`node <checkout>/apps/mcp-bridge/dist/bin.js`, where `<checkout>` is the full path to
-your checkout. Keep everything else in the command as the card gave it, in particular
-`--origin` and, if present, `--port`. Give the full path, not `$PWD`: `$PWD` is
-the folder your terminal is in when you run the command, and a wrong path makes the
-assistant report `CONNECTION_CLOSED`.
+**What the checksum proves.** It proves the file you saved is the one this copy of
+RETIVO is serving right now, and catches a damaged or cut-off download. Both come from
+the same address, so it does not protect against someone who controls that site; it
+is the same trust you already place in the site that holds your plan. The command
+also contains the exact address it downloads from, so check that it is the address
+you use for RETIVO.
+
+**Updating the bridge.** The bridge updates when your copy of RETIVO does, not on its
+own: a newer RETIVO serves a newer file. Run the download command from the card again
+(it overwrites the saved file) and restart the assistant session. If the card says
+the bridge and RETIVO do not speak the same version, this is the fix. The downloaded
+file does not check for updates.
+
+**If the card shows no download.** A copy that does not serve the bridge file, such
+as a local `pnpm dev` copy, says so instead of showing commands. For a local copy,
+build the bridge from a checkout and point your assistant at the built file
+([local setup](local-setup.md#connect-a-local-ai-assistant)).
 
 **One bridge per assistant session.** The bridge listens on one fixed port and
 serves one browser tab. If a second assistant session starts its own bridge on
@@ -238,8 +254,8 @@ the usual causes.
 
 | What you see | What it means and what to do |
 |---|---|
-| The assistant says the `retivo` server failed to start, or cannot be found. | The card's `npx -y retivo-mcp-bridge` launcher is provisional and is not published, so it does not start. Build the bridge from a checkout and use `node <checkout>/apps/mcp-bridge/dist/bin.js` in its place, as described under [Set up with your assistant](#set-up-with-your-assistant). Also check that Node 24 is the one the assistant runs. |
-| "RETIVO could not reach the bridge. It is either not running or blocked by your browser." | The browser cannot tell an absent bridge from a blocked one. Check that the command was added to your assistant, that its launcher starts (see the row above) and that the assistant has started a session. Then check the browser's permission for this site ([Browser support](#browser-support)); a denied permission looks exactly like an absent bridge. |
+| The assistant says the `retivo` server failed to start, or cannot be found. | Check that the download command finished without `FAILED` and that `.retivo/retivo-mcp-bridge.mjs` exists in your home folder, then that the assistant's command was added with the full path the card gave. The bridge is started with `node`, so Node 24 (24.2 or later in the 24 line) has to be the one the assistant runs. |
+| "RETIVO could not reach the bridge. It is either not running or blocked by your browser." | The browser cannot tell an absent bridge from a blocked one. Check that the command was added to your assistant, that the bridge starts (see the row above) and that the assistant has started a session. Then check the browser's permission for this site ([Browser support](#browser-support)); a denied permission looks exactly like an absent bridge. |
 | "The bridge is not running." | The browser allowed the connection and nothing answered. Add the command to your assistant, ask a question about your plan, then enter the new code. |
 | "Your browser blocked the connection to the bridge." | The permission was denied. Allow it in the browser's site settings for this site, then try again. |
 | "Something answered, but it is not the Retivo bridge." | Another program holds the port. Close it, or change the port in the build. |

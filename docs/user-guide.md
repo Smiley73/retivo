@@ -762,10 +762,13 @@ is saved.
 
 1. Turn on **Allow AI assistants on this device**. This is stored in this browser
    only.
-2. Copy the command for your assistant (there is one each for Claude Code
-   and Codex) and run it where the assistant runs. It adds a small helper
-   program to the assistant. The helper listens only on your computer and does
-   nothing until you approve.
+2. Copy the download command from the card and run it in a terminal where the
+   assistant runs. It saves a small helper program from this copy of RETIVO to
+   your computer after checking its checksum. Then copy the command for your
+   assistant (there is one each for Claude Code and Codex) and run it too. It adds
+   the helper to the assistant. The helper listens only on your computer and does
+   nothing until you approve. To update the helper later, run the download
+   command again.
 3. Ask the assistant something about your plan. The assistant's tools exist from
    the start, but until you pair they answer with a one-time pairing code and
    where to type it instead of with data.

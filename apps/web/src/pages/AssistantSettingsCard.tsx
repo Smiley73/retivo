@@ -1,7 +1,8 @@
 /**
  * The "AI assistants" card under Settings → Preferences: the per-device opt-in,
- * and once it is on, the launch commands, the pairing-code field, the
- * connection status and Disconnect. All session logic lives in `assistant/`
+ * and once it is on, the download command for the bridge file this copy serves
+ * (with the checksum it verifies), the launch commands, the pairing-code field,
+ * the connection status and Disconnect. All session logic lives in `assistant/`
  * (which may not import `pages/` or `components/`); this file only renders it.
  *
  * Hidden entirely unless the build carries a bridge port and the `ai-assistants`
@@ -10,8 +11,9 @@
  * and it leaves component state the moment Connect is pressed.
  */
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { bridgeCommandFor, isWellFormedPairingCode, type AgentName } from '@retirement/assistant-protocol';
+import { BRIDGE_NOTICES_FILE, bridgeCommandFor, bridgeInstallCommand, isWellFormedPairingCode, type AgentName } from '@retirement/assistant-protocol';
 import { useAssistant } from '../assistant/AssistantContext';
+import { useBridgeFile } from '../assistant/bridge-file';
 import { browserFamily, type BrowserFamily, type Diagnosis } from '../assistant/diagnosis';
 import { GENEROUS_DEFAULTS_STATEMENT, MODEL_PROVIDER_STATEMENT } from '../assistant/sharing/sentences';
 import { Badge } from '../components/Badge';
@@ -19,6 +21,7 @@ import { Field } from '../components/Field';
 import { Muted } from '../components/Muted';
 import { PM_IGNORE_ATTRS } from '../components/password-manager';
 import { TextInput } from '../components/TextInput';
+import { textLinkClass } from '../components/TextLink';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import { btnPrimaryClass, btnSecondaryClass, btnSecondarySmClass, inputClass, SettingsCard } from './profile-page-chrome';
 
@@ -52,8 +55,8 @@ function browserRemedy(family: BrowserFamily, kind: 'blocked' | 'unreachable' | 
       return 'Firefox 151 and later asks before a site may reach your computer. Choose Allow in the prompt, then try again. Older versions cannot connect.';
     case 'chromium':
       return kind === 'not-running'
-        ? 'Add the command above to your assistant, ask it a question about your plan, then enter the new code.'
-        : 'If your browser asked to let this site reach devices on your network, choose Allow. Then check that the command above has been added to your assistant.';
+        ? 'Add the bridge to your assistant with the commands above, ask it a question about your plan, then enter the new code.'
+        : 'If your browser asked to let this site reach devices on your network, choose Allow. Then check that the bridge has been added to your assistant with the commands above.';
     case 'other':
       return 'Use a recent version of Chrome, Edge, Brave or Firefox on a computer.';
   }
@@ -73,9 +76,9 @@ function diagnosisText(diagnosis: Diagnosis, family: BrowserFamily): string | nu
     case 'not-the-bridge':
       return 'Something answered, but it is not the Retivo bridge. Close the program using that port, or change the port, and try again.';
     case 'version-mismatch':
-      return 'The bridge and this version of Retivo do not speak the same version. Add the command above to your assistant again to update the bridge, then reload this page.';
+      return 'The bridge and this version of Retivo do not speak the same version. Run the download command above again to update the bridge, restart your assistant session, then reload this page.';
     case 'bridge-unverified':
-      return 'The program on that port could not prove it knows your code, so Retivo disconnected. Nothing was shared. Start the bridge with the command above.';
+      return 'The program on that port could not prove it knows your code, so Retivo disconnected. Nothing was shared. Start the bridge with the commands above.';
     case 'already-connected':
       return 'The bridge already has a Retivo tab connected. Disconnect that one (or close it) first, then try again.';
     case 'wrong-code':
@@ -112,9 +115,34 @@ function commandFor(agent: AgentName, port: number): string | null {
   }
 }
 
+function downloadCommandFor(sha256: string): string | null {
+  try {
+    return bridgeInstallCommand({ origin: window.location.origin, sha256 });
+  } catch {
+    return null;
+  }
+}
+
+/** A copyable command: the text, and a button that copies it and reports back through `onCopy`. */
+const CommandRow: React.FC<{ command: string; buttonLabel: string; copiedKey: string; copied: string | null; onCopy: (key: string, command: string) => void }> = ({
+  command,
+  buttonLabel,
+  copiedKey,
+  copied,
+  onCopy,
+}) => (
+  <div className="flex flex-wrap items-start gap-2">
+    <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-surface-sunken px-3 py-2 font-mono text-xs text-ink">{command}</code>
+    <button type="button" className={btnSecondarySmClass} onClick={() => onCopy(copiedKey, command)}>
+      {copied === copiedKey ? 'Copied' : buttonLabel}
+    </button>
+  </div>
+);
+
 const LaunchCommands: React.FC<{ port: number }> = ({ port }) => {
-  const [copied, setCopied] = useState<AgentName | 'failed' | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bridgeFile = useBridgeFile(true);
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
@@ -129,14 +157,47 @@ const LaunchCommands: React.FC<{ port: number }> = ({ port }) => {
       </Muted>
     );
   }
-  const copy = async (agent: AgentName, command: string): Promise<void> => {
-    setCopied((await copyText(command)) ? agent : 'failed');
+  if (bridgeFile.status === 'loading') {
+    return (
+      <Muted as="p" className="m-0 mb-4 text-xs">
+        Checking for the bridge file…
+      </Muted>
+    );
+  }
+  const download = bridgeFile.status === 'ready' ? downloadCommandFor(bridgeFile.info.sha256) : null;
+  if (bridgeFile.status === 'unavailable' || download === null) {
+    return (
+      <Muted as="p" className="m-0 mb-4 text-xs">
+        This copy of Retivo does not serve the bridge file, so there is nothing to download here. Whoever runs this copy turns it on with the
+        assistantBridgePort setting; to run the bridge from a source checkout instead, see the local setup guide.
+      </Muted>
+    );
+  }
+  const copy = async (key: string, command: string): Promise<void> => {
+    setCopied((await copyText(command)) ? key : 'failed');
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS);
   };
+  const onCopy = (key: string, command: string): void => void copy(key, command);
   return (
     <div className="mb-4">
-      <p className="m-0 mb-2 text-sm font-medium text-ink">1. Add the bridge to your assistant</p>
+      <p className="m-0 mb-2 text-sm font-medium text-ink">1. Download the bridge</p>
+      <Muted as="p" className="m-0 mb-3 text-xs">
+        The bridge is one file served by this copy of Retivo. Run this in a terminal on the computer where your assistant runs; it saves the file to
+        .retivo in your home folder and stops without keeping it if its checksum does not match. It needs curl, shasum and Node 24. Run it again to
+        update the bridge.
+      </Muted>
+      <div className="mb-2">
+        <CommandRow command={download} buttonLabel="Copy download command" copiedKey="download" copied={copied} onCopy={onCopy} />
+      </div>
+      <Muted as="p" className="m-0 mb-4 text-xs">
+        SHA-256 <code className="break-all font-mono">{bridgeFile.info.sha256}</code> (bridge {bridgeFile.info.version}).{' '}
+        <a className={textLinkClass} href={`/${BRIDGE_NOTICES_FILE}`} target="_blank" rel="noreferrer">
+          Licenses of what it contains
+        </a>
+        .
+      </Muted>
+      <p className="m-0 mb-2 text-sm font-medium text-ink">2. Add the bridge to your assistant</p>
       <Muted as="p" className="m-0 mb-3 text-xs">
         Run one of these where your assistant runs. The bridge stays on your computer.
       </Muted>
@@ -144,14 +205,7 @@ const LaunchCommands: React.FC<{ port: number }> = ({ port }) => {
         command === null ? null : (
           <div key={agent} className="mb-3">
             <p className="m-0 mb-1 text-xs font-medium text-ink">{label}</p>
-            <div className="flex flex-wrap items-start gap-2">
-              <code className="min-w-0 flex-1 break-all rounded-md border border-line bg-surface-sunken px-3 py-2 font-mono text-xs text-ink">
-                {command}
-              </code>
-              <button type="button" className={btnSecondarySmClass} onClick={() => void copy(agent, command)}>
-                {copied === agent ? 'Copied' : `Copy ${label} command`}
-              </button>
-            </div>
+            <CommandRow command={command} buttonLabel={`Copy ${label} command`} copiedKey={agent} copied={copied} onCopy={onCopy} />
           </div>
         ),
       )}
@@ -241,7 +295,7 @@ export const AssistantSettingsCard: React.FC = () => {
           <Muted as="p" className="m-0 mb-4 text-xs">
             {MODEL_PROVIDER_STATEMENT} {GENEROUS_DEFAULTS_STATEMENT}
           </Muted>
-          <p className="m-0 mb-2 text-sm font-medium text-ink">2. Enter the pairing code</p>
+          <p className="m-0 mb-2 text-sm font-medium text-ink">3. Enter the pairing code</p>
           <form ref={formRef} onSubmit={submit} noValidate>
             <Field
               htmlFor={CODE_FIELD_ID}
