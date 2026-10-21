@@ -410,26 +410,30 @@ premium credit is never available on separate returns.
      income rises, so it is worked out at the ceiling itself.
    - *Medicare surcharge line* (guarded plans only). A year's income sets the
      surcharge two years later, so this is the next surcharge line above the tier
-     the scenario sits in that later year with no conversion at all (the
-     zero-conversion projection, described below). Under every line, that is the
-     first line. It applies when someone is on Medicare then.
+     the scenario sits in that later year in the baseline projection (described
+     below). Under every line, that is the first line. It applies when someone is on Medicare then.
    - *Premium credit line* (guarded plans only). Four times the poverty
      guideline for the household less the Social Security that is not taxable,
      because the ACA income adds that back. It applies in years with Marketplace
      coverage while the credit has a cliff at that line, and only where the
-     zero-conversion projection is not already over it.
+     baseline projection is not already over it.
 
-   Both guards are held against the zero-conversion projection, not against the
-   current plan. The current plan is that projection only when the scenario has no
-   Fill windows. With Fill windows, the current plan's own conversions may already
-   sit in a higher surcharge tier or over the credit cliff, so the current plan
-   cannot be the reference. A guarded plan is therefore held to stay under the
-   line that converting nothing stays under: it never takes a year into a higher
-   surcharge tier, or over the credit cliff, than it would be in with no
-   conversion. For example, if the current plan puts a year's income in surcharge
-   tier 1 but zero conversion is under every line, a guarded plan is held under the
-   first line, not the tier 2 line. If zero conversion is under the credit cliff,
-   the guard applies even where the current plan is over it. A plan that still
+   Both guards are held against the baseline projection, not against the current
+   plan. The baseline is the scenario projected with no MAGI cap windows at all:
+   no Fill conversions, and no Minimize caps limiting pre-tax withdrawals either.
+   The current plan stands in for it only when the scenario has no cap windows of
+   any mode. With cap windows, whether Fill or Minimize, the current plan's own
+   conversions or capped withdrawals may already move a year's income into a
+   different surcharge tier or across the credit cliff, so the current plan
+   cannot be the reference. A Fill window with no valid target Roth converts
+   nothing but is still a cap window, so it also rules the current plan out. A
+   guarded plan is therefore held to stay under the line that the baseline stays
+   under: it never takes a year into a higher surcharge tier, or over the credit
+   cliff, than it would be in with no cap windows. For example, if the current
+   plan puts a year's income in surcharge tier 1 but the baseline is under every
+   line, a guarded plan is held under the first line, not the tier 2 line. If the
+   baseline is under the credit cliff, the guard applies even where the current
+   plan is over it. A plan that still
    crosses a line it is held to is flagged in step 6.
 
    The Fill step cannot see the interest and dividends that taxable accounts
