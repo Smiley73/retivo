@@ -489,6 +489,13 @@ dropped too. The line is a separate column in the **Taxes & health costs** table
 and a separate figure on the **Taxes** tab. The dollars are already part of the
 ACA health credits shown there, so they are not added a second time.
 
+The credit stops at the poverty line, so the line cannot lower the draw until
+income falls under it. In the projection, if lowering the draw by the line would
+leave income below 100% of the poverty line, the credit is lost at that draw and
+the line cannot be settled. The year is then worked out with no line, and the
+credit left after step 1 is dropped. The stress test instead stops the line at
+the income above the poverty line, so the draw it lowers still earns the credit.
+
 The stress test funds the whole IRMAA surcharge, where the projection funds only
 the part not withheld from Social Security, so step 1 uses the whole surcharge
 there. Both cap the line at the year's draw, which is the sum of the months in

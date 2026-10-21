@@ -18,16 +18,50 @@ interface CreditAppliedToPremiumsArgs {
   readonly medicalCents: number;
   /** The draw the engine would otherwise commit this year. */
   readonly remainingNeedCents: number;
+  /** How far the draw's MAGI can fall before it reaches the poverty line (see
+   *  {@link aboveFplFloorCents}). Absent → no limit; the deterministic solver
+   *  instead checks the line against the draw it commits. */
+  readonly floorHeadroomCents?: number;
 }
 
 /**
- * `min(max(0, credit − offset), medical, remainingNeed)`, floored at zero. The
- * model has no surplus deposit, so a year with no draw has nothing to lower and
- * the rest of the credit is dropped.
+ * `min(max(0, credit − offset), medical, remainingNeed)`, floored at zero, and
+ * no more than `floorHeadroomCents` when given. The model has no surplus
+ * deposit, so a year with no draw has nothing to lower and the rest of the
+ * credit is dropped.
  */
 export function creditAppliedToPremiumsCents(args: CreditAppliedToPremiumsArgs): number {
   const excessCents = Math.max(0, args.creditCents - args.offsetCents);
-  return Math.max(0, Math.min(excessCents, args.medicalCents, args.remainingNeedCents));
+  const limitCents = Math.min(excessCents, args.medicalCents, args.remainingNeedCents);
+  return Math.max(
+    0,
+    args.floorHeadroomCents === undefined ? limitCents : Math.min(limitCents, args.floorHeadroomCents),
+  );
+}
+
+/** A year's tax result, as {@link aboveFplFloorCents} reads it (integer cents). */
+interface FplFloorArgs {
+  readonly magiCents: number;
+  readonly taxableSsCents: number;
+  readonly fplPercentage: number;
+  /** The year's gross Social Security, whose untaxed part ACA MAGI adds back. */
+  readonly grossSsCents: number;
+}
+
+/**
+ * How many cents of ACA MAGI sit above the 100% poverty line. The ratio of ACA
+ * MAGI to the line is the same before and after the engine deflates MAGI, so
+ * the figure is in projection-year dollars. A draw lowered by this much or less
+ * cannot leave the household under the line, where the credit is zero: lowering
+ * the draw lowers ACA MAGI by at most the same amount, because ACA MAGI adds
+ * back all Social Security and counts a dollar of draw at most once. Zero below
+ * the line, where no credit is earned.
+ */
+export function aboveFplFloorCents(args: FplFloorArgs): number {
+  if (!(args.fplPercentage >= 100)) return 0;
+  const acaMagiCents =
+    args.magiCents + Math.max(0, args.grossSsCents - args.taxableSsCents);
+  return Math.max(0, Math.floor(acaMagiCents * (1 - 100 / args.fplPercentage)));
 }
 
 /**

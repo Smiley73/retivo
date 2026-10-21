@@ -461,6 +461,30 @@ describe('applyPerYearTaxForPath — credit applied to premiums', () => {
     expect(result.ptc).toBeCloseTo(5_134.2, 2);
   });
 
+  it('holds the line to the MAGI above the poverty line, where the credit ends', () => {
+    // No Social Security and a $17,000 pre-tax draw: 108.6% of the $15,650
+    // guideline, so the credit is several thousand dollars. All of it would lower
+    // the draw below the guideline, where the credit is zero, so the line stops
+    // at the $1,350 of MAGI above it.
+    const result = applyPerYearTaxForPath({
+      taxCtx: ctx,
+      taxYear: 2026,
+      retirementYear: 2026,
+      grossSsDollars: 0,
+      nominalExpense: 17_000,
+      medicalExpenseDollars: 7_200,
+      otherIncome: 0,
+      priorBalance: 1_000_000,
+      priorPreTaxByOwner: new Map<string, number>(),
+      magiMinus2: undefined,
+      classification: { ...roth(0), preTaxDollars: 17_000 },
+    })!;
+    expect(result.ptc).toBeGreaterThan(5_000);
+    expect(result.acaCreditAppliedToPremiums).toBeCloseTo(1_350, 1);
+    expect(17_000 - result.acaCreditAppliedToPremiums).toBeGreaterThanOrEqual(15_650);
+    expect(result.taxCashflowDollars).toBeCloseTo(-result.acaCreditAppliedToPremiums, 2);
+  });
+
   it('keeps a negative cumulative draw from adding balance back to the RMD base', () => {
     // The credit outran the tax so far (cumulative draw below zero): the
     // after-tax base is the raw balance, as `applyAfterTaxAdjustment` leaves it.

@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  aboveFplFloorCents,
   creditAppliedToPremiumsCents,
   foldYearDrawIntoExpense,
   sumPositiveNeed,
@@ -47,6 +48,48 @@ describe('creditAppliedToPremiumsCents', () => {
         remainingNeedCents: -1,
       }),
     ).toBe(0);
+  });
+});
+
+describe('creditAppliedToPremiumsCents, poverty-line headroom', () => {
+  const base = { creditCents: 640_580, offsetCents: 0, medicalCents: 720_000, remainingNeedCents: 2_200_000 };
+
+  it('holds the line to the headroom when that is the smallest limit', () => {
+    expect(creditAppliedToPremiumsCents({ ...base, floorHeadroomCents: 635_000 })).toBe(635_000);
+  });
+
+  it('leaves the line alone when the headroom is larger', () => {
+    expect(creditAppliedToPremiumsCents({ ...base, floorHeadroomCents: 900_000 })).toBe(640_580);
+    expect(creditAppliedToPremiumsCents(base)).toBe(640_580);
+  });
+
+  it('is zero with no headroom', () => {
+    expect(creditAppliedToPremiumsCents({ ...base, floorHeadroomCents: 0 })).toBe(0);
+  });
+});
+
+describe('aboveFplFloorCents', () => {
+  it('is the MAGI above the poverty line: $22,000 is 140.6% of $15,650', () => {
+    expect(
+      aboveFplFloorCents({
+        magiCents: 2_200_000, taxableSsCents: 0, grossSsCents: 0, fplPercentage: (22_000 / 15_650) * 100,
+      }),
+    ).toBeCloseTo(635_000, -1);
+  });
+
+  it('adds back the untaxed Social Security, as ACA MAGI does', () => {
+    // $10,000 of draw plus $12,000 of Social Security, none taxed: ACA MAGI 22,000.
+    expect(
+      aboveFplFloorCents({
+        magiCents: 1_000_000, taxableSsCents: 0, grossSsCents: 1_200_000,
+        fplPercentage: (22_000 / 15_650) * 100,
+      }),
+    ).toBeCloseTo(635_000, -1);
+  });
+
+  it('is zero below the line and at no coverage', () => {
+    expect(aboveFplFloorCents({ magiCents: 1_000_000, taxableSsCents: 0, grossSsCents: 0, fplPercentage: 63.9 })).toBe(0);
+    expect(aboveFplFloorCents({ magiCents: 1_000_000, taxableSsCents: 0, grossSsCents: 0, fplPercentage: 0 })).toBe(0);
   });
 });
 

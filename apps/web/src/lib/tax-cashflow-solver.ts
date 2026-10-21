@@ -47,8 +47,13 @@
  * IRMAA cash need lowers the year's draw (capped at those expenses and at the
  * draw itself). Each pass computes it from that pass's own credit, and it
  * enters the next trial target and the convergence test the same way the tax
- * need does. The loop stays a contraction: a lower draw raises the credit by at
- * most the applicable percentage of the MAGI it removes, and the line is capped.
+ * need does. Above the poverty line the loop stays a contraction: a lower draw
+ * raises the credit by at most the applicable percentage of the MAGI it
+ * removes, and the line is capped. At the poverty line the credit drops to
+ * zero, so a line that lowers the draw below it has no fixed point and the loop
+ * cycles; a solve that does not converge with the line is solved again without
+ * it, so the committed draw never rests on a credit the household does not earn
+ * at that draw.
  */
 import { applyTaxYearForFilingPlan } from './tax-integration';
 import type {
@@ -446,6 +451,19 @@ function buildResult(state: SolverPassState): TaxCashflowResult {
  * contraction and the `needCents`-keyed convergence test still settles.
  */
 export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult {
+  const result = solveTaxCashflowPasses(args);
+  // A line that never settled is one the loop cannot stand behind: the credit is
+  // discontinuous at the poverty line, so a draw lowered by the line can fall
+  // under it, lose the credit, and send the next trial back up. Committing
+  // whichever pass the cap lands on would lower the draw by a credit the
+  // committed draw does not earn, and report a tax year from a trial draw. Drop
+  // the line and solve again; with no line the loop is the one that converges.
+  if (result.taxCashflowConverged || args.medicalExpenseCents === undefined) return result;
+  return solveTaxCashflowPasses({ ...args, medicalExpenseCents: undefined });
+}
+
+/** The fixpoint loop behind {@link solveTaxCashflow}, with the line as given. */
+function solveTaxCashflowPasses(args: TaxCashflowSolveArgs): TaxCashflowResult {
   const { ordinaryNetNeedDollars } = args;
   const state: SolverPassState = {
     pass: 0,

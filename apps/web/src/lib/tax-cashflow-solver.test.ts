@@ -501,4 +501,49 @@ describe('solveTaxCashflow — credit applied to premiums', () => {
     expect(firstPass.acaPtcSubsidyCents).not.toBe(result.taxYearResult.acaPtcSubsidyCents);
     expect(result.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
   });
+
+  describe('near the poverty line', () => {
+    // No Social Security, all-pre-tax draws, a $7,200 benchmark: a $22,000 draw is
+    // 140.6% of the $15,650 poverty guideline and earns a $6,405.80 credit, but
+    // that line would lower the draw to $15,594.20, which is 99.6% and earns none.
+    const cliffArgs = (overrides: Partial<TaxCashflowSolveArgs> = {}): TaxCashflowSolveArgs =>
+      baseArgs({
+        ordinaryNetNeedDollars: 22_000,
+        taxInputBase: aca2026Input({ grossSsDollars: 0 }),
+        classifyForTarget: allPreTaxClassifier,
+        medicalExpenseCents: 720_000,
+        ...overrides,
+      });
+
+    it('drops a line the lowered draw could not earn, and settles on the line-free draw', () => {
+      const targets: number[] = [];
+      const result = solveTaxCashflow(
+        cliffArgs({
+          classifyForTarget: (target) => {
+            targets.push(target);
+            return allPreTaxClassifier(target);
+          },
+        }),
+      );
+      const withoutLine = solveTaxCashflow(cliffArgs({ medicalExpenseCents: undefined }));
+      expect(result.taxCashflowConverged).toBe(true);
+      expect(result.acaCreditAppliedToPremiumsCents).toBe(0);
+      // The tax year reported is the one the committed draw makes, not a trial's.
+      expect(result.taxYearResult.magiCents).toBe(withoutLine.taxYearResult.magiCents);
+      expect(result.taxYearResult.acaPtcSubsidyCents).toBe(
+        withoutLine.taxYearResult.acaPtcSubsidyCents,
+      );
+      expect(result.totalTaxCashflowNeedCents).toBe(withoutLine.totalTaxCashflowNeedCents);
+      expect(targets[targets.length - 1]).toBe(22_000);
+    });
+
+    it('keeps a line whose lowered draw still earns the credit', () => {
+      // $30,000 is 191.7% of the poverty guideline; the line lowers it to
+      // about $24,000, still above 100%, so the loop settles with the line on.
+      const result = solveTaxCashflow(cliffArgs({ ordinaryNetNeedDollars: 30_000 }));
+      expect(result.taxCashflowConverged).toBe(true);
+      expect(result.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
+      expect(result.taxYearResult.fplPercentage).toBeGreaterThanOrEqual(100);
+    });
+  });
 });
