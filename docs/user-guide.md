@@ -609,7 +609,8 @@ Tabs under the controls, **Projection views**, split the page:
   random sample, so a gap smaller than its sampling noise is not a real
   difference. If the other scenario's calculation fails, the row says so and
   offers **Try again** without affecting the rest of the tab. Two scenarios that
-  would run the same stress test show no row.
+  would run the same stress test and whose Planned results are identical show no
+  row.
 
 Most charts and bands have a small **(i)** button that explains what they show.
 

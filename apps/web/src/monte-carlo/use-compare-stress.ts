@@ -349,11 +349,21 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
     }
   }
 
+  // Memoised on the key values so consumers that depend on it keep a stable
+  // identity across the many renders a running stress test causes.
+  const liveViewedKey = live?.viewedKey ?? null;
+  const liveComparisonKey = live?.comparisonKey ?? null;
+  const hasLive = live !== null;
+  const cacheKeys = useMemo(
+    () => (hasLive ? { viewed: liveViewedKey, comparison: liveComparisonKey } : null),
+    [hasLive, liveViewedKey, liveComparisonKey],
+  );
+
   return {
     viewed: viewedState,
     comparison,
     verdict: successDeltaVerdict(sample(viewedState), sample(comparison)),
-    cacheKeys: live !== null ? { viewed: live.viewedKey, comparison: live.comparisonKey } : null,
+    cacheKeys,
     retry,
     runViewed: viewed.recalculate,
   };
