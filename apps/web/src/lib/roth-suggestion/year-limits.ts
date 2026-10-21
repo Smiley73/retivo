@@ -47,7 +47,8 @@ export interface LimitEnvironment {
   readonly acaFplRegion: AcaFplRegion | undefined;
 }
 
-/** What a reference row says about a year, `null` when the row is missing. */
+/** What a zero-conversion row says about a year (the guard baseline, not the
+ *  scenario's current plan), `null` when the row is missing. */
 export interface ReferenceTiers {
   readonly lookbackIrmaaTier: string | null;
   readonly acaPtcTier: string | null;

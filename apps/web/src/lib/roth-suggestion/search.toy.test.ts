@@ -305,6 +305,46 @@ describe('arguments a caller should never send', () => {
   });
 });
 
+describe('a guarded plan that still crosses a line', () => {
+  it('is returned unranked, naming the year and the line', TIMEOUT, async () => {
+    const result = await runOk({ iraBalance: 800_000, annualExpense: 250_000 });
+    const crossed = result.candidates.filter((c) => c.unranked.some((u) => u.kind === 'guard-crossed'));
+    expect(crossed.length).toBeGreaterThan(0);
+    for (const c of crossed) {
+      expect(c.guarded).toBe(true);
+      expect(c.rank).toBeNull();
+      expect(result.rankedIds).not.toContain(c.id);
+      const reasons = c.unranked.flatMap((u) => (u.kind === 'guard-crossed' ? u.crossings : []));
+      const rows = new Map(c.drawdownYears.map((r) => [r.year, r]));
+      for (const { year, line } of reasons) {
+        // The crossing is real: the rows, not the ceilings, show it.
+        if (line === 'aca') expect(rows.get(year)?.acaPtcTier).toBe('above-400-cliff');
+        else expect(rows.get(year + 2)?.irmaaTier ?? 'none').not.toBe('none');
+      }
+    }
+  });
+});
+
+describe('a saved plan that crosses a cliff', () => {
+  const HOUSEHOLD: ToyOptions = { iraBalance: 3_000_000 };
+
+  it('leaves the guarded rows held to zero conversion, not to the saved plan', TIMEOUT, async () => {
+    const fresh = await runOk(HOUSEHOLD);
+    const saved = candidate(fresh, 'bracket-32-unguarded');
+    // The user saves the unguarded ladder: it becomes the scenario's own cap.
+    const rerun = await runOk({ ...HOUSEHOLD, overrides: { magiCap: { windows: [...saved.ladder] } } });
+    expect(rerun.candidates[0].ladder).toEqual(saved.ladder);
+    const guarded = (r: RothSuggestionOk) => r.candidates.filter((c) => c.guarded === true);
+    expect(guarded(rerun).length).toBeGreaterThan(0);
+    for (const c of guarded(rerun)) {
+      const before = candidate(fresh, c.id);
+      expect(c.years.map((y) => y.limits)).toEqual(before.years.map((y) => y.limits));
+      expect(c.ladder).toEqual(before.ladder);
+      expect(c.unranked).toEqual(before.unranked);
+    }
+  });
+});
+
 describe('progress and cancellation', () => {
   it('ticks once per projection and reaches 100 % of the candidates on the last one', TIMEOUT, async () => {
     const ticks: RothSuggestionProgress[] = [];

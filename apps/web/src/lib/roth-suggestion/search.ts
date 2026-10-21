@@ -50,10 +50,11 @@ import type {
   YearLimits,
 } from './types';
 
-/** Projections a full search can run at most: the reference once, then each
- *  ladder candidate up to its pass cap. Must stay within `MAX_PROJECTIONS`. */
+/** Projections a full search can run at most: the reference once, the
+ *  zero-conversion baseline the guards are held to once more, then each ladder
+ *  candidate up to its pass cap. Must stay within `MAX_PROJECTIONS`. */
 export const PROJECTION_BOUND =
-  1 + (buildCandidateGrid().length - 1) * MAX_PASSES_PER_CANDIDATE;
+  2 + (buildCandidateGrid().length - 1) * MAX_PASSES_PER_CANDIDATE;
 
 type Unsupported = { readonly kind: 'unsupported'; readonly reason: RothSuggestionUnsupportedReason };
 
@@ -159,8 +160,8 @@ function prepareSetup(request: RothSuggestionRequest): SearchSetup | Unsupported
   };
 }
 
-/** What the reference rows show at a window year: the guards only constrain a
- *  line the reference was under. */
+/** What the zero-conversion baseline rows show at a window year: the guards
+ *  only constrain a line the household is under without converting. */
 function referenceTiersFor(
   year: number,
   rows: ReadonlyMap<number, DrawdownYear>,
@@ -251,6 +252,21 @@ function assembleResult(
   };
 }
 
+/** The projection the guards are held to: the scenario with no conversion at
+ *  all. The current plan stands in for it only when it has no cap windows;
+ *  otherwise a saved ladder, itself over a cliff, would become the line. Null
+ *  when the engine has no projection to give. */
+async function baselineFor(
+  referencePlan: PlannedProjection,
+  setup: SearchSetup,
+  runner: ProjectionRunner,
+): Promise<PlannedProjection | null> {
+  if (resolvedLadder(setup.prepared.ctx).length === 0) return referencePlan;
+  const baseline = await runner.project([]);
+  runner.tick(false);
+  return baseline;
+}
+
 async function runSearch(
   request: RothSuggestionRequest,
   grid: readonly CandidateSpec[],
@@ -261,13 +277,15 @@ async function runSearch(
   const referencePlan = await runner.project(undefined, setup.prepared);
   if (referencePlan === null) return unsupported('no-projection');
   runner.tick(true);
-  const referenceRows = indexRows(referencePlan.years);
+  const baselinePlan = await baselineFor(referencePlan, setup, runner);
+  if (baselinePlan === null) return unsupported('no-projection');
+  const baselineRows = indexRows(baselinePlan.years);
   const env: PassEnvironment = {
     limitEnv: setup.limitEnv,
     targetRothAccountId: request.targetRothAccountId,
     windowYears: setup.years.map((y) => ({
       ...y,
-      reference: referenceTiersFor(y.facts.year, referenceRows),
+      reference: referenceTiersFor(y.facts.year, baselineRows),
     })),
     runner,
   };

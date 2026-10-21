@@ -62,6 +62,9 @@ async function runSearch(
 describe('roth suggestion search on the demo household', () => {
   let projection: RothSuggestionProjectionInput;
   let result: RothSuggestionOk;
+  /** The same household with its own cap taken off: its current plan is the
+   *  zero-conversion run the guards are held to. */
+  let zeroConversion: RothSuggestionOk;
   let projectionCalls: number;
 
   beforeAll(async () => {
@@ -69,6 +72,14 @@ describe('roth suggestion search on the demo household', () => {
     const before = vi.mocked(runDrawdownForMethod).mock.calls.length;
     result = await runSearch(projection);
     projectionCalls = vi.mocked(runDrawdownForMethod).mock.calls.length - before;
+    zeroConversion = await runSearch({
+      ...projection,
+      scenarios: projection.scenarios.map((s) =>
+        s.id === projection.selectedScenarioId
+          ? { ...s, payload: { ...s.payload, overrides: { ...s.payload.overrides, magiCap: { windows: [] } } } }
+          : s,
+      ),
+    });
   }, 60_000);
 
   const ladderCandidates = (): RothCandidate[] => result.candidates.filter((c) => !c.isReference);
@@ -95,8 +106,8 @@ describe('roth suggestion search on the demo household', () => {
       expect(projectionCalls).toBe(result.projectionsRun);
     });
 
-    it('has a deterministic bound of the reference plus every candidate at its pass cap', () => {
-      expect(PROJECTION_BOUND).toBe(1 + 8 * MAX_PASSES_PER_CANDIDATE);
+    it('has a deterministic bound of the reference and baseline plus every candidate at its pass cap', () => {
+      expect(PROJECTION_BOUND).toBe(2 + 8 * MAX_PASSES_PER_CANDIDATE);
       expect(PROJECTION_BOUND).toBeLessThanOrEqual(MAX_PROJECTIONS);
     });
   });
@@ -227,9 +238,9 @@ describe('roth suggestion search on the demo household', () => {
   });
 
   describe('guarded candidates stay on their side of the IRMAA and ACA lines', () => {
-    /** Years where the candidate's rows cross a line the reference's rows were under. */
+    /** Years where the candidate's rows cross a line the zero-conversion rows were under. */
     function crossings(candidate: RothCandidate): { year: number; line: 'irmaa' | 'aca' }[] {
-      const reference = new Map(result.candidates[0].drawdownYears.map((r) => [r.year, r]));
+      const reference = new Map(zeroConversion.candidates[0].drawdownYears.map((r) => [r.year, r]));
       const rows = new Map(candidate.drawdownYears.map((r) => [r.year, r]));
       const out: { year: number; line: 'irmaa' | 'aca' }[] = [];
       for (let year = result.window.startYear; year <= result.window.endYear; year += 1) {
@@ -243,6 +254,13 @@ describe('roth suggestion search on the demo household', () => {
       }
       return out;
     }
+
+    it('holds the same lines whether or not the scenario already carries a cap', () => {
+      const guarded = (r: RothSuggestionOk): RothCandidate[] => r.candidates.filter((c) => c.guarded === true);
+      expect(guarded(zeroConversion).map((c) => c.years.map((y) => y.limits))).toEqual(
+        guarded(result).map((c) => c.years.map((y) => y.limits)),
+      );
+    });
 
     it('crosses nothing, judged from the projected rows', () => {
       const guarded = ladderCandidates().filter((c) => c.guarded === true);
