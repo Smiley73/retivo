@@ -1020,6 +1020,84 @@ function successFromInput(input: MonteCarloInput): number {
   return (sum % 99_991) / 99_991;
 }
 
+describe('runOptimizerMonteCarlo — stored month-level claim age', () => {
+  beforeEach(() => clearOptimizerMcCache());
+  const members = [member('m1', true, 1965)];
+  const scenarioWithMonths = (): ScenarioAggregate => {
+    const sc = scenarioFixture('s1');
+    sc.payload.overrides.socialSecurity = { primary: { ageYears: 66, ageMonths: 4 } };
+    return sc;
+  };
+  const GRID_PLUS_STORED = SINGLE_SCENARIO_GRID_PAIRS + 1;
+  const run = (
+    summaryFor: (call: number) => number,
+    extra: Partial<Parameters<typeof runOptimizerMonteCarlo>[0]> = {},
+  ) => {
+    // Serial pool: call N is the Nth triple, and the stored pair is last.
+    let call = 0;
+    const fake = makeFakeWorker(() => summaryFor((call += 1)));
+    return {
+      fake,
+      done: runOptimizerMonteCarlo({
+        scenarios: [scenarioWithMonths()],
+        accounts: [brokerage('m1')],
+        balances: [balanceRow(800_000)],
+        members,
+        ssBenefits: [ssBenefit('m1', PIA_HIGH)],
+        expenses: [],
+        incomeStreams: [],
+        today: TODAY,
+        concurrency: 1,
+        workerFactory: () => fake,
+        ...extra,
+      }),
+    };
+  };
+
+  it('captures the baseline at the stored pair (not the rounded year) and counts the extra triple', async () => {
+    const progress: Array<{ cumulativeIdx: number; pairs: number; totalPairs: number }> = [];
+    const { fake, done } = run((n) => (n === GRID_PLUS_STORED ? 0.4 : 0.5), {
+      onProgress: (p) =>
+        progress.push({ cumulativeIdx: p.cumulativeIdx, ...p.totals }),
+    });
+    const outcome = (await done).get('s1');
+    if (outcome?.kind !== 'result') throw new Error('expected result');
+    expect(fake.postedInputs).toHaveLength(GRID_PLUS_STORED);
+    expect(outcome.baselineMetricValue).toBe(0.4);
+    expect(outcome.alreadyAtOptimum).toBe(false);
+    expect(outcome.winner).toMatchObject({ primaryAgeYears: 62, metricValue: 0.5 });
+    expect(progress[progress.length - 1]).toMatchObject({
+      cumulativeIdx: GRID_PLUS_STORED,
+      pairs: GRID_PLUS_STORED,
+      totalPairs: GRID_PLUS_STORED,
+    });
+  });
+
+  it('a stored pair that ranks highest wins already-at-optimum with its months', async () => {
+    const { done } = run((n) => (n === GRID_PLUS_STORED ? 0.9 : 0.5));
+    const outcome = (await done).get('s1');
+    if (outcome?.kind !== 'result') throw new Error('expected result');
+    expect(outcome.winner).toMatchObject({ primaryAgeYears: 66, primaryAgeMonths: 4 });
+    expect(outcome.alreadyAtOptimum).toBe(true);
+    expect(outcome.baselineMetricValue).toBe(0.9);
+  });
+
+  it('on an exact tie the lower total-months age wins', async () => {
+    const { done } = run(() => 0.5);
+    const outcome = (await done).get('s1');
+    if (outcome?.kind !== 'result') throw new Error('expected result');
+    expect(outcome.winner?.primaryAgeYears).toBe(62);
+    expect(outcome.winner?.primaryAgeMonths).toBeUndefined();
+  });
+
+  it('a cancelled run still collapses to cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const { done } = run(() => 0.5, { signal: controller.signal });
+    expect((await done).get('s1')).toEqual({ kind: 'cancelled' });
+  });
+});
+
 describe('runOptimizerMonteCarlo — pool concurrency', () => {
   beforeEach(() => clearOptimizerMcCache());
 

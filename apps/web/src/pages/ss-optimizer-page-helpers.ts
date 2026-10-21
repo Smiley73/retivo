@@ -174,7 +174,13 @@ export function mcRowFromOutcome(
         winner: outcome.winner
           ? {
               primaryAgeYears: outcome.winner.primaryAgeYears,
+              ...(outcome.winner.primaryAgeMonths !== undefined
+                ? { primaryAgeMonths: outcome.winner.primaryAgeMonths }
+                : {}),
               secondaryAgeYears: outcome.winner.secondaryAgeYears,
+              ...(outcome.winner.secondaryAgeMonths !== undefined
+                ? { secondaryAgeMonths: outcome.winner.secondaryAgeMonths }
+                : {}),
               metricValue: outcome.winner.metricValue,
               alreadyAtOptimum: outcome.alreadyAtOptimum,
             }

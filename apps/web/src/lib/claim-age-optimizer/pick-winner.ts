@@ -1,13 +1,13 @@
 /**
  * Pick the winning claim-age pair from a list of simulated metric
  * values. Highest metric wins; flat-surface ties break
- * to **lower primary age** first, then **lower secondary age**. The
- * `alreadyAtOptimum` flag is set when the winner matches the
- * scenario's resolved (inherited or local) pair — and equality
- * is "ageYears match with ageMonths defaulted to 0 on either side", so
- * the resolved pair carries its own `ageMonths` and the winner (always
- * `ageMonths: 0` per the whole-year search) only matches when both the
- * resolved primary and secondary are exact whole years.
+ * to **lower primary age** first, then **lower secondary age**, each
+ * compared in total months. The `alreadyAtOptimum` flag is set when the
+ * winner matches the scenario's resolved (inherited or local) pair —
+ * and equality is "ageYears and ageMonths match, a missing `ageMonths`
+ * counting as 0". The search grid is whole years, but a stored
+ * month-level pair (and a member the search did not vary) rides along
+ * with its months, so it can be a candidate, win, and read as already set.
  */
 
 export interface CandidateResult {
@@ -18,9 +18,13 @@ export interface CandidateResult {
    *  the page is driven by the OptimizerResult's `partial` flag +
    *  `missingPiaMembers` list, not by a null age here. */
   readonly primaryAgeYears: number;
+  /** Months on top of `primaryAgeYears`; absent or 0 is a whole year. */
+  readonly primaryAgeMonths?: number;
   /** `null` for single-member households (or when secondary's grid
    *  was empty). */
   readonly secondaryAgeYears: number | null;
+  /** Months on top of `secondaryAgeYears`; absent or 0 is a whole year. */
+  readonly secondaryAgeMonths?: number;
   readonly metricValue: number;
 }
 
@@ -28,8 +32,8 @@ export interface ResolvedPair {
   readonly primaryAgeYears: number;
   /** ageMonths carried so `alreadyAtOptimum` can apply the
    *  "ageMonths defaulted to 0" rule — a resolved primary of
-   *  `{70, 6}` is NOT already at optimum vs a winner of `70` (which
-   *  is implicitly `{70, 0}` per the whole-year search). */
+   *  `{70, 6}` is NOT the whole-year candidate `70`; it matches only a
+   *  candidate carrying the same months. */
   readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
   readonly secondaryAgeMonths?: number;
@@ -49,7 +53,12 @@ export interface Winner {
    *  age, and the merge helper requires a real primary age to write
    *  through Apply. */
   readonly primaryAgeYears: number;
+  /** Absent or 0 is a whole year. A stored month-level age that won, or
+   *  a member the search did not vary, carries its months here so Apply
+   *  writes them back unchanged. */
+  readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
+  readonly secondaryAgeMonths?: number;
   readonly metricValue: number;
   readonly alreadyAtOptimum: boolean;
 }
@@ -63,7 +72,13 @@ export function pickWinner(args: PickWinnerArgs): Winner | null {
   }
   return {
     primaryAgeYears: best.primaryAgeYears,
+    ...(best.primaryAgeMonths !== undefined
+      ? { primaryAgeMonths: best.primaryAgeMonths }
+      : {}),
     secondaryAgeYears: best.secondaryAgeYears,
+    ...(best.secondaryAgeMonths !== undefined
+      ? { secondaryAgeMonths: best.secondaryAgeMonths }
+      : {}),
     metricValue: best.metricValue,
     alreadyAtOptimum: pairsEqual(best, args.currentResolvedPair),
   };
@@ -73,18 +88,33 @@ function isBetter(candidate: CandidateResult, current: CandidateResult): boolean
   if (candidate.metricValue !== current.metricValue) {
     return candidate.metricValue > current.metricValue;
   }
-  // Flat metric tie → lower primary age wins.
-  if (candidate.primaryAgeYears !== current.primaryAgeYears) {
-    return candidate.primaryAgeYears < current.primaryAgeYears;
-  }
+  // Flat metric tie → lower primary age wins, in total months (66 beats
+  // 66 years 4 months).
+  const candidatePrimary = totalMonths(
+    candidate.primaryAgeYears,
+    candidate.primaryAgeMonths,
+  );
+  const currentPrimary = totalMonths(current.primaryAgeYears, current.primaryAgeMonths);
+  if (candidatePrimary !== currentPrimary) return candidatePrimary < currentPrimary;
   // Primary tied → lower secondary age wins. `null` (single-member /
   // past-window) is treated as larger than any real age so a
   // partial-secondary pair loses the tie to a fully-specified pair on
   // the same metric — defensive, since pairs in one result set are
   // expected to be uniform in shape.
-  const candidateSecondary = candidate.secondaryAgeYears ?? Number.POSITIVE_INFINITY;
-  const currentSecondary = current.secondaryAgeYears ?? Number.POSITIVE_INFINITY;
+  const candidateSecondary =
+    candidate.secondaryAgeYears === null
+      ? Number.POSITIVE_INFINITY
+      : totalMonths(candidate.secondaryAgeYears, candidate.secondaryAgeMonths);
+  const currentSecondary =
+    current.secondaryAgeYears === null
+      ? Number.POSITIVE_INFINITY
+      : totalMonths(current.secondaryAgeYears, current.secondaryAgeMonths);
   return candidateSecondary < currentSecondary;
+}
+
+/** Claim age in total months — the unit the tie-break compares in. */
+export function totalMonths(years: number, months: number | undefined): number {
+  return years * 12 + (months ?? 0);
 }
 
 /**
@@ -112,11 +142,10 @@ function pairsEqual(
 ): boolean {
   if (resolved === null) return false;
   if (result.primaryAgeYears !== resolved.primaryAgeYears) return false;
-  // Winners always carry `ageMonths: 0` (whole-year search), so
-  // any non-zero `primaryAgeMonths` on the resolved override breaks
-  // equality — `{70, 6}` is NOT already at optimum vs winner `70`.
-  if ((resolved.primaryAgeMonths ?? 0) !== 0) return false;
+  // Months count: `{70, 6}` is NOT the whole-year candidate `70`, but it
+  // is the stored candidate carrying `{70, 6}`.
+  if ((result.primaryAgeMonths ?? 0) !== (resolved.primaryAgeMonths ?? 0)) return false;
   if (result.secondaryAgeYears !== resolved.secondaryAgeYears) return false;
-  if ((resolved.secondaryAgeMonths ?? 0) !== 0) return false;
+  if ((result.secondaryAgeMonths ?? 0) !== (resolved.secondaryAgeMonths ?? 0)) return false;
   return true;
 }

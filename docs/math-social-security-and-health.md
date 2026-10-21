@@ -263,8 +263,10 @@ birthdate rules. `lib/ss-spousal-survivor.ts` has the survivor rules.
 
 ## The Social Security claim-age comparison
 
-The **Social Security claim-age** page answers one question: which claim age
-gives the best modeled result for this scenario? It does this by trying them.
+The **Social Security claim-age** page answers one question: of a fixed set of
+claim-age options, which gives the highest modeled result for this scenario? It
+does this by trying them. It is a comparison at one assumed death age, not a
+proven best age and not advice.
 
 ### What goes in
 
@@ -281,28 +283,38 @@ Everything in the scenario as it stands, plus a **goal**:
 
 1. **List the ages to try.** For each member who has a PIA, every whole-year age
    from the later of 62 and their current age (rounded up) to 70. A member past
-   70, or with no PIA, is left at the scenario's current claim age, or 67 if
-   none is set. Only the other member's age is varied.
-2. **Pair them.** For a couple, every pairing of the two lists.
+   70, or with no PIA, is left at the scenario's current claim age, months
+   included, or 67 if none is set. Only the other member's age is varied.
+2. **Pair them.** For a couple, every pairing of the two lists. The scenario's
+   current pair is added as one more candidate, exactly as stored, months
+   included, unless it is already in the list. So a current setting such as 66
+   years 4 months is tried and ranked next to the whole years. When both lists
+   would be empty, nothing is added and the page shows no winner.
 3. **Run each pair.** The whole projection is run again with that pair as the
    claim ages. Nothing else in the scenario changes. The survivor claim age is
    not searched. The scenario's stored value is carried through unchanged.
 4. **Pick the winner.** The highest result wins. When two results are exactly
-   equal, the **younger age wins**: the lower primary age first, then the lower
-   secondary age. This matters for Plan success %, where many ages can show
-   the same percentage.
+   equal, the **younger age wins**, counted in total months: the lower primary
+   age first, then the lower secondary age. So 66 beats 66 years 4 months on an
+   exact tie. This matters for Plan success %, where many ages can show the
+   same percentage.
 5. **Compare with the present.** The page shows the result at the scenario's
-   current ages next to the winner, when those are whole years inside the
-   searched range. If they are already the winning ages, it says so.
+   current ages next to the winner. That includes a current age with months,
+   which is compared as it is. If the current ages are already the winning
+   ages, it says "Already set" and shows the age as, for example, 66 years 4
+   months. When only one member is searched (the other has no PIA or is past 70),
+   a current result is shown only if the searched member is the secondary.
 
 The comparison has no built-in yearly figures of its own. The ages 62 and 70 are
 fixed rules with no year. Every projection it runs uses the figures on this page
 and on the taxes page.
 
 **Save to scenario** is described in the
-[user guide](user-guide.md#social-security-claim-age). It writes the winning
-ages as whole years and keeps the scenario's benefit reduction, COLA and
-survivor ages.
+[user guide](user-guide.md#social-security-claim-age). It writes each member's
+winning age. A searched member gets a whole year. A member the search left at
+their current claim age keeps their years and months, and a current pair that
+won is written as it was. The scenario's benefit reduction, COLA and survivor
+ages are kept.
 
 ### Simplified or left out
 
@@ -310,7 +322,8 @@ survivor ages.
   the money is for.
 - It assumes each member lives exactly to their **Life expectancy** setting. It
   does not weigh the chance of living shorter or longer.
-- Claim ages with extra months are never tried. Only whole years are.
+- The search tries whole years only. The stored setting is compared as it is,
+  but no other age with months is tried.
 - Plan success % uses the stress test, which does not apply the earnings test.
 
 **Code.** All paths are under `apps/web/src`. `lib/claim-age-optimizer.ts` and
