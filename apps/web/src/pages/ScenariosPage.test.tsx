@@ -822,7 +822,7 @@ describe('ScenariosPage — Compare with parent', () => {
   }
 
   const childLink = (): Promise<HTMLElement> =>
-    screen.findByRole('button', { name: 'Compare Retire at 67 with parent Base' });
+    screen.findByRole('button', { name: 'Compare with parent: Retire at 67 with Base' });
 
   beforeEach(() => {
     setupContexts();
@@ -921,6 +921,6 @@ describe('ScenariosPage — Compare with parent', () => {
 
     await screen.findByText('Base');
     expect(screen.queryByText('Compare with parent')).toBeNull();
-    expect(screen.queryByRole('button', { name: /Compare .* with parent/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Compare with parent/ })).toBeNull();
   });
 });

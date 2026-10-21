@@ -196,7 +196,7 @@ export const ScenariosPageRow: React.FC<ScenariosPageRowProps> = ({
                   type="button"
                   className={`${textLinkClass} text-sm`}
                   onClick={compareWithParent.onActivate}
-                  aria-label={`Compare ${name} with parent ${compareWithParent.parentName}`}
+                  aria-label={`Compare with parent: ${name} with ${compareWithParent.parentName}`}
                 >
                   Compare with parent
                 </button>

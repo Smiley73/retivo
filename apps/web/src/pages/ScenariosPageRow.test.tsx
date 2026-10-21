@@ -118,7 +118,7 @@ describe('ScenariosPageRow — Compare with parent', () => {
   it('renders the visible control with an accessible name naming both scenarios', () => {
     const row = renderRow(undefined, { parentName: 'Historical row', onActivate: vi.fn() }, CHILD);
     const button = within(row).getByRole('button', {
-      name: 'Compare Retire at 67 with parent Historical row',
+      name: 'Compare with parent: Retire at 67 with Historical row',
     });
     expect(button).toHaveTextContent('Compare with parent');
     // Always visible: not inside the hover-revealed icon cluster.
@@ -135,7 +135,7 @@ describe('ScenariosPageRow — Compare with parent', () => {
     const onActivate = vi.fn();
     const user = userEvent.setup();
     const row = renderRow(undefined, { parentName: 'Historical row', onActivate }, CHILD);
-    const button = within(row).getByRole('button', { name: /Compare Retire at 67/ });
+    const button = within(row).getByRole('button', { name: /Compare with parent: Retire at 67/ });
     await user.click(button);
     expect(onActivate).toHaveBeenCalledTimes(1);
     button.focus();
