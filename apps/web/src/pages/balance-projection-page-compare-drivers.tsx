@@ -200,13 +200,16 @@ function formatDriver(kind: DriverRow['kind'], value: number): string {
 /**
  * Shown in place of the headline and the Drivers table when the two Planned
  * projections are identical. It says the PLANNED results match, not "the
- * results": the stress test is checked separately and can still differ.
+ * results": the stress test is checked separately and can still differ,
+ * unless its inputs match too (`stressMatches`), when the sentence says so.
  */
 export const CompareIdentitySection: React.FC<{
   readonly viewedName: string;
   readonly comparisonName: string;
   readonly changes: ScenarioChangeList;
-}> = ({ viewedName, comparisonName, changes }) => {
+  /** The two stress-test inputs are identical as well. */
+  readonly stressMatches: boolean;
+}> = ({ viewedName, comparisonName, changes, stressMatches }) => {
   const [descendant, ancestor] =
     changes.relation === 'descendant'
       ? [viewedName, comparisonName]
@@ -216,8 +219,10 @@ export const CompareIdentitySection: React.FC<{
       <p className="m-0">
         The Planned projections of {viewedName} and {comparisonName} are
         identical: every year of both comes out the same, so there is no
-        difference to show. The stress test is checked separately and can still
-        differ.
+        difference to show.{' '}
+        {stressMatches
+          ? 'Their stress tests use the same inputs too, so they would give the same result.'
+          : 'The stress test is checked separately and can still differ.'}
       </p>
       {changes.relation !== 'unrelated' &&
         (changes.groups.length === 0 ? (

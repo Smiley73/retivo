@@ -1,0 +1,161 @@
+/**
+ * Balance Projection page — the Compare tab's "Plan success" row. Renders
+ * only: both sides' states and the noise-gate verdict come from
+ * `useCompareStress`, and the signed difference from `formatSignedDifference`,
+ * so nothing here decides whether a gap is real.
+ *
+ * A figure appears only for a side whose stress test has settled for the plan
+ * on screen; until then it reads "—" and the figures dim and carry
+ * `aria-busy`, so a number from another scenario or an older plan is never
+ * painted. A difference is a sign glyph plus a direction word, or "about the
+ * same" with the reason; the text carries every distinction, never colour.
+ */
+import React from 'react';
+import { Button } from 'react-aria-components';
+import { McProgressBar } from '../components/McProgressBar';
+import { Muted } from '../components/Muted';
+import { formatSignedDifference } from '../lib/signed-difference';
+import { MC_PATH_COUNT } from '../lib/monte-carlo-scenario-input';
+import type { SuccessDeltaVerdict } from '../lib/success-delta-noise';
+import type { CompareStressSide, CompareStressVm } from '../monte-carlo/use-compare-stress';
+import { btnSecondarySmClass } from './accounts-page-chrome';
+
+const HEADING_ID = 'balance-projection-compare-stress-heading';
+
+const NUMBER_CLASS = 'm-0 font-mono text-lg tabular-nums text-ink';
+
+const INTRO =
+  `The stress test runs ${MC_PATH_COUNT.toLocaleString('en-US')} randomized market ` +
+  'simulations of a plan and counts how often the savings last the whole plan. ' +
+  'Each scenario is simulated on its own, so two runs differ a little by chance.';
+
+const SAME_TEXT = 'About the same';
+
+const percent = (side: CompareStressSide): string =>
+  side.state === 'ready' && side.probability !== null
+    ? `${Math.round(side.probability * 100)}%`
+    : '—';
+
+/** The one-line reason under the difference; `null` when there is no verdict. */
+function reasonLine(verdict: SuccessDeltaVerdict): string {
+  const points = Math.round(verdict.se * 1000) / 10;
+  const noise =
+    points > 0
+      ? `about ${points} point${points === 1 ? '' : 's'} here`
+      : 'the two runs agree';
+  if (verdict.kind === 'signal') {
+    return `The gap is larger than the stress test's sampling noise (${noise}).`;
+  }
+  if (verdict.reason === 'rounds-to-zero') {
+    return 'The gap is under half a percentage point, so it rounds to 0 points at the precision shown.';
+  }
+  return `The stress test is a random sample, so a gap this small is within its sampling noise (${noise}).`;
+}
+
+const Figure: React.FC<{
+  readonly label: string;
+  readonly children: React.ReactNode;
+}> = ({ label, children }) => (
+  <div className="flex min-w-32 flex-col gap-0.5">
+    <dt className="text-sm text-muted">{label}</dt>
+    <dd className="m-0">{children}</dd>
+  </div>
+);
+
+/** One side's note: progress while it is working, a sentence when it cannot show a figure. */
+const SideStatus: React.FC<{
+  readonly name: string;
+  readonly side: CompareStressSide;
+  readonly viewed: boolean;
+  readonly onRetry?: () => void;
+}> = ({ name, side, viewed, onRetry }) => {
+  if (side.state === 'pending' || side.state === 'running') {
+    return (
+      <McProgressBar
+        label={`Stress test for ${name}`}
+        done={side.progress?.done ?? 0}
+        total={side.progress?.total ?? 0}
+      />
+    );
+  }
+  if (side.state === 'unavailable') {
+    return (
+      <p className="m-0 text-sm text-muted">
+        {viewed
+          ? `${name} has no stress test to show: it needs an active account and a complete setup.`
+          : `${name} can't run a stress test: it needs a retirement age, an active account and a complete setup.`}
+      </p>
+    );
+  }
+  if (side.state === 'error') {
+    return viewed ? (
+      <p className="m-0 text-sm text-muted">
+        The stress test for {name} didn&rsquo;t finish. Use Try again in the
+        stress test controls at the top of the page.
+      </p>
+    ) : (
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="m-0 text-sm text-muted">
+          {side.message ?? `Couldn't calculate the stress test for ${name}.`}
+        </p>
+        {onRetry && (
+          <Button type="button" className={btnSecondarySmClass} onPress={onRetry}>
+            Try again
+          </Button>
+        )}
+      </div>
+    );
+  }
+  return null;
+};
+
+export const CompareStressRow: React.FC<{
+  readonly viewedName: string;
+  readonly comparisonName: string;
+  readonly stress: CompareStressVm;
+}> = ({ viewedName, comparisonName, stress }) => {
+  const { viewed, comparison, verdict } = stress;
+  const busy = [viewed, comparison].some((s) => s.state === 'pending' || s.state === 'running');
+  let difference = '—';
+  if (verdict !== null && viewed.probability !== null && comparison.probability !== null) {
+    difference =
+      verdict.kind === 'signal'
+        ? formatSignedDifference('percentagePoints', viewed.probability, comparison.probability)
+        : SAME_TEXT;
+  }
+  return (
+    <section aria-labelledby={HEADING_ID} className="flex flex-col gap-3">
+      <h3 id={HEADING_ID} className="m-0 text-base font-semibold text-ink">
+        Plan success
+      </h3>
+      <Muted as="p" className="m-0 text-sm">
+        {INTRO}
+      </Muted>
+      <dl
+        aria-busy={busy}
+        className={`m-0 flex flex-wrap gap-x-10 gap-y-3 transition-opacity duration-150 ${
+          busy ? 'opacity-50' : 'opacity-100'
+        }`}
+      >
+        <Figure label={viewedName}>
+          <span className={NUMBER_CLASS}>{percent(viewed)}</span>
+        </Figure>
+        <Figure label={comparisonName}>
+          <span className={NUMBER_CLASS}>{percent(comparison)}</span>
+        </Figure>
+        <Figure label="Difference">
+          <span className={NUMBER_CLASS} aria-live="polite">
+            {difference}
+          </span>
+        </Figure>
+      </dl>
+      {verdict !== null && (
+        <p className="m-0 text-sm text-muted">{reasonLine(verdict)}</p>
+      )}
+      <div role="status" aria-live="polite" className="flex flex-col gap-2">
+        <SideStatus name={viewedName} side={viewed} viewed />
+        <SideStatus name={comparisonName} side={comparison} viewed={false} onRetry={stress.retry} />
+      </div>
+    </section>
+  );
+};

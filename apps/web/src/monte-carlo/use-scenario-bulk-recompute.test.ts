@@ -14,6 +14,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useScenarioBulkRecompute } from './use-scenario-bulk-recompute';
 import { type MinimalMcWorker } from './mc-worker-pool';
+import { controlledWorker, type ControlledWorker } from './fake-worker.test-harness';
 import {
   clearMonteCarloCache,
   getCached,
@@ -81,54 +82,6 @@ function summaryFor(successProbability: number): MonteCarloSummary {
     endingBalanceHistogramReal: [],
     plannedOverlay: [],
   } as unknown as MonteCarloSummary;
-}
-
-interface ControlledWorker extends MinimalMcWorker {
-  resolveResult(summary: MonteCarloSummary): void;
-  emitError(message: string): void;
-  emitProgress(done: number, total: number): void;
-  readonly posted: ReadonlyArray<MonteCarloInput>;
-  readonly terminated: boolean;
-}
-
-function controlledWorker(): ControlledWorker {
-  const listeners = new Set<(ev: MessageEvent) => void>();
-  const posted: MonteCarloInput[] = [];
-  let terminated = false;
-  const emit = (data: unknown): void => {
-    const ev = { data } as MessageEvent;
-    listeners.forEach((fn) => fn(ev));
-  };
-  return {
-    posted,
-    get terminated() {
-      return terminated;
-    },
-    addEventListener(t, fn) {
-      // Only the pool's `message` listener drives this fake; the `error`
-      // listener is never emitted here, so keep it out of the set.
-      if (t !== 'error') listeners.add(fn);
-    },
-    removeEventListener(t, fn) {
-      if (t !== 'error') listeners.delete(fn);
-    },
-    postMessage(msg: unknown) {
-      const m = msg as { kind: 'run'; input: MonteCarloInput };
-      posted.push(m.input);
-    },
-    terminate() {
-      terminated = true;
-    },
-    resolveResult(summary: MonteCarloSummary) {
-      emit({ kind: 'result', summary });
-    },
-    emitError(message: string) {
-      emit({ kind: 'error', message });
-    },
-    emitProgress(done: number, total: number) {
-      emit({ kind: 'progress', done, total });
-    },
-  };
 }
 
 type OnResultMock = ReturnType<

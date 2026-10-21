@@ -592,7 +592,21 @@ Tabs under the controls, **Projection views**, split the page:
   When the two Planned projections are identical, one sentence says so in place
   of the headline and the table, followed by what the child scenario changes
   from its parent (grouped like the scenario page) or that it changes nothing;
-  the stress test is checked separately.
+  the stress test is checked separately, and when both scenarios would run the
+  same stress test the sentence says so.
+  Between the headline and the Drivers table a **Plan success** row sets the two
+  scenarios' stress-test results side by side. Opening the tab starts whichever
+  stress test has no current result: your scenario's is the one the page already
+  runs, and the other scenario's is read from its saved result when there is one
+  and otherwise calculated in the background, with a progress bar. Nothing else
+  on the tab waits for it. A figure appears only once the stress test has
+  finished for the plan on screen, and goes back to "—" while it reruns after an
+  edit. The difference is written with a sign and a word ("+10pp higher"), or
+  reads **About the same** with a line explaining why: the stress test is a
+  random sample, so a gap smaller than its sampling noise is not a real
+  difference. If the other scenario's calculation fails, the row says so and
+  offers **Try again** without affecting the rest of the tab. Two scenarios that
+  would run the same stress test show no row.
 
 Most charts and bands have a small **(i)** button that explains what they show.
 
@@ -605,7 +619,8 @@ Most charts and bands have a small **(i)** button that explains what they show.
   date, and the tax figure is a simplified estimate, not a tax return.
 - Comparing two plans that differ by a point or so of success is mostly noise: the
   stress test is a sample, and the same plan re-run can move by a fraction of a
-  point.
+  point. **Compare** applies this rule for you: a gap smaller than the sampling
+  noise reads "about the same" instead of a number.
 - The stress-test explainer lists what it does and does not model. Open the
   **(i)** beside **Success probability** to read it.
 
