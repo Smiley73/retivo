@@ -84,6 +84,7 @@ import { BalanceProjectionAccountStackSection } from './balance-projection-page-
 import { BalanceProjectionCharts } from './balance-projection-page-charts';
 import { BalanceProjectionSwrSection } from './balance-projection-page-swr';
 import { BalanceProjectionCompareSection } from './balance-projection-page-compare';
+import { useCompareWithAnchor } from './use-balance-projection-compare';
 import { useBalanceProjectionViewModel } from './use-balance-projection-view-model';
 import {
   BalanceProjectionErrorState,
@@ -186,6 +187,9 @@ export const BalanceProjectionPage: React.FC = () => {
   // see the hook for why a fixed `scroll-padding` reserve cannot do this).
   const [searchParams, setSearchParams] = useSearchParams();
   const view = parseBalanceProjectionView(searchParams.get('view'));
+  // Above the early returns on purpose: it must see every sidebar switch, also
+  // through a scenario that renders no Compare panel.
+  const compareWithAnchor = useCompareWithAnchor(selectedScenarioId);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   useFocusClearOfPinnedStrip(scrollAnchorRef, stripRef);
@@ -789,7 +793,8 @@ export const BalanceProjectionPage: React.FC = () => {
           </TabPanel>
           <TabPanel id="compare" shouldForceMount className="bp-view-panel outline-none">
             <BalanceProjectionCompareSection
-              dataLoad={dataLoad} data={data} isActive={view === 'compare'}
+              dataLoad={dataLoad} data={data} withAnchor={compareWithAnchor}
+              isActive={view === 'compare'}
               nowYear={nowYear} nowMonthIndex={nowMonthIndex} stressVm={stressVm}
             />
           </TabPanel>
