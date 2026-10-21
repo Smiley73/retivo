@@ -41,6 +41,7 @@ import {
 } from './scenarios-page-chrome';
 import { listAggregates } from '../db/store';
 import { saveScenario } from '../lib/scenario-mutations';
+import { INFLATION_MAX, INFLATION_MIN } from '../lib/scenario-input-bounds';
 import {
   resolveInflationForScenario,
   type ScenarioAggregate,
@@ -59,8 +60,6 @@ import {
   type ScenarioPayload,
 } from '../db/types';
 
-const INFLATION_MIN = 0;
-const INFLATION_MAX = 10;
 const INFLATION_STEP = 0.5;
 
 /** Clamp + snap a numeric rate to the persisted finite `[0, 10]` domain. */

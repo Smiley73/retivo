@@ -27,20 +27,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { idVersionSignature } from '../lib/aggregate-signature';
-import { listAggregates } from '../db/store';
 import type { MonteCarloInput, MonteCarloSummary } from '../lib/monte-carlo';
-import type {
-  AccountBalancePayload,
-  AccountPayload,
-  Aggregate,
-  ExpenseCategoryPayload,
-  ExpensePayload,
-  HouseholdMemberPayload,
-  IncomeStreamPayload,
-  SocialSecurityBenefitPayload,
-} from '../db/types';
 import { loadPageData } from './balance-projection-page-data';
 import { yieldToIdle } from '../lib/yield-to-idle';
+import { loadProjectionInputs, type ProjectionInputs } from '../lib/projection-inputs';
 import { useAggregates } from '../lib/use-aggregates';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 import { buildMonteCarloInputForScenario } from '../lib/monte-carlo-scenario-input';
@@ -148,18 +138,6 @@ export interface ScenarioCardMetricsResult {
   readonly recalcableScenarioIds: ReadonlyArray<string>;
 }
 
-interface ProjectionInputs {
-  readonly members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
-  readonly accounts: ReadonlyArray<Aggregate<AccountPayload>>;
-  readonly balances: ReadonlyArray<Aggregate<AccountBalancePayload>>;
-  readonly expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
-  readonly incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
-  readonly ssBenefits: ReadonlyArray<Aggregate<SocialSecurityBenefitPayload>>;
-  /** Household expense categories — threaded into the deterministic +
-   *  MC projections so the Scenarios cards apply the flag-derived +2pp
-   *  medical-inflation default (else they diverge from BPP). */
-  readonly categories: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>;
-}
 
 /**
  * Compute the deterministic at-horizon balance + sparkline series for every
@@ -362,46 +340,6 @@ export function useScenarioCardMetrics(
     refreshPlanSuccess,
     applyPlanSuccess,
     recalcableScenarioIds,
-  };
-}
-
-/** Read every aggregate the deterministic projection needs (one batch). */
-async function loadProjectionInputs(): Promise<ProjectionInputs> {
-  const [
-    members,
-    accounts,
-    balances,
-    expenses,
-    incomeStreams,
-    ssBenefits,
-    categories,
-  ] = await Promise.all([
-    listAggregates('householdMember') as Promise<
-      Aggregate<HouseholdMemberPayload>[]
-    >,
-    listAggregates('account') as Promise<Aggregate<AccountPayload>[]>,
-    listAggregates('accountBalance') as Promise<
-      Aggregate<AccountBalancePayload>[]
-    >,
-    listAggregates('expense') as Promise<Aggregate<ExpensePayload>[]>,
-    listAggregates('incomeStream') as Promise<
-      Aggregate<IncomeStreamPayload>[]
-    >,
-    listAggregates('socialSecurityBenefit') as Promise<
-      Aggregate<SocialSecurityBenefitPayload>[]
-    >,
-    listAggregates('expenseCategory') as Promise<
-      Aggregate<ExpenseCategoryPayload>[]
-    >,
-  ]);
-  return {
-    members,
-    accounts,
-    balances,
-    expenses,
-    incomeStreams,
-    ssBenefits,
-    categories,
   };
 }
 

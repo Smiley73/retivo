@@ -19,17 +19,12 @@ import { formatDate } from '../lib/format-date';
 import { formatAgeYearsMonths } from '../lib/format-age';
 import { ageOnDate, retirementDate } from '../lib/retirement-date-math';
 import { RangeSlider } from '../components/RangeSlider';
-import { MAX_AGE } from '../db/types';
+import { AGE_MONTHS_MAX, RETIREMENT_AGE_MAX, RETIREMENT_AGE_MIN } from '../lib/scenario-input-bounds';
 import type {
   RetirementAgeOverride,
   RetirementAgePerMember,
   SocialSecurityClaimAgeOverride,
 } from '../db/types';
-
-// Retirement age slider bounds: a sensible 50-year floor up to the
-// app-wide `MAX_AGE` ceiling; months run a full 0–11 cycle.
-const RETIREMENT_AGE_MIN = 50;
-const AGE_MONTHS_MAX = 11;
 
 export const DEFAULT_RETIREMENT: RetirementAgeOverride = {
   primary: { ageYears: 65, ageMonths: 0 },
@@ -133,7 +128,7 @@ export const AgeInputs: React.FC<AgeInputsProps> = ({
           <RangeSlider
             ariaLabel={`${ariaLabelPrefix}-years`}
             min={RETIREMENT_AGE_MIN}
-            max={MAX_AGE}
+            max={RETIREMENT_AGE_MAX}
             step={1}
             value={ageYears}
             onChange={(v) => onChange('ageYears', v)}

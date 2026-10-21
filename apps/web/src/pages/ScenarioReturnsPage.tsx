@@ -51,6 +51,7 @@ import { accountBucket } from '../lib/account-bucket';
 import { ACCOUNT_TYPE_LABELS } from '../api/types';
 import { listAggregates } from '../db/store';
 import { saveScenario } from '../lib/scenario-mutations';
+import { PLANNING_RETURN_MAX, PLANNING_RETURN_MIN } from '../lib/scenario-input-bounds';
 import {
   resolveAccountReturnsForScenario,
   type ScenarioAggregate,
@@ -396,6 +397,8 @@ export const ScenarioReturnsPage: React.FC = () => {
                           value={d}
                           onChange={(v) => updateDraft(a.id, v)}
                           allowNegative
+                          min={PLANNING_RETURN_MIN}
+                          max={PLANNING_RETURN_MAX}
                         />
                       </span>
                     </Cell>

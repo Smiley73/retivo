@@ -2,7 +2,7 @@
 // both the required ones (enableWaf, manageCloudTrail, enablePitr,
 // enableBackups, the four alarm-group switches, logRetentionDays, and the
 // conditionally required alarmNotificationEmail) and the optional ones (lambdaConcurrencyQuota,
-// edgeAllowedIps, apiThrottleRatePerSec, apiThrottleBurst). Kept out of
+// edgeAllowedIps, apiThrottleRatePerSec, apiThrottleBurst, assistantBridgePort). Kept out of
 // config.ts — and free of any @pulumi
 // import — so they can be unit-tested under `node --test` without AWS
 // credentials or a Pulumi runtime (scripts/test/config-coverage.test.mjs).
@@ -214,6 +214,40 @@ export function parseApiThrottle(get) {
       DEFAULT_API_THROTTLE_BURST,
     ),
   };
+}
+
+/**
+ * Lowest and highest port the AI assistant connector's loopback `connect-src`
+ * entry may name: any registered or dynamic port, never a well-known one.
+ * Shared by the parser below, the CSP generator (edge-functions.mjs) and the
+ * build-time check in infrastructure/scripts/lib/deploy-common.sh.
+ * @type {{ min: number, max: number }}
+ */
+export const ASSISTANT_BRIDGE_PORT_RANGE = { min: 1024, max: 65_535 };
+
+/**
+ * Parse + validate the OPTIONAL `assistantBridgePort` key: the loopback port
+ * the AI assistant connector's bridge listens on. Absent/blank ⇒ `undefined`
+ * (the connector is off: no `VITE_ASSISTANT_BRIDGE_PORT` in the SPA build, no
+ * extra `connect-src` entry). Otherwise a plain decimal integer in
+ * {@link ASSISTANT_BRIDGE_PORT_RANGE}; anything else (`24580.5`, `0x6004`,
+ * `abc`, `80`) throws naming the key.
+ * @param {(key: string) => string | undefined} get raw string getter
+ * @returns {number | undefined}
+ */
+export function parseAssistantBridgePort(get) {
+  const key = "assistantBridgePort";
+  const raw = get(key);
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const text = raw.trim();
+  const { min, max } = ASSISTANT_BRIDGE_PORT_RANGE;
+  const value = /^[0-9]+$/.test(text) ? Number(text) : NaN;
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(
+      `retivo:${key} must be an integer from ${min} to ${max} (got "${raw}") — it sets the SPA's bridge port and the one loopback entry in the CSP connect-src. Run: pulumi config set retivo:${key} 24580, or remove it: pulumi config rm retivo:${key}`,
+    );
+  }
+  return value;
 }
 
 // Octets and the prefix must be plain decimal with no leading zero:

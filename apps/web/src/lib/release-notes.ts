@@ -33,13 +33,40 @@ export interface ReleaseNote {
 /** The full changelog, newest-first. New entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
-    date: '2026-10-19',
+    date: '2026-10-20',
     kind: 'new',
     title: 'Compare two scenarios on Projections',
     blurb:
       'A new Compare tab sets the scenario you are viewing beside another one, ' +
       'showing the ending balance at the end of each plan and the year money ' +
       'runs out, with the difference between them.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'new',
+    title: 'Your AI assistant can try a what-if without saving it (beta)',
+    blurb:
+      'A connected assistant can now show how a change, such as retiring earlier or claiming ' +
+      'Social Security later, would turn out next to your scenario. The what-if is not saved: ' +
+      'it never appears on the Scenarios page, and you create the real scenario yourself.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'new',
+    title: 'Your AI assistant can run the projection and the stress test (beta)',
+    blurb:
+      'A connected assistant can now read the Balance Projection numbers, the stress test, ' +
+      'a comparison of two scenarios and where a headline number comes from. It still cannot ' +
+      'change anything, and a stress test it runs is not saved or shown on the page.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'new',
+    title: 'Ask an AI assistant about your plan (beta)',
+    blurb:
+      'Where your copy offers it, you can connect an AI assistant such as Claude Code ' +
+      'or Codex that runs on your computer: it reads only what you allow, shows ' +
+      'every request in an activity list, and cannot change anything.',
   },
   {
     date: '2026-10-04',

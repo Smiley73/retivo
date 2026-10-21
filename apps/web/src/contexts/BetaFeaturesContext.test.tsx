@@ -32,7 +32,7 @@ describe('BetaFeaturesContext', () => {
     expect(screen.getByTestId('show')).toHaveTextContent('false');
     expect(screen.getByTestId('guardrails-visible')).toHaveTextContent('false');
     expect(screen.getByTestId('guardrails-offered')).toHaveTextContent('true');
-    expect(screen.getByTestId('offered')).toHaveTextContent('projected-withdrawals,guardrails');
+    expect(screen.getByTestId('offered')).toHaveTextContent('projected-withdrawals,guardrails,ai-assistants');
   });
 
   it('toggling persists per user and makes offered features visible', () => {

@@ -38,6 +38,15 @@ function emitBuildIdJsonPlugin(id: string): PluginOption {
   };
 }
 
+// The shared workspace packages are consumed from their built `dist/`, which
+// is git-ignored and goes stale after a pull. In `vite` dev (mode
+// `development`; vitest and builds are untouched) read their source instead, so
+// the dev server can never serve an old build.
+const workspacePackageSources = {
+  '@retirement/contracts': resolve(rootDir, 'packages/contracts/src/index.ts'),
+  '@retirement/assistant-protocol': resolve(rootDir, 'packages/assistant-protocol/src/index.ts'),
+};
+
 export default defineConfig(({ mode }) => {
   // `loadEnv` reads `VITE_*` from the repo-root `.env` (the canonical env
   // file per AGENTS.md, via `rootDir`) AND merges process-env `VITE_*` on
@@ -51,6 +60,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), tailwindcss(), emitBuildIdJsonPlugin(buildId)],
     envDir: rootDir,
+    resolve: {
+      alias: mode === 'development' ? workspacePackageSources : {},
+    },
     define: {
       __BUILD_ID__: JSON.stringify(buildId),
     },

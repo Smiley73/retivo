@@ -94,7 +94,7 @@ export const CardPair: React.FC<{ children: React.ReactNode }> = ({
 );
 
 interface SettingsCardProps {
-  title: string;
+  title: React.ReactNode;
   subtitle: React.ReactNode;
   /** `danger` surfaces the destructive-zone wash (legacy `.card--danger`). */
   tone?: 'default' | 'danger';

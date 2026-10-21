@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   IdleTimer,
   consumeSignoutReason,
+  recordProgrammaticActivity,
   setSignoutReason,
   SIGNOUT_REASON_IDLE,
 } from './IdleTimer';
@@ -99,6 +100,58 @@ describe('IdleTimer', () => {
       await vi.advanceTimersByTimeAsync(15_000);
     });
     expect(onTimeout).not.toHaveBeenCalled();
+  });
+
+  it('programmatic activity is handled like an input event: writes the clock and reschedules this tab', async () => {
+    const { onTimeout } = renderTimer({ idleMs: 30_000, warnLeadMs: 5_000 });
+    const mounted = localStorage.getItem(ACTIVITY_KEY);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+      recordProgrammaticActivity();
+    });
+    // A bare write would not have rescheduled this tab: the key moved AND the 30 s timer was pushed out.
+    expect(localStorage.getItem(ACTIVITY_KEY)).toBe(String(Date.now()));
+    expect(localStorage.getItem(ACTIVITY_KEY)).not.toBe(mounted);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    // Each call defers once: the window now runs 30 s from the call, so 16 s more is past it.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(16_000);
+    });
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it('programmatic activity reaches every mounted timer', async () => {
+    const first = renderTimer({ idleMs: 30_000, warnLeadMs: 5_000 });
+    const second = renderTimer({ idleMs: 30_000, warnLeadMs: 5_000 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+      recordProgrammaticActivity();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(first.onTimeout).not.toHaveBeenCalled();
+    expect(second.onTimeout).not.toHaveBeenCalled();
+  });
+
+  it('a timer that unmounted no longer listens for programmatic activity', async () => {
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const { unmount } = renderTimer();
+    unmount();
+    expect(remove.mock.calls.map(([type]) => type)).toContain('retivo:programmatic-activity');
+    remove.mockRestore();
+  });
+
+  it('programmatic activity does nothing while the timer is disabled', async () => {
+    render(<IdleTimer enabled={false} idleMs={30_000} warnLeadMs={5_000} onWarn={vi.fn()} onTimeout={vi.fn()} />);
+    recordProgrammaticActivity();
+    expect(localStorage.getItem(ACTIVITY_KEY)).toBeNull();
   });
 
   it('storage event from another tab resets the timer', async () => {

@@ -47,7 +47,12 @@
 #                               the suite earns trust: a failing test shows in
 #                               the summary, a job-level failure (emulators,
 #                               API start, browser install) fails the run.
-#   5. All checks             — the aggregate: needs every enabled suite above
+#   5. mcp-bridge             — the local AI assistant bridge (apps/mcp-bridge):
+#                               builds it and runs its Vitest suite, including
+#                               the subprocess tests that spawn the built bin,
+#                               with coverage thresholds enforced, then the web
+#                               tab's `test:bridge` suite that pairs with it.
+#   6. All checks             — the aggregate: needs every enabled suite above
 #                               and writes a per-suite results table to the
 #                               run's job summary.
 #
@@ -117,6 +122,8 @@ jobs:
       # part of the local `pnpm gate` — this step mirrors it in CI.
       - run: pnpm knip
       - run: pnpm typecheck
+      # The protocol package's tests, with its coverage thresholds.
+      - run: pnpm --filter @retirement/assistant-protocol test:coverage
       # Does this PR change what gets installed? Any package.json, the lockfile
       # or pnpm-workspace.yaml (it holds the overrides and
       # `auditConfig.ignoreGhsas`, so editing it can hide an advisory).
@@ -547,6 +554,29 @@ jobs:
           overwrite: true
 
 
+  # The bridge's own suite. Its `test:coverage` builds dist/ first because the
+  # process-lifecycle tests spawn the built bin; the protocol package it imports
+  # is built here too (install already does, through its `prepare` script).
+  mcp-bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @retirement/assistant-protocol build
+      - run: pnpm --filter @retirement/mcp-bridge build
+      - run: pnpm --filter @retirement/mcp-bridge test:coverage
+      # The web tab's session dialed at the real built bridge (the only interop
+      # proof of the wire encoding); needs dist/ from the build step above.
+      - run: pnpm --filter @retirement/web test:bridge
+
   # The one check to require in branch protection. `if: always()` and nothing
   # that can evaluate false (no `!cancelled()`, no `success()`, no event or fork
   # condition): a required check that ends SKIPPED satisfies branch protection,
@@ -561,7 +591,7 @@ jobs:
     name: All checks
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [lint-typecheck-scripts, web-unit, web-coverage, api-integration, e2e]
+    needs: [lint-typecheck-scripts, web-unit, web-coverage, api-integration, e2e, mcp-bridge]
     if: always()
     steps:
       - name: Summarize suite results
@@ -577,6 +607,7 @@ jobs:
           API_RESULT: ${{ needs.api-integration.result }}
           API_RERUN: ${{ needs.api-integration.outputs.rerun }}
           E2E_RESULT: ${{ needs.e2e.result }}
+          MCP_BRIDGE_RESULT: ${{ needs.mcp-bridge.result }}
           E2E_TESTS: ${{ needs.e2e.outputs.tests }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -652,6 +683,7 @@ jobs:
             echo "| Web tests (unit shards + coverage) | $(row_for "$web" "$web_note") |"
             echo "| API integration | $(row_for "$API_RESULT" "$api_note") |"
             echo "| Browser tests (Playwright) | ${e2e_row} |"
+            echo "| AI assistant bridge | $(row_for "$MCP_BRIDGE_RESULT" "") |"
             echo
             echo "- Dependency audit: ${audit_line}"
             echo "- Date checks (feature-flag reviewBy): ${date_line}"
@@ -659,7 +691,7 @@ jobs:
             echo "[Run logs](${RUN_URL})"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          for result in "$LINT_RESULT" "$WEB_UNIT_RESULT" "$WEB_COVERAGE_RESULT" "$API_RESULT" "$E2E_RESULT"; do
+          for result in "$LINT_RESULT" "$WEB_UNIT_RESULT" "$WEB_COVERAGE_RESULT" "$API_RESULT" "$E2E_RESULT" "$MCP_BRIDGE_RESULT"; do
             if [ "$result" != success ]; then
               echo "::error::At least one suite did not succeed (failed, cancelled or skipped); see the summary table."
               exit 1

@@ -1,6 +1,7 @@
 /**
  * Preferences view (Settings → Preferences). Route shell + card layout only.
- * Holds the Appearance theme picker and the Beta features switch; the
+ * Holds the Appearance theme picker, the Beta features switch and (when the
+ * build offers it) the AI assistants card; the
  * security/account and data/workspace cards moved to the Security and
  * Workspace pages. The route path stays `/profile` for back-compat; the nav
  * label and page heading read "Preferences".
@@ -11,9 +12,11 @@ import { SegmentedRadioGroup } from '../components/SegmentedRadioGroup';
 import { ToggleSwitch } from '../components/ToggleSwitch';
 import { useTheme } from '../contexts/ThemeContext';
 import { useBetaFeatures } from '../contexts/BetaFeaturesContext';
+import { useAssistant } from '../assistant/AssistantContext';
 import { Card } from '../components/Card';
 import { Muted } from '../components/Muted';
 import { PageHeader } from '../components/PageHeader';
+import { AssistantSettingsCard } from './AssistantSettingsCard';
 import { CardPair, SettingsCard } from './profile-page-chrome';
 
 // Theme-picker glyphs for the Appearance SegmentedRadioGroup (mock
@@ -76,6 +79,7 @@ const BetaFeaturesCard: React.FC = () => {
 export const PreferencesPage: React.FC = () => {
   const { me } = useAuth();
   const { theme, setTheme } = useTheme();
+  const { offered: assistantOffered } = useAssistant();
 
   if (!me) return null;
 
@@ -114,6 +118,12 @@ export const PreferencesPage: React.FC = () => {
         </Card>
         <BetaFeaturesCard />
       </CardPair>
+      {/* Absent unless the build carries the bridge port and the beta feature is visible. */}
+      {assistantOffered && (
+        <div className="mb-6 [&>*]:mb-0">
+          <AssistantSettingsCard />
+        </div>
+      )}
     </section>
   );
 };

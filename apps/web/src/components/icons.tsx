@@ -45,6 +45,9 @@ export const PencilIcon = (): React.ReactElement =>
   svg(<><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z" /><path d="M13.5 6.5l3 3" /></>);
 export const XIcon = (): React.ReactElement =>
   svg(<><path d="M6 6l12 12M18 6L6 18" /></>);
+// Linked chain — a live connection (the shell's "Assistant connected" pill).
+export const LinkIcon = (): React.ReactElement =>
+  svg(<><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1" /></>);
 // "Configure" affordance — horizontal sliders (adjustments). Reads as
 // "adjust these settings" on every override card's Configure button.
 export const SlidersIcon = (): React.ReactElement =>

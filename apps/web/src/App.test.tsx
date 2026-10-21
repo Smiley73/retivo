@@ -40,6 +40,12 @@ vi.mock('./monte-carlo/MonteCarloProvider', () => ({
 }));
 vi.mock('./monte-carlo/MonteCarloProgressChip', () => ({ MonteCarloProgressChip: () => null }));
 vi.mock('./components/VersionBanner', () => ({ VersionBanner: () => null }));
+// The assistant session the shell's indicator and status region read; `null` is a build without the provider.
+const assistantMock = vi.hoisted(() => ({ value: null as unknown }));
+vi.mock('./assistant/AssistantContext', () => ({
+  useOptionalAssistant: () => assistantMock.value,
+  useAssistant: () => assistantMock.value,
+}));
 vi.mock('./components/FirstRunDemoModal', () => ({
   FirstRunDemoModal: ({ open }: { open: boolean }) =>
     open ? <div data-testid="first-run-modal" /> : null,
@@ -63,6 +69,7 @@ import { shouldShowReadyBanner } from './components/HouseholdReadyBanner';
 import { ensureBaseScenario } from './lib/scenario-bootstrap';
 import { ensureDefaultExpenseCategories } from './lib/expense-categories-bootstrap';
 import { reconcileScenarios } from './lib/scenario-mutations';
+import { assistantValue } from './test/assistant-context';
 
 type SyncState =
   | { kind: 'synced'; lastSyncedAt: string | null }
@@ -650,5 +657,46 @@ describe('wait notice reaches a signed-out auth route', () => {
     expect(submit).toBeEnabled();
     expect(document.activeElement).not.toBe(notice);
     expect(notice.contains(document.activeElement)).toBe(false);
+  });
+});
+
+describe('AppShell assistant indicator', () => {
+  beforeEach(() => {
+    authMock.mockReturnValue(authValue());
+    fetchAccountRecordMock.mockReset();
+    fetchAccountRecordMock.mockResolvedValue(EMAIL_ONLY_RECORD);
+    listAggregatesMock.mockResolvedValue([]);
+    setSync({ kind: 'synced', lastSyncedAt: null });
+    // The first-run prompt is not under test here; keep the household "seeded" so nothing else opens.
+    localStorage.setItem(SEEDED_FLAG_KEY, 'true');
+  });
+
+  afterEach(() => {
+    assistantMock.value = null;
+    vi.clearAllMocks();
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it('adds nothing to the shell without an assistant session context', () => {
+    const { container } = renderShell();
+    expect(container.querySelector('[role="banner"]')?.querySelectorAll('button')).toHaveLength(1);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Disconnect assistant' })).not.toBeInTheDocument();
+  });
+
+  it('adds only the empty status region when the assistant is offered but no session runs', () => {
+    assistantMock.value = assistantValue({ phase: 'idle', client: null, pairedAt: null });
+    const { container } = renderShell();
+    expect(container.querySelector('[role="banner"]')?.querySelectorAll('button')).toHaveLength(1);
+    expect(screen.getByRole('status')).toHaveTextContent('');
+  });
+
+  it('shows the indicator in the mobile banner, between the Menu button and the rest', () => {
+    assistantMock.value = assistantValue();
+    const { container } = renderShell();
+    const banner = container.querySelector<HTMLElement>('[role="banner"]')!;
+    const names = Array.from(banner.querySelectorAll('button')).map((button) => button.getAttribute('aria-label'));
+    expect(names).toEqual(['Open navigation', 'Assistant connected, reported as Claude Code. View activity', 'Disconnect assistant']);
   });
 });

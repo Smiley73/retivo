@@ -17,6 +17,9 @@ export const SIGNOUT_REASON_DEVICE_MISMATCH = 'device-mismatch';
 
 const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'touchstart'] as const;
 
+/** Window event the programmatic-activity function dispatches; the timer handles it like an input event. */
+const PROGRAMMATIC_ACTIVITY_EVENT = 'retivo:programmatic-activity';
+
 interface IdleTimerProps {
   enabled: boolean;
   idleMs: number;
@@ -44,6 +47,19 @@ function readLastActivityAt(): number {
 export function writeLastActivityAt(now: number): void {
   if (typeof localStorage === 'undefined') return;
   localStorage.setItem(ACTIVITY_KEY, String(now));
+}
+
+/**
+ * Counts as user activity without an input event: writes the shared activity
+ * clock and reschedules this tab's timers, exactly as a click does. This is the
+ * one way code outside this file moves the idle clock (the AI assistant
+ * connector calls it for a completed call, only when the person chose that);
+ * never write the activity key directly. A bare write would reach other tabs
+ * through the `storage` event but never reschedule the tab that wrote it.
+ */
+export function recordProgrammaticActivity(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event(PROGRAMMATIC_ACTIVITY_EVENT));
 }
 
 /**
@@ -159,6 +175,7 @@ export const IdleTimer = React.forwardRef<IdleTimerHandle, IdleTimerProps>(
       for (const evt of ACTIVITY_EVENTS) {
         window.addEventListener(evt, onActivity, { passive: true });
       }
+      window.addEventListener(PROGRAMMATIC_ACTIVITY_EVENT, onActivity);
       window.addEventListener('storage', onStorage);
       document.addEventListener('visibilitychange', onVisibility);
 
@@ -167,6 +184,7 @@ export const IdleTimer = React.forwardRef<IdleTimerHandle, IdleTimerProps>(
         for (const evt of ACTIVITY_EVENTS) {
           window.removeEventListener(evt, onActivity);
         }
+        window.removeEventListener(PROGRAMMATIC_ACTIVITY_EVENT, onActivity);
         window.removeEventListener('storage', onStorage);
         document.removeEventListener('visibilitychange', onVisibility);
       };

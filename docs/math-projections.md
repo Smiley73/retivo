@@ -540,12 +540,14 @@ All paths are under `apps/web/src`.
 | `lib/monte-carlo-scenario-input.ts` | The 10,000-path count. |
 | `lib/monte-carlo-shard.ts`, `monte-carlo/` | Counting successes, and splitting a run across workers. |
 | `lib/monte-carlo-summary.ts` | Percentiles, the tiers, the example path and the alternatives. |
-| `components/PlanStressTestSection.tsx` | The seed and Recalculate. |
+| `lib/monte-carlo-input-signature.ts` | The plan's content signature and the seed an automatic run draws from it. |
+| `components/PlanStressTestSection.tsx` | Using that seed, and Recalculate. |
 | `pages/use-balance-projection-compare.ts`, `pages/balance-projection-page-compare.tsx` | Which scenario Compare uses, the second projection that runs only while the tab is open, and the headline table. |
 | `lib/view-deflator.ts` | The remembered Compare choice, one comparison scenario per viewed scenario, kept in your browser beside the display mode. |
 | `lib/success-delta-noise.ts` | The noise check on a difference between two success probabilities. |
 | `pages/balance-projection-compare-data.ts`, `lib/signed-difference.ts`, `lib/scenario-change-list.ts`, `lib/structural-equality.ts` | The figures two scenarios are compared on, how a difference reads, the list of settings that changed, and the identical-results check. |
-| `db/monte-carlo-cache.ts` | Saved results, checked against the engine version. |
+| `db/monte-carlo-cache.ts` | Saved results, checked against the engine version, and a read that leaves them untouched. |
+| `assistant/tools/stress-test.ts` | The AI assistant's stress test: the saved result if there is one, otherwise the page's 10,000 paths and seed, run in the open tab and saved nowhere. |
 | `lib/market-stress.ts`, `components/plan-market-stress-comparison.ts` | The four stress tests and their comparison. |
 | `lib/guardrails.ts`, `lib/drawdown-engine-per-account-strategy.ts` | The funded ratio and the yearly guardrail step. |
 | `pages/GuardrailsPage.tsx`, `pages/use-guardrails-vm.ts` | The Guardrails today screen. |

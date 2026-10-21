@@ -30,7 +30,7 @@
  */
 
 /** Stable ids — referenced by sidebar items, route gates, and the config list. */
-export type BetaFeatureId = 'projected-withdrawals' | 'guardrails';
+export type BetaFeatureId = 'projected-withdrawals' | 'guardrails' | 'ai-assistants';
 
 export interface BetaFeature {
   readonly id: BetaFeatureId;
@@ -64,6 +64,14 @@ export const BETA_FEATURES: readonly BetaFeature[] = [
     owner: 'Smiley73',
     since: '2026-09-06',
     reviewBy: '2026-12-31',
+  },
+  {
+    id: 'ai-assistants',
+    label: 'AI assistants',
+    pdfSectionIds: [],
+    owner: 'Smiley73',
+    since: '2026-10-19',
+    reviewBy: '2027-01-31',
   },
 ];
 

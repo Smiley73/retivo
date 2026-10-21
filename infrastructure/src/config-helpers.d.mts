@@ -49,3 +49,12 @@ export declare function assertEdgeAllowedIpsForStack(
   stack: string,
   edgeAllowedIps: ReadonlyArray<string>,
 ): void;
+
+export declare const ASSISTANT_BRIDGE_PORT_RANGE: {
+  readonly min: number;
+  readonly max: number;
+};
+
+export declare function parseAssistantBridgePort(
+  get: (key: string) => string | undefined,
+): number | undefined;

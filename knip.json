@@ -9,14 +9,27 @@
       // main.tsx / vite.config.ts / vitest.config.ts are already covered by
       // knip's vite + vitest plugins (index.html -> main.tsx), so they are
       // omitted here. Workers are invisible to the static import graph, and
-      // the Playwright e2e specs are their own test entrypoints.
-      "entry": ["src/workers/*.worker.ts", "e2e/**/*.ts"],
+      // the Playwright e2e specs and the `*.bridge-test.ts` suites (run by
+      // `test:bridge` against the built bridge) are their own test entrypoints.
+      "entry": ["src/workers/*.worker.ts", "e2e/**/*.ts", "src/**/*.bridge-test.ts"],
       "project": ["src/**/*.{ts,tsx}"],
       // tailwindcss v4 is loaded via the @tailwindcss/vite plugin + a CSS
       // `@import "tailwindcss"`, never a JS import, so knip can't see it.
       // axe-core is consumed transitively for its types by @types/jest-axe
       // (jest-axe@10 bundles its own axe-core and ships no types).
       "ignoreDependencies": ["tailwindcss", "axe-core"]
+    },
+    "packages/assistant-protocol": {
+      "project": ["src/**/*.ts"]
+    },
+    "apps/mcp-bridge": {
+      // src/bin.ts is the entry point that agents run over stdio and the
+      // subprocess test spawns, but nothing imports. It is explicit because the
+      // package.json `bin` points at the bundled build/retivo-mcp-bridge.mjs,
+      // which knip cannot map back to the source (and which does not exist in
+      // a clean checkout).
+      "entry": ["src/bin.ts"],
+      "project": ["src/**/*.ts"]
     },
     "apps/api": {
       // main.ts is the NestJS server; lambda.ts is the API Gateway

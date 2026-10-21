@@ -13,6 +13,7 @@ import {
 } from './auth/IdleTimer';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { BetaFeaturesProvider } from './contexts/BetaFeaturesContext';
+import { AssistantProvider } from './assistant/AssistantContext';
 import { SyncProvider } from './sync/SyncContext';
 import { getCurrentAccessToken } from './api/client';
 import { API_BASE_URL } from './lib/api-base-url';
@@ -83,7 +84,9 @@ export const AuthAwareProviders: React.FC<{ children: React.ReactNode }> = ({ ch
         }}
         mock={SYNC_MOCK}
       >
-        {children}
+        {/* The AI assistant session: inside SyncProvider so it outlives route
+            changes and the tool handlers can read useSync() and useAuth(). */}
+        <AssistantProvider>{children}</AssistantProvider>
       </SyncProvider>
     </BetaFeaturesProvider>
     </ThemeProvider>

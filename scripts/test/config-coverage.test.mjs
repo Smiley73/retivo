@@ -24,17 +24,31 @@ import {
   CLOUDWATCH_LOG_RETENTION_DAYS,
   DEFAULT_API_THROTTLE_BURST,
   DEFAULT_API_THROTTLE_RATE_PER_SEC,
+  ASSISTANT_BRIDGE_PORT_RANGE,
   DEFAULT_LAMBDA_CONCURRENCY_QUOTA,
   anythingSendsAlerts,
   assertEdgeAllowedIpsForStack,
   ipv4CidrToRule,
   parseAlarmNotificationEmail,
   parseApiThrottle,
+  parseAssistantBridgePort,
   parseEdgeAllowedIps,
   parseLambdaConcurrencyQuota,
   parseLogRetentionDays,
   parseRequiredBoolean,
 } from '../../infrastructure/src/config-helpers.mjs';
+
+// The protocol package is ESM-only and infrastructure is CommonJS, so only
+// this test imports it (built `dist`, by relative path) to pin the documented
+// default to the package.
+const { DEFAULT_BRIDGE_PORT } = await import(
+  '../../packages/assistant-protocol/dist/index.js'
+).catch((error) => {
+  throw new Error(
+    'packages/assistant-protocol/dist is missing or stale — run `pnpm install` ' +
+      `(its prepare script builds it). Cause: ${error.message}`,
+  );
+});
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INFRA = resolve(__dirname, '../../infrastructure');
@@ -170,6 +184,20 @@ for (const [stack, rate, burst] of [
     const source = readFileSync(resolve(INFRA, `Pulumi.${stack}.yaml.example`), 'utf8');
     assert.match(source, new RegExp(`^\\s*retivo:apiThrottleRatePerSec:\\s*"${rate}"\\s*$`, 'm'));
     assert.match(source, new RegExp(`^\\s*retivo:apiThrottleBurst:\\s*"${burst}"\\s*$`, 'm'));
+  });
+}
+
+// The AI assistant connector switch is OFF by default: neither example may
+// set it (a stack that copies an example must not enable the connector), and
+// the commented hint carries the package's default port so the documented
+// value cannot drift from DEFAULT_BRIDGE_PORT.
+for (const stack of ['dev', 'prod']) {
+  test(`${stack} example cannot switch the assistant connector on, and documents DEFAULT_BRIDGE_PORT`, () => {
+    const source = readFileSync(resolve(INFRA, `Pulumi.${stack}.yaml.example`), 'utf8');
+    assert.doesNotMatch(source, /^\s*retivo:assistantBridgePort:/m);
+    const hint = /^\s*#\s*retivo:assistantBridgePort:\s*"(\d+)"\s*$/m.exec(source);
+    assert.ok(hint, 'a commented `# retivo:assistantBridgePort: "<port>"` line is expected');
+    assert.equal(Number(hint[1]), DEFAULT_BRIDGE_PORT);
   });
 }
 
@@ -486,3 +514,36 @@ test('prod guard — a blank allowlist on prod is fine; dev accepts any list', (
   assert.doesNotThrow(() => assertEdgeAllowedIpsForStack('prod', []));
   assert.doesNotThrow(() => assertEdgeAllowedIpsForStack('dev', ['1.2.3.4/32']));
 });
+
+// --- 10. parseAssistantBridgePort (optional AI assistant connector switch) ----
+
+test('parseAssistantBridgePort — absent or blank key means the connector is off (undefined)', () => {
+  assert.equal(parseAssistantBridgePort(getterFor({})), undefined);
+  assert.equal(parseAssistantBridgePort(getterFor({ assistantBridgePort: '' })), undefined);
+  assert.equal(parseAssistantBridgePort(getterFor({ assistantBridgePort: '   ' })), undefined);
+});
+
+test('parseAssistantBridgePort — the default and a non-default in-range port parse to numbers', () => {
+  assert.equal(
+    parseAssistantBridgePort(getterFor({ assistantBridgePort: String(DEFAULT_BRIDGE_PORT) })),
+    DEFAULT_BRIDGE_PORT,
+  );
+  assert.equal(parseAssistantBridgePort(getterFor({ assistantBridgePort: '24581' })), 24581);
+  assert.equal(parseAssistantBridgePort(getterFor({ assistantBridgePort: ' 24581 ' })), 24581);
+});
+
+test('parseAssistantBridgePort — the range bounds are inclusive', () => {
+  const { min, max } = ASSISTANT_BRIDGE_PORT_RANGE;
+  assert.deepEqual([min, max], [1024, 65535]);
+  assert.equal(parseAssistantBridgePort(getterFor({ assistantBridgePort: String(min) })), min);
+  assert.equal(parseAssistantBridgePort(getterFor({ assistantBridgePort: String(max) })), max);
+});
+
+for (const bad of ['0', '80', '1023', '65536', '99999', '-24580', '24580.5', '1e4', '0x6004', 'abc', '24 580', 'ws://127.0.0.1:24580']) {
+  test(`parseAssistantBridgePort — rejects "${bad}" naming the key`, () => {
+    assert.throws(
+      () => parseAssistantBridgePort(getterFor({ assistantBridgePort: bad })),
+      /retivo:assistantBridgePort must be an integer from 1024 to 65535/,
+    );
+  });
+}

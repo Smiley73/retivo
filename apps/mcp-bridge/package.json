@@ -1,0 +1,37 @@
+{
+  "name": "@retirement/mcp-bridge",
+  "private": true,
+  "license": "Apache-2.0",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "retivo-mcp-bridge": "build/retivo-mcp-bridge.mjs"
+  },
+  "files": [
+    "build/retivo-mcp-bridge.mjs",
+    "build/THIRD-PARTY-NOTICES.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24.2.0 <25.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && pnpm run build:bundle",
+    "build:bundle": "node scripts/build-bundle.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.build.json && vitest run",
+    "test:coverage": "tsc -p tsconfig.build.json && vitest run --coverage"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "@retirement/assistant-protocol": "workspace:*",
+    "@types/node": "24.19.2",
+    "@types/ws": "8.18.2",
+    "@vitest/coverage-v8": "5.0.4",
+    "esbuild": "0.28.1",
+    "typescript": "5.9.3",
+    "vitest": "5.0.4",
+    "ws": "8.22.0"
+  }
+}

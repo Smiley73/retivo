@@ -146,6 +146,7 @@ const edge = createEdge({
   acmCertificateArn: dns?.certificate.arn,
   enableWaf: cfg.enableWaf,
   edgeAllowedIps: cfg.edgeAllowedIps,
+  assistantBridgePort: cfg.assistantBridgePort,
 });
 
 // Health-check probe Lambda. Created AFTER createEdge() so the

@@ -646,7 +646,7 @@ the disclaimer. A beta section is left out unless that beta feature is on.
 
 ## Beta features
 
-Two items are marked **Beta**, which means still being finished. They may not work
+Three items are marked **Beta**, which means still being finished. They may not work
 perfectly, may change, or may be removed. They appear only when **both** of these
 are true:
 
@@ -666,15 +666,129 @@ If the build offers none, the **Beta features** card is not shown at all.
   guardrails**. It is a description, not an instruction. **Check now** runs a fresh
   stress test for context.
 
-These are different from the **Spending guardrails** card inside a scenario, which
-is a regular setting and not a beta feature.
+- **AI assistants** (Settings → Preferences). Lets an AI assistant that runs on
+  your own computer ask RETIVO about your plan, after you approve it. It is a
+  settings card rather than a page; see [AI assistants](#ai-assistants) below and
+  the [AI assistants guide](ai-assistants.md).
+
+The **Guardrails today** page is different from the **Spending guardrails** card
+inside a scenario, which is a regular setting and not a beta feature.
+
+## AI assistants
+
+*"Can I ask an AI assistant about my plan?"* **Settings → Preferences → AI
+assistants** (a Beta card, shown only when your copy offers it and **Show beta
+features** is on) connects an assistant such as Claude Code or Codex that
+runs on your computer. The assistant asks RETIVO questions; RETIVO answers from
+the tab you have open, and you decide what it may see. The assistant cannot
+change anything: it cannot edit, add or delete your data, and nothing it asks
+is saved.
+
+**Connect one.**
+
+1. Turn on **Allow AI assistants on this device**. This is stored in this browser
+   only.
+2. Copy the download command from the card and run it in a terminal where the
+   assistant runs. It saves a small helper program from this copy of RETIVO to
+   your computer after checking its checksum. Then copy the command for your
+   assistant (there is one each for Claude Code and Codex) and run it too. It adds
+   the helper to the assistant. The helper listens only on your computer and does
+   nothing until you approve. To update the helper later, run the download
+   command again.
+3. Ask the assistant something about your plan. The assistant's tools exist from
+   the start, but until you pair they answer with a one-time pairing code and
+   where to type it instead of with data.
+4. Type the code (like `ABCDE-FGHJK`) into **Pairing code** on the card and
+   choose **Connect**. A code works once and for five minutes.
+
+**Choose what it may see.** After the code is accepted, RETIVO asks **Let this
+assistant read your plan?** Anything the assistant reads goes to its model
+provider, unless it runs a local model. One switch for each of **Household
+members**, **Accounts**, **Account balances**, **Income**, **Expenses**, **Social
+Security**, **Scenarios** and **Notes and descriptions** decides whether that
+part is sent at all, and two more change how it reads: **Exact dollar figures**
+(off rounds annual amounts to the nearest $1,000 and monthly ones to the nearest
+$100) and **First names** (off shows members as Primary and Secondary). The
+defaults are generous: every one is on. A separate switch, **Let assistant
+activity keep me signed in**, is off by default; read its description before
+turning it on. Your choices last until the assistant disconnects. To change them,
+disconnect and pair again.
+
+**Never shared, whatever you choose:** email addresses, last names, your household
+name, your account record and your sign-in and security history, encryption keys
+and encrypted data, and device identifiers.
+
+**While it is connected.** **Assistant connected** appears in the header with a
+**Disconnect** button beside it. Choose the status to open **Assistant activity**:
+every request the assistant made, how long it took, how many bytes RETIVO sent
+back and the exact text it sent. **Disconnect** ends the session at once; signing
+out, locking and reloading or closing the tab also end it, and a new
+connection needs a new code.
+
+**What the assistant can ask for today.** Nine tools, none of which saves anything, and one prompt:
+
+- **Status**: whether the workspace is ready, the app build, the calculation
+  version, the tax-table year, when your data last synced and which sharing
+  switches are on.
+- **Plan data**: your members, accounts, balances, income, expenses, Social
+  Security and scenarios, as many of these as it asks for and you allow.
+- **List scenarios**: each scenario's name, its parent and which settings it
+  changes.
+- **Get scenario**: one scenario's settings after inheritance, each with where
+  it came from: the scenario that set it, or the default RETIVO applied.
+- **Get projection**: the year-by-year projection the Balance Projection page
+  shows for a scenario, Planned or Historical, with the balance in today's and
+  future dollars, withdrawals, growth and the tax figures. It can limit the rows to
+  a range of years.
+- **Get stress test**: the Monte Carlo result the page shows: the chance the
+  money lasts, the Typical, Pessimistic and Bad-luck endings and the balance by
+  year. It reads the result the page already saved; if there is none it runs the
+  10,000 paths in your open tab, which can take up to a minute, and saves
+  nothing. It never changes what the page shows.
+- **Compare scenarios**: how two scenarios relate, which settings differ and how
+  their planned outcomes differ, with each one's saved stress-test result if the
+  page has one. It never runs a simulation.
+- **Explain**: where one headline number comes from: its value, the settings and
+  defaults behind it, the assumptions and the page of the math documentation that
+  describes it.
+- **Run a what-if**: tries a change on a scenario and shows the result beside
+  that scenario's, with the differences and exactly which values changed from
+  what. See below.
+- **Plan review** (a prompt, not a tool): a short checklist the assistant can use
+  to review your plan. It starts with the status tool, never invents an input,
+  cites its assumptions, tries a what-if only from values you stated, names the
+  screen where you would make a change, and ends with the not-advice reminder.
+
+**What-ifs are not saved.** When you ask "what if I retire at 62 and claim Social
+Security at 70", the assistant can try it without creating anything. The what-if
+exists only for the length of that one request: it is not a scenario, it does not
+appear on the **Scenarios** page, and nothing is saved or synced, so a reload
+shows no trace of it. The answer lists every value that changed and what it was
+before. It can try the retirement age, the Social Security claim age, benefit cut
+and cost-of-living adjustment, life expectancy, the inflation rate, discretionary
+spending, spending guardrails, stopping contributions, an account's planned
+return and the withdrawal strategy, and nothing else: not expenses, income,
+filing, Roth conversions or health coverage. A value outside the range the
+scenario editors accept is refused rather than adjusted. It can also run the
+stress test for the what-if, which takes up to a minute and is not saved either.
+To keep a what-if, create it yourself: **Planning**, **Scenarios**, **Create
+scenario**, with the scenario it started from as the parent, then set the same
+values. The assistant cannot do that for you.
+
+Every answer repeats what was left out, how amounts were rounded, which tax-table
+year and calculation version it rests on, and that the figures are illustrative
+estimates, not advice. The assistant's own replies are its own: RETIVO cannot
+vouch for them. Chrome, Edge, Brave and Firefox on a computer can connect;
+Safari and phones and tablets cannot. The card says what to try when your browser
+blocks the connection. Setup for each assistant, the full tool list and
+troubleshooting are in the [AI assistants guide](ai-assistants.md).
 
 ## Settings, syncing and your data
 
 ### Preferences
 
 **Appearance** is a **Light**, **Dark** or **System** theme. The **Beta features**
-card is described above.
+card and the **AI assistants** card are described above.
 
 ### Security
 
@@ -798,7 +912,10 @@ Three things follow:
 - **Clearing browser data is recoverable only from the server copy.** Edits that
   had not synced yet are lost. Check that the badge reads **Synced** first.
 - **Idle sign-out.** The app signs you out after a period of inactivity (30
-  minutes by default) and tells you so.
+  minutes by default) and tells you so. An AI assistant's activity does not count
+  as yours, unless you turned on **Let assistant activity keep me signed in** when
+  you allowed it; see
+  [the switch](ai-assistants.md#let-assistant-activity-keep-me-signed-in).
 
 ## What the app is not
 

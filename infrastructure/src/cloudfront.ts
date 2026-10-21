@@ -14,6 +14,7 @@ import { ipv4CidrToRule } from "./config-helpers.mjs";
 import {
   gateOnlyCode,
   gatedSpaRouterCode,
+  securityHeadersCode,
   spaRouterCode,
 } from "./edge-functions.mjs";
 
@@ -55,6 +56,13 @@ interface CloudFrontOpts {
    * arrives with an IPv4 address the allowlist can match.
    */
   readonly edgeAllowedIps: ReadonlyArray<string>;
+  /**
+   * AI assistant connector port (sourced from `retivo:assistantBridgePort`).
+   * Unset = off: the security-headers function is byte-identical to the one
+   * every stack already runs. Set: the SPA CSP gains exactly one
+   * `connect-src` entry, `ws://127.0.0.1:<port>`.
+   */
+  readonly assistantBridgePort?: number;
 }
 
 // US-only application by design — the
@@ -97,6 +105,7 @@ export function createEdge(opts: CloudFrontOpts): Edge {
     acmCertificateArn,
     enableWaf,
     edgeAllowedIps,
+    assistantBridgePort,
   } = opts;
 
   // Edge IP gate — the function SOURCE is generated (and size-checked, 10 KB
@@ -109,6 +118,7 @@ export function createEdge(opts: CloudFrontOpts): Edge {
     ? gatedSpaRouterCode(gateRules)
     : spaRouterCode();
   const apiGateSource = gated ? gateOnlyCode(gateRules) : undefined;
+  const securityHeadersSource = securityHeadersCode(assistantBridgePort);
 
   // ---------- WAF web ACL with the AWS managed CommonRuleSet ----------
   // Created only when enableWaf is true (cost-control knob). When false,
@@ -189,7 +199,7 @@ export function createEdge(opts: CloudFrontOpts): Edge {
     {
       name: `${namePrefix}-security-headers`,
       runtime: "cloudfront-js-2.0",
-      code: securityHeadersCode(),
+      code: securityHeadersSource,
       comment: "Append strict security headers",
     },
     { provider: usEast1 },
@@ -408,56 +418,3 @@ function managedOriginRequestPolicyId(name: string): string {
   if (!id) throw new Error(`Unknown managed origin-request policy: ${name}`);
   return id;
 }
-
-function securityHeadersCode(): string {
-  // Keep this short — CloudFront Functions have a 10 KB compiled limit
-  // and ~1 ms execution budget per request.
-  //
-  // We set HSTS / X-Content-Type-Options / Referrer-Policy /
-  // Permissions-Policy on every response. CSP is more nuanced: API
-  // responses already carry a tight CSP from helmet (defaultSrc 'self',
-  // no inline anything), so we leave those alone. SPA static responses
-  // from S3 carry no CSP, so we attach a SPA-friendly default that
-  // allows same-origin assets + connect (for /api/* fetch) and inline
-  // styles (Vite's CSS hashes are inlined into <style> by some plugins
-  // — staying safe with 'unsafe-inline' on style-src only).
-  return `
-function handler(event) {
-  var response = event.response;
-  var headers = response.headers;
-
-  headers['strict-transport-security'] = {
-    value: 'max-age=63072000; includeSubDomains; preload'
-  };
-  headers['x-content-type-options'] = { value: 'nosniff' };
-  headers['referrer-policy'] = { value: 'same-origin' };
-  headers['permissions-policy'] = {
-    value: 'camera=(), microphone=(), geolocation=()'
-  };
-
-  if (!headers['content-security-policy']) {
-    headers['content-security-policy'] = {
-      value: [
-        "default-src 'self'",
-        // 'wasm-unsafe-eval' permits WebAssembly compilation only (NOT JS
-        // eval) for the Argon2id HDK key-wrapping WASM module (hash-wasm).
-        // The binary is base64-embedded in the JS
-        // bundle at build time — no runtime fetch, so no connect-src/worker-src
-        // change is needed beyond this one directive.
-        "script-src 'self' 'wasm-unsafe-eval'",
-        "style-src 'self' 'unsafe-inline'",
-        "img-src 'self' data:",
-        "font-src 'self' data:",
-        "connect-src 'self'",
-        "object-src 'none'",
-        "frame-ancestors 'none'",
-        "base-uri 'self'",
-        "form-action 'self'"
-      ].join('; ')
-    };
-  }
-  return response;
-}
-`.trim();
-}
-
