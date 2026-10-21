@@ -122,6 +122,8 @@ interface Household {
   readonly preTax?: boolean;
   /** Leave the plan with no Medical category, so no credit can be applied. */
   readonly noMedicalCategory?: boolean;
+  /** No Social Security at all, so ACA MAGI is only the draw and the pension. */
+  readonly noSocialSecurity?: boolean;
 }
 
 function args(h: Household): RunBalanceProjectionArgs {
@@ -180,7 +182,7 @@ function args(h: Household): RunBalanceProjectionArgs {
     accounts: [account],
     balances: [balance],
     members: [member()],
-    ssBenefits: [ss],
+    ssBenefits: h.noSocialSecurity === true ? [] : [ss],
     expenses: [
       ...(h.medicalMonthly === undefined
         ? [expense('medical', 'cat-medical', h.medical)]
@@ -423,5 +425,48 @@ describe('credit applied to premiums, uneven months and the funded draw', () => 
     expect(
       (row.acaCreditAppliedToPremiumsCents ?? 0) + (row.acaPtcCashflowOffsetCents ?? 0),
     ).toBeCloseTo(row.acaPtcSubsidyCents ?? 0, -1);
+  });
+});
+
+describe('credit applied to premiums, near the poverty line', () => {
+  // No Social Security, so ACA MAGI is only what the household draws and earns. The
+  // $15,650 poverty guideline is where the credit ends: a draw lowered below it
+  // earns nothing, so no line may lower it there.
+  const GUIDELINE = 15_650;
+
+  it('a pre-tax draw: neither engine lowers the draw below the guideline', () => {
+    // Need before the line 22,000 (140.6% of the guideline); the credit is 6,405.80
+    // there, more than the 6,350 of MAGI above the guideline.
+    const h: Household = { medical: 7_200, other: 14_808, preTax: true, noSocialSecurity: true };
+    const det = detRow(h);
+    const { row } = mcFirstRow(h);
+    const { row: without } = mcFirstRow({ ...h, noMedicalCategory: true });
+    for (const r of [det, row]) {
+      expect(r.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
+      expect(r.withdrawn).toBeGreaterThanOrEqual(GUIDELINE - 0.01);
+      expect(r.acaCreditAppliedToPremiumsCents).toBeLessThanOrEqual(cents(22_008 - GUIDELINE));
+    }
+    // The lowered draw still earns a credit on the row the engine reports.
+    expect(det.acaPtcSubsidyCents).toBeGreaterThan(0);
+    // The line is the whole fall in the stress test's draw.
+    expect(Math.round((without.withdrawn - row.withdrawn) * 100)).toBe(
+      row.acaCreditAppliedToPremiumsCents,
+    );
+  });
+
+  it('a qualified Roth draw sheds no MAGI: both engines apply the whole line', () => {
+    // A $15,650 pension is exactly on the guideline and the Roth draw funds the
+    // rest, so lowering the draw leaves MAGI, and the credit, where they are.
+    const h: Household = { medical: 7_200, other: 28_452, pensionAnnual: GUIDELINE, noSocialSecurity: true };
+    const det = detRow(h);
+    const { row, summary } = mcFirstRow(h);
+    expect(det.acaPtcSubsidyCents).toBeGreaterThan(cents(6_800));
+    expect(det.acaCreditAppliedToPremiumsCents).toBe(
+      (det.acaPtcSubsidyCents ?? 0) - (det.acaPtcCashflowOffsetCents ?? 0),
+    );
+    expect(row.acaCreditAppliedToPremiumsCents).toBe(det.acaCreditAppliedToPremiumsCents);
+    expect(Math.round(row.withdrawn * 100)).toBe(Math.round(det.withdrawn * 100));
+    const p50 = summary.acaCreditAppliedToPremiumsPercentilesByYear?.p50[0] ?? Number.NaN;
+    expect(p50 * 100).toBeCloseTo(det.acaCreditAppliedToPremiumsCents ?? 0, 0);
   });
 });

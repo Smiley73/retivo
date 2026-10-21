@@ -7,9 +7,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  aboveFplFloorCents,
   creditAppliedToPremiumsCents,
   foldYearDrawIntoExpense,
+  povertyLineLimitCents,
   sumPositiveNeed,
   sumYearCents,
 } from './credit-applied-to-premiums';
@@ -51,45 +51,41 @@ describe('creditAppliedToPremiumsCents', () => {
   });
 });
 
-describe('creditAppliedToPremiumsCents, poverty-line headroom', () => {
+describe('creditAppliedToPremiumsCents, poverty-line limit', () => {
   const base = { creditCents: 640_580, offsetCents: 0, medicalCents: 720_000, remainingNeedCents: 2_200_000 };
 
-  it('holds the line to the headroom when that is the smallest limit', () => {
-    expect(creditAppliedToPremiumsCents({ ...base, floorHeadroomCents: 635_000 })).toBe(635_000);
+  it('holds the line to the limit when that is the smallest bound', () => {
+    expect(creditAppliedToPremiumsCents({ ...base, povertyLineLimitCents: 635_000 })).toBe(635_000);
   });
 
-  it('leaves the line alone when the headroom is larger', () => {
-    expect(creditAppliedToPremiumsCents({ ...base, floorHeadroomCents: 900_000 })).toBe(640_580);
+  it('leaves the line alone when the limit is larger or absent', () => {
+    expect(creditAppliedToPremiumsCents({ ...base, povertyLineLimitCents: 900_000 })).toBe(640_580);
+    expect(creditAppliedToPremiumsCents({ ...base, povertyLineLimitCents: Number.POSITIVE_INFINITY })).toBe(640_580);
     expect(creditAppliedToPremiumsCents(base)).toBe(640_580);
   });
 
-  it('is zero with no headroom', () => {
-    expect(creditAppliedToPremiumsCents({ ...base, floorHeadroomCents: 0 })).toBe(0);
+  it('is zero with a zero limit', () => {
+    expect(creditAppliedToPremiumsCents({ ...base, povertyLineLimitCents: 0 })).toBe(0);
   });
 });
 
-describe('aboveFplFloorCents', () => {
-  it('is the MAGI above the poverty line: $22,000 is 140.6% of $15,650', () => {
-    expect(
-      aboveFplFloorCents({
-        magiCents: 2_200_000, taxableSsCents: 0, grossSsCents: 0, fplPercentage: (22_000 / 15_650) * 100,
-      }),
-    ).toBeCloseTo(635_000, -1);
+describe('povertyLineLimitCents', () => {
+  it('is the headroom when the draw is MAGI the lowered draw would shed', () => {
+    // $22,000 of pre-tax draw at 140.6% of $15,650: $6,350 above the line.
+    expect(povertyLineLimitCents({ headroomCents: 635_000, magiBearingDrawCents: 2_200_000 })).toBe(635_000);
   });
 
-  it('adds back the untaxed Social Security, as ACA MAGI does', () => {
-    // $10,000 of draw plus $12,000 of Social Security, none taxed: ACA MAGI 22,000.
-    expect(
-      aboveFplFloorCents({
-        magiCents: 1_000_000, taxableSsCents: 0, grossSsCents: 1_200_000,
-        fplPercentage: (22_000 / 15_650) * 100,
-      }),
-    ).toBeCloseTo(635_000, -1);
+  it('is no limit when the draw sheds no more MAGI than the headroom', () => {
+    // A $15,650 pension on the line, drawing qualified Roth only: nothing to shed.
+    expect(povertyLineLimitCents({ headroomCents: 0, magiBearingDrawCents: 0 })).toBe(Number.POSITIVE_INFINITY);
+    // $3,000 of pre-tax inside $6,350 of headroom: the line can take it all.
+    expect(povertyLineLimitCents({ headroomCents: 635_000, magiBearingDrawCents: 300_000 })).toBe(
+      Number.POSITIVE_INFINITY,
+    );
   });
 
-  it('is zero below the line and at no coverage', () => {
-    expect(aboveFplFloorCents({ magiCents: 1_000_000, taxableSsCents: 0, grossSsCents: 0, fplPercentage: 63.9 })).toBe(0);
-    expect(aboveFplFloorCents({ magiCents: 1_000_000, taxableSsCents: 0, grossSsCents: 0, fplPercentage: 0 })).toBe(0);
+  it('is zero on the line with MAGI-bearing draws', () => {
+    expect(povertyLineLimitCents({ headroomCents: 0, magiBearingDrawCents: 1 })).toBe(0);
   });
 });
 

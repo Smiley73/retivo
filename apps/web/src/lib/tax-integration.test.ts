@@ -23,6 +23,7 @@ import type {
   TaxYearInput,
   TaxMemberInput,
   TaxAccountSnapshot,
+  TaxYearResult,
 } from './tax-integration';
 import type { ResolvedTaxUnit } from './filing-status';
 import type { CalibrationSnapshot } from './calibration';
@@ -2629,6 +2630,83 @@ describe('ACA SLCSP override across separate returns', () => {
       REAL_BUNDLE,
     );
     expect(bothHoh.acaPtcSubsidyCents).toBeGreaterThan(0);
+  });
+});
+
+describe('acaMagiAboveFplCents', () => {
+  const members: TaxMemberInput[] = [
+    { memberId: 'p', isoBirthdate: '1970-03-10', onMedicare: false, hasAcaCoverage: true },
+    { memberId: 's', isoBirthdate: '1971-04-02', onMedicare: false, hasAcaCoverage: true },
+  ];
+  const single = (preTaxWithdrawalDollars: number): TaxYearResult =>
+    applyTaxYear(
+      baseInput({
+        taxYear: 2026,
+        filingStatus: 'Single',
+        householdSize: 1,
+        members: [members[0]],
+        preTaxWithdrawalDollars,
+        grossSsDollars: 0,
+        acaBenchmarkSlcspDollars: 7_200,
+      }),
+      REAL_BUNDLE,
+    );
+
+  it('is the ACA MAGI above the poverty guideline: $22,000 against $15,650', () => {
+    expect(single(22_000).acaMagiAboveFplCents).toBe(635_000);
+  });
+
+  it('is zero on the guideline and below it, where the credit is zero', () => {
+    expect(single(15_650).acaMagiAboveFplCents).toBe(0);
+    const below = single(15_000);
+    expect(below.acaPtcSubsidyCents).toBe(0);
+    expect(below.acaMagiAboveFplCents).toBe(0);
+  });
+
+  it('adds back untaxed Social Security, as ACA MAGI does', () => {
+    // $10,000 of draw plus $12,000 of Social Security that is not taxed: ACA MAGI 22,000.
+    const result = applyTaxYear(
+      baseInput({
+        taxYear: 2026,
+        filingStatus: 'Single',
+        householdSize: 1,
+        members: [members[0]],
+        preTaxWithdrawalDollars: 10_000,
+        grossSsDollars: 12_000,
+        acaBenchmarkSlcspDollars: 7_200,
+      }),
+      REAL_BUNDLE,
+    );
+    expect(result.taxableSsCents).toBe(0);
+    expect(result.acaMagiAboveFplCents).toBe(635_000);
+  });
+
+  it('reads each return on its own for separate returns, not the summed MAGI', () => {
+    // The primary files HoH (household of two, $21,150) on $22,000 drawn from their
+    // own IRA: $850 above the line. The secondary files MFS on $40,000 and earns
+    // no credit. Summing MAGI and taking the highest percentage would say $2,385.
+    const merged = applyTaxYearForFilingPlan(
+      {
+        ...baseInput({
+          taxYear: 2026,
+          filingStatus: 'MFJ',
+          householdSize: 2,
+          members,
+          preTaxWithdrawalDollars: 62_000,
+          grossSsDollars: 0,
+        }),
+        memberIdByRole: { primary: 'p', secondary: 's' },
+        acaBenchmarkSlcspDollars: 24_000,
+        ownerAttributedAmounts: { preTaxWithdrawalDollars: { p: 22_000, s: 40_000 } },
+        taxUnits: [
+          { memberIds: ['primary'], filingStatus: 'HoH', householdSize: 2 },
+          { memberIds: ['secondary'], filingStatus: 'MFS', householdSize: 1 },
+        ],
+      },
+      REAL_BUNDLE,
+    );
+    expect(merged.acaPtcSubsidyCents).toBeGreaterThan(0);
+    expect(merged.acaMagiAboveFplCents).toBe(85_000);
   });
 });
 

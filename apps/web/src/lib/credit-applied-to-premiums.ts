@@ -18,50 +18,57 @@ interface CreditAppliedToPremiumsArgs {
   readonly medicalCents: number;
   /** The draw the engine would otherwise commit this year. */
   readonly remainingNeedCents: number;
-  /** How far the draw's MAGI can fall before it reaches the poverty line (see
-   *  {@link aboveFplFloorCents}). Absent → no limit; the deterministic solver
-   *  instead checks the line against the draw it commits. */
-  readonly floorHeadroomCents?: number;
+  /** The most the draw can fall before the household leaves the credit's range
+   *  (see {@link povertyLineLimitCents}). Absent → no limit. */
+  readonly povertyLineLimitCents?: number;
 }
 
 /**
  * `min(max(0, credit − offset), medical, remainingNeed)`, floored at zero, and
- * no more than `floorHeadroomCents` when given. The model has no surplus
+ * no more than `povertyLineLimitCents` when given. The model has no surplus
  * deposit, so a year with no draw has nothing to lower and the rest of the
  * credit is dropped.
  */
 export function creditAppliedToPremiumsCents(args: CreditAppliedToPremiumsArgs): number {
   const excessCents = Math.max(0, args.creditCents - args.offsetCents);
-  const limitCents = Math.min(excessCents, args.medicalCents, args.remainingNeedCents);
-  return Math.max(
-    0,
-    args.floorHeadroomCents === undefined ? limitCents : Math.min(limitCents, args.floorHeadroomCents),
+  const limitCents = Math.min(
+    excessCents,
+    args.medicalCents,
+    args.remainingNeedCents,
+    args.povertyLineLimitCents ?? Number.POSITIVE_INFINITY,
   );
+  return Math.max(0, limitCents);
 }
 
-/** A year's tax result, as {@link aboveFplFloorCents} reads it (integer cents). */
-interface FplFloorArgs {
-  readonly magiCents: number;
-  readonly taxableSsCents: number;
-  readonly fplPercentage: number;
-  /** The year's gross Social Security, whose untaxed part ACA MAGI adds back. */
-  readonly grossSsCents: number;
+/** Inputs to {@link povertyLineLimitCents}, in integer cents. */
+interface PovertyLineLimitArgs {
+  /** ACA MAGI above the poverty line at the draw the credit was priced on
+   *  (`TaxYearResult.acaMagiAboveFplCents`). */
+  readonly headroomCents: number;
+  /** The part of that draw that is ACA MAGI: pre-tax and taxable-account
+   *  withdrawals, plus the taxable Roth earnings. Qualified Roth and cash-like
+   *  dollars are not. */
+  readonly magiBearingDrawCents: number;
 }
 
 /**
- * How many cents of ACA MAGI sit above the 100% poverty line. The ratio of ACA
- * MAGI to the line is the same before and after the engine deflates MAGI, so
- * the figure is in projection-year dollars. A draw lowered by this much or less
- * cannot leave the household under the line, where the credit is zero: lowering
- * the draw lowers ACA MAGI by at most the same amount, because ACA MAGI adds
- * back all Social Security and counts a dollar of draw at most once. Zero below
- * the line, where no credit is earned.
+ * The most the draw can be lowered by, so that the lowered draw still earns the
+ * credit it was priced on. The credit is zero below 100% of the poverty line, and
+ * a line the household does not earn at the draw it lowers would create money.
+ * Above the line the credit only grows as MAGI falls, so a line priced at the
+ * higher draw never overstates the credit at the lower one.
+ *
+ * Lowering the draw by L lowers ACA MAGI by at most `min(L, magiBearingDraw)`:
+ * ACA MAGI adds back all Social Security, so a dollar of draw counts once, and a
+ * dollar that is not income (a qualified Roth or cash-like withdrawal) does not
+ * count at all. So the draw can fall by the whole MAGI-bearing amount when the
+ * headroom covers it, and by the headroom otherwise. Both engines price the
+ * credit on the draw before the line and apply this one limit to it.
  */
-export function aboveFplFloorCents(args: FplFloorArgs): number {
-  if (!(args.fplPercentage >= 100)) return 0;
-  const acaMagiCents =
-    args.magiCents + Math.max(0, args.grossSsCents - args.taxableSsCents);
-  return Math.max(0, Math.floor(acaMagiCents * (1 - 100 / args.fplPercentage)));
+export function povertyLineLimitCents(args: PovertyLineLimitArgs): number {
+  return args.magiBearingDrawCents <= args.headroomCents
+    ? Number.POSITIVE_INFINITY
+    : Math.max(0, args.headroomCents);
 }
 
 /**

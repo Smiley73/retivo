@@ -541,6 +541,7 @@ export function applyTaxYear(
   let acaPtcSubsidyCents = 0;
   let acaPtcTier: TaxYearResult['acaPtcTier'] = 'below-fpl';
   let fplPercentage = 0;
+  let acaMagiAboveFplCents = 0;
 
   // An `MFS` return is statutorily ineligible for the PTC (§36B(c)(1)(C))
   // and `computeAcaPtc` throws rather than silently crediting one, so the gate
@@ -607,6 +608,16 @@ export function applyTaxYear(
     acaPtcSubsidyCents = acaResult.annualPtcCents;
     acaPtcTier = acaResult.tier;
     fplPercentage = acaResult.fplPercentage;
+    // The credit ends below 100% of the poverty line. The headroom is measured in
+    // the deflated dollars the line is compared in, then re-inflated to the
+    // projection-year dollars every other figure here is in. Flooring both steps
+    // keeps a draw lowered by it at or above the line.
+    if (fplPercentage >= 100) {
+      acaMagiAboveFplCents = Math.max(
+        0,
+        Math.floor((acaMagiDeflatedCents - Math.ceil(acaResult.fplDollars * 100)) * acaScaling),
+      );
+    }
   }
 
   // --- Step 4: RMD (independent pre-pass) ---
@@ -701,6 +712,7 @@ export function applyTaxYear(
     acaPtcSubsidyCents,
     acaPtcTier,
     fplPercentage,
+    acaMagiAboveFplCents,
     magiCents,
     effectiveTaxRate,
     taxYearExtrapolated,
@@ -1334,6 +1346,15 @@ function grossIncomeForEffectiveRateDollars(input: TaxYearInput): number {
   );
 }
 
+/** The smallest `acaMagiAboveFplCents` among the returns that earn a credit; 0
+ *  when none does. */
+function narrowestAcaMagiAboveFplCents(results: readonly TaxYearResult[]): number {
+  const earning = results.filter((r) => r.acaPtcSubsidyCents > 0);
+  return earning.length === 0
+    ? 0
+    : Math.min(...earning.map((r) => r.acaMagiAboveFplCents));
+}
+
 /** Sum the per-unit results into the household `TaxYearResult` the runners
  *  annotate. Cash fields sum exactly; the three categorical DISPLAY fields
  *  collapse to the household's most-affected unit. */
@@ -1377,6 +1398,10 @@ function mergeUnitResults(
     acaPtcTier:
       results.find((r) => r.acaPtcTier !== 'below-fpl')?.acaPtcTier ?? 'below-fpl',
     fplPercentage: results.reduce((max, r) => Math.max(max, r.fplPercentage), 0),
+    // The narrowest margin among the returns that earn a credit: the draw a
+    // credit lowers can come out of any of them, and each return's credit ends at
+    // its OWN poverty line. Summing MAGI across returns would overstate it.
+    acaMagiAboveFplCents: narrowestAcaMagiAboveFplCents(results),
     // The SUM of the returns' MAGIs is a HOUSEHOLD figure no single
     // return reports. It is the right basis for the household-level MAGI
     // ceiling the drawdown overlay applies (one user-entered household ceiling),

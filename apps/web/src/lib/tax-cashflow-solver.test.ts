@@ -515,7 +515,7 @@ describe('solveTaxCashflow — credit applied to premiums', () => {
         ...overrides,
       });
 
-    it('drops a line the lowered draw could not earn, and settles on the line-free draw', () => {
+    it('holds the line to the MAGI above the poverty line, so the lowered draw still earns the credit', () => {
       const targets: number[] = [];
       const result = solveTaxCashflow(
         cliffArgs({
@@ -525,16 +525,41 @@ describe('solveTaxCashflow — credit applied to premiums', () => {
           },
         }),
       );
-      const withoutLine = solveTaxCashflow(cliffArgs({ medicalExpenseCents: undefined }));
+      const lineFree = solveTaxCashflow(cliffArgs({ medicalExpenseCents: undefined }));
       expect(result.taxCashflowConverged).toBe(true);
-      expect(result.acaCreditAppliedToPremiumsCents).toBe(0);
-      // The tax year reported is the one the committed draw makes, not a trial's.
-      expect(result.taxYearResult.magiCents).toBe(withoutLine.taxYearResult.magiCents);
-      expect(result.taxYearResult.acaPtcSubsidyCents).toBe(
-        withoutLine.taxYearResult.acaPtcSubsidyCents,
+      // The limit is measured on the line-free first pass: $22,000 of ACA MAGI
+      // less the $15,650 poverty guideline.
+      const headroomCents = (22_000 - 15_650) * 100;
+      expect(result.acaCreditAppliedToPremiumsCents).toBe(headroomCents);
+      // No trial draw ever falls under the line, so none of them cycles.
+      for (const target of targets) expect(target).toBeGreaterThanOrEqual(15_650);
+      // The committed draw is still on the line, and earns a credit there.
+      expect(result.taxYearResult.fplPercentage).toBeGreaterThanOrEqual(100);
+      expect(result.taxYearResult.acaPtcSubsidyCents).toBeGreaterThan(0);
+      // The line is a reduction of the line-free draw, and earned at the lowered draw.
+      expect(result.acaCreditAppliedToPremiumsCents).toBeLessThanOrEqual(
+        result.taxYearResult.acaPtcSubsidyCents - result.acaPtcCashflowOffsetCents,
       );
-      expect(result.totalTaxCashflowNeedCents).toBe(withoutLine.totalTaxCashflowNeedCents);
-      expect(targets[targets.length - 1]).toBe(22_000);
+      expect(lineFree.acaCreditAppliedToPremiumsCents).toBe(0);
+    });
+
+    it('applies the whole line when the draw is qualified Roth, which sheds no MAGI', () => {
+      // A $15,650 pension sits exactly on the line; the Roth draw funds the rest.
+      // Lowering the Roth draw leaves MAGI where it is, so nothing limits the line.
+      const result = solveTaxCashflow(
+        baseArgs({
+          ordinaryNetNeedDollars: 20_000,
+          taxInputBase: aca2026Input({ grossSsDollars: 0, otherOrdinaryIncomeDollars: 15_650 }),
+          classifyForTarget: allRothClassifier,
+          medicalExpenseCents: 720_000,
+        }),
+      );
+      expect(result.taxYearResult.fplPercentage).toBeGreaterThanOrEqual(100);
+      expect(result.taxYearResult.acaMagiAboveFplCents).toBe(0);
+      expect(result.acaCreditAppliedToPremiumsCents).toBe(
+        result.taxYearResult.acaPtcSubsidyCents - result.acaPtcCashflowOffsetCents,
+      );
+      expect(result.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
     });
 
     it('keeps a line whose lowered draw still earns the credit', () => {

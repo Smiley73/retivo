@@ -47,13 +47,14 @@
  * IRMAA cash need lowers the year's draw (capped at those expenses and at the
  * draw itself). Each pass computes it from that pass's own credit, and it
  * enters the next trial target and the convergence test the same way the tax
- * need does. Above the poverty line the loop stays a contraction: a lower draw
- * raises the credit by at most the applicable percentage of the MAGI it
- * removes, and the line is capped. At the poverty line the credit drops to
- * zero, so a line that lowers the draw below it has no fixed point and the loop
- * cycles; a solve that does not converge with the line is solved again without
- * it, so the committed draw never rests on a credit the household does not earn
- * at that draw.
+ * need does. The credit is zero below the poverty line, so a line that lowered the
+ * draw below it would be one the draw does not earn, and the loop would cycle
+ * between the two. The first pass runs at the draw before any line; the limit it
+ * sets on how far a draw can fall and still earn the credit (see
+ * `povertyLineLimitCents`) holds for every pass, so every trial draw stays in the
+ * range where a lower draw only raises the credit. The loop stays a contraction:
+ * a lower draw raises the credit by at most the applicable percentage of the MAGI
+ * it removes, and the line is capped. The stress test applies the same limit.
  */
 import { applyTaxYearForFilingPlan } from './tax-integration';
 import type {
@@ -63,7 +64,7 @@ import type {
   TaxYearResult,
 } from './tax-integration';
 import { dollarsToCents } from './tax-integration';
-import { creditAppliedToPremiumsCents } from './credit-applied-to-premiums';
+import { creditAppliedToPremiumsCents, povertyLineLimitCents } from './credit-applied-to-premiums';
 
 /** Shared error `code` thrown by every engine's `UnsupportedTaxYearError`
  *  (federal-tax / ss-taxation / irmaa / aca-ptc / rmd). A projection year
@@ -111,6 +112,7 @@ const ZERO_TAX_YEAR_RESULT: TaxYearResult = {
   acaPtcSubsidyCents: 0,
   acaPtcTier: 'below-fpl',
   fplPercentage: 0,
+  acaMagiAboveFplCents: 0,
   magiCents: 0,
   effectiveTaxRate: 0,
   taxYearExtrapolated: false,
@@ -363,6 +365,9 @@ interface SolverPassState {
   irmaaCashCents: number;
   acaOffsetCents: number;
   creditAppliedCents: number;
+  /** How far the draw can fall and still earn the credit, set by the first pass
+   *  (the draw before any line) and held for the rest. */
+  povertyLineLimitCents: number;
   /** The target the last classification was run against (shortfall basis). */
   requestedTargetDollars: number;
   classification: WithdrawalClassification | undefined;
@@ -404,15 +409,23 @@ function runOnePass(
   state.needCents = totalCashflowNeedCents(result.federalTaxCents, cashCents, result.acaPtcSubsidyCents);
   // The draw this pass would commit before the line: the ordinary need, the
   // tax need and the IRMAA withheld from Social Security.
-  state.creditAppliedCents =
-    args.medicalExpenseCents === undefined
-      ? 0
-      : creditAppliedToPremiumsCents({
-          creditCents: result.acaPtcSubsidyCents,
-          offsetCents: state.acaOffsetCents,
-          medicalCents: args.medicalExpenseCents,
-          remainingNeedCents: dollarsToCents(args.ordinaryNetNeedDollars) + state.needCents + withheldCents,
-        });
+  if (args.medicalExpenseCents === undefined) {
+    state.creditAppliedCents = 0;
+    return;
+  }
+  if (state.pass === 1) {
+    state.povertyLineLimitCents = povertyLineLimitCents({
+      headroomCents: result.acaMagiAboveFplCents,
+      magiBearingDrawCents: dollarsToCents(cls.preTaxDollars + cls.postTaxNonRothDollars),
+    });
+  }
+  state.creditAppliedCents = creditAppliedToPremiumsCents({
+    creditCents: result.acaPtcSubsidyCents,
+    offsetCents: state.acaOffsetCents,
+    medicalCents: args.medicalExpenseCents,
+    remainingNeedCents: dollarsToCents(args.ordinaryNetNeedDollars) + state.needCents + withheldCents,
+    povertyLineLimitCents: state.povertyLineLimitCents,
+  });
 }
 
 /** Assemble the public result from the final pass state. */
@@ -451,19 +464,6 @@ function buildResult(state: SolverPassState): TaxCashflowResult {
  * contraction and the `needCents`-keyed convergence test still settles.
  */
 export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult {
-  const result = solveTaxCashflowPasses(args);
-  // A line that never settled is one the loop cannot stand behind: the credit is
-  // discontinuous at the poverty line, so a draw lowered by the line can fall
-  // under it, lose the credit, and send the next trial back up. Committing
-  // whichever pass the cap lands on would lower the draw by a credit the
-  // committed draw does not earn, and report a tax year from a trial draw. Drop
-  // the line and solve again; with no line the loop is the one that converges.
-  if (result.taxCashflowConverged || args.medicalExpenseCents === undefined) return result;
-  return solveTaxCashflowPasses({ ...args, medicalExpenseCents: undefined });
-}
-
-/** The fixpoint loop behind {@link solveTaxCashflow}, with the line as given. */
-function solveTaxCashflowPasses(args: TaxCashflowSolveArgs): TaxCashflowResult {
   const { ordinaryNetNeedDollars } = args;
   const state: SolverPassState = {
     pass: 0,
@@ -474,6 +474,7 @@ function solveTaxCashflowPasses(args: TaxCashflowSolveArgs): TaxCashflowResult {
     irmaaCashCents: 0,
     acaOffsetCents: 0,
     creditAppliedCents: 0,
+    povertyLineLimitCents: Number.POSITIVE_INFINITY,
     requestedTargetDollars: ordinaryNetNeedDollars,
     classification: undefined,
     result: undefined,

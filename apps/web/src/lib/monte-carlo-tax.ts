@@ -73,7 +73,7 @@ import {
   type PenaltyAccountInput,
 } from './early-withdrawal-penalty';
 import type { AccountType, AccountTaxTreatment } from '../db/types';
-import { aboveFplFloorCents, creditAppliedToPremiumsCents } from './credit-applied-to-premiums';
+import { creditAppliedToPremiumsCents, povertyLineLimitCents } from './credit-applied-to-premiums';
 import type { AcaFplRegion } from './aca-ptc';
 import { isQualifyingAccount } from './rmd';
 import type { DrawdownAccountYear } from './drawdown-engine-types';
@@ -1116,7 +1116,11 @@ export function applyPerYearTaxForPathWithConversion(
     penaltyDollars,
     args.medicalExpenseDollars,
     args.drawNeedDollars,
-    grossSsDollars,
+    // The dollars of the draw that are ACA MAGI, which a lowered draw sheds:
+    // pre-tax and taxable-account withdrawals and the taxable Roth earnings.
+    preTaxWithdrawalDollars +
+      (classification?.postTaxNonRothDollars ?? 0) +
+      rothEarnings.earningsExcessDollars,
   );
 
   // The ring sample is conversion-INCLUSIVE so Y+2 IRMAA is funded. With no
@@ -2195,7 +2199,7 @@ function assembleMcTaxResult(
   penaltyDollars = 0,
   medicalExpenseDollars?: number,
   drawNeedDollars?: number,
-  grossSsDollars = 0,
+  magiBearingDrawDollars = 0,
 ): McTaxYearResult {
   const fedTax = centsToDollars(taxResult.federalTaxCents);
   const irmaa = centsToDollars(taxResult.irmaaSurchargeCents);
@@ -2219,9 +2223,9 @@ function assembleMcTaxResult(
   // surcharge lowers this year's draw, up to the year's Medical expenses and the
   // draw (the year's draw need, plus the tax need). The stress test funds the whole
   // surcharge, so its offset uses the whole surcharge, where the deterministic
-  // engine's uses only the IRMAA cash part. The tax is taken before the line
-  // lowers the draw, so the line is also held to the MAGI above the poverty line,
-  // where the credit ends.
+  // engine's uses only the IRMAA cash part. The credit is priced on the draw
+  // before the line, so the line is also held to what that draw can fall by and
+  // still earn it (the deterministic solver applies the same limit).
   const creditCents =
     medicalExpenseDollars === undefined
       ? 0
@@ -2233,8 +2237,9 @@ function assembleMcTaxResult(
           ),
           medicalCents: dollarsToCents(medicalExpenseDollars),
           remainingNeedCents: dollarsToCents((drawNeedDollars ?? drawdown) + taxNeedDollars),
-          floorHeadroomCents: aboveFplFloorCents({
-            ...taxResult, grossSsCents: dollarsToCents(grossSsDollars),
+          povertyLineLimitCents: povertyLineLimitCents({
+            headroomCents: taxResult.acaMagiAboveFplCents,
+            magiBearingDrawCents: dollarsToCents(magiBearingDrawDollars),
           }),
         });
   const acaCreditAppliedToPremiums = centsToDollars(creditCents);

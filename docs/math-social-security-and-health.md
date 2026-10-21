@@ -489,19 +489,28 @@ dropped too. The line is a separate column in the **Taxes & health costs** table
 and a separate figure on the **Taxes** tab. The dollars are already part of the
 ACA health credits shown there, so they are not added a second time.
 
-The credit stops at the poverty line, so the line cannot lower the draw until
-income falls under it. In the projection, if lowering the draw by the line would
-leave income below 100% of the poverty line, the credit is lost at that draw and
-the line cannot be settled. The year is then worked out with no line, and the
-credit left after step 1 is dropped. The stress test instead stops the line at
-the income above the poverty line, so the draw it lowers still earns the credit.
+The credit stops at the poverty line. A lower draw lowers income, and income
+below 100% of the poverty line earns no credit, so a line that lowered the draw
+past it would be one the household does not earn. Both engines therefore limit
+the line the same way. The credit is worked out on the draw before the line, and
+the draw may fall by at most the income that draw adds above the poverty line,
+counted for each return that earns a credit and taking the narrowest. Only
+withdrawals that count as income can pull income down: a qualified Roth or
+savings withdrawal does not, so a household that draws only those is not
+limited. Above the poverty line a lower draw only raises the credit, so a line
+priced on the higher draw is never more than the household earns at the lower
+one.
 
 The stress test funds the whole IRMAA surcharge, where the projection funds only
 the part not withheld from Social Security, so step 1 uses the whole surcharge
 there. Both cap the line at the year's draw, which is the sum of the months in
 which spending is above income, so a year with a few expensive months can carry
-the whole line. Everything else is the same, and for the same flat household the
-two agree to the cent. Medical expenses are taken before any spending cut from the
+the whole line. Everything else is the same, and for the same flat household
+whose credit does not move with the draw (qualified Roth withdrawals, say) the
+two agree to the cent. When the credit does move with the draw, the projection
+settles on the line the lowered draw earns, and the stress test keeps the line
+priced on the draw before it, so the stress test's line is the smaller by a
+little. Medical expenses are taken before any spending cut from the
 downturn guardrail, because the premium is the amount you entered.
 
 ### Built-in figures and years
