@@ -6,7 +6,10 @@
  */
 export interface OptimizerMcWinner {
   readonly primaryAgeYears: number;
+  /** Absent or 0 is a whole year; see `Winner` in `pick-winner.ts`. */
+  readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
+  readonly secondaryAgeMonths?: number;
   readonly metricValue: number;
 }
 
@@ -35,7 +38,7 @@ export type OptimizerMcOutcome =
       readonly alreadyAtOptimum: boolean;
       /** MC success probability at the scenario's current claim ages —
        *  drives the "current → recommended" metric cell. `undefined` when
-       *  the current pair isn't a whole-year candidate in the grid. */
+       *  the current pair isn't a candidate (the 1-D primary-only fallback). */
       readonly baselineMetricValue?: number;
       /** Disclosure only: the fixed primary death age the optimizer
        *  assumed for this scenario. */

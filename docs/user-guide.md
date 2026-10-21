@@ -584,10 +584,18 @@ These three sit under **Planning** and each answers one question.
 
 *"Which claim age gives the best modeled result?"* The page is headed "Social
 Security claim-age comparison". For each scenario it compares the projected result
-at every eligible whole-year claim age for each household member, and shows the
-age with the highest modeled result. It says explicitly that this "does not tell
-you when to claim", and that the model leaves out some real-world Social Security
-rules, such as divorced-spouse benefits.
+at every eligible whole-year claim age for each household member, plus the age
+already set on the scenario, and shows the option with the highest modeled
+result. Every option is projected to one assumed death age, the scenario's Life
+expectancy setting. It says explicitly that this is a comparison, not a proven
+best age and not advice, that it "does not tell you when to claim", and that the
+model leaves out some real-world Social Security rules, such as divorced-spouse
+benefits.
+
+If the scenario's claim age includes months (for example 66 years 4 months),
+that exact age is compared too. The row shows your current result next to the
+best one, and if your setting already ranks highest it reads "Already set" with
+the age as "66 years 4 months".
 
 Choose the goal, **End-of-plan balance** (a quick comparison using the Planned and
 Historical projections) or **Plan success %** (the stress test; choose how many simulated paths, then **Run
@@ -598,7 +606,10 @@ under **Your Data → Social Security**.
 
 **Save to scenario** writes the winning claim age into that scenario's Social
 Security setting, after a confirmation that names the scenario and the ages. It
-replaces the claim ages but keeps the scenario's benefit reduction and COLA.
+replaces the claim ages but keeps the scenario's benefit reduction and COLA. The
+confirmation says when a member's current months are being replaced by a whole
+year, and that a member who is not changed keeps their current setting, months
+included.
 
 ### Roth conversion comparison
 
