@@ -33,6 +33,16 @@ export interface ReleaseNote {
 /** The full changelog, newest-first. New entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-21',
+    kind: 'improved',
+    title: 'Projections now flag years when Medicaid may apply',
+    blurb:
+      'When a year with a Marketplace plan has income at or below 138% of the ' +
+      'federal poverty line, a note under the charts says Medicaid may cover ' +
+      'you instead, depending on your state. Retivo still does not model ' +
+      'states or Medicaid, and no projected number changes.',
+  },
+  {
     date: '2026-10-20',
     kind: 'improved',
     title: 'Your Marketplace credit now lowers your withdrawals',

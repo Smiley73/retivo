@@ -403,7 +403,10 @@ fixed rules with no year.
 
 - **Surcharge only.** The base Part B and Part D premiums are not modeled.
 - **A stand-in for the first two retirement years.** After that the look-back is
-  the projection's own MAGI.
+  the projection's own MAGI. The setting stores one amount for both years, and
+  the stress test charges nothing by default where the other projections
+  estimate. The fix belongs with the IRMAA and Roth-conversion search work
+  planned separately.
 - **Year scaling.** Past 2026 it uses the scenario's general inflation rate, the
   same one the tax tables use.
 
@@ -565,10 +568,20 @@ base amount and the base year (2026) move together when the curve is re-anchored
 
 ### Simplified or left out
 
+- **Medicaid is not modeled.** Between 100% and 138% of the poverty line the
+  app works out a Marketplace credit, which is what a state that did not expand
+  Medicaid does. In a state that did, Medicaid covers that year instead and the
+  credit does not apply. The app has no state data and does not ask, so the
+  projection shows a note in those years rather than changing any number.
+  Medicaid can also recover its costs from the estate of someone covered at 55
+  or older, so it is not free money.
 - **Months are counted as a number, not a calendar.** Two spouses covered in
-  different parts of the year are credited the larger of their two counts.
+  different parts of the year are credited the larger of their two counts. A
+  calendar for two spouses would need the app to store which months each is
+  covered, not how many, and that changes the stored data and both projections.
 - **Married filing separately** gets no credit, even though a few separated
-  spouses can claim one in practice.
+  spouses can claim one in practice. Those exceptions need a new stored fact
+  about the household and a re-checked answer, for a rare case.
 - **One calculation a year.** The credit is worked out once from that year's
   income. The app does not model advance payments or repayment at tax time.
 - **A year with no draw cannot be lowered.** The credit is used against tax and

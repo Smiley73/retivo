@@ -466,6 +466,8 @@ What the cards do:
   you enter a **Benchmark plan cost for the year**, the benchmark plan price is an
   estimate that grows every year from 2026 at the scenario's medical inflation
   rate; an entered price is used as entered.
+  Medicaid and state rules are not modeled; the projections show a note when a
+  year's income is at or below 138% of the poverty line.
 - **Pre-retirement Roth conversions**: a **Roth conversion** moves money from a
   pre-tax account into a Roth account and you pay income tax on it now. This card
   models doing that during your working years, and its page is headed "Roth

@@ -15,6 +15,7 @@ import type { TaxBurdenChartRow } from '../components/TaxBurdenChart';
 import type { RmdChartRow } from '../components/RmdChart';
 import type { DrawdownByMethodResult } from './balance-projection-page-data';
 import type { DisplayMode } from '../lib/view-deflator';
+import type { DrawdownYear } from '../lib/drawdown-engine-types';
 
 /** Floor the fractional death marker to its integer death year (death = Dec 31
  *  of that year), or `null` when there is no finite death marker. */
@@ -22,6 +23,26 @@ function deathYearOf(lastDeathFractional: number | null): number | null {
   return lastDeathFractional !== null && Number.isFinite(lastDeathFractional)
     ? Math.floor(lastDeathFractional)
     : null;
+}
+
+/** Statutory Medicaid-expansion income line: 133% of the federal poverty line
+ *  plus the 5-point income disregard. A fixed rule, not a yearly figure. */
+const MEDICAID_EXPANSION_FPL_PERCENT = 138;
+
+/** True when any year has a household income at or below the Medicaid-expansion
+ *  line while a Marketplace credit was worked out. The `> 0` guard matters:
+ *  the engine leaves `fplPercentage` at 0 for a year it did not compute (no
+ *  Marketplace coverage, everyone on Medicare, married filing separately), and
+ *  that zero means "not computed", not "no income". */
+export function hasMedicaidRangeYear(
+  years: ReadonlyArray<Pick<DrawdownYear, 'fplPercentage'>>,
+): boolean {
+  return years.some(
+    (yr) =>
+      yr.fplPercentage !== undefined &&
+      yr.fplPercentage > 0 &&
+      yr.fplPercentage <= MEDICAID_EXPANSION_FPL_PERCENT,
+  );
 }
 
 export interface BuildTaxBurdenRowsArgs {

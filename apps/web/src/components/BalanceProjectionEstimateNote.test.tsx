@@ -227,9 +227,35 @@ describe('BalanceProjectionEstimateNote', () => {
     expect(text.tagName.toLowerCase()).toBe('strong');
   });
 
+  it('omits the Medicaid paragraph by default', () => {
+    render(<BalanceProjectionEstimateNote />);
+    expect(screen.getByRole('note')).not.toHaveTextContent(/Medicaid/i);
+  });
+
+  it('renders the Medicaid paragraph, with its four points, when the flag is set', () => {
+    render(<BalanceProjectionEstimateNote medicaidMayApply />);
+    const note = screen.getByRole('note');
+    // Medicaid may cover the household instead of a Marketplace plan, by state.
+    expect(note).toHaveTextContent(/Medicaid may cover your household instead/i);
+    expect(note).toHaveTextContent(/Depending on your\s+state/i);
+    // Retivo does not model states or Medicaid; the figures do not assume it.
+    expect(note).toHaveTextContent(/does not model states or Medicaid/i);
+    expect(note).toHaveTextContent(/do not assume Medicaid/i);
+    expect(note).toHaveTextContent(/did not expand\s+Medicaid/i);
+    // Estate recovery caution at 55 or older.
+    expect(note).toHaveTextContent(/estates of people who received it at 55 or older/i);
+    // The lead-in is a real text node, not colour- or icon-only.
+    const lead = screen.getByText(/Medicaid may apply/i);
+    expect(lead.tagName.toLowerCase()).toBe('strong');
+  });
+
   it('the health disclosures render with no a11y violations', async () => {
     const { container } = render(
-      <BalanceProjectionEstimateNote medicareBasePremiumMissing isMcBasisActive />,
+      <BalanceProjectionEstimateNote
+        medicareBasePremiumMissing
+        medicaidMayApply
+        isMcBasisActive
+      />,
     );
     await expectNoA11yViolations(container);
   });
