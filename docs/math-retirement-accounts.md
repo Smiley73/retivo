@@ -371,8 +371,9 @@ conversions also run in the stress test, with the same sizing on each path.
 
 The **Compare conversion plans** panel on the Roth conversion comparison page
 tries a fixed set of Fill plans for the selected scenario and ranks them by what
-is left at the end. It only reads your data: nothing it finds is saved to the
-scenario.
+is left at the end. Running it only reads your data and saves nothing. A ranked
+plan is written to the scenario only when you press **Save plan to scenario** on
+its row and confirm (see **Saving a plan** below).
 
 **What goes in.** The same accounts, balances, members, Social Security,
 expenses and income the page's own planned projection uses, today's date, and
@@ -459,13 +460,51 @@ nine plans at ten projections each stay far below it.
 - **One flat leftover-tax rate** for everything still in pre-tax accounts.
 - It shows what each plan does in this model and does not say which to pick.
 
+**Saving a plan.** **Save plan to scenario** turns a ranked row into the
+scenario's cap schedule on its **Withdrawal strategy** card, so the projection
+and the Fill conversions described above then run it. It is offered on ranked
+rows only, not on the current plan and not on a plan whose cap could not be kept.
+What is written:
+
+- *One window per year.* Each year of the plan's window gets its own Fill window,
+  with the same year as its start and its end, so adjacent windows do not overlap.
+  The windows are anchored to calendar years, not to ages, so they stay put if
+  you later change a retirement or birth year. They are saved in ascending year
+  order, one per year.
+- *Whole-dollar ceilings.* Each ceiling is the figure the search settled on for
+  that year, rounded down to a whole dollar (never below zero), so a saved
+  ceiling is never above the one the row was ranked on. It is a fixed amount in
+  that year's own dollars: it does not rise with inflation.
+- *The Medicare (IRMAA) income line.* Every window is measured on that line,
+  the line the comparison sized its ceilings on, with Fill mode and the target
+  Roth IRA the comparison used. Dropping either would convert different amounts
+  than the row showed, so you cannot pick another target in the dialog.
+- *Everything else is replaced.* Every cap window the scenario had is replaced by
+  the plan's windows. Nothing else on the scenario changes. A scenario that
+  inherits its cap from a parent and saves a plan equal to the parent's goes on
+  inheriting; any other plan is saved on that scenario only and the parent is
+  untouched.
+
+A window caps pre-tax income, as in the Fill description above; it does not order
+a conversion. In a year when spending needs more pre-tax money than the ceiling
+leaves, the projection draws on taxable or Roth accounts, and records that the
+cap could not be met when none are left. The ceilings were worked out against
+the data as it stood, so they are a snapshot: the page marks a saved plan **Out
+of date** once an account, balance, member, expense, income, Social Security or
+scenario setting it used has changed, and the comparison has to be run again to
+refresh it.
+
 **Code.** Paths are under `apps/web/src`. `lib/roth-suggestion/search.ts` runs
 the search; `candidate-grid.ts` lists the plans, `year-limits.ts` works out the
 three limits, `candidate-passes.ts` is the settle loop, `summarise.ts` and
 `ranking.ts` score and rank. `workers/roth-suggestion.worker.ts` runs it in the
 background and `pages/roth-betr/RothSuggestionPanel.tsx` shows it.
 `year-detail.ts` builds each plan's year-by-year table and
-`pages/roth-betr/RothSuggestionYearDetail.tsx` shows it.
+`pages/roth-betr/RothSuggestionYearDetail.tsx` shows it. `lib/roth-suggestion/ladder.ts`
+makes the one-year windows, `lib/roth-betr-apply-helpers.ts`
+(`buildSuggestionCap`) fixes the saved shape, and
+`pages/roth-betr/use-roth-suggestion-save.ts` writes it through the page's save
+path.
 
 #### Why each year
 
