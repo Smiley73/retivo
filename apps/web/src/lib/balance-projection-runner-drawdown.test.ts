@@ -586,6 +586,29 @@ describe('runDrawdownForMethod — RMD context', () => {
     expect(rmd.ownerByAccountId.size).toBe(1);
   });
 
+  it('should skip the synthesized glide pool, when only a CBP is drawable under an allocation override', () => {
+    // A CBP keeps its scalar rate, so no ledger account carries returnPctByMonth and the ledger gains a synthesized household
+    // glide pool that has no accountProjections entry; ownerByAccountId must skip it rather than crash.
+    const cbp = account('cbp1', 'm1', 'RETIREMENT_CASH_BALANCE', 'PRE_TAX');
+    const ctx = makeCtx({
+      primary: member('m1', true, '1980-01-01'),
+      accountProjections: [makeProj(cbp, 500_000)],
+      resolvedScenario: {
+        retirementAllocation: {
+          growthRatePct: 7,
+          incomeRatePct: 3,
+          startGrowthPct: 60,
+          endGrowthPct: null,
+          endYear: null,
+        },
+      } as ScenarioOverrides,
+    });
+    expect(runCap(ctx)).not.toBeNull();
+    const rmd = engineInput().rmdContext!;
+    expect(rmd.ownerByAccountId.get('cbp1')).toBe('m1');
+    expect(rmd.ownerByAccountId.size).toBe(1);
+  });
+
   it('should carry the recorded RMD facts + per-owner separation years to the FORCED draw', () => {
     // The forced-withdrawal pass resolves the per-account rule itself, so the context must hand it the facts; without them it
     // would run the default Uniform-Lifetime branch and contradict its own report disclosure.
