@@ -1014,11 +1014,15 @@ const DESIGNATED_CELLS: SolverCell[] = [
 ];
 
 describe('buildSolverPenaltyAccountsForYear — §408A Roth-IRA slice', () => {
-  it.each(ROTH_IRA_CELLS)('$name', itSolverCell);
+  it.each(ROTH_IRA_CELLS.map((cell) => [cell.name, cell] as const))('%s', (_name, cell) =>
+    itSolverCell(cell),
+  );
 });
 
 describe('buildSolverPenaltyAccountsForYear — §402A designated slice', () => {
-  it.each(DESIGNATED_CELLS)('$name', itSolverCell);
+  it.each(DESIGNATED_CELLS.map((cell) => [cell.name, cell] as const))('%s', (_name, cell) =>
+    itSolverCell(cell),
+  );
 });
 
 describe('buildSolverPenaltyAccountsForYear — carrier edge cases', () => {
