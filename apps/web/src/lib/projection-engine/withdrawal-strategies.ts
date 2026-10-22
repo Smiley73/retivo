@@ -1,7 +1,7 @@
 /** No-ledger single-pool kernel withdrawal hook; production spending rules (downturn guardrails) fire in `runYearByYearStrategyAware`, so a rule wired here would no-op on real runs.
  * Drawdown order: docs/math-withdrawals.md ("Which accounts, and in what order"). */
 
-export interface WithdrawalStepContext {
+interface WithdrawalStepContext {
   readonly stepIdx: number;
   /** Steps remaining until horizon, inclusive. */
   readonly stepsRemaining: number;

@@ -1,84 +1,9 @@
 /**
- * Unit tests for the pure helpers exported by `PlanStressTestSection` (cache signature, longevity anchor).
+ * Unit tests for the pure helpers exported by `PlanStressTestSection` (longevity anchor).
  */
 import { describe, expect, it } from 'vitest';
 import { longestLivedBirthYearOf } from './PlanStressTestSection';
-import { taxContextFingerprint } from '../lib/monte-carlo-input-signature';
 import type { Aggregate, HouseholdMemberPayload } from '../db/types';
-
-
-// Hook contract tests live in
-// `PlanStressTestSection.hook.test.tsx` — they mock the
-// MonteCarloProvider to keep this slot-test file free of worker plumbing.
-
-// ---------------------------------------------------------------------------
-// taxContextFingerprint — auto-rerun cache signature
-// ---------------------------------------------------------------------------
-
-describe('taxContextFingerprint — every tax-context field reaches the cache signature', () => {
-  const bundle = {
-    federalTax: { metadata: { asOfDate: '2026-01-01' } },
-    irmaa: { metadata: { asOfDate: '2026-01-01' } },
-    acaPtc: { metadata: { asOfDate: '2026-01-01' } },
-  };
-  const baseCtx = {
-    taxBundle: bundle,
-    filingStatus: 'MFJ',
-    householdSize: 2,
-    members: [
-      { memberId: 'm1', isoBirthdate: '1965-03-15', onMedicare: false, hasAcaCoverage: true },
-    ],
-  };
-  const fp = (ctx: unknown) =>
-    JSON.stringify(taxContextFingerprint(ctx as Parameters<typeof taxContextFingerprint>[0]));
-
-  it('returns null for an absent tax context', () => {
-    expect(taxContextFingerprint(undefined)).toBeNull();
-  });
-
-  it('changes when the health-coverage months change', () => {
-    // The Health coverage modal writes this key; a hand-written field list
-    // would omit it, so the debounced auto-rerun would never fire and the
-    // panel would keep showing pre-edit numbers.
-    const before = fp(baseCtx);
-    const after = fp({
-      ...baseCtx,
-      healthCoverageMonths: { perMember: { m1: { 2030: { marketplaceMonths: 7 } } } },
-    });
-    expect(after).not.toBe(before);
-  });
-
-  it('changes when the FPL region or benchmark override changes', () => {
-    const before = fp(baseCtx);
-    expect(fp({ ...baseCtx, acaFplRegion: 'alaska' })).not.toBe(before);
-    expect(
-      fp({ ...baseCtx, acaPtcBenchmark: [{ taxYear: 2030, annualSlcspDollars: 12_000 }] }),
-    ).not.toBe(before);
-  });
-
-  it('changes for a field the old hand-written list also omitted (MAGI bootstrap)', () => {
-    expect(fp({ ...baseCtx, magiBootstrapLookbackMinus2: 120_000 })).not.toBe(fp(baseCtx));
-  });
-
-  it('is stable for an identical context and ignores the bundle tables beyond their asOfDate', () => {
-    expect(fp(baseCtx)).toBe(fp({ ...baseCtx }));
-    const otherTables = {
-      ...baseCtx,
-      taxBundle: {
-        federalTax: { metadata: { asOfDate: '2026-01-01' }, values: { 2026: 'ignored' } },
-        irmaa: { metadata: { asOfDate: '2026-01-01' } },
-        acaPtc: { metadata: { asOfDate: '2026-01-01' } },
-      },
-    };
-    expect(fp(otherTables)).toBe(fp(baseCtx));
-    const refreshed = {
-      ...baseCtx,
-      taxBundle: { ...bundle, irmaa: { metadata: { asOfDate: '2027-01-01' } } },
-    };
-    expect(fp(refreshed)).not.toBe(fp(baseCtx));
-  });
-});
-
 
 // ---------------------------------------------------------------------------
 // The longevity cap is anchored on a member birthdate, so what counts as

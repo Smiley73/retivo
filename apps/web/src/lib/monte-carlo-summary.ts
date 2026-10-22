@@ -114,8 +114,8 @@ function depletionYearPercentile(
   return sortedDepletion.length > idx ? sortedDepletion[idx] : null;
 }
 
-/** De-minimis real-dollar threshold for a depleted path: the kernel's accept-loss fp residual leaves a tiny positive balance, so the gate is `endingReal < EPS_REAL`, not `=== 0`. */
-export const EPS_REAL = 1;
+// De-minimis real-dollar threshold for a depleted path: the kernel's accept-loss fp residual leaves a tiny positive balance, so the gate is `endingReal < EPS_REAL`, not `=== 0`.
+const EPS_REAL = 1;
 
 interface CardTargets {
   0.5: number | null;
@@ -123,20 +123,14 @@ interface CardTargets {
   0.1: number | null;
 }
 
-/**
- * Reroll band tolerances. `DEPLETION_BUCKET`: years a depleted alternative's `depletionYear` may differ from the card stat (hard ceiling 2,
- * so rerolled lines visibly differ while the default pick stays card-exact). `SURVIVING_BAND_FRAC`: ±2.5 % of the tier's real ending balance.
- * `REROLL_BAND_CAP`: seeds stored per tier, spread across the outcome range.
- */
-export const DEPLETION_BUCKET = 2;
+// Reroll band tolerances. `DEPLETION_BUCKET`: years a depleted alternative's `depletionYear` may differ from the card stat (hard ceiling 2, so rerolled lines visibly differ while the default pick stays card-exact).
+// `SURVIVING_BAND_FRAC`: ±2.5 % of the tier's real ending balance. `REROLL_BAND_CAP`: seeds stored per tier, spread across the outcome range.
+const DEPLETION_BUCKET = 2;
 const SURVIVING_BAND_FRAC = 0.025;
-export const REROLL_BAND_CAP = 25;
+const REROLL_BAND_CAP = 25;
 
-/**
- * Depletion-aware tie-break: when the rank-`p` path is effectively depleted (ran out and ended below `EPS_REAL`) and the tier has a card target,
- * picks the effectively-depleted path closest to it (ties: lowest pathIndex) so the basis line's run-out age matches its card; otherwise `rankIdx`.
- */
-export function reconcileEffectivelyDepletedPick(
+// Depletion-aware tie-break: when the rank-`p` path is effectively depleted (ran out and ended below `EPS_REAL`) and the tier has a card target, picks the effectively-depleted path closest to it (ties: lowest pathIndex) so the basis line's run-out age matches its card.
+function reconcileEffectivelyDepletedPick(
   rankIdx: number,
   endingReal: number[],
   depletionYearByPath: (number | null)[],
@@ -292,12 +286,8 @@ function evenSpread(indices: number[], cap: number): number[] {
   return out;
 }
 
-/**
- * Per-tier card-consistent band of candidate seeds for the reroll control. Candidates lie within tolerance of the tier outcome
- * (depleted: `|depletionYear - cardTarget| <= DEPLETION_BUCKET`; surviving: within `SURVIVING_BAND_FRAC` of the percentile value);
- * the default pick is band element 0 and the rest are capped and spread evenly to `REROLL_BAND_CAP`.
- */
-export function assembleRepresentativeBands(
+// Per-tier card-consistent band of candidate seeds for the reroll control: candidates lie within tolerance of the tier outcome (depleted: `|depletionYear - cardTarget| <= DEPLETION_BUCKET`; surviving: within `SURVIVING_BAND_FRAC` of the percentile value); the default pick is element 0 and the rest are capped and spread evenly.
+function assembleRepresentativeBands(
   baseSeed: number,
   endingReal: number[],
   depletionYearByPath: (number | null)[],

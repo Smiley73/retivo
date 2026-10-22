@@ -61,7 +61,6 @@ import {
   buildMcFactRmdRequiredCentsByOwnerIdx,
   type McRmdBalanceCents,
 } from './monte-carlo-rmd.js';
-export { priorYearTaxBases } from './monte-carlo-tax.js';
 import type { RothBasisCarrier } from './balance-projection-runner-roth-basis.js';
 import type { StepOutcome } from './projection-engine/kernel.js';
 import { buildMcFillConversionHook } from './monte-carlo-fill-conversion.js';
@@ -100,20 +99,20 @@ import type { DrawdownYear, DrawdownAccountYear } from './drawdown-engine-types.
  *  The AGENTS.md "ENGINE_VERSION bump — required companion edits" checklist lists everything a bump updates. */
 export const ENGINE_VERSION = 73;
 
-export interface PathOutcome {
+interface PathOutcome {
   readonly balanceByYearNominal: number[];
   readonly balanceByYearReal: number[];
   readonly depletionYear: number | null;
   readonly endingBalanceNominal: number;
   readonly endingBalanceReal: number;
-  /** Per-year tax series in dollars (`effectiveTaxRateByYear` is 0..1), defined when `taxContext` is present. */
+  // Per-year tax series in dollars (`effectiveTaxRateByYear` is 0..1), defined when `taxContext` is present.
   readonly federalTaxByYear?: number[];
   readonly irmaaSurchargeByYear?: number[];
   readonly acaPtcSubsidyByYear?: number[];
   readonly acaCreditAppliedToPremiumsByYear?: number[];
   readonly effectiveTaxRateByYear?: number[];
   readonly netAfterTaxByYear?: number[];
-  /** Full per-year capture, populated only when the path is replayed under `captureRun`, so the hot per-path sweep allocates nothing extra; `seed` is filled by the caller. */
+  // Populated only when the path is replayed under `captureRun`, so the hot per-path sweep allocates nothing extra; `seed` is filled by the caller.
   readonly representative?: Omit<RepresentativeRun, 'seed'>;
 }
 
@@ -346,8 +345,8 @@ function accumulatePerYearTaxResult(
   magi.unitsMinus1 = rescaleUnitMagiToTotal(taxResult.filingUnitMagi, magiForRingDollars);
 }
 
-/** Rescales per-return MAGI entries to sum to `totalDollars`, keeping each return's share (equal split for a zero-MAGI year). The split is exact to the cent by largest remainder (`allocateCentsByWeight`): rounding independently let equal returns of an odd-cent total drift a cent above the household ring, which becomes the IRMAA look-back, where a cent across a tier threshold moves the household onto a higher surcharge for the whole year. */
-export function rescaleUnitMagiToTotal(
+// Exact to the cent by largest remainder (`allocateCentsByWeight`): rounding independently let equal returns of an odd-cent total drift a cent above the household ring, which becomes the IRMAA look-back, where a cent across a tier threshold moves the household onto a higher surcharge for the whole year.
+function rescaleUnitMagiToTotal(
   units: readonly FilingUnitMagi[],
   totalDollars: number,
 ): readonly FilingUnitMagi[] {
@@ -359,40 +358,6 @@ export function rescaleUnitMagiToTotal(
   const weights = units.map((u) => (currentCents > 0 ? u.magiCents : 1));
   const rescaled = allocateCentsByWeight(targetCents, weights);
   return units.map((u, index) => ({ ...u, magiCents: rescaled[index] }));
-}
-
-/** Subtracts the cumulative same-year tax cashflow from each year's pre-tax balance (tax is funded the year it is owed; no regrown foregone return) and recomputes the after-tax depletion year. After-tax depletion is absorbing: once a year hits zero every later year is zero, mirroring the kernel's absorbing pre-tax depletion. */
-export function applyAfterTaxAdjustment(
-  balanceNominal: number[],
-  balanceReal: number[],
-  taxDrawByYear: number[],
-  out: StepOutcome,
-  firstYear: number,
-  stepCount: number,
-  preTaxDepletionYear: number | null,
-): number | null {
-  const horizonYears = balanceNominal.length;
-  let cumTax = 0;
-  let afterTaxDepletionYear: number | null = null;
-  for (let y = 0; y < horizonYears; y += 1) {
-    cumTax += taxDrawByYear[y];
-    const endStep = Math.min(stepCount - 1, (y + 1) * 12 - 1);
-    if (afterTaxDepletionYear !== null) {
-      balanceNominal[y] = 0;
-      balanceReal[y] = 0;
-      continue;
-    }
-    if (cumTax <= 0) continue;
-    const adjustedNominal = Math.max(0, balanceNominal[y] - cumTax);
-    if (adjustedNominal <= 0 && balanceNominal[y] > 0) {
-      afterTaxDepletionYear = firstYear + y;
-    }
-    balanceNominal[y] = adjustedNominal;
-    balanceReal[y] = adjustedNominal / out.cumCpi[endStep];
-  }
-  if (preTaxDepletionYear === null) return afterTaxDepletionYear;
-  if (afterTaxDepletionYear === null) return preTaxDepletionYear;
-  return Math.min(preTaxDepletionYear, afterTaxDepletionYear);
 }
 
 /** Builds the per-path tax state when a `taxContext` is present, else null. */
@@ -833,8 +798,8 @@ function buildPriorPreTaxByOwnerByYearIndex(
   return out;
 }
 
-/** Strategy-path tax fill: classifies each pass-1 strategy year's per-account withdrawal, runs `applyPerYearTaxForPath` and accumulates the per-path tax arrays and same-year tax draw. `priorBalance` is the drawdown-entry total for year 0, the prior row's end balance afterwards. Mutates `taxState.acc` / `taxState.taxDrawByYear`. */
-export function fillStrategyYearTax(
+// Mutates `taxState.acc` / `taxState.taxDrawByYear`; `priorBalance` is the drawdown-entry total for year 0, the prior row's end balance afterwards.
+function fillStrategyYearTax(
   input: MonteCarloInput,
   retYears: DrawdownYear[],
   accountsIn: ReadonlyArray<DrawdownAccountInput>,
@@ -998,9 +963,8 @@ function reseedRothBasisCarrier(taxState: TaxPathContext): void {
     seedMcDesignatedRothPool(taxState.input.taxContext?.rothOrderedProfile) ?? null;
 }
 
-/** Builds the strategy engine's `RmdContextInput` from the MC tax context and ledger so every named-strategy path runs `applyRmdFloorPrePass` inline with real per-owner floors; carries the per-account RMD facts and separation years off `mcRmdContext`, so the forced draw matches the MC tax floor.
- *  Admission is inherited-aware (a household holding only inherited accounts still gets a context); `undefined` without a tax context or a qualifying account. */
-export function buildStrategyRmdContext(input: MonteCarloInput): RmdContextInput | undefined {
+// Carries the per-account RMD facts and separation years off `mcRmdContext` so the forced draw matches the MC tax floor; admission is inherited-aware (a household holding only inherited accounts still gets a context).
+function buildStrategyRmdContext(input: MonteCarloInput): RmdContextInput | undefined {
   const taxCtx = input.taxContext;
   if (taxCtx === undefined || taxCtx.members.length === 0) return undefined;
   const rmdFactsByAccountId = input.mcRmdContext?.rmdFactsByAccountId;

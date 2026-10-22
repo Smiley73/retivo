@@ -7,13 +7,8 @@ import { seedFromString } from './sfc32';
 
 const PATH_COUNT = MC_PATH_COUNT;
 
-/**
- * Fingerprints the whole `McTaxContext` so any tax-assumption edit changes the signature. The context is spread so
- * fields added later are covered; `taxBundle` becomes its `asOfDate` triple and `members` its four identity fields
- * (per-year Medicare / Marketplace months derive from `healthCoverageMonths`). `JSON.stringify` drops `undefined`
- * keys, so an unset optional leaves the key shape unchanged.
- */
-export function taxContextFingerprint(taxCtx: MonteCarloInput['taxContext']): unknown {
+// The context is spread so a field added later is covered; `taxBundle` folds to its `asOfDate`s and `members` to four identity fields.
+function taxContextFingerprint(taxCtx: MonteCarloInput['taxContext']): unknown {
   if (!taxCtx) return null;
   const { taxBundle, members, ...rest } = taxCtx;
   return {

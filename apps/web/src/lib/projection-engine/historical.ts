@@ -159,19 +159,8 @@ export function historicalMonthlySummary(): HistoricalMonthlySummary {
   return memoSummary;
 }
 
-/** Draws one month uniformly at random from the dataset. */
-export function drawOneMonth(rng: Rng): HistoricalMonth {
-  const data = loadHistoricalMonthly();
-  const n = data.length;
-  const idx = rng.uniformInt(0, n - 1);
-  return data[idx];
-}
-
-/**
- * Default mean block length L (months): the smallest candidate whose lag-1 |return| autocorrelation clears the
- * clustering bar while keeping the success-probability SE within the recorded margin; table in `__fixtures__/sampler-stats.json`.
- */
-export const DEFAULT_MEAN_BLOCK_LENGTH = 3;
+// Smallest mean block length L (months) whose lag-1 |return| autocorrelation clears the clustering bar while keeping the success-probability SE within the recorded margin; table in `__fixtures__/sampler-stats.json`.
+const DEFAULT_MEAN_BLOCK_LENGTH = 3;
 
 /**
  * Stationary bootstrap (Politis & Romano 1994) of `monthCount` months: blocks of consecutive
@@ -251,11 +240,8 @@ export interface BlendedMix {
   readonly cashPct: number;
 }
 
-/**
- * Market-stress return shock: `annualInvestmentCostPct` is a flat portfolio drag, `returnShock` a per-asset annual pp reduction.
- * The MC per-account hot path inlines the same arithmetic; `historical.test.ts` pins this reference formula so a drift is caught.
- */
-export interface BlendedReturnShock {
+// `annualInvestmentCostPct` is a flat portfolio drag, `returnShock` a per-asset annual pp reduction; the MC per-account hot path inlines the same arithmetic.
+interface BlendedReturnShock {
   readonly annualInvestmentCostPct?: number;
   readonly returnShock?: {
     readonly stocksPct: number;

@@ -15,12 +15,8 @@ import type {
 import type { MagiCapWindowRuntime } from './drawdown-engine-per-account-strategy-helpers.js';
 import type { MonteCarloInput } from './monte-carlo-types.js';
 
-/**
- * Splits the deterministic Roth total into its wholesale tax-free inherited subset and the §408A-ordered remainder.
- * Mapping the inherited tranche as ordered would solve against more Roth tax than the funded pass charges; no
- * account-level split exists, so the rest stays basis-ordered. The two buckets sum to `rothDollars`.
- */
-export function splitProbeRothTranche(classification: {
+// Mapping the inherited tranche as ordered would solve against more Roth tax than the funded pass charges; no account-level split exists, so the rest stays basis-ordered.
+function splitProbeRothTranche(classification: {
   readonly rothDollars: number;
   readonly rothInheritedTaxFreeDollars?: number;
 }): { readonly rothBasisOrderedDollars: number; readonly rothWholesaleTaxFreeDollars: number } {
@@ -34,12 +30,8 @@ export function splitProbeRothTranche(classification: {
   };
 }
 
-/**
- * Withdrawals-only `applyTaxYear` input for one MC drawdown year; `null` before retirement or with no survivors.
- * The RMD floor derives from `priorPreTaxByOwner`, the basis `fillStrategyYearTax` threads, so a Roth-heavy or
- * all-taxable household sees a $0 floor (no phantom RMD income).
- */
-export function buildYearTaxInput(
+// The RMD floor derives from `priorPreTaxByOwner`, the basis `fillStrategyYearTax` threads, so a Roth-heavy or all-taxable household sees a $0 floor (no phantom RMD income).
+function buildYearTaxInput(
   input: MonteCarloInput,
   taxCtx: McTaxContext,
   taxYear: number,

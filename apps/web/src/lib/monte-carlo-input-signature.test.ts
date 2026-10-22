@@ -1,14 +1,6 @@
 /**
- * Pins the Plan Stress Test signature string and the seed drawn from it. The
- * expected values were computed with the code as it stood in
- * `components/PlanStressTestSection.tsx`, before it moved here, over inputs that
- * exercise every folded field (ledger fingerprints, a glide path, events in
- * unsorted order, a set of excluded indices, guardrails, a tax context). Running
- * the same input twice would not notice a changed fold order; a frozen value does.
- *
- * The tax context is synthetic with fixed `asOfDate` strings, because the real
- * calibration bundle's dates are folded into the signature and would break the
- * pin at every yearly tax refresh.
+ * Frozen signature digests and seeds over inputs that exercise every folded field.
+ * The tax context is synthetic: the real bundle's `asOfDate`s would break the pin at every tax refresh.
  */
 import { describe, expect, it } from 'vitest';
 import type { MonteCarloInput } from './monte-carlo';
@@ -129,7 +121,6 @@ function buildSeedVectorInputs(): Array<{ name: string; input: MonteCarloInput; 
   ];
 }
 
-/** First 16 hex characters of the signature's SHA-256, so the long string is pinned without being pasted. */
 async function digest(signature: string): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(signature)));
   return Array.from(bytes.slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -162,6 +153,20 @@ describe('hashMcInput and autoRunSeed', () => {
     const other = { ...full!.input, pathCount: 7 } as MonteCarloInput;
     expect(MC_PATH_COUNT).toBe(10_000);
     expect(hashMcInput(other, false)).toBe(hashMcInput(full!.input, false));
+  });
+
+  // A hand-written field list would omit these, and the auto-rerun would never fire after an edit.
+  it.each([
+    ['health-coverage months', { healthCoverageMonths: { perMember: { m1: { 2030: { marketplaceMonths: 8 } } } } }],
+    ['FPL region', { acaFplRegion: 'alaska' }],
+    ['PTC benchmark', { acaPtcBenchmark: [{ taxYear: 2030, annualSlcspDollars: 12_000 }] }],
+    ['MAGI bootstrap', { magiBootstrapLookbackMinus2: 120_000 }],
+    ['filing status', { filingStatus: 'SINGLE' }],
+    ['bundle as-of date', { taxBundle: { federalTax: { metadata: { asOfDate: '2000-01-01' } }, irmaa: { metadata: { asOfDate: '2001-02-02' } }, acaPtc: { metadata: { asOfDate: '2000-03-03' } } } }],
+  ])('draws a different signature when only the tax context\'s %s changes', (_name, patch) => {
+    const [full] = buildSeedVectorInputs();
+    const edited = { ...full!.input, taxContext: { ...full!.input.taxContext, ...patch } } as MonteCarloInput;
+    expect(hashMcInput(edited, false)).not.toBe(hashMcInput(full!.input, false));
   });
 
   it('draws a different seed when the plan or the CBP flag changes', () => {

@@ -15,10 +15,7 @@
  *  - buildMcTaxContext builds a context for every named strategy.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  assembleMcBundle,
-  computeMedicalDemandBase,
-} from './monte-carlo-input-bundle';
+import { assembleMcBundle } from './monte-carlo-input-bundle';
 import {
   canonicalSsSharesByYear,
   mcInputFromBundle,
@@ -632,7 +629,7 @@ describe('mcInputFromBundle + buildOptimizerMcScenarioSetup — pinned seed + pa
 
 describe('MC per-category inflation buckets', () => {
   // NOTE: `hsaQualified` defaults to `true` for medical-category fixtures used
-  // in tests that drive `computeMedicalDemandBase` — medical expenses must be
+  // in tests that read the MC medical demand — medical expenses must be
   // explicitly qualified to contribute to HSA demand. Fixtures for
   // non-medical categories ignore this parameter.
   const expense = (
@@ -842,44 +839,7 @@ describe('MC per-category inflation buckets', () => {
     expect(baseSum).toBeGreaterThan(0);
   });
 
-  // Drive `computeMedicalDemandBase` against a production-shaped pipeline
-  // context (mirrors the private `computeWindowedExpenseBase` setup). Asserts the
-  // rate-selection logic directly on the helper (the bundle-seam forwarding the
-  // fields end-to-end is covered separately by the production-seam suite).
-  function medicalDemandBaseForArgs(args: RunBalanceProjectionArgs): ReturnType<typeof computeMedicalDemandBase> {
-    const ctx = buildCtx(args);
-    const resolvedExpenses = resolveExpensesForScenario(args.scenarioId, [...ctx.effectiveScenarios], [...args.expenses]);
-    const baseCtx = {
-      ...buildExpenseProjectionContext({
-        resolved: {
-          discretionarySpending: ctx.resolvedScenario.discretionarySpending,
-          lifeExpectancy: ctx.resolvedScenario.lifeExpectancy,
-        },
-        primary: { birthdate: ctx.primary.payload.birthdate },
-        secondary: ctx.secondary ? { birthdate: ctx.secondary.payload.birthdate } : null,
-        primaryRetirementIso: ctx.primaryRetIso,
-      }),
-      todayYear: args.todayYear,
-      todayMonthIndex: args.todayMonthIndex,
-      retirementMonth0: ctx.primaryRetirementMonth0,
-    };
-    const yearRange = { from: args.todayYear, to: ctx.horizonYear };
-    const stepCount = (ctx.horizonYear - args.todayYear + 1) * 12;
-    const inflation = resolveInflationForScenario(
-      args.scenarioId,
-      [...ctx.effectiveScenarios],
-      new Set(args.medicalCategoryIds),
-    );
-    return computeMedicalDemandBase({
-      runArgs: args,
-      resolvedExpenses,
-      baseCtx,
-      yearRange,
-      inflation,
-      generalRate: inflation.ratePct,
-      stepCount,
-    });
-  }
+  const medicalDemandBaseForArgs = (args: RunBalanceProjectionArgs) => mcInputFromBundle(assemble(args).bundle);
 
   it('bucket-composition: a windowed + discretionary-multiplier Medical expense lands the per-month bucket base matching the scalar base', () => {
     const scenario = baseScenario('s-disc', 'Disc', {
@@ -1429,8 +1389,8 @@ describe('buildMcTaxContext', () => {
 });
 
 // ---------------------------------------------------------------------------
-// HSA-qualified filter in computeMedicalDemandBase. Tests drive the
-// exported helper directly, proving the
+// HSA-qualified filter in computeMedicalDemandBase. Tests read the demand
+// off the assembled MC input, proving the
 // MC builder applies the same isHsaQualifiedMedical predicate as the
 // deterministic buildMedicalDemandByMonth.
 // ---------------------------------------------------------------------------
@@ -1461,53 +1421,12 @@ describe('computeMedicalDemandBase — hsaQualified filter', () => {
     },
   });
 
-  /** Runs computeMedicalDemandBase for a simple fixture with one member
-   *  retiring at 67 (2032), zero inflation, medicalCategoryIds = ['cat-medical']. */
-  function demandFor(expenses: Aggregate<ExpensePayload>[]): ReturnType<typeof computeMedicalDemandBase> {
-    const args = buildArgs({
-      expenses,
-      medicalCategoryIds: ['cat-medical'],
-    });
-    const ctx = buildCtx(args);
-    const resolvedExpenses = resolveExpensesForScenario(
-      args.scenarioId,
-      [...ctx.effectiveScenarios],
-      [...args.expenses],
-    );
-    const baseCtxArg = {
-      ...buildExpenseProjectionContext({
-        resolved: {
-          discretionarySpending: ctx.resolvedScenario.discretionarySpending,
-          lifeExpectancy: ctx.resolvedScenario.lifeExpectancy,
-        },
-        primary: { birthdate: ctx.primary.payload.birthdate },
-        secondary: ctx.secondary ? { birthdate: ctx.secondary.payload.birthdate } : null,
-        primaryRetirementIso: ctx.primaryRetIso,
-      }),
-      todayYear: args.todayYear,
-      todayMonthIndex: args.todayMonthIndex,
-      retirementMonth0: ctx.primaryRetirementMonth0,
-    };
-    const yearRange = { from: args.todayYear, to: ctx.horizonYear };
-    const stepCount = (ctx.horizonYear - args.todayYear + 1) * 12;
-    const inflation = resolveInflationForScenario(
-      args.scenarioId,
-      [...ctx.effectiveScenarios],
-      new Set(args.medicalCategoryIds),
-    );
-    return computeMedicalDemandBase({
-      runArgs: args,
-      resolvedExpenses,
-      baseCtx: baseCtxArg,
-      yearRange,
-      inflation,
-      generalRate: inflation.ratePct,
-      stepCount,
-    });
+  function demandFor(expenses: Aggregate<ExpensePayload>[]) {
+    return mcInputFromBundle(assemble(buildArgs({ expenses, medicalCategoryIds: ['cat-medical'] })).bundle);
   }
 
   /** Returns the non-zero sum of monthlyMedicalDemandBase (over active months). */
-  function totalDemand(result: ReturnType<typeof computeMedicalDemandBase>): number {
+  function totalDemand(result: ReturnType<typeof demandFor>): number {
     if (!result.monthlyMedicalDemandBase) return 0;
     return result.monthlyMedicalDemandBase.reduce((a, b) => a + b, 0);
   }
@@ -1571,42 +1490,7 @@ describe('computeMedicalDemandBase — hsaQualified filter', () => {
       scenario,
       medicalCategoryIds: ['cat-medical', 'cat-med2'],
     });
-    const ctx = buildCtx(args);
-    const resolvedExpenses = resolveExpensesForScenario(
-      args.scenarioId,
-      [...ctx.effectiveScenarios],
-      [...args.expenses],
-    );
-    const baseCtxArg = {
-      ...buildExpenseProjectionContext({
-        resolved: {
-          discretionarySpending: ctx.resolvedScenario.discretionarySpending,
-          lifeExpectancy: ctx.resolvedScenario.lifeExpectancy,
-        },
-        primary: { birthdate: ctx.primary.payload.birthdate },
-        secondary: ctx.secondary ? { birthdate: ctx.secondary.payload.birthdate } : null,
-        primaryRetirementIso: ctx.primaryRetIso,
-      }),
-      todayYear: args.todayYear,
-      todayMonthIndex: args.todayMonthIndex,
-      retirementMonth0: ctx.primaryRetirementMonth0,
-    };
-    const yearRange = { from: args.todayYear, to: ctx.horizonYear };
-    const stepCount = (ctx.horizonYear - args.todayYear + 1) * 12;
-    const inflation = resolveInflationForScenario(
-      args.scenarioId,
-      [...ctx.effectiveScenarios],
-      new Set(args.medicalCategoryIds),
-    );
-    const result = computeMedicalDemandBase({
-      runArgs: args,
-      resolvedExpenses,
-      baseCtx: baseCtxArg,
-      yearRange,
-      inflation,
-      generalRate: inflation.ratePct,
-      stepCount,
-    });
+    const result = mcInputFromBundle(assemble(args).bundle);
     // Only cat-medical (qualified) contributes; cat-med2 (not-qualified) is
     // excluded. The single bucket rate must be the cat-medical rate (5%).
     expect(result.monthlyMedicalDemandBase).toBeDefined();

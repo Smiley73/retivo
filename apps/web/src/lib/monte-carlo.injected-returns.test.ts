@@ -1,9 +1,4 @@
-/**
- * Deterministic-mode harness for MC — when `injectedReturns` and
- * `injectedCpi` are supplied, the kernel skips historical sampling
- * and uses the caller-provided per-month series instead. The cross-engine
- * pin tests depend on this contract.
- */
+/** Injected monthly returns and CPI replace historical sampling; the cross-engine pins depend on it. */
 import { describe, expect, it } from 'vitest';
 import {
   runMonteCarlo,
@@ -34,7 +29,6 @@ function buildLedger(): MonteCarloAccountLedger[] {
   ];
 }
 
-// Build nominal year arrays for SS + other income.
 const INJ_YEARS = 2086 - 2026 + 1; // 61
 const INJ_SS_BY_YEAR = Array.from({ length: INJ_YEARS }, (_, i) =>
   i >= 2046 - 2026 ? 30_000 : 0,
@@ -67,7 +61,6 @@ function flatReturns(monthlyPct: number): Float64Array {
 
 describe('runMonteCarlo — injected-returns mode', () => {
   it('every path produces the same balance series when injected arrays are supplied', () => {
-    // Flat 0.5 %/mo return + 0.2 %/mo CPI — exact deterministic.
     const injectedReturns = flatReturns(0.5);
     const injectedCpi = flatReturns(0.2);
     const out = runMonteCarlo({
@@ -76,7 +69,6 @@ describe('runMonteCarlo — injected-returns mode', () => {
       injectedCpi,
       pathCount: 20,
     });
-    // Determinism collapses the fan: every percentile band coincides.
     for (let y = 0; y < out.horizonYears; y += 1) {
       expect(out.percentilesNominal.p50[y]).toBeCloseTo(
         out.percentilesNominal.p10[y],
