@@ -12,7 +12,6 @@ import {
   medicalCategoryIdsFrom,
   medicalCategoryIdSet,
   isHsaQualifiedMedical,
-  isMedicalExpense,
 } from './expense-category-resolvers';
 import { DEFAULT_EXPENSE_CATEGORY_IDS } from './expense-categories-bootstrap';
 import type { Aggregate, ExpenseCategoryPayload } from '../db/types';
@@ -152,20 +151,5 @@ describe('medicalCategoryIdSet', () => {
   it('re-applies the dangerous-key filter (defense-in-depth)', () => {
     const set = medicalCategoryIdSet(['cat-care', '__proto__', 'constructor']);
     expect([...set]).toEqual(['cat-care']);
-  });
-});
-
-describe('isMedicalExpense', () => {
-  const medicalIds: ReadonlySet<string> = new Set(['cat-medical']);
-
-  it('admits every row in a medical category, HSA-qualified or not', () => {
-    expect(isMedicalExpense({ payload: { categoryId: 'cat-medical' } }, medicalIds)).toBe(true);
-    expect(
-      isMedicalExpense({ payload: { categoryId: 'cat-medical', hsaQualified: true } as never }, medicalIds),
-    ).toBe(true);
-  });
-
-  it('rejects a row in any other category', () => {
-    expect(isMedicalExpense({ payload: { categoryId: 'cat-housing' } }, medicalIds)).toBe(false);
   });
 });

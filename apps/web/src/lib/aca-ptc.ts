@@ -419,9 +419,7 @@ export function computeAcaPtc(
   // `magiCents` input is already deflated to the clamped snapshot year for tier
   // classification, so `MAGI(deflated) × applicableFigure` is in clamped-year
   // dollars; scaling restores projection-year dollars. The benchmark premium is
-  // NOT scaled here: the caller grows the rough fallback at the scenario's
-  // medical rate before this call (`growRoughBenchmarkCents`), and a
-  // user-entered override is used as entered for its year.
+  // not scaled here: the caller has already priced it for the year.
   const contributionScaling =
     input.expectedContributionScalingFactor !== undefined &&
     input.expectedContributionScalingFactor > 0
@@ -503,10 +501,7 @@ export function fplDollarsForRegion(
  * `tax-integration-helpers.ts` derives its base/growth/age from these constants
  * (×12 to annual dollars), so the two curves cannot drift apart. Expressed
  * per member per month so the household benchmark can be summed per member.
- *
- * `baseYear` anchors the premium level: the $700 figure is a 2026 price, and
- * every later tax year multiplies it by `(1 + medical rate)^(taxYear − baseYear)`
- * (`growRoughBenchmarkCents`). Re-anchor the base amount and `baseYear` together.
+ * `baseYear` is the year the base amount is priced in; re-anchor the two together.
  */
 export const ROUGH_BENCHMARK_ASSUMPTIONS = {
   baseMonthlyDollars: 700,
@@ -518,12 +513,10 @@ export const ROUGH_BENCHMARK_ASSUMPTIONS = {
 } as const;
 
 /**
- * Grow a rough age-priced annual benchmark (integer cents) from the base year to
- * `taxYear` at the scenario's medical inflation rate:
- * `round(cents × (1 + medicalRatePct / 100)^max(0, taxYear − baseYear))`, rounded
- * once. Years at or before the base year, and an absent rate, return the input
- * unchanged. Applies to the age-priced fallback ONLY: a user-entered benchmark is
- * used as entered and never passes through here.
+ * Grow the age-priced annual benchmark (integer cents) from the base year to
+ * `taxYear` at the scenario's medical inflation rate, rounded once. Identity at or
+ * before the base year or without a rate. A user-entered benchmark never passes
+ * through here.
  */
 export function growRoughBenchmarkCents(
   annualCents: number,

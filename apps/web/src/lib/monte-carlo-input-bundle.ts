@@ -577,9 +577,8 @@ function computeWindowedExpenseBase(
   /** Per-effective-rate medical-demand buckets — emitted only when the
    *  `isMedical` categories span > 1 effective rate. */
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
-  /** Every `isMedical` row (the HSA demand above is its qualified subset), with
-   *  its effective rate and per-rate buckets — caps the credit applied to
-   *  premiums. Absent when no category is flagged. */
+  /** Every `isMedical` row (the HSA demand above is its qualified subset): the
+   *  cap on the credit applied to premiums. */
   monthlyMedicalExpenseBase?: number[];
   medicalExpenseRatePct?: number;
   monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
@@ -708,11 +707,9 @@ export function computeMedicalDemandBase(args: MedicalBaseArgs): {
 }
 
 /**
- * The same base for EVERY `isMedical` row, HSA-qualified or not: the cap on the
- * ACA credit applied to premiums. Built by the one routine the HSA demand uses
- * with the predicate switched, so windowing, monthly bucketing and rounding are
- * identical. Buckets are sorted by rate so the serialized input (and its cache
- * key) does not depend on category order.
+ * The same base for every `isMedical` row: the cap on the credit applied to
+ * premiums. Buckets are sorted by rate so the cache key does not depend on
+ * category order.
  */
 function computeMedicalExpenseBase(args: MedicalBaseArgs): {
   monthlyMedicalExpenseBase?: number[];

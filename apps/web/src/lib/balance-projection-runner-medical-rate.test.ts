@@ -1,10 +1,7 @@
 /**
- * Plumbing guard for the scenario's medical inflation rate in the deterministic
- * tax pass. The engine tests (`tax-integration-aca-benchmark-growth.test.ts`)
- * prove `applyTaxYear` grows the rough benchmark when it is handed the rate;
- * these prove the runner HANDS it over — the one failure they cannot see is a
- * production path that silently leaves the field absent and reverts to no
- * growth.
+ * The deterministic tax pass hands the scenario's medical inflation rate to
+ * `applyTaxYear`; a production path that left the field absent would revert to
+ * no growth without failing any engine test.
  */
 import { describe, it, expect } from 'vitest';
 import {

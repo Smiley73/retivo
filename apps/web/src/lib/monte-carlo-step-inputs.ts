@@ -50,9 +50,7 @@ export interface BuildStepInputsResult {
    *  `isMedical` category drives the base. */
   readonly medicalDemandCents: Float64Array;
   /** Per-year modeled Medical expenses (every `isMedical` row) at the year-END
-   *  step, nominal dollars: the per-path-inflated twin of `nominalExpenseByYear`
-   *  for the medical subset. Caps the ACA credit applied to premiums. All-zero
-   *  when no `isMedical` category drives the base. */
+   *  step, nominal dollars; the medical twin of `nominalExpenseByYear`. */
   readonly nominalMedicalExpenseByYear: Float64Array;
 }
 
@@ -133,12 +131,9 @@ export function buildStepInputs(
 }
 
 /**
- * Per-year modeled Medical expenses (every `isMedical` row) at the year-END
- * step: each year's today's-dollar sum times the medical rate's cumulative CPI
- * (the same mean-shift `(rate − general)/12` the HSA demand and the expense
- * buckets use), summed per bucket when the medical categories span several
- * rates. Mirrors how `nominalExpenseByYear` is built, so the cap and the spending
- * it caps are inflated the same way.
+ * Per-year modeled Medical expenses at the year-END step: each year's today's-dollar
+ * sum times the cumulative CPI shifted by `(rate − general)/12`, per rate bucket,
+ * inflated the way `nominalExpenseByYear` is.
  */
 function nominalMedicalExpenseByYear(
   input: MonteCarloInput,

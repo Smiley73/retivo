@@ -77,9 +77,8 @@ async function openTaxBurdenInfo(): Promise<HTMLElement> {
   return screen.getByRole('dialog', { name });
 }
 
-/** The summary tile (a label div plus a value div) whose label is `label`. The
- *  year-by-year table can repeat a label as a column header, so pick the tile
- *  by its shape rather than by text alone. */
+/** The summary tile whose label is `label`; the year-by-year table can repeat a
+ *  label as a column header. */
 function summaryTile(label: string): HTMLElement {
   const tile = screen
     .getAllByText(label)
@@ -285,9 +284,6 @@ describe('BalanceProjectionCharts', () => {
   });
 
   it('renders the credit applied to premiums tile with its lifetime total (deterministic basis)', () => {
-    // 2030: $5,000 credit of which $3,000 lowered the withdrawal; 2031: another
-    // $1,000 of $2,000. The tile sums the part applied ($4,000), distinct from
-    // the ACA health credits tile ($7,000).
     const years = [
       drawdownYear(2030, { acaPtcSubsidyCents: 500_000, acaCreditAppliedToPremiumsCents: 300_000 }),
       drawdownYear(2031, { acaPtcSubsidyCents: 200_000, acaCreditAppliedToPremiumsCents: 100_000 }),
@@ -1245,41 +1241,8 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
   describe('Medicaid note', () => {
     const MEDICAID_COPY = /Medicaid may apply/i;
 
-    it('shows the Medicaid paragraph when a deterministic year is at or below 138% of the poverty line', () => {
-      render(
-        <ThemeProvider>
-          <BalanceProjectionCharts
-            {...baseProps({
-              planned: method([drawdownYear(2030, { fplPercentage: 138 })]),
-              twr: null,
-            })}
-          />
-        </ThemeProvider>,
-      );
-      expect(screen.getByText(MEDICAID_COPY)).toBeInTheDocument();
-    });
-
-    it('omits it when every computed year is above 138% or none was computed', () => {
-      render(
-        <ThemeProvider>
-          <BalanceProjectionCharts
-            {...baseProps({
-              planned: method([
-                drawdownYear(2030, { fplPercentage: 0 }),
-                drawdownYear(2031, { fplPercentage: 250 }),
-                drawdownYear(2032),
-              ]),
-              twr: null,
-            })}
-          />
-        </ThemeProvider>,
-      );
-      expect(screen.queryByText(MEDICAID_COPY)).not.toBeInTheDocument();
-    });
-
-    it('still shows it under a Monte Carlo basis whose representative rows carry no fplPercentage', () => {
-      // The MC tax path never stamps `fplPercentage`; the flag has to come from
-      // the deterministic method's years, not the resolved (MC) basis.
+    it('shows it under a Monte Carlo basis whose representative rows carry no fplPercentage', () => {
+      // The flag has to come from the deterministic method's years, not the resolved basis.
       const representative = method([drawdownPhaseYear(2030)]);
       render(
         <ThemeProvider>

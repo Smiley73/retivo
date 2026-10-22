@@ -1,33 +1,27 @@
 /**
  * The part of the ACA premium tax credit that lowers a year's portfolio draw
- * because the household entered the premium as a Medical expense. Shared by the
- * deterministic funding solver and the Monte Carlo per-path tax so the two
- * engines compute it identically (explained in
- * docs/math-social-security-and-health.md, "How it reaches the numbers").
+ * because the premium is a Medical expense. Shared by both engines; explained in
+ * docs/math-social-security-and-health.md, "How it reaches the numbers".
  */
 
 /** Inputs to {@link creditAppliedToPremiumsCents}, all in integer cents. */
 interface CreditAppliedToPremiumsArgs {
   /** The year's premium tax credit. */
   readonly creditCents: number;
-  /** The part of the credit already used against federal tax and the IRMAA
-   *  cash need (the engine passes its own figure, so the deterministic engine's
-   *  cash-only IRMAA and the stress test's whole surcharge stay where they are). */
+  /** The part of the credit already used against federal tax and IRMAA, as the
+   *  calling engine defines that offset. */
   readonly offsetCents: number;
   /** Medical expenses modeled for the year (every `isMedical` row). */
   readonly medicalCents: number;
   /** The draw the engine would otherwise commit this year. */
   readonly remainingNeedCents: number;
-  /** The most the draw can fall before the household leaves the credit's range
-   *  (see {@link povertyLineLimitCents}). Absent → no limit. */
+  /** {@link povertyLineLimitCents}. Absent → no limit. */
   readonly povertyLineLimitCents?: number;
 }
 
 /**
- * `min(max(0, credit − offset), medical, remainingNeed)`, floored at zero, and
- * no more than `povertyLineLimitCents` when given. The model has no surplus
- * deposit, so a year with no draw has nothing to lower and the rest of the
- * credit is dropped.
+ * `min(max(0, credit − offset), medical, remainingNeed, povertyLineLimit)`, floored
+ * at zero. The model has no surplus deposit, so the rest of the credit is dropped.
  */
 export function creditAppliedToPremiumsCents(args: CreditAppliedToPremiumsArgs): number {
   const excessCents = Math.max(0, args.creditCents - args.offsetCents);
@@ -42,32 +36,20 @@ export function creditAppliedToPremiumsCents(args: CreditAppliedToPremiumsArgs):
 
 /** Inputs to {@link povertyLineLimitCents}, in integer cents. */
 interface PovertyLineLimitArgs {
-  /** ACA MAGI above the poverty line at the draw the credit was priced on
-   *  (`TaxYearResult.acaMagiAboveFplCents`). */
+  /** `TaxYearResult.acaMagiAboveFplCents` at the draw the credit was priced on. */
   readonly headroomCents: number;
-  /** The part of that draw taken from accounts whose withdrawals are income:
-   *  pre-tax and taxable-account withdrawals, plus the taxable Roth earnings.
-   *  Qualified Roth and cash-like dollars are not (see {@link drawIncomeCents}). */
+  /** The part of that draw whose withdrawals are income, and the ACA MAGI it
+   *  carries ({@link drawIncomeCents}). */
   readonly incomeDrawCents: number;
-  /** How much ACA MAGI that income draw carries: all of a pre-tax withdrawal or of
-   *  Roth earnings, but only the gain in a taxable-account one. */
   readonly magiOfDrawCents: number;
 }
 
 /**
- * The most the draw can be lowered by, so that the lowered draw still earns the
- * credit it was priced on. The credit is zero below 100% of the poverty line, and
- * a line the household does not earn at the draw it lowers would create money.
- * Above the line the credit only grows as MAGI falls, so a line priced at the
- * higher draw never overstates the credit at the lower one.
- *
- * Lowering the draw by L lowers ACA MAGI by at most `L × magiOfDraw / incomeDraw`:
- * ACA MAGI adds back all Social Security, so a dollar of draw counts once, a dollar
- * that is not income (a qualified Roth or cash-like withdrawal) does not count at
- * all, and a taxable-account dollar counts as its gain. So the draw can fall by the
- * whole income draw when the headroom covers its MAGI, and by the headroom scaled
- * back by that MAGI per dollar otherwise. Both engines price the credit on the draw
- * before the line and apply this one limit to it.
+ * The most the draw can fall and still earn the credit it was priced on: the
+ * credit is zero below 100% of the poverty line (§36B(c)(1)), and above it only
+ * grows as MAGI falls. Lowering the draw by L sheds at most
+ * `L × magiOfDraw / incomeDraw` of ACA MAGI, so the limit is the headroom scaled
+ * by that ratio, or no limit when the headroom covers the whole income draw.
  */
 export function povertyLineLimitCents(args: PovertyLineLimitArgs): number {
   if (args.magiOfDrawCents <= args.headroomCents) return Number.POSITIVE_INFINITY;
@@ -125,13 +107,10 @@ export function sumPositiveNeed(
 }
 
 /**
- * Fold one year's tax draw (`drawDollars`) into the monthly `expense` series
- * over the months `[start, end)`. A positive draw is spread evenly over twelve
- * months. A negative draw (the credit applied to premiums outweighing the tax
- * need) is spread in proportion to each month's need, `max(0, expense − income)`,
- * so no month's draw drops below zero and the year's draw falls by the whole
- * amount; an even split would lose the share of any month whose need is smaller.
- * A year with no need falls back to the even split.
+ * Fold one year's tax draw into the monthly `expense` series over `[start, end)`.
+ * A positive draw is spread evenly; a negative one (the credit applied to premiums)
+ * in proportion to each month's need, so no month drops below zero and the year's
+ * draw falls by the whole amount. A year with no need takes the even split.
  */
 export function foldYearDrawIntoExpense(
   expense: Float64Array,

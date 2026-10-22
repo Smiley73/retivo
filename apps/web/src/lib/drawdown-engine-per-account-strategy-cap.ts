@@ -1193,10 +1193,8 @@ function runTrialDraw(args: {
     capRemainingDollars, rmdForcedTotal, totalTargetDollars, within, acc } = args;
   if (within !== undefined) {
     // The tax add-on this trial pass funds = total target minus the ordinary
-    // year net need (the solver grows the total target each pass). Negative when
-    // the credit applied to premiums lowers the draw, bounded at minus the
-    // ordinary need exactly as the committing path bounds it, so the trial draws
-    // the same lowered amount and each month's target stays at or above zero.
+    // year net need (the solver grows the total target each pass); negative when
+    // the credit applied to premiums lowers the draw, bounded like the committing path.
     const taxAddedNeed = Math.max(-within.yearNetNeed, totalTargetDollars - within.yearNetNeed);
     return runTrialYearSim({
       trial, strategyKind, customTiers, excludedIndices, magiCapConfig,

@@ -42,11 +42,7 @@
  * `tax-integration-helpers.ts` (the same function the deterministic twin
  * calls). Output is pinned by the same MC parity-baseline gate as the kernel
  * (monte-carlo-tax.test.ts), so refactors here are checked against a frozen
- * numeric baseline. `assembleMcTaxResult` applies the credit applied to
- * premiums because it needs the very tax result the per-year apply builds; the
- * minimum itself and its poverty-line headroom live in
- * `credit-applied-to-premiums.ts`, and so does the monthly spread of the year's
- * draw that the strategy path folds back in.
+ * numeric baseline.
  * Trigger: a change adding 5 or more lines here must either refactor the file
  * back under 800 lines or re-justify this exception in this note.
  */
@@ -320,8 +316,7 @@ export interface McTaxContext {
    */
   readonly inflationRatePct?: number;
   /** Scenario medical inflation rate (percent) that grows the rough ACA
-   *  benchmark; fixed per scenario, not the path's sampled inflation. Absent →
-   *  no growth. */
+   *  benchmark; fixed, not the path's sampled inflation. Absent → no growth. */
   readonly medicalInflationRatePct?: number;
   /** Calendar year the primary is projected to die. `undefined`
    *  → alive for every projection year. Drives the per-year
@@ -564,11 +559,8 @@ export interface McTaxYearResult {
    * the conservative single-household direction for stress testing.
    */
   readonly taxCashflowDollars: number;
-  /**
-   * The part of the ACA credit that lowers the year's draw because the premium is
-   * a modeled Medical expense, in dollars (≥ 0): the funded figure, already
-   * inside `taxCashflowDollars`. Zero when no medical expenses were supplied.
-   */
+  /** The credit applied to premiums, dollars (≥ 0); already inside
+   *  `taxCashflowDollars`. */
   readonly acaCreditAppliedToPremiums: number;
 }
 
@@ -807,19 +799,12 @@ export interface PerYearTaxArgs {
    * `classification`; this governs the fallback drawdown + display.
    */
   readonly nominalExpense: number;
-  /**
-   * The year's modeled Medical expenses (every `isMedical` row) at this year-END
-   * step, in nominal dollars, BEFORE any guardrail scaling or tax fold — the cap
-   * on the ACA credit applied to premiums. Absent → no credit is applied (the
-   * Fill-conversion funding solves and the display post-pass omit it).
-   */
+  /** The year's modeled Medical expenses (every `isMedical` row), nominal dollars
+   *  before any guardrail scaling or tax fold: the cap on the credit applied to
+   *  premiums. Absent → no credit applied (Fill-conversion solves, display pass). */
   readonly medicalExpenseDollars?: number;
-  /**
-   * The year's draw need before any tax is folded in, in nominal dollars: the
-   * sum of the positive monthly needs the strategy engine will actually draw,
-   * the cap on the ACA credit applied to premiums. Absent → the year's net
-   * `nominalExpense − SS − otherIncome` stands in (the no-ledger kernel path).
-   */
+  /** The year's draw need before tax (the positive monthly needs the strategy
+   *  engine draws), nominal dollars. Absent → the year's net expense stands in. */
   readonly drawNeedDollars?: number;
   /** Non-SS non-portfolio ordinary income for this year. Offsets the year's
    *  spendable expense (reduces the computed drawdown) AND adds to taxable
@@ -1121,8 +1106,6 @@ export function applyPerYearTaxForPathWithConversion(
     penaltyDollars,
     args.medicalExpenseDollars,
     args.drawNeedDollars,
-    // The dollars of the draw that are ACA MAGI, which a lowered draw sheds:
-    // pre-tax and taxable-account withdrawals and the taxable Roth earnings.
     drawIncomeCents({
       preTaxDollars: preTaxWithdrawalDollars,
       taxableAccountDollars: classification?.postTaxNonRothDollars ?? 0,
@@ -2156,9 +2139,7 @@ export function buildMcTaxYearInput(
           args.irmaaLookbackUnitsMinus2),
     taxpayersAge65Plus: countTaxpayersAge65Plus(survivors, taxYear),
     inflationRatePct: taxCtx.inflationRatePct,
-    ...(taxCtx.medicalInflationRatePct !== undefined
-      ? { medicalInflationRatePct: taxCtx.medicalInflationRatePct }
-      : {}),
+    medicalInflationRatePct: taxCtx.medicalInflationRatePct,
     // The scenario's FPL region + the year's annual SLCSP override
     // reach the MC ACA-PTC block exactly as they reach the deterministic one, so
     // the two engines price the same benchmark against the same poverty line.
@@ -2223,20 +2204,13 @@ function assembleMcTaxResult(
   // path does not split IRMAA into cash vs SS-withheld (no per-member SS series
   // on the path), so it funds the whole surcharge — the conservative direction.
   //
-  // Mirror of the deterministic engine: the early-withdrawal / HSA /
-  // Roth-earnings penalty is funded per path so it reduces the path's balance via
-  // the absorbing after-tax adjustment. The credit is a refundable payment against
-  // the whole bill, penalty included (the deterministic engine's federal tax
-  // carries it too), so the penalty is part of the tax the credit offsets first.
+  // The early-withdrawal / HSA / Roth-earnings penalty is funded per path, as in
+  // the deterministic engine. The credit is refundable against the whole bill,
+  // penalty included, so the penalty is offset before any of it lowers the draw.
   const taxNeedDollars = Math.max(0, fedTax + irmaa + penaltyDollars - ptc);
 
-  // Credit applied to premiums: the excess over federal tax and the whole
-  // surcharge lowers this year's draw, up to the year's Medical expenses and the
-  // draw (the year's draw need, plus the tax need). The stress test funds the whole
-  // surcharge, so its offset uses the whole surcharge, where the deterministic
-  // engine's uses only the IRMAA cash part. The credit is priced on the draw
-  // before the line, so the line is also held to what that draw can fall by and
-  // still earn it (the deterministic solver applies the same limit).
+  // Credit applied to premiums; the offset here is the whole surcharge, where the
+  // deterministic engine's is the IRMAA cash part only.
   const creditCents =
     medicalExpenseDollars === undefined
       ? 0
@@ -2431,8 +2405,7 @@ export function advanceAfterTaxBase(
   cumTaxThroughThisYear: number,
 ): AfterTaxBaseState {
   if (prev.depleted) return { base: 0, depleted: true };
-  // A cumulative draw below zero (the credit applied to premiums outran the tax
-  // so far) adds nothing back, the way `applyAfterTaxAdjustment` skips it.
+  // A cumulative draw below zero adds nothing back, as `applyAfterTaxAdjustment` skips it.
   const afterTax = Math.max(0, rawNominalThisYear - Math.max(0, cumTaxThroughThisYear));
   const depleted = cumTaxThroughThisYear > 0 && rawNominalThisYear > 0 && afterTax <= 0;
   return { base: afterTax, depleted };

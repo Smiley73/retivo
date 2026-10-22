@@ -1,9 +1,5 @@
-/**
- * MedicarePremiumsDialog — the preview and the write path. Drives IndexedDB
- * through fake-indexeddb and reads back the queued mutations; SyncContext is
- * mocked at the module boundary, and `queueLocalMutation` is wrapped so one
- * test can make a write fail.
- */
+/** MedicarePremiumsDialog: the preview and the write path, read back from the
+ *  queued mutations; `queueLocalMutation` is wrapped so a write can fail. */
 import 'fake-indexeddb/auto';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

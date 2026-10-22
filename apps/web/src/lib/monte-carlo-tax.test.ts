@@ -406,8 +406,7 @@ describe('applyPerYearTaxForPath — tax cashflow', () => {
 
 describe('applyPerYearTaxForPath — credit applied to premiums', () => {
   // One retired single filer, 2026: $31,300 of Social Security, a $7,200
-  // benchmark, a Roth draw (no income). ACA MAGI is 200.0% of the poverty
-  // guideline, so the credit is $5,134.20 and there is no tax to offset.
+  // benchmark, a Roth draw: a $5,134.20 credit and no tax to offset.
   const ctx = makeMfjTaxContext({
     filingStatus: 'Single',
     members: [{ memberId: 'primary', isoBirthdate: '1963-01-01', onMedicare: false, hasAcaCoverage: true }],
@@ -462,10 +461,8 @@ describe('applyPerYearTaxForPath — credit applied to premiums', () => {
   });
 
   it('holds the line to the MAGI above the poverty line, where the credit ends', () => {
-    // No Social Security and a $17,000 pre-tax draw: 108.6% of the $15,650
-    // guideline, so the credit is several thousand dollars. All of it would lower
-    // the draw below the guideline, where the credit is zero, so the line stops
-    // at the $1,350 of MAGI above it.
+    // No Social Security and a $17,000 pre-tax draw (108.6% of the $15,650
+    // guideline): the line stops at the $1,350 of MAGI above it.
     const result = applyPerYearTaxForPath({
       taxCtx: ctx,
       taxYear: 2026,
@@ -486,9 +483,8 @@ describe('applyPerYearTaxForPath — credit applied to premiums', () => {
   });
 
   it('counts the early-withdrawal penalty in what the credit offsets, as the projection does', () => {
-    // A 55-year-old draws $30,000 from a traditional IRA: the 10% penalty is $3,000
-    // on top of the federal tax. The credit is a refundable payment against the
-    // whole bill, so it pays that penalty before any of it lowers the draw.
+    // A 55-year-old draws $30,000 from a traditional IRA: the $3,000 penalty is
+    // paid out of the credit before any of it lowers the draw.
     const earlyCtx = makeMfjTaxContext({
       filingStatus: 'Single',
       members: [{ memberId: 'primary', isoBirthdate: '1971-01-01', onMedicare: false, hasAcaCoverage: true }],

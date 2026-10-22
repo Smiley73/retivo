@@ -666,9 +666,6 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
     // committing two-pass HSA routing (medical-first, emergency-after).
     within: { yearIndex: y, expense, income, householdDeposit, yearNetNeed, hsaIndices, medicalDemand },
   });
-  // Negative when the credit applied to premiums outweighs the tax need; never
-  // below minus `yearNetNeed`, and the monthly spread below is proportional to
-  // each month's ordinary need, so no month's target goes below zero.
   const taxAddedNeed = taxOutcome?.addedNeedDollars ?? 0;
 
   // (1c) RMD surplus disposition AFTER the tax solve. The retained

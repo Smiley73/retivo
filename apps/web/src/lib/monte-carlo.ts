@@ -50,12 +50,6 @@
  *    two-stage pipeline the sharded coordinator does (serial ≡ 1-shard).
  *  - The per-tax-unit filing-status pass-through (including MFS/QSS) threads
  *    the same per-path `TaxPathContext` / `RunContext` seams.
- *  - The credit applied to premiums rides the same seams: the per-year medical
- *    cap sits on `TaxPathContext` beside `nominalExpenseByYear`, the funded line
- *    accumulates on `PathTaxAcc` and is stamped on the captured rows from there;
- *    the minimum itself lives in `credit-applied-to-premiums.ts`, and so does
- *    the monthly spread of a negative tax draw (proportional to each month's
- *    need) the strategy path folds into the expense slice.
  *  - The taxable-income accumulator (`advanceMcTaxableIncomeState`) runs ONLY in
  *    the representative display post-pass (`monte-carlo-tax-burden.ts`), never
  *    in the funded per-path loop; its math lives in the shared deterministic
@@ -211,8 +205,7 @@ export interface PathOutcome {
   readonly irmaaSurchargeByYear?: number[];
   /** Per-year ACA PTC subsidy in dollars. Defined when taxContext present. */
   readonly acaPtcSubsidyByYear?: number[];
-  /** Per-year ACA credit applied to premiums (the part that lowered the year's
-   *  draw), dollars. Defined when taxContext present. */
+  /** Per-year ACA credit applied to premiums, dollars. Defined when taxContext present. */
   readonly acaCreditAppliedToPremiumsByYear?: number[];
   /** Per-year effective tax rate (0..1). Defined when taxContext present. */
   readonly effectiveTaxRateByYear?: number[];
@@ -432,14 +425,11 @@ export interface TaxPathContext {
    *  fallback drawdown + `netAfterTax` display read `nominalExpenseByYear[y]` so
    *  the tax path stays consistent with the windowed expense DRAW. */
   readonly nominalExpenseByYear: Float64Array;
-  /** Per-year modeled Medical expenses at the year-END step (every `isMedical`
-   *  row, before any guardrail scaling or tax fold): the cap on the ACA credit
-   *  applied to premiums. */
+  /** Per-year modeled Medical expenses at the year-END step: the cap on the
+   *  credit applied to premiums. */
   readonly nominalMedicalExpenseByYear: Float64Array;
-  /** Per-year draw need before any tax is folded in (the sum of the positive
-   *  monthly needs the strategy engine draws), indexed like `taxDrawByYear`: the
-   *  cap on the credit applied to premiums. Absent on the no-ledger kernel path,
-   *  where the year's net expense stands in. */
+  /** Per-year draw need before tax, indexed like `taxDrawByYear`; absent on the
+   *  no-ledger kernel path. */
   readonly drawNeedByYear?: Float64Array;
   /** The run's precomputed per-year survivor state (from
    *  `RunContext.survivorStateByYear`), `null` when no `taxContext` was
@@ -671,14 +661,11 @@ export function newTaxPathState(
   // The per-year windowed nominal expense
   // at the year-END step from `buildStepInputs` (always supplied).
   nominalExpenseByYear: Float64Array,
-  // The per-year modeled Medical expenses at the year-END step from
-  // `buildStepInputs` (the cap on the credit applied to premiums).
   nominalMedicalExpenseByYear: Float64Array,
   // The per-run context — supplies the fixed-order ledger tax
   // metadata + the precomputed per-year survivor state, both hoisted out of
   // the per-path build.
   ctx: RunContext,
-  // The per-year pre-fold draw need (strategy path only).
   drawNeedByYear?: Float64Array,
 ): TaxPathContext | null {
   if (input.taxContext === undefined) return null;
@@ -1508,9 +1495,8 @@ function foldTaxIntoStrategyExpense(
   }
 }
 
-/** Per-year draw need before any tax is folded in, indexed by the full-horizon
- *  year like `taxDrawByYear`: the sum of the positive monthly needs of the
- *  (guardrail-scaled) retirement slice. Years before retirement stay 0. */
+/** Per-year draw need before tax, indexed by the full-horizon year like
+ *  `taxDrawByYear`; years before retirement stay 0. */
 function drawNeedByYearFromSlice(
   expense: Float64Array,
   income: Float64Array,
@@ -2121,8 +2107,7 @@ function runOnePathViaStrategyEngine(
   const taxState = newTaxPathState(
     input, kernelOut, stepCount, horizonYears, taxNominalExpenseByYear,
     nominalMedicalExpenseByYear, ctx,
-    // The guardrail has scaled `expense` in place on pass 1 and the tax is not
-    // folded in yet: this is the draw both passes make before the tax.
+    // Guardrail-scaled, tax not yet folded in: the draw both passes make before tax.
     drawNeedByYearFromSlice(expense, income, preRetirementYears, horizonYears),
   );
   let years = pass1.years;
@@ -2149,9 +2134,8 @@ function runOnePathViaStrategyEngine(
       priorPreTaxByOwnerByYearIndex,
     );
     foldTaxIntoStrategyExpense(expense, income, taxState.taxDrawByYear, preRetirementYears);
-    // The credit applied to premiums is what pass 1 folded into the expense: it
-    // is what lowered pass 2's draw. The pass-2 fill taxes the lowered draw and
-    // would restate it from a lower MAGI, a figure that never funded anything.
+    // Keep pass 1's line: it is what lowered pass 2's draw. The pass-2 fill would
+    // restate it from the lower MAGI, a figure that never funded anything.
     const creditFundedByYear = taxState.acc.credit.slice();
     // Restart §408A ordering from full basis before the pass-2 tax fill.
     reseedRothBasisCarrier(taxState);
@@ -2411,8 +2395,7 @@ function runOnePathViaStrategyEngine(
         taxState.acc.net[portfolioYear] = 0;
       }
     }
-    // The funded credit applied to premiums rides the captured rows the way the
-    // tax draw does (from the pass-2 per-path tax), not the display post-pass.
+    // The funded line rides the captured rows, not the display post-pass.
     if (captureRun && taxState && portfolioYear < taxState.acc.credit.length) {
       years[y].acaCreditAppliedToPremiumsCents = Math.round(taxState.acc.credit[portfolioYear] * 100);
     }
@@ -2750,8 +2733,6 @@ export function validateMonteCarloInput(input: MonteCarloInput): void {
       }
     }
   }
-  // The modeled Medical expenses base (and each bucket) caps the credit applied
-  // to premiums; a short array would silently read as zero and drop the cap.
   if (
     input.monthlyMedicalExpenseBase !== undefined &&
     input.monthlyMedicalExpenseBase.length !== stepCount

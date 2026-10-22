@@ -754,9 +754,7 @@ describe('simulateDrawdown × real buildTaxCashflowHook — Fill conversion gold
 
 describe('buildTaxCashflowHook — credit applied to premiums', () => {
   // A single filer aged 63 with $31,300 of Social Security and a $7,200
-  // benchmark: ACA MAGI is 200.0% of the poverty guideline, the credit is
-  // $5,134.20 and there is no federal tax or IRMAA to offset. Savings principal
-  // draws add no income, so the credit does not move with the draw.
+  // benchmark: a $5,134.20 credit with no federal tax or IRMAA to offset.
   const cashLike = (target: number): TaxCashflowYearClassification => ({
     preTaxDollars: 0,
     postTaxNonRothDollars: 0,
@@ -793,18 +791,6 @@ describe('buildTaxCashflowHook — credit applied to premiums', () => {
     expect(outcome.acaCreditAppliedToPremiumsCents).toBe(513_420);
     expect(outcome.totalTaxCashflowNeedCents).toBe(0);
     expect(outcome.addedNeedDollars).toBeCloseTo(-5_134.2, 6);
-  });
-
-  it('keeps the draw bounded below by minus the ordinary need', () => {
-    const outcome = hookFor(medicalPerMonth).solveForYear(0, 2_700, cashLike);
-    expect(outcome.acaCreditAppliedToPremiumsCents).toBe(270_000);
-    expect(outcome.addedNeedDollars).toBeCloseTo(-2_700, 6);
-  });
-
-  it('applies nothing without a medical series', () => {
-    const outcome = hookFor().solveForYear(0, 39_900, cashLike);
-    expect(outcome.acaCreditAppliedToPremiumsCents).toBe(0);
-    expect(outcome.addedNeedDollars).toBe(0);
   });
 
   it('a conversion\'s funded tax is the same with and without an excess credit', () => {

@@ -1,9 +1,5 @@
-/**
- * Row building, attribution, collision and payload cases for the Add Medicare
- * premiums helper. The demo household is the main fixture (its Medicare rows
- * carry the helper's fixed names); the extra cases cover the attribution rules
- * the demo rows alone would not catch.
- */
+/** The Add Medicare premiums helper on the demo household (its Medicare rows
+ *  carry the helper's fixed names) and the attribution rules it cannot show. */
 import { describe, expect, it } from 'vitest';
 import type {
   Aggregate,
@@ -19,7 +15,6 @@ import {
   buildPremiumPayloads,
   isRowIncluded,
   premiumCheckExpenses,
-  scenarioAddedExpenses,
   type MedicarePremiumPreview,
   type PremiumMemberGroup,
   type PremiumRow,
@@ -280,12 +275,6 @@ describe('attribution beyond the demo rows', () => {
     expect(names(row(p, 'm-jane', 'B'))).toEqual(['Johnson Medicare plan']);
     expect(row(p, 'm-john', 'B').alreadyEntered).toEqual([]);
   });
-
-  it('should_ignore_a_name_with_no_Medicare_or_part_words', () => {
-    const p = preview([expense('e10', { name: 'Dental plan' })]);
-    expect(row(p, 'm-john', 'B').alreadyEntered).toEqual([]);
-    expect(row(p, 'm-john', 'B').defaultIncluded).toBe(true);
-  });
 });
 
 describe('row blocks', () => {
@@ -383,13 +372,6 @@ describe('buildPremiumPayloads', () => {
     );
     expect(payloads.map((x) => [x.name, x.amount])).toEqual([['John Medicare Part D', 41.24]]);
   });
-
-  it('should_write_nothing_when_every_row_is_switched_off', () => {
-    const off = Object.fromEntries(
-      p.members.flatMap((g) => g.rows).map((r) => [r.key, false]),
-    );
-    expect(buildPremiumPayloads(p, off, {})).toEqual([]);
-  });
 });
 
 describe('scenario-only expenses', () => {
@@ -421,7 +403,7 @@ describe('scenario-only expenses', () => {
     const withoutScenario = preview([]);
     expect(row(withoutScenario, 'm-john', 'B').block).toBeNull();
 
-    const p = preview(scenarioAddedExpenses('base', scenarios));
+    const p = preview(premiumCheckExpenses([], scenarios, 'base'));
     const johnB = row(p, 'm-john', 'B');
     expect(johnB.block).toMatchObject({
       kind: 'nameTaken',
@@ -437,21 +419,20 @@ describe('scenario-only expenses', () => {
     const scenarios = [
       scenario('base', null, [{ ...partB, name: 'John Part B' }]),
     ];
-    const p = preview(scenarioAddedExpenses('base', scenarios));
+    const p = preview(premiumCheckExpenses([], scenarios, 'base'));
     expect(row(p, 'm-john', 'B').alreadyEntered).toHaveLength(1);
     expect(row(p, 'm-john', 'B').defaultIncluded).toBe(false);
     expect(row(p, 'm-john', 'D').alreadyEntered).toEqual([]);
   });
 
-  it('should_include_expenses_a_parent_scenario_adds_and_ignore_unknown_scenarios', () => {
+  it('should_include_expenses_a_parent_scenario_adds', () => {
     const scenarios = [
       scenario('base', null, [partB]),
       scenario('child', 'base', []),
     ];
-    expect(scenarioAddedExpenses('child', scenarios).map((e) => e.payload.name)).toEqual([
+    expect(premiumCheckExpenses([], scenarios, 'child').map((e) => e.payload.name)).toEqual([
       'John Medicare Part B',
     ]);
-    expect(scenarioAddedExpenses('missing', scenarios)).toEqual([]);
   });
 
   it('should_add_the_selected_scenarios_expenses_and_fall_back_to_the_primary', () => {

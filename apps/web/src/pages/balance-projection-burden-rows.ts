@@ -26,14 +26,12 @@ function deathYearOf(lastDeathFractional: number | null): number | null {
 }
 
 /** Statutory Medicaid-expansion income line: 133% of the federal poverty line
- *  plus the 5-point income disregard. A fixed rule, not a yearly figure. */
+ *  plus the 5-point income disregard. */
 const MEDICAID_EXPANSION_FPL_PERCENT = 138;
 
-/** True when any year has a household income at or below the Medicaid-expansion
- *  line while a Marketplace credit was worked out. The `> 0` guard matters:
- *  the engine leaves `fplPercentage` at 0 for a year it did not compute (no
- *  Marketplace coverage, everyone on Medicare, married filing separately), and
- *  that zero means "not computed", not "no income". */
+/** True when any year's income is at or below the Medicaid-expansion line. The
+ *  engine leaves `fplPercentage` at 0 for a year it did not compute, so 0 means
+ *  "not computed", never "no income". */
 export function hasMedicaidRangeYear(
   years: ReadonlyArray<Pick<DrawdownYear, 'fplPercentage'>>,
 ): boolean {

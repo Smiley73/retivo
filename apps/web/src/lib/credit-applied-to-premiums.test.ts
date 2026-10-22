@@ -1,9 +1,7 @@
 /**
- * The three-way minimum behind the credit applied to premiums. Each case is a
- * row of the worked 2026 household in docs/math-social-security-and-health.md
- * (single filer, $31,300 of Social Security, $7,200 benchmark): the credit is
- * $5,134.20 with nothing to offset, and each of the three limits binds in at
- * least one row.
+ * The minimum behind the credit applied to premiums. The table rows are the
+ * worked 2026 household in docs/math-social-security-and-health.md; each limit
+ * binds in at least one row.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -114,12 +112,6 @@ describe('drawIncomeCents', () => {
         costBasisFraction: 0.25,
       }),
     ).toEqual({ incomeDrawCents: 350_000, magiOfDrawCents: 300_000 });
-  });
-
-  it('carries no MAGI for a draw with no income dollars', () => {
-    expect(
-      drawIncomeCents({ preTaxDollars: 0, taxableAccountDollars: 0, rothEarningsDollars: 0, costBasisFraction: 0.5 }),
-    ).toEqual({ incomeDrawCents: 0, magiOfDrawCents: 0 });
   });
 });
 

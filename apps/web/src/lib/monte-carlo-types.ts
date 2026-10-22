@@ -479,14 +479,13 @@ export interface MonteCarloInput {
     readonly ratePct: number;
     readonly amount: number[];
   }>;
-  /** Per-month modeled Medical expenses in today's dollars: EVERY `isMedical`
-   *  row (`monthlyMedicalDemandBase` is its HSA-qualified subset), indexed like
-   *  `monthlyExpenseBase`. Caps the ACA credit applied to premiums. Absent when
-   *  no category is flagged. Feeds the cache key + seed. */
+  /** Per-month modeled Medical expenses in today's dollars, every `isMedical` row
+   *  (`monthlyMedicalDemandBase` is its HSA-qualified subset): caps the credit
+   *  applied to premiums. Absent when no category is flagged. */
   readonly monthlyMedicalExpenseBase?: number[];
-  /** Effective inflation rate (percent) of `monthlyMedicalExpenseBase`. */
+  /** Its effective rate (percent), and per-rate buckets when the categories span
+   *  more than one. */
   readonly medicalExpenseRatePct?: number;
-  /** Per-rate buckets of it, only when the categories span > 1 effective rate. */
   readonly monthlyMedicalExpenseBucketsBase?: MonteCarloInput['monthlyMedicalDemandBucketsBase'];
   /** Pre-computed nominal annual SS benefit by year-offset from `firstYear`.
    *  Length must equal `horizonYear - firstYear + 1`. */

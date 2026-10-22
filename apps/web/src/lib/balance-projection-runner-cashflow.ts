@@ -277,10 +277,8 @@ function buildMedicalDemandByMonth(
   const out = new Array<number>(length).fill(0);
   const medicalIds = medicalCategoryIdSet(args.medicalCategoryIds);
   if (medicalIds.size === 0) return out;
-  // Pre-filter to the admitted medical rows. The HSA subset uses the
-  // SINGLE-SOURCE predicate (isHsaQualifiedMedical). Filtering before
-  // projectExpensesByCategoryMonth preserves per-category rounding and the
-  // strict-subset invariant. Absent hsaQualified ⇒ not qualified.
+  // Filtering before projectExpensesByCategoryMonth preserves per-category
+  // rounding and the strict-subset invariant.
   const qualifiedExpenses = resolvedExpenses.filter((e) => qualifies(e, medicalIds));
   if (qualifiedExpenses.length === 0) return out;
   const points = projectExpensesByCategoryMonth(

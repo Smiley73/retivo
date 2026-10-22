@@ -2621,9 +2621,6 @@ describe('serialized id-keyed dictionaries survive hostile ids', () => {
 });
 
 describe('medical inflation rate plumbing', () => {
-  // The engine tests prove `applyTaxYear` grows the rough benchmark when handed
-  // the rate. These guard the one failure they cannot see: a production path
-  // silently leaving the field absent and reverting to no growth.
   const argsWith = (inflation: { ratePct: number; categoryRates?: Record<string, number> }) =>
     buildArgs({ scenario: baseScenario('s-med-rate', 'MedRate', { inflation }) });
 

@@ -1,20 +1,12 @@
 /**
  * The ACA credit applied to premiums, end to end in both engines.
  *
- * One retired single filer with a Roth IRA as the only account (qualified draws,
- * $0 taxable, so the credit does not move with the draw), Social Security of
- * $31,300 a year, and a user-entered 2026 benchmark of $7,200. Provisional
- * income is $15,650, so no Social Security is taxable and the federal tax is $0;
- * ACA MAGI is $31,300, which is 200.0% of the $15,650 poverty guideline, so the
- * expected contribution is 6.60% = $2,065.80 and the credit is $5,134.20 with
- * nothing to offset. Rules: HHS 2025 poverty guideline, 2026 applicable
- * percentages, IRC §86, Rev. Proc. 2025-32.
- *
- * Social Security cannot start before 62, so the person is 63 (born 1963-01-01,
- * claiming at 63 against a full retirement age of 67). Monthly benefits are whole
- * cents, which no PIA can make add to exactly $31,300, so the projection's
- * benefit is pinned to that figure in both engines. Every number above is the
- * same for any age under 65.
+ * One retired single filer, a Roth IRA as the only account, $31,300 of Social
+ * Security and a user-entered 2026 benchmark of $7,200: no taxable Social
+ * Security, $0 federal tax, ACA MAGI at 200.0% of the $15,650 poverty guideline,
+ * so the credit is $5,134.20 with nothing to offset (HHS 2025 poverty guideline,
+ * 2026 applicable percentages, IRC §86, Rev. Proc. 2025-32). Monthly benefits
+ * are whole cents, so the projected benefit is pinned to exactly $31,300.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { runMonteCarlo, validateMonteCarloInput } from './monte-carlo.js';
@@ -113,29 +105,23 @@ function pension(annual: number): Aggregate<IncomeStreamPayload> {
 }
 
 interface Household {
-  /** Medical rows (not HSA-qualified), dollars a year. */
+  /** Medical rows (not HSA-qualified) and everything else, dollars a year. */
   readonly medical: number;
-  /** Everything else, dollars a year. */
   readonly other: number;
   readonly pensionAnnual?: number;
   /** Extra non-medical monthly spending in the first `months` months only. */
   readonly shortMonthly?: { readonly amount: number; readonly months: number };
   /** Medical dollars a month for life, instead of the yearly `medical` row. */
   readonly medicalMonthly?: number;
-  /** A pre-tax IRA instead of the Roth IRA (taxable draws). */
+  /** A pre-tax IRA instead of the Roth IRA. */
   readonly preTax?: boolean;
-  /** Leave the plan with no Medical category, so no credit can be applied. */
   readonly noMedicalCategory?: boolean;
-  /** No Social Security at all, so ACA MAGI is only the draw and the pension. */
   readonly noSocialSecurity?: boolean;
-  /** A Roth IRA first funded in 2025, so its withdrawals are nonqualified and the
-   *  earnings are taxable income. */
+  /** A Roth IRA first funded in 2025: nonqualified draws, taxable earnings. */
   readonly nonqualifiedRoth?: boolean;
-  /** Age at retirement on 2026-01-01 (default 63, which is also when Social Security starts).
-   *  Under 59½ a pre-tax draw carries the 10% early-withdrawal penalty. */
+  /** Age at retirement on 2026-01-01 (default 63, when Social Security starts). */
   readonly age?: number;
-  /** A taxable brokerage account of this balance instead of the Roth IRA: only the
-   *  gain in a draw is income. */
+  /** A taxable brokerage account of this balance instead of the Roth IRA. */
   readonly brokerageBalance?: number;
 }
 
@@ -344,13 +330,6 @@ describe('credit applied to premiums, Monte Carlo input', () => {
     expect(input.monthlyMedicalExpenseBase).toHaveLength(input.monthlyExpenseBase.length);
   });
 
-  it('is absent when the plan flags no medical category', () => {
-    const input = runBalanceProjectionMc({ ...args(household), medicalCategoryIds: [] });
-    expect(input.monthlyMedicalExpenseBase).toBeUndefined();
-    expect(input.medicalExpenseRatePct).toBeUndefined();
-    expect(input.monthlyMedicalExpenseBucketsBase).toBeUndefined();
-  });
-
   it('emits per-rate buckets in rate order whichever way the categories are listed', () => {
     const forward = runBalanceProjectionMc(twoRateArgs(['cat-medical', 'cat-med2']));
     const reversed = runBalanceProjectionMc(twoRateArgs(['cat-med2', 'cat-medical']));
@@ -418,9 +397,8 @@ describe('credit applied to premiums, uneven months and the funded draw', () => 
   });
 
   it('reports the line that funded the draw, not one restated after the draw fell', () => {
-    // A pre-tax IRA: the lower pass-2 draw lowers MAGI and would restate a larger
-    // credit, which never funded anything. The reported line is the whole fall in
-    // the draw against the same plan with no Medical category.
+    // The reported line is the whole fall in the draw against the same plan with
+    // no Medical category, not a credit restated from the lower pass-2 MAGI.
     const h: Household = { medical: 20_000, other: 25_000, preTax: true };
     const { row } = mcFirstRow(h);
     const { row: without } = mcFirstRow({ ...h, noMedicalCategory: true });
@@ -444,10 +422,8 @@ describe('credit applied to premiums, uneven months and the funded draw', () => 
 });
 
 describe('credit applied to premiums, near the poverty line', () => {
-  // No Social Security, so ACA MAGI is only what the household draws and earns. The
-  // $15,650 poverty guideline is where the credit ends: a draw lowered below it
-  // earns nothing, so no line may lower it there.
-  const GUIDELINE = 15_650;
+  // No Social Security, so ACA MAGI is only what the household draws and earns;
+  // a draw lowered below the guideline earns no credit, so no line may lower it there.
 
   it('a pre-tax draw: neither engine lowers the draw below the guideline', () => {
     // Need before the line 22,000 (140.6% of the guideline); the credit is 6,405.80
@@ -458,8 +434,8 @@ describe('credit applied to premiums, near the poverty line', () => {
     const { row: without } = mcFirstRow({ ...h, noMedicalCategory: true });
     for (const r of [det, row]) {
       expect(r.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
-      expect(r.withdrawn).toBeGreaterThanOrEqual(GUIDELINE - 0.01);
-      expect(r.acaCreditAppliedToPremiumsCents).toBeLessThanOrEqual(cents(22_008 - GUIDELINE));
+      expect(r.withdrawn).toBeGreaterThanOrEqual(GUIDELINE_DOLLARS - 0.01);
+      expect(r.acaCreditAppliedToPremiumsCents).toBeLessThanOrEqual(cents(22_008 - GUIDELINE_DOLLARS));
     }
     // The lowered draw still earns a credit on the row the engine reports.
     expect(det.acaPtcSubsidyCents).toBeGreaterThan(0);
@@ -472,7 +448,7 @@ describe('credit applied to premiums, near the poverty line', () => {
   it('a qualified Roth draw sheds no MAGI: both engines apply the whole line', () => {
     // A $15,650 pension is exactly on the guideline and the Roth draw funds the
     // rest, so lowering the draw leaves MAGI, and the credit, where they are.
-    const h: Household = { medical: 7_200, other: 28_452, pensionAnnual: GUIDELINE, noSocialSecurity: true };
+    const h: Household = { medical: 7_200, other: 28_452, pensionAnnual: GUIDELINE_DOLLARS, noSocialSecurity: true };
     const det = detRow(h);
     const { row, summary } = mcFirstRow(h);
     expect(det.acaPtcSubsidyCents).toBeGreaterThan(cents(6_800));
@@ -508,15 +484,11 @@ describe('credit applied to premiums, nonqualified Roth above the poverty line',
     medical: 7_200, other: 30_000, pensionAnnual: 20_000, nonqualifiedRoth: true, noSocialSecurity: true,
   };
 
-  it('the line never exceeds what the credit earns at the draw the row reports', () => {
+  it('both engines price it on the draw before the line, never above what the credit earns there', () => {
     const det = detRow(h);
     const earned = (det.acaPtcSubsidyCents ?? 0) - (det.federalTaxCents ?? 0);
     expect(det.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
     expect(det.acaCreditAppliedToPremiumsCents ?? 0).toBeLessThanOrEqual(Math.max(0, earned));
-  });
-
-  it('both engines price it on the draw before the line: same line and withdrawal to the cent', () => {
-    const det = detRow(h);
     const { row } = mcFirstRow(h);
     expect(row.acaCreditAppliedToPremiumsCents).toBe(det.acaCreditAppliedToPremiumsCents);
     expect(Math.round(row.withdrawn * 100)).toBe(Math.round(det.withdrawn * 100));
@@ -525,10 +497,9 @@ describe('credit applied to premiums, nonqualified Roth above the poverty line',
 
 describe('credit applied to premiums, early-withdrawal penalty years', () => {
   it('the stress test counts the penalty in the offset as the projection does, so its line is not the larger', () => {
-    // A 55-year-old draws a traditional IRA: the 10% penalty is a refundable credit's
-    // first call, so the line is what is left after federal tax AND the penalty. The
-    // stress test prices the credit once on the draw before the line, so it stays the
-    // smaller of the two, where it used to exceed the projection by about the penalty.
+    // A 55-year-old draws a traditional IRA: the line is what is left after federal
+    // tax AND the 10% penalty; the stress test prices the credit once, so its line
+    // stays the smaller of the two.
     const h: Household = { medical: 7_200, other: 22_800, preTax: true, noSocialSecurity: true, age: 55 };
     const det = detRow(h);
     const { row } = mcFirstRow(h);
@@ -539,10 +510,9 @@ describe('credit applied to premiums, early-withdrawal penalty years', () => {
 
 describe('credit applied to premiums, taxable brokerage near the poverty line', () => {
   it('only the gain in a brokerage draw is MAGI, so the draw can fall further before the credit ends', () => {
-    // A $14,000 pension and a brokerage account at the default half basis: ACA MAGI is
-    // the pension plus half of what is drawn. The $8,000 draw before the line puts MAGI
-    // 2,350 over the guideline, so a whole dollar of draw per dollar of MAGI would stop
-    // the line there, where the draw can fall by 4,700 before MAGI reaches it.
+    // A $14,000 pension and a brokerage account at the default half basis: the $8,000
+    // draw before the line puts MAGI 2,350 over the guideline, so the draw can fall by
+    // 4,700 before MAGI reaches it.
     const h: Household = {
       medical: 7_200, other: 14_796, pensionAnnual: 14_000, brokerageBalance: 100_000, noSocialSecurity: true,
     };

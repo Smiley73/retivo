@@ -993,7 +993,6 @@ export function buildPipelineContext(
       ? { healthCoverageMonths: resolved.healthCoverageMonths }
       : {}),
     ...(resolved.acaFplRegion !== undefined ? { acaFplRegion: resolved.acaFplRegion } : {}),
-    // The ONE medical rate every engine grows the rough ACA benchmark at.
     medicalInflationRatePct: resolveMedicalInflationPct(args.scenarioId, [
       ...effectiveScenarios,
     ]),

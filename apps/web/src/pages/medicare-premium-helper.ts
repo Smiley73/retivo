@@ -1,14 +1,8 @@
 /**
- * Pure logic behind the Expenses page "Add Medicare premiums" helper: build the
- * preview rows (one Part B and one Part D row per household member with a
- * birthdate), decide which rows look already entered, find fixed-name
- * collisions, and build the `ExpensePayload` for each row the person keeps.
- *
- * The helper only adds ordinary expenses; nothing links an expense to a person
- * or marks it as a premium. Duplicate detection is therefore a name heuristic
- * that stays visible in the preview rather than a silent filter. The written
- * rows are the same shape as the demo household's Medicare rows, so the
- * projection treats them like any Medical expense.
+ * Pure logic behind the Expenses page "Add Medicare premiums" helper: the preview
+ * rows, which of them look already entered, fixed-name collisions, and the
+ * `ExpensePayload` for each row kept. Nothing links an expense to a person, so
+ * duplicate detection is a name heuristic shown in the preview, never a filter.
  */
 import type {
   Aggregate,
@@ -20,10 +14,7 @@ import type {
 import { medicalCategoryIdsFrom } from '../lib/expense-category-resolvers';
 import { memberLabel } from '../lib/expense-format';
 import { resolveExpensesForScenarioSparse } from '../lib/expense-override-resolution';
-import {
-  latestMedicarePremiums,
-  type LatestMedicarePremiums,
-} from '../lib/medicare-premiums';
+import { latestMedicarePremiums } from '../lib/medicare-premiums';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 
 /** Query parameter that opens the preview when the Expenses page loads. */
@@ -92,76 +83,48 @@ export interface PremiumPreviewInput {
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
   expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
   categories: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>;
-  /** Defaults to the newest year of the built-in snapshot. */
-  premiums?: LatestMedicarePremiums;
 }
 
-/**
- * The expenses the selected scenario adds on top of the canonical list
- * (its own and its ancestors'), shaped as expense aggregates so the preview
- * checks them for an already-entered premium or a name clash like any other
- * expense. Scenario-only expenses are not in the canonical list, so without
- * this a premium entered only in a scenario would be added a second time.
- */
-export function scenarioAddedExpenses(
-  scenarioId: string,
-  scenarios: ScenarioAggregate[],
-): Aggregate<ExpensePayload>[] {
-  const scenario = scenarios.find((s) => s.id === scenarioId);
-  if (!scenario) return [];
-  return resolveExpensesForScenarioSparse(scenarioId, scenarios, [])
-    .filter((e) => e.source === 'added')
-    .map((e) => ({
-      id: e.id,
-      householdId: scenario.householdId,
-      aggregateType: 'expense',
-      schemaVersion: scenario.schemaVersion,
-      version: 1,
-      updatedAt: scenario.updatedAt,
-      deviceId: scenario.deviceId,
-      payload: e.payload,
-    }));
-}
-
-/**
- * The canonical expenses the selected scenario renames, under the name the
- * scenario gives them. A scenario can patch "Health insurance" to "John
- * Medicare Part B"; the canonical name alone would hide that premium from the
- * check. Each keeps its canonical id so the preview points at the same row.
- */
-function scenarioRenamedExpenses(
+/** The rows the scenario chain adds, and the canonical rows it renames (under
+ *  their scenario names, with their canonical ids), as expense aggregates. */
+function scenarioExpenses(
   scenarioId: string,
   scenarios: ScenarioAggregate[],
   canonical: ReadonlyArray<Aggregate<ExpensePayload>>,
 ): Aggregate<ExpensePayload>[] {
+  const scenario = scenarios.find((s) => s.id === scenarioId);
+  if (!scenario) return [];
   const byId = new Map(canonical.map((c) => [`aggregate:${c.id}`, c]));
   const out: Aggregate<ExpensePayload>[] = [];
-  for (const e of resolveExpensesForScenarioSparse(
-    scenarioId,
-    scenarios,
-    canonical,
-  )) {
-    if (e.source !== 'patched') continue;
-    const original = byId.get(e.id);
-    if (!original) continue;
-    if (
-      normalizeName(e.payload.name ?? '') ===
-      normalizeName(original.payload.name ?? '')
-    ) {
-      continue;
+  for (const e of resolveExpensesForScenarioSparse(scenarioId, scenarios, canonical)) {
+    if (e.source === 'added') {
+      out.push({
+        id: e.id,
+        householdId: scenario.householdId,
+        aggregateType: 'expense',
+        schemaVersion: scenario.schemaVersion,
+        version: 1,
+        updatedAt: scenario.updatedAt,
+        deviceId: scenario.deviceId,
+        payload: e.payload,
+      });
+    } else if (e.source === 'patched') {
+      const original = byId.get(e.id);
+      if (
+        original &&
+        normalizeName(e.payload.name ?? '') !== normalizeName(original.payload.name ?? '')
+      ) {
+        out.push({ ...original, payload: e.payload });
+      }
     }
-    out.push({ ...original, payload: e.payload });
   }
   return out;
 }
 
 /**
- * The expenses the preview checks for an already-entered premium: the
- * canonical list (under its own names, which stay taken household-wide), the
- * canonical expenses the selected scenario renames under their scenario
- * names, and whatever the selected scenario adds on its own. The effective
- * scenario is the selected one, or the primary (base) when none is picked or
- * the pick is gone, as in the projection.
+ * The expenses the preview checks: the canonical list, the rows the effective
+ * scenario renames, and the rows it adds. The effective scenario is the selected
+ * one, else the primary, as in the projection.
  */
 export function premiumCheckExpenses(
   canonical: ReadonlyArray<Aggregate<ExpensePayload>>,
@@ -173,12 +136,7 @@ export function premiumCheckExpenses(
       ? selectedScenarioId
       : (scenarios.find((s) => s.payload.isPrimary)?.id ?? null);
   if (effectiveId === null) return canonical;
-  const chain = scenarios as ScenarioAggregate[];
-  return [
-    ...canonical,
-    ...scenarioRenamedExpenses(effectiveId, chain, canonical),
-    ...scenarioAddedExpenses(effectiveId, chain),
-  ];
+  return [...canonical, ...scenarioExpenses(effectiveId, scenarios as ScenarioAggregate[], canonical)];
 }
 
 /** Same case-folding and trimming the expense form applies to a name. */
@@ -259,35 +217,23 @@ interface Candidate {
 function findCandidates(
   expenses: ReadonlyArray<Aggregate<ExpensePayload>>,
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
-  categoryNameById: ReadonlyMap<string, string>,
+  toMatch: (e: Aggregate<ExpensePayload>) => MatchedExpense,
 ): Candidate[] {
   const out: Candidate[] = [];
   for (const e of expenses) {
     const parts = partsNamedBy(e.payload.name ?? '');
     if (!parts) continue;
-    out.push({
-      match: {
-        id: e.id,
-        name: e.payload.name,
-        categoryName:
-          categoryNameById.get(e.payload.categoryId) ?? '(unknown category)',
-      },
-      parts,
-      memberId: attributeToMember(e.payload, members),
-    });
+    out.push({ match: toMatch(e), parts, memberId: attributeToMember(e.payload, members) });
   }
   return out;
 }
 
-/**
- * Build the preview: one Part B and one Part D row for every member with a
- * birthdate, a one-line explanation for members without one, and nothing
- * writable when the household has no Medical category.
- */
+/** One Part B and one Part D row per member with a birthdate; nothing writable
+ *  without a Medical category. */
 export function buildMedicarePremiumPreview(
   input: PremiumPreviewInput,
 ): MedicarePremiumPreview {
-  const premiums = input.premiums ?? latestMedicarePremiums();
+  const premiums = latestMedicarePremiums();
   const medicalCategoryId = pickMedicalCategoryId(input.categories);
   const base = { year: premiums.year, medicalCategoryId };
   if (medicalCategoryId === null) return { ...base, members: [] };
@@ -295,22 +241,16 @@ export function buildMedicarePremiumPreview(
   const categoryNameById = new Map(
     input.categories.map((c) => [c.id, c.payload.name]),
   );
-  const candidates = findCandidates(
-    input.expenses,
-    input.members,
-    categoryNameById,
-  );
+  const toMatch = (e: Aggregate<ExpensePayload>): MatchedExpense => ({
+    id: e.id,
+    name: e.payload.name,
+    categoryName: categoryNameById.get(e.payload.categoryId) ?? '(unknown category)',
+  });
+  const candidates = findCandidates(input.expenses, input.members, toMatch);
   const expenseByName = new Map<string, MatchedExpense>();
   for (const e of input.expenses) {
     const key = normalizeName(e.payload.name ?? '');
-    if (!expenseByName.has(key)) {
-      expenseByName.set(key, {
-        id: e.id,
-        name: e.payload.name,
-        categoryName:
-          categoryNameById.get(e.payload.categoryId) ?? '(unknown category)',
-      });
-    }
+    if (!expenseByName.has(key)) expenseByName.set(key, toMatch(e));
   }
 
   // Primary first, so the preview reads in household order.
@@ -371,11 +311,8 @@ export function isRowIncluded(
   return edits[row.key] ?? row.defaultIncluded;
 }
 
-/**
- * The expense a row writes: monthly, essential, HSA-eligible, from the
- * member's 65th birthday to the end of their life. Anchors name the member's
- * role, never an id.
- */
+/** Monthly, essential, HSA-eligible, from the member's 65th birthday for life;
+ *  anchors name the member's role, never an id. */
 function buildPremiumPayload(
   row: PremiumRow,
   amount: number,
@@ -398,10 +335,7 @@ function buildPremiumPayload(
   };
 }
 
-/**
- * Payloads for exactly the rows the person kept: included, not blocked, with
- * any amount they edited. Empty without a Medical category.
- */
+/** Payloads for the rows kept: included, not blocked, with any edited amount. */
 export function buildPremiumPayloads(
   preview: MedicarePremiumPreview,
   includeEdits: Readonly<Record<string, boolean>>,
