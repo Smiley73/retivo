@@ -201,6 +201,8 @@ async function seedScenario(
     parentId?: string | null;
     benefitReductionPct?: number;
     colaPct?: number;
+    /** Verbatim override, instead of the whole-year ages above. */
+    socialSecurity?: ScenarioPayload['overrides']['socialSecurity'];
   } = {},
 ): Promise<void> {
   const payload: ScenarioPayload = {
@@ -211,7 +213,8 @@ async function seedScenario(
     notes: '',
     overrides: {
       socialSecurity:
-        opts.primaryAge !== undefined
+        opts.socialSecurity ??
+        (opts.primaryAge !== undefined
           ? {
               primary: { ageYears: opts.primaryAge, ageMonths: 0 },
               ...(opts.secondaryAge !== undefined
@@ -222,7 +225,7 @@ async function seedScenario(
                 : {}),
               ...(opts.colaPct !== undefined ? { colaPct: opts.colaPct } : {}),
             }
-          : undefined,
+          : undefined),
       retirementAge: {
         primary: { ageYears: 67, ageMonths: 0 },
         secondary: { ageYears: 67, ageMonths: 0 },
@@ -2620,42 +2623,16 @@ describe('SsOptimizerPage — month-level claim ages', () => {
     await seedAccount();
   }
 
-  async function seedWithOverrides(
+  const seedWithOverrides = (
     id: string,
     name: string,
     socialSecurity: ScenarioPayload['overrides']['socialSecurity'],
     parentId: string | null = null,
-  ): Promise<void> {
-    await putAggregate('scenario', {
-      id,
-      householdId: HH,
-      aggregateType: 'scenario',
-      schemaVersion: 1,
-      version: 1,
-      updatedAt: '2026-05-01T00:00:00Z',
-      deviceId: 'dev-1',
-      payload: {
-        name,
-        description: '',
-        parentScenarioId: parentId,
-        isPrimary: parentId === null,
-        notes: '',
-        overrides: {
-          ...(socialSecurity ? { socialSecurity } : {}),
-          retirementAge: {
-            primary: { ageYears: 67, ageMonths: 0 },
-            secondary: { ageYears: 67, ageMonths: 0 },
-          },
-          inflation: { ratePct: 0 },
-          lifeExpectancy: { primary: 95, secondary: 95 },
-        },
-      },
-    });
-  }
+  ): Promise<void> =>
+    seedScenario(id, name, { socialSecurity, parentId, isPrimary: parentId === null });
 
-  /** Drive the Monte Carlo tab with a fixed outcome per scenario. The
-   *  engine flag is false on purpose: the page must derive "Already set"
-   *  live from the current vs recommended age, months included. */
+  /** Monte Carlo tab with a fixed outcome per scenario; the engine flag is
+   *  false so the page must derive "Already set" itself. */
   async function runMc(
     outcomes: Record<
       string,
@@ -2858,8 +2835,6 @@ describe('SsOptimizerPage — month-level claim ages', () => {
   });
 
   it('should_read_Already_set_with_the_stored_age_in_years_and_months_on_both_balance_tab_child_rows', async () => {
-    // The engine flag is false on purpose: the child rows must derive
-    // "Already set" from the stored pair vs the month-level winner.
     setOptimizerWorkerRunImpl(async (runId, input) => ({
       kind: 'result',
       runId,

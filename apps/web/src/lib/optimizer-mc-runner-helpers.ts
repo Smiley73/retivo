@@ -69,8 +69,7 @@ export interface Triple {
   readonly scenarioIdx: number;
   readonly pairIdx: number;
   readonly primaryAgeYears: number;
-  /** Months on top of the years; absent or 0 is a whole year. Set for a
-   *  stored month-level pair and for a member the search did not vary. */
+  /** Absent or 0 is a whole year; see `PairSpec` in the deterministic path. */
   readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
   readonly secondaryAgeMonths?: number;
@@ -190,11 +189,7 @@ export function buildTriples(args: BuildTriplesArgs): TriplesBundle {
   };
 }
 
-/**
- * One non-empty scenario's triples: the searched grid (single-member,
- * joint, or a 1-D fallback) plus the stored claim-age pair as one extra
- * triple, unless an equal triple is already listed.
- */
+/** One scenario's grid triples plus the stored pair as one extra triple. */
 function appendScenarioTriples(opts: {
   list: Triple[];
   scenario: ScenarioAggregate;
@@ -278,15 +273,8 @@ function appendScenarioTriples(opts: {
   });
 }
 
-/**
- * Append the scenario's stored claim-age pair (both members verbatim,
- * months included) as one extra triple so a month-level setting has a
- * baseline and can rank. Mirrors `withStoredPair` in
- * claim-age-optimizer/orchestrator-helpers.ts: a member with no stored age
- * uses the fallbacks' default, an unsearched secondary keeps `null`
- * identity, and an equal triple already in this scenario's slice
- * (`list[firstIdx..]`) suppresses the duplicate.
- */
+/** Append the stored claim-age pair (months included) as one extra triple,
+ *  unless the scenario's slice `list[firstIdx..]` is empty or already holds it. */
 function appendStoredTriple(opts: {
   list: Triple[];
   firstIdx: number;
@@ -446,13 +434,9 @@ function appendJointTriples(opts: {
 
 /**
  * Does a candidate sit exactly at the scenario's current (resolved) claim
- * ages? Mirrors the deterministic path's `pairsEqual` (years and months
- * both match, a missing month counting as 0; a two-member plan with no
- * stored secondary age resolves to the fallbacks' default; a candidate
- * whose secondary is `null` — the 1-D primary-only fallback, where the
- * secondary is not searched and Save keeps its stored age — matches on the
- * primary alone). Used both for `alreadyAtOptimum` and to capture the
- * baseline metric value at the current claim ages.
+ * ages, months included? A `null` secondary (not searched, Save keeps its
+ * stored age) matches on the primary alone; a missing stored secondary is
+ * the fallback default. Drives `alreadyAtOptimum` and the baseline capture.
  */
 export function matchesCurrentClaim(
   primaryAgeYears: number,

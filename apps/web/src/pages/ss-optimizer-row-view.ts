@@ -36,14 +36,10 @@ export function resolveCurrentClaimAges(
 }
 
 /**
- * Does the current claim age already equal the recommendation? Years and
- * months both count: a current 65 years 6 months is NOT a match for a "65"
- * recommendation, but it is for a recommendation that carries the same 6
- * months (the stored pair ranked highest). A `null` recommendation
- * (secondary past the claim-age window) matches only a `null` current age;
- * callers skip the comparison for such a member, whose stored age Save keeps.
- * Single source of truth for both the "show just the age" display rule and
- * the already-applied button state.
+ * Does the current claim age already equal the recommendation, years and
+ * months both? Single source of truth for the "show just the age" display
+ * rule and the already-applied button state; callers skip a `null`
+ * recommendation (a member Save keeps as stored).
  */
 export function claimAgeMatches(
   current: RetirementAgePerMember | null,
