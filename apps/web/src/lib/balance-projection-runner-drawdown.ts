@@ -355,6 +355,8 @@ function buildTaxCashflowHookForInput(
     // Same rollover-year RMD ordinary income the post-pass taxes — fund
     // its incremental tax in the same year (canonical inlet).
     rolledRmdIncomeByYear,
+    // Every `isMedical` row, not the HSA-qualified subset.
+    medicalExpenseByMonthCents: series.medicalExpenseByMonth,
   });
 }
 

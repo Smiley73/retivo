@@ -41,6 +41,13 @@
  * surcharge is a CONSTANT within-year input (2-year MAGI look-back). The
  * withheld principal is still counted exactly once on the committing draw
  * (in the runner's `addedNeedDollars`); only the federal tax on it rises.
+ *
+ * Credit applied to premiums: with the year's Medical expenses supplied, the
+ * credit left after federal tax and IRMAA cash lowers the draw. Each pass computes
+ * it from its own credit; it enters the next trial target and the convergence
+ * test. The poverty-line limit (`povertyLineLimitCents`) is set on pass 1, the
+ * draw before any line, and held, so no trial draw falls below the line and the
+ * loop cannot cycle between earning the credit and losing it.
  */
 import { applyTaxYearForFilingPlan } from './tax-integration';
 import type {
@@ -49,7 +56,12 @@ import type {
   TaxMemberInput,
   TaxYearResult,
 } from './tax-integration';
-import { dollarsToCents } from './tax-integration';
+import { DEFAULT_ASSUMED_COST_BASIS_FRACTION, dollarsToCents } from './tax-integration';
+import {
+  creditAppliedToPremiumsCents,
+  drawIncomeCents,
+  povertyLineLimitCents,
+} from './credit-applied-to-premiums';
 
 /** Shared error `code` thrown by every engine's `UnsupportedTaxYearError`
  *  (federal-tax / ss-taxation / irmaa / aca-ptc / rmd). A projection year
@@ -75,6 +87,7 @@ function zeroTaxCashflowResult(): TaxCashflowResult {
     irmaaWithheldFromSsCents: 0,
     irmaaCashNeedCents: 0,
     acaPtcCashflowOffsetCents: 0,
+    acaCreditAppliedToPremiumsCents: 0,
     totalTaxCashflowNeedCents: 0,
     taxCashflowIterations: 0,
     taxCashflowConverged: true,
@@ -96,6 +109,7 @@ const ZERO_TAX_YEAR_RESULT: TaxYearResult = {
   acaPtcSubsidyCents: 0,
   acaPtcTier: 'below-fpl',
   fplPercentage: 0,
+  acaMagiAboveFplCents: 0,
   magiCents: 0,
   effectiveTaxRate: 0,
   taxYearExtrapolated: false,
@@ -157,6 +171,13 @@ export interface TaxCashflowSolveArgs {
    * once after convergence using the solver's final target.
    */
   readonly classifyForTarget: (totalTargetDollars: number) => WithdrawalClassification;
+  /** The year's modeled Medical expenses (every `isMedical` row), integer cents.
+   *  Absent → no credit applied: the Roth-conversion funding solves difference two
+   *  zero-need solves and must not see the line. */
+  readonly medicalExpenseCents?: number;
+  /** Taxable Roth earnings already in `taxInputBase`'s ordinary income, dollars:
+   *  ACA MAGI a lower draw sheds. Absent → 0. */
+  readonly rothEarningsIncomeDollars?: number;
 }
 
 /** Per-bucket withdrawal classification returned by the funding callback. */
@@ -185,6 +206,8 @@ export interface TaxCashflowResult {
   readonly irmaaCashNeedCents: number;
   /** ACA PTC offset applied against the tax/health cashflow need, cents. */
   readonly acaPtcCashflowOffsetCents: number;
+  /** The credit left after that offset that lowers the year's draw, cents. */
+  readonly acaCreditAppliedToPremiumsCents: number;
   /** Total same-year tax cashflow need the withdrawal target must fund:
    *  `max(0, federalTax + irmaaCash − acaPtcOffset)`, cents. */
   readonly totalTaxCashflowNeedCents: number;
@@ -337,6 +360,9 @@ interface SolverPassState {
   irmaaWithheldCents: number;
   irmaaCashCents: number;
   acaOffsetCents: number;
+  creditAppliedCents: number;
+  /** Set by pass 1 (the draw before any line) and held. */
+  povertyLineLimitCents: number;
   /** The target the last classification was run against (shortfall basis). */
   requestedTargetDollars: number;
   classification: WithdrawalClassification | undefined;
@@ -376,6 +402,29 @@ function runOnePass(
   // (floored — never more than federal + IRMAA cash so the need stays ≥ 0).
   state.acaOffsetCents = Math.min(result.acaPtcSubsidyCents, result.federalTaxCents + cashCents);
   state.needCents = totalCashflowNeedCents(result.federalTaxCents, cashCents, result.acaPtcSubsidyCents);
+  if (args.medicalExpenseCents === undefined) {
+    state.creditAppliedCents = 0;
+    return;
+  }
+  if (state.pass === 1) {
+    state.povertyLineLimitCents = povertyLineLimitCents({
+      headroomCents: result.acaMagiAboveFplCents,
+      ...drawIncomeCents({
+        preTaxDollars: cls.preTaxDollars,
+        taxableAccountDollars: cls.postTaxNonRothDollars,
+        rothEarningsDollars: args.rothEarningsIncomeDollars ?? 0,
+        costBasisFraction: taxInputBase.assumedCostBasisFraction ?? DEFAULT_ASSUMED_COST_BASIS_FRACTION,
+      }),
+    });
+  }
+  state.creditAppliedCents = creditAppliedToPremiumsCents({
+    creditCents: result.acaPtcSubsidyCents,
+    offsetCents: state.acaOffsetCents,
+    medicalCents: args.medicalExpenseCents,
+    // The draw this pass would commit before the line.
+    remainingNeedCents: dollarsToCents(args.ordinaryNetNeedDollars) + state.needCents + withheldCents,
+    povertyLineLimitCents: state.povertyLineLimitCents,
+  });
 }
 
 /** Assemble the public result from the final pass state. */
@@ -390,6 +439,7 @@ function buildResult(state: SolverPassState): TaxCashflowResult {
     irmaaWithheldFromSsCents: state.irmaaWithheldCents,
     irmaaCashNeedCents: state.irmaaCashCents,
     acaPtcCashflowOffsetCents: state.acaOffsetCents,
+    acaCreditAppliedToPremiumsCents: state.creditAppliedCents,
     totalTaxCashflowNeedCents: state.needCents,
     taxCashflowIterations: Math.min(state.pass, MAX_PASSES),
     taxCashflowConverged: state.converged,
@@ -403,9 +453,11 @@ function buildResult(state: SolverPassState): TaxCashflowResult {
  * Solve the annual tax/withdrawal feedback loop. Returns the tax cashflow
  * need + diagnostics; never throws (graceful degradation).
  *
- * The per-pass trial target = `ordinaryNetNeed + (needCents + withheldCents)`:
+ * The per-pass trial target =
+ * `ordinaryNetNeed + (needCents + withheldCents − creditAppliedCents)`:
  * the ordinary need, the cash tax need, AND the SS-withheld IRMAA portion,
- * so the federal tax on the withheld-funded draw is included. The
+ * less the credit applied to premiums, so the federal tax on the
+ * withheld-funded draw is included. The
  * initial seed is ordinary-need only (zero tax assumed on pass 1). The
  * withheld addend is a constant within-year offset, so the loop remains a
  * contraction and the `needCents`-keyed convergence test still settles.
@@ -420,6 +472,8 @@ export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult 
     irmaaWithheldCents: 0,
     irmaaCashCents: 0,
     acaOffsetCents: 0,
+    creditAppliedCents: 0,
+    povertyLineLimitCents: Number.POSITIVE_INFINITY,
     requestedTargetDollars: ordinaryNetNeedDollars,
     classification: undefined,
     result: undefined,
@@ -431,13 +485,14 @@ export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult 
   try {
     for (state.pass = 1; state.pass <= MAX_PASSES; state.pass += 1) {
       runOnePass(args, totalTargetDollars, state);
-      // Convergence test on the net tax cost (the quantity the loop drives).
+      // Convergence test on the net cost (need less the line), which the loop drives.
+      const netCostCents = state.needCents - state.creditAppliedCents;
       if (Number.isFinite(prevNetCostCents)
-        && Math.abs(state.needCents - prevNetCostCents) < dollarsToCents(CONVERGENCE_DOLLARS)) {
+        && Math.abs(netCostCents - prevNetCostCents) < dollarsToCents(CONVERGENCE_DOLLARS)) {
         state.converged = true;
         break;
       }
-      prevNetCostCents = state.needCents;
+      prevNetCostCents = netCostCents;
       // Next trial: fund the ordinary need plus the latest tax cashflow need
       // AND the IRMAA portion withheld from Social Security.
       // The runner spends GROSS SS but the withheld surcharge shrinks the
@@ -451,7 +506,8 @@ export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult 
       // added to the committing draw exactly once in the runner
       // (`addedNeedDollars`); only the federal tax on it rises here.
       totalTargetDollars =
-        ordinaryNetNeedDollars + (state.needCents + state.irmaaWithheldCents) / 100;
+        ordinaryNetNeedDollars +
+        (state.needCents + state.irmaaWithheldCents - state.creditAppliedCents) / 100;
     }
   } catch (err) {
     if (err === UNSUPPORTED_YEAR_SENTINEL) return zeroTaxCashflowResult();

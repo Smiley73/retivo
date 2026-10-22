@@ -369,7 +369,7 @@ const BenchmarkOverrideEditor: React.FC<{
 }> = ({ rows, onChangeRows }) => {
   const rowIds = useStableRowIds(rows.length, 'health-benchmark');
   const yearOptions = coverageYearOptions(rows.map((r) => r.taxYear));
-  const { baseMonthlyDollars, baseAge, ageGrowthRate } = ROUGH_BENCHMARK_ASSUMPTIONS;
+  const { baseMonthlyDollars, baseAge, ageGrowthRate, baseYear } = ROUGH_BENCHMARK_ASSUMPTIONS;
   return (
     <div className="flex flex-col gap-3">
       <span className="text-sm font-medium text-ink">Benchmark plan price</span>
@@ -379,10 +379,13 @@ const BenchmarkOverrideEditor: React.FC<{
         one: ${baseMonthlyDollars} a month for a {baseAge}-year-old, rising{' '}
         {Math.round(ageGrowthRate * 100)}% for each year of age, counted
         separately for each covered person and only for the months they are
-        covered. That is a rough estimate, not a real quote. If you have a real
-        benchmark price from your exchange, enter the full-year cost below for
-        that year and it replaces the estimate. In a year you are only covered
-        for part of the year, the matching share of it is used.
+        covered. From {baseYear}, the estimate grows every year at the
+        scenario&rsquo;s medical inflation rate. That is a rough estimate, not a
+        real quote. If you have a real benchmark price from your exchange, enter
+        the full-year cost below for that year and it replaces the estimate and
+        is used exactly as entered, whatever the medical inflation rate. In a
+        year you are only covered for part of the year, the matching share of it
+        is used.
       </Muted>
       {rows.length === 0 ? (
         <Muted as="p" className="m-0 text-sm">

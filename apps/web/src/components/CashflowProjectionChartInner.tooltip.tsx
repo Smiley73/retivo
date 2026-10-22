@@ -133,8 +133,10 @@ export function makeCashflowTooltip(
         {!hidden.has('Taxes') && (
           <div className="flex justify-between gap-4 pl-3">
             {/* eslint-disable-next-line no-restricted-syntax -- runtime series color from the theme-reactive tokens.ts map */}
-            <span style={{ color: TAXES_COLOR }}>Taxes</span>
-            <span>{formatCurrency(point.taxes)}</span>
+            <span style={{ color: TAXES_COLOR }}>
+              {point.taxes < 0 ? 'Credit applied to premiums' : 'Taxes'}
+            </span>
+            <span>{formatCurrency(Math.abs(point.taxes))}</span>
           </div>
         )}
         {!hidden.has('Shortfall') && (

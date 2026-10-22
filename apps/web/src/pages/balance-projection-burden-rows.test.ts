@@ -10,6 +10,7 @@ import {
   buildRmdRows,
   buildRothConversionsSeries,
   buildQcdRows,
+  hasMedicaidRangeYear,
 } from './balance-projection-burden-rows';
 import type { DrawdownByMethodResult } from './balance-projection-page-data';
 import type { DrawdownYear } from '../lib/drawdown-engine-types';
@@ -82,6 +83,21 @@ describe('buildTaxBurdenRows', () => {
       isMcBasisActive: false,
     });
     expect(row.acaPtcSubsidy).toBe(-1200);
+  });
+
+  it('carries the credit applied to premiums as a positive, deflated figure', () => {
+    const dd = drawdown([
+      year({ year: 2040, accountBalances: new Map(), acaPtcSubsidyCents: 5_134_20, acaCreditAppliedToPremiumsCents: 2_700_00 }),
+    ]);
+    const [row] = buildTaxBurdenRows({
+      resolvedDrawdown: dd,
+      basisDeflator: () => 0.5,
+      lastDeathFractional: null,
+      isMcBasisActive: false,
+    });
+    expect(row.acaCreditApplied).toBe(1_350);
+    // It is part of the subsidy bar, not an addition to it.
+    expect(row.acaPtcSubsidy).toBeCloseTo(-2_567.1, 6);
   });
 
   it('returns [] when there is no drawdown', () => {
@@ -667,5 +683,26 @@ describe('buildQcdRows', () => {
       displayMode: 'today',
     });
     expect(row.rmdOffsetDollars).toBeCloseTo(12_345.67 * 0.837, 6);
+  });
+});
+
+describe('hasMedicaidRangeYear', () => {
+  const fires = (fplPercentage?: number): boolean =>
+    hasMedicaidRangeYear([year({ year: 2040, fplPercentage })]);
+
+  it('fires at exactly 138 and stops a hair above', () => {
+    expect(fires(138)).toBe(true);
+    expect(fires(138.01)).toBe(false);
+  });
+
+  it('fires below the poverty line itself', () => {
+    expect(fires(60)).toBe(true);
+    expect(fires(0.5)).toBe(true);
+  });
+
+  it('does not fire for 0 ("not computed") or an absent field', () => {
+    expect(fires(0)).toBe(false);
+    expect(fires(undefined)).toBe(false);
+    expect(hasMedicaidRangeYear([])).toBe(false);
   });
 });

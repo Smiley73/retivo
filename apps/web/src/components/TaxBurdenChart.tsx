@@ -26,6 +26,9 @@ export interface TaxBurdenChartRow {
    * mirrors the Portfolio Flows "withdrawals" bar).
    */
   readonly acaPtcSubsidy: number;
+  /** The ACA credit applied to premiums (dollars, ≥ 0). Already inside the
+   *  `acaPtcSubsidy` bar, so never drawn as a second bar. */
+  readonly acaCreditApplied: number;
   /** Fractional X position. Always omitted now — death = Dec 31 of
    *  `deathYear` (the terminal year), so every bar (including the
    *  death-year bar) is a full year at its integer `year`; the chart

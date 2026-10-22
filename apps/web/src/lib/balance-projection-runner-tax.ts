@@ -93,6 +93,7 @@ import {
   storedAcaBenchmarkOverrides,
 } from './tax-integration-helpers';
 import { solveTaxCashflow, solveFillConversion } from './tax-cashflow-solver';
+import { sumYearCents } from './credit-applied-to-premiums';
 import {
   advanceBrokerageLikeBasis,
   buildAccountSnapshotsFromPriorYear,
@@ -209,6 +210,7 @@ interface TaxYearBuildArgs {
    *  (solver pre-commit path — same documented approximation). */
   readonly cashInterestDollars: number;
   readonly inflationRatePct: number;
+  readonly medicalInflationRatePct: number;
   readonly hsaQualifiedMedicalExpensePct: number;
   readonly earlyWithdrawalPenaltyExemptAccountIds: readonly string[];
   readonly penaltyAccounts: readonly PenaltyAccountSnapshot[];
@@ -257,6 +259,7 @@ function buildTaxYearInput(args: TaxYearBuildArgs): ApplyFilingPlanYearInput {
     acaFplRegion: args.acaFplRegion,
     taxpayersAge65Plus: args.taxpayersAge65Plus,
     inflationRatePct: args.inflationRatePct,
+    medicalInflationRatePct: args.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: args.hsaQualifiedMedicalExpensePct,
     earlyWithdrawalPenaltyExemptAccountIds: args.earlyWithdrawalPenaltyExemptAccountIds,
     penaltyAccounts: args.penaltyAccounts,
@@ -408,6 +411,7 @@ interface TaxLoopShared {
   readonly magiBootstrapMinus1: number | undefined;
   readonly acaPtcBenchmarkOverrides: ReadonlyArray<{ taxYear: number; annualSlcspDollars: number }>;
   readonly inflationRatePct: number;
+  readonly medicalInflationRatePct: number;
   readonly hsaQualifiedMedicalExpensePct: number;
   readonly earlyWithdrawalPenaltyExemptAccountIds: readonly string[];
   readonly primaryDeathYear: number;
@@ -724,6 +728,7 @@ function processTaxYear(
       // IRMAA look-back recompute; computed once above).
       cashInterestDollars,
       inflationRatePct: shared.inflationRatePct,
+      medicalInflationRatePct: shared.medicalInflationRatePct,
       hsaQualifiedMedicalExpensePct: shared.hsaQualifiedMedicalExpensePct,
       earlyWithdrawalPenaltyExemptAccountIds: shared.earlyWithdrawalPenaltyExemptAccountIds,
       // Append the Roth earnings-penalty accounts to the per-year
@@ -838,6 +843,7 @@ export function applyTaxIntegrationToDrawdownYears(
     // and a malformed row cannot price a benchmark.
     acaPtcBenchmarkOverrides: storedAcaBenchmarkOverrides(resolved.acaPtcBenchmark),
     inflationRatePct: ctx.projCtx.inflationPct,
+    medicalInflationRatePct: ctx.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: resolved.hsaQualifiedMedicalExpensePct ?? 100,
     earlyWithdrawalPenaltyExemptAccountIds: resolved.earlyWithdrawalPenaltyExemptAccountIds ?? [],
     // ONE shared derivation with the Monte Carlo twin
@@ -1126,6 +1132,7 @@ function buildTaxLoopShared(
     // and a malformed row cannot price a benchmark.
     acaPtcBenchmarkOverrides: storedAcaBenchmarkOverrides(resolved.acaPtcBenchmark),
     inflationRatePct: ctx.projCtx.inflationPct,
+    medicalInflationRatePct: ctx.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: resolved.hsaQualifiedMedicalExpensePct ?? 100,
     earlyWithdrawalPenaltyExemptAccountIds: resolved.earlyWithdrawalPenaltyExemptAccountIds ?? [],
     // ONE shared derivation with the Monte Carlo twin
@@ -1150,6 +1157,7 @@ function emptyTaxOutcome(): TaxCashflowYearOutcome {
     irmaaWithheldFromSsCents: 0,
     irmaaCashNeedCents: 0,
     acaPtcCashflowOffsetCents: 0,
+    acaCreditAppliedToPremiumsCents: 0,
     totalTaxCashflowNeedCents: 0,
     taxCashflowIterations: 0,
     taxCashflowConverged: true,
@@ -1289,6 +1297,7 @@ function buildSolverYearInput(
     brokerageLikeStartBalanceDollars: 0,
     cashInterestDollars: 0,
     inflationRatePct: shared.inflationRatePct,
+    medicalInflationRatePct: shared.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: shared.hsaQualifiedMedicalExpensePct,
     earlyWithdrawalPenaltyExemptAccountIds: shared.earlyWithdrawalPenaltyExemptAccountIds,
     // PASS 1 leaves `penaltyAccounts` empty (federal tax + IRMAA only).
@@ -1322,17 +1331,22 @@ function buildSolverYearInput(
  *  cents into its per-pass trial target (`tax-cashflow-solver.ts`), so the
  *  federal tax inside `totalTaxCashflowNeedCents` reflects the extra
  *  withheld-covering draw. This add-on still counts the withheld PRINCIPAL
- *  exactly once (here); the solver change raises only the tax on it. */
+ *  exactly once (here); the solver change raises only the tax on it. The credit
+ *  applied to premiums is subtracted, so the add-on can be negative. */
 function toTaxCashflowOutcome(
   result: ReturnType<typeof solveTaxCashflow>,
 ): TaxCashflowYearOutcome {
   return {
     addedNeedDollars:
-      (result.totalTaxCashflowNeedCents + result.irmaaWithheldFromSsCents) / 100,
+      (result.totalTaxCashflowNeedCents +
+        result.irmaaWithheldFromSsCents -
+        result.acaCreditAppliedToPremiumsCents) /
+      100,
     federalTaxCashNeedCents: result.federalTaxCashNeedCents,
     irmaaWithheldFromSsCents: result.irmaaWithheldFromSsCents,
     irmaaCashNeedCents: result.irmaaCashNeedCents,
     acaPtcCashflowOffsetCents: result.acaPtcCashflowOffsetCents,
+    acaCreditAppliedToPremiumsCents: result.acaCreditAppliedToPremiumsCents,
     totalTaxCashflowNeedCents: result.totalTaxCashflowNeedCents,
     taxCashflowIterations: result.taxCashflowIterations,
     taxCashflowConverged: result.taxCashflowConverged,
@@ -1349,6 +1363,9 @@ export function buildTaxCashflowHook(args: {
   readonly retirementYear: number;
   /** Per-calendar-year rolled-CBP RMD ordinary income (dollars). */
   readonly rolledRmdIncomeByYear?: ReadonlyMap<number, number>;
+  /** Monthly modeled Medical expenses (every `isMedical` row), integer cents,
+   *  aligned to (retirementYear, January). Absent → no credit is applied. */
+  readonly medicalExpenseByMonthCents?: ReadonlyArray<number>;
 }): TaxCashflowHook {
   const { ctx, ssRows, nonSsIncomeRows, ledgerAccounts, bundle, retirementYear } = args;
   const shared = buildTaxLoopShared(
@@ -1435,6 +1452,7 @@ export function buildTaxCashflowHook(args: {
       unitRing,
     );
     if (yearInput === null) return emptyTaxOutcome();
+    const medicalExpenseCents = sumYearCents(args.medicalExpenseByMonthCents ?? [], yearIndex);
     // Hybrid IRMAA: each Medicare member's surcharge is withheld only from
     // THAT member's own SS (mirrors CMS per-beneficiary collection). A member
     // on Medicare but not yet claiming their own SS (own SS $0) → full cash
@@ -1453,13 +1471,13 @@ export function buildTaxCashflowHook(args: {
       bundle,
       irmaaPayment: { ownSsDollarsByMemberId: yearInput.ownSsDollarsByMemberId },
       classifyForTarget: classify,
+      medicalExpenseCents,
     });
-    // The funded draw `solveTaxCashflow` settles on is
-    // `ordinaryNetNeed + (totalTaxCashflowNeed + irmaaWithheldFromSs)` — the
-    // withheld IRMAA cents are folded into the trial target so the
-    // portfolio covers the SS-check shortfall. The committed classification
-    // must therefore classify that SAME full funded draw; omitting the withheld
-    // cents under-states the Roth / penalty basis in withheld-IRMAA years.
+    // The committed classification covers the draw BEFORE the credit applied to
+    // premiums lowers it (`ordinaryNetNeed + totalTaxCashflowNeed +
+    // irmaaWithheldFromSs`): the credit, the Roth earnings and the penalties are
+    // all priced on that draw, as the stress test prices them. Omitting the
+    // withheld cents under-states the Roth / penalty basis in withheld-IRMAA years.
     const committedTarget =
       ordinaryNetNeedDollars +
       (pass1.totalTaxCashflowNeedCents + pass1.irmaaWithheldFromSsCents) / 100;
@@ -1491,6 +1509,8 @@ export function buildTaxCashflowHook(args: {
             bundle,
             irmaaPayment: { ownSsDollarsByMemberId: yearInput.ownSsDollarsByMemberId },
             classifyForTarget: classify,
+            medicalExpenseCents,
+            rothEarningsIncomeDollars: rothEarningsExcessDollars,
           });
     magiBuffer.push(result.taxYearResult.magiCents / 100);
     // The funding solver keeps its own per-return look-back ring in

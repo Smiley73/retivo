@@ -51,6 +51,29 @@ describe('release notes', () => {
     }
   });
 
+  it('holds the AI assistant what-if, analysis and assistant announcements, then the open-source one', () => {
+    const at = (title: string): ReleaseNote => RELEASE_NOTES.find((n) => n.title === title)!;
+    const whatIf = at('Your AI assistant can try a what-if without saving it (beta)');
+    const analysis = at('Your AI assistant can run the projection and the stress test (beta)');
+    const assistant = at('Ask an AI assistant about your plan (beta)');
+    const openSource = at('RETIVO is open source');
+    expect(whatIf.kind).toBe('new');
+    expect(whatIf.title).toBe('Your AI assistant can try a what-if without saving it (beta)');
+    expect(whatIf.blurb).toMatch(/not saved/i);
+    expect(whatIf.blurb).toMatch(/Scenarios page/);
+    expect(analysis.kind).toBe('new');
+    expect(analysis.title).toBe('Your AI assistant can run the projection and the stress test (beta)');
+    expect(analysis.blurb).toMatch(/stress test/i);
+    expect(analysis.blurb).toMatch(/cannot change anything/i);
+    expect(assistant.kind).toBe('new');
+    expect(assistant.title).toBe('Ask an AI assistant about your plan (beta)');
+    expect(assistant.blurb).toMatch(/reads only what you allow/i);
+    expect(assistant.blurb).toMatch(/cannot change anything/i);
+    expect(openSource.kind).toBe('new');
+    expect(openSource.title).toBe('RETIVO is open source');
+    expect(`${openSource.title} ${openSource.blurb}`).toMatch(/open source/i);
+  });
+
   it('keeps the open-source announcement', () => {
     const entry = RELEASE_NOTES.find((n) => n.title === 'RETIVO is open source');
     expect(entry?.kind).toBe('new');

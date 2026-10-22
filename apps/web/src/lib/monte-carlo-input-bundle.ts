@@ -55,7 +55,11 @@ import {
   type ClassifiedDepositEvent,
   type GuardrailBundleBlock,
 } from './balance-projection-bundle';
-import { isHsaQualifiedMedical, medicalCategoryIdSet } from './expense-category-resolvers';
+import {
+  isHsaQualifiedMedical,
+  isMedicalExpense,
+  medicalCategoryIdSet,
+} from './expense-category-resolvers';
 import { resolveExpensesForScenario } from './expense-resolution';
 import { resolveIncomeForScenario } from './income-resolution';
 import { resolveLinkedCbpIncomeStreams } from './cbp-resolution';
@@ -169,6 +173,15 @@ export function assembleMcBundle(args: {
           medicalDemandRatePct: nominalArrays.medicalDemandRatePct,
           ...(nominalArrays.monthlyMedicalDemandBucketsBase !== undefined
             ? { monthlyMedicalDemandBucketsBase: nominalArrays.monthlyMedicalDemandBucketsBase }
+            : {}),
+        }
+      : {}),
+    ...(nominalArrays.monthlyMedicalExpenseBase !== undefined
+      ? {
+          monthlyMedicalExpenseBase: nominalArrays.monthlyMedicalExpenseBase,
+          medicalExpenseRatePct: nominalArrays.medicalExpenseRatePct,
+          ...(nominalArrays.monthlyMedicalExpenseBucketsBase !== undefined
+            ? { monthlyMedicalExpenseBucketsBase: nominalArrays.monthlyMedicalExpenseBucketsBase }
             : {}),
         }
       : {}),
@@ -485,6 +498,9 @@ function computeNominalYearArrays(
   monthlyMedicalDemandBase?: number[];
   medicalDemandRatePct?: number;
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
+  monthlyMedicalExpenseBase?: number[];
+  medicalExpenseRatePct?: number;
+  monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
   ssByYear: number[];
   incomeByYear: number[];
 } {
@@ -501,6 +517,15 @@ function computeNominalYearArrays(
           medicalDemandRatePct: expense.medicalDemandRatePct,
           ...(expense.monthlyMedicalDemandBucketsBase !== undefined
             ? { monthlyMedicalDemandBucketsBase: expense.monthlyMedicalDemandBucketsBase }
+            : {}),
+        }
+      : {}),
+    ...(expense.monthlyMedicalExpenseBase !== undefined
+      ? {
+          monthlyMedicalExpenseBase: expense.monthlyMedicalExpenseBase,
+          medicalExpenseRatePct: expense.medicalExpenseRatePct,
+          ...(expense.monthlyMedicalExpenseBucketsBase !== undefined
+            ? { monthlyMedicalExpenseBucketsBase: expense.monthlyMedicalExpenseBucketsBase }
             : {}),
         }
       : {}),
@@ -552,6 +577,11 @@ function computeWindowedExpenseBase(
   /** Per-effective-rate medical-demand buckets — emitted only when the
    *  `isMedical` categories span > 1 effective rate. */
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
+  /** Every `isMedical` row (the HSA demand above is its qualified subset): the
+   *  cap on the credit applied to premiums. */
+  monthlyMedicalExpenseBase?: number[];
+  medicalExpenseRatePct?: number;
+  monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
 } {
   const resolvedExpenses = resolveExpensesForScenario(
     runArgs.scenarioId,
@@ -609,9 +639,11 @@ function computeWindowedExpenseBase(
   // of `monthlyExpenseBase`, in today's dollars, with the medical effective rate
   // so the MC engine inflates it per path the same way the matching expense is
   // inflated (keeping it a strict subset). Absent when no category is flagged.
-  const medical = computeMedicalDemandBase({
-    runArgs, resolvedExpenses, baseCtx, yearRange, inflation, generalRate, stepCount,
-  });
+  const medicalArgs = { runArgs, resolvedExpenses, baseCtx, yearRange, inflation, generalRate, stepCount };
+  const medical = {
+    ...computeMedicalDemandBase(medicalArgs),
+    ...computeMedicalExpenseBase(medicalArgs),
+  };
 
   const anyNonGeneral = resolvedExpenses.some(
     (e) =>
@@ -636,6 +668,17 @@ function computeWindowedExpenseBase(
   return { monthlyExpenseBase, monthlyExpenseBucketsBase, ...medical };
 }
 
+/** Inputs shared by the medical base builders. */
+interface MedicalBaseArgs {
+  runArgs: RunBalanceProjectionArgs;
+  resolvedExpenses: ReturnType<typeof resolveExpensesForScenario>;
+  baseCtx: Parameters<typeof projectExpensesByCategoryMonth>[1];
+  yearRange: { from: number; to: number };
+  inflation: ReturnType<typeof resolveInflationForScenario>;
+  generalRate: number;
+  stepCount: number;
+}
+
 /**
  * Per-month today's-dollar HSA medical-demand base — the `isMedical`
  * subset of `monthlyExpenseBase`, summed from the SAME category-month projection
@@ -646,31 +689,65 @@ function computeWindowedExpenseBase(
  * MC engine inflates the demand by the matching CPI and the inflated series
  * stays a subset of the inflated expense.
  */
-export function computeMedicalDemandBase(args: {
-  runArgs: RunBalanceProjectionArgs;
-  resolvedExpenses: ReturnType<typeof resolveExpensesForScenario>;
-  baseCtx: Parameters<typeof projectExpensesByCategoryMonth>[1];
-  yearRange: { from: number; to: number };
-  inflation: ReturnType<typeof resolveInflationForScenario>;
-  generalRate: number;
-  stepCount: number;
-}): {
+export function computeMedicalDemandBase(args: MedicalBaseArgs): {
   monthlyMedicalDemandBase?: number[];
   medicalDemandRatePct?: number;
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
 } {
-  const { runArgs, resolvedExpenses, baseCtx, yearRange, inflation, generalRate, stepCount } = args;
-  const medicalIds = medicalCategoryIdSet(runArgs.medicalCategoryIds);
-  if (medicalIds.size === 0) return {};
   // Pre-filter to HSA-qualified medical rows using the SINGLE-SOURCE
   // predicate (isHsaQualifiedMedical) — same gate the deterministic builder uses.
+  // Absent hsaQualified ⇒ not qualified.
+  const series = computeMedicalBaseSeries(args, isHsaQualifiedMedical, 'monthlyMedicalDemandBase');
+  if (series === null) return {};
+  return {
+    monthlyMedicalDemandBase: series.base,
+    medicalDemandRatePct: series.ratePct,
+    ...(series.buckets !== undefined ? { monthlyMedicalDemandBucketsBase: series.buckets } : {}),
+  };
+}
+
+/**
+ * The same base for every `isMedical` row: the cap on the credit applied to
+ * premiums. Buckets are sorted by rate so the cache key does not depend on
+ * category order.
+ */
+function computeMedicalExpenseBase(args: MedicalBaseArgs): {
+  monthlyMedicalExpenseBase?: number[];
+  medicalExpenseRatePct?: number;
+  monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
+} {
+  const series = computeMedicalBaseSeries(args, isMedicalExpense, 'monthlyMedicalExpenseBase');
+  if (series === null) return {};
+  return {
+    monthlyMedicalExpenseBase: series.base,
+    medicalExpenseRatePct: series.ratePct,
+    ...(series.buckets !== undefined
+      ? { monthlyMedicalExpenseBucketsBase: [...series.buckets].sort((a, b) => a.ratePct - b.ratePct) }
+      : {}),
+  };
+}
+
+/** One medical base series: the scalar base, the single shared rate, and the
+ *  per-rate buckets when the admitted categories span more than one rate. */
+function computeMedicalBaseSeries(
+  args: MedicalBaseArgs,
+  qualifies: (
+    expense: ReturnType<typeof resolveExpensesForScenario>[number],
+    medicalIds: ReadonlySet<string>,
+  ) => boolean,
+  label: string,
+): {
+  base: number[];
+  ratePct: number;
+  buckets?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
+} | null {
+  const { runArgs, resolvedExpenses, baseCtx, yearRange, inflation, generalRate, stepCount } = args;
+  const medicalIds = medicalCategoryIdSet(runArgs.medicalCategoryIds);
+  if (medicalIds.size === 0) return null;
   // Filtering before projectExpensesByCategoryMonth preserves the per-rate byRate
-  // binning and the strict-subset invariant. Absent hsaQualified ⇒ not
-  // qualified. This is the MC-independent application of the shared predicate.
-  const qualifiedExpenses = resolvedExpenses.filter((e) =>
-    isHsaQualifiedMedical(e, medicalIds),
-  );
-  if (qualifiedExpenses.length === 0) return {};
+  // binning and the strict-subset invariant.
+  const qualifiedExpenses = resolvedExpenses.filter((e) => qualifies(e, medicalIds));
+  if (qualifiedExpenses.length === 0) return null;
   const points = projectExpensesByCategoryMonth(qualifiedExpenses, baseCtx, yearRange);
   const base = new Array<number>(stepCount).fill(0);
   // Group the per-category medical charge by each category's OWN effective
@@ -703,7 +780,7 @@ export function computeMedicalDemandBase(args: {
     }
     base[i] = round2(monthlyChargeFromRunRate(recurring, oneOff));
   }
-  assertExpenseBaseLength(base, stepCount, 'monthlyMedicalDemandBase');
+  assertExpenseBaseLength(base, stepCount, label);
   // The single shared rate is the rate of the sole NONZERO-demand bucket
   // (`byRate` only records rates with positive in-window monthly demand). Using
   // the first FLAGGED id's rate unconditionally would inflate the real demand at
@@ -726,16 +803,12 @@ export function computeMedicalDemandBase(args: {
   // at its own rate. Single-rate → omit the bucketed field (scalar path).
   if (byRate.size > 1) {
     const buckets = [...byRate.entries()].map(([ratePct, amount]) => {
-      assertExpenseBaseLength(amount, stepCount, `monthlyMedicalDemandBucketsBase[${ratePct}]`);
+      assertExpenseBaseLength(amount, stepCount, `${label.replace('Base', 'BucketsBase')}[${ratePct}]`);
       return { ratePct, amount };
     });
-    return {
-      monthlyMedicalDemandBase: base,
-      medicalDemandRatePct: medicalRate,
-      monthlyMedicalDemandBucketsBase: buckets,
-    };
+    return { base, ratePct: medicalRate, buckets };
   }
-  return { monthlyMedicalDemandBase: base, medicalDemandRatePct: medicalRate };
+  return { base, ratePct: medicalRate };
 }
 
 /** Per-effective-rate per-month buckets. Regroups the per-category

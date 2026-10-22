@@ -52,6 +52,7 @@ import {
   bootstrapLookbackRing,
   centsToDollars,
   computeRmdFloorCents,
+  DEFAULT_ASSUMED_COST_BASIS_FRACTION,
   dollarsToCents,
 } from './tax-integration';
 import type {
@@ -69,6 +70,11 @@ import {
   type PenaltyAccountInput,
 } from './early-withdrawal-penalty';
 import type { AccountType, AccountTaxTreatment } from '../db/types';
+import {
+  creditAppliedToPremiumsCents,
+  drawIncomeCents,
+  povertyLineLimitCents,
+} from './credit-applied-to-premiums';
 import type { AcaFplRegion } from './aca-ptc';
 import { isQualifyingAccount } from './rmd';
 import type { DrawdownAccountYear } from './drawdown-engine-types';
@@ -309,6 +315,9 @@ export interface McTaxContext {
    * thresholds when the tax year exceeds the latest calibration snapshot.
    */
   readonly inflationRatePct?: number;
+  /** Scenario medical inflation rate (percent) that grows the rough ACA
+   *  benchmark; fixed, not the path's sampled inflation. Absent → no growth. */
+  readonly medicalInflationRatePct?: number;
   /** Calendar year the primary is projected to die. `undefined`
    *  → alive for every projection year. Drives the per-year
    *  filing-status + household-size + Medicare-count recompute. */
@@ -540,7 +549,9 @@ export interface McTaxYearResult {
   readonly filingUnitMagi: readonly FilingUnitMagi[];
   /**
    * Same-year tax cashflow the portfolio must fund: federal tax +
-   * IRMAA surcharge − ACA PTC offset, floored at zero, in dollars. The
+   * IRMAA surcharge + the penalty − ACA PTC offset, floored at zero, less the
+   * credit applied to premiums, in dollars. Negative when a credit applied
+   * lowers the year's draw (it is only applied past the tax and penalty). The
    * caller subtracts this from the path's balance trajectory so taxes affect
    * MC depletion / success / percentiles. The FULL IRMAA surcharge is funded
    * (cash + the portion withheld from Social Security) because the spendable
@@ -548,6 +559,9 @@ export interface McTaxYearResult {
    * the conservative single-household direction for stress testing.
    */
   readonly taxCashflowDollars: number;
+  /** The credit applied to premiums, dollars (≥ 0); already inside
+   *  `taxCashflowDollars`. */
+  readonly acaCreditAppliedToPremiums: number;
 }
 
 /**
@@ -785,6 +799,13 @@ export interface PerYearTaxArgs {
    * `classification`; this governs the fallback drawdown + display.
    */
   readonly nominalExpense: number;
+  /** The year's modeled Medical expenses (every `isMedical` row), nominal dollars
+   *  before any guardrail scaling or tax fold: the cap on the credit applied to
+   *  premiums. Absent → no credit applied (Fill-conversion solves, display pass). */
+  readonly medicalExpenseDollars?: number;
+  /** The year's draw need before tax (the positive monthly needs the strategy
+   *  engine draws), nominal dollars. Absent → the year's net expense stands in. */
+  readonly drawNeedDollars?: number;
   /** Non-SS non-portfolio ordinary income for this year. Offsets the year's
    *  spendable expense (reduces the computed drawdown) AND adds to taxable
    *  ordinary income. */
@@ -1079,7 +1100,22 @@ export function applyPerYearTaxForPathWithConversion(
     rothEarnings.additionalTaxBaseDollars,
   );
 
-  const result = assembleMcTaxResult(taxResult, drawdown, penaltyDollars);
+  const result = assembleMcTaxResult(
+    taxResult,
+    drawdown,
+    penaltyDollars,
+    args.medicalExpenseDollars,
+    args.drawNeedDollars,
+    drawIncomeCents({
+      preTaxDollars: preTaxWithdrawalDollars,
+      taxableAccountDollars: classification?.postTaxNonRothDollars ?? 0,
+      rothEarningsDollars: rothEarnings.earningsExcessDollars,
+      costBasisFraction:
+        args.costBasisFraction ??
+        taxCtx.assumedCostBasisFraction ??
+        DEFAULT_ASSUMED_COST_BASIS_FRACTION,
+    }),
+  );
 
   // The ring sample is conversion-INCLUSIVE so Y+2 IRMAA is funded. With no
   // conversion this is the funded MAGI; with a conversion, recompute MAGI on the
@@ -2103,6 +2139,7 @@ export function buildMcTaxYearInput(
           args.irmaaLookbackUnitsMinus2),
     taxpayersAge65Plus: countTaxpayersAge65Plus(survivors, taxYear),
     inflationRatePct: taxCtx.inflationRatePct,
+    medicalInflationRatePct: taxCtx.medicalInflationRatePct,
     // The scenario's FPL region + the year's annual SLCSP override
     // reach the MC ACA-PTC block exactly as they reach the deterministic one, so
     // the two engines price the same benchmark against the same poverty line.
@@ -2152,6 +2189,9 @@ function assembleMcTaxResult(
   taxResult: TaxYearResult,
   drawdown: number,
   penaltyDollars = 0,
+  medicalExpenseDollars?: number,
+  drawNeedDollars?: number,
+  drawIncome: ReturnType<typeof drawIncomeCents> = { incomeDrawCents: 0, magiOfDrawCents: 0 },
 ): McTaxYearResult {
   const fedTax = centsToDollars(taxResult.federalTaxCents);
   const irmaa = centsToDollars(taxResult.irmaaSurchargeCents);
@@ -2164,12 +2204,31 @@ function assembleMcTaxResult(
   // path does not split IRMAA into cash vs SS-withheld (no per-member SS series
   // on the path), so it funds the whole surcharge — the conservative direction.
   //
-  // Mirror of the deterministic engine: the early-withdrawal / HSA /
-  // Roth-earnings penalty is funded per path (added to the cashflow) so it
-  // reduces the path's balance via the absorbing after-tax adjustment. The
-  // ACA PTC offsets only the federal tax + IRMAA, never the penalty (a penalty
-  // is a Form 5329 additional tax, not PTC-offsettable).
-  const taxCashflowDollars = Math.max(0, fedTax + irmaa - ptc) + penaltyDollars;
+  // The early-withdrawal / HSA / Roth-earnings penalty is funded per path, as in
+  // the deterministic engine. The credit is refundable against the whole bill,
+  // penalty included, so the penalty is offset before any of it lowers the draw.
+  const taxNeedDollars = Math.max(0, fedTax + irmaa + penaltyDollars - ptc);
+
+  // Credit applied to premiums; the offset here is the whole surcharge, where the
+  // deterministic engine's is the IRMAA cash part only.
+  const creditCents =
+    medicalExpenseDollars === undefined
+      ? 0
+      : creditAppliedToPremiumsCents({
+          creditCents: taxResult.acaPtcSubsidyCents,
+          offsetCents: Math.min(
+            taxResult.acaPtcSubsidyCents,
+            taxResult.federalTaxCents + taxResult.irmaaSurchargeCents + dollarsToCents(penaltyDollars),
+          ),
+          medicalCents: dollarsToCents(medicalExpenseDollars),
+          remainingNeedCents: dollarsToCents((drawNeedDollars ?? drawdown) + taxNeedDollars),
+          povertyLineLimitCents: povertyLineLimitCents({
+            headroomCents: taxResult.acaMagiAboveFplCents,
+            ...drawIncome,
+          }),
+        });
+  const acaCreditAppliedToPremiums = centsToDollars(creditCents);
+  const taxCashflowDollars = taxNeedDollars - acaCreditAppliedToPremiums;
 
   return {
     fedTax,
@@ -2180,6 +2239,7 @@ function assembleMcTaxResult(
     magiDollars: centsToDollars(taxResult.magiCents),
     filingUnitMagi: taxResult.filingUnitMagi ?? [],
     taxCashflowDollars,
+    acaCreditAppliedToPremiums,
   };
 }
 
@@ -2294,6 +2354,7 @@ export interface McTaxAccumulators {
   readonly fedTaxByYear: number[][];
   readonly irmaaSurchargeByYear: number[][];
   readonly acaPtcSubsidyByYear: number[][];
+  readonly acaCreditAppliedToPremiumsByYear: number[][];
   readonly effectiveTaxRateByYear: number[][];
   readonly netAfterTaxByYear: number[][];
 }
@@ -2309,6 +2370,10 @@ export function createTaxAccumulators(
     fedTaxByYear: Array.from({ length: horizon }, () => new Array<number>(pathCount)),
     irmaaSurchargeByYear: Array.from({ length: horizon }, () => new Array<number>(pathCount)),
     acaPtcSubsidyByYear: Array.from({ length: horizon }, () => new Array<number>(pathCount)),
+    acaCreditAppliedToPremiumsByYear: Array.from(
+      { length: horizon },
+      () => new Array<number>(pathCount),
+    ),
     effectiveTaxRateByYear: Array.from({ length: horizon }, () => new Array<number>(pathCount)),
     netAfterTaxByYear: Array.from({ length: horizon }, () => new Array<number>(pathCount)),
   };
@@ -2340,7 +2405,8 @@ export function advanceAfterTaxBase(
   cumTaxThroughThisYear: number,
 ): AfterTaxBaseState {
   if (prev.depleted) return { base: 0, depleted: true };
-  const afterTax = Math.max(0, rawNominalThisYear - cumTaxThroughThisYear);
+  // A cumulative draw below zero adds nothing back, as `applyAfterTaxAdjustment` skips it.
+  const afterTax = Math.max(0, rawNominalThisYear - Math.max(0, cumTaxThroughThisYear));
   const depleted = cumTaxThroughThisYear > 0 && rawNominalThisYear > 0 && afterTax <= 0;
   return { base: afterTax, depleted };
 }

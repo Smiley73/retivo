@@ -26,6 +26,7 @@ import {
   type ScenarioAggregate,
 } from '../../lib/scenario-resolution';
 import { runBalanceProjectionForPage } from '../../lib/balance-projection-runner';
+import { growRoughBenchmarkCents } from '../../lib/aca-ptc';
 import { carriesTenPercentPenalty } from '../../lib/early-withdrawal-penalty';
 import { retirementDate } from '../../lib/retirement-date-math';
 import { deriveFilingStatus } from '../../lib/filing-status';
@@ -215,6 +216,7 @@ function deriveBenchmarkSlcspCents(
   memberInputs: readonly TaxMemberInput[],
   retirementYear: number,
   coverageMonths: number,
+  medicalInflationRatePct: number,
 ): number {
   // Read through the ONE shared shape-checking enumerator, so an
   // envelope-only-validated import cannot throw out of the probe at `.find` or
@@ -225,7 +227,11 @@ function deriveBenchmarkSlcspCents(
   if (override !== undefined) {
     return overrideBenchmarkCentsForCoverageMonths(override.annualSlcspDollars, coverageMonths);
   }
-  return Math.round(defaultHouseholdSlcspByAge(memberInputs, retirementYear) * CENTS_FACTOR);
+  return growRoughBenchmarkCents(
+    Math.round(defaultHouseholdSlcspByAge(memberInputs, retirementYear) * CENTS_FACTOR),
+    retirementYear,
+    medicalInflationRatePct,
+  );
 }
 
 /** The retirement year's `TaxMemberInput` set for the BETR probe, built
@@ -327,6 +333,7 @@ interface BETRContextAnchors {
   readonly lifeExpectancyAnchorYear: number;
   readonly currentCalendarYear: number;
   readonly inflationRatePct: number;
+  readonly medicalInflationRatePct: number;
 }
 
 /**
@@ -386,6 +393,7 @@ function buildBETRContext(
       healthMemberInputs,
       retirementYear,
       acaCoverageMonths,
+      anchors.medicalInflationRatePct,
     ),
     // The probe prices the household's OWN poverty-guideline
     // schedule and its actual Marketplace coverage months, so its "lost premium
@@ -441,6 +449,7 @@ export function buildRothBETRPageData(input: RothBETRDataInput): RothBETRPageDat
     lifeExpectancyAnchorYear: page.sharedCtx.horizonYear,
     currentCalendarYear,
     inflationRatePct: page.sharedCtx.ctx.inflationPct,
+    medicalInflationRatePct: page.sharedCtx.medicalInflationRatePct,
   });
 
   const workingSummary = computeWorkingYearsBETRSummary(ctx, drawdownYears, bundle);

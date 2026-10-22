@@ -7,7 +7,7 @@
  * and that every strategy renders the chart + sub-table. A11y assertion per
  * the project shared-component rule.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
@@ -75,6 +75,17 @@ async function openTaxBurdenInfo(): Promise<HTMLElement> {
   const name = /About the Tax & Health-Cost Burden chart/i;
   await user.click(screen.getByRole('button', { name }));
   return screen.getByRole('dialog', { name });
+}
+
+/** The summary tile whose label is `label`; the year-by-year table can repeat a
+ *  label as a column header. */
+function summaryTile(label: string): HTMLElement {
+  const tile = screen
+    .getAllByText(label)
+    .map((el) => el.parentElement)
+    .find((el) => el?.children.length === 2 && el.firstElementChild?.textContent === label);
+  if (tile === undefined || tile === null) throw new Error(`no summary tile labelled ${label}`);
+  return tile;
 }
 
 const NO_SIGNAL_COPY = /No taxable retirement events in this projection/;
@@ -270,6 +281,42 @@ describe('BalanceProjectionCharts', () => {
     expect(screen.getByText('$16k')).toBeInTheDocument();
     expect(screen.getByText('$3k')).toBeInTheDocument();
     expect(screen.getByText('$5k')).toBeInTheDocument();
+  });
+
+  it('renders the credit applied to premiums tile with its lifetime total (deterministic basis)', () => {
+    const years = [
+      drawdownYear(2030, { acaPtcSubsidyCents: 500_000, acaCreditAppliedToPremiumsCents: 300_000 }),
+      drawdownYear(2031, { acaPtcSubsidyCents: 200_000, acaCreditAppliedToPremiumsCents: 100_000 }),
+    ];
+    render(
+      <ThemeProvider>
+        <BalanceProjectionCharts
+          {...baseProps({ planned: method(years), twr: null })}
+        />
+      </ThemeProvider>,
+    );
+    expect(within(summaryTile('Credit applied to premiums')).getByText('$4k')).toBeInTheDocument();
+    expect(within(summaryTile('ACA health credits')).getByText('$7k')).toBeInTheDocument();
+  });
+
+  it('renders the credit applied to premiums tile under an MC basis', () => {
+    const years = [
+      drawdownPhaseYear(2030, {
+        acaPtcSubsidyCents: 500_000,
+        acaCreditAppliedToPremiumsCents: 300_000,
+      }),
+    ];
+    render(
+      <ThemeProvider>
+        <BalanceProjectionCharts
+          {...baseProps({ planned: method(years), twr: null })}
+          isMcBasisActive
+          resolvedLabel="Typical"
+        />
+      </ThemeProvider>,
+    );
+    expect(within(summaryTile('Credit applied to premiums')).getByText('$3k')).toBeInTheDocument();
+    expect(within(summaryTile('ACA health credits')).getByText('$5k')).toBeInTheDocument();
   });
 
   it('keeps the death-year tax-burden row FULL and drops rows past the death year', () => {
@@ -1189,5 +1236,28 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
     );
     expect(screen.getByText('$50k')).toBeInTheDocument();
     await waitForBars(container, 1);
+  });
+
+  describe('Medicaid note', () => {
+    const MEDICAID_COPY = /Medicaid may apply/i;
+
+    it('shows it under a Monte Carlo basis whose representative rows carry no fplPercentage', () => {
+      // The flag has to come from the deterministic method's years, not the resolved basis.
+      const representative = method([drawdownPhaseYear(2030)]);
+      render(
+        <ThemeProvider>
+          <BalanceProjectionCharts
+            {...baseProps({
+              planned: method([drawdownYear(2030, { fplPercentage: 120 })]),
+              twr: null,
+            })}
+            resolvedDrawdown={representative}
+            isMcBasisActive
+            resolvedLabel="Typical"
+          />
+        </ThemeProvider>,
+      );
+      expect(screen.getByText(MEDICAID_COPY)).toBeInTheDocument();
+    });
   });
 });

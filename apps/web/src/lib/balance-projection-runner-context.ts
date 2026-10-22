@@ -19,6 +19,7 @@ import {
 import {
   resolveAccountFloorsForScenario,
   resolveInflationForScenario,
+  resolveMedicalInflationPct,
   resolveQcdForScenario,
   resolveScenario,
   type ResolvedAccountFloor,
@@ -992,6 +993,9 @@ export function buildPipelineContext(
       ? { healthCoverageMonths: resolved.healthCoverageMonths }
       : {}),
     ...(resolved.acaFplRegion !== undefined ? { acaFplRegion: resolved.acaFplRegion } : {}),
+    medicalInflationRatePct: resolveMedicalInflationPct(args.scenarioId, [
+      ...effectiveScenarios,
+    ]),
     resolvedQcd,
   };
 }

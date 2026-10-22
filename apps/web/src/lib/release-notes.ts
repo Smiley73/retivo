@@ -35,6 +35,16 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-21',
     kind: 'new',
+    title: 'Add Medicare premiums to your expenses in one step',
+    blurb:
+      'The Expenses page has an Add Medicare premiums action. It previews a Part B and ' +
+      'a Part D premium for each person, with the current Medicare amounts you can edit, ' +
+      'and adds them as monthly Medical expenses from age 65. Medigap, Medicare Advantage ' +
+      'and your actual drug-plan price stay yours to enter.',
+  },
+  {
+    date: '2026-10-21',
+    kind: 'new',
     title: 'Save a Roth conversion plan to a scenario',
     blurb:
       'Each ranked plan in the Roth conversion comparison now has a "Save plan to scenario" ' +
@@ -46,6 +56,16 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-21',
     kind: 'improved',
+    title: 'Projections now flag years when Medicaid may apply',
+    blurb:
+      'When a year with a Marketplace plan has income at or below 138% of the ' +
+      'federal poverty line, a note under the charts says Medicaid may cover ' +
+      'you instead, depending on your state. Retivo still does not model ' +
+      'states or Medicaid, and no projected number changes.',
+  },
+  {
+    date: '2026-10-21',
+    kind: 'improved',
     title: 'See why each year of a Roth conversion plan converts what it does',
     blurb:
       'Each plan in the Roth conversion comparison now has a "Why each year" button that opens a ' +
@@ -53,6 +73,27 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
       'the amount, and what the year cost in income tax, taxable Social Security, the Medicare ' +
       'surcharge and the health-insurance premium credit. A year that a Medicare surcharge or ' +
       'premium-credit line stopped also shows what crossing it would have cost.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'improved',
+    title: 'Your Marketplace credit now lowers your withdrawals',
+    blurb:
+      'When the ACA premium credit is larger than your tax and Medicare surcharge, ' +
+      'the extra now lowers that year\u2019s withdrawals, up to the Medical expenses ' +
+      'you entered and what you would otherwise withdraw, instead of disappearing. ' +
+      'It shows as Credit applied to premiums on the Taxes tab, in the yearly ' +
+      'table and on the Cash flow tab. Projections and stress tests change when you update.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'improved',
+    title: 'Estimated Marketplace plan price now grows with medical inflation',
+    blurb:
+      'When you have not entered a benchmark plan price, the estimate now grows ' +
+      'every year after 2026 at your scenario\u2019s medical inflation rate, so ' +
+      'later-year health insurance subsidies are no longer overstated or understated. ' +
+      'A price you enter is still used exactly as entered.',
   },
   {
     date: '2026-10-20',

@@ -27,23 +27,27 @@ export function sumTaxBurden(rows: ReadonlyArray<TaxBurdenChartRow>): {
   federalTax: number;
   irmaaSurcharge: number;
   acaPtcCredit: number;
+  acaCreditApplied: number;
 } {
   let federalTax = 0;
   let irmaaSurcharge = 0;
   let acaPtcSubsidy = 0;
+  let acaCreditApplied = 0;
   for (const r of rows) {
     federalTax += r.federalTax;
     irmaaSurcharge += r.irmaaSurcharge;
     acaPtcSubsidy += r.acaPtcSubsidy;
+    acaCreditApplied += r.acaCreditApplied;
   }
   // `+ 0` normalizes a sign-flipped `-0` back to `0` (so an all-zero credit
   // never formats as "-$0").
-  return { federalTax, irmaaSurcharge, acaPtcCredit: -acaPtcSubsidy + 0 };
+  return { federalTax, irmaaSurcharge, acaPtcCredit: -acaPtcSubsidy + 0, acaCreditApplied };
 }
 
 /**
- * Summary-tile row for the tax-burden band — the three deflated lifetime totals
- * (federal tax, IRMAA, ACA-PTC credit). Extracted from `TaxBurdenBand` to keep
+ * Summary-tile row for the tax-burden band — the four deflated lifetime totals
+ * (federal tax, IRMAA, ACA-PTC credit, and the part of that credit that lowered
+ * the withdrawals). Extracted from `TaxBurdenBand` to keep
  * that component within the 60-line shape limit; rendered only inside its
  * hasSignal branch so the gate-by-placement is preserved. The lifetime-basis
  * caption that used to sit below the grid now lives in the section's `(i)` info
@@ -52,7 +56,7 @@ export function sumTaxBurden(rows: ReadonlyArray<TaxBurdenChartRow>): {
 const TaxBurdenSummaryTiles: React.FC<{
   readonly totals: ReturnType<typeof sumTaxBurden>;
 }> = ({ totals }) => (
-  <StatGrid cols="three">
+  <StatGrid cols="four">
     <Stat
       label="Federal income tax"
       value={formatCurrencyShort(totals.federalTax)}
@@ -64,6 +68,10 @@ const TaxBurdenSummaryTiles: React.FC<{
     <Stat
       label="ACA health credits"
       value={formatCurrencyShort(totals.acaPtcCredit)}
+    />
+    <Stat
+      label="Credit applied to premiums"
+      value={formatCurrencyShort(totals.acaCreditApplied)}
     />
   </StatGrid>
 );
@@ -87,6 +95,9 @@ const TaxBurdenMethodologyContent: React.FC<{
       Lifetime totals across every projected retirement year for the selected
       method, in {displayMode === 'today' ? "today's" : 'future'} dollars. ACA
       health credits are shown as a positive amount, they reduce your net cost.
+      Credit applied to premiums is the part of those credits that lowered your
+      withdrawals because you entered the premium as a Medical expense; it is
+      already inside the ACA health credits figure.
     </p>
     <p className="m-0">
       Federal income tax and Medicare IRMAA surcharge for each retirement year

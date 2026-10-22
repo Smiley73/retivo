@@ -173,6 +173,8 @@ export interface DrawdownYearRow {
   readonly irmaaTier?: 'none' | 'tier1' | 'tier2' | 'tier3' | 'tier4' | 'tier5';
   readonly acaPtcSubsidyCents?: number;
   readonly acaPtcTier?: 'below-fpl' | 'sliding' | 'cap-applies' | 'above-400-cliff';
+  /** Mirrors `DrawdownYear.acaCreditAppliedToPremiumsCents`. */
+  readonly acaCreditAppliedToPremiumsCents?: number;
   /** Mirrors `DrawdownYear.magiCapBreachDollars` — pre-tax dollars exceeding the
    *  MAGI cap this year. Populated by either (1) taxable-depletion breach
    *  (cap-aware tier loop ran out of later taxable balance to absorb the overage),
@@ -312,6 +314,8 @@ export interface PageSharedContext {
   readonly horizonYear: number;
   readonly ssStartYear: number;
   readonly methodAvailable: boolean;
+  /** `PipelineContext.medicalInflationRatePct`. */
+  readonly medicalInflationRatePct: number;
   /** Non-CBP accounts that lack an empirical TWR rate and so project
    *  on their planned rate inside the Historical view. Drives the inline
    *  disclosure note. Non-optional; `[]` when none fell back. */
@@ -533,6 +537,9 @@ export interface PipelineContext {
   /** Federal-poverty-level region for the ACA FPL denominator. Absent →
    *  `'contiguous'` (48 states + DC). */
   readonly acaFplRegion?: import('./aca-ptc').AcaFplRegion;
+  /** The scenario's medical inflation rate (percent), resolved once; grows the
+   *  rough ACA benchmark from its base year in every engine. */
+  readonly medicalInflationRatePct: number;
   /** QCD (Qualified Charitable Distributions): resolved + hardened per-member
    *  directives for the scenario — malformed / cross-owner /
    *  non-PRE_TAX-IRA / invalid-window entries already dropped, `start` clamped to
@@ -585,6 +592,10 @@ export interface CashflowSeries {
    *  to drive the HSA medical pass. Empty / no `isMedical` category ⇒ all-zero
    *  (the medical pass is a no-op; emergency-reserve path intact). */
   readonly medicalDemandByMonth: ReadonlyArray<number>;
+  /** Per-month modeled Medical expenses in INTEGER CENTS, every `isMedical` row
+   *  (`medicalDemandByMonth` is its HSA-qualified subset, same length and
+   *  anchoring). Caps the ACA credit applied to premiums. */
+  readonly medicalExpenseByMonth: ReadonlyArray<number>;
   /** True when the plan models ANY `isMedical` expense at all,
    *  HSA-qualified or not. Deliberately NOT derived from `medicalDemandByMonth`:
    *  that series is pre-filtered to HSA-QUALIFIED rows, and Medicare, Medigap,

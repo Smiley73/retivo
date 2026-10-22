@@ -12,6 +12,7 @@ import {
   resolveAccountReturnsForScenario,
   resolveContributionGrowth,
   resolveInflationForScenario,
+  resolveMedicalInflationPct,
   resolvePreRetirementRothConversions,
   resolveQcdForScenario,
   resolveAccountFloorsForScenario,
@@ -1523,5 +1524,61 @@ describe('resolveDownturnGuardrailsForScenario', () => {
     });
     expect(() => resolveDownturnGuardrailsForScenario('p', [p])).not.toThrow();
     expect(resolveDownturnGuardrailsForScenario('p', [p])).toBeUndefined();
+  });
+});
+
+describe('resolveMedicalInflationPct', () => {
+  const withInflation = (
+    id: string,
+    parentScenarioId: string | null,
+    inflation: { ratePct: number; categoryRates?: Record<string, number> } | undefined,
+    isPrimary = false,
+  ): ScenarioAggregate =>
+    scenario(id, {
+      name: id,
+      isPrimary,
+      parentScenarioId,
+      overrides: inflation ? { inflation } : {},
+    });
+
+  it('a chain with no inflation resolves to the 3% default + 2 pp = 5', () => {
+    const base = withInflation('b', null, undefined, true);
+    expect(resolveMedicalInflationPct('b', [base])).toBe(5);
+  });
+
+  it('general 4 with no Medical rate resolves to 6', () => {
+    const base = withInflation('b', null, { ratePct: 4 }, true);
+    expect(resolveMedicalInflationPct('b', [base])).toBe(6);
+  });
+
+  it('an explicit Medical category rate of 7 resolves to 7', () => {
+    const base = withInflation(
+      'b',
+      null,
+      { ratePct: 4, categoryRates: { 'cat-medical': 7 } },
+      true,
+    );
+    expect(resolveMedicalInflationPct('b', [base])).toBe(7);
+  });
+
+  it('a child scenario inherits the parent’s Medical rate', () => {
+    const parent = withInflation(
+      'p',
+      null,
+      { ratePct: 4, categoryRates: { 'cat-medical': 7 } },
+      true,
+    );
+    const child = withInflation('c', 'p', { ratePct: 4 });
+    expect(resolveMedicalInflationPct('c', [parent, child])).toBe(7);
+  });
+
+  it('does not depend on the household’s category list or other category rates', () => {
+    const base = withInflation(
+      'b',
+      null,
+      { ratePct: 4, categoryRates: { 'cat-housing': 9, 'some-other-medical': 1 } },
+      true,
+    );
+    expect(resolveMedicalInflationPct('b', [base])).toBe(6);
   });
 });

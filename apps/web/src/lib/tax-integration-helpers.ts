@@ -645,6 +645,9 @@ export interface TaxYearInput {
    * Absent or 0 → no scaling (thresholds used as-is from latest snapshot).
    */
   readonly inflationRatePct?: number;
+  /** Scenario medical inflation rate (percent) that grows the rough ACA
+   *  benchmark from its base year. Absent → no growth. */
+  readonly medicalInflationRatePct?: number;
   /**
    * Percentage (0–100) of EMERGENCY HSA withdrawals assumed to be qualified
    * medical expenses (tax-free); modeled medical-qualified withdrawals are
@@ -709,6 +712,10 @@ export interface TaxYearResult {
   readonly acaPtcTier: 'below-fpl' | 'sliding' | 'cap-applies' | 'above-400-cliff';
   /** ACA FPL percentage for the year (0 when not applicable). */
   readonly fplPercentage: number;
+  /** Cents of ACA MAGI above 100% of the poverty line, where the credit ends;
+   *  the smallest figure among the returns that earn a credit, 0 when none does.
+   *  Projection-year dollars. */
+  readonly acaMagiAboveFplCents: number;
   /** Household MAGI for the year, in integer cents. */
   readonly magiCents: number;
   /** Effective federal tax rate: totalTax / grossIncome (0..1). */

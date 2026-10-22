@@ -35,7 +35,7 @@
 import { computeFederalTax } from './federal-tax';
 import { computeSsTaxation } from './ss-taxation';
 import { computeMonthAwareIrmaa } from './irmaa';
-import { computeAcaPtc, acaPtcEligibleForFilingStatus } from './aca-ptc';
+import { computeAcaPtc, acaPtcEligibleForFilingStatus, growRoughBenchmarkCents } from './aca-ptc';
 import {
   computeRmd,
   rmdDeclaredRothPortionCents,
@@ -176,6 +176,10 @@ export interface FilingPlanTaxYearInput extends TaxYearInput {
   readonly irmaaLookbackMfsLivedWithSpouse?: boolean;
 }
 
+/** The share of a taxable-account withdrawal that is basis, not income, when the
+ *  caller states none. */
+export const DEFAULT_ASSUMED_COST_BASIS_FRACTION = 0.5;
+
 /**
  * Apply all five tax engines to a single projection year.
  *
@@ -223,7 +227,7 @@ export function applyTaxYear(
     taxExemptInterestDollars,
     cashInterestDollars = 0,
     qcdIncomeExclusionDollars = 0,
-    assumedCostBasisFraction = 0.5,
+    assumedCostBasisFraction = DEFAULT_ASSUMED_COST_BASIS_FRACTION,
     brokerageLikeStartBalanceDollars = 0,
     householdSize,
     members,
@@ -541,6 +545,7 @@ export function applyTaxYear(
   let acaPtcSubsidyCents = 0;
   let acaPtcTier: TaxYearResult['acaPtcTier'] = 'below-fpl';
   let fplPercentage = 0;
+  let acaMagiAboveFplCents = 0;
 
   // An `MFS` return is statutorily ineligible for the PTC (§36B(c)(1)(C))
   // and `computeAcaPtc` throws rather than silently crediting one, so the gate
@@ -565,7 +570,11 @@ export function applyTaxYear(
       // The rough fallback is the SUM over covered members of each
       // member's own age-priced monthly premium × their covered months, not the
       // oldest member's annual premium × the covered-member count.
-      benchmarkSlcspCents = dollarsToCents(healthFacts.defaultBenchmarkAnnualDollars);
+      benchmarkSlcspCents = growRoughBenchmarkCents(
+        dollarsToCents(healthFacts.defaultBenchmarkAnnualDollars),
+        taxYear,
+        input.medicalInflationRatePct,
+      );
     }
     // Deflate MAGI by the inflation factor so the FPL% comparison uses an
     // inflation-consistent poverty line (equivalent to inflating the clamped
@@ -585,12 +594,8 @@ export function applyTaxYear(
         ...(input.acaFplRegion !== undefined ? { fplRegion: input.acaFplRegion } : {}),
         // Re-inflate the expected-contribution OUTPUT back to projection-year
         // dollars (the MAGI input was deflated above for tier classification
-        // only). The benchmark premium is not scaled, and nothing inflates it:
-        // the rough fallback (`healthCoverageYearFacts`) is priced from each
-        // covered member's age alone, so it changes only as members age, and a
-        // user-entered per-year override is a separate input, used as entered
-        // for that year and prorated to coverage months by
-        // `overrideBenchmarkCentsForCoverageMonths`.
+        // only). The benchmark is not scaled here: the rough fallback was grown
+        // above and an override is used as entered.
         expectedContributionScalingFactor: acaScaling,
         // §36B(b)(2) sums the credit over COVERAGE MONTHS. The benchmark
         // above is already summed over covered member-months, so the expected
@@ -604,6 +609,14 @@ export function applyTaxYear(
     acaPtcSubsidyCents = acaResult.annualPtcCents;
     acaPtcTier = acaResult.tier;
     fplPercentage = acaResult.fplPercentage;
+    // Headroom above the poverty line, re-inflated to projection-year dollars;
+    // floored so a draw lowered by it stays at or above the line.
+    if (fplPercentage >= 100) {
+      acaMagiAboveFplCents = Math.max(
+        0,
+        Math.floor((acaMagiDeflatedCents - Math.ceil(acaResult.fplDollars * 100)) * acaScaling),
+      );
+    }
   }
 
   // --- Step 4: RMD (independent pre-pass) ---
@@ -698,6 +711,7 @@ export function applyTaxYear(
     acaPtcSubsidyCents,
     acaPtcTier,
     fplPercentage,
+    acaMagiAboveFplCents,
     magiCents,
     effectiveTaxRate,
     taxYearExtrapolated,
@@ -1331,6 +1345,14 @@ function grossIncomeForEffectiveRateDollars(input: TaxYearInput): number {
   );
 }
 
+/** The smallest headroom among the returns that earn a credit; 0 when none does. */
+function narrowestAcaMagiAboveFplCents(results: readonly TaxYearResult[]): number {
+  const earning = results.filter((r) => r.acaPtcSubsidyCents > 0);
+  return earning.length === 0
+    ? 0
+    : Math.min(...earning.map((r) => r.acaMagiAboveFplCents));
+}
+
 /** Sum the per-unit results into the household `TaxYearResult` the runners
  *  annotate. Cash fields sum exactly; the three categorical DISPLAY fields
  *  collapse to the household's most-affected unit. */
@@ -1374,6 +1396,7 @@ function mergeUnitResults(
     acaPtcTier:
       results.find((r) => r.acaPtcTier !== 'below-fpl')?.acaPtcTier ?? 'below-fpl',
     fplPercentage: results.reduce((max, r) => Math.max(max, r.fplPercentage), 0),
+    acaMagiAboveFplCents: narrowestAcaMagiAboveFplCents(results),
     // The SUM of the returns' MAGIs is a HOUSEHOLD figure no single
     // return reports. It is the right basis for the household-level MAGI
     // ceiling the drawdown overlay applies (one user-entered household ceiling),

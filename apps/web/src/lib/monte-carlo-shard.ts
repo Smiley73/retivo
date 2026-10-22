@@ -23,12 +23,13 @@ import type { PathLoopAccumulation, RunContext } from './monte-carlo.js';
 import type { MonteCarloInput } from './monte-carlo-types.js';
 import { createTaxAccumulators, type McTaxAccumulators } from './monte-carlo-tax.js';
 
-/** The five per-year tax matrices carried through a shard / merge, matching
+/** The six per-year tax matrices carried through a shard / merge, matching
  *  `McTaxAccumulators`' field set. `null` when the run has no `taxContext`. */
 interface TaxMatrices {
   fedTaxByYear: Float64Array[];
   irmaaSurchargeByYear: Float64Array[];
   acaPtcSubsidyByYear: Float64Array[];
+  acaCreditAppliedToPremiumsByYear: Float64Array[];
   effectiveTaxRateByYear: Float64Array[];
   netAfterTaxByYear: Float64Array[];
 }
@@ -76,6 +77,7 @@ function makeTaxMatrices(horizon: number, cols: number): TaxMatrices {
     fedTaxByYear: makeMatrix(horizon, cols),
     irmaaSurchargeByYear: makeMatrix(horizon, cols),
     acaPtcSubsidyByYear: makeMatrix(horizon, cols),
+    acaCreditAppliedToPremiumsByYear: makeMatrix(horizon, cols),
     effectiveTaxRateByYear: makeMatrix(horizon, cols),
     netAfterTaxByYear: makeMatrix(horizon, cols),
   };
@@ -128,6 +130,8 @@ export function runPathRange(
         tax.fedTaxByYear[y][li] = outcome.federalTaxByYear?.[y] ?? 0;
         tax.irmaaSurchargeByYear[y][li] = outcome.irmaaSurchargeByYear?.[y] ?? 0;
         tax.acaPtcSubsidyByYear[y][li] = outcome.acaPtcSubsidyByYear?.[y] ?? 0;
+        tax.acaCreditAppliedToPremiumsByYear[y][li] =
+          outcome.acaCreditAppliedToPremiumsByYear?.[y] ?? 0;
         tax.effectiveTaxRateByYear[y][li] = outcome.effectiveTaxRateByYear?.[y] ?? 0;
         tax.netAfterTaxByYear[y][li] = outcome.netAfterTaxByYear?.[y] ?? 0;
       }
@@ -195,6 +199,7 @@ export function mergePathRanges(
         tax.fedTaxByYear[y].set(r.tax.fedTaxByYear[y], off);
         tax.irmaaSurchargeByYear[y].set(r.tax.irmaaSurchargeByYear[y], off);
         tax.acaPtcSubsidyByYear[y].set(r.tax.acaPtcSubsidyByYear[y], off);
+        tax.acaCreditAppliedToPremiumsByYear[y].set(r.tax.acaCreditAppliedToPremiumsByYear[y], off);
         tax.effectiveTaxRateByYear[y].set(r.tax.effectiveTaxRateByYear[y], off);
         tax.netAfterTaxByYear[y].set(r.tax.netAfterTaxByYear[y], off);
       }
@@ -249,6 +254,9 @@ export function assembleAccumulationFromTyped(
         built.fedTaxByYear[y] = Array.from(merged.tax.fedTaxByYear[y]);
         built.irmaaSurchargeByYear[y] = Array.from(merged.tax.irmaaSurchargeByYear[y]);
         built.acaPtcSubsidyByYear[y] = Array.from(merged.tax.acaPtcSubsidyByYear[y]);
+        built.acaCreditAppliedToPremiumsByYear[y] = Array.from(
+          merged.tax.acaCreditAppliedToPremiumsByYear[y],
+        );
         built.effectiveTaxRateByYear[y] = Array.from(merged.tax.effectiveTaxRateByYear[y]);
         built.netAfterTaxByYear[y] = Array.from(merged.tax.netAfterTaxByYear[y]);
       }
@@ -322,6 +330,7 @@ export function collectAccumulationTransferables(x: MergedAccumulationTransfer):
     pushMatrixBuffers(out, x.tax.fedTaxByYear);
     pushMatrixBuffers(out, x.tax.irmaaSurchargeByYear);
     pushMatrixBuffers(out, x.tax.acaPtcSubsidyByYear);
+    pushMatrixBuffers(out, x.tax.acaCreditAppliedToPremiumsByYear);
     pushMatrixBuffers(out, x.tax.effectiveTaxRateByYear);
     pushMatrixBuffers(out, x.tax.netAfterTaxByYear);
   }

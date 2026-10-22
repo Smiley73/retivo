@@ -50,6 +50,7 @@ function makeTooltip(
     const federalTax = p.federalTax;
     const irmaa = p.irmaaSurcharge;
     const ptc = p.acaPtcSubsidy;
+    const creditApplied = p.acaCreditApplied;
     return (
       <div
         role="tooltip"
@@ -80,6 +81,13 @@ function makeTooltip(
         )}
         {ptc < 0 && !hidden.has('ACA-PTC subsidy') && (
           <Row label="ACA-PTC subsidy" value={-ptc} color={colors.acaPtc} />
+        )}
+        {creditApplied > 0 && (
+          // Part of the ACA-PTC subsidy above, so left out of the net cost.
+          <div className="flex justify-between gap-4 text-muted">
+            <span>Credit applied to premiums (part of the subsidy above)</span>
+            <span>{formatCurrency(creditApplied)}</span>
+          </div>
         )}
         {(federalTax > 0 || irmaa > 0 || ptc < 0) && (
           <div

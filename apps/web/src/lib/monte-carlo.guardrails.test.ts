@@ -135,7 +135,7 @@ describe('downturn guardrail — disabled parity', () => {
     };
     expect(strip(disabledCfg)).toEqual(strip(withoutCfg));
     expect(disabledCfg.engineVersion).toBe(ENGINE_VERSION);
-    expect(ENGINE_VERSION).toBe(70);
+    expect(ENGINE_VERSION).toBe(73);
   });
 
   it('a DISABLED guardrail carrying a discretionaryFloorPct is still math-byte-identical to no config', () => {

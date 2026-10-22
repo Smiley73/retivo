@@ -14,7 +14,7 @@
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AcaCoverageCard,
@@ -28,6 +28,7 @@ import type {
   ScenarioPayload,
 } from '../db/types';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
+import { ROUGH_BENCHMARK_ASSUMPTIONS } from '../lib/aca-ptc';
 
 const HH = 'hh-test';
 
@@ -327,6 +328,19 @@ describe('AcaCoverageModal — health facts', () => {
     expect(screen.getByText(/\$700 a month for a 60-year-old/i)).toBeInTheDocument();
     expect(screen.getByText(/rising\s+5% for each year of age/i)).toBeInTheDocument();
     expect(screen.getByText(/rough estimate, not a real quote/i)).toBeInTheDocument();
+    // The estimate grows every year from its base year at the scenario's medical
+    // rate, and an entered price is used exactly as entered.
+    expect(
+      screen.getByText(
+        new RegExp(
+          `From ${ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows every year at the scenario.s medical inflation rate`,
+          'i',
+        ),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/used exactly as entered, whatever the medical inflation rate/i),
+    ).toBeInTheDocument();
   });
 
   it('seeds the poverty-guideline region and the stored coverage months', async () => {
@@ -492,5 +506,70 @@ describe('ACA coverage — a11y smoke', () => {
     );
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
     await expectNoA11yViolations(container);
+  });
+});
+
+describe('AcaCoverageModal — Medicare premiums link', () => {
+  const LocationProbe: React.FC = () => {
+    const loc = useLocation();
+    return <div data-testid="location">{`${loc.pathname}${loc.search}`}</div>;
+  };
+
+  function renderWithRoutes(scenarioId: string): void {
+    const scenario = makeScenario(scenarioId);
+    render(
+      <MemoryRouter initialEntries={['/scenarios/x']}>
+        <Routes>
+          <Route
+            path="/scenarios/x"
+            element={
+              <AcaCoverageModal
+                open
+                scenario={scenario}
+                scenarios={[scenario]}
+                householdId={HH}
+                members={MEMBERS}
+                onClose={vi.fn()}
+              />
+            }
+          />
+          <Route path="/expenses" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it('navigates straight to the preview when the draft is clean', async () => {
+    renderWithRoutes('sc-link-clean');
+    await userEvent.click(
+      await screen.findByRole('link', { name: 'Add Part B and Part D premiums' }),
+    );
+    expect(await screen.findByTestId('location')).toHaveTextContent(
+      '/expenses?medicarePremiums=1',
+    );
+  });
+
+  it('asks Stay or Leave when the draft is dirty, and only Leave navigates', async () => {
+    renderWithRoutes('sc-link-dirty');
+    await userEvent.click(
+      await screen.findByRole('switch', { name: /Jane is on the ACA Marketplace/i }),
+    );
+    await userEvent.click(
+      screen.getByRole('link', { name: 'Add Part B and Part D premiums' }),
+    );
+    expect(await screen.findByText(/You have unsaved changes/)).toBeInTheDocument();
+    expect(screen.queryByTestId('location')).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Stay' }));
+    await waitFor(() => expect(screen.queryByText(/You have unsaved changes/)).toBeNull());
+    expect(screen.queryByTestId('location')).toBeNull();
+
+    await userEvent.click(
+      screen.getByRole('link', { name: 'Add Part B and Part D premiums' }),
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Leave' }));
+    expect(await screen.findByTestId('location')).toHaveTextContent(
+      '/expenses?medicarePremiums=1',
+    );
   });
 });

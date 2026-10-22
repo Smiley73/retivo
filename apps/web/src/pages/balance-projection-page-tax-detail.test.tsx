@@ -2,7 +2,7 @@
  * BalanceProjectionTaxDetail — "Taxes & health costs" sub-table render +
  * a11y smoke.
  *
- * Covers: the five visible tax fields render; the table is present for any
+ * Covers: the six visible tax fields render; the table is present for any
  * scenario (the component is strategy-agnostic — it consumes the runner
  * drawdown years, which carry tax fields for every named strategy);
  * the solver-diagnostic warning surfaces when a year is unfunded; and the
@@ -44,7 +44,7 @@ function taxYear(
 const identityDeflator = (): number => 1;
 
 describe('BalanceProjectionTaxDetail', () => {
-  it('renders the five tax fields with a column per field', () => {
+  it('renders the six tax fields with a column per field', () => {
     render(
       <BalanceProjectionTaxDetail
         drawdownYears={[taxYear(2040)]}
@@ -56,6 +56,7 @@ describe('BalanceProjectionTaxDetail', () => {
     expect(screen.getByText('IRMAA cash-paid')).toBeInTheDocument();
     expect(screen.getByText('ACA PTC offset')).toBeInTheDocument();
     expect(screen.getByText('Tax-funded withdrawals')).toBeInTheDocument();
+    expect(screen.getByText('Credit applied to premiums')).toBeInTheDocument();
     // The federal-tax cell renders the dollar figure ($8,000 from cents).
     expect(screen.getByText('$8,000')).toBeInTheDocument();
   });
@@ -127,6 +128,43 @@ describe('BalanceProjectionTaxDetail', () => {
       />,
     );
     await expectNoA11yViolations(container);
+  });
+
+  it('shows the credit applied to premiums, deflated like its neighbours', () => {
+    render(
+      <BalanceProjectionTaxDetail
+        drawdownYears={[
+          taxYear(2040, {
+            federalTaxCashNeedCents: 0,
+            irmaaWithheldFromSsCents: 0,
+            acaPtcCashflowOffsetCents: 0,
+            totalTaxCashflowNeedCents: 0,
+            acaCreditAppliedToPremiumsCents: 513_420,
+          }),
+        ]}
+        viewDeflator={() => 0.5}
+      />,
+    );
+    // $5,134.20 in future dollars is $2,567 in today's dollars at a 0.5 deflator.
+    expect(screen.getByText('$2,567')).toBeInTheDocument();
+  });
+
+  it('renders the table when the credit applied to premiums is the only signal', () => {
+    render(
+      <BalanceProjectionTaxDetail
+        drawdownYears={[
+          taxYear(2040, {
+            federalTaxCashNeedCents: 0,
+            irmaaWithheldFromSsCents: 0,
+            acaPtcCashflowOffsetCents: 0,
+            totalTaxCashflowNeedCents: 0,
+            acaCreditAppliedToPremiumsCents: 270_000,
+          }),
+        ]}
+        viewDeflator={identityDeflator}
+      />,
+    );
+    expect(screen.getByText('$2,700')).toBeInTheDocument();
   });
 
   it('omits the Net taxable IRA RMD column when no year carries a QCD', () => {

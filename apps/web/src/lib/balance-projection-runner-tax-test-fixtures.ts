@@ -126,6 +126,8 @@ interface MakeCtxOverrides {
    *  Seeds both the resolved-scenario override and the `PipelineContext` Set the
    *  member-flag derivation reads. Default: no opt-outs. */
   acaMarketplaceOptOutMemberIds?: readonly string[];
+  /** Scenario medical inflation rate (percent). Default: absent → no growth. */
+  medicalInflationRatePct?: number;
   /** The stored per-member/per-year health-coverage MONTHS the engines
    *  overlay on the automatic birthday-based derivation. Default: none stated. */
   healthCoverageMonths?: PipelineContext['healthCoverageMonths'];
@@ -284,6 +286,7 @@ export function makeCtx(overrides: MakeCtxOverrides = {}): PipelineContext {
     magiCap,
     acaMarketplaceOptOutMemberIds,
     healthCoverageMonths,
+    medicalInflationRatePct,
     rmdProfileFactsByAccountId = new Map<string, RmdAccountProfileFacts>(),
   } = overrides;
   // `rothBasisCentsByOwner` IS the per-owner Roth-IRA regular-contribution
@@ -357,5 +360,6 @@ export function makeCtx(overrides: MakeCtxOverrides = {}): PipelineContext {
     mixedInPlanConversionBasisCentsByAccount: new Map<string, number>(),
     acaMarketplaceOptOutMemberIds: new Set(acaMarketplaceOptOutMemberIds ?? []),
     healthCoverageMonths,
+    medicalInflationRatePct,
   } as unknown as PipelineContext;
 }

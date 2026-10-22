@@ -491,8 +491,8 @@ describe('cross-engine pin — deterministic drawdown vs MC (builder-backed)', (
     assertSeriesEqual(runDrawdownSide(cfg), runMcSide(cfg));
   });
 
-  it('pins the Monte Carlo ENGINE_VERSION at 70 (Roth basis worked out from recorded history — both engines derive a person\u2019s own Roth IRA basis and remaining conversion lots from every non-deleted Roth IRA they own, and an employer Roth plan\u2019s basis is its recorded in-plan-rollover principal alone)', () => {
-    expect(ENGINE_VERSION).toBe(70);
+  it('pins the Monte Carlo ENGINE_VERSION at 73 (the stress test offsets the early-withdrawal penalty with the ACA credit as the projection does, and the line\u2019s poverty-line limit counts only the gain of a taxable-account draw)', () => {
+    expect(ENGINE_VERSION).toBe(73);
   });
 });
 

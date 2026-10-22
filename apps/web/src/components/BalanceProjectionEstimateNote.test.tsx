@@ -5,13 +5,18 @@
  * announcement, plus the shared-component axe rule (AGENTS mandate).
  */
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render as renderBare, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { BalanceProjectionEstimateNote } from './BalanceProjectionEstimateNote';
 import { MonteCarloMethodologyModal } from './MonteCarloMethodologyModal';
 import { expectNoA11yViolations } from '../test/a11y';
 import { ROUGH_BENCHMARK_ASSUMPTIONS } from '../lib/aca-ptc';
+
+// The missing-premium paragraph links to the Expenses page, so the note needs a router.
+const render = (ui: React.ReactElement): ReturnType<typeof renderBare> =>
+  renderBare(<MemoryRouter>{ui}</MemoryRouter>);
 
 describe('BalanceProjectionEstimateNote', () => {
   it('discloses that tax/IRMAA/ACA figures are balance-affecting estimates', () => {
@@ -189,6 +194,13 @@ describe('BalanceProjectionEstimateNote', () => {
     expect(note).toHaveTextContent(
       /counted for each covered person and only for the months they are\s+covered/i,
     );
+    expect(note).toHaveTextContent(
+      new RegExp(
+        `From ${ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows\\s+every year at the scenario.s medical inflation rate`,
+        'i',
+      ),
+    );
+    expect(note).toHaveTextContent(/it is used exactly as entered/i);
     // The approximation is never presented as a real exchange quote.
     expect(note).toHaveTextContent(/not a real quote from your exchange/i);
   });
@@ -218,10 +230,46 @@ describe('BalanceProjectionEstimateNote', () => {
     expect(text.tagName.toLowerCase()).toBe('strong');
   });
 
+  it('omits the Medicaid paragraph by default', () => {
+    render(<BalanceProjectionEstimateNote />);
+    expect(screen.getByRole('note')).not.toHaveTextContent(/Medicaid/i);
+  });
+
+  it('renders the Medicaid paragraph, with its four points, when the flag is set', () => {
+    render(<BalanceProjectionEstimateNote medicaidMayApply />);
+    const note = screen.getByRole('note');
+    expect(note).toHaveTextContent(/Medicaid may cover your household instead/i);
+    expect(note).toHaveTextContent(/Depending on your\s+state/i);
+    expect(note).toHaveTextContent(/does not model states or Medicaid/i);
+    expect(note).toHaveTextContent(/do not assume Medicaid/i);
+    expect(note).toHaveTextContent(/did not expand\s+Medicaid/i);
+    expect(note).toHaveTextContent(/estates of people who received it at 55 or older/i);
+    const lead = screen.getByText(/Medicaid may apply/i);
+    expect(lead.tagName.toLowerCase()).toBe('strong');
+  });
+
   it('the health disclosures render with no a11y violations', async () => {
     const { container } = render(
-      <BalanceProjectionEstimateNote medicareBasePremiumMissing isMcBasisActive />,
+      <BalanceProjectionEstimateNote
+        medicareBasePremiumMissing
+        medicaidMayApply
+        isMcBasisActive
+      />,
     );
     await expectNoA11yViolations(container);
+  });
+
+  it('shows the Add Medicare premiums link only when the base premium is missing', () => {
+    const { unmount } = render(<BalanceProjectionEstimateNote />);
+    expect(screen.getByRole('note')).toHaveTextContent(
+      /Expenses page can add the standard Part B and Part D\s+amounts for you/i,
+    );
+    expect(screen.queryByRole('link', { name: 'Add Medicare premiums' })).toBeNull();
+    unmount();
+    render(<BalanceProjectionEstimateNote medicareBasePremiumMissing />);
+    expect(screen.getByRole('link', { name: 'Add Medicare premiums' })).toHaveAttribute(
+      'href',
+      '/expenses?medicarePremiums=1',
+    );
   });
 });

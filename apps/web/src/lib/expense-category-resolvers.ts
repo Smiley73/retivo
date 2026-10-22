@@ -41,6 +41,14 @@ export function medicalCategoryIdsFrom(
   return out;
 }
 
+/** Every modeled Medical expense, HSA-qualified or not. */
+export function isMedicalExpense(
+  expense: { payload: Pick<ExpensePayload, 'categoryId'> },
+  medicalIds: ReadonlySet<string>,
+): boolean {
+  return medicalIds.has(expense.payload.categoryId);
+}
+
 /**
  * The SINGLE-SOURCE predicate for HSA-qualified medical demand.
  *

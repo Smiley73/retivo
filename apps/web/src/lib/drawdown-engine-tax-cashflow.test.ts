@@ -77,6 +77,7 @@ function flatTaxHook(taxPerYear: number): {
         irmaaWithheldFromSsCents: 0,
         irmaaCashNeedCents: 0,
         acaPtcCashflowOffsetCents: 0,
+        acaCreditAppliedToPremiumsCents: 0,
         totalTaxCashflowNeedCents: taxPerYear * 100,
         taxCashflowIterations: 2,
         taxCashflowConverged: true,
@@ -341,5 +342,62 @@ describe('drawdown engine — tax cashflow', () => {
       ),
     });
     expect(out.years[0].magiCapBreachDollars ?? 0).toBeGreaterThan(0);
+  });
+});
+
+/** Hook whose outcome is the credit applied to premiums alone: a NEGATIVE
+ *  add-on of `$line`, never below minus the year's ordinary need. */
+function creditHook(line: number): TaxCashflowHook {
+  return {
+    solveForYear: (): TaxCashflowYearOutcome => ({
+      addedNeedDollars: -line,
+      federalTaxCashNeedCents: 0,
+      irmaaWithheldFromSsCents: 0,
+      irmaaCashNeedCents: 0,
+      acaPtcCashflowOffsetCents: 0,
+      acaCreditAppliedToPremiumsCents: line * 100,
+      totalTaxCashflowNeedCents: 0,
+      taxCashflowIterations: 1,
+      taxCashflowConverged: true,
+      taxCashflowShortfallCents: 0,
+    }),
+  };
+}
+
+describe('drawdown engine — credit applied to premiums (negative add-on)', () => {
+  const ira = (): DrawdownAccountInput[] => [account({ id: 'ira', initialPre: 1_000_000 }, 2040, 2040)];
+
+  it('lowers the same-year withdrawal by the line and stamps it on the row', () => {
+    const base = simulateDrawdown(baseInput(ira(), 2040, 2040, 1_000));
+    const credited = simulateDrawdown(baseInput(ira(), 2040, 2040, 1_000, creditHook(3_000)));
+    expect(credited.years[0].withdrawn).toBeCloseTo(base.years[0].withdrawn - 3_000, 6);
+    expect(credited.years[0].balance).toBeCloseTo(base.years[0].balance + 3_000, 6);
+    expect(credited.years[0].acaCreditAppliedToPremiumsCents).toBe(300_000);
+    expect(credited.years[0].depleted).toBe(false);
+  });
+
+  it('spreads the line over the months in proportion to each month\'s need and never goes negative', () => {
+    // Spending only in the first six months: a line spread evenly over twelve
+    // months would drive the idle months negative.
+    const expensesByMonth = uniform(2040, 2040, 2_000);
+    expensesByMonth.values.fill(0, 6);
+    const run = (hook?: TaxCashflowHook) =>
+      simulateDrawdown({ ...baseInput(ira(), 2040, 2040, 0, hook), expensesByMonth });
+    const base = run();
+    const credited = run(creditHook(6_000));
+    expect(base.years[0].withdrawn).toBeCloseTo(12_000, 6);
+    expect(credited.years[0].withdrawn).toBeCloseTo(6_000, 6);
+    // The six spending months each draw half of what they did; the rest stay at zero.
+    const monthly = Array.from(credited.perMonthWithdrawal);
+    for (let m = 0; m < 6; m += 1) expect(monthly[m]).toBeCloseTo(1_000, 6);
+    for (let m = 6; m < 12; m += 1) expect(monthly[m]).toBe(0);
+  });
+
+  it('with no line the year is byte-identical to a run without the hook', () => {
+    const base = simulateDrawdown(baseInput(ira(), 2040, 2040, 1_000));
+    const zero = simulateDrawdown(baseInput(ira(), 2040, 2040, 1_000, creditHook(0)));
+    expect(zero.years[0].withdrawn).toBe(base.years[0].withdrawn);
+    expect(zero.years[0].balance).toBe(base.years[0].balance);
+    expect(Array.from(zero.perMonthWithdrawal)).toEqual(Array.from(base.perMonthWithdrawal));
   });
 });

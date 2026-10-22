@@ -510,4 +510,38 @@ describe('buildRothBETRPageData — ACA benchmark for the retirement year', () =
     expect(data?.ctx.acaCoverageMonths).toBe(7);
     expect(data?.ctx.benchmarkAnnualSlcspCents).toBe(700_000);
   });
+
+  it('grows the rough benchmark to the retirement year at the scenario medical rate', () => {
+    // General inflation 4% with no Medical rate → medical 6%. The member is 62
+    // in the retirement year (2028): $700 × 1.05² = $771.75 a month, × 12 =
+    // 926,100 cents, × 1.06² (two years past the 2026 base year) = 1,040,566.
+    const data = buildRothBETRPageData(
+      projectingInput({
+        scenarios: [scenario('s1', { ...retireAt62, inflation: { ratePct: 4 } })],
+      }),
+    );
+    expect(data?.ctx.retirementYear).toBe(2028);
+    expect(data?.ctx.acaCoverageMonths).toBe(12);
+    expect(data?.ctx.benchmarkAnnualSlcspCents).toBe(1_040_566);
+  });
+
+  it('uses an explicit Medical category rate, and never scales an entered price', () => {
+    const medical7 = { inflation: { ratePct: 4, categoryRates: { 'cat-medical': 7 } } };
+    const rough = buildRothBETRPageData(
+      projectingInput({ scenarios: [scenario('s1', { ...retireAt62, ...medical7 })] }),
+    );
+    expect(rough?.ctx.benchmarkAnnualSlcspCents).toBe(Math.round(926_100 * 1.07 * 1.07));
+    const entered = buildRothBETRPageData(
+      projectingInput({
+        scenarios: [
+          scenario('s1', {
+            ...retireAt62,
+            ...medical7,
+            acaPtcBenchmark: [{ taxYear: 2028, annualSlcspDollars: 12_000 }],
+          }),
+        ],
+      }),
+    );
+    expect(entered?.ctx.benchmarkAnnualSlcspCents).toBe(1_200_000);
+  });
 });

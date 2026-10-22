@@ -646,6 +646,7 @@ export function buildMcTaxContext(
     householdSize: ctx.secondary ? 2 : 1,
     assumedCostBasisFraction,
     inflationRatePct: ctx.projCtx.inflationPct,
+    medicalInflationRatePct: ctx.medicalInflationRatePct,
     primaryDeathYear,
     secondaryDeathYear,
     filingStatusOverride: resolved.filingStatus ?? undefined,
@@ -960,6 +961,15 @@ export function mcInputFromBundle(
           // spans > 1 effective rate so each sub-series inflates at its own rate.
           ...(bundle.monthlyMedicalDemandBucketsBase !== undefined
             ? { monthlyMedicalDemandBucketsBase: bundle.monthlyMedicalDemandBucketsBase }
+            : {}),
+        }
+      : {}),
+    ...(bundle.monthlyMedicalExpenseBase !== undefined
+      ? {
+          monthlyMedicalExpenseBase: bundle.monthlyMedicalExpenseBase,
+          medicalExpenseRatePct: bundle.medicalExpenseRatePct,
+          ...(bundle.monthlyMedicalExpenseBucketsBase !== undefined
+            ? { monthlyMedicalExpenseBucketsBase: bundle.monthlyMedicalExpenseBucketsBase }
             : {}),
         }
       : {}),

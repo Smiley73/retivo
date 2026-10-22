@@ -25,6 +25,7 @@ import {
   buildRmdRows,
   buildRothConversionsSeries,
   buildQcdRows,
+  hasMedicaidRangeYear,
 } from './balance-projection-burden-rows';
 import { TaxBurdenBand } from './balance-projection-page-tax-burden';
 import { RmdBand } from './balance-projection-page-rmd-band';
@@ -136,6 +137,14 @@ export const BalanceProjectionCharts: React.FC<BalanceProjectionChartsProps> = (
         (yr) => yr.medicareBasePremiumMissing === true,
       ) || drawdownYears.some((yr) => yr.medicareBasePremiumMissing === true),
     [drawdownByMethod, activeMethod, drawdownYears],
+  );
+
+  /** Medicaid paragraph flag, read off the DETERMINISTIC drawdown like
+   *  `medicareBasePremiumMissing`: the MC representative run never stamps
+   *  `fplPercentage`. */
+  const medicaidMayApply = useMemo(
+    () => hasMedicaidRangeYear(drawdownByMethod?.[activeMethod]?.years ?? []),
+    [drawdownByMethod, activeMethod],
   );
 
   /** Per-year tax / health-cost burden rows for TaxBurdenBand,
@@ -482,6 +491,7 @@ export const BalanceProjectionCharts: React.FC<BalanceProjectionChartsProps> = (
         magiEstimatedFromProjection={isMcBasisActive ? false : magiEstimatedFromProjection}
         isMcBasisActive={isMcBasisActive}
         medicareBasePremiumMissing={medicareBasePremiumMissing}
+        medicaidMayApply={medicaidMayApply}
       />
     </>
   );

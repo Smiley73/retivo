@@ -126,6 +126,7 @@ function stampTaxCashflowRow(row: DrawdownYear, outcome: TaxCashflowYearOutcome)
   row.irmaaWithheldFromSsCents = outcome.irmaaWithheldFromSsCents;
   row.irmaaCashNeedCents = outcome.irmaaCashNeedCents;
   row.acaPtcCashflowOffsetCents = outcome.acaPtcCashflowOffsetCents;
+  row.acaCreditAppliedToPremiumsCents = outcome.acaCreditAppliedToPremiumsCents;
   row.totalTaxCashflowNeedCents = outcome.totalTaxCashflowNeedCents;
   row.taxCashflowIterations = outcome.taxCashflowIterations;
   row.taxCashflowConverged = outcome.taxCashflowConverged;

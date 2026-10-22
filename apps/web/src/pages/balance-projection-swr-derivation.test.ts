@@ -397,6 +397,28 @@ describe('buildSwrComparisonData — the four-layer identity', () => {
     expect(row.guaranteedIncomeSplit.pension).toBeCloseTo(5_000, 6);
   });
 
+  it('a year the ACA credit lowered the draw keeps the draw it funds and a tax layer of 0', () => {
+    // $71,200 spending, $31,300 Social Security, a $5,134.20 credit applied to
+    // premiums: the cashflow row draws 34,765.80 and carries -5,134.20 as taxes.
+    const result = buildSwrComparisonData(
+      baseParams({
+        yearlyCashflowByYear: new Map([
+          [2031, cfRow(2031, { withdrawal: 34_765.8, taxes: -5_134.2, total: 66_065.8 })],
+          [2032, cfRow(2032, { withdrawal: 34_765.8, taxes: -5_134.2, total: 66_065.8 })],
+        ]),
+        resolvedDrawdownYears: [
+          ddYear(2031, { federalTaxCents: 0 }),
+          ddYear(2032, { federalTaxCents: 0 }),
+        ],
+        sourceSplitByYear: new Map([[2032, { ss: 31_300, pensionAnnuity: 0, partTime: 0, oneOff: 0 }]]),
+      }),
+    );
+    const row = result.bundle!.rows.find((r) => r.year === 2032)!;
+    expect(row.tax).toBe(0);
+    expect(row.afterTaxDraw).toBeCloseTo(39_900, 6);
+    expect(row.guaranteedIncome + row.otherIncome + row.afterTaxDraw).toBeCloseTo(71_200, 6);
+  });
+
   it('holds with an untargeted one-off windfall instead of wages', () => {
     const result = buildSwrComparisonData(
       baseParams({

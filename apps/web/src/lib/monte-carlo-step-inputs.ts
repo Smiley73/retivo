@@ -49,6 +49,9 @@ export interface BuildStepInputsResult {
    *  named-strategy engine's medical-first HSA pass. All-zero when no
    *  `isMedical` category drives the base. */
   readonly medicalDemandCents: Float64Array;
+  /** Per-year modeled Medical expenses (every `isMedical` row) at the year-END
+   *  step, nominal dollars; the medical twin of `nominalExpenseByYear`. */
+  readonly nominalMedicalExpenseByYear: Float64Array;
 }
 
 /** Helper: per-year sum of `base[i]` over that year's months
@@ -122,8 +125,48 @@ export function buildStepInputs(
     retirementStepIdx,
     nominalExpenseByYear: series.nominalExpenseByYear,
     medicalDemandCents: series.medicalDemandCents,
+    nominalMedicalExpenseByYear: nominalMedicalExpenseByYear(input, tuples.cpiPct, stepCount),
     cumCpi: series.cumCpi,
   };
+}
+
+/**
+ * Per-year modeled Medical expenses at the year-END step: each year's today's-dollar
+ * sum times the cumulative CPI shifted by `(rate − general)/12`, per rate bucket,
+ * inflated the way `nominalExpenseByYear` is.
+ */
+function nominalMedicalExpenseByYear(
+  input: MonteCarloInput,
+  cpiPct: Float64Array,
+  stepCount: number,
+): Float64Array {
+  const horizonYears = Math.ceil(stepCount / 12);
+  const out = new Float64Array(horizonYears);
+  const generalRatePct = input.scenarioInflationPct ?? DEFAULT_INFLATION_PCT;
+  const buckets = input.monthlyMedicalExpenseBucketsBase;
+  const series: ReadonlyArray<{ ratePct: number; amount: readonly number[] }> =
+    buckets !== undefined && buckets.length > 0
+      ? buckets
+      : input.monthlyMedicalExpenseBase !== undefined
+        ? [{
+            ratePct: input.medicalExpenseRatePct ?? generalRatePct,
+            amount: input.monthlyMedicalExpenseBase,
+          }]
+        : [];
+  for (const { ratePct, amount } of series) {
+    const shiftPct = (ratePct - generalRatePct) / 12;
+    let cum = 1;
+    let yearSum = 0;
+    for (let i = 0; i < stepCount; i += 1) {
+      cum *= 1 + (cpiPct[i] + shiftPct) / 100;
+      yearSum += amount[i] ?? 0;
+      if ((i + 1) % 12 === 0 || i === stepCount - 1) {
+        out[Math.floor(i / 12)] += yearSum * cum;
+        yearSum = 0;
+      }
+    }
+  }
+  return out;
 }
 
 /** Pack the resolved per-step arrays + per-account ledger into the

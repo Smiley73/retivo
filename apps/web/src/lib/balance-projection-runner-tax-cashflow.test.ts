@@ -747,3 +747,62 @@ describe('simulateDrawdown × real buildTaxCashflowHook — Fill conversion gold
     expect(out.years[0].rothConvertedCents).toBe(7_999_954);
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildTaxCashflowHook — credit applied to premiums
+// ---------------------------------------------------------------------------
+
+describe('buildTaxCashflowHook — credit applied to premiums', () => {
+  // A single filer aged 63 with $31,300 of Social Security and a $7,200
+  // benchmark: a $5,134.20 credit with no federal tax or IRMAA to offset.
+  const cashLike = (target: number): TaxCashflowYearClassification => ({
+    preTaxDollars: 0,
+    postTaxNonRothDollars: 0,
+    postTaxCashLikeDollars: target,
+    rothDollars: 0,
+    fundedDollars: target,
+  });
+
+  function hookFor(medicalExpenseByMonthCents?: ReadonlyArray<number>) {
+    const ctx = makeCtx({ primaryBirthdate: '1963-01-01', primaryRetirementYear: 2026 });
+    (ctx.resolvedScenario as { acaPtcBenchmark: unknown }).acaPtcBenchmark = [
+      { taxYear: 2026, annualSlcspDollars: 7_200 },
+    ];
+    return buildTaxCashflowHook({
+      ctx,
+      ssRows: Array.from({ length: 12 }, (_, m) => ({
+        year: 2026,
+        month0: m,
+        total: 31_300,
+        primary: 31_300,
+      })),
+      nonSsIncomeRows: [],
+      ledgerAccounts: [],
+      bundle: REAL_BUNDLE,
+      retirementYear: 2026,
+      ...(medicalExpenseByMonthCents !== undefined ? { medicalExpenseByMonthCents } : {}),
+    });
+  }
+
+  const medicalPerMonth = Array.from({ length: 12 }, () => 60_000); // $7,200 a year
+
+  it('lowers the draw by the line and reports it on the outcome', () => {
+    const outcome = hookFor(medicalPerMonth).solveForYear(0, 39_900, cashLike);
+    expect(outcome.acaCreditAppliedToPremiumsCents).toBe(513_420);
+    expect(outcome.totalTaxCashflowNeedCents).toBe(0);
+    expect(outcome.addedNeedDollars).toBeCloseTo(-5_134.2, 6);
+  });
+
+  it('a conversion\'s funded tax is the same with and without an excess credit', () => {
+    // The two zero-need funding solves behind `fundConversionTaxForYear` carry
+    // no medical cap: with one, the conversion would lower the credit and the
+    // line with it, and the difference would read as extra tax.
+    const withExcess = hookFor(medicalPerMonth);
+    const without = hookFor();
+    withExcess.solveForYear(0, 39_900, cashLike);
+    without.solveForYear(0, 39_900, cashLike);
+    const funded = (hook: ReturnType<typeof hookFor>): number =>
+      hook.fundConversionTaxForYear!(0, cashLike(39_900), 10_000);
+    expect(funded(withExcess)).toBe(funded(without));
+  });
+});

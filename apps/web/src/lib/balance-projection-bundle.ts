@@ -298,6 +298,11 @@ export interface BalanceProjectionMcBundle {
    *  inflates at its own rate. Threaded into
    *  `MonteCarloInput.monthlyMedicalDemandBucketsBase`. */
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
+  /** Per-month today's-dollar modeled Medical expenses (every `isMedical` row),
+   *  rate and buckets, for the matching `MonteCarloInput` fields. */
+  monthlyMedicalExpenseBase?: number[];
+  medicalExpenseRatePct?: number;
+  monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
   /** Pre-computed nominal annual SS benefit by year-offset from
    *  `todayYear`. Length = `horizonYear - todayYear + 1`. Already in
    *  nominal (calendar-year) dollars — the MC kernel reads directly,
@@ -434,6 +439,10 @@ export interface BalanceProjectionMcBundleArgs {
    *  inflates at its own rate. Carried through to
    *  `MonteCarloInput.monthlyMedicalDemandBucketsBase`. */
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
+  /** Modeled Medical expenses (every `isMedical` row) base, rate and buckets. */
+  monthlyMedicalExpenseBase?: number[];
+  medicalExpenseRatePct?: number;
+  monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
   /** Pre-computed nominal annual SS benefit by year-offset from
    *  `todayYear`. Length must equal `horizonYear - todayYear + 1`.
    *  Already in nominal (calendar-year) dollars. */
@@ -593,6 +602,15 @@ function assembleMcBundleResult(opts: {
           medicalDemandRatePct: args.medicalDemandRatePct,
           ...(args.monthlyMedicalDemandBucketsBase !== undefined
             ? { monthlyMedicalDemandBucketsBase: args.monthlyMedicalDemandBucketsBase }
+            : {}),
+        }
+      : {}),
+    ...(args.monthlyMedicalExpenseBase !== undefined
+      ? {
+          monthlyMedicalExpenseBase: args.monthlyMedicalExpenseBase,
+          medicalExpenseRatePct: args.medicalExpenseRatePct,
+          ...(args.monthlyMedicalExpenseBucketsBase !== undefined
+            ? { monthlyMedicalExpenseBucketsBase: args.monthlyMedicalExpenseBucketsBase }
             : {}),
         }
       : {}),

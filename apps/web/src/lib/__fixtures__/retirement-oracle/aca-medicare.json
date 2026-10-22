@@ -202,7 +202,7 @@
       "description": "Disclosed rough ACA benchmark fallback: per-member age-priced monthly premium summed over each member's covered months — an approximation, NOT an exchange SLCSP quote.",
       "tolerance": "within $50/year vs the independent workbook; assumptions and direction asserted separately",
       "derivation": [
-        "Disclosed assumptions (product calibration, not statute): $700/mo at age 60, +5% per year of age, per covered member per covered month.",
+        "Disclosed assumptions (product calibration, not statute): $700/mo at age 60 in the 2026 base year, +5% per year of age, per covered member per covered month; later tax years grow it at the scenario medical rate, tax year 2026 is the base year (factor 1).",
         "Member A age 62, 12 months: 700*1.05^2 = 771.75/mo -> 77,175 cents * 12 = 926,100.",
         "Member B age 60, 4 months: 70,000 cents * 4 = 280,000.",
         "Household total = 1,206,100 cents ($12,061.00). Direction: premium must rise with age (age-62 monthly > age-60 monthly)."
@@ -215,7 +215,7 @@
       },
       "expected": {
         "householdAnnualCents": 1206100,
-        "assumptions": { "baseMonthlyDollars": 700, "baseAge": 60, "ageGrowthRate": 0.05 }
+        "assumptions": { "baseMonthlyDollars": 700, "baseAge": 60, "ageGrowthRate": 0.05, "baseYear": 2026 }
       }
     },
     {

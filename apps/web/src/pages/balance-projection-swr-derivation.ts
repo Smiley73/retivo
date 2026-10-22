@@ -350,9 +350,12 @@ export function buildSwrComparisonData(
   for (let year = cashflowFromYear; year <= drawdownEndYear; year += 1) {
     const cfRow = yearlyCashflowByYear.get(year);
     const grossWithdrawal = cfRow?.withdrawal ?? 0;
-    const tax = noTaxFigures ? 0 : (cfRow?.taxes ?? 0);
-    const afterTaxDraw = Math.max(0, grossWithdrawal - tax);
-    const plannedSpendOnly = Math.max(0, (cfRow?.total ?? 0) - tax);
+    // The band is negative in a year the ACA credit lowered the draw; only the
+    // reported tax layer is floored at 0.
+    const netTax = noTaxFigures ? 0 : (cfRow?.taxes ?? 0);
+    const tax = Math.max(0, netTax);
+    const afterTaxDraw = Math.max(0, grossWithdrawal - netTax);
+    const plannedSpendOnly = Math.max(0, (cfRow?.total ?? 0) - netTax);
 
     const split = sourceSplitByYear?.get(year);
     const f = viewDeflator(year, 11);
@@ -372,7 +375,7 @@ export function buildSwrComparisonData(
     // (not plannedSpendOnly alone) — otherwise a funded SS/pension year with
     // non-zero federal tax/IRMAA reports guaranteed income as "surplus" that
     // the portfolio draw actually needed to cover that same year's tax.
-    const guaranteedIncomeSurplus = Math.max(0, guaranteedRaw - (plannedSpendOnly + tax));
+    const guaranteedIncomeSurplus = Math.max(0, guaranteedRaw - (plannedSpendOnly + netTax));
     const guaranteedScale = guaranteedRaw > 0 ? guaranteedIncome / guaranteedRaw : 0;
     const remainingAfterGuaranteed = Math.max(0, plannedSpendOnly - guaranteedIncome);
     const otherIncome = Math.min(Math.max(0, otherRaw), remainingAfterGuaranteed);

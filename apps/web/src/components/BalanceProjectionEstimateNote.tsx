@@ -37,6 +37,8 @@ import React from 'react';
 // The single source of truth for the rough age-premium curve, so this
 // disclosure can never quote a price the engine no longer charges.
 import { ROUGH_BENCHMARK_ASSUMPTIONS } from '../lib/aca-ptc';
+import { MEDICARE_PREMIUMS_URL } from '../pages/medicare-premium-helper';
+import { TextLink } from './TextLink';
 
 export interface BalanceProjectionEstimateNoteProps {
   /**
@@ -61,6 +63,9 @@ export interface BalanceProjectionEstimateNoteProps {
    * readiness warning below. Defaults to false.
    */
   readonly medicareBasePremiumMissing?: boolean;
+  /** True when a projection year has income at or below 138% of the federal
+   *  poverty line while on a Marketplace plan. Adds the Medicaid paragraph. */
+  readonly medicaidMayApply?: boolean;
 }
 
 export const BalanceProjectionEstimateNote: React.FC<
@@ -69,6 +74,7 @@ export const BalanceProjectionEstimateNote: React.FC<
   magiEstimatedFromProjection = false,
   isMcBasisActive = false,
   medicareBasePremiumMissing = false,
+  medicaidMayApply = false,
 }) => (
   <div
     className="my-3 rounded-lg border border-line bg-surface-raised p-5 shadow-sm"
@@ -108,12 +114,15 @@ export const BalanceProjectionEstimateNote: React.FC<
       {ROUGH_BENCHMARK_ASSUMPTIONS.baseAge}-year-old, rising{' '}
       {Math.round(ROUGH_BENCHMARK_ASSUMPTIONS.ageGrowthRate * 100)}% for each year
       of age, counted for each covered person and only for the months they are
-      covered. That is an estimate, not a real quote from your exchange; enter
-      your own benchmark price in the scenario&rsquo;s health coverage settings
-      to replace it. The projection also estimates only the Medicare
+      covered. From {ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows
+      every year at the scenario&rsquo;s medical inflation rate. That is an
+      estimate, not a real quote from your exchange; enter your own benchmark
+      price in the scenario&rsquo;s health coverage settings to replace it, and
+      it is used exactly as entered. The projection also estimates only the Medicare
       income-related surcharge (IRMAA). The base Medicare premium, Medigap,
       Medicare Advantage, and drug-plan premiums are yours to enter as Medical
-      expenses — if you have not, your health costs in retirement are
+      expenses (the Expenses page can add the standard Part B and Part D
+      amounts for you) — if you have not, your health costs in retirement are
       understated.
     </p>
     {medicareBasePremiumMissing && (
@@ -125,7 +134,24 @@ export const BalanceProjectionEstimateNote: React.FC<
         medical spending at all. The base Medicare premium and any Medigap,
         Medicare Advantage, or drug-plan premiums are yours to enter as Medical
         expenses — until you do, this plan understates what you will actually
-        pay for health care.
+        pay for health care.{' '}
+        <TextLink to={MEDICARE_PREMIUMS_URL}>Add Medicare premiums</TextLink>{' '}
+        to review the standard Part B and Part D amounts and add them.
+      </p>
+    )}
+    {medicaidMayApply && (
+      <p className="m-0 mt-3 text-sm text-muted">
+        <strong className="text-ink">
+          Medicaid may apply.
+        </strong>{' '}
+        In at least one year your income is at or below 138% of the federal
+        poverty line while you are on a Marketplace plan. Depending on your
+        state, Medicaid may cover your household instead of a Marketplace plan
+        in that year. Retivo does not model states or Medicaid, so the figures
+        shown here do not assume Medicaid; the Marketplace credit shown between
+        100% and 138% of the poverty line is what a state that did not expand
+        Medicaid would give. Medicaid is not free money: states seek repayment
+        from the estates of people who received it at 55 or older.
       </p>
     )}
     <p className="m-0 mt-3 text-sm text-muted">
