@@ -71,7 +71,7 @@ const PremiumRowItem: React.FC<{
             ariaLabel={`${row.expenseName} monthly amount`}
             value={amount}
             onChange={onAmount}
-            disabled={row.block !== null}
+            disabled={row.block !== null || !included}
           />
         </div>
         <Muted className="text-sm">a month</Muted>

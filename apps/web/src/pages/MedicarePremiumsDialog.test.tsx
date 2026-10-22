@@ -163,6 +163,31 @@ describe('MedicarePremiumsDialog', () => {
     expect(notifyPending).toHaveBeenCalledTimes(1);
   });
 
+  it('disables a row\'s amount field while its switch is off and enables it again when on', async () => {
+    renderDialog();
+    const toggle = await screen.findByRole('switch', { name: 'Jane Medicare Part B' });
+    const amount = screen.getByRole('textbox', { name: 'Jane Medicare Part B monthly amount' });
+    expect(amount).toBeEnabled();
+
+    await userEvent.click(toggle);
+    expect(amount).toBeDisabled();
+    // The other rows are unaffected.
+    expect(screen.getByRole('textbox', { name: 'John Medicare Part B monthly amount' })).toBeEnabled();
+
+    await userEvent.click(toggle);
+    expect(amount).toBeEnabled();
+  });
+
+  it('keeps a blocked row\'s amount field disabled', async () => {
+    renderDialog(DEMO_EXPENSES);
+    const blocked = await screen.findAllByText('Cannot be added.');
+    expect(blocked.length).toBeGreaterThan(0);
+    for (const input of screen.getAllByRole('textbox', { name: /monthly amount$/ })) {
+      const row = input.closest('li');
+      if (row?.textContent?.includes('Cannot be added.')) expect(input).toBeDisabled();
+    }
+  });
+
   it('shows already-entered Part B rows as unchecked and blocked on the demo household', async () => {
     const { onClose } = renderDialog(DEMO_EXPENSES);
     const johnB = await screen.findByRole('switch', { name: 'John Medicare Part B' });
