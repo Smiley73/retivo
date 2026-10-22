@@ -164,10 +164,9 @@ export function buildMemberInputs(
     retirementYear?: number,
   ): void => {
     const iso = member.payload.birthdate ?? `${taxYear - 65}-01-01`;
-    // Account types whose POST_TAX withdrawals return already-taxed principal ($0 taxable, $0 MAGI):
-    // cash-like instruments plus HSA. Savings, money-market and CD interest is taxed annually
-    // (`isTaxableCashInterestAccount`); HSA growth is tax-free (§223) and its nonqualified income and pre-65
-    // 20% tax come from the penalty pass. BROKERAGE and OTHER use the LTCG proxy instead.
+    // Medicare and Marketplace months come from the shared resolver the Monte Carlo twin also calls
+    // (§36B(c)(2)(B) overlap). An ACA opt-out removes the member from the benchmark sum and the ACA gate but
+    // not from `householdSize`: an opted-out member stays in the tax household (§36B / Pub 974).
     const coverage = resolveMemberHealthCoverage({
       isoBirthdate: iso,
       taxYear,
@@ -444,9 +443,12 @@ interface BrokerageAccountYearInput {
   readonly depositDollars: number;
 }
 
-// Only the HSA share of the cash-like bucket is the §223(f)(4) nonqualified basis; feeding the whole bucket
-// would over-tax savings/CD/MM principal. The solver has no per-account draw, so the share is the HSA's
-// balance share of cash-like ledger balances.
+/**
+ * Advances the per-account cost-basis accumulator one year (mutates `state.basisByAccountId`) and returns the
+ * year's yield base plus the withdrawal-weighted pre-withdrawal basis fraction. Order is load-bearing: grow
+ * basis by deposits and reinvested yield first, take the gain from the pre-withdrawal fraction
+ * `basis / (end + withdrawn)`, then deplete basis pro rata.
+ */
 export function advanceBrokerageLikeBasis(
   accounts: readonly BrokerageAccountYearInput[],
   state: BrokerageLikeBasisState,
@@ -605,8 +607,9 @@ export function buildCashLikeYearAccounts(
 }
 
 /**
- * Seeds the funding pass's per-owner pooled designated-Roth balance (see
- * `balance-projection-runner-roth-basis.ts`).
+ * Annual taxable interest of cash-like accounts: `max(0, end + withdrawn - deposits - start)` per account,
+ * clamped at 0. Shared by the deterministic annotation and the Monte Carlo display post-pass; neither
+ * engine's funded tax includes it (cross-engine parity).
  */
 export function computeCashLikeInterestDollars(
   accounts: readonly TaxableAccountYearRow[],
