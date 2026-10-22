@@ -87,10 +87,9 @@ export function notifySelectedScenarioChanged(): void {
   window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
 }
 
-/** The one way to switch the active scenario: persist the per-device pointer,
- *  then announce it so mounted consumers re-read. Resolves only after the
- *  write has landed, so a caller that navigates next never mounts a page that
- *  reads the previous pointer. Rejects (without notifying) if the write fails. */
+/** The one way to switch the active scenario: write the per-device pointer,
+ *  then notify. Resolves only after the write has landed, so a caller that
+ *  navigates next never mounts a page that reads the previous pointer. */
 export async function switchSelectedScenario(scenarioId: string): Promise<void> {
   await writeSelectedScenario({
     scenarioId,

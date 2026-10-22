@@ -35,21 +35,15 @@ export function successDeltaGate(
   return { delta, se, meaningful: Math.abs(delta) > se };
 }
 
-/** One side of a success comparison: a probability (0..1) and the path count
- *  of the run that produced it. */
+/** A success probability (0..1) and the path count of the run behind it. */
 export interface SuccessSample {
   readonly probability: number;
   readonly pathCount: number;
 }
 
-/**
- * What the Compare tab prints for the gap between two success probabilities.
- * `signal` carries the signed whole-point difference (`first - second`, never
- * 0); `same` is "about the same", with the standard error behind it and why:
- * `noise` when `|delta| <= se`, `rounds-to-zero` when the gap clears the noise
- * but still rounds to 0 points at whole-point display precision (the rule
- * `GuardrailDeltaBadge` applies, so the two never contradict each other).
- */
+/** `signal` carries the signed whole-point difference (`first - second`);
+ *  `same` is noise (`|delta| <= se`) or a gap that rounds to 0 points, the
+ *  rule `GuardrailDeltaBadge` applies. */
 export type SuccessDeltaVerdict =
   | { readonly kind: 'signal'; readonly points: number; readonly se: number }
   | {

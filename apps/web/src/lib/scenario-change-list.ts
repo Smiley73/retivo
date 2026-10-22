@@ -5,10 +5,8 @@
  * the descendant's chain sets between itself and the ancestor, the ancestor
  * excluded. The list reports what the user SET (presence, as the scenario
  * detail page counts it), not what moved a result: a child that re-sets
- * `retirementAge` to the inherited values still names it. The list is by
- * detail-page card (several keys share one), except
- * `preRetirementTaxableIncomeDollars`, a Roth-comparison-page input that
- * reaches no projection and is never listed.
+ * `retirementAge` to the inherited values still names it. Entries are the
+ * detail page's cards (several keys share one).
  *
  * Every `ScenarioOverrides` key is registered below with `satisfies`, so a
  * future override key fails typecheck instead of silently vanishing from the
@@ -31,13 +29,9 @@ type Counts = (ov: ScenarioOverrides) => boolean;
 
 interface Setting {
   readonly group: GroupTitle;
-  /** The detail page card that owns the key; several keys can share one. */
   readonly card: string;
   readonly counts: Counts;
 }
-
-/** The key is a Roth-comparison-page input that reaches no projection: never listed. */
-const NOT_LISTED = null;
 
 const T = GROUP_TITLES;
 const present = (key: keyof ScenarioOverrides): Counts => (ov) => ov[key] !== undefined;
@@ -63,10 +57,9 @@ const setting = (group: GroupTitle, card: string, key: keyof ScenarioOverrides):
   counts: present(key),
 });
 
-/** The card titles are the detail page's. The key-to-card mapping lives only
- *  inline in `ScenarioDetailPage` as predicates (and `ROTH_CONVERSION_OVERRIDE_KEYS`
- *  / `hasQcdOverride`), restated here because `lib/` cannot import UI; the page
- *  test pins the titles. Order within a group is the order listed here. */
+/** Group and detail-page card per override key (`lib/` cannot import the page,
+ *  so the mapping is restated here and a page test pins the titles); `null`
+ *  for a key that reaches no projection. Order within a group is this order. */
 export const SCENARIO_CHANGE_SETTINGS = {
   retirementAge: setting(T[0], 'Retirement age', 'retirementAge'),
   socialSecurity: setting(T[0], 'Social Security', 'socialSecurity'),
@@ -119,14 +112,14 @@ export const SCENARIO_CHANGE_SETTINGS = {
     'Pre-retirement Roth conversions',
     'preRetirementRothConversionTaxRatePct',
   ),
-  preRetirementTaxableIncomeDollars: NOT_LISTED,
+  preRetirementTaxableIncomeDollars: null,
   qualifiedCharitableDistributions: setting(
     T[3],
     'Charitable distributions (QCDs)',
     'qualifiedCharitableDistributions',
   ),
   accountFloors: { group: T[3], card: 'Account limits', counts: perAccount('accountFloors') },
-} satisfies Record<keyof ScenarioOverrides, Setting | typeof NOT_LISTED>;
+} satisfies Record<keyof ScenarioOverrides, Setting | null>;
 
 type SettingKey = keyof typeof SCENARIO_CHANGE_SETTINGS;
 
@@ -158,7 +151,7 @@ function nonEmpty(value: object | undefined): boolean {
 }
 
 const LISTED_KEYS = (Object.keys(SCENARIO_CHANGE_SETTINGS) as SettingKey[]).filter(
-  (key) => SCENARIO_CHANGE_SETTINGS[key] !== NOT_LISTED,
+  (key) => SCENARIO_CHANGE_SETTINGS[key] !== null,
 );
 
 function settingOf(key: SettingKey): Setting {
