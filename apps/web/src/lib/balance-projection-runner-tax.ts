@@ -48,9 +48,7 @@
  * and surviving-spouse statuses) and the annual cash-like interest ride the
  * same per-year loop and `TaxYearBuildArgs` seam, with the same rolling
  * MAGI-buffer / prior-year-RMD state and no new seam, so this stays a single
- * cohesive deterministic tax post-pass. The credit applied to premiums is only
- * wired here: the hook sums the year's Medical expenses and hands them to the
- * solver, which computes the line through `credit-applied-to-premiums.ts`. Recorded future split path: when next
+ * cohesive deterministic tax post-pass. Recorded future split path: when next
  * touched, lift the per-year solver loop (and its MAGI-buffer threading) into a
  * sibling module driven by `computeYearTaxWithMagiLookback`. Trigger: a change
  * adding 5 or more lines here must either refactor the file back under the
@@ -1327,10 +1325,8 @@ function buildSolverYearInput(
  *  cents into its per-pass trial target (`tax-cashflow-solver.ts`), so the
  *  federal tax inside `totalTaxCashflowNeedCents` reflects the extra
  *  withheld-covering draw. This add-on still counts the withheld PRINCIPAL
- *  exactly once (here); the solver change raises only the tax on it.
- *
- *  The credit applied to premiums lowers the draw: it is subtracted here, so
- *  the add-on can be negative (never below minus the year's ordinary need). */
+ *  exactly once (here); the solver change raises only the tax on it. The credit
+ *  applied to premiums is subtracted, so the add-on can be negative. */
 function toTaxCashflowOutcome(
   result: ReturnType<typeof solveTaxCashflow>,
 ): TaxCashflowYearOutcome {
@@ -1362,8 +1358,7 @@ export function buildTaxCashflowHook(args: {
   /** Per-calendar-year rolled-CBP RMD ordinary income (dollars). */
   readonly rolledRmdIncomeByYear?: ReadonlyMap<number, number>;
   /** Monthly modeled Medical expenses (every `isMedical` row), integer cents,
-   *  aligned to (retirementYear, January) — caps the credit applied to premiums.
-   *  Absent → no credit is applied. */
+   *  aligned to (retirementYear, January). Absent → no credit is applied. */
   readonly medicalExpenseByMonthCents?: ReadonlyArray<number>;
 }): TaxCashflowHook {
   const { ctx, ssRows, nonSsIncomeRows, ledgerAccounts, bundle, retirementYear } = args;
@@ -1472,15 +1467,10 @@ export function buildTaxCashflowHook(args: {
       classifyForTarget: classify,
       medicalExpenseCents,
     });
-    // The draw `solveTaxCashflow` funds is
-    // `ordinaryNetNeed + (totalTaxCashflowNeed + irmaaWithheldFromSs −
-    // acaCreditAppliedToPremiums)` — the withheld IRMAA cents are folded into
-    // the trial target so the portfolio covers the SS-check shortfall. The
-    // committed classification classifies that draw BEFORE the credit lowers it:
-    // the credit is priced on that draw, and the Roth earnings and penalties it
-    // fixes are income and tax of the same draw, the way the stress test takes
-    // them. Taking them from the lowered draw would price a line on a MAGI the
-    // earnings no longer have and overstate what the credit earns. Omitting the
+    // The committed classification covers the draw BEFORE the credit applied to
+    // premiums lowers it (`ordinaryNetNeed + totalTaxCashflowNeed +
+    // irmaaWithheldFromSs`): the credit, the Roth earnings and the penalties are
+    // all priced on that draw, as the stress test prices them. Omitting the
     // withheld cents under-states the Roth / penalty basis in withheld-IRMAA years.
     const committedTarget =
       ordinaryNetNeedDollars +

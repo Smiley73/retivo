@@ -645,11 +645,8 @@ export interface TaxYearInput {
    * Absent or 0 → no scaling (thresholds used as-is from latest snapshot).
    */
   readonly inflationRatePct?: number;
-  /**
-   * The scenario's medical inflation rate (percent), resolved once by the
-   * runner. Grows the rough age-priced ACA benchmark from its 2026 base year;
-   * a user-entered benchmark is never scaled. Absent → no growth.
-   */
+  /** Scenario medical inflation rate (percent) that grows the rough ACA
+   *  benchmark from its base year. Absent → no growth. */
   readonly medicalInflationRatePct?: number;
   /**
    * Percentage (0–100) of EMERGENCY HSA withdrawals assumed to be qualified
@@ -715,14 +712,9 @@ export interface TaxYearResult {
   readonly acaPtcTier: 'below-fpl' | 'sliding' | 'cap-applies' | 'above-400-cliff';
   /** ACA FPL percentage for the year (0 when not applicable). */
   readonly fplPercentage: number;
-  /**
-   * How many cents of ACA MAGI the household could shed and still reach 100% of
-   * the poverty line, where the credit ends. Read from each return's own ACA MAGI
-   * and poverty line; a multi-return year reports the SMALLEST figure among the
-   * returns that earn a credit, because a lowered draw can come out of any of
-   * them. 0 when no return earns a credit. Projection-year dollars, like the
-   * credit itself.
-   */
+  /** Cents of ACA MAGI above 100% of the poverty line, where the credit ends;
+   *  the smallest figure among the returns that earn a credit, 0 when none does.
+   *  Projection-year dollars. */
   readonly acaMagiAboveFplCents: number;
   /** Household MAGI for the year, in integer cents. */
   readonly magiCents: number;

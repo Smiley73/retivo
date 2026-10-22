@@ -646,8 +646,6 @@ export function buildMcTaxContext(
     householdSize: ctx.secondary ? 2 : 1,
     assumedCostBasisFraction,
     inflationRatePct: ctx.projCtx.inflationPct,
-    // Fixed scenario rate (not the path's sampled inflation) that grows the
-    // rough ACA benchmark; the deterministic engine reads the same number.
     medicalInflationRatePct: ctx.medicalInflationRatePct,
     primaryDeathYear,
     secondaryDeathYear,
@@ -966,8 +964,6 @@ export function mcInputFromBundle(
             : {}),
         }
       : {}),
-    // Every `isMedical` row (the HSA demand above is its qualified subset): caps
-    // the ACA credit applied to premiums on each path.
     ...(bundle.monthlyMedicalExpenseBase !== undefined
       ? {
           monthlyMedicalExpenseBase: bundle.monthlyMedicalExpenseBase,

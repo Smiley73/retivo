@@ -173,9 +173,7 @@ export interface DrawdownYearRow {
   readonly irmaaTier?: 'none' | 'tier1' | 'tier2' | 'tier3' | 'tier4' | 'tier5';
   readonly acaPtcSubsidyCents?: number;
   readonly acaPtcTier?: 'below-fpl' | 'sliding' | 'cap-applies' | 'above-400-cliff';
-  /** Mirrors `DrawdownYear.acaCreditAppliedToPremiumsCents` — the part of the
-   *  ACA credit that lowered this year's draw because the premium is a modeled
-   *  Medical expense (integer cents). */
+  /** Mirrors `DrawdownYear.acaCreditAppliedToPremiumsCents`. */
   readonly acaCreditAppliedToPremiumsCents?: number;
   /** Mirrors `DrawdownYear.magiCapBreachDollars` — pre-tax dollars exceeding the
    *  MAGI cap this year. Populated by either (1) taxable-depletion breach
@@ -316,8 +314,7 @@ export interface PageSharedContext {
   readonly horizonYear: number;
   readonly ssStartYear: number;
   readonly methodAvailable: boolean;
-  /** The scenario's medical inflation rate (percent): the one rate every engine
-   *  grows the rough ACA benchmark at. `PipelineContext.medicalInflationRatePct`. */
+  /** `PipelineContext.medicalInflationRatePct`. */
   readonly medicalInflationRatePct: number;
   /** Non-CBP accounts that lack an empirical TWR rate and so project
    *  on their planned rate inside the Historical view. Drives the inline
@@ -540,9 +537,8 @@ export interface PipelineContext {
   /** Federal-poverty-level region for the ACA FPL denominator. Absent →
    *  `'contiguous'` (48 states + DC). */
   readonly acaFplRegion?: import('./aca-ptc').AcaFplRegion;
-  /** The scenario's medical inflation rate (percent), resolved once from the
-   *  scenario chain. Grows the rough ACA benchmark from its base year in every
-   *  engine; a user-entered benchmark is never scaled. */
+  /** The scenario's medical inflation rate (percent), resolved once; grows the
+   *  rough ACA benchmark from its base year in every engine. */
   readonly medicalInflationRatePct: number;
   /** QCD (Qualified Charitable Distributions): resolved + hardened per-member
    *  directives for the scenario — malformed / cross-owner /
@@ -596,11 +592,9 @@ export interface CashflowSeries {
    *  to drive the HSA medical pass. Empty / no `isMedical` category ⇒ all-zero
    *  (the medical pass is a no-op; emergency-reserve path intact). */
   readonly medicalDemandByMonth: ReadonlyArray<number>;
-  /** Per-month modeled Medical expenses in INTEGER CENTS: every `isMedical` row,
-   *  HSA-qualified or not, built from the same projection and monthly bucketing
-   *  as `medicalDemandByMonth` (which is its HSA-qualified subset). Caps the ACA
-   *  credit applied to premiums; never reaches the drawdown engine. Same length
-   *  and anchoring as `medicalDemandByMonth`. */
+  /** Per-month modeled Medical expenses in INTEGER CENTS, every `isMedical` row
+   *  (`medicalDemandByMonth` is its HSA-qualified subset, same length and
+   *  anchoring). Caps the ACA credit applied to premiums. */
   readonly medicalExpenseByMonth: ReadonlyArray<number>;
   /** True when the plan models ANY `isMedical` expense at all,
    *  HSA-qualified or not. Deliberately NOT derived from `medicalDemandByMonth`:

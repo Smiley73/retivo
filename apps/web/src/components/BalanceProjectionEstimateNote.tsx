@@ -63,12 +63,8 @@ export interface BalanceProjectionEstimateNoteProps {
    * readiness warning below. Defaults to false.
    */
   readonly medicareBasePremiumMissing?: boolean;
-  /**
-   * True when at least one projection year has a household income at or below
-   * 138% of the federal poverty line while someone is on a Marketplace plan,
-   * so Medicaid may cover the household instead. Adds the Medicaid paragraph.
-   * Defaults to false.
-   */
+  /** True when a projection year has income at or below 138% of the federal
+   *  poverty line while on a Marketplace plan. Adds the Medicaid paragraph. */
   readonly medicaidMayApply?: boolean;
 }
 

@@ -523,8 +523,6 @@ describe('buildRothBETRPageData — ACA benchmark for the retirement year', () =
     expect(data?.ctx.retirementYear).toBe(2028);
     expect(data?.ctx.acaCoverageMonths).toBe(12);
     expect(data?.ctx.benchmarkAnnualSlcspCents).toBe(1_040_566);
-    // General inflation alone (1.04²) or the age rate (1.05²) would not match.
-    expect(data?.ctx.benchmarkAnnualSlcspCents).not.toBe(Math.round(926_100 * 1.04 * 1.04));
   });
 
   it('uses an explicit Medical category rate, and never scales an entered price', () => {

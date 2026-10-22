@@ -569,8 +569,7 @@ export function applyTaxYear(
     } else {
       // The rough fallback is the SUM over covered members of each
       // member's own age-priced monthly premium × their covered months, not the
-      // oldest member's annual premium × the covered-member count. It then grows
-      // from its 2026 base year at the scenario's medical inflation rate.
+      // oldest member's annual premium × the covered-member count.
       benchmarkSlcspCents = growRoughBenchmarkCents(
         dollarsToCents(healthFacts.defaultBenchmarkAnnualDollars),
         taxYear,
@@ -595,10 +594,8 @@ export function applyTaxYear(
         ...(input.acaFplRegion !== undefined ? { fplRegion: input.acaFplRegion } : {}),
         // Re-inflate the expected-contribution OUTPUT back to projection-year
         // dollars (the MAGI input was deflated above for tier classification
-        // only). The benchmark premium follows the medical rate, not general
-        // inflation: the rough fallback is grown above from its base year, and
-        // a user-entered per-year override is used as entered for that year
-        // (prorated to coverage months by `overrideBenchmarkCentsForCoverageMonths`).
+        // only). The benchmark is not scaled here: the rough fallback was grown
+        // above and an override is used as entered.
         expectedContributionScalingFactor: acaScaling,
         // §36B(b)(2) sums the credit over COVERAGE MONTHS. The benchmark
         // above is already summed over covered member-months, so the expected
@@ -612,10 +609,8 @@ export function applyTaxYear(
     acaPtcSubsidyCents = acaResult.annualPtcCents;
     acaPtcTier = acaResult.tier;
     fplPercentage = acaResult.fplPercentage;
-    // The credit ends below 100% of the poverty line. The headroom is measured in
-    // the deflated dollars the line is compared in, then re-inflated to the
-    // projection-year dollars every other figure here is in. Flooring both steps
-    // keeps a draw lowered by it at or above the line.
+    // Headroom above the poverty line, re-inflated to projection-year dollars;
+    // floored so a draw lowered by it stays at or above the line.
     if (fplPercentage >= 100) {
       acaMagiAboveFplCents = Math.max(
         0,
@@ -1350,8 +1345,7 @@ function grossIncomeForEffectiveRateDollars(input: TaxYearInput): number {
   );
 }
 
-/** The smallest `acaMagiAboveFplCents` among the returns that earn a credit; 0
- *  when none does. */
+/** The smallest headroom among the returns that earn a credit; 0 when none does. */
 function narrowestAcaMagiAboveFplCents(results: readonly TaxYearResult[]): number {
   const earning = results.filter((r) => r.acaPtcSubsidyCents > 0);
   return earning.length === 0
@@ -1402,9 +1396,6 @@ function mergeUnitResults(
     acaPtcTier:
       results.find((r) => r.acaPtcTier !== 'below-fpl')?.acaPtcTier ?? 'below-fpl',
     fplPercentage: results.reduce((max, r) => Math.max(max, r.fplPercentage), 0),
-    // The narrowest margin among the returns that earn a credit: the draw a
-    // credit lowers can come out of any of them, and each return's credit ends at
-    // its OWN poverty line. Summing MAGI across returns would overstate it.
     acaMagiAboveFplCents: narrowestAcaMagiAboveFplCents(results),
     // The SUM of the returns' MAGIs is a HOUSEHOLD figure no single
     // return reports. It is the right basis for the household-level MAGI

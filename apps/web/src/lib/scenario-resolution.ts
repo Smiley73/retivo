@@ -841,8 +841,7 @@ export function resolveInflationForScenario(
 /**
  * The scenario's medical inflation rate (percent): the chain's resolved rate for
  * the seeded Medical category, else general + `DEFAULT_MEDICAL_INFLATION_SPREAD_PCT`.
- * It depends on the scenario chain alone (never the household's category list),
- * so every engine that grows the rough ACA benchmark prices a year the same way.
+ * Depends on the scenario chain alone, never the household's category list.
  */
 export function resolveMedicalInflationPct(
   scenarioId: string,

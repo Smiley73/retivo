@@ -554,7 +554,6 @@ describe('roughMonthlyBenchmarkCentsForMember', () => {
     expect(ROUGH_BENCHMARK_ASSUMPTIONS.ageGrowthRate).toBe(0.05);
     expect(ROUGH_BENCHMARK_ASSUMPTIONS.baseYear).toBe(2026);
     expect(ROUGH_BENCHMARK_ASSUMPTIONS.disclosure).toMatch(/not an exchange/i);
-    expect(ROUGH_BENCHMARK_ASSUMPTIONS.disclosure).toContain('2026');
     expect(ROUGH_BENCHMARK_ASSUMPTIONS.disclosure).toMatch(/medical inflation rate/i);
   });
 

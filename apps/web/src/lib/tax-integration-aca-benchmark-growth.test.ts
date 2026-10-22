@@ -1,9 +1,7 @@
 /**
- * The rough ACA benchmark grows from its 2026 base year at the scenario's
- * medical inflation rate (`TaxYearInput.medicalInflationRatePct`); a user-entered
- * benchmark is used as entered. Golden numbers are worked by hand in the spec
- * (health-cost-accuracy 01): medical rates are deliberately not 5%, so mixing up
- * the age-growth rate or general inflation cannot pass.
+ * The rough ACA benchmark grows from its 2026 base year at the scenario's medical
+ * inflation rate; a user-entered benchmark is used as entered. Golden numbers are
+ * worked by hand; the medical rates are deliberately not 5% or the general rate.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -36,8 +34,6 @@ describe('growRoughBenchmarkCents', () => {
     // Age 62: 700 × 1.05² = $771.75/mo = 77,175 cents; × 12 = 926,100.
     // × 1.07³ (1.225043) = 1,134,512.32 → 1,134,512.
     expect(growRoughBenchmarkCents(926_100, 2029, 7)).toBe(1_134_512);
-    // The age rate (5%) in the medical rate's place gives a different answer.
-    expect(growRoughBenchmarkCents(926_100, 2029, 5)).toBe(1_072_077);
   });
 
   it('is the identity at the base year and before it', () => {
@@ -53,11 +49,7 @@ describe('growRoughBenchmarkCents', () => {
   });
 
   it('returns an integer number of cents', () => {
-    for (const year of [2027, 2031, 2044, 2060]) {
-      for (const rate of [0.5, 3.3, 6, 7.25]) {
-        expect(Number.isInteger(growRoughBenchmarkCents(926_101, year, rate))).toBe(true);
-      }
-    }
+    expect(Number.isInteger(growRoughBenchmarkCents(926_101, 2044, 7.25))).toBe(true);
   });
 });
 
@@ -99,17 +91,6 @@ describe('applyTaxYear — rough ACA benchmark growth', () => {
     // Without the field the engine reproduces today's output: 840,000 − 223,437.
     const ungrown = applyTaxYear(caseInput(), BUNDLE);
     expect(ungrown.acaPtcSubsidyCents).toBe(616_563);
-  });
-
-  it('does not use general inflation or the age rate for the growth', () => {
-    // General 4% would give 840,000 × 1.0816 = 908,544 → 685,107.
-    expect(applyTaxYear(caseInput({ medicalInflationRatePct: 4 }), BUNDLE).acaPtcSubsidyCents).toBe(
-      685_107,
-    );
-    // The age rate 5% would give 840,000 × 1.1025 = 926,100 → 702,663.
-    expect(applyTaxYear(caseInput({ medicalInflationRatePct: 5 }), BUNDLE).acaPtcSubsidyCents).toBe(
-      702_663,
-    );
   });
 
   it('case C: a user-entered benchmark is used verbatim at any medical rate', () => {

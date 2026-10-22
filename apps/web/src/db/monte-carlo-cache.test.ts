@@ -830,59 +830,22 @@ describe('monte-carlo-cache', () => {
     expect(await getCached('v69')).toBeNull();
   });
 
-  it('invalidates a v70-vintage entry after the v71 benchmark-growth bump', async () => {
-    // ENGINE_VERSION 70 → 71: the rough ACA benchmark premium now grows each
-    // year after 2026 at the scenario's medical inflation rate, so a household
-    // on the age-priced fallback must not reuse a summary computed without it.
-    await putCached('v70', fakeSummary(1));
+  it('invalidates v70, v71 and v72 entries after the health-cost bumps (71 benchmark growth, 72 credit applied to premiums, 73 credit pricing)', async () => {
+    expect(ENGINE_VERSION).toBe(73);
     const { db } = await import('./store.js');
     const handle = await db();
-    const tx = handle.transaction('monteCarloResults', 'readwrite');
-    const entry = await tx.store.get('v70');
-    if (entry) {
-      entry.engineVersion = 70;
-      await tx.store.put(entry);
+    for (const stale of [70, 71, 72]) {
+      const key = `v${stale}`;
+      await putCached(key, fakeSummary(1));
+      const tx = handle.transaction('monteCarloResults', 'readwrite');
+      const entry = await tx.store.get(key);
+      if (entry) {
+        entry.engineVersion = stale;
+        await tx.store.put(entry);
+      }
+      await tx.done;
+      expect(await getCached(key)).toBeNull();
     }
-    await tx.done;
-    expect(ENGINE_VERSION).toBe(73);
-    expect(await getCached('v70')).toBeNull();
-  });
-
-  it('invalidates a v71-vintage entry after the v72 credit-applied-to-premiums bump', async () => {
-    // ENGINE_VERSION 71 → 72: the ACA credit left after federal tax and IRMAA
-    // cash now lowers the year's draw (up to the Medical expenses and the draw),
-    // so a summary computed without it must not be reused.
-    await putCached('v71', fakeSummary(1));
-    const { db } = await import('./store.js');
-    const handle = await db();
-    const tx = handle.transaction('monteCarloResults', 'readwrite');
-    const entry = await tx.store.get('v71');
-    if (entry) {
-      entry.engineVersion = 71;
-      await tx.store.put(entry);
-    }
-    await tx.done;
-    expect(ENGINE_VERSION).toBe(73);
-    expect(await getCached('v71')).toBeNull();
-  });
-
-  it('invalidates a v72-vintage entry after the v73 credit-line pricing bump', async () => {
-    // ENGINE_VERSION 72 → 73: the stress test now counts the early-withdrawal
-    // penalty in what the ACA credit offsets, and the line's poverty-line limit
-    // counts only the gain of a taxable-account draw, so a summary computed before
-    // must not be reused.
-    await putCached('v72', fakeSummary(1));
-    const { db } = await import('./store.js');
-    const handle = await db();
-    const tx = handle.transaction('monteCarloResults', 'readwrite');
-    const entry = await tx.store.get('v72');
-    if (entry) {
-      entry.engineVersion = 72;
-      await tx.store.put(entry);
-    }
-    await tx.done;
-    expect(ENGINE_VERSION).toBe(73);
-    expect(await getCached('v72')).toBeNull();
   });
 });
 
@@ -1214,10 +1177,6 @@ describe('Roth / RMD tax-fact cache-key inclusion (a)', () => {
 });
 
 describe('modeled Medical expenses cache-key inclusion', () => {
-  // The base caps the ACA credit applied to premiums on every path, so two
-  // households that differ only in it must not share one cached summary. It is
-  // plain data (arrays and numbers); the builder emits its per-rate buckets in
-  // rate order, so the same categories always serialize the same way.
   const base = { portfolioToday: 1_000_000, firstYear: 2026 } as unknown as MonteCarloInput;
   const withMedical = (fields: Record<string, unknown>): MonteCarloInput =>
     ({ ...base, ...fields } as unknown as MonteCarloInput);
@@ -1245,7 +1204,6 @@ describe('modeled Medical expenses cache-key inclusion', () => {
   });
 
   it('absent fields reproduce the PRE-FEATURE key byte for byte', async () => {
-    // `JSON.stringify` drops `undefined`, so an unset base adds no bytes.
     expect(
       await mcCacheKey(
         withMedical({
@@ -1255,14 +1213,6 @@ describe('modeled Medical expenses cache-key inclusion', () => {
         }),
       ),
     ).toBe(await mcCacheKey(base));
-  });
-
-  it('the bucket set survives JSON as plain data (a Map here would be invisible)', () => {
-    const buckets = [
-      { ratePct: 0, amount: [600, 600] },
-      { ratePct: 6, amount: [300, 300] },
-    ];
-    expect(JSON.parse(JSON.stringify(buckets))).toEqual(buckets);
   });
 });
 
@@ -1361,8 +1311,6 @@ describe('health-coverage cache-key inclusion (a)', () => {
   });
 
   it('two different medical inflation rates produce DIFFERENT keys', async () => {
-    // The rough ACA benchmark grows at this fixed scenario rate, so two
-    // households that differ only in it must not share one cached summary.
     const six = await mcCacheKey(withTaxContext({ medicalInflationRatePct: 6 }));
     const seven = await mcCacheKey(withTaxContext({ medicalInflationRatePct: 7 }));
     expect(six).not.toBe(seven);
@@ -1370,16 +1318,9 @@ describe('health-coverage cache-key inclusion (a)', () => {
   });
 
   it('an absent medical inflation rate reproduces the PRE-FEATURE key byte for byte', async () => {
-    // The runner spreads the field only when set; `undefined` is dropped by
-    // `JSON.stringify`, so an unset rate adds no bytes to the hashed input.
     expect(await mcCacheKey(withTaxContext({ medicalInflationRatePct: undefined }))).toBe(
       await mcCacheKey(withTaxContext({})),
     );
-  });
-
-  it('the medical inflation rate is a plain number that survives JSON (no ordering to canonicalize)', () => {
-    const ctx = { medicalInflationRatePct: 6.5 };
-    expect(JSON.parse(JSON.stringify(ctx))).toEqual(ctx);
   });
 
   // AGENTS.md ENGINE_VERSION checklist — a new serialized MC

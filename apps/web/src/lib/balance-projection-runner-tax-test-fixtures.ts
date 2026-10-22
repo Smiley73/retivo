@@ -126,8 +126,7 @@ interface MakeCtxOverrides {
    *  Seeds both the resolved-scenario override and the `PipelineContext` Set the
    *  member-flag derivation reads. Default: no opt-outs. */
   acaMarketplaceOptOutMemberIds?: readonly string[];
-  /** The scenario's medical inflation rate (percent) that grows the rough ACA
-   *  benchmark. Default: absent → no growth. */
+  /** Scenario medical inflation rate (percent). Default: absent → no growth. */
   medicalInflationRatePct?: number;
   /** The stored per-member/per-year health-coverage MONTHS the engines
    *  overlay on the automatic birthday-based derivation. Default: none stated. */

@@ -208,10 +208,6 @@ function accountOption(acc: Aggregate<AccountPayload>): AccountOption {
  * `computeAcaPtc` prorates the expected contribution by that month count, so an
  * un-prorated benchmark would make the probe report a larger "lost credit" than
  * the projection could ever lose.
- *
- * The rough fallback is grown from its 2026 base year to the retirement year at
- * `medicalInflationRatePct` (`growRoughBenchmarkCents`); an override is never
- * scaled.
  */
 function deriveBenchmarkSlcspCents(
   resolved: ScenarioOverrides,
@@ -229,8 +225,6 @@ function deriveBenchmarkSlcspCents(
   if (override !== undefined) {
     return overrideBenchmarkCentsForCoverageMonths(override.annualSlcspDollars, coverageMonths);
   }
-  // The age-priced fallback grows from its base year at the scenario's medical
-  // rate, the same helper and rate the projection's tax pass uses.
   return growRoughBenchmarkCents(
     Math.round(defaultHouseholdSlcspByAge(memberInputs, retirementYear) * CENTS_FACTOR),
     retirementYear,
