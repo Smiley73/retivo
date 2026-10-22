@@ -1,13 +1,7 @@
 /**
- * One planned-basis projection per call, with the bookkeeping a worker-safe
- * search needs around it: a count of projections run, a macrotask yield so a
- * cancel message can be delivered between projections, an abort check before
- * each one, and a progress tick after it.
- *
- * Each projection runs the same three steps as `runBalanceProjection`
- * (pipeline context, cashflow series, planned drawdown) but keeps the raw
- * `DrawdownYear` rows, which carry the per-account balances the after-tax
- * ranking reads and that the thinned public result drops.
+ * One planned-basis projection per call (the same steps as
+ * `runBalanceProjection`, keeping the raw rows), with the projection count,
+ * abort check, macrotask yield and progress tick a worker-safe search needs.
  */
 import type { MagiCapWindow } from '../../db/types';
 import { buildCashflowSeries } from '../balance-projection-runner-cashflow';
@@ -102,9 +96,8 @@ function runPlannedDrawdown(
   };
 }
 
-/** Lets the event loop deliver queued messages. A resolved `await` is a
- *  microtask and does not drain the macrotask queue a worker's cancel message
- *  waits in, so this schedules a real task. */
+/** A real task, so a worker's queued cancel message is delivered (a resolved
+ *  `await` is only a microtask). */
 function yieldMacrotask(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);

@@ -17,8 +17,8 @@ import type {
 import type { ScenarioAggregate } from '../scenario-resolution';
 import type { RothSuggestionProjectionInput } from './types';
 
-export const TOY_TODAY_YEAR = 2026;
-export const TOY_TODAY_MONTH = 5;
+const TOY_TODAY_YEAR = 2026;
+const TOY_TODAY_MONTH = 5;
 export const TOY_BIRTH_YEAR = 1966;
 const TOY_IRA_ID = 'ira';
 export const TOY_ROTH_ID = 'roth';
@@ -123,7 +123,7 @@ export function toyBalances(
   ]);
 }
 
-export function toyExpense(annualDollars: number): Aggregate<ExpensePayload> {
+function toyExpense(annualDollars: number): Aggregate<ExpensePayload> {
   return {
     ...BASE,
     id: 'exp',
@@ -171,7 +171,7 @@ export function toyScenario(overrides: ScenarioOverrides = {}): ScenarioAggregat
 
 export interface ToyOptions {
   readonly couple?: boolean;
-  /** Account ids to include; the IRA and the (target) Roth IRA are always there. */
+  /** Adds a taxable account beside the IRA and the target Roth IRA. */
   readonly brokerage?: boolean;
   readonly rothBalance?: number;
   readonly iraBalance?: number;

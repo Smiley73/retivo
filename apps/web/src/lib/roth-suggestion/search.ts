@@ -14,7 +14,6 @@ import type { DrawdownYear } from '../drawdown-engine-types';
 import { detectUnsupportedScenarioFeatures } from '../optimizer-unsupported';
 import { DEFAULT_TAX_CALIBRATION_BUNDLE } from '../tax-integration';
 import {
-  MAX_PASSES_PER_CANDIDATE,
   indexRows,
   searchLadderCandidate,
   type PassEnvironment,
@@ -50,12 +49,6 @@ import type {
   YearLimits,
 } from './types';
 
-/** Projections a full search can run at most: the reference once, the
- *  zero-conversion baseline the guards are held to once more, then each ladder
- *  candidate up to its pass cap. Must stay within `MAX_PROJECTIONS`. */
-export const PROJECTION_BOUND =
-  2 + (buildCandidateGrid().length - 1) * MAX_PASSES_PER_CANDIDATE;
-
 type Unsupported = { readonly kind: 'unsupported'; readonly reason: RothSuggestionUnsupportedReason };
 
 function unsupported(reason: RothSuggestionUnsupportedReason): Unsupported {
@@ -88,8 +81,7 @@ interface SearchSetup {
   readonly detailEnv: YearDetailEnvironment;
 }
 
-/** Whether a birthdate gives the engine a birth year. Without one it dates the
- *  horizon from the clock, so the same request would rank differently by year. */
+/** Without a birth year the engine dates the horizon from the clock. */
 function hasBirthYear(birthdate: string | null | undefined): boolean {
   const birthYear = Number((birthdate ?? '').slice(0, 4));
   return Number.isFinite(birthYear) && birthYear > 0;
@@ -252,10 +244,8 @@ function assembleResult(
   };
 }
 
-/** The projection the guards are held to: the scenario with no conversion at
- *  all. The current plan stands in for it only when it has no cap windows;
- *  otherwise a saved ladder, itself over a cliff, would become the line. Null
- *  when the engine has no projection to give. */
+/** The zero-conversion projection the guards are held to; the current plan
+ *  stands in for it only when it has no cap windows. */
 async function baselineFor(
   referencePlan: PlannedProjection,
   setup: SearchSetup,

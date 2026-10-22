@@ -14,15 +14,11 @@ import {
 } from '../tax-integration-helpers';
 import type { LookbackFacts, YearFacts } from './year-facts';
 import {
-  acaLimit,
   bracketGeometry,
-  bracketLimit,
   deriveYearLimits,
-  irmaaLimit,
   pickBindingLimit,
   taxableOrdinaryBoundDollars,
   type LimitEnvironment,
-  type YearLimitInputs,
 } from './year-limits';
 import type { AcaLimit, BracketLimit, IrmaaLimit } from './types';
 
@@ -59,6 +55,8 @@ const MEDICARE_LOOKBACK = (year: number): LookbackFacts => ({
   ],
 });
 
+type YearLimitInputs = Parameters<typeof deriveYearLimits>[0];
+
 function inputs(overrides: Partial<YearLimitInputs> & { facts: YearFacts }): YearLimitInputs {
   return {
     rate: 0.12,
@@ -70,6 +68,11 @@ function inputs(overrides: Partial<YearLimitInputs> & { facts: YearFacts }): Yea
     ...overrides,
   };
 }
+
+const bracketAt = (rate: number, f: YearFacts): BracketLimit =>
+  deriveYearLimits(inputs({ rate, facts: f }), ENV).bracket;
+const irmaaLimit = (i: YearLimitInputs, env: LimitEnvironment): IrmaaLimit => deriveYearLimits(i, env).irmaa;
+const acaLimit = (i: YearLimitInputs, env: LimitEnvironment): AcaLimit => deriveYearLimits(i, env).aca;
 
 /** Floor of the ordinary bracket after the one taxed at `rate`, straight off
  *  the (possibly extrapolated) federal table. */
@@ -86,7 +89,7 @@ function bracketTopFromTable(year: number, status: 'MFJ' | 'Single', rate: numbe
 
 describe('bracketLimit', () => {
   it('is the next bracket floor plus the standard deduction when no one is 65', () => {
-    const limit = bracketLimit(bracketGeometry(0.12, facts({ year: 2026 }), ENV));
+    const limit = bracketAt(0.12, facts({ year: 2026 }));
     const config = BUNDLE.federalTax.values[2026];
     expect(limit.bracketTopDollars).toBe(bracketTopFromTable(2026, 'MFJ', 0.12));
     expect(limit.standardDeductionDollars).toBe(config.standardDeduction.MFJ);
@@ -96,10 +99,8 @@ describe('bracketLimit', () => {
   });
 
   it('adds one age-65 add-on per member who attains 65 and uses the Single rate for one filer', () => {
-    const mfj = bracketLimit(bracketGeometry(0.22, facts({ year: 2030, age65Count: 2 }), ENV));
-    const single = bracketLimit(
-      bracketGeometry(0.22, facts({ year: 2030, filingStatus: 'Single', age65Count: 1 }), ENV),
-    );
+    const mfj = bracketAt(0.22, facts({ year: 2030, age65Count: 2 }));
+    const single = bracketAt(0.22, facts({ year: 2030, filingStatus: 'Single', age65Count: 1 }));
     const { snapshot, lookupYear } = resolveFederalTaxSnapshotForYear(BUNDLE.federalTax, 2030, 2.5);
     const live = snapshot.values[lookupYear];
     expect(mfj.age65AddOnDollars).toBe(2 * live.age65AddOn.mfj);
@@ -109,7 +110,7 @@ describe('bracketLimit', () => {
   });
 
   it('keeps the $25 floor rounding of an extrapolated year', () => {
-    const limit = bracketLimit(bracketGeometry(0.22, facts({ year: 2040 }), ENV));
+    const limit = bracketAt(0.22, facts({ year: 2040 }));
     expect(limit.bracketTopDollars).toBe(bracketTopFromTable(2040, 'MFJ', 0.22));
     expect(limit.bracketTopDollars % 25).toBe(0);
   });
@@ -137,9 +138,7 @@ describe('bracketLimit', () => {
       ['past the phase-out', 'MFJ', 0.24, 2],
       ['a single filer inside the phase-out', 'Single', 0.22, 1],
     ] as const)('solves the ceiling %s', (_label, status, rate, count) => {
-      const limit = bracketLimit(
-        bracketGeometry(rate, facts({ year: 2026, filingStatus: status, age65Count: count }), ENV),
-      );
+      const limit = bracketAt(rate, facts({ year: 2026, filingStatus: status, age65Count: count }));
       expect(limit.valueDollars).toBe(Math.floor(closedForm(status, rate, count)));
       // The ceiling recomputes from its own recorded pieces.
       expect(limit.valueDollars).toBe(
@@ -154,7 +153,7 @@ describe('bracketLimit', () => {
 
     it('leaves taxable ordinary income at the bracket top at the ceiling', () => {
       const geometry = bracketGeometry(0.22, facts({ year: 2026, age65Count: 2 }), ENV);
-      const limit = bracketLimit(geometry);
+      const limit = bracketAt(0.22, facts({ year: 2026, age65Count: 2 }));
       expect(taxableOrdinaryBoundDollars(geometry, limit.valueDollars)).toBeLessThanOrEqual(
         limit.bracketTopDollars,
       );
@@ -178,15 +177,6 @@ describe('irmaaLimit', () => {
     expect(limit.thresholdDollars).toBe(threshold);
     expect(limit.scalingFactor).toBe(thresholdScalingFactor);
     expect(limit.valueDollars).toBe(Math.floor(threshold * thresholdScalingFactor));
-  });
-
-  it('rounds an extrapolated line down so a rounded-up ceiling cannot sit over', () => {
-    const limit = irmaaLimit(inputs({ facts: facts({ year: 2040 }) }), ENV);
-    if (!limit.applies) throw new Error('expected the line to apply');
-    const exact = limit.thresholdDollars * limit.scalingFactor;
-    expect(Number.isInteger(limit.valueDollars)).toBe(true);
-    expect(limit.valueDollars).toBeLessThanOrEqual(exact);
-    expect(limit.valueDollars).toBeGreaterThan(exact - 1);
   });
 
   it('is the line the engine tiers on: MAGI equal to it is tier none', () => {

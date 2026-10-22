@@ -77,13 +77,8 @@ type LimitSkipReason =
   | 'not-pre-arpa'
   | 'reference-over-line';
 
-/**
- * Bracket top expressed as MAGI: the next bracket's floor (post-deduction
- * taxable ordinary income) plus the deductions the year takes. The senior
- * bonus is evaluated at the resulting ceiling because it phases out with MAGI.
- * `valueDollars = floor(bracketTopDollars + standardDeductionDollars +
- * age65AddOnDollars + seniorBonusDollars)`.
- */
+/** Bracket top as MAGI: `valueDollars = floor(bracketTopDollars +
+ *  standardDeductionDollars + age65AddOnDollars + seniorBonusDollars)`. */
 export interface BracketLimit {
   readonly kind: 'bracket';
   readonly valueDollars: number;
@@ -98,10 +93,8 @@ export interface BracketLimit {
 /** The IRMAA tiers a guard can start under; tier 5 has no line above it. */
 export type IrmaaGuardTier = 'none' | 'tier1' | 'tier2' | 'tier3' | 'tier4';
 
-/** The next IRMAA line of year Y+2 above the reference's tier, year Y+2 being
- *  the year that reads year Y's MAGI: tier 1's line when the reference sat
- *  under all of them, tier 2's when it sat in tier 1, and so on.
- *  `valueDollars = floor(thresholdDollars * scalingFactor)`. */
+/** The IRMAA line of year Y+2 (which reads year Y's MAGI) just above the
+ *  reference's tier: `valueDollars = floor(thresholdDollars * scalingFactor)`. */
 export type IrmaaLimit =
   | {
       readonly kind: 'irmaa';
@@ -116,10 +109,8 @@ export type IrmaaLimit =
     }
   | { readonly kind: 'irmaa'; readonly applies: false; readonly reason: LimitSkipReason };
 
-/** ACA 400 % FPL line, moved onto the federal MAGI line by subtracting the
- *  nontaxable Social Security the ACA MAGI adds back.
- *  `valueDollars = max(0, floor(multiple * fplDollars * scalingFactor -
- *  nontaxableSsDollars))`. */
+/** ACA 400 % FPL line on the federal MAGI line: `valueDollars = max(0,
+ *  floor(multiple * fplDollars * scalingFactor - nontaxableSsDollars))`. */
 export type AcaLimit =
   | {
       readonly kind: 'aca';
@@ -135,16 +126,9 @@ export type AcaLimit =
     }
   | { readonly kind: 'aca'; readonly applies: false; readonly reason: LimitSkipReason };
 
-/**
- * One window year's limits and the ceiling written to the ladder.
- * `limitDollars` is the smallest applicable limit, the MAGI the plan means to
- * stay at or under. The Fill step sizes a conversion against the MAGI it can
- * see while it runs, which leaves out the interest and dividends the year's
- * taxable accounts throw off; `engineOffsetDollars` is that gap, measured from
- * the previous pass (0 on the first), so
- * `ceilingDollars = floor(limitDollars - engineOffsetDollars)` and the row's
- * MAGI lands at `limitDollars`.
- */
+/** One window year's limits and the ceiling written to the ladder:
+ *  `ceilingDollars = floor(limitDollars - engineOffsetDollars)`, the offset
+ *  being the MAGI the Fill step cannot see, measured from the previous pass. */
 export interface YearLimits {
   readonly year: number;
   readonly bracket: BracketLimit;

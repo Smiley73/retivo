@@ -1,13 +1,7 @@
 /**
- * The per-candidate pass loop. The limits come from the calibration tables and
- * the year's filing facts, but the MAGI the engine reports for a year also
- * carries income the Fill step cannot see while it sizes a conversion, and
- * that gap moves a little with the rest of the ladder. So a ladder is a short
- * fixed-point loop: write every window year's ceiling, project once with the
- * whole ladder, measure the gap from the new rows, verify from the same rows,
- * and repeat while a ceiling moved by more than a dollar. The greedy fill is
- * per year with no lookahead across years, which is what keeps the projection
- * count at `1 + candidates x passes`.
+ * The per-candidate pass loop: write every window year's ceiling, project once
+ * with the whole ladder, measure from the rows the income the Fill step could
+ * not see, and repeat while a ceiling moved by more than a dollar.
  */
 import type { MagiCapWindow } from '../../db/types';
 import type { DrawdownYear } from '../drawdown-engine-types';
@@ -26,15 +20,12 @@ import {
 import type { UnrankedReason, YearLimits } from './types';
 
 /** Upper bound on projections per ladder candidate. */
-export const MAX_PASSES_PER_CANDIDATE = 10;
+const MAX_PASSES_PER_CANDIDATE = 10;
 /** A ceiling that moved this many dollars or less has settled. */
 const SETTLED_DOLLARS = 1;
 /** Rounding slack when comparing a row's MAGI with a whole-dollar ceiling. */
 const BRACKET_SLACK_DOLLARS = 1;
-/** Kept under the limit when the offset is measured: the gap drifts by cents
- *  from pass to pass as earlier conversions change the taxable balances that
- *  throw it off, and a limit is only worth anything if the MAGI stays at or
- *  under it. Costs at most this many dollars of conversion per year. */
+/** Slack under the limit, since the measured gap drifts by cents between passes. */
 const OFFSET_MARGIN_DOLLARS = 2;
 const CENTS_PER_DOLLAR = 100;
 
@@ -91,14 +82,9 @@ function deriveAllLimits(
 }
 
 /**
- * Per-year gap between the MAGI a row reports and the ceiling the Fill step
- * was given. The step sizes a conversion against the income its funding pass
- * can see (withdrawals, their gains and the conversion), which leaves out the
- * year's interest and dividends on taxable accounts, so the reported MAGI
- * lands above the ceiling by that amount. Only a year a conversion filled up
- * to its ceiling shows the gap; any other year keeps the offset it had. A year
- * whose spending was rerouted is left alone on purpose: the rerouted draw adds
- * gains the cap does not govern, so no ceiling moves its MAGI one for one.
+ * Per-year gap between the MAGI a row reports and the ceiling the Fill step was
+ * given (the taxable accounts' interest and dividends it cannot see). Only a
+ * year a conversion filled to its ceiling shows the gap; other years keep theirs.
  */
 function calibrateOffsets(
   limits: readonly YearLimits[],
@@ -120,9 +106,8 @@ function largestMove(a: readonly YearLimits[], b: readonly YearLimits[]): number
   return a.reduce((max, limit, i) => Math.max(max, Math.abs(limit.ceilingDollars - b[i].ceilingDollars)), 0);
 }
 
-/** Whether the rows kept each guarded year on its side of the line, judged
- *  from the rows rather than from the ceilings: Y+2 may not rank above the
- *  tier the reference had. */
+/** Guarded years whose rows crossed their line: Y+2 ranks above the
+ *  reference's IRMAA tier, or the year itself is over the ACA cliff. */
 export function guardCrossings(
   limits: readonly YearLimits[],
   rows: ReadonlyMap<number, DrawdownYear>,
@@ -142,14 +127,9 @@ export function guardCrossings(
   return crossings;
 }
 
-/**
- * Conversion years whose MAGI, less that year's deductions, is above the
- * bracket top. A year with no conversion is not the candidate's doing (its
- * income is whatever spending forced, and MAGI there can include capital gains
- * that are not ordinary income), and a breach year is reported as a breach.
- * In a conversion year the check is conservative: MAGI also carries gains and
- * dividends, so taxable ordinary income is at most MAGI less deductions.
- */
+/** Conversion years whose MAGI less deductions is above the bracket top (a
+ *  conservative bound: MAGI also carries gains). Years with no conversion or a
+ *  breach are not the ladder's doing and are skipped. */
 function bracketExceededYears(
   spec: CandidateSpec,
   limits: readonly YearLimits[],
@@ -189,12 +169,8 @@ function unrankedReasons(
   return reasons;
 }
 
-/**
- * Runs one ladder candidate to a settled plan or the pass cap. Returns null
- * when a projection has no portfolio to draw down. A guarded plan that still
- * crosses a guarded line when the loop ends is returned unranked with the
- * years and lines, never as a plan that merely looks guarded.
- */
+/** Runs one ladder candidate to a settled plan or the pass cap; null when a
+ *  projection has no portfolio to draw down. */
 export async function searchLadderCandidate(
   spec: CandidateSpec,
   env: PassEnvironment,
