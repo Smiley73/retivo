@@ -1,12 +1,10 @@
 /** Unit tests for the per-method drawdown executor helpers in `balance-projection-runner-drawdown.ts`. */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  resolveMagiCapWindows,
-  computePortfolioAtRetirement,
-  buildRmdContext,
   runDrawdownForMethod,
   resolveQcdLimitCentsForYear,
 } from './balance-projection-runner-drawdown';
+import { simulateDrawdown } from './drawdown-engine';
 import { emptyMonthlySeries } from './monthly-cashflow';
 import { DEFAULT_LIFE_EXPECTANCY_AGE } from '../db/types';
 import type {
@@ -18,7 +16,7 @@ import type {
   MagiCapWindow,
   ScenarioOverrides,
 } from '../db/types';
-import type { TaxCalibrationBundle } from './tax-integration';
+import { DEFAULT_TAX_CALIBRATION_BUNDLE } from './tax-integration';
 import type { ProjectionOutput } from './projection';
 import type {
   AccountProjection,
@@ -28,8 +26,43 @@ import type {
   RunBalanceProjectionArgs,
 } from './balance-projection-runner-types';
 import type { ScenarioAggregate } from './scenario-resolution';
-import type { DrawdownAccountInput } from './drawdown-engine-types';
+import type { DrawdownInput } from './drawdown-engine-types';
 import type { RmdAccountProfileFacts } from './rmd';
+
+// The engine input is spied (still running the real engine) so the MAGI-cap windows and RMD context the executor builds are
+// observable through `runDrawdownForMethod`.
+vi.mock('./drawdown-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./drawdown-engine')>();
+  return { ...actual, simulateDrawdown: vi.fn(actual.simulateDrawdown) };
+});
+
+beforeEach(() => {
+  vi.mocked(simulateDrawdown).mockClear();
+});
+
+function engineInput(): DrawdownInput {
+  const calls = vi.mocked(simulateDrawdown).mock.calls;
+  expect(calls).toHaveLength(1);
+  return calls[0][0];
+}
+
+function runCap(ctx: PipelineContext): ReturnType<typeof runDrawdownForMethod> {
+  return runDrawdownForMethod({} as RunBalanceProjectionArgs, ctx, emptySeries(), 'planned');
+}
+
+function emptySeries(): CashflowSeries {
+  const empty = emptyMonthlySeries(2046, 2086);
+  return {
+    expensesByMonth: empty,
+    incomeByMonth: empty,
+    depositsByMonth: empty,
+    expenseRows: [],
+    nonSsIncomeRows: [],
+    postPrimaryContributionEvents: [],
+    targetedOneOffEvents: [],
+    ssRows: [],
+  } as unknown as CashflowSeries;
+}
 
 function member(
   id: string,
@@ -220,10 +253,19 @@ function magiCap(
   return { windows: [window] };
 }
 
-describe('resolveMagiCapWindows', () => {
+describe('runDrawdownForMethod — MAGI-cap window resolution', () => {
+  function resolveWindows(ctx: PipelineContext, cap: MagiCapOverride) {
+    runCap({
+      ...ctx,
+      accountProjections: [makeProj(account('a1', ctx.primary.id), 500_000)],
+      resolvedScenario: { magiCap: cap } as ScenarioOverrides,
+    });
+    return engineInput().magiCapWindows;
+  }
+
   it('should resolve a primary-anchored window to [retirementYear, birthYear+endAge) (legacy parity)', () => {
     const ctx = makeCtx({ primary: member('m1', true, '1990-01-01') });
-    const windows = resolveMagiCapWindows(magiCap('primary', 75), ctx);
+    const windows = resolveWindows(ctx, magiCap('primary', 75));
     expect(windows).toHaveLength(1);
     expect(windows![0].startYear).toBe(2046);
     expect(windows![0].endYear).toBe(1990 + 75);
@@ -234,13 +276,13 @@ describe('resolveMagiCapWindows', () => {
       primary: member('m1', true, '1990-01-01'),
       secondary: member('m2', false, '1988-06-15'),
     });
-    const windows = resolveMagiCapWindows(magiCap('secondary', 75), ctx);
+    const windows = resolveWindows(ctx, magiCap('secondary', 75));
     expect(windows![0].endYear).toBe(1988 + 75);
   });
 
   it('should FLAG a broken-anchor window inactive — never throw — when the gating birthdate is missing', () => {
     const ctx = makeCtx({ primary: member('m1', true, undefined) });
-    const windows = resolveMagiCapWindows(magiCap('primary', 75), ctx);
+    const windows = resolveWindows(ctx, magiCap('primary', 75));
     expect(windows).toHaveLength(1);
     expect(windows![0].brokenAnchor).toBe(true);
     // Empty interval so it never selects.
@@ -269,7 +311,7 @@ describe('resolveMagiCapWindows', () => {
         },
       ],
     };
-    const windows = resolveMagiCapWindows(ladder, ctx);
+    const windows = resolveWindows(ctx, ladder);
     expect(windows).toHaveLength(2);
     const good = windows!.find((w) => !w.brokenAnchor)!;
     expect(good.startYear).toBe(2050);
@@ -285,7 +327,7 @@ describe('resolveMagiCapWindows', () => {
         { start: { kind: 'year', year: 2050 }, end: { kind: 'year', year: 2055 }, magiCeilingAnnualDollars: 1, capMode: 'minimize', capMagiLine: 'irmaa' },
       ],
     };
-    const windows = resolveMagiCapWindows(ladder, ctx)!;
+    const windows = resolveWindows(ctx, ladder)!;
     expect(windows.map((w) => w.startYear)).toEqual([2050, 2060]);
     expect(windows.map((w) => w.originalIndex)).toEqual([1, 0]);
   });
@@ -298,12 +340,12 @@ describe('resolveMagiCapWindows', () => {
         { start: { kind: 'year', year: 2055 }, end: { kind: 'year', year: 2050 }, magiCeilingAnnualDollars: 1, capMode: 'minimize', capMagiLine: 'irmaa' },
       ],
     };
-    expect(resolveMagiCapWindows(ladder, ctx)).toBeUndefined();
+    expect(resolveWindows(ctx, ladder)).toBeUndefined();
   });
 
   it('should return undefined for an empty ladder', () => {
     const ctx = makeCtx({ primary: member('m1', true, '1980-01-01') });
-    expect(resolveMagiCapWindows({ windows: [] }, ctx)).toBeUndefined();
+    expect(resolveWindows(ctx, { windows: [] })).toBeUndefined();
   });
 });
 
@@ -346,20 +388,16 @@ describe('runDrawdownForMethod — strategy + allocation routing', () => {
     expect(result!.years.length).toBeGreaterThan(0);
   });
 
-  it('should surface the net at-retirement figure computePortfolioAtRetirement already computed, additively', () => {
-    // With an annuity-elected CBP beside a brokerage, netPortfolioAtRetirement equals computePortfolioAtRetirement's figure
-    // (broker only), not the raw total.
+  it('should surface the net at-retirement figure, excluding an annuity-elected CBP', () => {
     const broker = account('a1', 'm1');
     const cbp = account('cbp1', 'm1', 'RETIREMENT_CASH_BALANCE', 'PRE_TAX');
     const ctx = makeCtx({
       accountProjections: [makeProj(broker, 500_000), makeProj(cbp, 100_000)],
       incomeStreams: [pensionStream('p1', 'm1', 'cbp1', 'annuity')],
     });
-    const expected = computePortfolioAtRetirement(ctx);
     const result = runDrawdownForMethod(args, ctx, series(), 'planned');
     expect(result).not.toBeNull();
-    expect(expected).toBe(500_000);
-    expect(result!.netPortfolioAtRetirement).toBe(expected);
+    expect(result!.netPortfolioAtRetirement).toBe(500_000);
   });
 
   it('should return null, when the portfolio at retirement is <= 0', () => {
@@ -456,19 +494,10 @@ describe('runDrawdownForMethod — strategy + allocation routing', () => {
   });
 });
 
-describe('computePortfolioAtRetirement', () => {
-  it('should subtract an annuity-elected CBP balance from the total', () => {
-    const broker = account('a1', 'm1');
-    const cbp = account('cbp1', 'm1', 'RETIREMENT_CASH_BALANCE', 'PRE_TAX');
-    const ctx: PipelineContext = {
-      ...makeCtx({
-        accountProjections: [makeProj(broker, 500_000), makeProj(cbp, 100_000)],
-        incomeStreams: [pensionStream('p1', 'm1', 'cbp1', 'annuity')],
-      }),
-    };
-    const total = computePortfolioAtRetirement(ctx);
-    expect(total).toBe(500_000);
-  });
+describe('runDrawdownForMethod — portfolio at retirement', () => {
+  function netAtRetirement(ctx: PipelineContext): number | undefined {
+    return runCap(ctx)?.netPortfolioAtRetirement;
+  }
 
   it('should subtract a lumpSum-elected CBP, when the lump-sum event lands before primary retirement', () => {
     const broker = account('a1', 'm1');
@@ -479,8 +508,7 @@ describe('computePortfolioAtRetirement', () => {
       primaryRetirementAbsMonth: 2046 * 12,
       cbpLumpSumEventAbsMonth: new Map([['cbp1', 2046 * 12 - 12]]),
     });
-    const total = computePortfolioAtRetirement(ctx);
-    expect(total).toBe(500_000);
+    expect(netAtRetirement(ctx)).toBe(500_000);
   });
 
   it('should NOT subtract a lumpSum-elected CBP, when the lump-sum event lands at/after primary retirement', () => {
@@ -492,28 +520,23 @@ describe('computePortfolioAtRetirement', () => {
       primaryRetirementAbsMonth: 2046 * 12,
       cbpLumpSumEventAbsMonth: new Map([['cbp1', 2046 * 12]]),
     });
-    const total = computePortfolioAtRetirement(ctx);
-    expect(total).toBe(600_000);
+    expect(netAtRetirement(ctx)).toBe(600_000);
   });
 
-  it('should floor the total at 0, when subtractions exceed the summed balances', () => {
+  it('should return null, when subtractions exceed the summed balances', () => {
     const cbp = account('cbp1', 'm1', 'RETIREMENT_CASH_BALANCE', 'PRE_TAX');
     const ctx = makeCtx({
       accountProjections: [makeProj(cbp, 100_000)],
       incomeStreams: [pensionStream('p1', 'm1', 'cbp1', 'annuity')],
     });
-    const total = computePortfolioAtRetirement(ctx);
-    expect(total).toBe(0);
+    expect(runCap(ctx)).toBeNull();
   });
 });
 
-describe('buildRmdContext', () => {
-  const bundle = {
-    rmd: { sentinel: 'rmd-snapshot' },
-  } as unknown as TaxCalibrationBundle;
-
-  function ledgerEntry(id: string): DrawdownAccountInput {
-    return { id } as unknown as DrawdownAccountInput;
+describe('runDrawdownForMethod — RMD context', () => {
+  function rmdContext(ctx: PipelineContext) {
+    runCap(ctx);
+    return engineInput().rmdContext!;
   }
 
   it('should set deathYear = birthYear + lifeExpectancy for each owner with a birthdate', () => {
@@ -529,11 +552,7 @@ describe('buildRmdContext', () => {
         lifeExpectancy: { primary: 90, secondary: 88 },
       } as ScenarioOverrides,
     });
-    const rmd = buildRmdContext(
-      ctx,
-      [ledgerEntry('a1'), ledgerEntry('a2')],
-      bundle,
-    );
+    const rmd = rmdContext(ctx);
     expect(rmd.ownerMeta.get('m1')).toEqual({
       isoBirthdate: '1980-01-01',
       deathYear: 1980 + 90,
@@ -552,26 +571,18 @@ describe('buildRmdContext', () => {
       accountProjections: [makeProj(acctP, 1)],
       resolvedScenario: {} as ScenarioOverrides,
     });
-    const rmd = buildRmdContext(ctx, [ledgerEntry('a1')], bundle);
-    expect(rmd.ownerMeta.get('m1')?.deathYear).toBe(
+    expect(rmdContext(ctx).ownerMeta.get('m1')?.deathYear).toBe(
       1980 + DEFAULT_LIFE_EXPECTANCY_AGE,
     );
   });
 
-  it('should skip ledger accounts absent from accountProjections in ownerByAccountId', () => {
-    const primary = member('m1', true, '1980-01-01');
-    const acctP = account('a1', 'm1');
+  it('should map each ledger account to its owner in ownerByAccountId', () => {
     const ctx = makeCtx({
-      primary,
-      accountProjections: [makeProj(acctP, 1)],
+      primary: member('m1', true, '1980-01-01'),
+      accountProjections: [makeProj(account('a1', 'm1'), 1)],
     });
-    const rmd = buildRmdContext(
-      ctx,
-      [ledgerEntry('a1'), ledgerEntry('ghost')],
-      bundle,
-    );
+    const rmd = rmdContext(ctx);
     expect(rmd.ownerByAccountId.get('a1')).toBe('m1');
-    expect(rmd.ownerByAccountId.has('ghost')).toBe(false);
     expect(rmd.ownerByAccountId.size).toBe(1);
   });
 
@@ -591,7 +602,7 @@ describe('buildRmdContext', () => {
       rmdProfileFactsByAccountId: new Map([['a1', facts]]),
       retirementByMember: new Map([['m2', '2043-06-01']]),
     });
-    const rmd = buildRmdContext(ctx, [ledgerEntry('a1'), ledgerEntry('a2')], bundle);
+    const rmd = rmdContext(ctx);
     // Plain Records (a Map would be invisible to the MC cache key).
     expect(rmd.rmdFactsByAccountId?.a1).toBe(facts);
     expect(rmd.rmdFactsByAccountId?.a2).toBeUndefined();
@@ -606,19 +617,17 @@ describe('buildRmdContext', () => {
       primary: member('m1', true, '1980-01-01'),
       accountProjections: [makeProj(account('a1', 'm1'), 1)],
     });
-    const rmd = buildRmdContext(ctx, [ledgerEntry('a1')], bundle);
+    const rmd = rmdContext(ctx);
     expect(rmd.rmdFactsByAccountId).toBeUndefined();
     expect(rmd.retirementYearByOwner).toBeUndefined();
   });
 
-  it('should pass the bundle.rmd snapshot through unchanged', () => {
-    const primary = member('m1', true, '1980-01-01');
+  it('should pass the default bundle rmd snapshot through unchanged', () => {
     const ctx = makeCtx({
-      primary,
+      primary: member('m1', true, '1980-01-01'),
       accountProjections: [makeProj(account('a1', 'm1'), 1)],
     });
-    const rmd = buildRmdContext(ctx, [ledgerEntry('a1')], bundle);
-    expect(rmd.rmdSnapshot).toBe(bundle.rmd);
+    expect(rmdContext(ctx).rmdSnapshot).toBe(DEFAULT_TAX_CALIBRATION_BUNDLE.rmd);
   });
 });
 
