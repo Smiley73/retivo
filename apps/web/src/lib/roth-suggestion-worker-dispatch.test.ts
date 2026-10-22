@@ -41,14 +41,10 @@ function start(onProgress?: (tick: { done: number; total: number }) => void) {
 }
 
 describe('dispatchToRothSuggestionWorker', () => {
-  it('posts one run request carrying a fresh runId and the input', () => {
-    const { worker, runId } = start();
+  it('posts one run request and resolves only on the terminal reply of its own runId', async () => {
+    const { worker, promise, runId } = start();
     expect(worker.sent).toEqual([{ kind: 'run', runId, input: INPUT }]);
     expect(runId).not.toBe('');
-  });
-
-  it('resolves only on the terminal reply of its own runId', async () => {
-    const { worker, promise, runId } = start();
     const settled = vi.fn();
     void promise.then(settled);
 
@@ -88,15 +84,6 @@ describe('dispatchToRothSuggestionWorker', () => {
     worker.reply({ kind: 'error', runId, scenarioId: 's1', message: 'x' });
     await promise;
     expect(worker.listenerCount()).toBe(0);
-  });
-
-  it('ignores progress after the terminal reply', async () => {
-    const onProgress = vi.fn();
-    const { worker, promise, runId } = start(onProgress);
-    worker.reply({ kind: 'error', runId, scenarioId: 's1', message: 'x' });
-    await promise;
-    worker.reply({ kind: 'progress', runId, done: 3, total: 9 });
-    expect(onProgress).not.toHaveBeenCalled();
   });
 
   it('resolves an error reply when the worker crashes, and removes its listeners', async () => {

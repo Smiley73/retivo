@@ -1,26 +1,8 @@
 /**
- * Roth conversion suggestion Web Worker. Receives the aggregate set the Roth
- * conversion comparison page already projects from, plus the leftover-tax rate
- * and the assumed death ages; runs `searchRothSuggestions` (up to a few hundred
- * planned projections) and posts progress ticks and one terminal reply back.
- *
- * Cancel is `worker.terminate()` from the page, so the search is started
- * without an `AbortSignal`: nothing here listens for a cancel message.
- *
- * Protocol (every message carries the `runId` the page sent):
- *   main → worker: { kind: 'run', runId, input: RothSuggestionWorkerInput }
- *   worker → main: { kind: 'progress', runId, done, total }   (0..n times)
- *                  then exactly one of
- *                | { kind: 'result', runId, scenarioId, result }
- *                | { kind: 'empty',  runId, scenarioId, reason }
- *                | { kind: 'error',  runId, scenarioId, message }
- *
- * The result drops each candidate's raw `drawdownYears`: they are the heaviest
- * part of the structured clone and nothing on the page reads them (the
- * per-year `years` records and the ladder stay).
- *
- * Test pattern: `registerRothSuggestionWorkerListener` is driven against a
- * fake `self`, the way the claim-age worker's tests do.
+ * Roth conversion suggestion Web Worker: runs `searchRothSuggestions` on the
+ * page's aggregate set and posts progress ticks, then one terminal reply, every
+ * message carrying the page's `runId`. Cancel is `worker.terminate()` from the
+ * page, so the search runs without an `AbortSignal`.
  */
 import { searchRothSuggestions } from '../lib/roth-suggestion/search';
 import { friendlyProjectionErrorMessage } from '../lib/tax-integration';
@@ -33,9 +15,7 @@ import type {
   RothSuggestionUnsupportedReason,
 } from '../lib/roth-suggestion/types';
 
-/** What the page sends: the projection inputs it already assembles (the tax
- *  bundle is the default one on both sides), where conversions land, the rate
- *  on money left in pre-tax accounts and the assumed death ages. */
+/** What the page sends; the tax bundle is the default one on both sides. */
 export interface RothSuggestionWorkerInput {
   readonly projection: Omit<RothSuggestionProjectionInput, 'bundle'>;
   readonly targetRothAccountId: string;
@@ -44,6 +24,8 @@ export interface RothSuggestionWorkerInput {
   readonly deathAges: RothSuggestionDeathAges;
 }
 
+/** A candidate without its raw `drawdownYears`, the heaviest part of the clone
+ *  and nothing the page reads. */
 export type RothSuggestionWorkerCandidate = Omit<RothCandidate, 'drawdownYears'>;
 
 export interface RothSuggestionWorkerResult extends Omit<RothSuggestionOk, 'candidates'> {
@@ -56,7 +38,7 @@ export interface RothSuggestionWorkerInbound {
   input: RothSuggestionWorkerInput;
 }
 
-export type RothSuggestionWorkerProgress = {
+type RothSuggestionWorkerProgress = {
   kind: 'progress';
   runId: string;
   /** Candidates finished so far. */
@@ -107,8 +89,7 @@ function terminalFor(
     case 'error':
       return { kind: 'error', runId, scenarioId, message: result.message };
     case 'cancelled':
-      // No signal is passed, so this cannot happen; report it rather than
-      // leave the page waiting on a reply that never comes.
+      // Unreachable without a signal; reply anyway so the page never waits.
       return { kind: 'error', runId, scenarioId, message: 'The comparison was cancelled.' };
   }
 }
@@ -149,10 +130,7 @@ export async function runRothSuggestion(
   }
 }
 
-/**
- * Register the worker's message listener on a target global. Exported so
- * tests can drive it against a fake `self`.
- */
+/** Registers the message listener on a target global (tests pass a fake `self`). */
 export function registerRothSuggestionWorkerListener(target: {
   addEventListener: typeof self.addEventListener;
   postMessage: typeof self.postMessage;
@@ -166,11 +144,8 @@ export function registerRothSuggestionWorkerListener(target: {
   });
 }
 
-/**
- * Brand-check guard, as in the claim-age worker: the registration is a no-op
- * anywhere but a real worker global (the main thread, jsdom), so importing
- * this module does not add a stray `message` listener to `window`.
- */
+// Register only in a real worker global, so importing this module on the main
+// thread or in jsdom adds no `message` listener to `window`.
 const WORKER_GLOBAL_SCOPE_CTOR =
   typeof (globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope === 'function'
     ? ((globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope as new (

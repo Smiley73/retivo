@@ -1,15 +1,7 @@
 /**
- * Page → Roth suggestion Web Worker dispatch. Sibling of
- * `dispatchToOptimizerWorker`, which resolves on the first message carrying
- * its `runId` and so cannot forward progress: this one forwards every
- * `progress` message of its own run to `onProgress` and resolves on the
- * terminal reply, the shape `McPool.dispatch`'s `onProgress` uses.
- *
- * `runId` correlation is the same as the claim-age dispatch: a reply (progress
- * or terminal) from another run, such as one the user cancelled, is ignored.
- * Per-call listeners are removed on every resolution. The worker lifecycle
- * (spawn, terminate on cancel, terminate on unmount) is the hook's; this
- * wraps one round-trip.
+ * One page → Roth suggestion worker round-trip: forwards the run's `progress`
+ * messages to `onProgress`, resolves on its terminal reply, ignores replies
+ * carrying another `runId`. The worker lifecycle is the hook's.
  */
 import { cryptoUuid } from './crypto-uuid';
 import type {
@@ -19,7 +11,7 @@ import type {
   RothSuggestionWorkerTerminal,
 } from '../workers/roth-suggestion.worker';
 
-export interface RothSuggestionTick {
+interface RothSuggestionTick {
   readonly done: number;
   readonly total: number;
 }

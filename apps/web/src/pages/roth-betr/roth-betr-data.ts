@@ -84,8 +84,7 @@ export interface RothBETRPageData {
   /** Roth IRA accounts (Apply target). Empty → Apply is blocked / errored. */
   readonly rothIraAccounts: readonly AccountOption[];
   readonly currentCalendarYear: number;
-  /** The month index (0-11) the projection was run at, so a second projection
-   *  of the same household (the suggestion search) can be dated identically. */
+  /** The month index (0-11) the projection was run at. */
   readonly todayMonthIndex: number;
   readonly retirementAge: number;
   /** The latest calendar year a penalty-carrying convertible-source owner crosses

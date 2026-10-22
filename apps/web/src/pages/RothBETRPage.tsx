@@ -62,8 +62,7 @@ export const RothBETRPage: React.FC = () => {
   const [scenarioOverride, setScenarioOverride] = useState<string | null>(null);
   const [source, setSource] = useState<BETRSource>('ira');
   const [dragPct, setDragPct] = useState(10);
-  // Leftover-tax rate for the plan comparison, in percent. `null` follows the
-  // page's own RMD-era rate until the user types; not persisted.
+  // Leftover-tax rate in percent; `null` follows the page's RMD-era rate. Not persisted.
   const [leftoverTaxOverride, setLeftoverTaxOverride] = useState<number | null>(null);
   const [wyDialogOpen, setWyDialogOpen] = useState(false);
   const [retDialogOpen, setRetDialogOpen] = useState(false);

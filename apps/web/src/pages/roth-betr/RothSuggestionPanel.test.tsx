@@ -1,10 +1,8 @@
 /**
- * RothSuggestionPanel tests. The `?worker` module is mocked by a fake Worker
- * class that records what the page sends and lets a test post progress, then
- * hold the terminal reply until it chooses to release it (the harness in
- * `SsOptimizerPage.test.tsx`, extended with held replies). The fake keeps its
- * listeners after `terminate()`, so a late reply reaches the page and only the
- * run guard stands between it and the screen.
+ * The `?worker` module is mocked by a fake Worker that records what the page
+ * sends and posts replies when a test releases them. It keeps its listeners
+ * after `terminate()`, so only the run guard stands between a late reply and
+ * the screen.
  */
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

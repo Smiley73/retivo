@@ -1,14 +1,7 @@
 /**
- * Roth conversion suggestion panel — view-model. Everything the panel decides
- * that is not React: the leftover-tax-rate default, whether a search can run
- * and why not, the worker input, re-ranking when the rate changes, and the
- * comparison rows.
- *
- * The numbers come from the search (`lib/roth-suggestion`), already in today's
- * dollars: the lifetime totals are deflated per year there with the same
- * December deflator as the horizon figure, so no row mixes a nominal total
- * with a real ending balance. Re-ranking reuses the search's own `rankedOrder`
- * and its `ending - pre-tax * rate` formula; it never projects.
+ * Roth conversion suggestion panel view-model: the leftover-tax-rate default,
+ * whether a search can run, the worker input, re-ranking on a rate change and
+ * the comparison rows. The search already reports today's dollars throughout.
  */
 import type {
   AccountBalancePayload,
@@ -41,9 +34,7 @@ import type {
 } from '../../workers/roth-suggestion.worker';
 import type { AccountOption, RothBETRPageData } from './roth-betr-data';
 
-/** Leftover-tax rate, in percent, when the page has no RMD-era rows to take
- *  one from (`workingSummary.T_future` is 0). 22% is the middle ordinary
- *  bracket of the compared targets. */
+/** Leftover-tax rate, in percent, when the page has no RMD-era rate (`T_future` is 0). */
 export const LEFTOVER_TAX_FALLBACK_PCT = 22;
 
 /** Highest rate the input accepts: the search needs a fraction below 1. */
@@ -56,19 +47,14 @@ export function defaultLeftoverTaxPct(tFuture: number): number {
   return pct > 0 ? Math.min(pct, LEFTOVER_TAX_MAX_PCT) : LEFTOVER_TAX_FALLBACK_PCT;
 }
 
-export type SuggestionUnavailableReason =
-  | 'no-roth-ira'
-  | 'no-retirement-window'
-  | 'separate-filing';
+type SuggestionUnavailableReason = 'no-roth-ira' | 'no-retirement-window' | 'separate-filing';
 
-export type SuggestionAvailability =
+type SuggestionAvailability =
   | { readonly kind: 'ready'; readonly targetRoth: AccountOption }
   | { readonly kind: 'unavailable'; readonly reason: SuggestionUnavailableReason };
 
-/** True when the scenario's saved filing plan files two returns while both
- *  spouses are alive: the search's own test (`resolveYearFacts`), read from the
- *  same resolver. The page's `ctx.filingStatus` cannot say so, since the legacy
- *  scalar it is built from never names married filing separately. */
+/** True when the filing plan files two returns while both spouses are alive;
+ *  the page's `ctx.filingStatus` scalar never says so. */
 function filesSeparateReturns(
   data: Pick<RothSuggestionData, 'scenarios' | 'members'>,
   selectedScenarioId: string,
@@ -86,10 +72,7 @@ function filesSeparateReturns(
   return resolution.kind === 'resolved' && resolution.taxUnits.length > 1;
 }
 
-/** Whether a search can run on this page's data, and why not. Separate filing
- *  is checked first: it cannot be fixed by adding an account. The conversion
- *  window is the search's own (`conversionWindow`), so the page and the search
- *  agree on when it is empty. */
+/** Whether a search can run on this page's data, and why not. */
 export function suggestionAvailability(
   pageData: RothBETRPageData,
   data: Pick<RothSuggestionData, 'scenarios' | 'members'>,
@@ -166,9 +149,8 @@ export function suggestionDataSignature(data: RothSuggestionData): string {
   ].join('|');
 }
 
-/** The scenario's resolved life expectancies, the ages the page's own
- *  projection ends at. A partner age the scenario does not store stays unset,
- *  so the search reads the gap exactly as the page's projection does. */
+/** The scenario's resolved life expectancies, the ages the page's own projection
+ *  ends at; a partner age the scenario does not store stays unset. */
 export function resolveAssumedDeathAges(
   scenarios: readonly ScenarioAggregate[],
   scenarioId: string,
@@ -200,8 +182,7 @@ export function describeDeathAges(
   );
 }
 
-/** The worker input: the exact aggregate set and today the page's own
- *  projection used, so the reference row equals the page. */
+/** The worker input: the aggregate set and today the page's own projection used. */
 export function buildSuggestionWorkerInput(args: {
   readonly data: RothSuggestionData;
   readonly pageData: RothBETRPageData;
@@ -235,12 +216,9 @@ export function leftoverTaxFraction(pct: number): number {
   return clamped / 100;
 }
 
-/**
- * The result re-ranked at another leftover-tax rate, from the per-bucket
- * ending balances the search returned: `ending - pre-tax * rate`, then the
- * search's own tie-break order. No projection runs.
- */
-export function rerankResult(
+/** The result re-ranked at another leftover-tax rate from the per-bucket ending
+ *  balances (`ending - pre-tax * rate`); no projection runs. */
+function rerankResult(
   result: RothSuggestionWorkerResult,
   leftoverTaxRate: number,
 ): RothSuggestionWorkerResult {
@@ -277,7 +255,7 @@ export function rerankResult(
 }
 
 /** Whole-dollar amount with an explicit sign; a zero (to the dollar) has none. */
-export function formatSignedDollars(dollars: number): string {
+function formatSignedDollars(dollars: number): string {
   const rounded = Math.round(dollars);
   if (rounded === 0) return formatCurrency(0);
   return `${rounded > 0 ? '+' : '−'}${formatCurrency(Math.abs(rounded))}`;
@@ -394,16 +372,12 @@ function convertsNothing(result: RothSuggestionWorkerResult): boolean {
   );
 }
 
-export type RothSuggestionTableView =
+type RothSuggestionTableView =
   | { readonly kind: 'no-room' }
   | { readonly kind: 'rows'; readonly rows: readonly RothSuggestionRow[] };
 
-/**
- * The rows to show for a result at a leftover-tax rate: ranked candidates by
- * after-tax ending balance (the current plan among them, at its rank), then the
- * unranked ones in search order. A search in which nothing converts is one
- * notice, not a table of identical rows.
- */
+/** The rows for a result at a leftover-tax rate: ranked candidates first, then
+ *  the unranked ones in search order; a search in which nothing converts is one notice. */
 export function buildSuggestionTable(
   result: RothSuggestionWorkerResult,
   leftoverTaxRate: number,

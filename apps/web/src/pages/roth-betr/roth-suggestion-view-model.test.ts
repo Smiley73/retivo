@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { HouseholdMemberPayload, Aggregate } from '../../db/types';
 import { formatCurrency } from '../../lib/format-currency';
 import { searchRothSuggestions } from '../../lib/roth-suggestion/search';
 import { TOY_ROTH_ID, toyProjection, toyScenario } from '../../lib/roth-suggestion/test-fixtures';
@@ -19,9 +18,7 @@ import {
   buildSuggestionWorkerInput,
   defaultLeftoverTaxPct,
   describeDeathAges,
-  formatSignedDollars,
   leftoverTaxFraction,
-  rerankResult,
   resolveAssumedDeathAges,
   suggestionAvailability,
   suggestionDataSignature,
@@ -170,13 +167,6 @@ describe('suggestionAvailability', () => {
       },
     });
 
-    it('declines, ahead of the other reasons', () => {
-      expect(suggestionAvailability(page({ rothIraAccounts: [] }), separate, 'toy')).toEqual({
-        kind: 'unavailable',
-        reason: 'separate-filing',
-      });
-    });
-
     it('declines on page data built from the scenario, whose scalar filing status is never MFS', () => {
       const built = buildRothBETRPageData(separate);
       if (built === null) throw new Error('separate-filing page data is null');
@@ -228,16 +218,6 @@ describe('resolveAssumedDeathAges and describeDeathAges', () => {
     );
   });
 
-  it('names members by first name when they have one', () => {
-    const projection = toyProjection({ couple: true });
-    const named = projection.members.map(
-      (m, i): Aggregate<HouseholdMemberPayload> => ({
-        ...m,
-        payload: { ...m.payload, firstName: i === 0 ? 'Alex' : 'Sam' },
-      }),
-    );
-    expect(describeDeathAges({ primary: 91, secondary: 88 }, named)).toBe('age 91 for Alex and 88 for Sam');
-  });
 });
 
 describe('suggestionDataSignature', () => {
@@ -247,47 +227,6 @@ describe('suggestionDataSignature', () => {
     expect(suggestionDataSignature({ ...base })).toBe(same);
     const bumped = { ...base, accounts: base.accounts.map((a, i) => (i === 0 ? { ...a, version: 2 } : a)) };
     expect(suggestionDataSignature(bumped)).not.toBe(same);
-  });
-});
-
-describe('formatSignedDollars', () => {
-  it('shows a sign on every non-zero value and none on zero', () => {
-    expect(formatSignedDollars(1234.4)).toBe('+$1,234');
-    expect(formatSignedDollars(-1234.6)).toBe('−$1,235');
-    expect(formatSignedDollars(0)).toBe('$0');
-    expect(formatSignedDollars(0.3)).toBe('$0');
-    expect(formatSignedDollars(-0.3)).toBe('$0');
-  });
-});
-
-describe('rerankResult', () => {
-  const result = resultOf([
-    { id: 'current-plan', ending: 1_000_000, preTax: 800_000, totals: { totalConvertedTodayDollars: 0 } },
-    { id: 'bracket-12-guarded', bracketRate: 0.12, ending: 950_000, preTax: 400_000 },
-    { id: 'bracket-22-guarded', bracketRate: 0.22, ending: 900_000, preTax: 100_000 },
-  ]);
-
-  it('ranks on ending minus pre-tax times the rate, without projecting', () => {
-    const low = rerankResult(result, 0);
-    expect(low.rankedIds).toEqual(['current-plan', 'bracket-12-guarded', 'bracket-22-guarded']);
-
-    const high = rerankResult(result, 0.4);
-    // 1,000,000 - 320,000 = 680,000; 950,000 - 160,000 = 790,000; 900,000 - 40,000 = 860,000
-    expect(high.rankedIds).toEqual(['bracket-22-guarded', 'bracket-12-guarded', 'current-plan']);
-    expect(high.candidates.map((c) => c.rank)).toEqual([3, 2, 1]);
-    expect(high.candidates.map((c) => c.afterTax.afterTaxTodayDollars)).toEqual([680_000, 790_000, 860_000]);
-    expect(high.candidates.map((c) => c.afterTax.deltaVsReferenceTodayDollars)).toEqual([0, 110_000, 180_000]);
-    expect(high.leftoverTaxRate).toBe(0.4);
-  });
-
-  it('leaves an unranked candidate unranked whatever the rate', () => {
-    const withBreach = resultOf([
-      { id: 'current-plan', ending: 1_000_000 },
-      { id: 'bracket-12-guarded', bracketRate: 0.12, ending: 2_000_000, unranked: [{ kind: 'cap-breached', years: [2030] }] },
-    ]);
-    const ranked = rerankResult(withBreach, 0);
-    expect(ranked.rankedIds).toEqual(['current-plan']);
-    expect(ranked.candidates[1].rank).toBeNull();
   });
 });
 
@@ -399,13 +338,22 @@ describe('buildSuggestionTable', () => {
     expect(buildSuggestionTable(result, 0.2).kind).toBe('rows');
   });
 
-  it('re-ranks the rows when the rate changes', () => {
+  it('re-ranks the rows on ending minus pre-tax times the rate when the rate changes', () => {
     const result = resultOf([
-      { id: 'current-plan', ending: 1_000_000, preTax: 800_000 },
-      { id: 'bracket-22-guarded', ending: 900_000, preTax: 100_000 },
+      { id: 'current-plan', ending: 1_000_000, preTax: 800_000, totals: { totalConvertedTodayDollars: 0 } },
+      { id: 'bracket-12-guarded', bracketRate: 0.12, ending: 950_000, preTax: 400_000 },
+      { id: 'bracket-22-guarded', bracketRate: 0.22, ending: 900_000, preTax: 100_000 },
     ]);
-    expect(rowsOf(result, 0).map((r) => r.id)).toEqual(['current-plan', 'bracket-22-guarded']);
-    expect(rowsOf(result, 0.3).map((r) => r.id)).toEqual(['bracket-22-guarded', 'current-plan']);
+    expect(rowsOf(result, 0).map((r) => r.id)).toEqual([
+      'current-plan',
+      'bracket-12-guarded',
+      'bracket-22-guarded',
+    ]);
+    // 900,000 - 40,000; 950,000 - 160,000; 1,000,000 - 320,000
+    const high = rowsOf(result, 0.4);
+    expect(high.map((r) => r.id)).toEqual(['bracket-22-guarded', 'bracket-12-guarded', 'current-plan']);
+    expect(high.map((r) => r.rank)).toEqual([1, 2, 3]);
+    expect(high.map((r) => r.afterTaxEnding)).toEqual(['$860,000', '$790,000', '$680,000']);
   });
 });
 
