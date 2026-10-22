@@ -968,6 +968,37 @@ describe('buildMcFactRmdRequiredCentsByOwnerIdx', () => {
     expect(mixed).toBeGreaterThan(0);
     expect(mixed).toBe(preTaxOnly);
   });
+
+  it('nets the §325 Roth pocket out of a MIXED account’s first-year-deferral catch-up base', () => {
+    // Born 1951 → trigger year 2024, so 2025 is the catch-up year, sized from the Dec-31-two-years-prior balance.
+    const facts: RmdAccountProfileFacts = {
+      firstYearDeferralElected: true,
+      currentEmployerPlan: false,
+      fivePercentOwner: false,
+      planRequiresDistributionAtStatutoryAge: false,
+    };
+    const required = (entry: MonteCarloAccountLedger, slice: McRmdBalanceCents): number =>
+      buildMcFactRmdRequiredCentsByOwnerIdx({
+        ledger: [entry],
+        ownerIds: [PRIMARY.memberId],
+        members: [PRIMARY],
+        rmdSnapshot: RMD_SNAPSHOT,
+        taxYear: 2025,
+        priorBalancesCents: new Map([[entry.id, slice]]),
+        twoYearsPriorBalancesCents: new Map([[entry.id, slice]]),
+        rmdFactsByAccountId: { [entry.id]: facts },
+      })[0];
+    const mixed = required(
+      ledgerEntryTyped('acct', PRIMARY.memberId, 60_000, 'RETIREMENT_401K', 'MIXED', 40_000),
+      { preCents: 60_000_00, postCents: 40_000_00 },
+    );
+    const preTaxOnly = required(
+      ledgerEntryTyped('acct', PRIMARY.memberId, 60_000, 'RETIREMENT_401K'),
+      { preCents: 60_000_00, postCents: 0 },
+    );
+    expect(mixed).toBeGreaterThan(0);
+    expect(mixed).toBe(preTaxOnly);
+  });
 });
 
 describe('RMD base — the §325 Roth pocket nets out for every treatment', () => {

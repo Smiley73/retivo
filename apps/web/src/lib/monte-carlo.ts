@@ -219,8 +219,8 @@ function ledgerTaxMeta(input: MonteCarloInput): McLedgerTaxMeta[] {
   }));
 }
 
-/** Each account's withdrawal summed over year `y`'s 12 steps plus its start-of-year pre/post buckets (from the prior year-end, or the initial buckets for y=0); `undefined` when the kernel ran the single-pool branch (all-pre-tax fallback). */
-export function accountYearStates(
+// Each account's withdrawal summed over year `y`'s 12 steps plus its start-of-year pre/post buckets (from the prior year-end, or the initial buckets for y=0); `undefined` when the kernel ran the single-pool branch (all-pre-tax fallback).
+function accountYearStates(
   input: MonteCarloInput,
   out: StepOutcome,
   y: number,

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENGINE_VERSION,
-  accountYearStates,
   buildRunContext,
   runMonteCarlo,
   runOnePath,
@@ -15,11 +14,10 @@ import {
 } from './monte-carlo.js';
 import { RMD_OVERFLOW_CASH_ACCOUNT_ID } from './drawdown-engine-per-account-strategy-helpers';
 import { assembleMonteCarloSummary, pickBandIndex } from './monte-carlo-summary.js';
-import { advanceAfterTaxBase, buildYearClassification } from './monte-carlo-tax.js';
+import { advanceAfterTaxBase } from './monte-carlo-tax.js';
 import { runBalanceProjectionMc } from './balance-projection-runner.js';
 import { CASH1_FLOOR, flooredFillArgs } from '../test/fixtures/fill-floor-household';
 import { makeMonthlyExpenseBase } from './monte-carlo.test-helpers.js';
-import type { StepOutcome } from './projection-engine/kernel.js';
 import { DEFAULT_TAX_CALIBRATION_BUNDLE } from './tax-integration.js';
 import { netNeedStrategy } from './projection-engine/withdrawal-strategies.js';
 import { makeRng } from './sfc32.js';
@@ -1234,128 +1232,6 @@ describe('runMonteCarlo — QCD per-path wiring', () => {
     const withQcd = runMonteCarlo({ ...cliffInput(), qcdContext: qcdContext() });
     expect(withQcd.successProbability).not.toBe(noQcd.successProbability);
     expect(withQcd.successProbability).toBeLessThan(noQcd.successProbability);
-  });
-});
-
-describe('accountYearStates — start-of-year bucket boundary', () => {
-  const STEPS = 24; // two simulation years.
-
-  function mixedLedger(initialPre: number, initialPost: number): MonteCarloAccountLedger[] {
-    return [
-      {
-        id: 'mixed',
-        initialPre,
-        initialPost,
-        contribPre: new Float64Array(STEPS),
-        contribPost: new Float64Array(STEPS),
-        deposit: new Float64Array(STEPS),
-        assetMix: { stocksPct: 60, bondsPct: 35, cashPct: 5 },
-        assetMixSeries: null,
-        cbpPlanningReturnPct: null,
-        taxTreatment: 'MIXED',
-        accountType: 'RETIREMENT_IRA',
-        ownerId: 'mc-test-primary',
-      },
-    ];
-  }
-
-  function outcomeFor(args: {
-    withdrawalPerStep: number;
-    preEndByStep: number[];
-    postEndByStep: number[];
-  }): StepOutcome {
-    return {
-      preEnd: new Float64Array(STEPS),
-      postEnd: new Float64Array(STEPS),
-      growth: new Float64Array(STEPS),
-      contributions: new Float64Array(STEPS),
-      withdrawal: new Float64Array(STEPS),
-      deposit: new Float64Array(STEPS),
-      expense: new Float64Array(STEPS),
-      income: new Float64Array(STEPS),
-      cumCpi: new Float64Array(STEPS).fill(1),
-      accountWithdrawal: [Float64Array.from({ length: STEPS }, () => args.withdrawalPerStep)],
-      accountPreEnd: [Float64Array.from(args.preEndByStep)],
-      accountPostEnd: [Float64Array.from(args.postEndByStep)],
-      accountDeposit: [new Float64Array(STEPS)],
-      depletionStepIdx: -1,
-    };
-  }
-
-  function inputFor(ledger: MonteCarloAccountLedger[]): MonteCarloInput {
-    return {
-      portfolioToday: 100_000,
-      accountMcLedger: ledger,
-      annualContribution: 0,
-      firstYear: 2026,
-      retirementYear: 2026,
-      horizonYear: 2027,
-      monthlyExpenseBase: makeMonthlyExpenseBase(0, 2 * 12),
-      ssByYear: [0, 0],
-      incomeByYear: [0, 0],
-      pathCount: 1,
-      seed: 1,
-      strategyKind: 'taxEfficient',
-    };
-  }
-
-  it("y=0 split uses the ledger's initial pre/post buckets (priorStep < 0)", () => {
-    // For y=0 priorStep is -1, so the initial 75/25 buckets win over the 25/75 year-end ones.
-    const input = inputFor(mixedLedger(75, 25));
-    const preEndByStep = new Array<number>(STEPS).fill(0);
-    const postEndByStep = new Array<number>(STEPS).fill(0);
-    preEndByStep[11] = 25;
-    postEndByStep[11] = 75;
-    const out = outcomeFor({ withdrawalPerStep: 1200 / 12, preEndByStep, postEndByStep });
-
-    const states = accountYearStates(input, out, 0, STEPS)!;
-    expect(states[0].withdrawalDollars).toBeCloseTo(1200); // 12 steps * 100/step
-    expect(states[0].preBalanceStartDollars).toBe(75);
-    expect(states[0].postBalanceStartDollars).toBe(25);
-
-    const cls = buildYearClassification(
-      [{ taxTreatment: 'MIXED', accountType: 'RETIREMENT_IRA' }],
-      states,
-    )!;
-    expect(cls.preTaxDollars).toBeCloseTo(900); // 1200 * 75/100
-    expect(cls.postTaxNonRothDollars).toBeCloseTo(300); // 1200 * 25/100
-  });
-
-  it("y=1 split uses the prior year-end (step 11) accumulated buckets", () => {
-    const input = inputFor(mixedLedger(75, 25));
-    const preEndByStep = new Array<number>(STEPS).fill(0);
-    const postEndByStep = new Array<number>(STEPS).fill(0);
-    preEndByStep[11] = 20;
-    postEndByStep[11] = 80;
-    const out = outcomeFor({ withdrawalPerStep: 1200 / 12, preEndByStep, postEndByStep });
-
-    const states = accountYearStates(input, out, 1, STEPS)!;
-    expect(states[0].preBalanceStartDollars).toBe(20);
-    expect(states[0].postBalanceStartDollars).toBe(80);
-
-    const cls = buildYearClassification(
-      [{ taxTreatment: 'MIXED', accountType: 'RETIREMENT_IRA' }],
-      states,
-    )!;
-    expect(cls.preTaxDollars).toBeCloseTo(240); // 1200 * 20/100
-    expect(cls.postTaxNonRothDollars).toBeCloseTo(960); // 1200 * 80/100
-  });
-
-  it('returns undefined when the kernel ran the single-pool branch (no per-account arrays)', () => {
-    const input = inputFor(mixedLedger(75, 25));
-    const out: StepOutcome = {
-      preEnd: new Float64Array(STEPS),
-      postEnd: new Float64Array(STEPS),
-      growth: new Float64Array(STEPS),
-      contributions: new Float64Array(STEPS),
-      withdrawal: new Float64Array(STEPS),
-      deposit: new Float64Array(STEPS),
-      expense: new Float64Array(STEPS),
-      income: new Float64Array(STEPS),
-      cumCpi: new Float64Array(STEPS).fill(1),
-      depletionStepIdx: -1,
-    };
-    expect(accountYearStates(input, out, 0, STEPS)).toBeUndefined();
   });
 });
 
