@@ -1,24 +1,14 @@
 /**
- * Balance Projection page — Compare tab data hook.
+ * Balance Projection page — Compare tab data hook: which scenario to compare
+ * with (URL, then the remembered choice, then the parent, then none), the
+ * selector options, and the second `loadPageData` projection, run only while
+ * the tab is selected (the panel is force-mounted) and deferred to an idle
+ * slice. A result is kept across tab switches and recomputed only when an
+ * input of the page's own projection, or the comparison id, changes.
  *
- * Owns everything the Compare panel needs that is not presentation: which
- * scenario to compare with (URL, then the remembered choice, then the viewed
- * scenario's parent, then none), the selector's option list, the remembered-
- * choice read/write, and the second deterministic projection for the chosen
- * scenario. That projection is the page's own `loadPageData` call over the same
- * eight slices, run only while the tab is selected (the panel is force-mounted,
- * so mounting is not selecting) and deferred to an idle slice so a large
- * household cannot hitch a frame. A finished result is kept across tab switches
- * and recomputed only when the inputs the page's own effect depends on, or the
- * comparison id, change. The viewed scenario's figures never wait on it.
- *
- * Status: `none` (nothing chosen), `pending` (queued or running), `ready`
- * (`comparison` holds the projected scenario), `unprojectable` (no retirement
- * age resolves, so there is no projection and nothing is wrong to report),
- * `unavailable` (the projection ran but one side has no usable Planned
- * result, e.g. an unconfigured pension election, so there is nothing to
- * compare) or `error` (a recognised configuration clash; `errorMessage` says
- * which).
+ * Status: `none`, `pending`, `ready`, `unprojectable` (no retirement age
+ * resolves), `unavailable` (no usable Planned result on one side, e.g. an
+ * unconfigured pension election) or `error` (a configuration clash).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
@@ -56,7 +46,6 @@ export interface UseBalanceProjectionCompareInput {
   readonly dataLoad: UseBalanceProjectionDataResult;
   /** The viewed scenario's projection — the page's own `data`. */
   readonly data: PipelineData;
-  /** The page's `?with=` anchor: which scenario was viewed when it arrived. */
   readonly withAnchor: CompareWithAnchor | null;
   /** True while the Compare tab is the selected view. */
   readonly isActive: boolean;
@@ -73,7 +62,7 @@ export interface UseBalanceProjectionCompareResult {
   /** The comparison scenario's projection; non-null only when `status` is `ready`. */
   readonly comparison: PipelineData | null;
   readonly errorMessage: string | null;
-  /** A selector change: writes `?with=` (REPLACE) and the remembered choice. */
+  /** Writes `?with=` (REPLACE) and the remembered choice. */
   readonly choose: (id: string) => void;
 }
 
@@ -103,7 +92,7 @@ function writeRemembered(choices: ReadonlyMap<string, string>): void {
       JSON.stringify(Object.fromEntries(choices)),
     );
   } catch {
-    // Storage blocked or full: the choice still holds for this visit via the URL.
+    // Storage blocked or full: the URL still carries the choice for this visit.
   }
 }
 
@@ -129,15 +118,10 @@ function sameInputs(a: ReadonlyArray<unknown>, b: ReadonlyArray<unknown>): boole
 }
 
 /**
- * `?with=` names a partner for the scenario that was viewed when it arrived (a
- * "Compare with parent" link, or a selector choice). Once a different scenario
- * is viewed (a sidebar switch) it no longer applies, so it stops overriding
- * that scenario's remembered choice and default, and is dropped from the URL.
- *
- * Called by the page itself, above its early returns, with the sidebar's
- * selected id: the Compare panel unmounts for a scenario with no projection to
- * show, and an anchor kept inside it would miss that switch. Nothing is
- * anchored until a scenario id is known.
+ * `?with=` applies to the scenario that was viewed when it arrived. After a
+ * sidebar switch it no longer overrides the remembered choice or the default
+ * and is dropped from the URL. The page calls this above its early returns, so
+ * a switch through a scenario that renders no Compare panel is still seen.
  */
 export function useCompareWithAnchor(
   viewedId: string | null,
@@ -155,7 +139,6 @@ export function useCompareWithAnchor(
     rawWithParam === anchor.withParam &&
     viewedId !== null &&
     anchor.viewedId !== viewedId;
-  // Drop the spent parameter so the URL matches what the tab resolves.
   useEffect(() => {
     if (!stale) return;
     setSearchParams(
@@ -187,9 +170,6 @@ export function useBalanceProjectionCompare(
   } = dataLoad;
   const viewedId = data.selectedScenarioId;
   const [, setSearchParams] = useSearchParams();
-  // The anchor is owned by the page (see `useCompareWithAnchor`), which stays
-  // mounted when this panel does not, so a sidebar switch through a scenario
-  // that renders no panel still spends the parameter.
   const withParam =
     withAnchor !== null && withAnchor.viewedId === viewedId ? withAnchor.withParam : null;
   const [remembered, setRemembered] = useState(readRemembered);
@@ -216,8 +196,7 @@ export function useBalanceProjectionCompare(
   const comparisonName =
     scenarios.find((s) => s.id === comparisonId)?.payload.name ?? null;
 
-  // The inputs the page's own projection effect depends on, plus the id. A
-  // stored result is current only while all of them are unchanged.
+  // A stored result is current only while all of these are unchanged.
   const inputs = useMemo(
     () => [
       comparisonId,
@@ -250,9 +229,7 @@ export function useBalanceProjectionCompare(
     readonly inputs: ReadonlyArray<unknown>;
     readonly outcome: Outcome;
   } | null>(null);
-  // An error other than a recognised configuration clash is a bug, not a
-  // state to show: it is rethrown from render so the error boundary sees it,
-  // as it would from the page's own effect (an idle callback cannot throw to it).
+  // An idle callback cannot throw to the error boundary; rethrow from render.
   const [fatal, setFatal] = useState<{ readonly error: unknown } | null>(null);
   if (fatal) throw fatal.error;
 
@@ -331,8 +308,7 @@ export function useBalanceProjectionCompare(
     setRemembered(next);
   };
 
-  // A ready comparison still needs a usable Planned result on the viewed side;
-  // without one, the headline would read its missing figures as "Never".
+  // Without a Planned result on the viewed side the headline would read "Never".
   const readyComparison =
     outcome?.status === 'ready' && hasPlannedProjection(data) ? outcome.comparison : null;
   const status: CompareStatus =

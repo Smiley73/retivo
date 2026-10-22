@@ -138,7 +138,6 @@ export interface ScenarioCardMetricsResult {
   readonly recalcableScenarioIds: ReadonlyArray<string>;
 }
 
-
 /**
  * Compute the deterministic at-horizon balance + sparkline series for every
  * scenario, lazily and serially. Returns a map keyed by scenario id; a

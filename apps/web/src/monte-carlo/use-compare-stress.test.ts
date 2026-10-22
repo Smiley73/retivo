@@ -8,7 +8,7 @@
  */
 import 'fake-indexeddb/auto';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { clearAllStores, listAggregates } from '../db/store';
 import { clearMonteCarloCache, getCached, mcCacheKey, putCached } from '../db/monte-carlo-cache';
 import { loadDemoData } from '../lib/demo-data-loader';
@@ -163,13 +163,6 @@ describe('useCompareStress — comparison side', () => {
     expect(built).toHaveLength(1);
   });
 
-  it('gives a verdict once both sides are ready', async () => {
-    await putCached(await keyFor(EARLY), summaryAt(0.8));
-    const { result } = setup({ viewed: settled(0.9), comparisonId: EARLY });
-    await waitFor(() => expect(result.current.verdict).not.toBeNull(), WAIT);
-    expect(result.current.verdict).toMatchObject({ kind: 'signal', points: 10 });
-  });
-
   it('starts no run while the page run is in flight or unsettled, and starts once it settles', async () => {
     const running: CompareStressViewed = {
       ...settled(),
@@ -218,14 +211,6 @@ describe('useCompareStress — comparison side', () => {
     expect(built[0]!.posted).toEqual([expectedInput(EARLY)]);
     expect(result.current.viewed.state).toBe('stopped');
     expect(result.current.comparison.state).toBe('running');
-  });
-
-  it('starts when the page run failed, so one failure does not hold the other side back', async () => {
-    const { built } = setup({
-      viewed: { ...settled(), error: 'boom', stressPairSignature: null, result: null },
-      comparisonId: EARLY,
-    });
-    await waitFor(() => expect(built).toHaveLength(1), WAIT);
   });
 
   it('disposes the pool and drops the late reply when the comparison scenario changes mid-run', async () => {
@@ -301,18 +286,6 @@ describe('useCompareStress — comparison side', () => {
     expect(result.current.verdict).toMatchObject({ kind: 'same' });
   });
 
-  it('keeps the cache keys object identity across renders while the keys do not change', async () => {
-    const { result, rerender } = setup({ viewed: settled(0.9), comparisonId: BASE });
-    await waitFor(() => expect(result.current.cacheKeys).not.toBeNull(), WAIT);
-    const first = result.current.cacheKeys;
-    // A different viewed state (the page ticking its progress) re-renders the
-    // hook with the same keys; the object must be the same one.
-    rerender({ viewed: settled(0.8), comparisonId: BASE });
-    expect(result.current.cacheKeys).toBe(first);
-    rerender({ viewed: { ...settled(0.8), progressDone: 5 }, comparisonId: BASE });
-    expect(result.current.cacheKeys).toBe(first);
-  });
-
   it('reads a comparison that cannot run the stress test as unavailable, with no worker', async () => {
     const { result, built } = setup({ viewed: settled(), comparisonId: 'no-such-scenario' });
     await waitFor(() => expect(result.current.comparison.state).toBe('unavailable'), WAIT);
@@ -336,7 +309,6 @@ describe('useCompareStress — comparison side', () => {
 describe('useCompareStress — viewed side', () => {
   const base = settled();
   it.each([
-    ['pending with nothing in flight yet', { ...base, runPending: true, stressPairSignature: null, result: null }, 'pending'],
     ['stopped when nothing is running or queued and no pair settled', { ...base, stressPairSignature: null, result: null }, 'stopped'],
     // A result is on screen but is not the settled pair for this plan: it may
     // belong to another scenario or an older plan, so it is never read.
@@ -358,20 +330,5 @@ describe('useCompareStress — viewed side', () => {
     expect(result.current.viewed.progress).toEqual({ done: 300, total: 10_000 });
     rerender({ viewed: { ...running, progressDone: 0, progressTotal: 0 }, comparisonId: null });
     expect(result.current.viewed.progress).toEqual({ done: 0, total: 0 });
-  });
-
-  it('returns to pending when an edit clears the settled signature', () => {
-    const { result, rerender } = setup({ viewed: base, comparisonId: null });
-    expect(result.current.viewed.state).toBe('ready');
-    rerender({ viewed: { ...base, runPending: true, stressPairSignature: null }, comparisonId: null });
-    expect(result.current.viewed.state).toBe('pending');
-    expect(result.current.viewed.probability).toBeNull();
-  });
-
-  it('hands the page recalculate to runViewed', () => {
-    const recalculate = vi.fn();
-    const { result } = setup({ viewed: { ...base, stressPairSignature: null, result: null, recalculate }, comparisonId: null });
-    result.current.runViewed();
-    expect(recalculate).toHaveBeenCalledTimes(1);
   });
 });

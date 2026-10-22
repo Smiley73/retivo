@@ -8,11 +8,8 @@
  *    chip on the active card, an optional description sub-line + the
  *    notes presentation, and a right-side hover-revealed icon-action
  *    cluster — Edit (pencil), Delete (trash). A card with a parent also
- *    carries an always-visible "Compare with parent" link-styled button
- *    under the name (outside the hover-revealed cluster); the page builds
- *    its handler, which makes the card active and opens the Compare tab.
- *    Switching the active scenario otherwise lives in the sidebar
- *    Active-Scenario picker.
+ *    carries an always-visible "Compare with parent" button under the name,
+ *    which makes the card active and opens the Compare tab.
  *  - **Footer zone** (`.scn-foot`): a "Plan success" metric leads, then four
  *    graph+value groups — **Planned** (deterministic), **Historical**
  *    (deterministic TWR), **Typical** (MC P50), **Pessimistic** (MC P25) —
@@ -79,9 +76,7 @@ export interface ScenariosPageRowProps {
    *  Ignored unless `isRecalculating`. */
   recalcDone: number;
   recalcTotal: number;
-  /** "Compare with parent" control: the parent's name (for the accessible
-   *  name) and the activation handler. `null` for the base scenario and for
-   *  a card whose parent is not in the loaded list — no control renders. */
+  /** "Compare with parent" control; `null` (no control) for Base or a missing parent. */
   compareWithParent: { parentName: string; onActivate: () => void } | null;
 }
 

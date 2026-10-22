@@ -143,12 +143,8 @@ export interface PlanStressTestVm {
    *  comparison withholds itself on `null` rather than differencing a fresh
    *  input against a stale result. */
   stressPairSignature: string | null;
-  /** True while a run for the plan on screen is still to come or in progress:
-   *  an edit waiting out the auto-run debounce, or a requested run that has not
-   *  yet ended (its cache work counts, as `isRunning` is still false there).
-   *  False once nothing is going to run on its own, which is what separates a
-   *  CANCELLED run (no pair, not running, nothing coming) from one merely
-   *  queued. Always false when there is no valid run input. */
+  /** A run for the plan on screen is queued behind the debounce or requested
+   *  and not yet ended. False after a cancel: nothing more is coming. */
   runPending: boolean;
   /** Birth year of the household's youngest member (the latest birth year)
    *  — the anchor for the longevity stress's age-105 cap. `null` when no
@@ -315,10 +311,8 @@ interface PrimaryRunState {
     readonly signature: string;
     readonly summary: MonteCarloSummary;
   } | null;
-  /** Id of the last request whose promise ended by ANY path — a summary, a
-   *  cancel (`null`) or a worker error. `requested.id !== endedId` is "a
-   *  request is still in flight", which `status === 'running'` alone misses
-   *  for the provider's asynchronous cache work before the worker starts. */
+  /** Id of the last request that ended by any path (summary, cancel, error);
+   *  `status === 'running'` alone misses the provider's cache work. */
   readonly endedId: number;
 }
 
@@ -451,8 +445,7 @@ export function usePlanStressTestVm(
           // `null` = cancelled mid-flight (the provider settles the awaiter so a
           // caller cannot hang). Nothing new reached the screen, so the run that
           // IS on screen stays settled — a cancelled Recalculate leaves the plan
-          // and its displayed summary exactly as they were. The request still
-          // ENDED, which is what tells a watcher that nothing more is coming.
+          // and its displayed summary exactly as they were.
           setPrimaryRun((prev) => {
             // A newer request already replaced this one — its own completion
             // is the only thing allowed to settle the pair or end the run.
@@ -470,8 +463,7 @@ export function usePlanStressTestVm(
           // A worker failure is already surfaced through the provider's `error`
           // (the retry button). It produces no new summary, so — as with a
           // cancel — the previously settled run stays settled; what withholds
-          // the pair is a plan EDIT, via the signature comparison below. The
-          // request ended all the same.
+          // the pair is a plan EDIT, via the signature comparison below.
           setPrimaryRun((prev) =>
             prev.requested !== null && prev.requested.id === runId
               ? { ...prev, endedId: runId }
@@ -533,9 +525,6 @@ export function usePlanStressTestVm(
     currentSignature !== null &&
     lastRunSignature !== currentSignature;
   const isRunning = status === 'running';
-  // A run is still to come for the plan on screen: the auto-run debounce has not
-  // yet asked for this signature, or the request made has not ended. Neither a
-  // cancel nor a superseded request leaves this true, so no run is awaited then.
   const runPending =
     mcInput !== null &&
     !cbpFailed &&

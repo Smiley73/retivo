@@ -49,15 +49,11 @@ export function parseDisplayMode(stored: string | null): DisplayMode {
 }
 
 /** localStorage key for the Compare tab's remembered choices: a JSON object
- *  mapping a viewed scenario id to the scenario it was last compared with.
- *  One id per viewed scenario — a single id would collide the moment the person
- *  views the scenario they last compared with. */
+ *  mapping each viewed scenario id to the scenario it was last compared with. */
 export const COMPARE_CHOICE_STORAGE_KEY =
   'retivo.balanceProjection.compareWith';
 
-/** Coerce a stored string into the viewed-id → comparison-id map. Anything but
- *  a JSON object (missing, malformed, an array, a number) reads as empty, and
- *  entries whose value is not a string are dropped; it never throws. */
+/** The stored map; anything but a JSON object of strings reads as empty, never throws. */
 export function parseCompareChoices(
   stored: string | null,
 ): ReadonlyMap<string, string> {

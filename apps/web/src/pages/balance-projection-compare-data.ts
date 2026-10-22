@@ -80,10 +80,8 @@ export interface CompareData {
     readonly drivers: CompareDrivers | null;
   };
   readonly identity: {
-    /** The two planned year-by-year results are structurally equal AND every
-     *  figure compared (horizon, ending balance in today's dollars, run-out
-     *  year, drivers) agrees: scenario inflation deflates those figures, so
-     *  equal nominal years alone can still hide a difference. */
+    /** The planned years and every deflated figure are equal: equal nominal
+     *  years alone can hide an inflation-only difference. */
     readonly planned: boolean;
     /** The two stress-test cache keys are equal; `null` when either is unknown. */
     readonly stress: boolean | null;
@@ -103,9 +101,7 @@ function plannedYears(data: PipelineData): ReadonlyArray<DrawdownYear> | null {
   return planned && planned.years.length > 0 ? planned.years : null;
 }
 
-/** True when `data` has a Planned projection to compare: a runner result, no
- *  unconfigured CBP election, and at least one planned year. The same guard
- *  `buildSide` applies before it reports any figure. */
+/** A runner result, no unconfigured CBP election, and at least one planned year. */
 export function hasPlannedProjection(data: PipelineData): boolean {
   return (
     plannedYears(data) !== null &&

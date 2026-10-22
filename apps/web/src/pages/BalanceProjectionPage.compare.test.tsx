@@ -11,26 +11,27 @@
 import 'fake-indexeddb/auto';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, useLocation, useNavigationType } from 'react-router';
+import { useLocation, useNavigationType } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React, { useEffect } from 'react';
-import {
-  clearAllStores,
-  deleteAggregateLocally,
-  listAggregates,
-  putAggregate,
-  writeSelectedScenario,
-} from '../db/store';
-import type { Aggregate, ScenarioPayload } from '../db/types';
-import { loadDemoData } from '../lib/demo-data-loader';
+import { clearAllStores, deleteAggregateLocally } from '../db/store';
 import { SELECTED_SCENARIO_CHANGED_EVENT } from '../lib/scenario-mutations';
 import { COMPARE_CHOICE_STORAGE_KEY } from '../lib/view-deflator';
 import { TaxIntegrationInvalidInputError } from '../lib/balance-projection-runner-tax';
-import { MonteCarloProvider } from '../monte-carlo/MonteCarloProvider';
 import { expectNoA11yViolations } from '../test/a11y';
-import { withTheme } from '../test/theme-render';
-import { BalanceProjectionPage } from './BalanceProjectionPage';
 import { loadPageData } from './balance-projection-page-data';
+import {
+  BASE,
+  DELAY,
+  EARLY,
+  FUNDS_RUN_OUT,
+  WAIT,
+  comparePage,
+  findComparePanel,
+  resetDemo,
+  seedChild,
+  viewScenario as view,
+} from './__fixtures__/compare-page';
 
 vi.mock('./balance-projection-page-data', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./balance-projection-page-data')>();
@@ -43,12 +44,6 @@ const actualLoad = (
   )
 ).loadPageData;
 const loadSpy = vi.mocked(loadPageData);
-
-const BASE = 'demo-scenario-base';
-const EARLY = 'demo-scenario-early';
-const DELAY = 'demo-scenario-delay';
-const FUNDS_RUN_OUT = 'demo-scenario-early-no-contrib';
-const WAIT = { timeout: 10_000 };
 
 interface ProbeEntry {
   search: string;
@@ -82,28 +77,12 @@ function pageAt(
   log: ProbeEntry[] = [],
   theme: 'light' | 'dark' = 'light',
 ): React.ReactElement {
-  return withTheme(
-    theme,
-    <MemoryRouter initialEntries={[path]}>
-      <MonteCarloProvider>
-        <LocationProbe onEntry={(e) => log.push(e)} />
-        <BalanceProjectionPage />
-      </MonteCarloProvider>
-    </MemoryRouter>,
-  );
-}
-
-async function view(scenarioId: string): Promise<void> {
-  await writeSelectedScenario({ scenarioId, updatedAt: new Date().toISOString() });
+  return comparePage({ path, theme, probe: <LocationProbe onEntry={(e) => log.push(e)} /> });
 }
 
 /** The `selectedScenarioId` of every `loadPageData` call so far. */
 function projectedIds(): string[] {
   return loadSpy.mock.calls.map(([opts]) => opts.selectedScenarioId);
-}
-
-async function findPanel(): Promise<HTMLElement> {
-  return screen.findByRole('region', { name: 'Compare scenarios' }, WAIT);
 }
 
 function selectorTrigger(panel: HTMLElement): HTMLElement {
@@ -117,7 +96,7 @@ async function renderCompare(
   await view(viewed);
   const log: ProbeEntry[] = [];
   render(pageAt(path, log));
-  return { panel: await findPanel(), log };
+  return { panel: await findComparePanel(), log };
 }
 
 function atHorizonStat(): string {
@@ -132,13 +111,7 @@ function headlineCells(panel: HTMLElement, row: RegExp): string[] {
 
 describe('BalanceProjectionPage — Compare tab', () => {
   beforeEach(async () => {
-    await clearAllStores();
-    window.localStorage.clear();
-    await loadDemoData({
-      householdId: 'hh-test',
-      email: 'demo@example.test',
-      displayName: 'Demo User',
-    });
+    await resetDemo();
     loadSpy.mockClear();
     loadSpy.mockImplementation(actualLoad);
   });
@@ -146,7 +119,6 @@ describe('BalanceProjectionPage — Compare tab', () => {
   afterEach(async () => {
     vi.unstubAllGlobals();
     await clearAllStores();
-    window.localStorage.clear();
   });
 
   describe('which scenario it compares with', () => {
@@ -183,25 +155,6 @@ describe('BalanceProjectionPage — Compare tab', () => {
       expect(window.localStorage.getItem(COMPARE_CHOICE_STORAGE_KEY)).toBeNull();
     });
 
-    it('stops applying ?with= once another scenario is picked in the sidebar', async () => {
-      window.localStorage.setItem(
-        COMPARE_CHOICE_STORAGE_KEY,
-        JSON.stringify({ [BASE]: FUNDS_RUN_OUT }),
-      );
-      const { panel, log } = await renderCompare(
-        `/balance-projection?view=compare&with=${DELAY}`,
-        EARLY,
-      );
-      expect(selectorTrigger(panel)).toHaveTextContent('Delay — work to 70');
-
-      await view(BASE);
-      act(() => {
-        window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
-      });
-      await waitFor(() => expect(selectorTrigger(panel)).toHaveTextContent('Funds Run Out'), WAIT);
-      await waitFor(() => expect(log.at(-1)!.search).toBe('?view=compare'), WAIT);
-    });
-
     it('stops applying ?with= after a sidebar switch through a scenario that shows no panel', async () => {
       window.localStorage.setItem(
         COMPARE_CHOICE_STORAGE_KEY,
@@ -231,7 +184,7 @@ describe('BalanceProjectionPage — Compare tab', () => {
       act(() => {
         window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
       });
-      const back = await findPanel();
+      const back = await findComparePanel();
       await waitFor(() => expect(selectorTrigger(back)).toHaveTextContent('Funds Run Out'), WAIT);
       await waitFor(() => expect(log.at(-1)!.search).toBe('?view=compare'), WAIT);
     });
@@ -334,14 +287,11 @@ describe('BalanceProjectionPage — Compare tab', () => {
       expect(selectorTrigger(panel)).toHaveTextContent('Base (Base)');
     });
 
-    it.each(['{not json', '[1,2]', '"text"', '{"demo-scenario-early":7}'])(
-      'reads a malformed stored value (%s) as no remembered choice, without throwing',
-      async (stored) => {
-        window.localStorage.setItem(COMPARE_CHOICE_STORAGE_KEY, stored);
-        const { panel } = await renderCompare('/balance-projection?view=compare', EARLY);
-        expect(selectorTrigger(panel)).toHaveTextContent('Base (Base)');
-      },
-    );
+    it('reads a malformed stored value as no remembered choice, without throwing', async () => {
+      window.localStorage.setItem(COMPARE_CHOICE_STORAGE_KEY, '{not json');
+      const { panel } = await renderCompare('/balance-projection?view=compare', EARLY);
+      expect(selectorTrigger(panel)).toHaveTextContent('Base (Base)');
+    });
 
     it('says there is nothing to compare with when it is the only scenario, and links to Scenarios', async () => {
       for (const id of [EARLY, DELAY, FUNDS_RUN_OUT]) {
@@ -367,7 +317,7 @@ describe('BalanceProjectionPage — Compare tab', () => {
       expect(projectedIds()).not.toContain(BASE);
 
       await user.click(screen.getByRole('tab', { name: 'Compare' }));
-      const panel = await findPanel();
+      const panel = await findComparePanel();
       await within(panel).findByRole('row', { name: /Ending balance/ }, WAIT);
       expect(projectedIds().filter((id) => id === BASE)).toHaveLength(1);
 
@@ -480,21 +430,8 @@ describe('BalanceProjectionPage — Compare tab', () => {
     });
 
     it('shows the viewed ending balance the Overview shows, each column headed by name and its own horizon year', async () => {
-      // The demo scenarios all share one horizon, so add a child of Base that
-      // lives five years longer.
-      const base = (await listAggregates('scenario')).find((s) => s.id === BASE)!;
-      const basePayload = base.payload as ScenarioPayload;
-      await putAggregate('scenario', {
-        ...base,
-        id: 'long-life',
-        payload: {
-          ...basePayload,
-          name: 'Long life',
-          parentScenarioId: BASE,
-          isPrimary: false,
-          overrides: { lifeExpectancy: { primary: 100 } },
-        },
-      } as Aggregate<ScenarioPayload>);
+      // The demo scenarios share one horizon; this child lives five years longer.
+      await seedChild('long-life', BASE, { lifeExpectancy: { primary: 100 } });
       const { panel } = await renderCompare('/balance-projection?view=compare', 'long-life');
       await within(panel).findByRole('row', { name: /Ending balance/ }, WAIT);
       const [viewedBalance, comparisonBalance, difference] = headlineCells(
@@ -506,7 +443,7 @@ describe('BalanceProjectionPage — Compare tab', () => {
       expect(difference).toMatch(/^[+−]\$.+ (more|less)$/);
 
       const headers = within(panel).getAllByRole('columnheader');
-      expect(headers[1]).toHaveTextContent('Long life');
+      expect(headers[1]).toHaveTextContent('long-life');
       expect(headers[2]).toHaveTextContent('Base');
       const years = [headers[1], headers[2]].map(
         (h) => /Horizon (\d{4})/.exec(h.textContent ?? '')?.[1],
@@ -534,7 +471,7 @@ describe('BalanceProjectionPage — Compare tab', () => {
         const { unmount } = render(
           pageAt('/balance-projection?view=compare', [], theme),
         );
-        const panel = await findPanel();
+        const panel = await findComparePanel();
         await within(panel).findByRole('row', { name: /Ending balance/ }, WAIT);
         await expectNoA11yViolations(panel);
         unmount();

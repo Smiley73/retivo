@@ -179,16 +179,14 @@ export const BalanceProjectionPage: React.FC = () => {
   // value renders Overview, and the page never writes the URL on mount to
   // normalise it (a mount-time write would add a replace entry on every load
   // and make deep-link behavior depend on render timing). `scrollAnchorRef`
-  // wraps the pinned strip + the six panels: a sticky element can't scroll
-  // itself into view, so a user-initiated switch scrolls this plain ancestor
-  // instead. `stripRef` is the sticky container itself: while stuck it paints
-  // over the panel beneath, so a control reached by keyboard inside a panel is
-  // scrolled clear of the strip's MEASURED bottom edge (WCAG 2.2 AA 2.4.11 —
-  // see the hook for why a fixed `scroll-padding` reserve cannot do this).
+  // wraps the pinned strip + the panels: a sticky element can't scroll itself
+  // into view, so a user-initiated switch scrolls this plain ancestor instead.
+  // `stripRef` is the sticky container: while stuck it paints over the panel
+  // beneath, so keyboard focus inside a panel is scrolled clear of its measured
+  // bottom edge (WCAG 2.2 AA 2.4.11).
   const [searchParams, setSearchParams] = useSearchParams();
   const view = parseBalanceProjectionView(searchParams.get('view'));
-  // Above the early returns on purpose: it must see every sidebar switch, also
-  // through a scenario that renders no Compare panel.
+  // Above the early returns: it must see a switch through a scenario that renders no panel.
   const compareWithAnchor = useCompareWithAnchor(selectedScenarioId);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -519,13 +517,8 @@ export const BalanceProjectionPage: React.FC = () => {
         onSelectionChange={handleViewChange}
         keyboardActivation="manual"
       >
-        {/* The scroll anchor for a user-initiated view switch: a sticky
-            element can't scroll itself into view (once stuck its rect top is
-            already 0), so this plain, non-sticky div — wrapping the pinned
-            strip AND the six panels — is the scroll target instead (see
-            `handleViewChange`). It is also the container
-            `useFocusClearOfPinnedStrip` watches for keyboard focus landing
-            under the stuck strip (`stripRef`, the sticky div just inside). */}
+        {/* Scroll target of a user-initiated view switch (`handleViewChange`)
+            and the container `useFocusClearOfPinnedStrip` watches. */}
         <div ref={scrollAnchorRef}>
           <div
             ref={stripRef}

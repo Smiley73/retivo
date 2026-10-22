@@ -224,10 +224,7 @@ export const ScenariosPage: React.FC = () => {
     [householdId, scenarios, confirm, notifyPending],
   );
 
-  // "Compare with parent" — switch the active scenario to the card, and only
-  // once the pointer write has landed open Projections on the Compare tab
-  // against the parent. Navigating first would mount the page against the
-  // previous pointer and open the tab on the wrong pair.
+  // Navigating before the pointer write lands would open the tab on the wrong pair.
   const compareWithParent = useCallback(
     async (scenario: ScenarioAggregate, parentId: string): Promise<void> => {
       setActionError(null);

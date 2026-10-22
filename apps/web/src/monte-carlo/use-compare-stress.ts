@@ -1,36 +1,16 @@
 /**
  * Compare tab — the "Plan success" figures for the two scenarios.
  *
- * Two sources, deliberately different:
- *
- *  - The VIEWED scenario's result is read from the page's own stress-test view
- *    model, never looked up again: the app-wide `MonteCarloProvider` is
- *    single-slot, so a second `runToCompletion` would supersede the page's run.
- *    The figure is shown only once the page reports a settled pair for the plan
- *    on screen (`stressPairSignature` non-null); `isStale || isRunning` is the
- *    wrong test (a first mount after another surface ran would paint that
- *    surface's numbers).
- *  - The COMPARISON scenario's result is read from the Monte Carlo cache under
- *    the key the Projections page writes for that scenario
- *    (`buildMonteCarloInputForScenario` + `mcCacheKey`), else computed on a
- *    worker pool this hook owns (the Scenarios "Recalculate all" pattern: one
- *    `pool.run`, a monotonic token so a late reply from a disposed pool is
- *    ignored, `putCached` on success, dispose on every exit path).
- *
- * Sequencing: the cache keys and the cache read start as soon as the tab is
- * selected (deferred to an idle slice, as the Compare tab's second projection
- * is). The pool run starts only when no run of the page's own is in flight or
- * still to come (`isRunning`, `runPending`), because the provider shards that
- * run across cores-1 workers and a second pool at the same moment makes the
- * page hitch. The gate is "nothing more is coming", not "the page has a settled
- * pair": a page run the user cancelled never settles and is not restarted, and
- * waiting for it would strand the comparison forever. Once started a run is not aborted by
- * leaving the tab (the result is cached and cheap to finish); it is aborted by
- * unmount, by a change of comparison scenario and by a change of the
- * comparison's cache key.
- *
- * Equal cache keys (same stress-test input) run nothing: the comparison side
- * IS the viewed side.
+ * The viewed side is read from the page's own stress view model (the provider
+ * is single-slot; a second run would supersede the page's) and shown only once
+ * `stressPairSignature` is non-null. The comparison side is cache-first under
+ * the key the Projections page writes, else one `pool.run` on a worker pool
+ * this hook owns, token-guarded and cached on success. The pool run waits
+ * until nothing of the page's own run is in flight or queued (a cancelled page
+ * run never settles, so waiting for a settled pair would strand it). Leaving
+ * the tab does not abort a run; unmount, a changed comparison scenario or a
+ * changed cache key does. Equal keys run nothing: the comparison side is the
+ * viewed side.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getCached, mcCacheKey, putCached } from '../db/monte-carlo-cache';
@@ -48,7 +28,6 @@ import {
 } from '../lib/success-delta-noise';
 import { yieldToIdle } from '../lib/yield-to-idle';
 import { createMcPool, type McPool, type MinimalMcWorker } from './mc-worker-pool';
-// Vite `?worker` import — same pattern as `use-scenario-bulk-recompute.ts`.
 import MCWorker from '../workers/monte-carlo.worker.ts?worker';
 
 /** The slice of the page's stress-test view model this hook reads. */
@@ -59,8 +38,7 @@ export interface CompareStressViewed {
   readonly cbpValidation: { readonly ok: boolean } | null;
   /** Non-null only once a completed run for the plan on screen produced `result`. */
   readonly stressPairSignature: string | null;
-  /** A run for the plan on screen is queued behind the auto-run debounce or has
-   *  been requested and not ended. False after a cancel: nothing is coming. */
+  /** A run for the plan on screen is queued or in flight; false after a cancel. */
   readonly runPending: boolean;
   readonly result: MonteCarloSummary | null;
   readonly progressDone: number;
@@ -90,12 +68,11 @@ export interface CompareStressVm {
   readonly comparison: CompareStressSide;
   /** The noise gate's verdict for `viewed - comparison`; null until both sides are ready. */
   readonly verdict: SuccessDeltaVerdict | null;
-  /** The two stress-test cache keys; null until they are computed for the
-   *  current inputs. A side whose scenario cannot run the stress test has a null key. */
+  /** Null until computed for the current inputs; a side that cannot run has a null key. */
   readonly cacheKeys: { readonly viewed: string | null; readonly comparison: string | null } | null;
-  /** Re-run a failed comparison side (a new token, so a late reply of the failed run is ignored). */
+  /** Re-run a failed comparison side. */
   readonly retry: () => void;
-  /** Start the viewed scenario's stress test again, for a viewed side that `stopped`. */
+  /** Start the viewed scenario's stress test again (a `stopped` viewed side). */
   readonly runViewed: () => void;
 }
 
@@ -104,9 +81,7 @@ export interface UseCompareStressArgs {
   readonly viewedScenarioId: string;
   readonly comparisonId: string | null;
   readonly scenarios: ReadonlyArray<ScenarioAggregate>;
-  /** The page's slices, categories included: omitting them changes the
-   *  medical-id set, hence the key, and every lookup would miss. Keep the
-   *  identity stable between renders (memoise it). */
+  /** The page's slices, categories included (they change the key); memoised. */
   readonly inputs: ScenarioMcInputs;
   readonly nowYear: number;
   readonly nowMonthIndex: number;
@@ -189,9 +164,7 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
   const [run, setRun] = useState<ComparisonRun | null>(null);
 
   const poolRef = useRef<McPool | null>(null);
-  // Monotonic token: only the current run's replies mutate state. Every
-  // dispose (completion, key/scenario change, unmount, a retry) bumps it, so a
-  // late reply from a torn-down pool is ignored — also StrictMode-safe.
+  // Bumped on every dispose, so a late reply from a torn-down pool is ignored.
   const runTokenRef = useRef(0);
   const workerFactoryRef = useRef(args.workerFactory);
   workerFactoryRef.current = args.workerFactory;
@@ -209,8 +182,7 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
     poolRef.current = null;
   }, []);
 
-  // 1. Inputs and cache keys, as soon as the tab is selected. Kept across tab
-  // switches and recomputed only when an input they derive from changes.
+  // 1. Inputs and cache keys, once the tab is selected; kept across tab switches.
   useEffect(() => {
     if (!isActive || comparisonId === null || current) return;
     let cancelled = false;
@@ -249,8 +221,6 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
   const comparisonKey = prepared?.comparisonKey ?? null;
   const sameKey =
     live !== null && live.comparisonKey !== null && live.comparisonKey === live.viewedKey;
-  // The key a lookup or a run is for: current inputs, a runnable comparison,
-  // and not the viewed scenario's own entry.
   const targetKey = live !== null && !sameKey ? live.comparisonKey : null;
 
   // 2. Cache first.
@@ -275,9 +245,7 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
     };
   }, [targetKey]);
 
-  // 3. A miss runs on the pool, but only once the page's own run is out of the
-  // way: not in flight and none queued (cancelled and failed runs both count as
-  // out of the way, so the comparison never waits on a run that will not come).
+  // 3. A miss runs on the pool once the page's own run is neither in flight nor queued.
   const viewedState = viewedSide(viewed);
   const viewedSettled = !viewed.isRunning && !viewed.runPending;
   const comparisonInput = live?.comparisonInput ?? null;
@@ -316,8 +284,6 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
         } else if (reply.kind === 'error') {
           finish({ key, phase: 'error', message: RUN_FAILED_MESSAGE });
         }
-        // `aborted` → the pool was disposed; the token guard above has
-        // already suppressed it.
       })
       .catch((e: unknown) => {
         console.warn('[compare-stress] run failed', e);
@@ -325,8 +291,6 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
       });
   }, [isActive, targetKey, comparisonInput, run, viewedSettled, disposePool]);
 
-  // No leaked workers: a changed comparison scenario or cache key aborts the
-  // run in flight (leaving the tab does not), and so does unmount.
   useEffect(() => disposePool, [comparisonId, comparisonKey, disposePool]);
 
   const retry = useCallback((): void => {
@@ -349,8 +313,7 @@ export function useCompareStress(args: UseCompareStressArgs): CompareStressVm {
     }
   }
 
-  // Memoised on the key values so consumers that depend on it keep a stable
-  // identity across the many renders a running stress test causes.
+  // Stable identity across the many renders a running stress test causes.
   const liveViewedKey = live?.viewedKey ?? null;
   const liveComparisonKey = live?.comparisonKey ?? null;
   const hasLive = live !== null;

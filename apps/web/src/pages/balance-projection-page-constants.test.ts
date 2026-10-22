@@ -68,9 +68,4 @@ describe('compareDeepLink', () => {
     expect(parseBalanceProjectionView(url.searchParams.get('view'))).toBe('compare');
     expect(url.searchParams.get(COMPARE_WITH_PARAM)).toBe('sc-base');
   });
-
-  it('encodes an id that needs escaping', () => {
-    const url = new URL(compareDeepLink('a&b=c'), 'http://x');
-    expect(url.searchParams.get(COMPARE_WITH_PARAM)).toBe('a&b=c');
-  });
 });

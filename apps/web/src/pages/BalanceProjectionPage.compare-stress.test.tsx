@@ -8,19 +8,10 @@
  * `monte-carlo/use-compare-stress.test.ts`.
  */
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { cleanup, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import React from 'react';
-import {
-  clearAllStores,
-  listAggregates,
-  putAggregate,
-  writeSelectedScenario,
-} from '../db/store';
+import { clearAllStores, listAggregates, putAggregate } from '../db/store';
 import { clearMonteCarloCache, mcCacheKey, putCached } from '../db/monte-carlo-cache';
-import type { Aggregate, ScenarioOverrides, ScenarioPayload } from '../db/types';
-import { loadDemoData } from '../lib/demo-data-loader';
 import type { MonteCarloInput, MonteCarloSummary } from '../lib/monte-carlo';
 import { runBalanceProjectionMc } from '../lib/balance-projection-runner';
 import {
@@ -29,11 +20,17 @@ import {
   type ScenarioMcInputs,
 } from '../lib/monte-carlo-scenario-input';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
-import { MonteCarloProvider } from '../monte-carlo/MonteCarloProvider';
 import { fakeSummary } from '../monte-carlo/fake-worker.test-harness';
 import { expectNoA11yViolations } from '../test/a11y';
-import { withTheme } from '../test/theme-render';
-import { BalanceProjectionPage } from './BalanceProjectionPage';
+import {
+  BASE,
+  EARLY,
+  WAIT,
+  comparePath,
+  renderComparePage,
+  resetDemo,
+  seedChild,
+} from './__fixtures__/compare-page';
 
 // The page's stress view model, overridden field by field. `null` passes the
 // real hook's value through.
@@ -55,10 +52,6 @@ vi.mock('../components/PlanStressTestSection', async () => {
     },
   };
 });
-
-const BASE = 'demo-scenario-base';
-const EARLY = 'demo-scenario-early';
-const WAIT = { timeout: 10_000 };
 
 const summaryAt = (successProbability: number): MonteCarloSummary => ({
   ...fakeSummary(1),
@@ -115,43 +108,8 @@ async function cacheFor(scenarioId: string, successProbability: number): Promise
   await putCached(await mcCacheKey(await mcInputFor(scenarioId)), summaryAt(successProbability));
 }
 
-async function seedChild(
-  id: string,
-  parentId: string,
-  overrides: ScenarioOverrides,
-): Promise<void> {
-  const parent = (await listAggregates('scenario')).find((s) => s.id === parentId)!;
-  await putAggregate('scenario', {
-    ...parent,
-    id,
-    payload: {
-      ...(parent.payload as ScenarioPayload),
-      name: id,
-      parentScenarioId: parentId,
-      isPrimary: false,
-      overrides,
-    },
-  } as Aggregate<ScenarioPayload>);
-}
-
-function pageElement(withId?: string): React.ReactElement {
-  const search = withId ? `&with=${withId}` : '';
-  return withTheme(
-    'light',
-    <MemoryRouter initialEntries={[`/balance-projection?view=compare${search}`]}>
-      <MonteCarloProvider>
-        <BalanceProjectionPage />
-      </MonteCarloProvider>
-    </MemoryRouter>,
-  );
-}
-
-async function renderCompare(viewed: string, withId?: string) {
-  await writeSelectedScenario({ scenarioId: viewed, updatedAt: new Date().toISOString() });
-  const view = render(pageElement(withId));
-  const panel = await screen.findByRole('region', { name: 'Compare scenarios' }, WAIT);
-  return { panel, rerender: () => view.rerender(pageElement(withId)) };
-}
+const renderCompare = (viewed: string, withId?: string) =>
+  renderComparePage(viewed, { path: comparePath(withId) });
 
 async function findRow(panel: HTMLElement): Promise<HTMLElement> {
   return within(panel).findByRole('region', { name: 'Plan success' }, WAIT);
@@ -169,19 +127,16 @@ function figures(row: HTMLElement): Record<string, string> {
 
 describe('Compare tab — Plan success row', () => {
   beforeEach(async () => {
-    await clearAllStores();
     await clearMonteCarloCache();
-    window.localStorage.clear();
     stressVmOverride.value = null;
     stressVmOverride.runArgs = null;
-    await loadDemoData({ householdId: 'hh-test', email: 'demo@example.test', displayName: 'Demo User' });
+    await resetDemo();
   });
   afterEach(async () => {
     cleanup();
     stressVmOverride.value = null;
     await clearAllStores();
     await clearMonteCarloCache();
-    window.localStorage.clear();
   });
 
   it('shows the planned headline immediately and keeps the row pending, with no number, until the pair settles', async () => {

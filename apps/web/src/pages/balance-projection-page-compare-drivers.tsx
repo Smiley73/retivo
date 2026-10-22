@@ -1,15 +1,9 @@
 /**
  * Balance Projection page — the Compare tab's Drivers table, its note, and the
- * identical-results state. Renders only: every total and signed difference
- * comes from `buildCompareData` / `formatSignedDifference`, and the grouped
- * list of settings from `buildScenarioChangeList`, so nothing here computes a
- * figure the Taxes tab also shows.
- *
- * The wording keeps to one stance: the rows are totals of two complete
- * projections, and the model does not apportion the gap among them. No
- * sentence here says a row caused, explains or is responsible for the gap,
- * and nothing ranks the rows or colours a difference (more tax is not a loss,
- * more conversions not a win).
+ * identical-results state. Renders only (`buildCompareData`,
+ * `formatSignedDifference`, `buildScenarioChangeList`). No sentence says a row
+ * caused or explains the gap, and no difference is coloured: more tax is not
+ * a loss, more conversions not a win.
  */
 import React from 'react';
 import { Cell, Column, Row, Table, TableBody, TableHeader } from 'react-aria-components';
@@ -22,8 +16,7 @@ import { formatSignedDifference } from '../lib/signed-difference';
 import type { CompareData, CompareDrivers } from './balance-projection-compare-data';
 import { tableClass, tdClass, tdNumClass, thClass, thNumClass } from './accounts-page-chrome';
 
-/** The fixed no-attribution note; pinned by string in the page tests. */
-export const DRIVERS_NOTE =
+const DRIVERS_NOTE =
   'These are differences between the totals of two complete projections. The ' +
   'model does not apportion the gap among them, and one change usually moves ' +
   'several lines at once, so read each row as a total, not as a share of the gap.';
@@ -197,12 +190,7 @@ function formatDriver(kind: DriverRow['kind'], value: number): string {
   return kind === 'money' ? formatCurrencyShort(value) : String(value);
 }
 
-/**
- * Shown in place of the headline and the Drivers table when the two Planned
- * projections are identical. It says the PLANNED results match, not "the
- * results": the stress test is checked separately and can still differ,
- * unless its inputs match too (`stressMatches`), when the sentence says so.
- */
+/** Replaces the headline and Drivers when the two Planned projections are identical. */
 export const CompareIdentitySection: React.FC<{
   readonly viewedName: string;
   readonly comparisonName: string;

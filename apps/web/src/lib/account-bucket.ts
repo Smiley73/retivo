@@ -17,9 +17,7 @@ import type { AccountType } from '../db/types';
 
 export type AccountBucket = 'pretax' | 'roth' | 'taxable' | 'cash' | 'tax_free';
 
-/** Plain-language bucket names, in the user guide's own words ("tax-deferred",
- *  not the Dashboard's tax-treatment partition). Shown where a bucket is named
- *  as such, e.g. the Compare tab's years-of-withdrawals rows. */
+/** Plain-language bucket names, in the user guide's words. */
 export const ACCOUNT_BUCKET_LABEL: Readonly<Record<AccountBucket, string>> = {
   pretax: 'Tax-deferred',
   roth: 'Roth',
