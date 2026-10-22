@@ -1,20 +1,4 @@
-/**
- * RMD surplus accounting + display tests.
- *
- * Covers the deterministic per-account strategy path only (the feature's gate):
- *   - Leak regression: held-as-cash overflow is PRESERVED in the projected
- *     balance (the year-end total = the no-surplus baseline PLUS the surplus),
- *     proving the credit-back, not just field presence.
- *   - Disposition split: a real POST_TAX-non-Roth account → `rmdReinvestedCents`;
- *     no such account → `rmdOverflowToCashCents`.
- *   - Tax invariant: the full forced RMD is classified pre-tax in BOTH
- *     dispositions — the surplus never reduces the pre-tax withdrawal.
- *   - Basis invariant: reinvested surplus flows through `DrawdownAccountYear.deposit`
- *     so the cost-basis accumulator credits it.
- *   - Spend-first across EVERY strategy kind: a held-as-cash year reduces
- *     the FOLLOWING year's forced pre-tax draw + RMD base.
- *   - Integer cents end-to-end (no penny drift).
- */
+/** RMD surplus accounting tests for the deterministic per-account strategy path. */
 import { describe, it, expect } from 'vitest';
 import { simulateDrawdown } from './drawdown-engine';
 import { singleMagiCapWindow } from './drawdown-engine-per-account-magi-cap';
@@ -31,8 +15,7 @@ import { RMD_DIVISORS } from './rmd-divisors';
 import { RMD_OVERFLOW_CASH_ACCOUNT_ID } from './drawdown-engine-per-account-strategy-helpers';
 
 const RETIREMENT_YEAR = 2030;
-// Owner born 1957 → age 73 in 2030 → RMD trigger fires; Uniform Lifetime
-// divisor at 73 = 26.5.
+// Born 1957: age 73 in 2030 triggers the RMD; Uniform Lifetime divisor 26.5.
 const OWNER_ISO = '1957-06-15';
 const DIVISOR_73 = 26.5;
 
@@ -78,8 +61,6 @@ function makeRmdContext(accountIds: ReadonlyArray<string>): RmdContextInput {
   return { ownerMeta, ownerByAccountId, rmdSnapshot: RMD_DIVISORS };
 }
 
-/** A one-year run with an IRA forced above the spending need + an optional
- *  real taxable account. 0% growth so balance arithmetic is exact. */
 function runOneYear(opts: {
   iraBalance: number;
   expenseAnnual: number;
@@ -128,8 +109,8 @@ describe('RMD surplus — held-as-cash leak regression', () => {
   const expectedSurplus = expectedRmd - EXPENSE;
 
   it('preserves the held-as-cash overflow in the year-end balance (= baseline + surplus)', () => {
-    // Held-as-cash run: only a Roth post account, so the surplus has no real
-    // taxable landing site and is held in the synthetic carrier.
+    // Held-as-cash run: only a Roth post account, so the surplus has no taxable landing site and is held in the synthetic
+    // carrier.
     const held = simulateDrawdown({
       portfolioAtRetirement: IRA + 100_000,
       ratePct: 0,
@@ -146,14 +127,10 @@ describe('RMD surplus — held-as-cash leak regression', () => {
       rmdContext: makeRmdContext(['ira', 'roth']),
     });
     const yr = held.years[0];
-    // The forced RMD leaves the IRA, only `EXPENSE` is spent, the rest is held
-    // as cash — so the portfolio total = starting total − spending (NOT
-    // − the full forced RMD). The surplus is preserved.
+    // Only EXPENSE is spent and the rest is held as cash, so the total = start − spending, not start − the full forced RMD.
     const startTotal = IRA + 100_000;
     expect(yr.balance).toBeCloseTo(startTotal - EXPENSE, -1);
-    // The overflow surfaces and matches the surplus.
     expect((yr.rmdOverflowToCashCents ?? 0) / 100).toBeCloseTo(expectedSurplus, -1);
-    // No reinvest disposition in the held-as-cash household.
     expect(yr.rmdReinvestedCents ?? 0).toBe(0);
   });
 });
@@ -168,7 +145,6 @@ describe('RMD surplus — disposition split', () => {
     const yr = out.years[0];
     expect((yr.rmdReinvestedCents ?? 0) / 100).toBeCloseTo(expectedSurplus, -1);
     expect(yr.rmdOverflowToCashCents ?? 0).toBe(0);
-    // Basis invariant: reinvested surplus flows through the brokerage deposit.
     const brokDeposit = yr.accountBalances?.get('brok')?.deposit ?? 0;
     expect(brokDeposit).toBeCloseTo(expectedSurplus, -1);
   });
@@ -191,45 +167,25 @@ describe('RMD surplus — tax invariant (full forced RMD stays pre-tax)', () => 
       const out = runOneYear({ iraBalance: IRA, expenseAnnual: EXPENSE, withRealTaxable });
       const yr = out.years[0];
       const iraWd = yr.accountBalances?.get('ira')?.withdrawn ?? 0;
-      // The pre-tax IRA withdrawal equals the full forced RMD — the surplus
-      // disposition (reinvest or hold) never nets it down.
+      // The pre-tax IRA withdrawal equals the full forced RMD; the surplus disposition never nets it down.
       expect(iraWd).toBeCloseTo(expectedRmd, -1);
     }
   });
 });
 
 describe('RMD surplus — universal spend-first across strategies', () => {
-  // Two-year run: year 0 forces a large RMD beyond spending (builds held cash),
-  // year 1 has spending the held cash should fund FIRST, measurably reducing
-  // the year-1 forced pre-tax withdrawal vs. a no-cash baseline.
+  // Year 0 forces an RMD beyond spending (building held cash); year 1's spending should fund from that cash first, reducing
+  // the forced pre-tax draw against a no-cash baseline.
   const IRA = 1_400_000;
   const EXPENSE = 30_000;
   const HORIZON = RETIREMENT_YEAR + 1;
 
   for (const kind of ['taxEfficient', 'rothFirst', 'proportional'] as const) {
-    // Prove cash-first ordering for each preset by a PAIRED comparison.
-    // Year-0 forces a large RMD (builds held cash). Year-1 net need EXCEEDS the
-    // year-1 forced RMD, so a discretionary draw IS required. We compare the
-    // year-1 pre-tax (IRA) draw of the held-cash household against an identical
-    // household with NO prior-year held cash (its IRA is right-sized so its
-    // year-0 forces ~no surplus). With held cash present the year-1 IRA draw
-    // must be STRICTLY LOWER (held cash consumed before pre-tax). This assertion
-    // fails if `consumeOverflowCashFirst` is disabled.
     it(`held cash is consumed before real accounts in year 1 under ${kind} (paired baseline)`, () => {
-      // Both households hold the SAME (large) IRA and Roth — the ONLY difference
-      // is whether year-0 built held cash. We toggle that via the year-0 expense:
-      //   - held household: LOW year-0 expense → forced RMD >> spend → surplus
-      //     held as cash; AND because less was spent, MORE balance carries into
-      //     year 1 (so any balance confound works AGAINST the assertion).
-      //   - baseline household: year-0 expense set so the forced RMD is fully
-      //     spent → ~no surplus, no prior-year held cash to consume in year 1.
-      // Year-1 net need EXCEEDS the year-1 forced RMD in BOTH, so a discretionary
-      // draw is required unless cash funds it first. The discretionary source
-      // varies by strategy (IRA / Roth), so we assert on the strategy-agnostic
-      // quantity: the TOTAL year-1 draw from the REAL accounts (IRA + Roth,
-      // excluding the synthetic carrier). With held cash present that real draw
-      // is STRICTLY LOWER (cash funded part of the need) — fails if
-      // `consumeOverflowCashFirst` is disabled.
+      // Same IRA and Roth in both households; only year-0 spending differs (held: a low expense builds held cash; baseline: the
+      // expense equals the forced RMD, so no surplus). Year-1 need exceeds the forced RMD in both, so the strategy-agnostic
+      // real-account draw (IRA + Roth, excluding the carrier) must be strictly lower with held cash; this fails if
+      // consumeOverflowCashFirst is disabled.
       const Y1_EXPENSE = 90_000;
       const year0Rmd = Math.round(IRA / DIVISOR_73);
       const months = (HORIZON - RETIREMENT_YEAR + 1) * 12;
@@ -255,12 +211,9 @@ describe('RMD surplus — universal spend-first across strategies', () => {
         });
       };
 
-      // Held household: low year-0 expense (well below the forced RMD) → surplus.
       const held = makeRun(EXPENSE);
-      // Baseline household: year-0 expense matches the forced RMD → ~no surplus.
       const baseline = makeRun(year0Rmd);
 
-      // Sanity: the held household built cash; the baseline did not.
       expect((held.years[0].rmdOverflowToCashCents ?? 0) / 100).toBeGreaterThan(0);
       expect((baseline.years[0].rmdOverflowToCashCents ?? 0) / 100).toBeCloseTo(0, -1);
 
@@ -268,8 +221,8 @@ describe('RMD surplus — universal spend-first across strategies', () => {
         const bal = out.years[1].accountBalances;
         return (bal?.get('ira')?.withdrawn ?? 0) + (bal?.get('roth')?.withdrawn ?? 0);
       };
-      // Held cash consumed first → strictly lower year-1 REAL-account draw, even
-      // though the held household carries MORE balance into year 1.
+      // Held cash is consumed first, so the real-account draw is strictly lower despite the held household carrying more balance
+      // into year 1.
       expect(realDraw(held)).toBeLessThan(realDraw(baseline) - 1);
     });
   }
@@ -294,8 +247,7 @@ describe('RMD surplus — universal spend-first across strategies', () => {
     });
     const y0 = out.years[0];
     expect((y0.rmdOverflowToCashCents ?? 0) / 100).toBeGreaterThan(0);
-    // Year 1: held cash funds the discretionary need before the customOrder
-    // router would touch Roth — Roth balance is preserved through year 1.
+    // Year 1: held cash funds the need before the customOrder router would touch Roth, so Roth is preserved.
     const y1RothBal = out.years[1].accountBalances?.get('roth')?.balance ?? 0;
     expect(y1RothBal).toBeCloseTo(100_000, -2);
   });
@@ -323,7 +275,7 @@ describe('RMD surplus — universal spend-first across strategies', () => {
     });
     const y0 = out.years[0];
     expect((y0.rmdOverflowToCashCents ?? 0) / 100).toBeGreaterThan(0);
-    // Year 1: held cash funds the spend before the cap path draws Roth/pre-tax.
+    // Year 1: held cash funds the spend before the cap path draws Roth or pre-tax.
     const y1RothBal = out.years[1].accountBalances?.get('roth')?.balance ?? 0;
     expect(y1RothBal).toBeCloseTo(100_000, -2);
   });
@@ -338,9 +290,8 @@ describe('RMD surplus — integer cents, no penny drift', () => {
   });
 
   it('carrier surplus cents stay integer-exact across a multi-year held-as-cash run', () => {
-    // Awkward odd-dollar balances + expenses to provoke any fractional-cent
-    // drift. 0% growth, no real taxable account → every year overflows to the
-    // carrier and the carrier balance accumulates across years.
+    // Odd-dollar balances and expenses provoke any fractional-cent drift; with no real taxable account every year overflows to
+    // the carrier.
     const HORIZON_5Y = RETIREMENT_YEAR + 4;
     const out = runOneYear({
       iraBalance: 1_234_567,
@@ -350,15 +301,12 @@ describe('RMD surplus — integer cents, no penny drift', () => {
     });
     expect(out.years.length).toBe(5);
     for (const yr of out.years) {
-      // Each year's overflow surplus is integer cents (exact, not approximate).
       const overflowCents = yr.rmdOverflowToCashCents ?? 0;
       expect(Number.isInteger(overflowCents)).toBe(true);
-      // The carrier's running balance (its post bucket) is integer-cents exact.
       const carrierBal = yr.accountBalances?.get(RMD_OVERFLOW_CASH_ACCOUNT_ID)?.balance ?? 0;
       expect(Number.isInteger(Math.round(carrierBal * 100))).toBe(true);
       expect(carrierBal * 100).toBe(Math.round(carrierBal * 100));
     }
-    // The carrier balance grows year-over-year (surplus accumulates, no spend).
     const carrierByYear = out.years.map(
       (yr) => yr.accountBalances?.get(RMD_OVERFLOW_CASH_ACCOUNT_ID)?.balance ?? 0,
     );
@@ -376,30 +324,23 @@ describe('RMD surplus — synthetic carrier excluded from per-account breakdown'
   it('the carrier id is NOT a real input account, so the account-stack (keyed on real ids) excludes it while the total balance still includes the surplus', () => {
     const out = runOneYear({ iraBalance: IRA, expenseAnnual: EXPENSE, withRealTaxable: false });
     const yr = out.years[0];
-    // Real input accounts for this household.
     const realIds = ['ira'];
     expect(realIds).not.toContain(RMD_OVERFLOW_CASH_ACCOUNT_ID);
-    // The account-stack UI keys off the real account list (acct.id), so the
-    // sum over real ids is what the per-account breakdown shows — it never
-    // surfaces the synthetic carrier id.
+    // The account-stack UI keys off real account ids, so it never surfaces the synthetic carrier.
     const stackTotal = realIds.reduce(
       (sum, id) => sum + (yr.accountBalances?.get(id)?.balance ?? 0),
       0,
     );
-    // The surplus is held in the carrier, NOT in any real account, so the
-    // per-account stack total is LESS than the year total by exactly the surplus.
+    // The surplus sits in the carrier, not in a real account, so the stack total is less than the year total by exactly the
+    // surplus.
     expect(yr.balance - stackTotal).toBeCloseTo(expectedSurplus, -1);
-    // The carrier's balance is exactly the surplus (held, not in the stack).
     const carrierBal = yr.accountBalances?.get(RMD_OVERFLOW_CASH_ACCOUNT_ID)?.balance ?? 0;
     expect(carrierBal).toBeCloseTo(expectedSurplus, -1);
   });
 });
 
-/** Tax hook that adds a flat `$taxPerYear` cash need every year. Mirrors the
- *  stub used in `drawdown-engine-tax-cashflow.test.ts`. */
 function flatTaxHook(taxPerYear: number): TaxCashflowHook {
   return {
-    // Params unused — flat add-on independent of year/need/classification.
     solveForYear: (): TaxCashflowYearOutcome => ({
       addedNeedDollars: taxPerYear,
       federalTaxCashNeedCents: taxPerYear * 100,
@@ -416,18 +357,14 @@ function flatTaxHook(taxPerYear: number): TaxCashflowHook {
 }
 
 describe('RMD surplus — tax portion is NOT retained in the portfolio', () => {
-  // Over-RMD year where the forced RMD exceeds spending but NOT spending+tax,
-  // so the monthly RMD credit drives the discretionary target to $0 and the tax
-  // cash is funded out of the forced RMD itself (never a separate withdrawal).
-  // The surplus reinvested/held must exclude the tax dollars, and the ending
-  // balance must reflect the tax cash LEAVING the portfolio.
+  // The forced RMD exceeds spending but not spending + tax, so the monthly RMD credit drives the discretionary target to $0
+  // and the tax cash is funded from the forced RMD itself; the surplus must exclude the tax dollars and the ending balance
+  // reflects the tax leaving the portfolio.
   const IRA = 1_400_000;
   const ROTH = 100_000;
   const EXPENSE = 30_000;
   const TAX = 15_000;
   const forcedRmd = Math.round(IRA / DIVISOR_73); // ~52,830, well above EXPENSE
-  // The surplus excludes the tax add-on. A surplus that included it would be
-  // `forcedRmd − EXPENSE` (= TAX larger), so this case fails that behaviour.
   const expectedSurplus = forcedRmd - EXPENSE - TAX;
 
   it('held-as-cash surplus excludes the tax portion and the tax cash leaves the portfolio', () => {
@@ -441,7 +378,6 @@ describe('RMD surplus — tax portion is NOT retained in the portfolio', () => {
       retirementYear: RETIREMENT_YEAR,
       horizonYear: RETIREMENT_YEAR,
       withdrawalStrategy: { kind: 'taxEfficient' },
-      // No real POST_TAX-non-Roth account (only Roth) → surplus held as cash.
       accounts: [
         makeAccount({ id: 'ira', initialPre: IRA, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }, RETIREMENT_YEAR, RETIREMENT_YEAR),
         makeAccount({ id: 'roth', initialPost: ROTH, taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' }, RETIREMENT_YEAR, RETIREMENT_YEAR),
@@ -450,15 +386,10 @@ describe('RMD surplus — tax portion is NOT retained in the portfolio', () => {
       taxCashflow: flatTaxHook(TAX),
     });
     const yr = out.years[0];
-    // (a) Ending balance = start − spending − tax (the tax cash LEFT the
-    // portfolio). Pre-fix: only − spending, overstated by exactly TAX.
     expect(yr.balance).toBeCloseTo(startTotal - EXPENSE - TAX, -1);
-    // (b) The stamped surplus excludes the tax portion. Pre-fix it would be
-    // `forcedRmd − EXPENSE` (TAX dollars too large).
     const stampedSurplus =
       ((yr.rmdReinvestedCents ?? 0) + (yr.rmdOverflowToCashCents ?? 0)) / 100;
     expect(stampedSurplus).toBeCloseTo(expectedSurplus, -1);
-    // The full forced RMD still left the IRA (the surplus never nets it down).
     const iraWd = yr.accountBalances?.get('ira')?.withdrawn ?? 0;
     expect(iraWd).toBeCloseTo(forcedRmd, -1);
   });
@@ -485,10 +416,8 @@ describe('RMD surplus — tax portion is NOT retained in the portfolio', () => {
     const yr = out.years[0];
     expect((yr.rmdReinvestedCents ?? 0) / 100).toBeCloseTo(expectedSurplus, -1);
     expect(yr.rmdOverflowToCashCents ?? 0).toBe(0);
-    // The brokerage deposit equals the tax-excluded surplus, NOT forced−EXPENSE.
     const brokDeposit = yr.accountBalances?.get('brok')?.deposit ?? 0;
     expect(brokDeposit).toBeCloseTo(expectedSurplus, -1);
-    // Ending balance reflects the tax cash leaving the portfolio.
     expect(yr.balance).toBeCloseTo(startTotal - EXPENSE - TAX, -1);
   });
 });
@@ -500,15 +429,9 @@ describe('RMD overflow carrier — receives ZERO share of real household deposit
   const HORIZON = RETIREMENT_YEAR + 1;
 
   it('a later-year household deposit lands wholly in the real account, never in the carrier (paired)', () => {
-    // Year 0 forces an RMD surplus → builds the synthetic carrier balance (no
-    // real POST_TAX-non-Roth account, so it overflows to cash). The carrier DOES
-    // legitimately receive its targeted RMD-surplus credit each year (which
-    // surfaces in its `deposit`), so we can't assert a zero deposit. Instead we
-    // run TWO identical households differing ONLY by a year-1 household deposit
-    // (a pension lump sum) and assert: the carrier's year-1 deposit + balance are
-    // IDENTICAL across both runs (it received ZERO share of the household
-    // deposit — only its RMD-surplus credit), while the full lump sum lands in
-    // the real Roth account.
+    // The carrier legitimately receives its RMD-surplus credit each year, so compare two households differing only by a year-1
+    // pension lump sum: the carrier's year-1 deposit and balance are identical across them (zero share of the household
+    // deposit) while the full lump sum lands in the real Roth account.
     const makeRun = (lumpSum: number): ReturnType<typeof simulateDrawdown> => {
       const months = (HORIZON - RETIREMENT_YEAR + 1) * 12;
       const deposits = new Float64Array(months);
@@ -524,8 +447,7 @@ describe('RMD overflow carrier — receives ZERO share of real household deposit
         withdrawalStrategy: { kind: 'taxEfficient' },
         accounts: [
           makeAccount({ id: 'ira', initialPre: IRA, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }, RETIREMENT_YEAR, HORIZON),
-          // Roth holds the real deposit home but is NOT a surplus sink (Roth is
-          // excluded), so the RMD surplus still overflows to the synthetic carrier.
+          // Roth holds the real deposit home but is not a surplus sink, so the RMD surplus still overflows to the carrier.
           makeAccount({ id: 'roth', initialPost: 50_000, taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' }, RETIREMENT_YEAR, HORIZON),
         ],
         rmdContext: makeRmdContext(['ira', 'roth']),
@@ -535,7 +457,6 @@ describe('RMD overflow carrier — receives ZERO share of real household deposit
     const withDeposit = makeRun(PENSION_LUMP);
     const noDeposit = makeRun(0);
 
-    // Year 0 built carrier cash in both (overflow, no real POST_TAX-non-Roth sink).
     expect((withDeposit.years[0].rmdOverflowToCashCents ?? 0) / 100).toBeGreaterThan(0);
 
     const carrierDep = (out: ReturnType<typeof simulateDrawdown>): number =>
@@ -543,15 +464,10 @@ describe('RMD overflow carrier — receives ZERO share of real household deposit
     const carrierBal = (out: ReturnType<typeof simulateDrawdown>): number =>
       out.years[1].accountBalances?.get(RMD_OVERFLOW_CASH_ACCOUNT_ID)?.balance ?? 0;
 
-    // The carrier's year-1 deposit + balance are IDENTICAL with and without the
-    // household deposit — it received ZERO share of the pension lump sum (only
-    // its RMD-surplus credit, which is the same in both runs at 0% growth).
     expect(carrierDep(withDeposit)).toBeCloseTo(carrierDep(noDeposit), 6);
     expect(carrierBal(withDeposit)).toBeCloseTo(carrierBal(noDeposit), 6);
 
-    // The full pension lump sum lands WHOLLY in the REAL accounts (IRA + Roth):
-    // their combined year-1 deposit rises by exactly the lump sum vs. the
-    // no-deposit run (the carrier — excluded from the pro-rata pool — gets none).
+    // The lump sum lands wholly in the real accounts (IRA + Roth): their combined year-1 deposit rises by exactly the lump sum.
     const realDep = (out: ReturnType<typeof simulateDrawdown>): number =>
       (out.years[1].accountBalances?.get('ira')?.deposit ?? 0) +
       (out.years[1].accountBalances?.get('roth')?.deposit ?? 0);
@@ -603,7 +519,6 @@ describe('RMD surplus — a negative add-on (credit applied to premiums) is more
     }).years[0];
     expect(surplusOf(base)).toBeCloseTo(forcedRmd - EXPENSE, -1);
     expect(surplusOf(credited)).toBeCloseTo(forcedRmd - EXPENSE + LINE, -1);
-    // The forced withdrawal is mandatory, so it leaves the IRA either way.
     expect(credited.accountBalances?.get('ira')?.withdrawn).toBeCloseTo(
       base.accountBalances?.get('ira')?.withdrawn ?? 0,
       6,

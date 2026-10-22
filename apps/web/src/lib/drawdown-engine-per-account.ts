@@ -4,7 +4,6 @@
  */
 import type { MonthlyCashflowSeries } from './monthly-cashflow';
 import type {
-  DrawdownAccountInput,
   DrawdownInput,
   DrawdownOutput,
 } from './drawdown-engine-types';
@@ -67,26 +66,6 @@ export function simulatePerAccountMonthly(
     magiCapWindows: input.magiCapWindows,
     taxCashflow: input.taxCashflow,
   });
-}
-
-/**
- * RMD floor check: from the total RMD floor (dollars) and per-account withdrawal totals, returns the
- * RMD-eligible withdrawal sum and any shortfall.
- */
-export function rmdFloorEnforcePrePass(args: {
-  accounts: ReadonlyArray<DrawdownAccountInput>;
-  withdrawnByAccountId: ReadonlyMap<string, number>;
-  rmdFloorDollars: number;
-}): { rmdEligibleWithdrawn: number; rmdShortfall: number } {
-  const { accounts, withdrawnByAccountId, rmdFloorDollars } = args;
-  const RMD_ELIGIBLE_TREATMENTS = new Set<string>(['PRE_TAX']);
-  let rmdEligibleWithdrawn = 0;
-  for (const a of accounts) {
-    if (!RMD_ELIGIBLE_TREATMENTS.has(a.taxTreatment)) continue;
-    rmdEligibleWithdrawn += withdrawnByAccountId.get(a.id) ?? 0;
-  }
-  const rmdShortfall = Math.max(0, rmdFloorDollars - rmdEligibleWithdrawn);
-  return { rmdEligibleWithdrawn, rmdShortfall };
 }
 
 function readSeriesIntoBuffer(series: MonthlyCashflowSeries, stepCount: number): Float64Array {

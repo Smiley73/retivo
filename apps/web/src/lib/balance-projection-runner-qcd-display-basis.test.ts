@@ -1,21 +1,4 @@
-/**
- * QCD display-basis integration tests at NON-ZERO inflation (regression guard).
- *
- * The QCD suite's other integration tests run at 0% inflation — the one regime
- * where every inflation anchor (year-mean, year-end, none) coincides, so a
- * convention mismatch between the engine's gift inflation and the page's
- * display deflation is invisible there. This suite pins the year-END anchor at
- * 3% inflation:
- *
- *  - the engine inflates the REAL gift by the December `inflationFactorAt`
- *    factor and stamps that EXACT factor as `qcdInflationFactor`;
- *  - the standalone QCD chart / tile / PDF rows (`buildQcdRows.qcdDollars`)
- *    round-trip to the configured amount;
- *  - the QCD-RMD split bar's amber offset (`rmdOffsetDollars`, deflated on the
- *    RMD's year-end `basisDeflator`) ALSO equals the configured amount when the
- *    gift is fully counted — the year-mean convention this replaces showed a
- *    $10,000 gift as a constant ~$9,866 here.
- */
+/** QCD display-basis tests at 3% inflation, where the engine's year-end gift inflation and the page's display deflation must agree. */
 import { describe, expect, it } from 'vitest';
 import { runBalanceProjectionForPage } from './balance-projection-runner';
 import { buildQcdRows } from '../pages/balance-projection-burden-rows';
@@ -170,8 +153,7 @@ const SCENARIO: ScenarioAggregate = {
   },
 };
 
-/** The page's deterministic Today's-dollars display deflator: the December
- *  anchor `1 / inflationFactorAt(year, 11)` with `asOfMonth` = today. */
+// The page's Today's-dollars display deflator: the December anchor 1 / inflationFactorAt(year, 11) with asOfMonth = today.
 const asOfMonth = TODAY_YEAR * 12 + TODAY_MONTH;
 function decemberFactor(year: number): number {
   return Math.pow(1 + INFLATION_PCT / 100, (year * 12 + 11 - asOfMonth) / 12);
@@ -214,11 +196,9 @@ describe('QCD display basis at 3% inflation (year-end anchor)', () => {
     });
     expect(rows.length).toBe(qcdYears.length);
     for (const r of rows) {
-      // Standalone QCD chart / "QCD distributed" tile / PDF table basis.
       expect(r.qcdDollars).toBeCloseTo(GIFT_DOLLARS, 2);
-      // Split-bar amber slice: the gift is far below the ~$75k gross IRA RMD in
-      // every gift year, so the offset is the FULL gift — and on the shared
-      // year-end anchor it must equal the configured amount, not ~$9,866.
+      // The gift is far below the ~$75k gross IRA RMD in every gift year, so the split-bar offset is the full gift and must equal
+      // the configured amount on the shared year-end anchor.
       expect(r.rmdOffsetDollars).toBeCloseTo(GIFT_DOLLARS, 2);
     }
   });

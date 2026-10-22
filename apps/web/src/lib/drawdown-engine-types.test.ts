@@ -1,6 +1,4 @@
-/**
- * Direct unit tests for `rmdEligibleWithdrawnCents` (drawdown-engine-types.ts).
- */
+/** Direct unit tests for `rmdEligibleWithdrawnCents` in `drawdown-engine-types.ts`. */
 import { describe, it, expect } from 'vitest';
 import { rmdEligibleWithdrawnCents } from './drawdown-engine-types';
 import type { DrawdownAccountYear } from './drawdown-engine-types';
@@ -34,7 +32,7 @@ describe('rmdEligibleWithdrawnCents', () => {
 
   it('MIXED: returns 0 when preWithdrawnCents is absent (conservative fallback)', () => {
     const row = makeRow({ withdrawn: 10_000 });
-    // preWithdrawnCents is undefined — defensive ?? 0
+    // preWithdrawnCents is undefined: defensive ?? 0.
     expect(rmdEligibleWithdrawnCents(row, 'MIXED')).toBe(0);
   });
 
@@ -43,11 +41,8 @@ describe('rmdEligibleWithdrawnCents', () => {
     expect(rmdEligibleWithdrawnCents(row, 'MIXED')).toBe(0);
   });
 
-  // A pure Roth account only ever carries a required amount when
-  // it is INHERITED (§401(a)(9)(B) post-death distributions — a living Roth owner
-  // has no RMD). What satisfies that requirement is the distribution AMOUNT, not
-  // its tax treatment, so the beneficiary's untaxed draw counts in full. Counting
-  // 0 here left an inherited Roth account flagged short in every year forever.
+  // A pure Roth account carries a required amount only when inherited (§401(a)(9)(B)), and the distribution amount satisfies
+  // it regardless of tax treatment, so the beneficiary's untaxed draw counts in full.
   it('ROTH: the whole withdrawal counts toward an inherited-Roth requirement', () => {
     const row = makeRow({ withdrawn: 50_000 });
     expect(rmdEligibleWithdrawnCents(row, 'ROTH')).toBe(5_000_000);

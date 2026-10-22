@@ -1,17 +1,4 @@
-/**
- * Unit tests for `buildCashflowSeries` (balance-projection-runner-cashflow.ts).
- *
- * Drives the real pipeline-context builder from `Aggregate` fixtures (same
- * fixture style as `balance-projection-runner.test.ts`) so the cashflow
- * series exercises the production expense / income / SS / deposit projection
- * helpers it composes. Each test isolates one cashflow surface:
- *  - degenerate empty inputs → correctly-sized all-zero series;
- *  - a single recurring expense → golden `expensesByMonth` run-rate;
- *  - the `targetedOneOffEvents` filter (depositInflow !== 0 AND post-primary);
- *  - the post-primary contribution abs-month → {year, month0} mapping;
- *  - SS rows tracking scenario inflation by default, and honouring a fixed
- *    colaPct when `colaTracksInflation` is off.
- */
+/** Unit tests for `buildCashflowSeries` in `balance-projection-runner-cashflow.ts`. */
 import { describe, expect, it } from 'vitest';
 import { buildCashflowSeries } from './balance-projection-runner-cashflow';
 import { buildPipelineContext } from './balance-projection-runner-context';
@@ -148,8 +135,6 @@ function balanceRow(
   };
 }
 
-/** Base scenario: primary + secondary retire & claim at 67, life 90, zero
- *  inflation. Override blocks are merged in per-test. */
 function baseScenario(
   id: string,
   name: string,
@@ -197,7 +182,6 @@ interface FixtureOverrides {
   readonly medicalCategoryIds?: ReadonlyArray<string>;
 }
 
-/** Build the run-args + resolved pipeline context for a fixture. */
 function buildCtx(o: FixtureOverrides = {}): {
   args: RunBalanceProjectionArgs;
   ctx: PipelineContext;
@@ -229,45 +213,35 @@ function buildCtx(o: FixtureOverrides = {}): {
 
 describe('buildCashflowSeries', () => {
   it('should_produce_correctly_sized_all_zero_series_for_no_expense_no_income_household', () => {
-    // Arrange: primary born 1965, retire at 67 (2032), horizon at 90 (2055).
-    // No expenses, no income streams, minimal SS so SS rows stay tiny but
-    // the zero-cashflow surfaces (expenses, deposits) are exercised.
     const { args, ctx } = buildCtx({
       expenses: [],
       incomeStreams: [],
       ssBenefits: [ssBenefit('m1', null)], // no PIA → no SS rows at all.
     });
 
-    // Act.
     const series = buildCashflowSeries(args, ctx);
 
-    // Assert: span retirementYear..horizonYear inclusive, monthly.
     const expectedLength =
       (ctx.horizonYear - ctx.primaryRetirementYear + 1) * 12;
     expect(series.expensesByMonth.startYear).toBe(ctx.primaryRetirementYear);
     expect(series.expensesByMonth.values.length).toBe(expectedLength);
     expect(series.incomeByMonth.values.length).toBe(expectedLength);
     expect(series.depositsByMonth.values.length).toBe(expectedLength);
-    // No expenses, no income, no SS PIA → every cashflow bucket is zero.
     const allZero = (v: Float64Array): boolean => v.every((x) => x === 0);
     expect(allZero(series.expensesByMonth.values)).toBe(true);
     expect(allZero(series.incomeByMonth.values)).toBe(true);
     expect(allZero(series.depositsByMonth.values)).toBe(true);
-    // No income streams short-circuit to an empty list; no targeted/
-    // post-primary events with nothing to deposit.
     expect(series.nonSsIncomeRows).toEqual([]);
     expect(series.targetedOneOffEvents).toEqual([]);
     expect(series.postPrimaryContributionEvents).toEqual([]);
-    // Expense + SS projection still emit one zero-valued row per month
-    // (a null SS PIA yields a real context whose rows are all zero).
+    // A null SS PIA yields a real context whose rows are all zero.
     expect(series.expenseRows.length).toBe(expectedLength);
     expect(series.expenseRows.every((r) => r.total === 0)).toBe(true);
     expect(series.ssRows.every((r) => r.total === 0)).toBe(true);
   });
 
   it('should_spread_a_single_yearly_expense_as_a_monthly_run_rate_in_expensesByMonth', () => {
-    // Arrange: one $60k/yr essential expense, retirementStart → lifetime.
-    // Zero inflation, so every retirement month carries the same dollars.
+    // One $60k/yr essential expense, retirementStart → lifetime, zero inflation: every retirement month carries $5,000.
     const expense: Aggregate<ExpensePayload> = {
       id: 'e1',
       householdId: 'h',
@@ -288,28 +262,21 @@ describe('buildCashflowSeries', () => {
     };
     const { args, ctx } = buildCtx({ expenses: [expense] });
 
-    // Act.
     const series = buildCashflowSeries(args, ctx);
 
-    // Assert golden: the first retirement month (index 0) carries the
-    // $60k/yr run-rate divided by 12 = $5000, with zero inflation.
     const first = series.expensesByMonth.values[0];
     expect(first).toBeCloseTo(5_000, 6);
-    // A full year of $5000 monthly = $60k annual.
     const firstTwelve = Array.from(
       series.expensesByMonth.values.slice(0, 12),
     ).reduce((a, b) => a + b, 0);
     expect(firstTwelve).toBeCloseTo(60_000, 4);
-    // The expense rows surface the same run-rate as `total`.
     expect(series.expenseRows[0].total).toBeCloseTo(60_000, 4);
     expect(series.expenseRows[0].oneOffEssential).toBe(0);
   });
 
   it('should_keep_only_post_primary_nonzero_deposit_inflow_rows_in_targetedOneOffEvents', () => {
-    // Arrange: a one-off windfall income stream that deposits into the
-    // portfolio AFTER primary retirement (2034, two years past 2032 retire).
-    // Its absolute month is >= primaryRetirementAbsMonth AND its
-    // depositInflow !== 0, so it must survive the targetedOneOffEvents filter.
+    // A one-off windfall deposited after primary retirement (2034 vs a 2032 retirement) must survive the targetedOneOffEvents
+    // filter (post-primary and depositInflow !== 0).
     const windfall: Aggregate<IncomeStreamPayload> = {
       id: 'inc-windfall',
       householdId: 'h',
@@ -323,20 +290,15 @@ describe('buildCashflowSeries', () => {
         kind: 'oneOff',
         memberId: 'm1',
         oneOffAmount: 40_000,
-        // `targetAccountId` routes the receipt to depositInflow (portfolio
-        // addition) rather than spendable income.
+        // targetAccountId routes the receipt to depositInflow rather than spendable income.
         targetAccountId: 'a1',
         start: { kind: 'year', year: 2034 },
       } as IncomeStreamPayload,
     };
     const { args, ctx } = buildCtx({ incomeStreams: [windfall] });
 
-    // Act.
     const series = buildCashflowSeries(args, ctx);
 
-    // Assert: every surviving targeted event is a non-zero deposit at or
-    // after the primary retirement absolute month, and the windfall amount
-    // is present.
     expect(series.targetedOneOffEvents.length).toBeGreaterThan(0);
     for (const ev of series.targetedOneOffEvents) {
       expect(ev.amount).not.toBe(0);
@@ -347,7 +309,6 @@ describe('buildCashflowSeries', () => {
       0,
     );
     expect(total).toBeCloseTo(40_000, 4);
-    // Cross-check: no surviving event is a non-deposit row (depositInflow 0).
     const rowDeposits = series.nonSsIncomeRows.filter(
       (r) => r.depositInflow !== 0,
     );
@@ -355,11 +316,8 @@ describe('buildCashflowSeries', () => {
   });
 
   it('should_map_post_primary_contribution_abs_month_to_year_floor_and_month0_mod', () => {
-    // Arrange: secondary works (and contributes) two years past primary's
-    // retirement. Primary born 1965 → retire 2032; secondary born 1968 →
-    // retire 2035. The secondary's INDIVIDUAL account's planned monthly
-    // contributions become post-primary contribution events for every
-    // absolute month in [primaryRetireAbs, secondaryRetireAbs).
+    // The secondary (born 1968) retires two years after the primary (born 1965); their individual account's planned monthly
+    // contributions become post-primary events for each month in [primaryRetireAbs, secondaryRetireAbs).
     const primary = member('m1', true, 'Alex', 1965);
     const secondary = member('m2', false, 'Sam', 1968);
     const secAccount = brokerage(
@@ -381,27 +339,23 @@ describe('buildCashflowSeries', () => {
       ],
     });
 
-    // Act.
     const series = buildCashflowSeries(args, ctx);
 
-    // Assert: each event's stored absolute month round-trips to the
-    // {year: floor(m/12), month0: m%12} mapping the deposit builder uses.
+    // Each event's absolute month round-trips to {year: floor(m/12), month0: m%12}.
     expect(series.postPrimaryContributionEvents.length).toBeGreaterThan(0);
     for (const ev of series.postPrimaryContributionEvents) {
       const year = Math.floor(ev.month / 12);
       const month0 = ev.month - year * 12;
       expect(month0).toBe(ev.month % 12);
       expect(year * 12 + month0).toBe(ev.month);
-      // Each event sits in the overlap window [primaryRetire, secondaryRetire).
       expect(ev.month).toBeGreaterThanOrEqual(ctx.primaryRetirementAbsMonth);
       expect(ev.amount).toBeCloseTo(1_000, 6); // $12k/yr ÷ 12.
     }
   });
 
   it('should_derive_amountPre_and_amountPost_from_a_MIXED_secondary_account', () => {
-    // Arrange: secondary's INDIVIDUAL account is MIXED — both a pre-tax and a
-    // post-tax (designated-Roth) planned contribution. Each post-primary event
-    // must carry the per-bucket split, with `amount` the summed total.
+    // A MIXED secondary account with pre-tax and designated-Roth planned contributions: each event carries the per-bucket split
+    // and amount is the sum.
     const primary = member('m1', true, 'Alex', 1965);
     const secondary = member('m2', false, 'Sam', 1968);
     const PLANNED_PRE = 9_000; // $9k/yr → $750/mo pre-tax.
@@ -425,10 +379,8 @@ describe('buildCashflowSeries', () => {
       ],
     });
 
-    // Act.
     const series = buildCashflowSeries(args, ctx);
 
-    // Assert: every event carries the per-bucket split, summing to `amount`.
     expect(series.postPrimaryContributionEvents.length).toBeGreaterThan(0);
     for (const ev of series.postPrimaryContributionEvents) {
       expect(ev.amountPre).toBeCloseTo(PLANNED_PRE / 12, 6);
@@ -439,8 +391,7 @@ describe('buildCashflowSeries', () => {
   });
 
   it('should_route_a_POST_TAX_only_secondary_account_entirely_to_amountPost', () => {
-    // Arrange: a POST_TAX (designated-Roth) secondary account → the whole
-    // contribution is the post slice; the pre slice is zero.
+    // A POST_TAX (designated-Roth) secondary account: the whole contribution is the post slice.
     const primary = member('m1', true, 'Alex', 1965);
     const secondary = member('m2', false, 'Sam', 1968);
     const PLANNED_POST = 6_000; // $6k/yr → $500/mo.
@@ -463,10 +414,8 @@ describe('buildCashflowSeries', () => {
       ],
     });
 
-    // Act.
     const series = buildCashflowSeries(args, ctx);
 
-    // Assert: amountPre === 0, amountPost === amount.
     expect(series.postPrimaryContributionEvents.length).toBeGreaterThan(0);
     for (const ev of series.postPrimaryContributionEvents) {
       expect(ev.amountPre).toBe(0);
@@ -475,8 +424,7 @@ describe('buildCashflowSeries', () => {
     }
   });
 
-  // Helper: first full-year January SS run-rate and the same January one
-  // year later, the clean COLA step (avoids claim-year proration).
+  // First full-year January SS run-rate and the next January: a clean COLA step that avoids claim-year proration.
   function ssYearOverYearRatio(series: ReturnType<typeof buildCashflowSeries>): number {
     const januaries = series.ssRows.filter((r) => r.month0 === 0 && r.total > 0);
     expect(januaries.length).toBeGreaterThanOrEqual(2);
@@ -487,10 +435,8 @@ describe('buildCashflowSeries', () => {
   }
 
   it('should_track_scenario_inflation_for_ss_cola_by_default', () => {
-    // Arrange: a scenario whose socialSecurity block sets the claim age but
-    // omits `colaTracksInflation`. Default-on: buildSsRows must grow SS at the
-    // scenario inflation rate (2.5 %), independent of any fixed colaPct.
-    // Birth 1960 → claim 2027.
+    // The claim age is set but colaTracksInflation is omitted: SS grows at the 2.5% scenario inflation regardless of colaPct
+    // (birth 1960 → claim 2027).
     const scenarioTrack = baseScenario('s-track', 'TracksInflation', {
       socialSecurity: { primary: { ageYears: 67, ageMonths: 0 } },
       inflation: { ratePct: 2.5 },
@@ -509,9 +455,7 @@ describe('buildCashflowSeries', () => {
   });
 
   it('should_use_fixed_cola_pct_when_tracking_disabled', () => {
-    // Arrange: opt out of inflation-tracking (`colaTracksInflation: false`)
-    // and pin a fixed 4 % COLA that differs from the 2.5 % inflation rate, so
-    // the SS run-rate grows at the fixed colaPct, not inflation.
+    // colaTracksInflation: false with a fixed 4% COLA (≠ 2.5% inflation): SS grows at colaPct.
     const scenarioFixed = baseScenario('s-fixed', 'FixedCola', {
       socialSecurity: {
         primary: { ageYears: 67, ageMonths: 0 },
@@ -558,8 +502,7 @@ describe('per-category inflation in the expense band', () => {
   });
 
   it('Medical grows faster than an identical non-medical expense at the same general rate', () => {
-    // General 3%; Medical defaults to general + 2pp (= 5%) via the resolver's
-    // materialised default — no explicit categoryRates needed.
+    // General 3%; Medical defaults to general + 2pp (5%) via the resolver, with no explicit categoryRates.
     const scenario = baseScenario('s', 'WithMedicalInflation', {
       inflation: { ratePct: 3 },
     });
@@ -568,21 +511,17 @@ describe('per-category inflation in the expense band', () => {
     const { args, ctx } = buildCtx({ expenses: [med, housing], scenario });
     const series = buildCashflowSeries(args, ctx);
 
-    // Compare against single-category runs to isolate each category's growth.
     const medCtx = buildCtx({ expenses: [med], scenario });
     const medOnly = buildCashflowSeries(medCtx.args, medCtx.ctx);
     const housingCtx = buildCtx({ expenses: [housing], scenario });
     const housingOnly = buildCashflowSeries(housingCtx.args, housingCtx.ctx);
 
-    // At the first retirement month both are equal (factor ~1); by a later
-    // year Medical (5%) outpaces Housing (3%). Pick a month ~10 years out.
+    // Equal at the first retirement month; ~10 years out Medical (5%) outpaces Housing (3%).
     const idx = 12 * 10; // ~10 years into retirement
     expect(medOnly.expensesByMonth.values[idx]).toBeGreaterThan(
       housingOnly.expensesByMonth.values[idx],
     );
-    // The combined band equals the sum of the two single-category bands
-    // (per-month cent rounding leaves a sub-cent seam between the combined
-    // run and the sum of two separately-rounded single-category runs).
+    // The combined band equals the sum of the single-category bands, within the sub-cent seam of per-month rounding.
     expect(series.expensesByMonth.values[idx]).toBeCloseTo(
       medOnly.expensesByMonth.values[idx] +
         housingOnly.expensesByMonth.values[idx],
@@ -591,7 +530,6 @@ describe('per-category inflation in the expense band', () => {
   });
 
   it('an explicit Medical override (= general) removes the spread', () => {
-    // Force Medical to the general rate explicitly → it grows like housing.
     const scenario = baseScenario('s', 'MedicalEqualsGeneral', {
       inflation: { ratePct: 3, categoryRates: { 'cat-medical': 3 } },
     });
@@ -609,9 +547,7 @@ describe('per-category inflation in the expense band', () => {
   });
 
   it('flag follows the engine: a recreated-Medical (NEW id) in medicalCategoryIds gets +2pp; cat-medical omitted does not', () => {
-    // The set carries ONLY the recreated id. A stale hard-coded cat-medical
-    // path would green for the wrong reason; omitting cat-medical proves the
-    // +2pp follows the threaded set.
+    // The set carries only the recreated id, not cat-medical, so a stale hard-coded cat-medical path cannot pass.
     const scenario = baseScenario('s', 'Recreated', { inflation: { ratePct: 3 } });
     const newMed = recurring('newmed', 'cat-medical-recreated');
     const legacyMed = recurring('legacymed', 'cat-medical');
@@ -629,8 +565,6 @@ describe('per-category inflation in the expense band', () => {
     });
     const newSeries = buildCashflowSeries(newCtx.args, newCtx.ctx);
     const legacySeries = buildCashflowSeries(legacyCtx.args, legacyCtx.ctx);
-    // The recreated id grew at +2pp (5%); the now-unflagged cat-medical grew
-    // at the general rate (3%), so the recreated band is the larger one.
     expect(newSeries.expensesByMonth.values[idx]).toBeGreaterThan(
       legacySeries.expensesByMonth.values[idx],
     );
@@ -653,7 +587,6 @@ describe('per-category inflation in the expense band', () => {
     });
     const dentalSeries = buildCashflowSeries(dentalCtx.args, dentalCtx.ctx);
     const housingSeries = buildCashflowSeries(housingCtx.args, housingCtx.ctx);
-    // The flagged Dental grows faster (5%) than the unflagged Housing (3%).
     expect(dentalSeries.expensesByMonth.values[idx]).toBeGreaterThan(
       housingSeries.expensesByMonth.values[idx],
     );
@@ -661,12 +594,9 @@ describe('per-category inflation in the expense band', () => {
 });
 
 describe('buildPipelineContext — working-years Roth-conversion basis separation', () => {
-  // Guard: the working-years converted principal must seed ONLY the
-  // SEPARATE `preRetirementConversionBasisCentsByOwner` map. The
-  // `rothBasisCentsByOwner` map (threaded into the MC tax context, which does
-  // NOT model the conversion deposit legs) must stay byte-for-byte identical to
-  // the no-conversion case — otherwise MC Roth withdrawals would be shielded
-  // from tax the MC Roth balance never received (Monte Carlo is out of scope).
+  // The working-years converted principal seeds only preRetirementConversionBasisCentsByOwner; rothBasisCentsByOwner (threaded
+  // into the MC tax context, which does not model the conversion deposit legs) must stay identical to the no-conversion
+  // case, or MC Roth withdrawals would be shielded from tax the MC Roth balance never received.
   function conversionFixture(withConversion: boolean): PipelineContext {
     const m1 = member('m1', true, 'Alex', 1965); // retire 67 → 2032; works 2026-31
     const src = brokerage('pre', 'm1', 'RETIREMENT_401K', 'PRE_TAX', 5);
@@ -698,27 +628,18 @@ describe('buildPipelineContext — working-years Roth-conversion basis separatio
     const without = conversionFixture(false);
     const withConv = conversionFixture(true);
 
-    // The MC-seeding map is byte-identical with and without conversions.
     expect([...withConv.rothBasisCentsByOwner.entries()]).toEqual(
       [...without.rothBasisCentsByOwner.entries()],
     );
 
-    // The conversion basis lands in the SEPARATE map: 3 working years (2026,
-    // 2027, 2028 — end is inclusive, retire=2032 so all three are working years)
-    // × $20,000 = $60,000 = 6,000,000 cents for owner m1.
+    // 3 working years (2026-2028; retire 2032) × $20,000 = $60,000 = 6,000,000 cents for m1.
     expect(withConv.preRetirementConversionBasisCentsByOwner.get('m1')).toBe(
       6_000_000,
     );
-    // Absent any conversion, the separate map is empty.
     expect(without.preRetirementConversionBasisCentsByOwner.size).toBe(0);
   });
 });
 
-// ---------------------------------------------------------------------------
-// HSA-qualified filter in buildMedicalDemandByMonth. Tests verify the
-// deterministic cashflow builder applies the isHsaQualifiedMedical
-// predicate correctly.
-// ---------------------------------------------------------------------------
 describe('buildCashflowSeries — hsaQualified filter on medicalDemandByMonth', () => {
   const medExp = (
     id: string,
@@ -745,15 +666,13 @@ describe('buildCashflowSeries — hsaQualified filter on medicalDemandByMonth', 
     },
   });
 
-  // medicalDemandByMonth is in CENTS (integer, per `Math.round(monthly * 100)`
-  // in buildMedicalDemandByMonth). Convert to dollars for comparisons.
+  // medicalDemandByMonth is in cents; convert to dollars for comparisons.
   function sumDemandDollars(series: ReturnType<typeof buildCashflowSeries>): number {
     if (!series.medicalDemandByMonth) return 0;
     return series.medicalDemandByMonth.reduce((a, b) => a + b, 0) / 100;
   }
 
   it('a legacy/absent medical row produces zero HSA medical demand', () => {
-    // A medical expense with no hsaQualified field is treated as not-qualified.
     const { args, ctx } = buildCtx({
       expenses: [medExp('e-legacy', 600)], // absent
       medicalCategoryIds: ['cat-medical'],
@@ -764,8 +683,6 @@ describe('buildCashflowSeries — hsaQualified filter on medicalDemandByMonth', 
   });
 
   it('only hsaQualified === true rows contribute to medical demand', () => {
-    // One qualified ($500/mo) and one not-qualified ($800/mo) medical expense.
-    // Only the qualified row should contribute to medicalDemandByMonth.
     const { args: argsQual, ctx: ctxQual } = buildCtx({
       expenses: [medExp('e-q', 500, true)],
       medicalCategoryIds: ['cat-medical'],
@@ -776,7 +693,6 @@ describe('buildCashflowSeries — hsaQualified filter on medicalDemandByMonth', 
     });
     const qualOnly = buildCashflowSeries(argsQual, ctxQual);
     const mixed = buildCashflowSeries(argsMixed, ctxMixed);
-    // Mixed includes a non-qualified row but demand equals qual-only.
     expect(sumDemandDollars(mixed)).toBeCloseTo(sumDemandDollars(qualOnly), 0);
   });
 
@@ -790,7 +706,6 @@ describe('buildCashflowSeries — hsaQualified filter on medicalDemandByMonth', 
   });
 
   it('non-medical row with hsaQualified=true is ignored by the demand builder', () => {
-    // Non-medical category with hsaQualified=true must not appear in demand.
     const { args, ctx } = buildCtx({
       expenses: [medExp('e-housing', 2_000, true, 'cat-housing')],
       medicalCategoryIds: ['cat-medical'],
@@ -800,7 +715,6 @@ describe('buildCashflowSeries — hsaQualified filter on medicalDemandByMonth', 
   });
 
   it('qualified demand is always ≤ total expense (strict-subset invariant)', () => {
-    // One qualified and one non-qualified medical expense.
     const expenses = [
       medExp('e-q', 500, true),
       medExp('e-nq', 800, false),

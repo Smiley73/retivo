@@ -298,7 +298,7 @@ function addRolledRmdToIncomeSeries(
  * Sums the per-account at-retirement balances minus annuity-elected CBP and pre-retirement lump-sum-elected
  * CBP, whose dollars flow as income or deposits.
  */
-export function computePortfolioAtRetirement(ctx: PipelineContext): number {
+function computePortfolioAtRetirement(ctx: PipelineContext): number {
   const method = ctx.method;
   const cbpElections = resolveLinkedCbpIncomeStreams({
     scenarioId: ctx.scenarioId,
@@ -368,7 +368,7 @@ function resolveWindowYears(
  * bounds; a non-positive interval is dropped.
  * Returns `undefined` when no usable window remains.
  */
-export function resolveMagiCapWindows(
+function resolveMagiCapWindows(
   magiCap: MagiCapOverride,
   ctx: PipelineContext,
 ): ReadonlyArray<MagiCapWindowRuntime> | undefined {
@@ -440,7 +440,7 @@ export function resolveMagiCapWindowBounds(
  * and the calibration snapshot only, since the engine reads the prior-year-end balances itself. Also carries
  * per-account RMD profile facts and per-owner separation years.
  */
-export function buildRmdContext(
+function buildRmdContext(
   ctx: PipelineContext,
   ledger: ReadonlyArray<DrawdownAccountInput>,
   bundle: TaxCalibrationBundle,

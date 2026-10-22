@@ -41,26 +41,11 @@ import {
 import { runDrawdownForMethod } from './balance-projection-runner-drawdown';
 
 export type {
-  CandidateOverlay,
   RunBalanceProjectionArgs,
-  RunBalanceProjectionResult,
-  RunBalanceProjectionAtHorizonResult,
-  RunBalanceProjectionFullResult,
   RunBalanceProjectionPageResult,
   PageDrawdownMethodResult,
-  PageSharedContext,
-  AccountYearRow,
-  DrawdownYearRow,
-  LifeExpectancyMarker,
-  RetirementMarkerOutput,
-  MonthlyCashflowSeriesPublic,
-  WithdrawalEvent,
 } from './balance-projection-runner-types';
-export {
-  CbpUnconfiguredError,
-  NoPrimaryRetirementError,
-  MagiCapCalibrationError,
-} from './balance-projection-runner-types';
+export { CbpUnconfiguredError, NoPrimaryRetirementError } from './balance-projection-runner-types';
 export { computePlannedAtHorizonToday } from './balance-projection-runner-result';
 
 /**

@@ -1,14 +1,4 @@
-/**
- * Unit tests for `balance-projection-runner-roth-basis.ts` — the Roth §408A
- * basis carrier + ordering helpers, split out of
- * `balance-projection-runner-tax-helpers.test.ts`.
- *
- * `applyRothBasisOrdering` allocates each owner's Roth-IRA earnings
- * excess back across that owner's actual Roth-IRA withdrawals. The emitted
- * per-account earnings cents must sum EXACTLY to the owner's earnings excess
- * (largest-remainder residual absorption), not drift 1+ cent off via
- * independent per-account rounding.
- */
+/** Unit tests for `balance-projection-runner-roth-basis.ts`, the Roth §408A basis carrier and ordering helpers. */
 import { describe, it, expect } from 'vitest';
 import {
   applyRothBasisOrdering,
@@ -51,7 +41,6 @@ import {
   type MakeCtxAccountProjections,
 } from './balance-projection-runner-tax-test-fixtures';
 
-/** Minimal Roth `AccountPayload` for the fact adapter tests. */
 function rothAccountPayload(extra: Partial<AccountPayload>): AccountPayload {
   return {
     name: 'Roth',
@@ -70,9 +59,6 @@ function rothAccountPayload(extra: Partial<AccountPayload>): AccountPayload {
   };
 }
 
-/** One annual balance row recording a Roth conversion — the only place a
- *  conversion is entered now that the account payload no longer carries lots.
- *  Only the fields the fact adapter reads are populated. */
 function conversionRow(
   accountId: string,
   year: number,
@@ -92,11 +78,7 @@ function conversionRow(
   };
 }
 
-/** One annual balance row recording regular Roth contributions — the recorded
- *  history the §408A basis derivation credits as contribution basis. The two
- *  MIXED split keys are set to `null` explicitly because that pair is what
- *  distinguishes a flat row from a MIXED one; leaving them `undefined` would read
- *  as MIXED and credit nothing. */
+// The MIXED split keys are explicit nulls: undefined would read as MIXED and credit nothing.
 function contributionRow(
   accountId: string,
   year: number,
@@ -116,9 +98,6 @@ function contributionRow(
   };
 }
 
-/** The employer-plan sibling of {@link conversionRow}: one annual balance row
- *  recording a designated-Roth IN-PLAN ROLLOVER (§402A), the only place that fact
- *  is entered. */
 function rolloverRow(
   accountId: string,
   year: number,
@@ -138,20 +117,14 @@ function rolloverRow(
 
 describe('applyRothBasisOrdering — per-account earnings allocation', () => {
   it('emitted per-account earnings cents sum EXACTLY to the owner earnings excess (multi-account drift case)', () => {
-    // Three same-owner Roth IRAs, each withdrawing $1.00 (100 cents) → owner
-    // withdrawn = 300 cents. Owner has $1.00 (100 cents) of remaining basis, so
-    // earnings excess = 200 cents. Independent per-account rounding would emit
-    // round(200 * 100 / 300) = 67 cents EACH → 201 cents, drifting +1 cent over
-    // the owner's exact 200-cent earnings excess. Residual absorption must pull
-    // the sum back to exactly 200.
+    // Three same-owner IRAs each draw 100¢ against 100¢ of basis: 200¢ excess. Independent rounding would emit 67¢ each
+    // (201¢); residual absorption must sum to exactly 200.
     const accountProjections: MakeCtxAccountProjections = [
       { id: 'roth-a', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' },
       { id: 'roth-b', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' },
       { id: 'roth-c', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' },
     ];
-    // Owner must be PRE-59½ for an additional-tax base to exist at all (the
-    // ordering engine zeroes the base once the owner is 59½ for the whole
-    // year, rather than emitting it and relying on the penalty engine's 0 fraction).
+    // Pre-59½: the ordering engine zeroes the additional-tax base once the owner is 59½ for the whole year.
     const ctx = makeCtx({ primaryBirthdate: '1969-01-01', accountProjections });
 
     const accountBalances = new Map<string, DrawdownAccountYear>([
@@ -161,26 +134,20 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
     ]);
     const year: DrawdownYear = makeDrawdownYear(2024, 3, accountBalances);
 
-    // Owner ('member-primary' is the fixture default) keeps $1.00 remaining basis.
     const carrier = seedRothBasisCarrier(new Map([['member-primary', 100]]));
 
     const split = applyRothBasisOrdering(ctx, year, carrier, new Map());
 
-    // Owner earnings excess = withdrawn (300) − basis (100) = 200 cents.
     expect(Math.round(split.earningsExcessDollars * 100)).toBe(200);
 
-    // Each emitted account snapshot carries an earnings (penalty-basis) amount;
-    // the SUM across this owner's accounts must equal the owner's exact excess.
     const emittedCents = split.penaltyAccounts.reduce(
       (sum, acc) => sum + Math.round(acc.penaltyPreTaxWithdrawalDollars * 100),
       0,
     );
     expect(emittedCents).toBe(200);
 
-    // Independent rounding would have produced 201 — assert we did NOT.
     expect(emittedCents).not.toBe(201);
 
-    // All emitted snapshots are this owner's Roth IRAs.
     for (const acc of split.penaltyAccounts) {
       expect(acc.type).toBe('RETIREMENT_ROTH_IRA');
       expect(acc.ownerId).toBe('member-primary');
@@ -188,9 +155,6 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
   });
 
   it('residual is absorbed within each owner, not across owners', () => {
-    // Two owners, each with a 3-account drift case. Each owner's emitted cents
-    // must independently equal that owner's own earnings excess (no cross-owner
-    // residual leakage).
     const accountProjections: MakeCtxAccountProjections = [
       { id: 'p-a', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA', ownerId: 'member-primary' },
       { id: 'p-b', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA', ownerId: 'member-primary' },
@@ -199,7 +163,6 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
       { id: 's-b', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA', ownerId: 'member-secondary' },
       { id: 's-c', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA', ownerId: 'member-secondary' },
     ];
-    // Both owners PRE-59½ so both carry a non-zero additional-tax base.
     const ctx = makeCtx({
       primaryBirthdate: '1969-01-01',
       secondaryBirthdate: '1970-01-01',
@@ -230,22 +193,14 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
         .filter((acc) => acc.ownerId === ownerId)
         .reduce((sum, acc) => sum + Math.round(acc.penaltyPreTaxWithdrawalDollars * 100), 0);
 
-    // Each owner: withdrawn 300 − basis 100 = 200 cents earnings excess, exactly.
     expect(sumForOwner('member-primary')).toBe(200);
     expect(sumForOwner('member-secondary')).toBe(200);
-    // Whole-household excess = 400 cents.
     expect(Math.round(split.earningsExcessDollars * 100)).toBe(400);
   });
 
   it('residual-correct per-account split flows the right penalty share to each account (one exempt)', () => {
-    // One owner (pre-59½: born 1969, age 55 in 2024), two Roth IRAs whose
-    // proportional earnings split would otherwise leave a 1-cent residual.
-    // rothA draws $53.00, rothB draws $51.00 → owner withdrawn $104.00. With
-    // $13.00 remaining basis the earnings excess is $91.00 (9,100 cents).
-    // Independent per-account rounding would emit round(9100*5300/10400)=4,638
-    // and round(9100*5100/10400)=4,463 → 9,101 cents, drifting +1 over the exact
-    // 9,100. Residual absorption pulls the leftover onto the LARGEST-draw account
-    // (rothA): rothA earnings $46.37 (4,637¢), rothB earnings $44.63 (4,463¢).
+    // rothA draws $53 and rothB $51 against $13 of basis: $91 excess (9,100¢). Independent rounding emits 4,638 + 4,463 =
+    // 9,101¢; the residual goes to the largest draw (rothA 4,637¢, rothB 4,463¢).
     const accountProjections: MakeCtxAccountProjections = [
       { id: 'rothA', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' },
       { id: 'rothB', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' },
@@ -258,12 +213,10 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
     ]);
     const year: DrawdownYear = makeDrawdownYear(2024, 104, accountBalances);
 
-    // $13.00 (1,300 cents) remaining basis for the owner.
     const carrier = seedRothBasisCarrier(new Map([['member-primary', 1_300]]));
 
     const split = applyRothBasisOrdering(ctx, year, carrier, new Map());
 
-    // (a) Per-account snapshot cents sum EXACTLY to the owner's earnings excess.
     const byId = new Map(
       split.penaltyAccounts.map((acc) => [
         acc.id,
@@ -277,9 +230,8 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
     expect(emittedCents).toBe(9_100);
     expect(emittedCents).not.toBe(9_101); // independent rounding would have drifted
 
-    // (b) Exempting ONLY rothA waives the penalty for exactly its residual-correct
-    // share ($46.37) while rothB's penalty ($44.63 × 10%) still applies. The 10%
-    // §72(t) tranche is fully penalized pre-59½ (fraction = 1).
+    // Exempting only rothA waives its residual-correct share ($46.37) while rothB's ($44.63 × 10%) still applies; pre-59½ the
+    // fraction is 1.
     const penaltyInputs = split.penaltyAccounts.map((acc) => ({
       id: acc.id,
       type: acc.type,
@@ -290,34 +242,26 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
     const neitherExempt = computeEarlyWithdrawalPenalty(penaltyInputs, 2024, []);
     const aExempt = computeEarlyWithdrawalPenalty(penaltyInputs, 2024, ['rothA']);
 
-    // Neither exempt: 10% of the whole $91.00 earnings excess = $9.10.
+    // Neither exempt: 10% of $91.00 = $9.10.
     expect(Math.round(neitherExempt.penaltyDollars * 100)).toBe(910);
-    // rothA exempt: only rothB's $44.63 share is penalized → $4.463.
+    // rothA exempt: only rothB's $44.63 share is penalized.
     expect(Math.round(aExempt.penaltyDollars * 100)).toBe(446);
-    // The waived amount is exactly rothA's residual-correct 10% share ($4.637).
+    // The waived amount is rothA's 10% share ($4.637).
     expect(
       Math.round((neitherExempt.penaltyDollars - aExempt.penaltyDollars) * 100),
     ).toBe(464);
   });
 
   it('designated-Roth employer accounts use their OWN pro-rata carrier, never the owner Roth-IRA pool', () => {
-    // A Roth 401(k) and a Roth IRA both draw $1.00 (100¢) for the same owner.
-    // The owner's Roth IRA has 100¢ of recorded regular-contribution basis; the
-    // Roth 401(k) has its own recorded designated basis of 50¢ against a
-    // pre-distribution balance of 100¢ (so pro rata recovers exactly HALF).
-    //
-    // The two do not pool into one contribution-first carrier, which would let the
-    // 401(k) draw shelter itself with the IRA's contribution basis:
-    //   Roth IRA:      100¢ drawn − 100¢ basis            → 0¢ earnings
-    //   Roth 401(k):   100¢ drawn × (50¢ basis / 100¢ bal) → 50¢ basis, 50¢ earnings
+    // A Roth 401(k) and a Roth IRA each draw 100¢. The IRA has 100¢ basis (0¢ earnings); the 401(k) has 50¢ designated basis
+    // over a 100¢ balance (50¢ basis, 50¢ earnings). Pooling would let the 401(k) shelter itself with the IRA's basis.
     const accountProjections: MakeCtxAccountProjections = [
       { id: 'roth-ira', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' },
       { id: 'roth-401k', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_401K' },
     ];
     const ctx = makeCtx({ primaryBirthdate: '1969-01-01', accountProjections });
 
-    // Pre-distribution balance = row.balance + drawn = 0 + 100¢ → set balance so
-    // `balance*100 + draw` is 100¢: balance 0 dollars, withdrawn $1.00.
+    // Balance 0 dollars with $1.00 withdrawn makes the pre-distribution balance 100¢.
     const accountBalances = new Map([
       ['roth-ira', makeAccountBalance(0, 1)],
       ['roth-401k', makeAccountBalance(0, 1)],
@@ -339,7 +283,6 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
 
     // Only the 401(k)'s pro-rata earnings half is ordinary income.
     expect(Math.round(split.earningsExcessDollars * 100)).toBe(50);
-    // The fully-basis-covered Roth IRA emits NO additional-tax base.
     const byId = new Map(
       split.penaltyAccounts.map((a) => [a.id, Math.round(a.penaltyPreTaxWithdrawalDollars * 100)]),
     );
@@ -349,15 +292,13 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
     expect(
       split.penaltyAccounts.find((a) => a.id === 'roth-401k')?.rothOrderedAdditionalTaxBase,
     ).toBe(true);
-    // Each carrier was decremented independently — no cross-regime borrowing.
     expect(carrier.get('member-primary')?.rothBasisRemainingCents).toBe(0);
     expect(designated.get('roth-401k')?.designatedRothBasisRemainingCents).toBe(0);
   });
 
   it('a designated account with NO recorded basis treats the whole draw as earnings (conservative)', () => {
-    // No designated facts recorded → $0 basis and an unsatisfied five-year clock,
-    // so the entire pro-rata split is earnings. (Treating the whole at-retirement
-    // balance as basis would shelter it all.)
+    // No designated facts: $0 basis and an unmet clock, so the whole split is earnings (treating the balance as basis would
+    // shelter it all).
     const accountProjections: MakeCtxAccountProjections = [
       { id: 'roth-403b', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_403B' },
     ];
@@ -373,15 +314,12 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
       split.penaltyAccounts.map((a) => [a.id, a.penaltyPreTaxWithdrawalDollars]),
     );
     expect(byId.get('roth-403b')).toBe(100);
-    // The on-demand carrier entry exists so later years keep consuming the same
-    // (zero-basis) state rather than silently escaping ordinary income.
+    // The on-demand entry keeps later years consuming the same zero-basis state.
     expect(designated.has('roth-403b')).toBe(true);
   });
 
   it('governmental 457(b) ordinary Roth earnings carry NO §72(t) base but ARE ordinary income', () => {
-    // Roth 457(b) draws $1.00 with no recorded basis → 100¢ earnings. §72(t)(9)
-    // exempts ordinary Roth 457(b) earnings, so no additional-tax base is emitted,
-    // while the ordinary-income tax on those earnings still applies.
+    // §72(t)(9) exempts ordinary Roth 457(b) earnings from the 10%, but they remain ordinary income.
     const accountProjections: MakeCtxAccountProjections = [
       { id: 'roth-457b', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_457B' },
     ];
@@ -396,19 +334,14 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
   });
 
   it('MIXED Roth-designated post sub-bucket splits pro rata against its own recorded basis', () => {
-    // MIXED 401(k) withdraws $5 total: $3 pre (300¢) + $2 post (200¢
-    // Roth-designated). Only the POST tranche enters the §402A pro-rata rule (the
-    // pre tranche is owned by `buildPenaltyAccountsForYear`). Recorded designated
-    // basis 100¢ against a pre-distribution post balance of 200¢ → half basis,
-    // half earnings.
+    // MIXED 401(k) draws $3 pre and $2 post (Roth-designated); only the post tranche enters the §402A pro-rata rule. Basis
+    // 100¢ over a 200¢ post balance: half basis, half earnings.
     const accountProjections: MakeCtxAccountProjections = [
       { id: 'mixed-401k', taxTreatment: 'MIXED', accountType: 'RETIREMENT_401K' },
     ];
     const ctx = makeCtx({ primaryBirthdate: '1969-01-01', accountProjections });
 
-    // `makeAccountBalance(balance, withdrawn)` sets `postEnd = balance`, so a $0
-    // balance leaves the post pocket's PRE-distribution value at exactly the 200¢
-    // draw — the pro-rata denominator this test needs.
+    // makeAccountBalance sets postEnd = balance, so a $0 balance leaves the pre-distribution post pocket at the 200¢ draw.
     const accountBalances = new Map([
       ['mixed-401k', makeAccountBalance(0, 5, { preWithdrawnCents: 300, postWithdrawnCents: 200 })],
     ]);
@@ -421,8 +354,6 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
 
     const split = applyRothBasisOrdering(ctx, year, new Map(), designated);
 
-    // Pre-distribution post balance = postEnd (0) + 200¢ draw = 200¢.
-    // Pro rata: 200¢ × 100/200 = 100¢ basis, 100¢ earnings.
     expect(Math.round(split.earningsExcessDollars * 100)).toBe(100);
     const byId = new Map(
       split.penaltyAccounts.map((a) => [a.id, Math.round(a.penaltyPreTaxWithdrawalDollars * 100)]),
@@ -431,14 +362,11 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
   });
 
   it('MIXED Roth-designated with no postWithdrawnCents field uses 0 (legacy fallback)', () => {
-    // Legacy rows without the preWithdrawnCents/postWithdrawnCents split default to 0
-    // for the post portion in applyRothBasisOrdering, so nothing is drawn.
     const accountProjections: MakeCtxAccountProjections = [
       { id: 'mixed-401k-legacy', taxTreatment: 'MIXED', accountType: 'RETIREMENT_401K' },
     ];
     const ctx = makeCtx({ accountProjections });
 
-    // No preWithdrawnCents / postWithdrawnCents provided → legacy row.
     const accountBalances = new Map([
       ['mixed-401k-legacy', makeAccountBalance(50_000, 5)],
     ]);
@@ -446,18 +374,14 @@ describe('applyRothBasisOrdering — per-account earnings allocation', () => {
 
     const split = applyRothBasisOrdering(ctx, year, new Map(), new Map());
 
-    // 0¢ consumed (no postWithdrawnCents) → 0 earnings excess.
     expect(split.earningsExcessDollars).toBe(0);
     expect(split.penaltyAccounts).toHaveLength(0);
   });
 });
 
 describe('creditRothConversionToBasisCarrier — multi-window target routing', () => {
-  // Two windows with DISTINCT target Roth accounts owned by DISTINCT members:
-  //   window 0: years 2030–2034 (i.e. [2030, 2035)) → roth-primary (member-primary)
-  //   window 1: years 2035–2039 (i.e. [2035, 2040)) → roth-secondary (member-secondary)
-  // A conversion in each window's year range must credit §408A basis to the
-  // ACTIVE window's target Roth's owner for THAT year.
+  // Windows: 2030-2034 → roth-primary (member-primary), 2035-2039 → roth-secondary (member-secondary), each crediting
+  // §408A basis to its active window's target owner.
   const accountProjections: MakeCtxAccountProjections = [
     { id: 'roth-primary', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA', ownerId: 'member-primary' },
     { id: 'roth-secondary', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA', ownerId: 'member-secondary' },
@@ -499,27 +423,23 @@ describe('creditRothConversionToBasisCarrier — multi-window target routing', (
     const ctx = ctxForTwoWindows();
     const carrier = seedRothBasisCarrier(new Map());
 
-    // Consecutive conversions across BOTH windows.
     creditRothConversionToBasisCarrier(ctx, yearWithConversion(2031, 10_000), carrier);
     creditRothConversionToBasisCarrier(ctx, yearWithConversion(2033, 20_000), carrier);
     creditRothConversionToBasisCarrier(ctx, yearWithConversion(2036, 30_000), carrier);
     creditRothConversionToBasisCarrier(ctx, yearWithConversion(2038, 40_000), carrier);
 
-    // An in-projection conversion is credited as a DATED conversion LOT (one
-    // per conversion year), not as undated regular basis — that is what makes a
-    // pre-59½ withdrawal inside the five-tax-year window carry the 10% recapture.
+    // A conversion is credited as a dated conversion lot, not undated regular basis, so a pre-59½ draw inside the five-tax-year
+    // window carries the 10% recapture.
     const lotTotal = (ownerId: string): number =>
       (carrier.get(ownerId)?.conversionLots ?? []).reduce(
         (sum, lot) => sum + lot.taxableRemainingCents + lot.nontaxableRemainingCents,
         0,
       );
-    // Window 0 years (2031 + 2033) → primary's lots.
     expect(carrier.get('member-primary')?.rothBasisRemainingCents).toBe(0);
     expect(lotTotal('member-primary')).toBe(30_000);
     expect(carrier.get('member-primary')?.conversionLots?.map((l) => l.taxYear)).toEqual([
       2031, 2033,
     ]);
-    // Window 1 years (2036 + 2038) → secondary's lots.
     expect(lotTotal('member-secondary')).toBe(70_000);
     expect(carrier.get('member-secondary')?.conversionLots?.map((l) => l.taxYear)).toEqual([
       2036, 2038,
@@ -527,9 +447,7 @@ describe('creditRothConversionToBasisCarrier — multi-window target routing', (
   });
 
   it('a gap year (no active window) credits no basis', () => {
-    // No window covers 2034 (window 0 ends exclusive at 2035, window 1 starts
-    // 2035) — wait: window 0 is [2030,2035) so 2034 IS covered. Use 2040, past
-    // the last window, as the true gap.
+    // Window 0 covers [2030, 2035), so 2040 (past the last window) is the true gap.
     const ctx = ctxForTwoWindows();
     const carrier = seedRothBasisCarrier(new Map());
     creditRothConversionToBasisCarrier(ctx, yearWithConversion(2040, 50_000), carrier);
@@ -538,11 +456,8 @@ describe('creditRothConversionToBasisCarrier — multi-window target routing', (
   });
 
   it('an INHERITED target Roth IRA credits no basis to the beneficiary', () => {
-    // Defence in depth: `findTargetRothIndex` and
-    // `isWorkingYearsRothConversionTarget` both refuse an inherited target, so no
-    // converted cents should reach this call. If one did, the credit would land
-    // on the BENEFICIARY's own §408A pool (the key is the bare owner id) and buy
-    // tax-free basis on their own Roth IRAs.
+    // findTargetRothIndex and isWorkingYearsRothConversionTarget both refuse an inherited target; if cents reached it anyway
+    // they would buy tax-free basis on the beneficiary's own Roth IRAs.
     const ctx = makeCtx({
       secondaryBirthdate: '1962-01-01',
       accountProjections,
@@ -552,7 +467,6 @@ describe('creditRothConversionToBasisCarrier — multi-window target routing', (
     const carrier = seedRothBasisCarrier(new Map());
     creditRothConversionToBasisCarrier(ctx, yearWithConversion(2031, 10_000), carrier);
     expect(carrier.get('member-primary')).toBeUndefined();
-    // The other window's target is NOT inherited and still credits normally.
     creditRothConversionToBasisCarrier(ctx, yearWithConversion(2036, 30_000), carrier);
     expect(
       (carrier.get('member-secondary')?.conversionLots ?? []).reduce(
@@ -562,10 +476,6 @@ describe('creditRothConversionToBasisCarrier — multi-window target routing', (
     ).toBe(30_000);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Fact-based Roth engine — roth-distribution-tax.ts
-// ---------------------------------------------------------------------------
 
 describe('roth-distribution-tax — five-year clock + qualification', () => {
   it('five-year clock met only at exactly five taxable years', () => {
@@ -627,7 +537,7 @@ describe('orderRothIraDistribution — §408A ordering (contributions → conver
     expect(r.earningsCents).toBe(3_000);
     // Income tax on earnings only ($30); conversion principal is never re-taxed.
     expect(r.incomeTaxableCents).toBe(3_000);
-    // 10% base = taxable-converted recapture (5_000) + earnings (3_000) = 8_000.
+    // 10% base = recaptured taxable principal (5_000) + earnings (3_000).
     expect(r.additionalTaxBaseCents).toBe(8_000);
   });
 
@@ -638,7 +548,6 @@ describe('orderRothIraDistribution — §408A ordering (contributions → conver
       distributionTaxYear: 2026, // 2026 − 2020 = 6 ≥ 5 → window closed
       ownerReached59Half: false,
     });
-    // Only earnings are in the 10% base now (no recapture on the conversion).
     expect(r.additionalTaxBaseCents).toBe(3_000);
     expect(r.incomeTaxableCents).toBe(3_000);
   });
@@ -681,11 +590,8 @@ describe('orderRothIraDistribution — §408A ordering (contributions → conver
   });
 
   it('same-year multi-lot — the full AGGREGATED taxable recapture is consumed before ANY same-year nontaxable', () => {
-    // Two lots in the SAME tax year (2020). Per §408A(d)(4)(B) they aggregate:
-    // year-2020 total taxable = 3_000 + 4_000 = 7_000, total nontaxable =
-    // 1_000 + 2_000 = 3_000. A withdrawal of 7_000 (after $0 regular basis) must
-    // recapture the FULL 7_000 aggregated taxable and touch NO nontaxable — not
-    // stop at the first lot's 3_000.
+    // Same-year lots aggregate (§408A(d)(4)(B)): taxable 3_000 + 4_000 = 7_000 is fully recaptured before any of the 3_000
+    // nontaxable.
     const r = orderRothIraDistribution({
       facts: {
         regularContributionBasisCents: 0,
@@ -701,7 +607,6 @@ describe('orderRothIraDistribution — §408A ordering (contributions → conver
     expect(r.conversionTaxablePrincipalCents).toBe(7_000);
     expect(r.conversionNontaxablePrincipalCents).toBe(0);
     expect(r.earningsCents).toBe(0);
-    // Full aggregated taxable recapture in the 10% base — no nontaxable leaked in.
     expect(r.additionalTaxBaseCents).toBe(7_000);
   });
 
@@ -717,13 +622,11 @@ describe('orderRothIraDistribution — §408A ordering (contributions → conver
       distributionTaxYear: 2024, // lot is future-dated
       ownerReached59Half: false,
     });
-    // Future lot skipped → whole withdrawal is earnings, no conversion basis used.
     expect(r.conversionTaxablePrincipalCents).toBe(0);
     expect(r.earningsCents).toBe(4_000);
   });
 
   it('a NaN / Infinity Roth-IRA input is REJECTED (throws), never propagated', () => {
-    // NaN withdrawal.
     expect(() =>
       orderRothIraDistribution({
         facts: { regularContributionBasisCents: 0, conversionLots: [] },
@@ -732,7 +635,6 @@ describe('orderRothIraDistribution — §408A ordering (contributions → conver
         ownerReached59Half: false,
       }),
     ).toThrow(RangeError);
-    // Infinity regular basis.
     expect(() =>
       orderRothIraDistribution({
         facts: { regularContributionBasisCents: Number.POSITIVE_INFINITY, conversionLots: [] },
@@ -741,7 +643,6 @@ describe('orderRothIraDistribution — §408A ordering (contributions → conver
         ownerReached59Half: false,
       }),
     ).toThrow(RangeError);
-    // NaN conversion-lot principal.
     expect(() =>
       orderRothIraDistribution({
         facts: {
@@ -758,11 +659,8 @@ describe('orderRothIraDistribution — §408A ordering (contributions → conver
   });
 
   it('a same-year multi-lot aggregate that overflows safe-integer precision is REJECTED (never understates tax)', () => {
-    // 200 same-year lots (the migration cap), each a valid safe-integer near the
-    // money bound. Their same-year taxable AGGREGATE (200 × 9e13 = 1.8e16) exceeds
-    // Number.MAX_SAFE_INTEGER, so accumulating in plain `number` would silently
-    // lose precision. The BigInt accumulation + safe-integer re-validation must
-    // throw rather than let an inflated (understating) basis through.
+    // 200 same-year lots near the money bound aggregate past MAX_SAFE_INTEGER; plain-number accumulation would lose precision,
+    // so the BigInt re-validation must throw.
     const bigLotCents = 90_000_000_000_000; // 9e13, individually a safe integer
     const conversionLots = Array.from({ length: 200 }, () => ({
       taxYear: 2020,
@@ -802,8 +700,7 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
   });
 
   it('exact integer half-cent boundary (11/15/22 → 8, not 7 from float drift)', () => {
-    // 11 * 15 / 22 = 7.5 → half-up 8. IEEE-754 float division returns
-    // 7.499999999999999 → Math.round → 7. Exact BigInt integer math must give 8.
+    // 11 * 15 / 22 = 7.5 rounds half-up to 8; float division gives 7.499999999999999 → 7.
     const s = splitDesignatedRothNonqualified({
       basisCents: 15,
       accountBalanceCents: 22,
@@ -831,7 +728,6 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
   });
 
   it('a negative-balance input is REJECTED (throws), and basis > balance caps at the withdrawal', () => {
-    // Negative balance throws (nonnegative-safe-integer contract).
     expect(() =>
       splitDesignatedRothNonqualified({
         basisCents: 15,
@@ -839,8 +735,7 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
         withdrawalCents: 11,
       }),
     ).toThrow(RangeError);
-    // basisFraction cap: basis (5_000) exceeds balance (1_000) → all withdrawal
-    // is basis (fraction capped at 1), earnings 0.
+    // Basis (5_000) above balance (1_000): the fraction caps at 1, so all of the withdrawal is basis.
     const s = splitDesignatedRothNonqualified({
       basisCents: 5_000,
       accountBalanceCents: 1_000,
@@ -851,8 +746,6 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
   });
 
   it('a large safe-integer input keeps precision (no float rounding)', () => {
-    // withdrawal = balance, basis = balance → all basis, exactly, at magnitudes
-    // where float * would lose integer precision.
     const big = 90_000_000_000_000; // < Number.MAX_SAFE_INTEGER
     const s = splitDesignatedRothNonqualified({
       basisCents: big,
@@ -872,10 +765,9 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
       ownerReached59Half: true,
     });
     expect(r.qualified).toBe(true);
-    // Pro-rata basis consumed (40% of 1_000), NOT the whole withdrawal as basis.
+    // Pro-rata basis consumed (40% of 1_000), not the whole withdrawal.
     expect(r.basisCents).toBe(400);
     expect(r.earningsCents).toBe(600);
-    // Tax OUTPUTS zeroed by qualified status (only the earnings tax is waived).
     expect(r.incomeTaxableCents).toBe(0);
     expect(r.additionalTaxBaseCents).toBe(0);
   });
@@ -892,13 +784,11 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
       distributionTaxYear: 2024,
       ownerReached59Half: false, // pre-59½
     };
-    // Ordinary 457(b) earnings (no rollover) → §72(t)(9) exempts them.
     const ordinary = computeDesignatedRothDistribution(base);
     expect(ordinary.earningsCents).toBe(600);
     expect(ordinary.incomeTaxableCents).toBe(600); // still ordinary income
     expect(ordinary.additionalTaxBaseCents).toBe(0); // but NOT penalized
 
-    // Earnings attributable to a rollover into the 457(b) → still in the base.
     const rolled = computeDesignatedRothDistribution({
       ...base,
       rolloverAttributableEarningsCents: 600,
@@ -918,15 +808,12 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
       distributionTaxYear: 2024,
       ownerReached59Half: false, // pre-59½ → the 10% base branch runs
     };
-    // A NaN / Infinity for THIS specific cents input must be REJECTED like every
-    // other cents input in the file (never propagate to a NaN additionalTaxBase).
     expect(() =>
       computeDesignatedRothDistribution({ ...base, rolloverAttributableEarningsCents: NaN }),
     ).toThrow(RangeError);
     expect(() =>
       computeDesignatedRothDistribution({ ...base, rolloverAttributableEarningsCents: Infinity }),
     ).toThrow(RangeError);
-    // A negative clamps to 0 → no rollover-attributable earnings enter the base.
     const negative = computeDesignatedRothDistribution({
       ...base,
       rolloverAttributableEarningsCents: -500,
@@ -942,9 +829,6 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
         { taxYear: 2020, taxableRolloverPrincipalCents: 10_000, nontaxableRolloverPrincipalCents: 0 },
       ],
     };
-    // In window (2024 − 2020 = 4 < 5), pre-59½, whole withdrawal is basis
-    // (balance = basis) → the full in-window taxable rollover principal is
-    // recaptured into the 10% base.
     const inWindow = computeDesignatedRothDistribution({
       facts,
       accountBalanceCents: 10_000,
@@ -956,7 +840,6 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
     expect(inWindow.earningsCents).toBe(0);
     expect(inWindow.additionalTaxBaseCents).toBe(10_000);
 
-    // Out of window (2026 − 2020 = 6 ≥ 5) → no recapture.
     const outWindow = computeDesignatedRothDistribution({
       facts,
       accountBalanceCents: 10_000,
@@ -978,8 +861,6 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
       distributionTaxYear: 2024,
       ownerReached59Half: false, // pre-59½ → the ordered allocation / recapture runs
     };
-    // A NaN taxable rollover-lot principal must be REJECTED like every other cents
-    // input in the file (never propagate to a NaN recapture / lotConsumption).
     expect(() =>
       computeDesignatedRothDistribution({
         ...base,
@@ -991,7 +872,6 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
         },
       }),
     ).toThrow(RangeError);
-    // An Infinity nontaxable rollover-lot principal is likewise rejected.
     expect(() =>
       computeDesignatedRothDistribution({
         ...base,
@@ -1010,10 +890,8 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
   });
 
   it('a withdrawal fully absorbed by ordinary basis leaves the rollover lot untouched (no premature recapture)', () => {
-    // 10_000 basis = 6_000 ordinary (non-rollover) + a 4_000 taxable rollover lot.
-    // Withdraw only 5_000 (≤ ordinary basis) of a basis-only balance → ordinary
-    // basis absorbs it entirely, the rollover lot is never reached, so NOTHING is
-    // recaptured (Notice 2010-84 Q&A-13 ordinary-first).
+    // 10_000 basis = 6_000 ordinary + a 4_000 taxable rollover lot: a 5_000 draw is absorbed by ordinary basis (Notice 2010-84
+    // Q&A-13 ordinary-first), so nothing is recaptured.
     const r = computeDesignatedRothDistribution({
       facts: {
         basisCents: 10_000,
@@ -1035,10 +913,7 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
   });
 
   it('a withdrawal that exhausts ordinary basis then draws a rollover lot recaptures only the lot portion', () => {
-    // 10_000 basis = 6_000 ordinary + 4_000 taxable rollover lot; withdraw the
-    // whole 10_000 basis. 6_000 ordinary carries no recapture; the 4_000 lot
-    // taxable principal (in window, pre-59½) is recaptured — the 6_000 ordinary is
-    // NOT (the old pro-rata rule would have spread recapture across all basis).
+    // Drawing all 10_000: the 4_000 in-window lot principal is recaptured, the 6_000 ordinary basis is not.
     const r = computeDesignatedRothDistribution({
       facts: {
         basisCents: 10_000,
@@ -1059,10 +934,8 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
   });
 
   it('rollover lots are drawn FIFO oldest-tax-year first; only in-window taxable principal is recaptured', () => {
-    // No ordinary basis: all 10_000 basis is rollover principal in two lots.
-    // Supplied newest-first to prove the allocator sorts to oldest-first. Withdraw
-    // 7_000: FIFO draws the 2016 lot (5_000, window CLOSED 2024−2016 = 8 ≥ 5 → no
-    // recapture) first, then 2_000 of the 2021 lot (in window → recaptured).
+    // Lots are supplied newest-first to prove the allocator sorts oldest-first: 7_000 takes the 2016 lot (5_000, window closed
+    // 2024 - 2016 = 8) then 2_000 of the 2021 lot (in window, recaptured).
     const r = computeDesignatedRothDistribution({
       facts: {
         basisCents: 10_000,
@@ -1079,16 +952,12 @@ describe('designated-Roth pro rata (§402A nonqualified)', () => {
     });
     expect(r.basisCents).toBe(7_000);
     expect(r.additionalTaxBaseCents).toBe(2_000); // only the in-window 2021 portion
-    // The 2016 lot (input index 1) is drawn fully first; the 2021 lot (index 0)
-    // is drawn only 2_000.
     expect(r.basisAllocation.lotConsumptions[1].taxableConsumedCents).toBe(5_000);
     expect(r.basisAllocation.lotConsumptions[0].taxableConsumedCents).toBe(2_000);
   });
 
   it('within a rollover lot the taxable principal is attributed before the nontaxable', () => {
-    // One lot = 4_000 taxable + 2_000 nontaxable, no ordinary basis. Withdraw
-    // 5_000 basis: the 4_000 taxable is drawn first (in window → recaptured), then
-    // 1_000 of the nontaxable (never recaptured) — taxable-before-nontaxable.
+    // 4_000 taxable is drawn first (recaptured), then 1_000 of the nontaxable.
     const r = computeDesignatedRothDistribution({
       facts: {
         basisCents: 6_000,
@@ -1134,7 +1003,7 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
             rothIra: {
               regularContributionBasisCents: 10_000,
               firstContributionTaxYear: 2015,
-              // Supplied out of order — must be sorted FIFO by tax year.
+              // Supplied out of order: must sort FIFO by tax year.
               conversionLots: [
                 { taxYear: 2021, taxableConvertedPrincipalCents: 3_000, nontaxableConvertedPrincipalCents: 0 },
                 { taxYear: 2019, taxableConvertedPrincipalCents: 4_000, nontaxableConvertedPrincipalCents: 1_000 },
@@ -1148,8 +1017,7 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
     expect(entry.rothBasisRemainingCents).toBe(10_000);
     expect(entry.conversionLots?.map((l) => l.taxYear)).toEqual([2019, 2021]);
 
-    // Withdrawal 1: $120 — consumes all $100 regular basis + $20 of the 2019
-    // lot's taxable principal.
+    // Withdrawal 1 ($120): all $100 regular basis plus $20 of the 2019 lot's taxable principal.
     const r1 = applyFactBasedRothIraOrdering(entry, {
       withdrawalCents: 12_000,
       distributionTaxYear: 2024,
@@ -1161,7 +1029,7 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
     expect(entry.rothBasisRemainingCents).toBe(0);
     expect(entry.conversionLots?.[0].taxableRemainingCents).toBe(2_000); // 4_000 − 2_000
 
-    // Withdrawal 2: $60 — regular basis gone, so it starts inside the 2019 lot.
+    // Withdrawal 2 ($60): regular basis is gone, so it starts inside the 2019 lot.
     const r2 = applyFactBasedRothIraOrdering(entry, {
       withdrawalCents: 6_000,
       distributionTaxYear: 2024,
@@ -1169,12 +1037,10 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
       firstContributionTaxYear: 2015,
     });
     expect(r2.regularContributionCents).toBe(0);
-    // 2_000 taxable remaining in 2019 lot + 1_000 nontaxable, then 3_000 into 2021 lot.
+    // 2_000 taxable remaining in the 2019 lot + 1_000 nontaxable, then 3_000 into the 2021 lot.
     expect(r2.conversionTaxablePrincipalCents).toBe(2_000 + 3_000);
     expect(r2.conversionNontaxablePrincipalCents).toBe(1_000);
-    // Perf: fully-depleted lots are PRUNED after each ordering pass — they
-    // can never contribute to a later year, so rescanning them every path-year would be
-    // pure waste. Numerically a no-op: both lots are now empty, so nothing remains.
+    // Fully depleted lots are pruned after each pass; they cannot contribute to a later year.
     expect(entry.conversionLots).toEqual([]);
   });
 
@@ -1204,9 +1070,6 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
   });
 
   it('two same-owner designated-Roth accounts qualify + split basis INDEPENDENTLY (no borrowed clock/basis)', () => {
-    // Same owner, two designated-Roth accounts: different first-participation
-    // years (one clock met, one not) and different basis ratios. Neither borrows
-    // the other's clock or basis.
     const carrier = seedDesignatedRothCarrier(
       new Map([
         [
@@ -1230,7 +1093,7 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
       ]),
     );
 
-    // acc-old: 59½ + clock met → qualified (tax-free), basis pro-rata 80%.
+    // acc-old: 59½ + met clock → qualified, 80% basis.
     const old = applyFactBasedDesignatedRothDistribution(carrier.get('acc-old')!, {
       accountBalanceCents: 10_000,
       withdrawalCents: 1_000,
@@ -1241,7 +1104,7 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
     expect(old.basisCents).toBe(800); // 80% — its OWN ratio, not acc-new's
     expect(old.incomeTaxableCents).toBe(0);
 
-    // acc-new: clock NOT met → nonqualified even at 59½; basis pro-rata 20%.
+    // acc-new: unmet clock → nonqualified even at 59½, 20% basis.
     const fresh = applyFactBasedDesignatedRothDistribution(carrier.get('acc-new')!, {
       accountBalanceCents: 10_000,
       withdrawalCents: 1_000,
@@ -1252,20 +1115,13 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
     expect(fresh.basisCents).toBe(200); // 20% — its OWN ratio
     expect(fresh.incomeTaxableCents).toBe(800); // earnings taxed
 
-    // Remaining basis decremented independently per account.
     expect(carrier.get('acc-old')!.designatedRothBasisRemainingCents).toBe(7_200);
     expect(carrier.get('acc-new')!.designatedRothBasisRemainingCents).toBe(1_800);
   });
 
   it('cumulative in-plan rollover recapture across partial-withdrawal years is capped at the lot original taxable principal (ordinary-first ordering)', () => {
-    // 6_000 basis = 2_000 ordinary (non-rollover) + a 4_000 taxable in-plan
-    // rollover lot. Two consecutive partial-withdrawal years, both pre-59½ and
-    // inside the lot's five-tax-year window. Per the ordered rule (Notice 2010-84
-    // Q&A-13) the ordinary basis is exhausted FIRST (no recapture), so year 1 only
-    // dips 1_000 into the lot; year 2 draws the lot's remaining 3_000. Without
-    // decrementing the lot's remaining principal, year 2 would re-count the FULL
-    // original 4_000 and the summed recapture would exceed the lot's original
-    // taxable principal. The shared allocation caps the lifetime recapture at it.
+    // 6_000 basis = 2_000 ordinary + a 4_000 in-window rollover lot, over two pre-59½ years. Ordinary basis goes first, so year 1
+    // dips 1_000 into the lot and year 2 draws the remaining 3_000; without decrementing the lot, year 2 would recount 4_000.
     const carrier = seedDesignatedRothCarrier(
       new Map([
         [
@@ -1284,16 +1140,14 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
     );
     const entry = carrier.get('acc-401k-rollover')!;
 
-    // Year 1 (2024, in window 2024 − 2022 = 2 < 5): withdraw 5_000 of 10_000
-    // balance → 3_000 basis portion = 2_000 ordinary (no recapture) + 1_000 lot.
+    // Year 1 (in window 2024 - 2022 = 2 < 5): 5_000 of 10_000 balance → 3_000 basis = 2_000 ordinary + 1_000 lot.
     const y1 = applyFactBasedDesignatedRothDistribution(entry, {
       accountBalanceCents: 10_000,
       withdrawalCents: 5_000,
       distributionTaxYear: 2024,
       ownerReached59Half: false,
     });
-    // Year 2 (2025, still in window 2025 − 2022 = 3 < 5): remaining 3_000 basis is
-    // all rollover-lot taxable principal (ordinary basis is gone).
+    // Year 2 (still in window): the remaining 3_000 basis is all lot principal.
     const y2 = applyFactBasedDesignatedRothDistribution(entry, {
       accountBalanceCents: 5_000,
       withdrawalCents: 5_000,
@@ -1301,27 +1155,18 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
       ownerReached59Half: false,
     });
 
-    // additionalTaxBaseCents = nonqualified pre-59½ earnings + in-window rollover
-    // recapture. Isolate the recapture by subtracting each year's earnings.
+    // additionalTaxBaseCents = earnings + recapture; subtract earnings to isolate the recapture.
     const y1Recapture = y1.additionalTaxBaseCents - y1.earningsCents;
     const y2Recapture = y2.additionalTaxBaseCents - y2.earningsCents;
     expect(y1Recapture).toBe(1_000); // ordinary-first → only 1_000 into the lot
     expect(y2Recapture).toBe(3_000); // lot's remaining taxable principal
-    // Lifetime recapture never exceeds the lot's original 4_000 taxable principal.
     expect(y1Recapture + y2Recapture).toBeLessThanOrEqual(4_000);
-    // The lot's remaining taxable principal is fully consumed after the two years.
     expect(entry.inPlanRolloverLots[0].taxableRolloverPrincipalRemainingCents).toBe(0);
   });
 
   it('a 1-cent ordinary/rollover tie never double-recaptures the same cent across years (cumulative cap)', () => {
-    // 2-cent basis = 1 cent ordinary + 1 cent in-window taxable rollover, 4-cent
-    // balance, 2-cent withdrawals. The recapture (additional-tax) computation and
-    // the lot-principal state decrement read the SAME ordered allocation, so year
-    // 1 draws the ordinary cent (no recapture) and the rollover cent survives to
-    // be recaptured exactly ONCE in year 2. The previous two-independently-rounded
-    // paths could assign the consumed cent to the phantom ordinary component in
-    // the decrement while the recapture reported it — leaving the lot's cent to be
-    // recaptured AGAIN next year (cumulative 2 > the lot's 1-cent principal).
+    // 2-cent basis = 1 ordinary + 1 in-window rollover cent. Recapture and the lot decrement read the same ordered
+    // allocation, so year 1 draws the ordinary cent and the rollover cent is recaptured exactly once in year 2.
     const carrier = seedDesignatedRothCarrier(
       new Map([
         [
@@ -1355,17 +1200,13 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
     const y2Recapture = y2.additionalTaxBaseCents - y2.earningsCents;
     expect(y1Recapture).toBe(0); // ordinary cent drawn first — no recapture
     expect(y2Recapture).toBe(1); // rollover cent recaptured exactly once
-    // Cumulative recapture never exceeds the lot's true 1-cent taxable principal.
     expect(y1Recapture + y2Recapture).toBeLessThanOrEqual(1);
     expect(entry.inPlanRolloverLots[0].taxableRolloverPrincipalRemainingCents).toBe(0);
   });
 
   it('multi-lot rounding boundary — combined lot decrement equals basis actually consumed (no phantom decrement)', () => {
-    // Two 1-cent taxable lots (2 cents total basis, ALL in lots, no other basis).
-    // Independent per-lot rounding would decrement each lot's 0.5-cent share to a
-    // full 1 cent, zeroing BOTH lots though only 1 cent of basis truly left the
-    // account. The exact largest-remainder split must decrement the lots by a
-    // COMBINED 1 cent, leaving the other cent outstanding for next year.
+    // Two 1-cent taxable lots, all of the basis: independent per-lot rounding would zero both lots though only 1 cent left the
+    // account; the largest-remainder split decrements by a combined 1 cent.
     const carrier = seedDesignatedRothCarrier(
       new Map([
         [
@@ -1385,7 +1226,7 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
     );
     const entry = carrier.get('acc-boundary')!;
 
-    // Year 1 (2024, in window): balance 4, withdraw 2 → pro-rata basis = 1 cent.
+    // Year 1 (in window): balance 4, withdraw 2 → pro-rata basis = 1 cent.
     applyFactBasedDesignatedRothDistribution(entry, {
       accountBalanceCents: 4,
       withdrawalCents: 2,
@@ -1395,14 +1236,12 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
     const remainingAfterY1 =
       entry.inPlanRolloverLots[0].taxableRolloverPrincipalRemainingCents +
       entry.inPlanRolloverLots[1].taxableRolloverPrincipalRemainingCents;
-    // original total (2) − actually consumed (1) = 1 — NOT 0 (phantom decrement).
+    // 2 - 1 consumed = 1, not 0 (phantom decrement).
     expect(remainingAfterY1).toBe(1);
-    // No lot's remaining principal goes negative.
     expect(entry.inPlanRolloverLots[0].taxableRolloverPrincipalRemainingCents).toBeGreaterThanOrEqual(0);
     expect(entry.inPlanRolloverLots[1].taxableRolloverPrincipalRemainingCents).toBeGreaterThanOrEqual(0);
     expect(entry.designatedRothBasisRemainingCents).toBe(1);
 
-    // Year 2 (2025, still in window): balance 2, withdraw 2 → remaining 1 cent basis.
     applyFactBasedDesignatedRothDistribution(entry, {
       accountBalanceCents: 2,
       withdrawalCents: 2,
@@ -1412,53 +1251,7 @@ describe('seedFactBasedRothBasisCarrier + applyFactBasedRothIraOrdering', () => 
     const remainingAfterY2 =
       entry.inPlanRolloverLots[0].taxableRolloverPrincipalRemainingCents +
       entry.inPlanRolloverLots[1].taxableRolloverPrincipalRemainingCents;
-    // original total (2) − actually consumed (2) = 0.
     expect(remainingAfterY2).toBe(0);
-  });
-
-  it('simultaneous independent accounts stay isolated (a withdrawal on one never touches the other)', () => {
-    const carrier = seedDesignatedRothCarrier(
-      new Map([
-        [
-          'acc-a',
-          {
-            accountId: 'acc-a',
-            ownerId: 'member-primary',
-            basisCents: 2,
-            firstParticipationTaxYear: 2015,
-            inPlanRolloverLots: [
-              { taxYear: 2023, taxableRolloverPrincipalCents: 1, nontaxableRolloverPrincipalCents: 0 },
-              { taxYear: 2023, taxableRolloverPrincipalCents: 1, nontaxableRolloverPrincipalCents: 0 },
-            ],
-          },
-        ],
-        [
-          'acc-b',
-          {
-            accountId: 'acc-b',
-            ownerId: 'member-primary',
-            basisCents: 2,
-            firstParticipationTaxYear: 2015,
-            inPlanRolloverLots: [
-              { taxYear: 2023, taxableRolloverPrincipalCents: 1, nontaxableRolloverPrincipalCents: 0 },
-              { taxYear: 2023, taxableRolloverPrincipalCents: 1, nontaxableRolloverPrincipalCents: 0 },
-            ],
-          },
-        ],
-      ]),
-    );
-    // Draw only from acc-a.
-    applyFactBasedDesignatedRothDistribution(carrier.get('acc-a')!, {
-      accountBalanceCents: 4,
-      withdrawalCents: 2,
-      distributionTaxYear: 2024,
-      ownerReached59Half: false,
-    });
-    // acc-b is untouched — both lots keep their full principal.
-    const b = carrier.get('acc-b')!;
-    expect(b.designatedRothBasisRemainingCents).toBe(2);
-    expect(b.inPlanRolloverLots[0].taxableRolloverPrincipalRemainingCents).toBe(1);
-    expect(b.inPlanRolloverLots[1].taxableRolloverPrincipalRemainingCents).toBe(1);
   });
 });
 
@@ -1639,8 +1432,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       {
         id: 'acc-ira-1',
         payload: rothAccountPayload({
-          // Still stored, deliberately DISAGREEING with the recorded history
-          // below — nothing reads it any more.
+          // Stored but deliberately disagreeing with the recorded history below; nothing reads it.
           rothIraRegularContributionBasis: 20_000,
           rothIraFirstContributionTaxYear: 2016,
         }),
@@ -1662,9 +1454,6 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       },
     ];
 
-    // Contributions, conversions and in-plan rollovers all live on the ANNUAL
-    // BALANCE ROWS. The two Roth IRAs' contribution history pools into ONE §408A
-    // figure and their conversions into one FIFO list ordered by tax year.
     const balances = [
       contributionRow('acc-ira-1', 2016, 20_000),
       contributionRow('acc-ira-2', 2014, 25_000),
@@ -1678,15 +1467,12 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       balances,
     );
     const facts = rothIraByPool.get('member-primary')!;
-    // $20k + $25k of RECORDED contributions — not the $30k the two stored
-    // `rothIraRegularContributionBasis` fields still claim.
+    // $20k + $25k of recorded contributions, not the $30k the stored fields claim.
     expect(facts.rothIra?.regularContributionBasisCents).toBe(4_500_000);
     expect(facts.rothIra?.firstContributionTaxYear).toBe(2014);
     expect(facts.rothIra?.conversionLots.map((l) => l.taxYear)).toEqual([2019, 2021]);
     expect(facts.rothIra?.conversionLots[0].taxableConvertedPrincipalCents).toBe(500_000);
     expect(facts.rothIra?.conversionLots[0].nontaxableConvertedPrincipalCents).toBe(100_000);
-    // Designated is keyed by ACCOUNT id, never pooled onto the owner, and
-    // its basis is the recorded in-plan-rollover principal alone.
     const designated = designatedByAccount.get('acc-roth-401k')!;
     expect(designated.ownerId).toBe('member-primary');
     expect(designated.basisCents).toBe(800_000); // the $8k rollover, not the $99k field
@@ -1694,9 +1480,8 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('pooling is POOL-LEVEL — a sibling’s withdrawal consumes the pool’s basis', () => {
-    // $50k of contributions on one Roth IRA and a $50k withdrawal on another,
-    // both the same owner's. Per-account-then-sum with a floor would leave
-    // $50k; the §408A pool is one taxpayer-level whole, so the answer is $0.
+    // $50k contributed on one Roth IRA and $50k withdrawn from another (same owner): the §408A pool is one taxpayer-level
+    // whole, so $0 remains; per-account-then-sum with a floor would leave $50k.
     const accounts = [
       { id: 'acc-a', payload: rothAccountPayload({}) },
       { id: 'acc-b', payload: rothAccountPayload({}) },
@@ -1720,10 +1505,8 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('consumption is CHRONOLOGICAL — an early withdrawal cannot eat later contributions', () => {
-    // $10k/yr 2000-2010 on one account; a $100k withdrawal in 2001 on a sibling
-    // funded entirely by rollover. Subtracting over the whole history leaves
-    // $10k; walking the years leaves $90k, because in 2001 only $20k of basis
-    // existed to consume.
+    // $10k a year 2000-2010 on one account and a $100k rollover-funded withdrawal in 2001 on a sibling: walking the years leaves
+    // $90k (only $20k of basis existed in 2001); subtracting over the whole history would leave $10k.
     const rows = [];
     let balance = 0;
     for (let year = 2000; year <= 2010; year += 1) {
@@ -1760,10 +1543,8 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('the pool’s REMAINING conversion lot keeps its tax year and its taxable/nontaxable split', () => {
-    // A $200k 2015 conversion, then a $100k 2020 withdrawal against no
-    // contribution basis: half the lot is gone and half remains, still dated
-    // 2015 — the §72(t) recapture clock and the ordered allocation both key on
-    // that year and on which half is which.
+    // A $200k 2015 conversion then a $100k 2020 withdrawal: half the lot remains, still dated 2015, which keys the §72(t)
+    // recapture clock.
     const { rothIraByPool } = buildRothDistributionFacts(
       [{ id: 'acc-ira', payload: rothAccountPayload({}) }],
       [
@@ -1783,8 +1564,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     );
     const ira = rothIraByPool.get('member-primary')!.rothIra!;
     expect(ira.regularContributionBasisCents).toBe(0);
-    // Taxable converted principal is consumed before nontaxable within a year
-    // (§408A(d)(4)(B)), so $100k of draw leaves $50k taxable + $50k nontaxable.
+    // Taxable converted principal goes before nontaxable within a year (§408A(d)(4)(B)): $100k of draw leaves $50k of each.
     expect(ira.conversionLots).toEqual([
       {
         taxYear: 2015,
@@ -1795,8 +1575,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('a stored rothIraRegularContributionBasis alone resolves NOTHING', () => {
-    // The field is still written by the form; no engine reads it. With no
-    // recorded history behind it the pool has $0 of basis.
+    // With no recorded history behind the stored field, the pool has $0 basis.
     const accounts = [
       {
         id: 'acc-ira',
@@ -1810,8 +1589,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('an INACTIVE Roth IRA’s contribution history enters the pool with no status gate', () => {
-    // Its money followed a consolidation rollover into the sibling the pool
-    // still holds, so its recorded contributions are still the taxpayer's basis.
+    // Its money followed a consolidation rollover into the sibling, so its recorded contributions are still the taxpayer's basis.
     const accounts = [
       { id: 'acc-open', payload: rothAccountPayload({}) },
       { id: 'acc-closed', payload: rothAccountPayload({ active: false }) },
@@ -1819,8 +1597,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     const { rothIraByPool } = buildRothDistributionFacts(accounts, [
       contributionRow('acc-open', 2019, 6_000, { startingBalance: 0, endingBalance: 6_000 }),
       contributionRow('acc-closed', 2010, 30_000, { startingBalance: 0, endingBalance: 30_000 }),
-      // The consolidation itself: a positive start zeroed out by an outbound
-      // rollover that fully explains the drop, so it imputes no withdrawal.
+      // A positive start zeroed out by an outbound rollover that fully explains the drop imputes no withdrawal.
       contributionRow('acc-closed', 2019, 0, {
         startingBalance: 30_000,
         rollover: -30_000,
@@ -1833,9 +1610,8 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('an INACTIVE Roth IRA’s year never enters the pool’s five-year anchor', () => {
-    // Roth qualification is not part of the basis derivation, so the clock
-    // stays scoped to active accounts: an owner whose only seasoned Roth
-    // IRA is closed still has an UNMET pooled clock.
+    // Qualification is not part of the basis derivation, so the clock stays active-only: an owner whose only seasoned Roth IRA
+    // is closed has an unmet pooled clock.
     const closedOnly = buildRothDistributionFacts(
       [
         {
@@ -1850,21 +1626,13 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     );
     const pool = closedOnly.rothIraByPool.get('member-primary')!.rothIra!;
     expect(pool.firstContributionTaxYear).toBeUndefined();
-    // …while its basis is real, which is the whole point of the widening.
     expect(pool.regularContributionBasisCents).toBe(30_000_00);
   });
 
   it('a closed Roth IRA whose history resolves to NOTHING is an ABSENT pool, not a $0 one', () => {
-    // The owner closed their only Roth IRA by withdrawing it: the derivation
-    // charges the recorded distribution and resolves $0 basis with no remaining
-    // lots — and, the anchor being active-only, no clock. Emitting a pool for it
-    // delivers only disqualification: `buildMcRothOrderedProfile` walks every
-    // emitted pool, so this one would blank the HOUSEHOLD's pooled five-year
-    // clock and drag its owner into the pooled 59½ set, taxing a seasoned
-    // co-owner's qualified Roth earnings (and adding the 10% §72(t) leg).
-    // §408A(d)(2)(B) keeps the five-year clock running after an account closes
-    // — a closed Roth IRA can only make a household clock EARLIER, never
-    // absent. A basis-carrying closed pool (the closed-pool tests above) stays emitted.
+    // A closed Roth IRA that resolves $0 basis, no lots and no clock must not emit a pool: buildMcRothOrderedProfile walks
+    // every emitted pool, so it would blank the household's pooled five-year clock and drag its owner into the 59½ set
+    // (§408A(d)(2)(B): a closed account can only make the clock earlier, never absent).
     const emptied = buildRothDistributionFacts(
       [
         {
@@ -1891,15 +1659,13 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('degenerate inputs invent nothing and never throw', () => {
-    // No Roth IRA anywhere.
     expect(
       buildRothDistributionFacts(
         [{ id: 'acc-brk', payload: rothAccountPayload({ type: 'BROKERAGE', taxTreatment: 'POST_TAX' }) }],
         [contributionRow('acc-brk', 2020, 9_000)],
       ).rothIraByPool.size,
     ).toBe(0);
-    // An account with rows but NO positive-starting row anywhere — never
-    // compared at any balance, so no withdrawal is imputed out of thin air.
+    // Rows with no positive-starting balance are never compared, so no withdrawal is imputed.
     const noPositiveStart = buildRothDistributionFacts(
       [{ id: 'acc-ira', payload: rothAccountPayload({}) }],
       [
@@ -1911,36 +1677,6 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     expect(
       noPositiveStart.rothIraByPool.get('member-primary')!.rothIra?.regularContributionBasisCents,
     ).toBe(5_000_00);
-  });
-
-  it('two same-owner designated-Roth accounts stay SEPARATE per account (no pooling)', () => {
-    const accounts = [
-      {
-        id: 'acc-401k',
-        payload: rothAccountPayload({
-          type: 'RETIREMENT_ROTH_401K',
-          designatedRothBasis: 8_000,
-          designatedRothFirstParticipationTaxYear: 2012,
-        }),
-      },
-      {
-        id: 'acc-403b',
-        payload: rothAccountPayload({
-          type: 'RETIREMENT_ROTH_403B',
-          designatedRothBasis: 3_000,
-          designatedRothFirstParticipationTaxYear: 2020,
-        }),
-      },
-    ];
-    const { designatedByAccount } = buildRothDistributionFacts(accounts, [
-      rolloverRow('acc-401k', 2012, 8_000),
-      rolloverRow('acc-403b', 2020, 3_000),
-    ]);
-    expect(designatedByAccount.size).toBe(2);
-    expect(designatedByAccount.get('acc-401k')!.basisCents).toBe(800_000);
-    expect(designatedByAccount.get('acc-401k')!.firstParticipationTaxYear).toBe(2012);
-    expect(designatedByAccount.get('acc-403b')!.basisCents).toBe(300_000);
-    expect(designatedByAccount.get('acc-403b')!.firstParticipationTaxYear).toBe(2020);
   });
 
   it('a MIXED account\'s Roth-designated subaccount builds designated facts', () => {
@@ -1964,12 +1700,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('two same-owner designated-Roth accounts + a MIXED account keep independent per-account state (never owner-pooled)', () => {
-    // Guards against pooling: the surviving seed path is the account-keyed
-    // `designatedByAccount` structure, NOT an owner-pooled sum. Two same-owner
-    // designated accounts with DIFFERENT basis ratios and DIFFERENT first-
-    // participation years must retain independent basis/clock, and a same-owner
-    // MIXED account's Roth-designated subaccount basis must be included, not
-    // dropped or pooled onto the owner.
+    // A same-owner MIXED account's designated basis must be included in the account-keyed designatedByAccount, not pooled.
     const accounts = [
       {
         id: 'acc-401k',
@@ -2002,16 +1733,13 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       rolloverRow('acc-403b', 2020, 3_000),
       rolloverRow('acc-mixed-457b', 2016, 5_000),
     ]);
-    // Three distinct account entries — same owner, never collapsed to one.
     expect(designatedByAccount.size).toBe(3);
     expect(designatedByAccount.get('acc-401k')!.basisCents).toBe(800_000);
     expect(designatedByAccount.get('acc-401k')!.firstParticipationTaxYear).toBe(2012);
     expect(designatedByAccount.get('acc-403b')!.basisCents).toBe(300_000);
     expect(designatedByAccount.get('acc-403b')!.firstParticipationTaxYear).toBe(2020);
-    // MIXED-account designated basis is included, not dropped.
     expect(designatedByAccount.get('acc-mixed-457b')!.basisCents).toBe(500_000);
     expect(designatedByAccount.get('acc-mixed-457b')!.firstParticipationTaxYear).toBe(2016);
-    // All three share the same owner id but stay independent entries.
     for (const id of ['acc-401k', 'acc-403b', 'acc-mixed-457b']) {
       expect(designatedByAccount.get(id)!.ownerId).toBe('member-primary');
     }
@@ -2051,9 +1779,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('designated-Roth basis IS the recorded in-plan-rollover principal', () => {
-    // Every in-plan Roth rollover dollar (taxable OR nontaxable) is basis — it was
-    // taxed / already after-tax at the rollover. $6k + $1k of recorded principal
-    // is therefore exactly $7k of basis, with no aggregate fact involved.
+    // Every in-plan rollover dollar (taxable or nontaxable) is basis: $6k + $1k = $7k.
     const accounts = [
       { id: 'acc-401k', payload: rothAccountPayload({ type: 'RETIREMENT_ROTH_401K' }) },
     ];
@@ -2062,8 +1788,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('a stored designatedRothBasis is ignored, whether it is smaller or larger', () => {
-    // The stored aggregate is still written by the form; neither engine reads it.
-    // $2k and $12k both resolve to the same $7k of recorded rollover principal.
+    // The stored aggregate is ignored: $2k and $12k both resolve to the same $7k of rollover principal.
     const withStoredBasis = (designatedRothBasis: number): number =>
       buildRothDistributionFacts(
         [
@@ -2079,9 +1804,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('an employer plan with no recorded in-plan rollover resolves $0 basis', () => {
-    // Its whole nonqualified distribution is therefore earnings — the more-tax
-    // direction, and the deliberate consequence of not reading an unverifiable
-    // aggregate the user typed.
+    // With no rollover recorded the whole nonqualified distribution is earnings (the more-tax direction).
     const accounts = [
       {
         id: 'acc-401k',
@@ -2105,8 +1828,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('a CLOSED employer Roth plan resolves nothing at all', () => {
-    // The designated branch stays ACTIVE-ONLY: an inactive plan
-    // carries no balance, so its recorded facts have nothing behind them.
+    // The designated branch stays active-only: an inactive plan has no balance behind its recorded facts.
     const accounts = [
       {
         id: 'acc-401k',
@@ -2124,13 +1846,8 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('ordinary (non-lot) designated basis is always 0, so an in-window pre-59½ draw is recaptured', () => {
-    // `computeDesignatedRothDistribution` derives ordinary basis as
-    // `basisCents − lotsTotal`, and those two are now equal by construction — so
-    // IRS Notice 2010-84 Q&A-13's "exhaust ordinary basis first" stage is vacuous
-    // and every basis dollar drawn is lot principal carrying its own five-year
-    // recapture clock. Under the old `Math.max(storedBasis, lotsFloor)` the $50k
-    // stored figure created $44k of ordinary basis that was consumed FIRST, taking
-    // the draw out of the §72(t) recapture base entirely.
+    // Basis equals lot principal by construction, so every basis dollar drawn is lot principal with its own recapture clock; a
+    // stored $50k figure must not create ordinary basis that is consumed first.
     const accounts = [
       {
         id: 'acc-401k',
@@ -2155,9 +1872,8 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('pre-59½ 457(b) rollover recapture is recognized even with an absent designatedRothBasis', () => {
-    // End-to-end: build facts from lots-only (no aggregate basis), then run a
-    // pre-59½ governmental-457(b) distribution. The rollover principal must land
-    // in the 10% additional-tax base, NOT be silently dropped as all-earnings.
+    // End-to-end: facts from lots only (no aggregate basis), then a pre-59½ governmental-457(b) draw; the rollover principal
+    // must land in the 10% base, not be dropped as all-earnings.
     const accounts = [
       {
         id: 'acc-457b',
@@ -2167,8 +1883,6 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       },
     ];
     const facts = buildRothDistributionFacts(accounts, [rolloverRow('acc-457b', 2024, 6_000, 0)]).designatedByAccount.get('acc-457b')!;
-    // Withdraw the full basis ($6k) from a $6k account → all basis, in-window
-    // taxable rollover recapture applies (2024 lot, 2025 distribution, pre-59½).
     const result = computeDesignatedRothDistribution({
       facts,
       accountBalanceCents: 600_000,
@@ -2179,17 +1893,12 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     expect(facts.basisCents).toBe(600_000);
     expect(result.basisCents).toBe(600_000);
     expect(result.earningsCents).toBe(0);
-    // The taxable rollover principal is recaptured, not dropped.
     expect(result.additionalTaxBaseCents).toBe(600_000);
   });
 
   it('a designated-Roth basis FLOOR that would overflow saturates high (not 0), so known 457(b) rollover recapture is not dropped', () => {
-    // Two maximum-magnitude taxable in-plan rollover lots with an ABSENT aggregate
-    // designatedRothBasis: their summed principal overflows safe-integer cents.
-    // The known-basis FLOOR must saturate to the largest representable value, NOT
-    // collapse to a floor-removing 0 that would reclassify the (individually
-    // valid) taxable rollover principal as penalty-exempt 457(b) earnings and drop
-    // it from the recapture base entirely.
+    // Two maximum-magnitude taxable rollover lots with no aggregate designatedRothBasis overflow safe-integer cents; the basis
+    // floor must saturate high, not collapse to 0 and drop the recapture base.
     const maxMoney = Math.floor(Number.MAX_SAFE_INTEGER / 100);
     const accounts = [
       {
@@ -2199,18 +1908,12 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
         }),
       },
     ];
-    // Two DISTINCT years, both inside the five-year window for the 2025
-    // distribution below. Distinct matters: rows sharing a year resolve to ONE
-    // row, so a single year carrying both would yield a single non-overflowing lot
-    // and the cross-year FLOOR would never saturate — which is the point here.
+    // Distinct years, both in the 2025 window: rows sharing a year resolve to one row and would never saturate the floor.
     const facts = buildRothDistributionFacts(accounts, [
       rolloverRow('acc-457b', 2023, maxMoney, 0),
       rolloverRow('acc-457b', 2024, maxMoney, 0),
     ]).designatedByAccount.get('acc-457b')!;
-    // The floor saturates high rather than collapsing to 0.
     expect(facts.basisCents).toBe(Number.MAX_SAFE_INTEGER);
-    // A real (small) pre-59½ governmental-457(b) withdrawal still recaptures the
-    // in-window taxable rollover principal it draws — it is NOT silently dropped.
     const result = computeDesignatedRothDistribution({
       facts,
       accountBalanceCents: 600_000,
@@ -2260,8 +1963,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('a balance row with neither conversion amount contributes NO lot', () => {
-    // Absent is a weaker claim than a stored $0: a year the user simply filled in
-    // balances for must not start a §408A five-year clock.
+    // Absent is a weaker claim than a stored $0: filling in balances for a year must not start a §408A five-year clock.
     const accounts = [{ id: 'acc-ira', payload: rothAccountPayload({}) }];
     const balances = [
       { payload: { accountId: 'acc-ira', year: 2020, lastUpdated: '2020-12-31' } as AccountBalancePayload },
@@ -2285,8 +1987,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     const accounts = [{ id: 'acc-ira', payload: rothAccountPayload({}) }];
     const { rothIraByPool } = buildRothDistributionFacts(accounts, [
       conversionRow('acc-ira', 2020, 1_000),
-      // A row for an account the adapter was NOT handed (inactive, or a
-      // different owner's) — its conversion must not reach this pool.
+      // A row for an account the adapter was not handed (inactive, or another owner's) must not reach this pool.
       conversionRow('acc-other', 2021, 9_999),
     ]);
     const lots = rothIraByPool.get('member-primary')!.rothIra!.conversionLots;
@@ -2310,21 +2011,16 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       conversionRow('acc-ira', 2021, -500, Number.POSITIVE_INFINITY),
     ]);
     const lots = rothIraByPool.get('member-primary')!.rothIra!.conversionLots;
-    // 2020 survives on its valid nontaxable side; 2021 has nothing valid at all,
-    // so it never became a lot.
+    // 2020 survives on its valid nontaxable side; 2021 has nothing valid, so it is no lot.
     expect(lots.map((l) => l.taxYear)).toEqual([2020]);
     expect(lots[0].taxableConvertedPrincipalCents).toBe(0);
     expect(lots[0].nontaxableConvertedPrincipalCents).toBe(200_000);
   });
 
   it('duplicate rows for one account-year resolve to the FIRST row, never summed', () => {
-    // The balances page cannot produce this pair (the aggregate id is
-    // `bal-<accountId>-<year>`), but a tampered import replaying foreign ids can.
-    // These fields are ANNUAL TOTALS, so a duplicate is a restatement of the same
-    // year rather than two movements to add: summing would credit two rows' worth
-    // of basis against the ONE row the seed-balance reducers keep, shrinking
-    // earnings and understating ordinary income. First-in-order matches the strict-
-    // `>` tie-break in `projection.ts` / `balance-projection-runner-projection.ts`.
+    // The balances page cannot produce this pair (id is bal-<accountId>-<year>) but a tampered import can. Annual totals
+    // restate a year rather than add, so summing would credit two rows of basis against the one row the seed reducers keep;
+    // first-in-order matches their strict-> tie-break.
     const accounts = [{ id: 'acc-ira', payload: rothAccountPayload({}) }];
     const { rothIraByPool } = buildRothDistributionFacts(accounts, [
       conversionRow('acc-ira', 2020, 1_000, 500),
@@ -2337,50 +2033,15 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('a duplicate year whose FIRST row records no movement contributes no lot', () => {
-    // The has-a-movement test must run AFTER the (account, year) slot is claimed.
-    // Otherwise a first row carrying only a balance would be skipped and the
-    // SECOND row would supply the facts — while both seed reducers went on
-    // reading the first row's balance. The two would disagree about which record
-    // the year even was.
-    //
-    // Concretely: row `a` holds a $10,000 balance and no conversion; row `z`
-    // restates the year with a $10,000 nontaxable conversion. Crediting `z`'s
-    // conversion against `a`'s balance manufactured $10,000 of basis, turning a
-    // fully taxable pre-59½ withdrawal into a tax-free, penalty-free one.
+    // The has-a-movement test runs after the (account, year) slot is claimed. Row a holds a $10,000 balance and no conversion;
+    // row z restates the year with a $10,000 nontaxable conversion. Crediting z against a's balance would manufacture $10,000
+    // of basis and make a taxable pre-59½ draw tax-free.
     const accounts = [{ id: 'acc-ira', payload: rothAccountPayload({}) }];
     const { rothIraByPool } = buildRothDistributionFacts(accounts, [
       { payload: { accountId: 'acc-ira', year: 2024, lastUpdated: '2024-12-31', endingBalance: 10_000 } as AccountBalancePayload },
       conversionRow('acc-ira', 2024, 0, 10_000),
     ]);
-    // The winning row recorded nothing, so the year contributes no lot at all —
-    // NOT the loser row's conversion.
     expect(rothIraByPool.get('member-primary')?.rothIra?.conversionLots ?? []).toHaveLength(0);
-  });
-
-  it('a per-lot value can no longer overflow, because one row wins per tax year', () => {
-    // Each row's amount passes `isValidRothMoney`, which bounds it at
-    // MAX_SAFE_INTEGER cents. Summing two of them would exceed that and reach the
-    // ordering engine as a non-safe integer, where `requireSafeNonnegIntCents`
-    // THROWS and kills the whole projection. Resolving to one row per tax year
-    // removes the hazard at its source rather than papering over it with a lossy
-    // read-back: the surviving value is the first row's, intact and exact.
-    //
-    // The lossy read-back it replaced was NOT conservative, which is why it went.
-    // Degrading the lot to 0 while a stored `designatedRothBasis` survived made the
-    // whole draw ORDINARY basis — consumed before every lot, so tax-free AND
-    // penalty-free. See the sibling test below.
-    const maxMoney = Math.floor(Number.MAX_SAFE_INTEGER / 100);
-    const accounts = [{ id: 'acc-ira', payload: rothAccountPayload({}) }];
-    let lots: ReadonlyArray<{ taxableConvertedPrincipalCents: number }> = [];
-    expect(() => {
-      lots = buildRothDistributionFacts(accounts, [
-        conversionRow('acc-ira', 2020, maxMoney),
-        conversionRow('acc-ira', 2020, maxMoney),
-      ]).rothIraByPool.get('member-primary')!.rothIra!.conversionLots;
-    }).not.toThrow();
-    expect(lots).toHaveLength(1);
-    expect(lots[0].taxableConvertedPrincipalCents).toBe(maxMoney * 100);
-    expect(Number.isSafeInteger(lots[0].taxableConvertedPrincipalCents)).toBe(true);
   });
 
   it('derives designated-Roth in-plan rollover lots from the balance rows', () => {
@@ -2402,27 +2063,14 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     expect(lots.map((l) => l.taxYear)).toEqual([2019, 2021]);
     expect(lots[0].taxableRolloverPrincipalCents).toBe(600_000);
     expect(lots[0].nontaxableRolloverPrincipalCents).toBe(100_000);
-    // Every rollover dollar is basis, so the lots set a FLOOR under the
-    // recorded aggregate basis — $11k of lots beats the $3k stored figure.
+    // Every rollover dollar is basis, so the lots floor the recorded aggregate: $11k of lots beats the $3k stored figure.
     expect(facts.basisCents).toBe(1_100_000);
   });
 
   it('a duplicated rollover year cannot bury its taxable principal under ordinary basis', () => {
-    // The regression this pins:
-    //
-    // These rows used to SUM, and a per-year sum of two individually-valid amounts
-    // can exceed MAX_SAFE_INTEGER cents. The old code read that back through
-    // `safeRothCentsFromBigInt`, degrading the lot to 0 — argued at the time to be
-    // the higher-tax direction because the dollars would resurface as earnings.
-    // They do NOT when the account also records a `designatedRothBasis`: that
-    // stored basis survives the degradation, and `computeDesignatedRothDistribution`
-    // derives ordinary basis as `basisCents - lotsTotal` = the full stored figure.
-    // Ordinary basis is consumed BEFORE every rollover lot, so the whole draw came
-    // out tax-free AND penalty-free — $0 collected where the correct answer is the
-    // 10% recapture on in-window taxable rollover principal.
-    //
-    // Resolving a duplicated (account, year) to ONE row removes the overflow at its
-    // source, so the lot keeps its real value and the allocator still reaches it.
+    // Resolving a duplicated (account, year) to one row keeps the lot at its real value: summing two valid amounts can pass
+    // MAX_SAFE_INTEGER, and degrading the lot to 0 beside a stored designatedRothBasis would make the whole draw ordinary
+    // basis, consumed before every lot, so tax- and penalty-free.
     const maxMoney = Math.floor(Number.MAX_SAFE_INTEGER / 100);
     const accounts = [
       {
@@ -2435,7 +2083,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     ];
     const facts = buildRothDistributionFacts(accounts, [
       rolloverRow('acc-457b', 2024, maxMoney, 0),
-      rolloverRow('acc-457b', 2024, maxMoney, 0), // duplicate year -> first wins
+      rolloverRow('acc-457b', 2024, 1, 99), // duplicate year -> first wins, never summed
     ]).designatedByAccount.get('acc-457b')!;
     expect(facts.inPlanRolloverLots).toHaveLength(1);
     expect(facts.inPlanRolloverLots![0].taxableRolloverPrincipalCents).toBe(maxMoney * 100);
@@ -2447,27 +2095,16 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       distributionTaxYear: 2025,
       ownerReached59Half: false,
     });
-    // Every dollar is rollover principal, so none of it is earnings...
     expect(result.earningsCents).toBe(0);
     expect(result.incomeTaxableCents).toBe(0);
-    // ...and all of it is in-window taxable principal, so the 10% base is the full
-    // draw. Under the degrade-to-0 predecessor this asserted 0 (governmental 457(b)
-    // earnings are penalty-exempt, so nothing was collected at all).
+    // All in-window taxable principal, so the 10% base is the full draw.
     expect(result.additionalTaxBaseCents).toBe(600_000);
     expect(result.basisAllocation.ordinaryBasisConsumedCents).toBe(0);
   });
 
   it('consumes ALL of a tax year’s taxable rollover principal before any nontaxable', () => {
-    // The §402A(c)(4)(D) clock attaches to the TAX YEAR, not the individual
-    // transfer, so a year's amounts are ONE lot and all of its taxable principal
-    // is consumed before any of its nontaxable. The retired per-transfer arrays
-    // could order this differently depending on the order transfers were typed in:
-    // {$1 taxable, $99 nontaxable} then {$99, $1} would have recaptured $1 here.
-    // See the RothInPlanRolloverLotCents docs.
-    //
-    // One row, both halves — the shape the balances page actually produces, since
-    // an accountBalance id is `bal-<accountId>-<year>` and the year's transfers are
-    // entered as that year's totals. (The duplicate-row case is the next test.)
+    // The §402A(c)(4)(D) clock attaches to the tax year, so a year's transfers are one lot and its taxable principal is
+    // consumed before any nontaxable ({$1, $99} then {$99, $1} must not differ).
     const accounts = [
       {
         id: 'acc-457b',
@@ -2482,8 +2119,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     expect(lots[0].taxableRolloverPrincipalCents).toBe(10_000);
     expect(lots[0].nontaxableRolloverPrincipalCents).toBe(10_000);
 
-    // A $100 in-window pre-59½ draw recaptures the full $100 of taxable principal
-    // — never the nontaxable half, which carries no recapture.
+    // A $100 in-window pre-59½ draw recaptures the full $100 of taxable principal, never the nontaxable half.
     const result = computeDesignatedRothDistribution({
       facts,
       accountBalanceCents: 20_000,
@@ -2492,33 +2128,6 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       ownerReached59Half: false,
     });
     expect(result.additionalTaxBaseCents).toBe(10_000);
-  });
-
-  it('resolves duplicate rows for one (account, year) to the first — import-only case', () => {
-    // Not reachable through the app: the deterministic `bal-<accountId>-<year>` id
-    // means a second edit of the same year — including one made offline on another
-    // device — updates that one aggregate rather than adding a row. Only an import
-    // bundle carrying a foreign id can land two.
-    //
-    // The first row wins, matching the strict-`>` tie-break both seed-balance
-    // reducers use, so the lot and the projected balance describe the same record.
-    // Summing would credit BOTH rows' basis against ONE row's balance; since these
-    // fields are annual totals rather than increments, that inflates basis, shrinks
-    // earnings and understates ordinary income.
-    const accounts = [
-      {
-        id: 'acc-457b',
-        payload: rothAccountPayload({ type: 'RETIREMENT_ROTH_457B' }),
-      },
-    ];
-    const facts = buildRothDistributionFacts(accounts, [
-      rolloverRow('acc-457b', 2024, 1, 99),
-      rolloverRow('acc-457b', 2024, 99, 1),
-    ]).designatedByAccount.get('acc-457b')!;
-    const lots = facts.inPlanRolloverLots!;
-    expect(lots).toHaveLength(1);
-    expect(lots[0].taxableRolloverPrincipalCents).toBe(100); // $1, the first row
-    expect(lots[0].nontaxableRolloverPrincipalCents).toBe(9_900); // $99, the first row
   });
 
   it('a Roth IRA ignores in-plan rollover rows (wrong Code section for the type)', () => {
@@ -2530,11 +2139,8 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('keeps EVERY valid year — no cap below the tax-year range can drop a late lot', () => {
-    // The retired account arrays carried a 200-lot DoS cap because one year could
-    // repeat arbitrarily. Here the year IS the key, so the output is bounded by the
-    // 203 valid years and needs no cap. A 200 cap would sit BELOW that bound and
-    // drop the LATEST years — the ones most likely still inside a five-year window,
-    // and for a governmental 457(b) that removes recapture rather than adding tax.
+    // The year is the key, so output is bounded by the 203 valid years; a 200-lot cap would drop the latest years, the ones
+    // still in a five-year window.
     const YEARS = 203; // isValidRothTaxYear: [1998, 2200] inclusive
     const accounts = [{ id: 'acc-ira', payload: rothAccountPayload({}) }];
     const balances = Array.from({ length: YEARS }, (_, i) =>
@@ -2549,17 +2155,15 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('a late designated-Roth rollover year is never dropped in favour of earlier ones', () => {
-    // The 457(b) case the removed cap would have broken: many early $1 years plus
-    // one late, large, in-window taxable rollover. The late lot must survive, or
-    // its recapture silently disappears into penalty-exempt earnings.
+    // Many early $1 years plus one late large in-window taxable rollover: the late lot must survive or its recapture vanishes
+    // into penalty-exempt 457(b) earnings.
     const accounts = [
       {
         id: 'acc-457b',
         payload: rothAccountPayload({ type: 'RETIREMENT_ROTH_457B' }),
       },
     ];
-    // 200 early $1 years, deliberately skipping 2024 so the late lot below is its
-    // own year rather than being summed into an early one.
+    // 200 early years, skipping 2024 so the late lot is its own year.
     const earlyYears = Array.from({ length: 201 }, (_, i) => 1998 + i)
       .filter((y) => y !== 2024)
       .slice(0, 200);
@@ -2573,7 +2177,6 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     const late = facts.inPlanRolloverLots!.find((l) => l.taxYear === 2024);
     expect(late?.taxableRolloverPrincipalCents).toBe(600_000);
 
-    // …and it still recaptures on a pre-59½ in-window withdrawal.
     const result = computeDesignatedRothDistribution({
       facts,
       accountBalanceCents: 620_000,
@@ -2585,8 +2188,7 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('a designated-Roth employer account ignores conversion rows entirely', () => {
-    // Only Roth IRAs take conversion lots from balance rows; an employer plan's
-    // in-plan rollover lots are a different fact and still live on the account.
+    // Only Roth IRAs take conversion lots from balance rows; an employer plan's rollover lots are a different fact.
     const accounts = [
       {
         id: 'acc-401k',
@@ -2600,8 +2202,6 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       conversionRow('acc-401k', 2020, 50_000),
       rolloverRow('acc-401k', 2019, 3_000),
     ]);
-    // Only the §402A in-plan rollover row counts; the §408A conversion row on the
-    // same account contributes neither basis nor a lot.
     expect(designatedByAccount.get('acc-401k')!.basisCents).toBe(300_000);
     expect(designatedByAccount.get('acc-401k')!.inPlanRolloverLots).toEqual([
       { taxYear: 2019, taxableRolloverPrincipalCents: 300_000, nontaxableRolloverPrincipalCents: 0 },
@@ -2609,17 +2209,14 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 
   it('a malformed current-schema BALANCE ROW degrades safely (no throw, no lots)', () => {
-    // A directly-imported / hand-constructed row at the current schema version
-    // bypasses the balance migrations, so it reaches this adapter unsanitised.
-    // The account-payload lot arrays this used to guard are gone; the equivalent
-    // hostile surface is now the row itself.
+    // A hand-constructed current-schema row bypasses the balance migrations and reaches the adapter unsanitised.
     const accounts = [
       { id: 'acc-ira', payload: rothAccountPayload({ rothIraRegularContributionBasis: 5_000 }) },
     ];
     const balances = [
-      // Year is a string, not a number → not a valid tax year → row dropped.
+      // Year is a string: not a valid tax year, row dropped.
       { payload: { accountId: 'acc-ira', year: '2020', rothConversionTaxableAmount: 9_000 } },
-      // Amounts are objects → read as $0 rather than money or a throw.
+      // Amounts are objects: read as $0.
       {
         payload: {
           accountId: 'acc-ira',
@@ -2635,19 +2232,13 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
       facts = buildRothDistributionFacts(accounts, balances);
     }).not.toThrow();
     const ira = facts!.rothIraByPool.get('member-primary')!;
-    // Neither malformed row credits anything, and the stored $5k scalar is no
-    // longer a fallback — a pool whose recorded history says nothing has $0 basis.
     expect(ira.rothIra?.regularContributionBasisCents).toBe(0);
-    // The string-year row is dropped; the object-amount row records nothing, so
-    // neither becomes a lot that could shelter a withdrawal.
     expect(ira.rothIra?.conversionLots).toEqual([]);
   });
 
   it('an aggregate that would overflow safe-integer precision degrades to a conservative 0 (never throws)', () => {
-    // Two same-owner Roth IRAs each RECORDING the maximum accepted contribution
-    // magnitude: summed in plain Number the pooled basis overflows IEEE-754
-    // precision. The BigInt accumulation + conservative read-back must degrade to
-    // 0 basis (max-tax direction), never a silent lossy/NaN value and never a throw.
+    // Two same-owner IRAs each recording the maximum contribution overflow IEEE-754 precision when summed; the BigInt
+    // accumulation must degrade to $0 basis (max-tax direction), never a lossy value or a throw.
     const maxMoney = Math.floor(Number.MAX_SAFE_INTEGER / 100);
     const accounts = [
       { id: 'acc-ira-1', payload: rothAccountPayload({}) },
@@ -2664,10 +2255,8 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     ).toBe(0);
   });
 
-  // An inherited Roth IRA's withdrawals are assumed fully qualified, so the
-  // account carries NO basis state anywhere. That has to be an ABSENCE, not a $0:
-  // the carrier seeding and the ordering pass both materialise $0 basis plus lot
-  // state on demand for any pool key handed to them.
+  // An inherited Roth IRA must be an absence, not a $0 pool: the carrier seeding and the ordering pass both materialise $0
+  // state on demand for any pool key.
   it('emits NO pool at all for an INHERITED Roth IRA, and leaves the owner’s own pool intact', () => {
     const accounts = [
       {
@@ -2688,11 +2277,8 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     ];
     const { rothIraByPool } = buildRothDistributionFacts(accounts, [
       contributionRow('acc-own', 2010, 20_000),
-      // The inherited account's own recorded history must not reach the pool
-      // either — the derivation is never run over it at all.
       contributionRow('acc-inherited', 2011, 55_000),
     ]);
-    // One pool — the owner's own. The inherited key never appears.
     expect(rothIraByPool.size).toBe(1);
     expect([...rothIraByPool.keys()]).toEqual(['member-primary']);
     expect(rothIraByPool.has('member-primary::inherited-acct:acc-inherited')).toBe(false);
@@ -2702,29 +2288,6 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
     expect(own.rothIra?.inheritedFromDeceasedOwner).toBeUndefined();
   });
 
-  it('emits no pool for EITHER of two Roth IRAs inherited from different decedents', () => {
-    const accounts = [
-      {
-        id: 'acc-inh-a',
-        payload: rothAccountPayload({
-          rothIraFirstContributionTaxYear: 2005,
-          rmdInheritedAccount: true,
-        }),
-      },
-      {
-        id: 'acc-inh-b',
-        payload: rothAccountPayload({
-          rothIraFirstContributionTaxYear: 2024,
-          rmdInheritedAccount: true,
-        }),
-      },
-    ];
-    const { rothIraByPool } = buildRothDistributionFacts(accounts, []);
-    expect(rothIraByPool.size).toBe(0);
-  });
-
-  // Defence in depth: the seeder must not MATERIALISE a $0 entry for an inherited
-  // pool a caller hands it anyway (the builder above no longer produces one).
   it('seedFactBasedRothBasisCarrier skips an inherited pool handed to it directly', () => {
     const carrier = seedFactBasedRothBasisCarrier(
       new Map([
@@ -2748,21 +2311,13 @@ describe('buildRothDistributionFacts — the fact adapter both engines read', ()
   });
 });
 
-// ---------------------------------------------------------------------------
-// An inherited Roth IRA's dollars are wholesale tax-free and carry no basis
-// state anywhere, end-to-end through the deterministic ordering pass.
-// ---------------------------------------------------------------------------
-
 describe('an inherited Roth IRA passes through the deterministic ordering pass untaxed', () => {
-  /** Both accounts, the household context, and the seeded pool carrier for a
-   *  beneficiary who owns one Roth IRA and holds one inherited Roth IRA. */
   const setUp = (opts: {
     readonly ownFirstYear: number;
     readonly ownBasisDollars: number;
     readonly inheritedFirstYear: number;
     readonly inheritedBasisDollars: number;
-    /** Default 1965 → age 62 in 2027 (59½ met all year). Pass a later year to run
-     *  the beneficiary-under-59½ shape. */
+    // Default 1965 is 62 in 2027 (59½ met all year); a later year runs the under-59½ shape.
     readonly primaryBirthdate?: string;
   }) => {
     const accounts = [
@@ -2782,8 +2337,6 @@ describe('an inherited Roth IRA passes through the deterministic ordering pass u
         }),
       },
     ];
-    // Basis comes from the recorded contribution history now, so each account's
-    // dollars are seeded as a balance row in its own first year.
     const rothDistributionFacts = buildRothDistributionFacts(accounts, [
       contributionRow('roth-own', opts.ownFirstYear, opts.ownBasisDollars),
       contributionRow('roth-inherited', opts.inheritedFirstYear, opts.inheritedBasisDollars),
@@ -2803,9 +2356,7 @@ describe('an inherited Roth IRA passes through the deterministic ordering pass u
     return { ctx, carrier };
   };
 
-  // The regression guard for `applyRothBasisOrdering`'s ON-DEMAND pool creation: a
-  // "tax is zero" assertion alone would still pass if the pass had silently created
-  // (and drawn down) a $0 inherited entry.
+  // A zero-tax assertion alone would pass if the pass silently created and drew down a $0 inherited entry.
   it('leaves NO carrier entry after a year containing an inherited draw', () => {
     const { ctx, carrier } = setUp({
       ownFirstYear: 2010,
@@ -2824,19 +2375,14 @@ describe('an inherited Roth IRA passes through the deterministic ordering pass u
       carrier,
       new Map(),
     );
-    // Wholesale tax-free even though the recorded 2024 clock is unmet in 2027.
     expect(split.earningsExcessDollars).toBe(0);
     expect(split.penaltyAccounts).toEqual([]);
-    // No pool was materialised for the inherited account, and the owner's own basis
-    // is untouched.
     expect([...carrier.keys()]).toEqual(['member-primary']);
     expect(carrier.get('member-primary')?.rothBasisRemainingCents).toBe(2_000_000);
     expect(carrier.get('member-primary')?.rothCumulativeWithdrawnCents).toBe(0);
   });
 
-  // The deterministic engine must not tax the whole draw as ordinary income
-  // while Monte Carlo routes the same dollars tax-free — a cross-engine
-  // disagreement.
+  // The deterministic engine must not tax the draw as ordinary income while Monte Carlo routes it tax-free.
   it('is tax- AND penalty-free with an unmet clock and a beneficiary under 59½', () => {
     const { ctx, carrier } = setUp({
       ownFirstYear: 2010,
@@ -2859,50 +2405,9 @@ describe('an inherited Roth IRA passes through the deterministic ordering pass u
     expect(split.penaltyAccounts).toEqual([]);
   });
 
-  it('leaves the owner’s OWN basis fully recoverable in a LATER year', () => {
-    const { ctx, carrier } = setUp({
-      ownFirstYear: 2010,
-      ownBasisDollars: 20_000,
-      inheritedFirstYear: 2024,
-      inheritedBasisDollars: 0,
-    });
-    // Year 1 — the inherited account only.
-    applyRothBasisOrdering(
-      ctx,
-      makeDrawdownYear(
-        2027,
-        20_000,
-        new Map([
-          ['roth-own', makeAccountBalance(50_000, 0)],
-          ['roth-inherited', makeAccountBalance(30_000, 20_000)],
-        ]),
-      ),
-      carrier,
-      new Map(),
-    );
-    // Year 2 — the owner's own account draws its whole $20k recorded basis. It is
-    // still there, so the draw is basis-covered rather than taxable earnings.
-    const split = applyRothBasisOrdering(
-      ctx,
-      makeDrawdownYear(
-        2028,
-        20_000,
-        new Map([
-          ['roth-own', makeAccountBalance(30_000, 20_000)],
-          ['roth-inherited', makeAccountBalance(10_000, 0)],
-        ]),
-      ),
-      carrier,
-      new Map(),
-    );
-    expect(split.earningsExcessDollars).toBe(0);
-    expect(carrier.get('member-primary')?.rothBasisRemainingCents).toBe(0);
-  });
-
   it('contributes nothing to the flattened per-owner FUNDING basis or clock', () => {
-    // The funding solver keeps ONE owner-keyed entry and consumes only its basis.
-    // An inherited account supplies no pool, so it can neither add basis to that
-    // total nor pull the conservative LATEST clock forward.
+    // An inherited account supplies no pool, so it can neither add basis to the owner's funding entry nor pull its latest clock
+    // forward.
     const accounts = [
       {
         id: 'roth-own',
@@ -2933,30 +2438,9 @@ describe('an inherited Roth IRA passes through the deterministic ordering pass u
     expect(owner.rothIra?.inheritedFromDeceasedOwner).toBeUndefined();
   });
 
-  it('flattening leaves the owner clock ABSENT when their surviving pool records none', () => {
-    // The inherited account carries a recorded 2024 year; it must not become the
-    // owner's flattened clock, and the owner's own pool has none of its own.
-    const accounts = [
-      { id: 'roth-own', payload: rothAccountPayload({}) },
-      {
-        id: 'roth-inherited',
-        payload: rothAccountPayload({
-          rothIraFirstContributionTaxYear: 2024,
-          rmdInheritedAccount: true,
-        }),
-      },
-    ];
-    const flat = flattenRothIraPoolsByOwner(
-      buildRothDistributionFacts(accounts, []).rothIraByPool,
-    );
-    expect(flat.size).toBe(1);
-    expect(flat.get('member-primary')!.rothIra?.firstContributionTaxYear).toBeUndefined();
-  });
-
   it('still aggregates the owner’s OWN Roth IRAs with each other (Pub 590-B)', () => {
-    // Two own accounts, one seasoned (2010) and one brand-new (2026), $0 basis on
-    // both. One person's own Roth IRAs DO count as a single account, so the
-    // earliest clock governs and the 2027 draw from the new account is qualified.
+    // One person's own Roth IRAs count as a single account, so the earliest clock (2010) governs and the 2027 draw from the new
+    // account is qualified.
     const accounts = [
       {
         id: 'roth-old',
@@ -2988,25 +2472,16 @@ describe('an inherited Roth IRA passes through the deterministic ordering pass u
       carrier,
       new Map(),
     );
-    // Qualified on the owner-aggregated 2010 clock + age 62 → nothing taxable.
     expect(split.earningsExcessDollars).toBe(0);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Inherited-account death exception (§408A(d)(2)(A)(ii) /
-// §72(t)(2)(A)(ii)) and dated lots for engine-generated
-// conversions.
-// ---------------------------------------------------------------------------
-
 describe('inherited Roth accounts — death is the qualifying event', () => {
   it('qualifies an inherited Roth-IRA distribution on the FIVE-YEAR test alone', () => {
-    // The BENEFICIARY is only 40, so their own 59½ test fails — but the original
-    // owner's death IS the qualifying event, so a five-year-seasoned account's
-    // distribution is qualified (tax- and penalty-free).
+    // The beneficiary is 40, but the owner's death is the qualifying event (§408A(d)(2)(A)(ii)), so a five-year-seasoned
+    // account qualifies.
     const facts = { firstContributionTaxYear: 2010, inheritedFromDeceasedOwner: true };
     expect(isRothIraDistributionQualified(facts, 2030, false)).toBe(true);
-    // Not seasoned five taxable years → still nonqualified, even inherited.
     expect(
       isRothIraDistributionQualified(
         { firstContributionTaxYear: 2028, inheritedFromDeceasedOwner: true },
@@ -3014,7 +2489,7 @@ describe('inherited Roth accounts — death is the qualifying event', () => {
         false,
       ),
     ).toBe(false);
-    // An OWNER account still needs the owner's own 59½.
+    // An owner account still needs the owner's own 59½.
     expect(isRothIraDistributionQualified({ firstContributionTaxYear: 2010 }, 2030, false)).toBe(
       false,
     );
@@ -3028,7 +2503,6 @@ describe('inherited Roth accounts — death is the qualifying event', () => {
           {
             rothIra: {
               regularContributionBasisCents: 0,
-              // Unseasoned clock → nonqualified, so earnings are ordinary income …
               firstContributionTaxYear: 2029,
               conversionLots: [
                 {
@@ -3052,8 +2526,7 @@ describe('inherited Roth accounts — death is the qualifying event', () => {
     // $10,000 converted principal + $5,000 earnings.
     expect(result.earningsCents).toBe(5_000_00);
     expect(result.incomeTaxableCents).toBe(5_000_00);
-    // … but the §72(t)(2)(A)(ii) death exception waives the 10% base entirely:
-    // neither the in-window conversion recapture nor the earnings are penalized.
+    // §72(t)(2)(A)(ii): the death exception waives the 10% base, including the in-window conversion recapture.
     expect(result.additionalTaxBaseCents).toBe(0);
   });
 
@@ -3077,9 +2550,7 @@ describe('inherited Roth accounts — death is the qualifying event', () => {
       distributionTaxYear: 2030,
       ownerReached59Half: false,
     });
-    // Earnings are still ordinary income (the five-year clock is unmet) …
     expect(inherited.incomeTaxableCents).toBe(10_000_00);
-    // … but no 10%.
     expect(inherited.additionalTaxBaseCents).toBe(0);
   });
 });
@@ -3099,11 +2570,8 @@ describe('engine-generated conversions carry a DATED lot', () => {
         nontaxableConvertedPrincipalCents: 0,
       },
     ]);
-    // The dollars are NOT double-counted as undated regular basis.
     expect(seeds.get('owner')?.rothIra?.regularContributionBasisCents).toBe(0);
 
-    // Drawing the converted principal pre-59½ inside its five-tax-year window now
-    // carries the 10% recapture (undated basis carried none).
     const carrier = seedFactBasedRothBasisCarrier(seeds);
     const result = applyFactBasedRothIraOrdering(carrier.get('owner')!, {
       withdrawalCents: 10_000_00,
@@ -3265,9 +2733,7 @@ describe('recorded conversion recapture — public projection funding', () => {
   it('funds the annotation recapture in-window and drops it at the five-year boundary', () => {
     const inWindow = projectAt(2024);
     expect(inWindow.federalTaxCents).toBe(100_000);
-    // Roth-first exhausts the $10k conversion principal on living costs, then
-    // the savings account supplies the $1k recapture tax. The committed row
-    // therefore funds exactly the federal tax the annotation pass reports.
+    // Roth-first exhausts the $10k conversion principal on living costs, then savings supply the $1k recapture tax.
     expect(Math.round((inWindow.withdrawal - 10_000) * 100)).toBe(
       inWindow.federalTaxCents,
     );
@@ -3278,17 +2744,9 @@ describe('recorded conversion recapture — public projection funding', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The inherited exclusion's scope is exactly `RETIREMENT_ROTH_IRA` AND inherited. An inherited
-// DESIGNATED-Roth (employer) plan keeps its §402A treatment untouched, so this
-// pins both sides of that account's behaviour against the change.
-// ---------------------------------------------------------------------------
-
 describe('an inherited DESIGNATED-Roth plan is unchanged (scope)', () => {
-  /** One inherited-or-not Roth 401(k), drawn $10,000 from a $100,000 pocket by a
-   *  beneficiary aged 45 (well under 59½). Basis $40,000 of recorded in-plan
-   *  rollover principal, clock 2005 (met by the 2027 draw) unless
-   *  overridden. */
+  // One inherited-or-not Roth 401(k): $10,000 drawn from a $100,000 pocket by a beneficiary aged 45; $40,000 basis of rollover
+  // principal, clock 2005 unless overridden.
   const run = (inherited: boolean, firstParticipationTaxYear = 2005) => {
     const accounts = [
       {
@@ -3349,23 +2807,16 @@ describe('an inherited DESIGNATED-Roth plan is unchanged (scope)', () => {
   });
 
   it('still applies §402A pro rata to an INHERITED plan whose own clock is UNMET (guard-scope pin)', () => {
-    // 2025 + 5 > 2027 → nonqualified even though death is the qualifying event,
-    // so the $10k draw splits pro rata against the $40k basis: $6,000 of
-    // earnings is ordinary income, while §72(t)(2)(A)(ii) still waives the 10%
-    // additional tax. DISCRIMINATING for the inherited-skip guard's scope: if
-    // `collectRothDraws` lost the `isRothIra &&` half of its inherited skip and
-    // dropped EVERY inherited draw, this draw would never reach the §402A split
-    // and `earningsExcessDollars` would be 0 — the met-clock case above cannot
-    // tell those apart because its correct answer is also 0.
+    // Clock 2025 + 5 > 2027: nonqualified even though death qualifies, so the $10k draw splits pro rata against the $40k basis
+    // ($6,000 earnings as ordinary income) while §72(t)(2)(A)(ii) waives the 10%. Discriminates the inherited-skip guard's
+    // scope: if collectRothDraws dropped every inherited draw, earningsExcessDollars would be 0.
     const split = run(true, 2025);
     expect(split.earningsExcessDollars).toBeCloseTo(6_000, 6);
     expect(split.penaltyAccounts).toEqual([]);
   });
 
   it('still applies §402A pro rata to the SAME plan when it is NOT inherited', () => {
-    // Nonqualified (owner is 45): $40k basis of a $100k pocket → 40% basis,
-    // 60% earnings, so $6,000 is ordinary income and the whole $6,000 is the
-    // 10% additional-tax base.
+    // Nonqualified (owner is 45): $40k basis of a $100k pocket → 60% earnings = $6,000 income and the whole $6,000 is the 10% base.
     const split = run(false);
     expect(split.earningsExcessDollars).toBeCloseTo(6_000, 6);
     expect(split.penaltyAccounts).toHaveLength(1);
