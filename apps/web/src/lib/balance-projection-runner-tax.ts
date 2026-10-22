@@ -1,59 +1,8 @@
 /**
- * Tax-integration post-pass for the deterministic balance-projection
- * runner. Walks the drawdown years emitted by `simulateDrawdown` and
- * calls `applyTaxYear` from `tax-integration.ts` for each year,
- * annotating `DrawdownYear` with the 15 optional tax fields.
- *
- * The post-pass runs for EVERY named
- * strategy. The per-account engine builds an `accountBalances` map, so the
- * post-pass classifies the COMMITTED per-account split by its real tax
- * treatment. Only the bucket-allocation path (no `accountBalances` map) falls
- * back to all-pre-tax inside `splitWithdrawalsByTaxTreatment`. Every drawdown
- * row carries the 15 display tax fields.
- *
- * MAGI look-back:
- *   - Year 0 of drawdown: use `magiBootstrapLookbackMinus2` (= MAGI(ret−2))
- *     when provided. Year 1: use `magiBootstrapLookbackMinus1` (= MAGI(ret−1)).
- *   - When a member is on Medicare in projection year 0 or 1 and the
- *     scenario stores NO bootstrap value for that lookback year, ESTIMATE the
- *     lookback MAGI from the engine's own projected year-0 MAGI
- *     (`magiBuffer[0]`, built from resolved income streams + SS + drawdown) and
- *     set the per-year `magiEstimatedFromProjection` disclosure flag. When the
- *     engine cannot produce a year-0 MAGI (below the calibration floor) the
- *     estimate falls back to $0 but the disclosure flag STILL fires.
- *   - Year 2+: use the MAGI computed in the year 2 years prior.
- *
- * RMD prior-year balance (rmd engine):
- *   - Year 0: use the per-account balances at retirement from the
- *     drawdown ledger input (approximated from ledger.accounts).
- *   - Year 1+: use `DrawdownYear.accountBalances` from the prior year.
- *
- * Helper extraction: `buildMemberInputs`,
- * `buildAccountSnapshotsFromPriorYear`, `splitWithdrawalsByTaxTreatment`,
- * `otherOrdinaryIncomeForYear`, `grossSsForYear`, `resolveHouseholdDeathYears`,
- * `countTaxpayersAge65Plus` live in
- * `./balance-projection-runner-tax-helpers`.
- *
- * SHAPE-LIMIT EXCEPTION (recorded justification; CODING_STANDARDS ≤ 800 lines):
- * this file is over the 800-line limit. Why: it is the deterministic tax
- * post-pass — the year loop and the per-year solver wiring run in sequence over
- * the same `TaxYearInput` / MAGI-lookback state, and the chokepoint
- * `computeYearTaxWithMagiLookback` already consolidates the per-year tax
- * computation so the loop body stays thin. The pure helpers already live in the
- * sibling `balance-projection-runner-tax-helpers.ts` (`buildMemberInputs`,
- * `splitWithdrawalsByTaxTreatment`, the SS / death-year / age-65 helpers), so
- * the clean seam is taken; what remains threads the rolling MAGI buffer and
- * prior-year RMD balances through the loop, which a split would re-export.
- * The per-tax-unit filing-status pass-through (including the separate-return
- * and surviving-spouse statuses) and the annual cash-like interest ride the
- * same per-year loop and `TaxYearBuildArgs` seam, with the same rolling
- * MAGI-buffer / prior-year-RMD state and no new seam, so this stays a single
- * cohesive deterministic tax post-pass. Recorded future split path: when next
- * touched, lift the per-year solver loop (and its MAGI-buffer threading) into a
- * sibling module driven by `computeYearTaxWithMagiLookback`. Trigger: a change
- * adding 5 or more lines here must either refactor the file back under the
- * limit or re-justify this exception in this note. The zero-conversion
- * repricing call in the loop reuses this file's per-year pass, so it cannot move out.
+ * Tax-integration post-pass for the deterministic runner: calls `applyTaxYear` for each drawdown year to
+ * annotate `DrawdownYear` with the tax fields, and builds the tax-cashflow hook the drawdown engine funds tax
+ * through.
+ * See `docs/math-taxes.md`.
  */
 
 import type {
@@ -130,61 +79,58 @@ import {
   type RothBasisCarrier,
 } from './balance-projection-runner-roth-basis';
 
-// Re-export the base tax-integration validation error for runner callers.
 export { TaxIntegrationInvalidInputError } from './tax-integration';
 
-// ---------------------------------------------------------------------------
-// Filing-plan resolution per projection year
-// ---------------------------------------------------------------------------
-
-/** One projection year's resolved filing facts. */
+// One projection year's resolved filing facts.
 interface YearFilingResolution {
-  /** Resolved tax units, or `undefined` when the plan could not be resolved
-   *  from a legacy scalar — the branch that keeps the legacy scalar path. */
+  /**
+   * Resolved tax units, or `undefined` when the legacy scalar cannot be converted, which keeps the legacy
+   * scalar path.
+   */
   readonly taxUnits: readonly ResolvedTaxUnit[] | undefined;
   /** Household role → member id, so a unit's roles map onto the member rows. */
   readonly memberIdByRole: { readonly primary?: string; readonly secondary?: string };
-  /** §86(c)(1)(C)(ii) — MFS spouses lived together during the year. */
+  /** §86(c)(1)(C)(ii): MFS spouses lived together during the year. */
   readonly mfsLivedWithSpouse: boolean;
-  /** The returns filed TWO YEARS AGO, one entry per tax unit. Each
-   *  of this year's units reads its OWN look-back return out of this list, so
-   *  two separate returns land on their own MAGI and their own tier schedule
-   *  and a survivor is tiered on the joint return they actually filed. Empty
-   *  in the two bootstrap years (the ring has no entry yet). */
+  /**
+   * The returns filed two years ago, one per tax unit, each unit reading its own look-back return so separate
+   * returns tier on their own MAGI and a survivor on the joint return filed. Empty in the two bootstrap
+   * years.
+   */
   readonly irmaaLookbackUnits: readonly FilingUnitMagi[];
-  /** The returns the household filed in a BOOTSTRAP look-back year (a
-   *  pre-projection year the ring has no entry for), when that year had MORE
-   *  THAN ONE return. `buildTaxYearInput` pairs them with the year's household
-   *  bootstrap MAGI to rebuild the per-return ring, so a mixed `MFS`+`HoH`
-   *  couple's first two projection years tier each spouse on their OWN schedule
-   *  exactly as every later year does. Absent for a single-return look-back —
-   *  the `irmaaLookbackFilingStatus` scalar below already says the same thing. */
+  /**
+   * The returns filed in a bootstrap look-back year that had more than one, paired with the household
+   * bootstrap MAGI to rebuild the per-return ring so each spouse tiers on their own schedule. Absent for a
+   * single-return look-back.
+   */
   readonly bootstrapLookbackUnits: readonly BootstrapLookbackUnit[] | undefined;
-  /** Legacy fallback only — the single look-back status a year with NO
-   *  resolvable units tiers on. */
+  /** Legacy fallback: the single look-back status a year with no resolvable units tiers on. */
   readonly irmaaLookbackFilingStatus: FilingStatus | undefined;
   readonly irmaaLookbackMfsLivedWithSpouse: boolean | undefined;
 }
 
-/** One buffered projection year of the per-tax-unit IRMAA look-back ring
- *  Index `i` holds the returns filed in projection year `i`. */
+/**
+ * One buffered projection year of the per-tax-unit IRMAA look-back ring: index `i` holds the returns filed in
+ * year `i`.
+ */
 type FilingUnitRingEntry = readonly FilingUnitMagi[] | undefined;
 
-/** Args for `buildTaxYearInput`. */
 interface TaxYearBuildArgs {
   readonly taxYear: number;
-  /** Legacy scalar-derived status — the fallback used when `filing.taxUnits`
-   *  is absent (an unresolvable legacy scalar conversion). */
+  /** Legacy scalar-derived status, used when `filing.taxUnits` is absent. */
   readonly filingStatus: ReturnType<typeof deriveFilingStatus>;
-  /** The year's resolved filing facts. */
   readonly filing: YearFilingResolution;
-  /** Each member's OWN gross SS for the year, so a `separate` couple's
-   *  two returns carry only their own benefit (§86 / IRS Pub 555). */
+  /**
+   * Each member's own gross SS for the year, so a `separate` couple's returns carry only their own benefit
+   * (§86, Pub 555).
+   */
   readonly ownSsDollarsByMemberId: Readonly<Record<string, number>>;
   /** Member ids that attain age 65 by year end (IRS born-Jan-1 rule). */
   readonly age65PlusMemberIds: readonly string[];
-  /** Owner-attributed withdrawal / income / balance dollars, so a
-   *  `separate` couple's two returns each report what they actually own. */
+  /**
+   * Owner-attributed withdrawal, income and balance dollars, so a `separate` couple's returns each report
+   * what they own.
+   */
   readonly ownerAttributedAmounts: OwnerAttributedAmounts;
   readonly grossSsDollars: number;
   readonly preTax: number;
@@ -197,17 +143,19 @@ interface TaxYearBuildArgs {
   readonly householdSize: number;
   readonly magiTwoYearsPriorDollars: number | undefined;
   readonly acaBenchmarkSlcspDollars: number | undefined;
-  /** The scenario's federal-poverty-level region for the ACA FPL
-   *  denominator. `undefined` → contiguous 48 states + DC. */
+  /** The scenario's FPL region for the ACA denominator; `undefined` means contiguous 48 states plus DC. */
   readonly acaFplRegion: import('./aca-ptc').AcaFplRegion | undefined;
   readonly taxpayersAge65Plus: number;
   readonly costBasisFraction: number;
-  /** Brokerage-like (POST_TAX BROKERAGE/OTHER) balance at the start of the
-   *  year — the yield-drag base. 0 when unknown (solver pre-commit path). */
+  /**
+   * Brokerage-like (POST_TAX BROKERAGE/OTHER) balance at year start, the yield-drag base; 0 when unknown
+   * (solver pre-commit path).
+   */
   readonly brokerageLikeStartBalanceDollars: number;
-  /** Annual ordinary taxable interest from cash-like accounts
-   *  (savings/money-market/CD realized growth; HSA excluded). 0 when unknown
-   *  (solver pre-commit path — same documented approximation). */
+  /**
+   * Annual ordinary taxable interest from cash-like accounts (HSA excluded); 0 when unknown (solver
+   * pre-commit path).
+   */
   readonly cashInterestDollars: number;
   readonly inflationRatePct: number;
   readonly medicalInflationRatePct: number;
@@ -216,12 +164,10 @@ interface TaxYearBuildArgs {
   readonly penaltyAccounts: readonly PenaltyAccountSnapshot[];
 }
 
-/** Assemble the per-year tax input for a single projection year. */
 function buildTaxYearInput(args: TaxYearBuildArgs): ApplyFilingPlanYearInput {
   return {
     taxYear: args.taxYear,
-    // The resolved units drive the filing status when the plan resolved;
-    // `filingStatus` remains the legacy fallback for an unresolved scalar.
+    // Resolved units drive the filing status; `filingStatus` is the fallback for an unresolved scalar.
     filingStatus: args.filingStatus,
     taxUnits: args.filing.taxUnits,
     memberIdByRole: args.filing.memberIdByRole,
@@ -229,9 +175,8 @@ function buildTaxYearInput(args: TaxYearBuildArgs): ApplyFilingPlanYearInput {
     age65PlusMemberIds: args.age65PlusMemberIds,
     ownerAttributedAmounts: args.ownerAttributedAmounts,
     mfsLivedWithSpouse: args.filing.mfsLivedWithSpouse,
-    // Covers the simulated years and the two bootstrap years, whose ring entry
-    // is rebuilt from the look-back year's own returns + this year's household
-    // bootstrap MAGI so both spouses never share one spouse's IRMAA schedule.
+    // Bootstrap-year ring entries are rebuilt from the look-back year's own returns and this year's household
+    // bootstrap MAGI, so both spouses never share one IRMAA schedule.
     irmaaLookbackUnits:
       args.filing.irmaaLookbackUnits.length > 0
         ? args.filing.irmaaLookbackUnits
@@ -266,9 +211,7 @@ function buildTaxYearInput(args: TaxYearBuildArgs): ApplyFilingPlanYearInput {
   };
 }
 
-/** Arguments to `annotateYearWithTaxResult` (an args object rather than
- *  eight positional parameters ending in a boolean after four numbers, which
- *  made a silent argument swap easy). */
+// An args object rather than eight positional parameters, to avoid silent argument swaps.
 interface AnnotateYearArgs {
   readonly ctx: PipelineContext;
   readonly year: DrawdownYear;
@@ -277,13 +220,13 @@ interface AnnotateYearArgs {
   readonly grossSsDollars: number;
   readonly postTaxNonRothDollars: number;
   readonly postTaxCashLikeDollars: number;
-  /** True when the plan models NO medical spending at all
-   *  (`shared.noMedicalSpendingModeled`). Combined with a charged IRMAA
-   *  surcharge it means the base Medicare premium is missing. */
+  /**
+   * True when the plan models no medical spending; with a charged IRMAA surcharge it means the base Medicare
+   * premium is missing.
+   */
   readonly noMedicalSpendingModeled: boolean;
 }
 
-/** Mutate a `DrawdownYear` with all 15 tax fields from `TaxYearResult`. */
 function annotateYearWithTaxResult(args: AnnotateYearArgs): void {
   const {
     ctx,
@@ -296,24 +239,16 @@ function annotateYearWithTaxResult(args: AnnotateYearArgs): void {
     noMedicalSpendingModeled,
   } = args;
   const rmdFloorCents = result.rmdFloorCents;
-  // Prefer the per-account RMD shortfall (`rmdPerAccountCents`) so a
-  // single account's missed RMD surfaces even when household netting (account A
-  // overshooting masks account B's miss) would report $0. Falls back to the
-  // household-level `max(0, rmdFloorCents − totalPreTaxWithdrawn)` when the
-  // per-account map / `accountBalances` is unavailable (bucket-allocation path).
+  // Prefer the per-account RMD shortfall so one account's missed RMD surfaces even when another's overshoot
+  // would net it to $0; falls back to the household figure on the bucket-allocation path.
   const perAccountShortfallCents = derivePerAccountRmdShortfallCents(
     ctx,
     year,
     result.rmdPerAccountCents,
   );
   const preTaxWithdrawnCents = dollarsToCents(preTaxDollars);
-  // In the household fallback the QCD is debited directly to the IRA
-  // pre-tax bucket (not part of `preTaxDollars`) yet COUNTS TOWARD the IRA RMD
-  // (§408(d)(8)). Credit the total per-owner IRA-pool offset toward the floor so
-  // an over-RMD QCD year shows no phantom shortfall. (The per-account path above
-  // already scopes the credit to each owner's IRA pool; this fallback runs only
-  // on the bucket-allocation path, which the QCD engine does not currently feed,
-  // so the offset is typically absent — credited here for correctness parity.)
+  // In the household fallback the QCD is debited from the IRA pre-tax bucket yet counts toward the IRA RMD
+  // (§408(d)(8)), so credit the owner IRA-pool offsets to avoid a phantom shortfall.
   const qcdOffsetCents = Object.values(year.qcdRmdOffsetCentsByOwner ?? {}).reduce(
     (sum, c) => sum + Math.max(0, c),
     0,
@@ -321,9 +256,6 @@ function annotateYearWithTaxResult(args: AnnotateYearArgs): void {
   const rmdShortfallCents =
     perAccountShortfallCents ??
     Math.max(0, rmdFloorCents - preTaxWithdrawnCents - qcdOffsetCents);
-  // netAfterTaxCents: gross income (SS + pre-tax + post-tax-non-roth +
-  // post-tax-cash-like return-of-principal) minus taxes plus PTC. Cash-like
-  // dollars are tax-free spendable income so they belong in the gross.
   const netAfterTaxCents = Math.max(
     0,
     dollarsToCents(grossSsDollars + preTaxDollars + postTaxNonRothDollars + postTaxCashLikeDollars)
@@ -335,30 +267,21 @@ function annotateYearWithTaxResult(args: AnnotateYearArgs): void {
   year.ssTaxationTier = result.ssTaxationTier;
   year.rmdFloorCents = rmdFloorCents;
   year.rmdShortfallCents = rmdShortfallCents;
-  // Display-only decomposition of `rmdFloorCents`: stamp the per-account
-  // required RMD the RMD pre-pass already computed (`result.rmdPerAccountCents`,
-  // BOTH owners merged — ids are unique across owners) so the Withdrawal
-  // Guidance page can present the RMD by legal aggregation group. Present (a
-  // possibly-empty `{}` at a $0 floor) when ≥ 1 owner reached their trigger age;
-  // left ABSENT below every owner's trigger age. Stamped ONLY here in the
-  // deterministic post-pass — never on the strategy-engine / kernel / MC paths —
-  // so it never serializes into the MC capture (no ENGINE_VERSION bump).
+  // Display-only per-account RMD decomposition of `rmdFloorCents`, stamped only here in the deterministic
+  // post-pass (never on the engine, kernel or MC paths, so no `ENGINE_VERSION` bump); present once an owner
+  // reached their trigger age, absent before.
   if (result.rmdApplicable) {
     year.perAccountRmdCents = { ...result.rmdPerAccountCents };
   }
-  // Surplus disposition fields are ENGINE-set (per-account strategy path); the
-  // post-pass must not clobber them. `?? 0` defaults the unmodeled paths
-  // (bucket-allocation) to 0 while preserving any non-zero value the engine stamped.
+  // Surplus disposition fields are engine-set; `?? 0` defaults only the unmodeled paths and preserves any
+  // engine value.
   year.rmdReinvestedCents = year.rmdReinvestedCents ?? 0;
   year.rmdOverflowToCashCents = year.rmdOverflowToCashCents ?? 0;
   year.irmaaSurchargeCents = result.irmaaSurchargeCents;
   year.irmaaTier = result.irmaaTier;
-  // Readiness warning: an IRMAA surcharge is being charged while
-  // the plan models no medical spending anywhere, so the base Medicare premium
-  // (a user-entered medical expense, never modeled) is missing and the plan
-  // understates retirement health costs. Only the affirmatively-missing case is
-  // flagged; a plan that DOES record medical spending is left alone, since the
-  // projection cannot tell whether that amount includes the premium.
+  // Readiness warning: an IRMAA surcharge with no modeled medical spending means the base Medicare premium
+  // (user-entered) is missing. Only that case is flagged, since a plan with medical spending may already
+  // include it.
   if (result.irmaaSurchargeCents > 0 && noMedicalSpendingModeled) {
     year.medicareBasePremiumMissing = true;
   }
@@ -372,10 +295,7 @@ function annotateYearWithTaxResult(args: AnnotateYearArgs): void {
   year.earlyWithdrawalPenaltyCents = result.earlyWithdrawalPenaltyCents;
   year.hsaAdditionalTaxCents = result.hsaAdditionalTaxCents;
   year.penaltySkippedForMissingBirthdate = result.penaltySkippedForMissingBirthdate;
-  // Carry the engine's own RMD disclosures onto the row so the
-  // Projected-withdrawals page can state them in plain English. Each is stamped
-  // only when the engine reported something, so a fact-free household's rows are
-  // unchanged (and nothing new serializes on a $0-disclosure year).
+  // Engine RMD disclosures are stamped only when reported, so a fact-free household's rows are unchanged.
   if ((result.rmdWithheldAccounts?.length ?? 0) > 0) {
     year.rmdWithheldAccountIds = result.rmdWithheldAccounts!.map((w) => w.accountId);
   }
@@ -394,20 +314,20 @@ function annotateYearWithTaxResult(args: AnnotateYearArgs): void {
   }
 }
 
-/** Shared per-year-loop context — fixed across the entire run. */
 interface TaxLoopShared {
   readonly ctx: PipelineContext;
   readonly ssRows: ReadonlyArray<SsRunRateRow>;
   readonly nonSsIncomeRows: ReadonlyArray<MonthlyIncomeRow>;
   readonly ledgerAccounts: ReadonlyArray<DrawdownAccountInput>;
   readonly bundle: TaxCalibrationBundle;
-  /** Seed cost-basis fraction (`assumedCostBasisFractionOfTaxableWithdrawal ??
-   *  0.5`). The post-pass evolves a per-account basis from this seed; the
-   *  solver path uses it statically (no per-account balance pre-commit). */
+  /**
+   * Seed cost-basis fraction (`assumedCostBasisFractionOfTaxableWithdrawal ?? 0.5`); the post-pass evolves a
+   * per-account basis from it and the solver uses it statically.
+   */
   readonly seedBasisFraction: number;
-  /** Stored MAGI bootstrap for projection year 0 (= MAGI(ret−2)). */
+  /** Stored MAGI bootstrap for projection year 0 (MAGI(ret-2)). */
   readonly magiBootstrapMinus2: number | undefined;
-  /** Stored MAGI bootstrap for projection year 1 (= MAGI(ret−1)). */
+  /** Stored MAGI bootstrap for projection year 1 (MAGI(ret-1)). */
   readonly magiBootstrapMinus1: number | undefined;
   readonly acaPtcBenchmarkOverrides: ReadonlyArray<{ taxYear: number; annualSlcspDollars: number }>;
   readonly inflationRatePct: number;
@@ -416,30 +336,26 @@ interface TaxLoopShared {
   readonly earlyWithdrawalPenaltyExemptAccountIds: readonly string[];
   readonly primaryDeathYear: number;
   readonly secondaryDeathYear: number;
-  /** Per-calendar-year rolled-CBP RMD ordinary income (dollars) — the
-   *  rollover-year RMD carved from a linked-CBP lump-sum landing in/after the
-   *  source owner's RMD trigger year. Added to the year's ordinary-income inlet
-   *  (taxed exactly once; the cash leg is added to the spendable income series
-   *  upstream). Empty when no split fired. */
+  /**
+   * Per-calendar-year rolled-CBP RMD ordinary income (dollars) from linked-CBP lump-sums landing in or after
+   * the source owner's RMD trigger year; taxed once (the cash leg is added to the income series upstream).
+   * Empty when no split fired.
+   */
   readonly rolledRmdIncomeByYear: ReadonlyMap<number, number>;
-  /** True when the plan models NO medical spending at all.
-   *  Combined with a charged IRMAA surcharge it means the base Medicare premium
-   *  (a user-entered medical expense) is missing. OPTIONAL: only the
-   *  annotation post-pass consumes it, so the funding-hook builder — whose
-   *  callers have no expense inventory — simply omits it rather than supplying a
-   *  meaningless value. Absent → the readiness flag is never raised. */
+  /**
+   * True when the plan models no medical spending; optional because only the annotation post-pass consumes
+   * it, and absent never raises the readiness flag.
+   */
   readonly noMedicalSpendingModeled?: boolean;
 }
 
-/** Resolved IRMAA look-back for one projection year. `estimatedFromProjection`
- *  is true only on the estimate path (years 0–1, on Medicare, no stored bootstrap →
- *  estimate from `magiBuffer[0]`). */
+// Resolved IRMAA look-back for one projection year; `estimatedFromProjection` marks the years 0-1 estimate
+// from `magiBuffer[0]` for a Medicare member with no stored bootstrap.
 interface MagiLookbackResolution {
   readonly value: number | undefined;
   readonly estimatedFromProjection: boolean;
 }
 
-/** Stored bootstrap for projection year `i` (0 → minus2, 1 → minus1). */
 function storedBootstrapForYear(
   i: number,
   minus2: number | undefined,
@@ -450,17 +366,9 @@ function storedBootstrapForYear(
   return undefined;
 }
 
-/**
- * Resolve `magiTwoYearsPriorDollars` for projection year `i`:
- *   - i ≥ 2: rolling buffer entry `magiBuffer[i - 2]`.
- *   - i ∈ {0, 1}: the stored lookback field (minus2 for year 0, minus1 for
- *     year 1). When that field is absent AND the household has a Medicare
- *     member this year (`onMedicareThisYear`), ESTIMATE the lookback from the
- *     engine's projected year-0 MAGI (`estimatedYear0Magi`) and flag it.
- *     `estimatedYear0Magi` is `undefined` for year 0 before its own MAGI is
- *     known — the caller handles year 0 via a recompute (see `processTaxYear`).
- *   - otherwise: `undefined` (IRMAA skipped).
- */
+// Resolves `magiTwoYearsPriorDollars` for year `i`: the rolling buffer entry for `i >= 2`, the stored
+// bootstrap for years 0-1, or for a Medicare member with none the projected year-0 MAGI (flagged). Year 0's
+// own MAGI is unknown until a first compute, which `processTaxYear` handles with a recompute.
 function magiLookback(args: {
   i: number;
   magiBuffer: number[];
@@ -473,33 +381,23 @@ function magiLookback(args: {
   if (i >= 2) return { value: magiBuffer[i - 2], estimatedFromProjection: false };
   const stored = storedBootstrapForYear(i, minus2, minus1);
   if (stored !== undefined) return { value: stored, estimatedFromProjection: false };
-  // No stored bootstrap. Estimate from the projected year-0 MAGI when a
-  // member is on Medicare this year. The flag fires even when the estimate is
-  // $0 (below-floor fallback) so the disclosure always shows.
+  // The flag fires even when the estimate is $0 (below-floor fallback), so the disclosure always shows.
   if (onMedicareThisYear && estimatedYear0Magi !== undefined) {
     return { value: estimatedYear0Magi, estimatedFromProjection: true };
   }
   return { value: undefined, estimatedFromProjection: false };
 }
 
-/** Outcome of one year's tax compute. `result` is null when the year is
- *  below the calibration floor (no modelable tax — caller skips the
- *  annotation but still counts the year as processed). */
+// `result` is null below the calibration floor (no modelable tax); the caller skips annotation but counts the
+// year as processed.
 interface YearTaxComputation {
   result: ReturnType<typeof applyTaxYear> | null;
   estimatedFromProjection: boolean;
 }
 
-/** MAGI look-back stepping + tax compute for one projection year:
- *  resolve the two-year-prior MAGI (ring / stored bootstrap / projected
- *  estimate), run `applyTaxYear`, perform the year-0 own-MAGI IRMAA
- *  recompute when on Medicare with no stored bootstrap, and handle the
- *  below-calibration-floor fallback. Always appends this year's MAGI
- *  sample to `magiBuffer` ($0 on the below-floor path) so the IRMAA
- *  two-year look-back ring stays index-aligned.
- *  Slightly over the 60-line shape cap (~63 physical lines): a quarter of
- *  the body is the decision commentary, which must stay with the code
- *  it explains — trimming it to hit the count would cost more than the cap buys. */
+// MAGI look-back stepping and tax compute for one year: resolves the two-year-prior MAGI, runs
+// `applyTaxYear`, recomputes year 0 on its own MAGI when on Medicare with no stored bootstrap, and handles
+// the below-floor fallback. Always appends this year's MAGI sample so the IRMAA ring stays index-aligned.
 function computeYearTaxWithMagiLookback(args: {
   i: number;
   magiBuffer: number[];
@@ -508,10 +406,8 @@ function computeYearTaxWithMagiLookback(args: {
   buildInput: (magiTwoYearsPriorDollars: number | undefined) => ApplyFilingPlanYearInput;
 }): YearTaxComputation {
   const { i, magiBuffer, shared, onMedicareThisYear, buildInput } = args;
-  // The year-0 projected MAGI estimate for the missing-bootstrap path.
-  // For year 1 it is already in `magiBuffer[0]`; for year 0 it is the year's
-  // OWN MAGI, which is only known after a first compute, so year 0 is handled
-  // by a recompute below (estimatedYear0Magi stays undefined for the first pass).
+  // Year 0's own MAGI is known only after a first compute, so year 0 recomputes below and its first pass has
+  // no estimate.
   const estimatedYear0Magi = i === 1 ? magiBuffer[0] : undefined;
   const lookback = magiLookback({
     i,
@@ -526,10 +422,8 @@ function computeYearTaxWithMagiLookback(args: {
   let estimatedFromProjection = lookback.estimatedFromProjection;
   try {
     result = applyTaxYearForFilingPlan(buildInput(lookback.value), shared.bundle);
-    // Year-0 recompute: when on Medicare in year 0 with no stored
-    // minus2 bootstrap, the lookback estimate IS this year's own projected
-    // MAGI. The first compute (above, lookback undefined → IRMAA skipped)
-    // yields that MAGI; recompute IRMAA with it as the look-back and flag it.
+    // Year-0 recompute: the lookback estimate is this year's own MAGI, from the first compute (IRMAA
+    // skipped).
     if (
       i === 0 &&
       onMedicareThisYear &&
@@ -541,16 +435,11 @@ function computeYearTaxWithMagiLookback(args: {
       estimatedFromProjection = true;
     }
   } catch (err) {
-    // Year below the calibration floor (e.g. a retired-in-the-past account
-    // projected from a pre-snapshot year) → no modelable tax. Skip the
-    // annotation gracefully; advance the buffer so the IRMAA look-back stays
-    // index-aligned (the post-pass mirrors the engine's graceful degradation).
+    // A year below the calibration floor has no modelable tax: skip annotation but advance the buffer so the
+    // look-back stays index-aligned.
     if (isUnsupportedTaxYear(err)) {
       magiBuffer.push(0);
-      // Below-floor fallback: when a member is on Medicare in projection
-      // year 0–1 with no stored bootstrap and the engine cannot produce a
-      // year-0 MAGI, the estimate falls back to $0 (IRMAA naturally skipped)
-      // but the disclosure flag STILL fires so the assumption is surfaced.
+      // Below-floor fallback: the estimate is $0 (IRMAA skipped) but the disclosure flag still fires.
       const flagBelowFloorEstimate =
         i <= 1 &&
         onMedicareThisYear &&
@@ -564,10 +453,8 @@ function computeYearTaxWithMagiLookback(args: {
   return { result, estimatedFromProjection };
 }
 
-/** Per-year body extracted from `applyTaxIntegrationToDrawdownYears`
- *  Mutates the `year` and appends a MAGI sample into
- *  `magiBuffer`. Returns false when zero members are alive (caller
- *  should still advance i but leave the year's tax fields undefined). */
+// Per-year body of `applyTaxIntegrationToDrawdownYears`; mutates `year` and appends a MAGI sample. Returns
+// false when no member is alive.
 function processTaxYear(
   year: DrawdownYear,
   i: number,
@@ -576,8 +463,7 @@ function processTaxYear(
   magiBuffer: number[],
   unitRing: FilingUnitRingEntry[],
   rothBasisCarrier: RothBasisCarrier,
-  /** The ACCOUNT-keyed designated-Roth carrier (pro-rata regime).
-   *  Mutated in place across the year loop alongside `rothBasisCarrier`. */
+  /** Account-keyed designated-Roth carrier (pro-rata regime), mutated in place across the year loop. */
   designatedRothCarrier: DesignatedRothCarrier,
   basisState: BrokerageLikeBasisState,
 ): boolean {
@@ -592,8 +478,7 @@ function processTaxYear(
     secondaryAlive,
     filingStatusOverride: ctx.resolvedScenario.filingStatus ?? undefined,
   });
-  // Resolve the year's filing plan into tax units. `taxUnits === undefined`
-  // is the legacy branch — an unresolvable legacy scalar keeps `filingStatus` above.
+  // `taxUnits === undefined` is the legacy branch: an unresolvable scalar keeps `filingStatus`.
   const filing = resolveYearFiling({
     ctx,
     taxYear,
@@ -608,9 +493,8 @@ function processTaxYear(
   const withdrawalSplit = splitWithdrawalsByTaxTreatment(ctx, year);
   const { preTax, postTaxNonRoth, postTaxCashLike, roth } = withdrawalSplit;
   const priorYear = i > 0 ? years[i - 1] : undefined;
-  // The year TWO before this one sizes a first-year-deferral catch-up
-  // ("two RMDs in one year"); absent in the first two projection years, where the
-  // engine reports the catch-up as a blocker instead of guessing a base.
+  // The year two before this one sizes a first-year-deferral catch-up; absent in the first two years, where
+  // the engine reports a blocker instead of guessing.
   const priorPriorYear = i > 1 ? years[i - 2] : undefined;
   const accounts = buildAccountSnapshotsFromPriorYear(
     ctx,
@@ -618,10 +502,8 @@ function processTaxYear(
     shared.ledgerAccounts,
     priorPriorYear,
   );
-  // Advance the per-brokerage-like-account cost-basis accumulator with
-  // this year's contributions + reinvested yield BEFORE the withdrawal, take
-  // the pre-withdrawal basis fraction for the withdrawal-time LTCG gain, then
-  // deplete basis. The start-of-year brokerage-like balance is the yield base.
+  // Advance each brokerage-like account's cost basis with this year's contributions and reinvested yield
+  // before the withdrawal, take the pre-withdrawal fraction for the LTCG gain, then deplete basis.
   const assumedYieldPct = resolveAssumedTaxableYieldConfig(
     shared.bundle.assumedTaxableYield,
     taxYear,
@@ -632,14 +514,11 @@ function processTaxYear(
     basisState,
     assumedYieldPct,
   );
-  // Annual ordinary taxable interest from cash-like accounts (savings/
-  // money-market/CD realized growth; HSA excluded — tax-free). Same helper +
-  // formula as the MC representative-display post-pass (monte-carlo-tax-burden.ts);
-  // both engines' FUNDED per-path/per-year tax deliberately omit this component.
+  // Cash-like interest (HSA excluded, tax-free) via the same helper as `monte-carlo-tax-burden.ts`; both
+  // engines' funded tax deliberately omits this component.
   const cashLikeYearAccounts = buildCashLikeYearAccounts(ctx, year, priorYear, shared.ledgerAccounts);
   const cashInterestDollars = computeCashLikeInterestDollars(cashLikeYearAccounts);
-  // The owner behind each of those dollars, so a `separate` couple's two
-  // returns report what they actually own instead of half of everything.
+  // The owner behind each dollar, so a `separate` couple's returns report what they own.
   const ownerAttributedAmounts: OwnerAttributedAmounts = {
     preTaxWithdrawalDollars: withdrawalSplit.byOwner.preTax,
     postTaxNonRothWithdrawalDollars: withdrawalSplit.byOwner.postTaxNonRoth,
@@ -649,21 +528,12 @@ function processTaxYear(
     brokerageLikeStartBalanceDollars: brokerageStartBalanceByOwner(brokerageYearAccounts),
   };
   const acaOverride = shared.acaPtcBenchmarkOverrides.find((o) => o.taxYear === taxYear);
-  // The look-back gate must use the SAME month-aware
-  // predicate the IRMAA surcharge gate uses. Reading the whole-year
-  // `onMedicare` boolean here would let a beneficiary with stated Medicare months but
-  // a false age-derived flag pass the surcharge gate with no look-back MAGI —
-  // the surcharge would be silently skipped and its disclosure never rendered.
+  // The look-back gate uses the month-aware predicate the IRMAA surcharge gate uses; the whole-year
+  // `onMedicare` boolean would let a surcharge be skipped with no look-back MAGI and no disclosure.
   const onMedicareThisYear = anyMemberOnMedicare(members);
-  // Cumulative owner-level §408A Roth-IRA ordering. Consume each owner's
-  // remaining derived basis first (tax/penalty-free); the earnings excess above
-  // the owner's cumulative basis is taxed as ordinary income AND fed to the Roth
-  // earnings-penalty branch (10% pre-59½). The carrier is mutated across years.
-  //
-  // Computed ONCE here — it is MAGI-independent. `buildInput` (below) is called
-  // up to twice for the IRMAA look-back recompute, but the Roth split is
-  // identical for every look-back value and the carrier mutation MUST run only
-  // once per year, so `rothSplit` is resolved outside the closure and reused.
+  // Cumulative owner-level §408A ordering: basis is consumed first, and the earnings excess is ordinary
+  // income and feeds the Roth earnings penalty (10% pre-59½). Computed once, outside `buildInput`, since it
+  // is MAGI-independent and the carrier mutation must run once per year.
   const rothSplit = applyRothBasisOrdering(
     ctx,
     year,
@@ -671,7 +541,6 @@ function processTaxYear(
     designatedRothCarrier,
   );
 
-  /** Assemble the per-year input for a given IRMAA look-back value. */
   const buildInput = (magiTwoYearsPriorDollars: number | undefined): ApplyFilingPlanYearInput =>
     buildTaxYearInput({
       taxYear,
@@ -690,49 +559,31 @@ function processTaxYear(
       postTaxNonRoth,
       postTaxCashLike,
       roth,
-      // Fold the Roth earnings-excess (above cumulative §408A basis)
-      // into ordinary income. MAGI-independent → safe to add for every
-      // look-back value (rothSplit was computed once, above).
-      //
-      // A Fill-mode Roth conversion is ALSO ordinary income for the
-      // year — it raises BOTH divergent MAGIs (federal/IRMAA + ACA, via the
-      // shared ordinary-income → MAGI add-back), NIIT (MAGI-threshold), and the
-      // senior-bonus phase-out (conversion-inclusive MAGI). It SUMS on top
-      // of withdrawals; it is NOT a distribution, so it is deliberately absent
-      // from `penaltyAccounts` (excluded from the §72(t) 10% penalty).
+      // Roth earnings excess folds into ordinary income, and a Fill-mode conversion adds ordinary income too
+      // (raising both MAGIs, NIIT and the senior-bonus phase-out); it is not a distribution, so it is absent
+      // from `penaltyAccounts` and the §72(t) penalty.
       otherOrdinaryIncomeDollars:
         otherOrdinaryIncomeForYear(shared.nonSsIncomeRows, taxYear) +
         rothSplit.earningsExcessDollars +
         (year.rothConvertedCents ?? 0) / 100 +
-        // The rollover-year RMD from a linked-CBP lump-sum is ordinary
-        // income for the year, taxed exactly once via this canonical inlet.
-        // No-double-tax: the rolled-CBP source is excluded from the
-        // per-account ledger entirely, so the forced-RMD reconciliation never
-        // counts these dollars (`rmdFloorByAccountDollars` sees only ledger
-        // accounts).
+        // The rollover-year RMD is ordinary income taxed once here; the rolled-CBP source is excluded from
+        // the ledger, so the forced-RMD reconciliation never counts it.
         (shared.rolledRmdIncomeByYear.get(taxYear) ?? 0),
       accounts,
       members,
       householdSize: members.length,
       magiTwoYearsPriorDollars,
       acaBenchmarkSlcspDollars: acaOverride?.annualSlcspDollars,
-      // The scenario's FPL region (Alaska / Hawaii use their own,
-      // higher HHS poverty guidelines). Absent → contiguous 48 + DC.
+      // Alaska and Hawaii use their own, higher HHS poverty guidelines.
       acaFplRegion: ctx.acaFplRegion,
       taxpayersAge65Plus: countTaxpayersAge65Plus(ctx, taxYear, primaryAlive, secondaryAlive),
-      // Per-account pre-withdrawal cost basis + start-of-year brokerage-like
-      // balance (the yield base), threaded from advanceBrokerageLikeBasis.
       costBasisFraction: preWithdrawalBasisFraction,
       brokerageLikeStartBalanceDollars: startBalanceDollars,
-      // Annual cash-like interest (MAGI-independent → identical across the
-      // IRMAA look-back recompute; computed once above).
       cashInterestDollars,
       inflationRatePct: shared.inflationRatePct,
       medicalInflationRatePct: shared.medicalInflationRatePct,
       hsaQualifiedMedicalExpensePct: shared.hsaQualifiedMedicalExpensePct,
       earlyWithdrawalPenaltyExemptAccountIds: shared.earlyWithdrawalPenaltyExemptAccountIds,
-      // Append the Roth earnings-penalty accounts to the per-year
-      // penalty inputs. MAGI-independent → identical across look-back values.
       penaltyAccounts: [...buildPenaltyAccountsForYear(ctx, year), ...rothSplit.penaltyAccounts],
     });
 
@@ -743,21 +594,14 @@ function processTaxYear(
     onMedicareThisYear,
     buildInput,
   });
-  // Buffer THIS year's returns (each with its own members, status, and
-  // MAGI) so the year-two-later surcharge tiers every return on its own
-  // look-back. A below-floor year buffers an empty list, exactly like the $0
-  // MAGI sample the helper already pushed.
+  // Buffer this year's returns so the year-two-later surcharge tiers every return on its own look-back; a
+  // below-floor year buffers an empty list.
   unitRing[i] = computed.result?.filingUnitMagi ?? [];
   if (computed.estimatedFromProjection) year.magiEstimatedFromProjection = true;
-  // Credit this year's Fill-mode converted principal to the target Roth's
-  // §408A basis carrier, AFTER `applyRothBasisOrdering` (rothSplit, above) drew
-  // down basis for this year's Roth withdrawals — the converted dollars land at
-  // year-end, so they are basis only for LATER years. Runs on both the
-  // below-floor and modelable paths (a conversion can occur in a below-floor
-  // year too, though the engine only converts when a cap is active).
+  // Credit converted principal after `applyRothBasisOrdering` drew down basis, since converted dollars land
+  // at year end and are basis only for later years; runs on the below-floor path too.
   creditRothConversionToBasisCarrier(ctx, year, rothBasisCarrier);
-  // Below the calibration floor — no modelable tax; the year still counts as
-  // processed (the helper already advanced the MAGI ring with a $0 sample).
+  // Below the calibration floor the year still counts as processed; the MAGI ring already advanced with $0.
   if (computed.result === null) return true;
   annotateYearWithTaxResult({
     ctx,
@@ -772,8 +616,8 @@ function processTaxYear(
   return true;
 }
 
-/** Shared error `code` for every engine's `UnsupportedTaxYearError`. A
- *  projection year below the calibration floor has no modelable tax. */
+// Shared error `code` of every engine's `UnsupportedTaxYearError`: a year below the calibration floor has no
+// modelable tax.
 function isUnsupportedTaxYear(err: unknown): boolean {
   return (
     typeof err === 'object' &&
@@ -784,18 +628,8 @@ function isUnsupportedTaxYear(err: unknown): boolean {
 }
 
 /**
- * Apply tax-integration to all drawdown years in-place.
- *
- * Mutates `years` by setting the 15 optional tax fields on each
- * `DrawdownYear` (federalTaxCents, taxableSsCents, etc.). Runs for every named
- * strategy.
- *
- * @param years - The mutable `DrawdownYear[]` from `simulateDrawdown`.
- * @param ssRows - Per-month SS income rows for SS gross rollup.
- * @param nonSsIncomeRows - Per-month non-SS income rows for `otherOrdinaryIncome`.
- * @param ledgerAccounts - Per-account drawdown inputs (for year-0 RMD basis).
- * @param ctx - Pipeline context (members, accounts, scenario overrides).
- * @param bundle - Calibration bundle for the 5 tax engines.
+ * Applies tax integration to all drawdown years in place, setting the optional tax fields (federalTaxCents,
+ * taxableSsCents, and so on) on each `DrawdownYear`.
  */
 export function applyTaxIntegrationToDrawdownYears(
   years: DrawdownYear[],
@@ -806,22 +640,13 @@ export function applyTaxIntegrationToDrawdownYears(
   bundle: TaxCalibrationBundle,
   /** Per-calendar-year rolled-CBP RMD ordinary income (dollars). */
   rolledRmdIncomeByYear: ReadonlyMap<number, number> = new Map(),
-  /** True when the plan models ANY medical spending
-   *  (`CashflowSeries.anyMedicalSpendingModeled`). Its NEGATION — combined with
-   *  a charged IRMAA surcharge — sets the missing-base-Medicare-premium
-   *  readiness flag.
-   *
-   *  This is the FULL `isMedical` expense inventory, NOT the
-   *  HSA-qualified `medicalDemandByMonth` sub-series the drawdown engine
-   *  spends: Medicare, Medigap and drug-plan premiums are never HSA-qualified
-   *  (§223(d)(2)(C)(iv) allows only a narrow set), so a household that DID
-   *  record its premiums would otherwise be told it models no medical spending
-   *  at all.
-   *
-   *  OMITTED means "this caller has no expense inventory", which is NOT
-   *  the same as "the plan models nothing". Only an explicit `false` raises the
-   *  flag; `undefined` suppresses it, so a focused unit test that never passes
-   *  an expense series can never stamp a readiness warning. */
+  /**
+   * True when the plan models any medical spending (`CashflowSeries.anyMedicalSpendingModeled`); its negation
+   * with a charged IRMAA surcharge raises the missing-base-Medicare-premium flag. It is the full `isMedical`
+   * inventory, not the HSA-qualified demand, because Medicare, Medigap and drug-plan premiums are never
+   * HSA-qualified (§223(d)(2)(C)(iv)).
+   * Omitted means the caller has no expense inventory; only an explicit `false` raises the flag.
+   */
   anyMedicalSpendingModeled?: boolean,
 ): void {
   const resolved = ctx.resolvedScenario;
@@ -837,59 +662,39 @@ export function applyTaxIntegrationToDrawdownYears(
     seedBasisFraction,
     magiBootstrapMinus2: resolved.magiBootstrapLookbackMinus2,
     magiBootstrapMinus1: resolved.magiBootstrapLookbackMinus1,
-    // The stored array reaches this engine straight off an
-    // envelope-only-validated scenario aggregate; the ONE shared enumerator
-    // shape-checks it so a non-array import cannot throw the whole projection
-    // and a malformed row cannot price a benchmark.
+    // The stored array comes from an envelope-only-validated aggregate, so the shared enumerator shape-checks
+    // it: a non-array import cannot throw the projection and a malformed row cannot price a benchmark.
     acaPtcBenchmarkOverrides: storedAcaBenchmarkOverrides(resolved.acaPtcBenchmark),
     inflationRatePct: ctx.projCtx.inflationPct,
     medicalInflationRatePct: ctx.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: resolved.hsaQualifiedMedicalExpensePct ?? 100,
     earlyWithdrawalPenaltyExemptAccountIds: resolved.earlyWithdrawalPenaltyExemptAccountIds ?? [],
-    // ONE shared derivation with the Monte Carlo twin
-    // (`resolveHouseholdDeathYears`). `undefined` (no derivable death year) maps
-    // to `Infinity` here because this engine compares plain numbers; MC omits
-    // the field and treats it as alive. Both therefore read the member as ALIVE
-    // — never `NaN`, which silently made a member with a malformed
-    // imported birthdate dead in every year on this engine only.
+    // Shared derivation with the MC twin (`resolveHouseholdDeathYears`); no derivable death year maps to
+    // `Infinity` (alive), never `NaN`, which made a member with a malformed imported birthdate dead every
+    // year on this engine only.
     primaryDeathYear: deathYears.primaryDeathYear ?? Infinity,
     secondaryDeathYear: deathYears.secondaryDeathYear ?? Infinity,
     rolledRmdIncomeByYear,
     noMedicalSpendingModeled,
   };
-  // Rolling MAGI buffer: index i holds MAGI in dollars for year[i].
-  // IRMAA for year[i] uses magiBuffer[i - 2].
+  // Index `i` holds year `i`'s MAGI; IRMAA for year `i` uses `magiBuffer[i - 2]`.
   const magiBuffer: number[] = [];
-  // The parallel PER-TAX-UNIT look-back ring. Index i holds
-  // one entry per return filed in year[i] (its own members, status, and MAGI);
-  // IRMAA for year[i] reads unitRing[i - 2], so every return is tiered on the
-  // return IT filed two years earlier — a survivor's first Single year uses the
-  // joint return's own MAGI + schedule, and two separate returns never share
-  // one merged MAGI or one tier ladder.
+  // The parallel per-tax-unit look-back ring: IRMAA for year `i` reads `unitRing[i - 2]`, so each return is
+  // tiered on the return it filed two years earlier and separate returns never share a MAGI or tier ladder.
   const unitRing: FilingUnitRingEntry[] = [];
-  // The FACT-BASED §408A carriers, seeded once per run.
-  //
-  // Two carriers, because the two regimes differ: the owner-keyed carrier
-  // holds each owner's REMAINING Roth-IRA regular-contribution basis and conversion
-  // lots, both derived from the pool's recorded balance history
-  // (contribution-first, lots FIFO with their own five-year clocks), while the
-  // ACCOUNT-keyed designated carrier holds each employer designated-Roth account's
-  // own basis, five-year participation clock and in-plan-rollover lots (pro rata,
-  // never pooled). A single pooled carrier seeded from at-retirement BALANCES
-  // would treat an entire projected Roth balance as recoverable basis.
-  //
-  // Deterministic-only additions the MC seed never sees: the working-years
-  // converted-principal Roth-IRA basis, and the same-account MIXED in-plan
-  // conversion basis credited to its exact target account.
+  // Fact-based §408A carriers, seeded once per run: the owner-keyed carrier holds remaining Roth-IRA basis
+  // and conversion lots (contributions first, lots FIFO with their own clocks), and the account-keyed
+  // designated carrier holds each employer plan's own basis, clock and rollover lots (pro rata, never
+  // pooled); one pooled carrier seeded from balances would treat a whole projected Roth balance as basis. The
+  // working-years conversion basis is deterministic-only.
   const rothBasisCarrier = seedFactBasedRothBasisCarrier(
     mergeFactBasedRothIraSeeds(
-      // POOL-keyed: an owner's own Roth IRAs share one entry. An INHERITED
-      // Roth IRA contributes no pool here and therefore no carrier entry:
-      // its dollars are wholesale tax-free and never reach this carrier.
+      // Pool-keyed: an owner's own Roth IRAs share one entry, and an inherited Roth IRA contributes no pool
+      // and no carrier entry, since its dollars are tax-free.
       ctx.rothDistributionFacts.rothIraByPool,
       ctx.preRetirementConversionBasisCentsByOwner,
-      // DATED, so each engine-generated conversion becomes a real lot with
-      // its own five-tax-year §408A(d)(3)(F) recapture window.
+      // Dated, so each engine-generated conversion becomes a lot with its own five-tax-year §408A(d)(3)(F)
+      // recapture window.
       ctx.preRetirementConversionBasisCentsByOwnerYear,
     ),
   );
@@ -897,13 +702,12 @@ export function applyTaxIntegrationToDrawdownYears(
     mergeDesignatedRothSeeds(
       ctx.rothDistributionFacts.designatedByAccount,
       ctx.mixedInPlanConversionBasisCentsByAccount,
-      // DATED in-plan rollover lots (§402A(c)(4)(D) recapture windows).
+      // Dated in-plan rollover lots (§402A(c)(4)(D) recapture windows).
       ctx.mixedInPlanConversionBasisCentsByAccountYear,
     ),
   );
-  // Per-brokerage-like-account cost-basis accumulator carried across
-  // years (basis grows with reinvested yield + contributions, depletes on
-  // withdrawal). Seeded from the same fraction the static value used.
+  // Per-account cost-basis accumulator carried across years (grows with reinvested yield and contributions,
+  // depletes on withdrawal).
   const basisState: BrokerageLikeBasisState = {
     basisByAccountId: new Map<string, number>(),
     seedBasisFraction,
@@ -924,30 +728,17 @@ export function applyTaxIntegrationToDrawdownYears(
       designatedRothCarrier,
       basisState,
     );
-    // When a year is skipped (zero alive members), the buffer must
-    // still advance so the `i - 2` look-back for subsequent years stays
-    // aligned with the projection year index. Push 0 — the surviving cohort
-    // had no taxable income in the dead year, which is the correct IRMAA
-    // basis (zero MAGI two years prior).
+    // A skipped year (no alive members) still pushes 0 so the `i - 2` look-back stays aligned; zero MAGI is
+    // the right IRMAA basis for a dead year.
     if (!processed) magiBuffer.push(0);
   }
 }
 
-// ---------------------------------------------------------------------------
-// Per-tax-unit resolution seam
-// ---------------------------------------------------------------------------
-
 /**
- * Resolve a projection year's filing plan into tax units from the pipeline
- * context. The transition-safe successor to `deriveFilingStatus`: it returns
- * one resolved tax unit for a joint / survivor / individual year, two for a
- * `separate` couple, or an `unresolved` result when the legacy scalar cannot be
- * safely converted (the caller then keeps the scalar-status path and the scenario
- * editor prompts the user, never guessing a split).
- *
- * The scenario's stored `taxFilingPlan` supersedes the legacy scalar; it is
- * layered on here (rather than inside `buildFilingPlanContextForYear`) so the
- * shared context builder keeps serving both the deterministic and the MC seam.
+ * Resolves a projection year's filing plan into tax units from the pipeline context: one unit for a joint,
+ * survivor or individual year, two for a `separate` couple, or `unresolved` when the legacy scalar cannot be
+ * safely converted (the caller keeps the scalar path and the editor prompts the user). The stored
+ * `taxFilingPlan` supersedes the legacy scalar.
  */
 export function resolveTaxUnitsForYear(
   ctx: PipelineContext,
@@ -961,27 +752,10 @@ export function resolveTaxUnitsForYear(
   });
 }
 
-/**
- * The filing status of the return the household filed in `taxYear`, for a
- * year the projection never simulated.
- *
- * Projection years 0–1 tier IRMAA on returns filed BEFORE the projection starts,
- * so the per-unit ring has no entry for them. Leaving the look-back status
- * undefined would make the deterministic engine fall back to the CURRENT year's status
- * (`tax-integration.ts`'s `irmaaLookbackFilingStatus ?? filingStatus`), while
- * Monte Carlo resolves `taxYear - 2`'s own plan — so a spouse dying in
- * projection year 0 would have year 1 tiered on the survivor's `Single` schedule in one
- * engine and the couple's `MFJ` schedule in the other, off the SAME stored plan.
- * This mirrors MC's `resolveMcFilingForYear` for those two years: resolve the
- * plan for the look-back year with that year's own alive-state, falling back to
- * the legacy scalar derivation for the look-back year (never the current year's)
- * when the plan cannot be resolved.
- *
- * A look-back year with TWO returns (a separate-filing couple) also
- * reports them individually in `units`, so the caller can rebuild the per-return
- * look-back ring instead of collapsing both spouses onto the first one's
- * schedule.
- */
+// Filing status of the return filed in `taxYear`, for a year the projection never simulated. Years 0-1 tier
+// IRMAA on pre-projection returns, so without this the engine would use the current year's status while MC
+// resolves `taxYear - 2`'s own plan, tiering a surviving spouse differently on the two engines. A two-return
+// year (separate filers) is also reported per unit.
 function resolveBootstrapLookbackFiling(
   ctx: PipelineContext,
   lookbackYear: number,
@@ -1025,10 +799,8 @@ function resolveBootstrapLookbackFiling(
   };
 }
 
-/** Resolve one projection year's filing facts and read the two-year look-back
- *  returns out of the per-unit ring. Never throws: an unresolved plan
- *  yields `taxUnits: undefined`, which routes the year down the legacy scalar
- *  path unchanged. */
+// Resolves one year's filing facts and reads the two-year look-back returns from the per-unit ring. Never
+// throws: an unresolved plan gives `taxUnits: undefined`, the legacy scalar path.
 function resolveYearFiling(args: {
   ctx: PipelineContext;
   taxYear: number;
@@ -1046,13 +818,13 @@ function resolveYearFiling(args: {
       ? resolution.taxUnits
       : undefined;
   const plan = ctx.resolvedScenario.taxFilingPlan;
-  // The lived-together fact is a couple-level input on the `separate` plan and
-  // is only meaningful while both spouses are alive and filing separately.
+  // The lived-together fact is couple-level on the `separate` plan and meaningful only while both spouses are
+  // alive and filing separately.
   const mfsLivedWithSpouse =
     plan?.kind === 'separate' && (taxUnits?.length ?? 0) > 1 && plan.livedTogether === true;
   const lookbackUnits = (yearIndex >= 2 ? unitRing[yearIndex - 2] : undefined) ?? [];
-  // Projection years 0–1 have no ring entry; resolve the pre-projection
-  // look-back year's own return instead of inheriting this year's status.
+  // Years 0-1 have no ring entry; resolve the pre-projection look-back year's own return instead of
+  // inheriting this year's status.
   const bootstrapLookback =
     yearIndex >= 2
       ? undefined
@@ -1067,20 +839,20 @@ function resolveYearFiling(args: {
     memberIdByRole: { primary: ctx.primary.id, secondary: ctx.secondary?.id },
     mfsLivedWithSpouse,
     irmaaLookbackUnits: lookbackUnits,
-    // A two-return bootstrap look-back is rebuilt per return in
-    // `buildTaxYearInput`, which is where the year's household bootstrap MAGI
-    // (resolved by `magiLookback`) becomes available to divide across them.
+    // A two-return bootstrap look-back is rebuilt per return in `buildTaxYearInput`, where the year's
+    // household bootstrap MAGI becomes available.
     bootstrapLookbackUnits: bootstrapLookback?.units,
-    // Legacy fallback (no resolvable units): the single-status
-    // look-back. A resolved year reads `irmaaLookbackUnits` per return instead.
+    // Legacy single-status look-back; a resolved year reads `irmaaLookbackUnits` per return.
     irmaaLookbackFilingStatus: lookbackUnits[0]?.filingStatus ?? bootstrapLookback?.status,
     irmaaLookbackMfsLivedWithSpouse:
       lookbackUnits[0]?.mfsLivedWithSpouse ?? bootstrapLookback?.mfsLivedWithSpouse,
   };
 }
 
-/** Member ids that attain age 65 by the END of `taxYear` (IRS born-Jan-1 rule),
- *  so the age add-on and senior bonus land on the return that claims them. */
+/**
+ * Member ids that attain age 65 by the end of `taxYear` (IRS born-Jan-1 rule), so the age add-on and senior
+ * bonus land on the return that claims them.
+ */
 export function age65PlusMemberIdsForYear(
   ctx: PipelineContext,
   taxYear: number,
@@ -1101,12 +873,6 @@ export function age65PlusMemberIdsForYear(
   return ids;
 }
 
-// ---------------------------------------------------------------------------
-// Tax-cashflow hook — funds federal tax + IRMAA cash − ACA PTC into
-// the drawdown engine's per-year withdrawal target via the annual solver.
-// ---------------------------------------------------------------------------
-
-/** Build the shared per-year-loop context once (mirrors the post-pass). */
 function buildTaxLoopShared(
   ctx: PipelineContext,
   ssRows: TaxLoopShared['ssRows'],
@@ -1126,30 +892,22 @@ function buildTaxLoopShared(
     seedBasisFraction: resolved.assumedCostBasisFractionOfTaxableWithdrawal ?? 0.5,
     magiBootstrapMinus2: resolved.magiBootstrapLookbackMinus2,
     magiBootstrapMinus1: resolved.magiBootstrapLookbackMinus1,
-    // The stored array reaches this engine straight off an
-    // envelope-only-validated scenario aggregate; the ONE shared enumerator
-    // shape-checks it so a non-array import cannot throw the whole projection
-    // and a malformed row cannot price a benchmark.
+    // The stored array comes from an envelope-only-validated aggregate; the shared enumerator shape-checks
+    // it.
     acaPtcBenchmarkOverrides: storedAcaBenchmarkOverrides(resolved.acaPtcBenchmark),
     inflationRatePct: ctx.projCtx.inflationPct,
     medicalInflationRatePct: ctx.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: resolved.hsaQualifiedMedicalExpensePct ?? 100,
     earlyWithdrawalPenaltyExemptAccountIds: resolved.earlyWithdrawalPenaltyExemptAccountIds ?? [],
-    // ONE shared derivation with the Monte Carlo twin
-    // (`resolveHouseholdDeathYears`). `undefined` (no derivable death year) maps
-    // to `Infinity` here because this engine compares plain numbers; MC omits
-    // the field and treats it as alive. Both therefore read the member as ALIVE
-    // — never `NaN`, which silently made a member with a malformed
-    // imported birthdate dead in every year on this engine only.
+    // Shared derivation with the MC twin; no derivable death year maps to `Infinity` (alive), never `NaN`.
     primaryDeathYear: deathYears.primaryDeathYear ?? Infinity,
     secondaryDeathYear: deathYears.secondaryDeathYear ?? Infinity,
     rolledRmdIncomeByYear,
-    // Only the annotation post-pass consumes this; the funding hook never
-    // stamps the disclosure flag, so the fact is omitted here.
+    // Only the annotation post-pass consumes this; the funding hook omits it.
   };
 }
 
-/** Zero-need outcome — a dead year (no living members) funds no tax. */
+// Zero-need outcome for a dead year, which funds no tax.
 function emptyTaxOutcome(): TaxCashflowYearOutcome {
   return {
     addedNeedDollars: 0,
@@ -1165,39 +923,19 @@ function emptyTaxOutcome(): TaxCashflowYearOutcome {
   };
 }
 
-/**
- * Build the `TaxCashflowHook` the drawdown engine calls once per year to
- * fund federal tax + the IRMAA cash portion (minus the ACA PTC offset) into
- * the withdrawal target. Converts the annotation post-pass's per-year input
- * assembly into the solver-driving input (shared helper). Runs for
- * EVERY named strategy.
- *
- * The hook owns a rolling MAGI buffer for the IRMAA 2-year look-back. The
- * engine calls `solveForYear` in ascending year order, so the buffer fills
- * in lockstep with the projection year index. RMD-floor display fields are
- * owned by the separate annotation post-pass; this hook passes empty
- * `accounts` to the solver's `applyTaxYear` (the cashflow need does not
- * depend on the RMD-display floor — the pre-tax classification the engine
- * supplies already reflects the RMD-forced pre-tax draws).
- */
-/** Per-year solver input assembled by `buildSolverYearInput`. */
+// Per-year solver input assembled by `buildSolverYearInput`.
 interface SolverYearInput {
   readonly taxInputBase: ApplyFilingPlanYearInput;
-  /** Each member's OWN annual SS for the year, keyed by memberId — the
-   *  per-member IRMAA-withholding source. A Medicare member absent from
-   *  the map has no own SS, so their surcharge is a full cash need. */
+  /**
+   * Each member's own annual SS by member id, the per-member IRMAA-withholding source; a Medicare member
+   * absent from the map has no own SS, so the surcharge is a full cash need.
+   */
   readonly ownSsDollarsByMemberId: Readonly<Record<string, number>>;
 }
 
-/** Assemble the per-year tax input (classification fields zeroed — the
- *  solver overwrites them each pass from the engine classifier). Returns
- *  `null` when no member is alive (caller funds zero tax). Pushes the MAGI
- *  sample into the buffer for the dead-year case to keep the look-back
- *  index-aligned.
- *
- *  Resolves the SAME filing plan the annotation post-pass resolves, so the
- *  funded balances and the displayed tax never disagree about which return the
- *  household files. */
+// Assembles the per-year tax input with classification fields zeroed (the solver overwrites them each pass);
+// `null` when no member is alive, pushing the MAGI sample to keep the look-back aligned. Resolves the same
+// filing plan as the post-pass, so funded balances and displayed tax agree.
 function buildSolverYearInput(
   ctx: PipelineContext,
   shared: TaxLoopShared,
@@ -1242,14 +980,9 @@ function buildSolverYearInput(
     filing,
     ownSsDollarsByMemberId,
     age65PlusMemberIds: age65PlusMemberIdsForYear(ctx, taxYear, primaryAlive, secondaryAlive),
-    // The FUNDING solver has no committed per-account withdrawal split
-    // yet (the classifier overwrites the four bucket totals on every pass and
-    // reports them per BUCKET, not per owner), so a separate-filing year funds
-    // on the even split and the annotation post-pass above reports the exact
-    // owner-attributed figures. Same documented "funded-approximate,
-    // display-exact" boundary the yield-drag / cost-basis / cash-interest inputs
-    // already sit on. Gross Social Security IS attributed here —
-    // it comes from the SS series, not the withdrawal classifier.
+    // The funding solver has no committed per-account split yet, so a separate-filing year funds on the even
+    // split and the post-pass reports the exact owner-attributed figures. Gross SS is attributed here because
+    // it comes from the SS series.
     ownerAttributedAmounts: {},
     grossSsDollars,
     preTax: 0,
@@ -1258,20 +991,14 @@ function buildSolverYearInput(
     roth: 0,
     otherOrdinaryIncomeDollars:
       otherOrdinaryIncomeForYear(shared.nonSsIncomeRows, taxYear) +
-      // Fund the rollover-year RMD's incremental tax in the same year
-      // (same canonical ordinary-income inlet as the post-pass).
+      // Fund the rollover-year RMD's incremental tax in the same year.
       (shared.rolledRmdIncomeByYear.get(taxYear) ?? 0),
     accounts: [],
     members,
     householdSize: members.length,
-    // Read the two split lookback fields; for the funding solver the
-    // projected-MAGI estimate uses the solver's own `magiBuffer[0]`, which
-    // is available for year 1 but NOT for year 0 (its own MAGI is unknown
-    // before the within-year fixpoint converges, and feeding it back would
-    // break the contraction guarantee). So the FUNDING solver estimates IRMAA
-    // for year 1 in the no-bootstrap case but funds $0 for year 0; the
-    // authoritative year-0 estimate + disclosure lives in the annotation pass
-    // (`processTaxYear`), which is what the user sees.
+    // The funding solver estimates year-1 IRMAA from its own `magiBuffer[0]` but funds $0 for year 0 (its own
+    // MAGI is unknown before the fixpoint converges, and feeding it back would break the contraction
+    // guarantee); the authoritative year-0 estimate and disclosure live in `processTaxYear`.
     magiTwoYearsPriorDollars: magiLookback({
       i: yearIndex,
       magiBuffer,
@@ -1281,18 +1008,11 @@ function buildSolverYearInput(
       estimatedYear0Magi: yearIndex === 1 ? magiBuffer[0] : undefined,
     }).value,
     acaBenchmarkSlcspDollars: acaOverride?.annualSlcspDollars,
-    // Same FPL region as the annotation pass, so the funding solver
-    // and the displayed figures price the same poverty line.
+    // Same FPL region as the annotation pass.
     acaFplRegion: ctx.acaFplRegion,
     taxpayersAge65Plus: countTaxpayersAge65Plus(ctx, taxYear, primaryAlive, secondaryAlive),
-    // The cashflow solver runs BEFORE the committing per-account draw, so this
-    // year's per-account balances are not yet known. It therefore uses the
-    // STATIC seed basis fraction, a $0 brokerage-like yield base, and $0
-    // cash-like interest (documented approximation — the annual-yield drag,
-    // the evolving cost basis, and the cash-like interest are applied
-    // exactly in the post-pass annotation, which the user sees; their effect on
-    // the within-year cashflow solve is small relative to the draw, mirroring
-    // the same pre-commit treatment as `penaltyAccounts`).
+    // The solver runs before the committing draw, so it uses the static seed basis fraction, a $0 yield base
+    // and $0 cash-like interest (an approximation); the post-pass applies them exactly.
     costBasisFraction: shared.seedBasisFraction,
     brokerageLikeStartBalanceDollars: 0,
     cashInterestDollars: 0,
@@ -1300,39 +1020,17 @@ function buildSolverYearInput(
     medicalInflationRatePct: shared.medicalInflationRatePct,
     hsaQualifiedMedicalExpensePct: shared.hsaQualifiedMedicalExpensePct,
     earlyWithdrawalPenaltyExemptAccountIds: shared.earlyWithdrawalPenaltyExemptAccountIds,
-    // PASS 1 leaves `penaltyAccounts` empty (federal tax + IRMAA only).
-    // The SECOND pass in `solveForYear` re-solves with the penalty inputs built
-    // from pass 1's converged (committed) classification, so the early-
-    // withdrawal / HSA / Roth-earnings penalty is funded into the year's draw.
-    // The post-pass annotation
-    // still computes the EXACT per-account penalty against the committed
-    // `accountBalances` and owns the displayed `earlyWithdrawalPenaltyCents`.
+    // Pass 1 leaves `penaltyAccounts` empty (federal tax and IRMAA only); pass 2 in `solveForYear` builds the
+    // penalty inputs from pass 1's committed classification. The post-pass owns the exact displayed penalty.
     penaltyAccounts: [],
   });
   return { taxInputBase, ownSsDollarsByMemberId };
 }
 
-/** Map a solver result to the engine-facing per-year outcome.
- *
- *  The engine draw add-on (`addedNeedDollars`) raises the portfolio
- *  withdrawal by BOTH the cash tax need (`totalTaxCashflowNeedCents` — federal
- *  tax + IRMAA cash − ACA offset) AND the IRMAA portion WITHHELD from Social
- *  Security. The withheld surcharge shrinks the member's SS check, but the
- *  drawdown's spendable income series spends GROSS SS, so the portfolio must
- *  cover the shortfall — net spendable SS = gross − withheld. Adding the
- *  withheld amount here is equivalent to reducing the spendable SS series by it
- *  (net need = E − I, so lowering I by W ≡ raising the draw by W). It is counted
- *  exactly once (only in `addedNeedDollars`); `irmaaWithheldFromSsCents` stays
- *  a separate display field and `totalTaxCashflowNeedCents` (the cash portion)
- *  is unchanged. Gross SS still feeds MAGI / §86 / the IRMAA surcharge itself —
- *  this nets only the spendable income, never the tax computation.
- *
- *  The withheld-funded draw is ALSO taxed: the solver folds the withheld
- *  cents into its per-pass trial target (`tax-cashflow-solver.ts`), so the
- *  federal tax inside `totalTaxCashflowNeedCents` reflects the extra
- *  withheld-covering draw. This add-on still counts the withheld PRINCIPAL
- *  exactly once (here); the solver change raises only the tax on it. The credit
- *  applied to premiums is subtracted, so the add-on can be negative. */
+// Maps a solver result to the engine outcome. `addedNeedDollars` is the cash tax need plus the IRMAA withheld
+// from SS: the withheld surcharge shrinks the SS check while the income series spends gross SS, so the
+// portfolio covers it, counted once here. Its draw is also taxed (the solver folds it into the trial target),
+// and the premium credit is subtracted, so the add-on can be negative.
 function toTaxCashflowOutcome(
   result: ReturnType<typeof solveTaxCashflow>,
 ): TaxCashflowYearOutcome {
@@ -1354,6 +1052,13 @@ function toTaxCashflowOutcome(
   };
 }
 
+/**
+ * Builds the `TaxCashflowHook` the drawdown engine calls once per year to fund federal tax and the IRMAA cash
+ * portion (minus the ACA PTC offset) into the withdrawal target, for every named strategy.
+ * The hook owns a rolling MAGI buffer for the IRMAA two-year look-back and passes empty `accounts` to the
+ * solver, since the RMD-display floor does not change the cashflow need; RMD display fields belong to the
+ * annotation post-pass.
+ */
 export function buildTaxCashflowHook(args: {
   readonly ctx: PipelineContext;
   readonly ssRows: TaxLoopShared['ssRows'];
@@ -1363,8 +1068,10 @@ export function buildTaxCashflowHook(args: {
   readonly retirementYear: number;
   /** Per-calendar-year rolled-CBP RMD ordinary income (dollars). */
   readonly rolledRmdIncomeByYear?: ReadonlyMap<number, number>;
-  /** Monthly modeled Medical expenses (every `isMedical` row), integer cents,
-   *  aligned to (retirementYear, January). Absent → no credit is applied. */
+  /**
+   * Monthly modeled Medical expenses (every `isMedical` row), integer cents, aligned to (retirementYear,
+   * January); absent applies no credit.
+   */
   readonly medicalExpenseByMonthCents?: ReadonlyArray<number>;
 }): TaxCashflowHook {
   const { ctx, ssRows, nonSsIncomeRows, ledgerAccounts, bundle, retirementYear } = args;
@@ -1377,50 +1084,26 @@ export function buildTaxCashflowHook(args: {
     args.rolledRmdIncomeByYear ?? new Map(),
   );
   const magiBuffer: number[] = [];
-  // The funding pass keeps its own filing-status ring, in lockstep
-  // with its own `magiBuffer` (the engine calls `solveForYear` in ascending
-  // year order), so its IRMAA look-back is tiered on the same look-back return
-  // the annotation post-pass uses.
+  // The funding pass keeps its own filing-status ring, in lockstep with its `magiBuffer`, so its IRMAA
+  // look-back matches the post-pass.
   const unitRing: FilingUnitRingEntry[] = [];
-  // The FUNDING pass's own §408A carrier, seeded from the SAME
-  // fact-based sources as the post-pass carrier above (an independent copy — the
-  // funding solver consumes basis on its own trial path). The funding pass keeps
-  // an owner-keyed carrier: §408A pools are flattened only WITHIN each owner
-  // (`flattenRothIraPoolsByOwner`), and each drawn owner consumes their OWN
-  // basis/lots — and is qualified by their OWN entry's clock + their own 59½
-  // status — via the classifier's per-account attribution
-  // (`rothIraDollarsByAccountId`); the household-conservative qualification
-  // reduction remains only for attribution-free classifications. The post-pass
-  // carrier keeps the real pools.
-  //
-  // The carrier holds §408A material ONLY: Roth-IRA pool basis + conversion
-  // lots, and the working-years converted principal. Designated-Roth basis of
-  // EVERY kind stays off it: the NON-inherited roll-ups live exclusively on the
-  // pooled designated state below (so a Roth-IRA draw can never consume a
-  // designated plan's rollover lots, nor a designated draw the owner's §408A
-  // contribution basis — the aliasing that mis-funded both directions), and an
-  // INHERITED designated plan's basis lives on the separate INHERITED pooled
-  // state (its draws carry their own classifier subset; the death event, not
-  // §408A ordering, decides their tax — §402A(d)(2)(B)(i) / §72(t)(2)(A)(ii)).
+  // The funding pass's own §408A carrier, an independent copy seeded from the same facts as the post-pass
+  // carrier and owner-keyed (`flattenRothIraPoolsByOwner`). It holds §408A material only: designated-Roth
+  // basis stays on the pooled designated state, so a Roth-IRA draw never consumes a designated plan's
+  // rollover lots nor the reverse; inherited designated plans use their own pooled state (§402A(d)(2)(B)(i),
+  // §72(t)(2)(A)(ii)).
   const rothBasisCarrier = seedFactBasedRothBasisCarrier(
     mergeFactBasedRothIraSeeds(
       flattenRothIraPoolsByOwner(ctx.rothDistributionFacts.rothIraByPool),
       ctx.preRetirementConversionBasisCentsByOwner,
-      // Keep engine-generated conversion principal dated in the funding copy,
-      // matching the annotation carrier's §408A(d)(3)(F) recapture windows.
+      // Conversion principal stays dated here, matching the annotation carrier's §408A(d)(3)(F) recapture
+      // windows.
       ctx.preRetirementConversionBasisCentsByOwnerYear,
     ),
   );
-  // The pooled DESIGNATED-Roth state that accompanies the carrier: basis,
-  // dated in-plan-rollover lots (each with its own five-tax-year §402A(c)(4)(D)
-  // recapture window), participation clock and running pooled balance, seeded
-  // from the SAME merged per-account facts the annotation pass seeds its
-  // per-account carrier from — so engine-generated MIXED in-plan conversion
-  // principal arrives as dated lots here exactly as it does there. The
-  // designated slice of the Roth bucket runs the same
-  // `computeDesignatedRothDistribution` pro-rata + ordered-lot allocation
-  // against it, which is what makes the funded recapture the figure the
-  // annotation reports.
+  // The pooled designated-Roth state (basis, dated rollover lots with §402A(c)(4)(D) windows, clock, running
+  // balance) seeds from the same merged per-account facts as the annotation carrier, so the funded recapture
+  // equals the reported one.
   const designatedSeedFacts = mergeDesignatedRothSeeds(
     ctx.rothDistributionFacts.designatedByAccount,
     ctx.mixedInPlanConversionBasisCentsByAccount,
@@ -1430,8 +1113,8 @@ export function buildTaxCashflowHook(args: {
     designatedSeedFacts,
     solverDesignatedRothBalanceCentsByOwner(ctx, ledgerAccounts),
   );
-  // The INHERITED pooled companion: same primitive, entries flagged
-  // `inheritedFromDeceasedOwner: true`, fed by the inherited classifier subset.
+  // The inherited pooled companion, entries flagged `inheritedFromDeceasedOwner: true`, fed by the inherited
+  // classifier subset.
   const solverInheritedDesignatedRoth = seedSolverInheritedDesignatedRothStates(
     designatedSeedFacts,
     solverDesignatedRothBalanceCentsByOwner(ctx, ledgerAccounts, true),
@@ -1453,18 +1136,10 @@ export function buildTaxCashflowHook(args: {
     );
     if (yearInput === null) return emptyTaxOutcome();
     const medicalExpenseCents = sumYearCents(args.medicalExpenseByMonthCents ?? [], yearIndex);
-    // Hybrid IRMAA: each Medicare member's surcharge is withheld only from
-    // THAT member's own SS (mirrors CMS per-beneficiary collection). A member
-    // on Medicare but not yet claiming their own SS (own SS $0) → full cash
-    // need; withholding never reaches across to a spouse's SS.
-    //
-    // Two-pass penalty funding. PASS 1: solve the cashflow draw with
-    // `penaltyAccounts: []` (federal tax + IRMAA only), producing the converged
-    // target whose classification is the committed per-bucket split. PASS 2:
-    // build the early-withdrawal / HSA / Roth-earnings penalty inputs from that
-    // committed split (a FIXED input — pass 2 does not re-classify), then
-    // re-solve so the penalty is funded into balances. Skip pass 2 when no
-    // penalizable basis exists (no extra draw — the common 59½+ case).
+    // Hybrid IRMAA: each Medicare member's surcharge is withheld only from that member's own SS (CMS
+    // per-beneficiary collection); a member with no own SS owes full cash.
+    // Two-pass penalty funding: pass 1 solves with no penalty inputs; pass 2 builds them from that committed
+    // split and re-solves, and is skipped when no penalizable basis exists.
     const pass1 = solveTaxCashflow({
       ordinaryNetNeedDollars,
       taxInputBase: yearInput.taxInputBase,
@@ -1473,11 +1148,9 @@ export function buildTaxCashflowHook(args: {
       classifyForTarget: classify,
       medicalExpenseCents,
     });
-    // The committed classification covers the draw BEFORE the credit applied to
-    // premiums lowers it (`ordinaryNetNeed + totalTaxCashflowNeed +
-    // irmaaWithheldFromSs`): the credit, the Roth earnings and the penalties are
-    // all priced on that draw, as the stress test prices them. Omitting the
-    // withheld cents under-states the Roth / penalty basis in withheld-IRMAA years.
+    // The committed classification covers the draw before the premium credit lowers it
+    // (`ordinaryNetNeed + totalTaxCashflowNeed + irmaaWithheldFromSs`); omitting the withheld cents would
+    // understate the Roth and penalty basis in withheld-IRMAA years.
     const committedTarget =
       ordinaryNetNeedDollars +
       (pass1.totalTaxCashflowNeedCents + pass1.irmaaWithheldFromSsCents) / 100;
@@ -1491,10 +1164,8 @@ export function buildTaxCashflowHook(args: {
       designatedRoth: solverDesignatedRoth,
       inheritedDesignatedRoth: solverInheritedDesignatedRoth,
     });
-    // Pass 2 runs when EITHER leg produced something: a year can carry taxable
-    // Roth excess (ordinary income) with NO penalty snapshot — e.g. a
-    // nonqualified draw by an owner past 59½ — and skipping pass 2 then would
-    // leave that income unfunded.
+    // Pass 2 runs when either leg produced something: taxable Roth excess with no penalty snapshot (an owner
+    // past 59½) would otherwise go unfunded.
     const result =
       penaltyAccounts.length === 0 && rothEarningsExcessDollars === 0
         ? pass1
@@ -1513,32 +1184,18 @@ export function buildTaxCashflowHook(args: {
             rothEarningsIncomeDollars: rothEarningsExcessDollars,
           });
     magiBuffer.push(result.taxYearResult.magiCents / 100);
-    // The funding solver keeps its own per-return look-back ring in
-    // lockstep with its MAGI buffer, so the funded IRMAA and the displayed
-    // IRMAA agree on which return each surcharge is tiered against.
+    // The funding solver's ring runs in lockstep with its MAGI buffer, so funded and displayed IRMAA tier on
+    // the same return.
     unitRing[yearIndex] = result.taxYearResult.filingUnitMagi ?? [];
     return toTaxCashflowOutcome(result);
   };
 
-  /**
-   * Fill-mode conversion solve. Builds the year's tax input with the
-   * COMMITTED withdrawal classification baked in, then runs the outer bisection
-   * (`solveFillConversion`) to size the auto-conversion against the selected
-   * MAGI line. The conversion is layered on as ADDITIONAL ordinary income inside
-   * the bisection probes — never folded into `preTaxWithdrawalDollars` (which
-   * would wrongly feed the §72(t) penalty basis; a conversion is not a
-   * distribution). Side-effect-free: a throwaway copy of the IRMAA
-   * look-back ring is used so the year's MAGI sample (already pushed by
-   * `solveForYear`) is never double-counted. Returns 0 when no headroom exists.
-   *
-   * Note: the converted principal becomes Roth §408A basis, credited to the
-   * AUTHORITATIVE post-pass carrier against the EXACT committed `rothConvertedCents`
-   * (`creditRothConversionToBasisCarrier` in the annotation pass). The funding-pass
-   * carrier here is deliberately NOT credited — the engine-committed amount can
-   * differ from this solve's result when pre-tax buckets are exhausted, and the
-   * post-pass owns the displayed Roth-earnings penalty (the same solver-vs-post-pass
-   * precision split used throughout this hook).
-   */
+  // Fill-mode conversion solve: builds the year's tax input with the committed withdrawal classification and
+  // runs the outer bisection against the selected MAGI line. The conversion is added ordinary income, never
+  // folded into `preTaxWithdrawalDollars` (not a distribution, so outside the §72(t) basis). Side-effect-free
+  // via a throwaway ring copy.
+  // The funding carrier is not credited: the committed `rothConvertedCents` can differ, and the post-pass
+  // credits the authoritative carrier.
   const solveFillConversionForYear = (
     yearIndex: number,
     withdrawalClassification: TaxCashflowYearClassification,
@@ -1548,11 +1205,8 @@ export function buildTaxCashflowHook(args: {
   ): number => {
     if (convertibleRoomDollars <= 0) return 0;
     const taxYear = retirementYear + yearIndex;
-    // Reuse a SNAPSHOT of the look-back ring (solveForYear already advanced the
-    // real buffer for this year) so the probe sees the same IRMAA look-back MAGI
-    // without mutating the live ring.
-    // The per-unit look-back ring is likewise snapshotted — `solveForYear`
-    // already stamped this year's entry, and the probe must not re-stamp it.
+    // Use a snapshot of the look-back ring and the per-unit ring, since `solveForYear` already advanced them
+    // for this year.
     const yearInput = buildSolverYearInput(
       ctx,
       shared,
@@ -1562,8 +1216,8 @@ export function buildTaxCashflowHook(args: {
       [...unitRing],
     );
     if (yearInput === null) return 0;
-    // Bake the committed withdrawal classification into the tax input so the
-    // bisection's "MAGI at conv=0" reflects the year's actual withdrawals.
+    // Bake in the committed withdrawal classification so the bisection's MAGI at conv=0 reflects the year's
+    // actual withdrawals.
     const taxInputBase: ApplyFilingPlanYearInput = {
       ...yearInput.taxInputBase,
       preTaxWithdrawalDollars: withdrawalClassification.preTaxDollars,
@@ -1581,24 +1235,11 @@ export function buildTaxCashflowHook(args: {
     return convertedDollars;
   };
 
-  /**
-   * Fund the conversion's same-year incremental ordinary-income tax. The
-   * conversion is sized by `solveFillConversionForYear`; this then computes the
-   * EXTRA same-year tax cashflow need it creates so the engine draws it from
-   * cap-safe balances (otherwise ending balances are overstated by the unfunded
-   * conversion tax and Fill spuriously dominates Minimize).
-   *
-   * Need = conversion-inclusive funding solve − withdrawals-only funding solve,
-   * using the same `totalTaxCashflowNeed + irmaaWithheldFromSs` composition the
-   * engine funds for ordinary withdrawals (`toTaxCashflowOutcome`). The
-   * conversion is layered as ADDITIONAL ordinary income (never a pre-tax
-   * withdrawal — it is not a distribution); the cap-safe funding draw the
-   * caller makes is MAGI-free, so a single incremental solve is exact.
-   *
-   * Side effect: REPLACE the year's live IRMAA look-back MAGI sample
-   * (`solveForYear` pushed the conv=0 MAGI) with the conversion-inclusive MAGI,
-   * so the conversion's Y+2 surcharge is FUNDED, not merely displayed.
-   */
+  // Funds the conversion's same-year incremental ordinary-income tax: the conversion-inclusive funding solve
+  // minus the withdrawals-only solve, composed as `toTaxCashflowOutcome` does. The funding draw is cap-safe
+  // (MAGI-free), so one incremental solve is exact.
+  // It replaces the year's live IRMAA look-back MAGI sample with the conversion-inclusive one, so the Y+2
+  // surcharge is funded, not just displayed.
   const fundConversionTaxForYear = (
     yearIndex: number,
     withdrawalClassification: TaxCashflowYearClassification,
@@ -1606,10 +1247,8 @@ export function buildTaxCashflowHook(args: {
   ): number => {
     if (convertedDollars <= 0) return 0;
     const taxYear = retirementYear + yearIndex;
-    // SNAPSHOT the look-back ring (solveForYear already advanced the live buffer
-    // for this year) so both funding solves see the same look-back MAGI.
-    // The per-unit look-back ring is likewise snapshotted — `solveForYear`
-    // already stamped this year's entry, and the probe must not re-stamp it.
+    // Snapshot the rings (`solveForYear` already advanced them) so both funding solves see the same look-back
+    // MAGI.
     const yearInput = buildSolverYearInput(
       ctx,
       shared,
@@ -1626,21 +1265,17 @@ export function buildTaxCashflowHook(args: {
       postTaxCashLikeWithdrawalDollars: withdrawalClassification.postTaxCashLikeDollars,
       rothWithdrawalDollars: withdrawalClassification.rothDollars,
     };
-    // The conversion solve targets a MAGI line; only the IRMAA/federal line
-    // tax need is fundable cash here. (ACA-line Fill controls premium subsidy,
-    // not a same-year cash bill the portfolio funds — its consequence is the
-    // PTC offset already modeled in the withdrawals-only solve.) Fund the
-    // federal/IRMAA incremental need either way: it is the true same-year cash
-    // cost of the converted ordinary income.
+    // Only the federal/IRMAA line need is fundable cash; ACA-line Fill controls premium subsidy, whose effect
+    // is already in the withdrawals-only solve. Funding the federal/IRMAA increment either way is the true
+    // same-year cash cost.
     const fundingNeedCents = (input: TaxYearInput): number => {
       const r = solveTaxCashflow({
         ordinaryNetNeedDollars: 0,
         taxInputBase: input,
         bundle,
         irmaaPayment: { ownSsDollarsByMemberId: yearInput.ownSsDollarsByMemberId },
-        // The conversion + withdrawals are already baked into the tax input; the
-        // funding draw is cap-safe (MAGI-free), so the classifier reports the
-        // fixed baked split for any trial target (no re-routing of MAGI).
+        // Conversion and withdrawals are baked into the input and the funding draw is cap-safe, so the
+        // classifier reports the fixed split for any trial target.
         classifyForTarget: () => {
           const pre = input.preTaxWithdrawalDollars ?? 0;
           const postNonRoth = input.postTaxNonRothWithdrawalDollars ?? 0;
@@ -1663,10 +1298,8 @@ export function buildTaxCashflowHook(args: {
       otherOrdinaryIncomeDollars: baseTaxInput.otherOrdinaryIncomeDollars + convertedDollars,
     };
     const withConvCents = fundingNeedCents(withConvInput);
-    // Make the LIVE look-back buffer conversion-inclusive so Y+2 IRMAA is
-    // funded. Replace the conv=0 sample `solveForYear` pushed for this year —
-    // both the household MAGI sample AND the per-return ring entries the
-    // surcharge year reads, so the two never disagree about this year's MAGI.
+    // Make the live look-back buffer conversion-inclusive so Y+2 IRMAA is funded, replacing the conv=0 sample
+    // in both the MAGI sample and the per-return ring entries.
     const convInclusiveResult = applyTaxYearForFilingPlan(withConvInput, bundle);
     const convInclusiveMagi = convInclusiveResult.magiCents / 100;
     if (magiBuffer.length > 0) magiBuffer[magiBuffer.length - 1] = convInclusiveMagi;

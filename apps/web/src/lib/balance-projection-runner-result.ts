@@ -1,12 +1,6 @@
 /**
- * Result-shaping helpers for `balance-projection-runner.ts`. Pure shape
- * transforms from the internal `PipelineContext` + drawdown-engine
- * output into the public `RunBalanceProjectionFullResult` surfaces
- * (`accountYears`, `drawdownYears`, `withdrawalEvents`, marker arrays,
- * empty-result builders). Extracted from `balance-projection-runner.ts`
- * so the runner file holds only the public entry points + orchestration
- * (file shape cap).
- * No circular dep back to the entry points — these are leaf transforms.
+ * Result-shaping helpers: pure transforms from `PipelineContext` and drawdown-engine output into the public
+ * `RunBalanceProjectionFullResult` surfaces.
  */
 import type { DrawdownYear } from './drawdown-engine';
 import type { MonthlyCashflowSeries } from './monthly-cashflow';
@@ -26,22 +20,9 @@ import type {
 } from './balance-projection-runner-types';
 
 /**
- * Pure helper that mirrors BPP's "At horizon — Planned" stat-card
- * arithmetic: read the last drawdown year's nominal balance, multiply
- * by the year-end deflator factor.
- *
- * Two callable shapes:
- *  - `{ drawdownPlannedYears, factor }` — BPP supplies its
- *    `viewDeflator(horizonYear, 11)` result directly (the page's
- *    Today/Future display toggle is honoured outside this helper).
- *  - `{ drawdownPlannedYears, horizonYear, projCtx }` — the runner
- *    supplies a `ProjectionContext` and the helper computes the
- *    Today's-dollar factor via `realDeflatorAt(ctx, horizonYear, 11)`
- *    (always Today's dollars — the optimizer's metric anchor).
- *
- * Both the page and the runner reduce to the same arithmetic, so the
- * BPP-equivalence parity test pins one source of truth for the
- * stat-card oracle. Pure; empty drawdown ⇒ 0 (BPP renders `—`).
+ * Mirrors the Balance Projection "At horizon — Planned" stat card: the last drawdown year's nominal balance
+ * times the year-end deflator factor.
+ * Takes either `factor` or `horizonYear` plus `projCtx` (Today's dollars). An empty drawdown gives 0.
  */
 export function computePlannedAtHorizonToday(
   args:
@@ -80,14 +61,8 @@ function emptyCashflowSeries(): MonthlyCashflowSeriesPublic {
 }
 
 /**
- * Per-account, per-year nominal balance (December anchor) plus the
- * per-year contribution / growth split lifted from `project()`'s
- * `yearlyTotals`. `withdrawalsThisYear` stays `0` for the accumulation
- * phase — `project()` models accumulation only; post-retirement
- * per-account withdrawal attribution lives on the drawdown engine's
- * per-account ledger (`DrawdownYear.accountBalances`), surfaced
- * separately for the consumer that needs it. Nominal — the renderer
- * applies `realDeflatorAt(ctx, year, 11)` at display time.
+ * Per-account, per-year nominal balance (December anchor) with the contribution/growth split from
+ * `project()`'s `yearlyTotals`; `withdrawalsThisYear` stays 0 because `project()` models accumulation only.
  */
 export function buildAccountYearsMap(
   ctx: PipelineContext,
@@ -112,10 +87,7 @@ export function buildAccountYearsMap(
 export function buildDrawdownYearRows(
   years: ReadonlyArray<DrawdownYear>,
 ): ReadonlyArray<DrawdownYearRow> {
-  // DrawdownYear surfaces aggregate per-year totals. `expense`/`income`/
-  // `ss` are not split on the engine return — surface as 0 here and
-  // let the renderer read them off `monthlyCashflowSeries` if needed.
-  // Tax fields pass through unchanged — absent (undefined) on legacy callers.
+  // The engine return does not split `expense`/`income`/`ss`, so they surface as 0.
   return years.map((y) => ({
     year: y.year,
     nominalBalance: y.balance,
@@ -151,9 +123,7 @@ export function buildDrawdownYearRows(
 export function buildWithdrawalEvents(
   years: ReadonlyArray<DrawdownYear>,
 ): ReadonlyArray<WithdrawalEvent> {
-  // Drawdown engine surfaces per-year totals only — month-level
-  // withdrawal events aren't carried on the existing engine return.
-  // Emit one synthetic event per year at month-12 with no source
+  // The engine returns per-year totals only, so emit one synthetic event per year at month 12 with no source
   // account.
   const out: WithdrawalEvent[] = [];
   for (const y of years) {
@@ -168,13 +138,8 @@ export function buildWithdrawalEvents(
 }
 
 /**
- * Life-expectancy markers from the resolved scenario. `fractionalYear`
- * is the integer `deathYear` (`projectedDeathFractionalYear` returns
- * `birthYear + age`; death = Dec 31 of `deathYear`). No `+ 1` is
- * applied here: this builder's output reaches only a `.length > 0` test
- * (see `balance-projection-runner.test.ts`) and never the chart marker —
- * the balance chart's `+ 1` death-year-end convention lives in
- * `ProjectionChartInner`.
+ * Life-expectancy markers from the resolved scenario; `fractionalYear` is the integer `deathYear` (Dec 31),
+ * with no `+ 1` because the chart applies its own death-year-end convention.
  */
 export function buildLifeExpectancyMarkers(
   ctx: PipelineContext,
@@ -221,10 +186,8 @@ export function buildRetirementMarkersFromCtx(
 }
 
 /**
- * `cbpResolution`, marker arrays, anchor numbers are unconditional.
- * Per-account/per-year balances still surface for the TWR-insufficient
- * case so the year-by-year table renders "Insufficient history"
- * annotations on the unavailable rows without crashing.
+ * Empty result: markers and anchors are unconditional; per-account balances still surface for the
+ * TWR-insufficient case.
  */
 export function buildEmptyFullResult(
   args: RunBalanceProjectionArgs,
@@ -250,26 +213,18 @@ export function buildEmptyFullResult(
   };
 }
 
-/** Clone the household-aggregate `depositsByMonth` and subtract
- *  every CBP lump-sum dollar that's been routed to a target account's
- *  per-account `depositsByMonth`. Avoids the double-count where the
- *  kernel applies the same CBP dollars both per-account (via
- *  `acc.deposit[i]`) AND proportionally via the household-aggregate
- *  `s.deposit[i]`. Mirrors the MC bundle factory's `skipsPortfolio: true`
- *  contract for `lumpSum`-elected CBP.
- *
- *  Clamps the subtraction to the existing series value at the event
- *  month — production `incomeProjection` drops at/post-primary linked-
- *  CBP events (lookup returns null), so the household-aggregate may
- *  not contain the dollars; subtracting unconditionally would create
- *  negative deposits the kernel would apply as withdrawals. */
+/**
+ * Clones the household `depositsByMonth` and subtracts every CBP lump-sum already routed to a target account,
+ * so the kernel does not apply it twice.
+ * The subtraction is clamped to the series value at the event month: linked-CBP events at or after primary
+ * retirement are not in `depositInflow`.
+ */
 export function subtractCbpLumpSumsFromHouseholdDeposits(
   household: MonthlyCashflowSeries,
   cbpLumpSumDeposits: ReadonlyArray<{ year: number; month0: number; amount: number }>,
 ): MonthlyCashflowSeries {
   if (cbpLumpSumDeposits.length === 0) return household;
-  // Clone the underlying Float64Array — never mutate the input series
-  // (the cashflow builder caches the same series under multiple keys).
+  // Clones the Float64Array: the cashflow builder caches one series under several keys.
   const cloned: MonthlyCashflowSeries = {
     startYear: household.startYear,
     startMonthIndex: household.startMonthIndex,
@@ -280,9 +235,6 @@ export function subtractCbpLumpSumsFromHouseholdDeposits(
     const targetAbs = dep.year * 12 + dep.month0;
     const idx = targetAbs - startAbs;
     if (idx < 0 || idx >= cloned.values.length) continue;
-    // Clamp to existing value — production drops at/post-primary
-    // linked-CBP events from `depositInflow`, so the household-
-    // aggregate doesn't always carry the dollars to subtract.
     const subtract = Math.min(cloned.values[idx], dep.amount);
     cloned.values[idx] -= subtract;
   }

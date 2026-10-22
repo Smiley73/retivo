@@ -1,9 +1,4 @@
-/**
- * Per-account projection + targeted-deposit classification half of the
- * BPP-equivalent helper. Hosts the cohort of pure functions
- * `balance-projection-runner-context.ts` calls during `buildPipelineContext`
- * — split from that file so each stays under the ≤400-ln shape cap.
- */
+/** Per-account projection and targeted-deposit classification for `buildPipelineContext`. */
 import type {
   AccountBalancePayload,
   AccountPayload,
@@ -152,9 +147,6 @@ export function classifyTargetedDeposits(opts: {
     if (eventAbsMonth >= opts.primaryRetirementAbsMonth) continue;
     let preTax = 0;
     let postTax = 0;
-    // HSA targeted deposits route to the post-tax bucket — consistent with
-    // HSA accounts seeding/contributing through the post-tax side (their
-    // planned contribution is stored in `plannedContributionPostTax`).
     if (target.payload.taxTreatment === 'PRE_TAX') preTax = ev.amount;
     else postTax = ev.amount;
     const entry = { year: ev.year, month0: ev.month0, preTax, postTax };
@@ -162,15 +154,8 @@ export function classifyTargetedDeposits(opts: {
     if (list) list.push(entry);
     else preDepositsByAccount.set(target.id, [entry]);
   }
-  // Post-primary linked-CBP lump-sum events are dropped by
-  // `collectTargetedDepositEvents` (its lookup returns null at/after
-  // primary retirement). Rediscover them directly from resolved
-  // income so `cbpLumpSumEventAbsMonth` carries the event month —
-  // the per-account ledger builder needs it to (a) exclude the source
-  // CBP from the ledger and (b) route the projected at-event balance
-  // to the target account's `depositsByMonth`. The contract is a transfer
-  // (source excluded from the ledger, target receives once), not a ledger
-  // entry plus the household-aggregate proportional split.
+  // Post-primary linked-CBP lump-sum events are dropped by `collectTargetedDepositEvents`; rediscover them so
+  // the ledger builder can exclude the source CBP and route the at-event balance to the target once.
   for (const item of resolvedIncome) {
     const p = item.payload;
     if (p.kind !== 'pension' || p.payoutType !== 'lumpSum') continue;
@@ -221,21 +206,15 @@ export function makeCbpBalanceLookup(
 
 export interface ProjectActiveAccountsResult {
   readonly projections: AccountProjection[];
-  /** Historical (TWR) is available unless EVERY non-CBP account fell
-   *  back to its planned rate (the degenerate all-fallback case, where
-   *  Historical ≡ Planned). A single empty / short-history account does
-   *  not veto the method for the whole portfolio — it falls back to
-   *  its planned rate and is disclosed via `fallbackAccounts`.
-   *  `true` ⟺ ∃ non-CBP account with a non-null empirical TWR rate.
-   *  CBP / drawdown-only accounts never carry an empirical rate and never
-   *  count toward (or against) availability. */
+  /**
+   * Historical (TWR) is available unless every non-CBP account fell back to its planned rate; CBP accounts
+   * never count either way.
+   */
   readonly methodAvailable: boolean;
-  /** The non-CBP accounts that lack an empirical TWR rate and so
-   *  project on their planned rate inside the Historical view. Drives the
-   *  inline disclosure note + the totals-card planned-rate count.
-   *  Non-optional; `[]` when every non-CBP account has empirical history.
-   *  No-rows accounts are absent from `projections` and so are
-   *  NOT listed (nothing renders for them until they have a balance row). */
+  /**
+   * Non-CBP accounts without an empirical TWR rate; they project on their planned rate in the Historical
+   * view. `[]` when all have history.
+   */
   readonly fallbackAccounts: ReadonlyArray<{ id: string; name: string }>;
 }
 
@@ -246,15 +225,13 @@ export function projectActiveAccounts(opts: {
   readonly primaryRetIso: string;
   readonly retirementByMember: ReadonlyMap<string, string | null>;
   readonly preDepositsByAccount: ReadonlyMap<string, PreDepositList>;
-  /** Source-leg pre-tax withdrawals for working-years Roth conversions,
-   *  keyed by source account id. Threaded into `project()` as
-   *  `preRetirementWithdrawals`. Absent → no conversions. */
+  /**
+   * Source-leg pre-tax withdrawals for working-years Roth conversions, by source account id; passed to
+   * `project()` as `preRetirementWithdrawals`.
+   */
   readonly preWithdrawalsByAccount?: ReadonlyMap<string, PreWithdrawalList>;
 }): ProjectActiveAccountsResult {
-  // The runner builds BOTH method outputs (planned + twr) per account
-  // regardless of `args.method`. `methodAvailable` gates only the requested
-  // method: Planned is always available; Historical (TWR) follows the
-  // empirical-rate predicate computed below.
+  // Both method outputs are built per account; `methodAvailable` gates only the requested method.
   const method = opts.args.method ?? 'planned';
   const stopContributionsToday =
     opts.resolved.contributions?.stopContributionsToday ?? false;
@@ -277,20 +254,11 @@ export function projectActiveAccounts(opts: {
   );
   const todayMonthIndex = opts.args.todayMonthIndex;
   const projections: AccountProjection[] = [];
-  // Track non-CBP accounts that DO carry an empirical TWR rate (≥1
-  // makes Historical available) and those that fell back to planned (the
-  // disclosure set). A no-rows account never enters `projections`
-  // and is NOT a fallback account — nothing renders for it until it has a
-  // balance row.
   let hasEmpiricalTwr = false;
   const fallbackAccounts: { id: string; name: string }[] = [];
   for (const account of opts.activeAccounts) {
     const accBalances = balancesByAccount.get(account.id) ?? [];
     if (accBalances.length === 0) {
-      // No balance history → empirical TWR impossible. The account is
-      // dropped from `projections` (a non-CBP account does not veto
-      // Historical; CBP accrues from a formula, so missing rows are
-      // harmless). It is not listed as a fallback account either.
       continue;
     }
     const latest = accBalances.reduce((best, r) =>
@@ -300,17 +268,10 @@ export function projectActiveAccounts(opts: {
     const contribOverride = contribOverrides.get(account.id);
     const plannedRate =
       returnOverrides.get(account.id) ?? account.payload.planningReturnPct;
-    // TWR only applies to non-CBP accounts — CBP balances accrue from
-    // the cash-balance formula, not market returns, so `accountReturns`
-    // returns `null` (insufficient history) for them but that should
-    // NOT block the row. Mirror BPP, which routes CBP through planned
-    // even on the TWR view.
+    // CBP balances accrue from the cash-balance formula, not market returns, so they never carry an empirical
+    // TWR and use planned even on the TWR view.
     const isCbp = account.payload.type === 'RETIREMENT_CASH_BALANCE';
     const twrRate = isCbp ? null : accountReturns(accBalances).twr;
-    // A non-CBP account with no empirical rate does not veto
-    // Historical — it projects on its planned rate (twrProj below) and is
-    // surfaced for disclosure. ≥1 account WITH an empirical rate keeps the
-    // method available; all-fallback is the only degenerate hide-case.
     if (!isCbp) {
       if (twrRate === null) {
         fallbackAccounts.push({ id: account.id, name: account.payload.name });
@@ -329,10 +290,8 @@ export function projectActiveAccounts(opts: {
           },
         }
       : account;
-    // Resolved per-account contribution-growth rate (override → baseline →
-    // tracks-inflation = scenario general inflation rate). Both modes feed
-    // a single nominal rate into the deterministic engine; MC handles the
-    // tracks-inflation per-path CPI scaling separately.
+    // Contribution-growth rate (override, then baseline, then tracks-inflation = general inflation); MC
+    // scales the tracks-inflation case per path separately.
     const growth = growthByAccount.get(account.id);
     const sharedInput = {
       account: effectiveAccount,
@@ -340,9 +299,6 @@ export function projectActiveAccounts(opts: {
       retirementDate: opts.primaryRetIso,
       accumulationEndDate: ownerRet ?? opts.primaryRetIso,
       preRetirementDeposits: opts.preDepositsByAccount.get(account.id),
-      // Working-years Roth-conversion source leg: the SAME account can be
-      // a conversion source (pre-tax outflow) and a deposit target (a different
-      // account) — the two maps are independent keyed sets.
       preRetirementWithdrawals: opts.preWithdrawalsByAccount?.get(account.id),
       stopContributionsToday,
       todayYear,
@@ -350,10 +306,8 @@ export function projectActiveAccounts(opts: {
       contributionGrowthPct: growth?.ratePct ?? 0,
     };
     const plannedProj = project({ ...sharedInput, ratePct: plannedRate });
-    // When a non-CBP account has no empirical TWR rate it projects
-    // on its planned rate under the Historical view (per-account fallback,
-    // disclosed via `fallbackAccounts`) so `outputs.twr` is always
-    // non-null. CBP rows always reuse planned under TWR (no empirical rate).
+    // A non-CBP account with no empirical rate projects on its planned rate under Historical, so
+    // `outputs.twr` is always non-null.
     const twrProj =
       isCbp || twrRate === null
         ? plannedProj
@@ -375,27 +329,13 @@ export function projectActiveAccounts(opts: {
       }),
     });
   }
-  // Planned is always available. Historical (TWR) is available ⟺ ≥1 non-CBP
-  // account carries an empirical TWR rate; no empirical rate ⟹
-  // Historical ≡ Planned ⟹ degenerate hide-case. A single empty /
-  // short-history account does not veto Historical.
   const methodAvailable = method === 'twr' ? hasEmpiricalTwr : true;
   return { projections, methodAvailable, fallbackAccounts };
 }
 
 /**
- * Re-derive TWR availability from an already-built projection set without
- * re-running the agnostic projection phase (the page builds its
- * `PipelineContext` once on the default `'planned'` method). Mirrors the
- * exact predicate `projectActiveAccounts` applies: Historical is available
- * ⟺ ∃ non-CBP account with a non-null empirical TWR rate
- * (`ratePctByMethod.twr`). A single empty / short-history account does not
- * veto the method — it falls back to its planned rate. The
- * method is hidden ONLY in the degenerate all-fallback case (no non-CBP
- * account has empirical history, so Historical ≡ Planned). CBP rows reuse
- * the planned rate (their `ratePctByMethod.twr` is never the empirical
- * rate) and never count toward availability. The predicate reads only the
- * already-built projection set.
+ * Re-derives TWR availability from an already-built projection set with the predicate `projectActiveAccounts`
+ * uses: available iff some non-CBP account has an empirical TWR rate (`ratePctByMethod.twr`).
  */
 export function deriveTwrAvailability(
   projections: ReadonlyArray<AccountProjection>,
@@ -416,11 +356,8 @@ function computePerMonthContribution(opts: {
   if (opts.stopContributionsToday) return { preTax: 0, postTax: 0 };
   if (!opts.ownerRet) return { preTax: 0, postTax: 0 };
   const taxTreatment = opts.effectiveAccount.payload.taxTreatment;
-  // HSA is single-sided: the HSA contribution is entered pre-tax (payroll deduction) and
-  // stored in `plannedContributionPreTax`, but grows in the tax-free (post)
-  // bucket. So source the amount from the pre-tax field yet route it to the
-  // post bucket; `plannedContributionPostTax` is unused for HSA. This matches
-  // `contribAdds` / `seedBuckets` in projection.ts.
+  // HSA is single-sided: the contribution is entered pre-tax (`plannedContributionPreTax`) but grows in the
+  // post bucket, as in `contribAdds`/`seedBuckets`.
   const plannedPre =
     taxTreatment === 'HSA'
       ? 0
@@ -435,11 +372,7 @@ function computePerMonthContribution(opts: {
       : taxTreatment === 'PRE_TAX'
         ? opts.latest.payload.companyContributions
         : 0;
-  // HSA and ROTH route company contributions to the post bucket like
-  // POST_TAX — their balance + contributions are stored on the post-tax
-  // side. ROTH is a no-op in practice (a Roth IRA has no employer match,
-  // companyContributions = 0) but kept for consistency and to avoid silent
-  // misrouting if a Roth employer-matched account is ever added.
+  // HSA and ROTH route company contributions to the post bucket like POST_TAX.
   const companyPost =
     taxTreatment === 'MIXED'
       ? opts.latest.payload.companyContributionsPostTax ?? 0
