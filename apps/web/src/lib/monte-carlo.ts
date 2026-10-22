@@ -798,8 +798,8 @@ function buildPriorPreTaxByOwnerByYearIndex(
   return out;
 }
 
-// Mutates `taxState.acc` / `taxState.taxDrawByYear`; `priorBalance` is the drawdown-entry total for year 0, the prior row's end balance afterwards.
-function fillStrategyYearTax(
+/** Mutates `taxState.acc` / `taxState.taxDrawByYear`; `priorBalance` is the drawdown-entry total for year 0, the prior row's end balance afterwards. Exported for the shared-pass-1-QCD-offset pin in `monte-carlo-fill-conversion.test.ts`. */
+export function fillStrategyYearTax(
   input: MonteCarloInput,
   retYears: DrawdownYear[],
   accountsIn: ReadonlyArray<DrawdownAccountInput>,

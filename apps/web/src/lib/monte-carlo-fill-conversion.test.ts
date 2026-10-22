@@ -1,7 +1,9 @@
 /** Fill-mode MAGI-cap Roth conversions in the MC strategy path: parity with the deterministic engine and per-path own-CPI deflation. */
 import { describe, expect, it } from 'vitest';
 import { runBalanceProjection, runBalanceProjectionMc } from './balance-projection-runner';
-import { runMonteCarlo, type McBasis } from './monte-carlo';
+import { buildRunContext, fillStrategyYearTax, newTaxPathState, runMonteCarlo, type McBasis } from './monte-carlo';
+import type { StepOutcome } from './projection-engine/kernel';
+import type { DrawdownAccountInput, DrawdownYear } from './drawdown-engine-types';
 import type { MagiCapWindowRuntime } from './drawdown-engine-per-account-strategy-helpers';
 import {
   applyPerYearTaxForPathWithConversion,
@@ -490,6 +492,80 @@ describe('Monte Carlo — Fill conversion solve reads the same RMD floor surface
       converted(hookFor({ entryPreTaxByOwner: new Map() })),
       2,
     );
+  });
+});
+
+describe('Monte Carlo — committed pass-2 tax reads the SHARED pass-1 QCD offset', () => {
+  it('uses the threaded qcdRmdOffsetByYearIndex, not the row offset, for the committed RMD floor', () => {
+    // Regression: the Fill two-pass hands one pass-1 QCD offset array to the conversion solve and the committed tax; a committed tax reading the pass-2 row's own offset drifts from the solve once pass-2 tax funding moves the IRA across the QCD cap.
+    const taxCtx = rmdAgeTaxContext();
+    const IRA_ID = 'ira';
+    const PRE_TAX_DOLLARS = 1_000_000;
+    const COMMITTED_DRAW = 5_000; // below the RMD floor, so the floor grosses it up.
+    const input = {
+      firstYear: 2030,
+      horizonYear: 2030,
+      retirementYear: 2030,
+      ssByYear: [0],
+      incomeByYear: [0],
+      monthlyExpenseBase: [],
+      taxContext: taxCtx,
+      accountMcLedger: [
+        {
+          id: IRA_ID,
+          initialPre: PRE_TAX_DOLLARS,
+          initialPost: 0,
+          taxTreatment: 'PRE_TAX' as const,
+          accountType: 'RETIREMENT_IRA' as const,
+          ownerId: 'primary',
+        },
+      ],
+    } as unknown as MonteCarloInput;
+    const out = { cumCpi: new Float64Array([1]) } as unknown as StepOutcome;
+    const accountsIn = [
+      { id: IRA_ID, initialPre: PRE_TAX_DOLLARS, initialPost: 0 },
+    ] as unknown as ReadonlyArray<DrawdownAccountInput>;
+    // The pass-2 row carries no QCD offset of its own.
+    const buildRow = (): DrawdownYear =>
+      ({
+        balance: PRE_TAX_DOLLARS - COMMITTED_DRAW,
+        accountBalances: new Map([
+          [
+            IRA_ID,
+            {
+              balance: PRE_TAX_DOLLARS - COMMITTED_DRAW,
+              preEnd: PRE_TAX_DOLLARS - COMMITTED_DRAW,
+              postEnd: 0,
+              withdrawn: COMMITTED_DRAW,
+              deposit: 0,
+            },
+          ],
+        ]),
+      }) as unknown as DrawdownYear;
+    const horizonYears = 1;
+    const priorPreTaxByOwnerByYearIndex = [
+      new Map<string, number>([['primary', PRE_TAX_DOLLARS * 100]]),
+    ];
+    const committedFedTax = (sharedQcdOffsets?: ReadonlyArray<ReadonlyMap<string, number>>): number => {
+      const state = newTaxPathState(input, out, 12, horizonYears, new Float64Array([40_000]), new Float64Array(horizonYears), buildRunContext(input))!;
+      fillStrategyYearTax(
+        input,
+        [buildRow()],
+        accountsIn,
+        0,
+        state,
+        [PRE_TAX_DOLLARS],
+        priorPreTaxByOwnerByYearIndex,
+        sharedQcdOffsets,
+      );
+      return state.acc.fedTax[0];
+    };
+
+    const withoutShared = committedFedTax();
+    // An offset above the whole gross floor collapses it to the committed draw.
+    const withShared = committedFedTax([new Map([['primary', PRE_TAX_DOLLARS * 100]])]);
+    expect(withoutShared).toBeGreaterThan(0);
+    expect(withShared).toBeLessThan(withoutShared);
   });
 });
 
