@@ -36,7 +36,6 @@ interface ResolveRothStartYearInput {
 interface ResolveEffectiveRothStartYearInput extends ResolveRothStartYearInput {
   readonly ownerId: string;
   readonly inherited: boolean;
-  /** Accounts eligible to participate in the current projection's Roth IRA pools. */
   readonly accounts: ReadonlyArray<
     Pick<Aggregate<AccountPayload>, 'id' | 'payload' | 'deletedAt'>
   >;

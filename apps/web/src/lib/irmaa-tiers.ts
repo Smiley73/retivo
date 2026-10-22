@@ -1,44 +1,22 @@
 /**
- * IRMAA calibration data — Medicare Part B/D income-related adjustment tiers.
- * Typed seed config for 2024, 2025, and 2026 CMS published values.
+ * IRMAA tiers (Medicare Part B/D income-related surcharges) for 2024–2026 from the CMS fact sheets.
+ * Refresh: docs/yearly-tax-refresh.md.
  */
 
 import type { CalibrationSnapshot } from './calibration';
 import type { FilingStatus } from './federal-tax';
 
-// ---------------------------------------------------------------------------
-// Schema types
-// ---------------------------------------------------------------------------
-
-/**
- * One tier entry: the MAGI threshold that starts this tier plus monthly surcharge amounts.
- * There are 5 entries per filing-status group (tier1–tier5); tier 'none' is implicit
- * (MAGI ≤ entries[0].thresholdDollars → no surcharge).
- */
+/** One tier: the MAGI threshold that starts it (lower bound exclusive, tier 5 inclusive) plus monthly surcharges; tier 'none' is implicit below the first threshold. */
 export interface IrmaaTableEntry {
-  /** MAGI in dollars at which this tier begins (lower-bound exclusive). Tier5 is inclusive. */
   thresholdDollars: number;
-  /** Monthly Part B surcharge in dollars for this tier. */
   partBMonthly: number;
-  /** Monthly Part D surcharge in dollars for this tier. */
   partDMonthly: number;
 }
 
 /**
- * Full IRMAA table for one tax year.
- * HoH and QSS filers use `bySingle` (CMS practice; QSS is an individual
- * filer for IRMAA). MFS filers who lived with their spouse use `byMfs`.
- * Each array has exactly 5 entries: [tier1, tier2, tier3, tier4, tier5].
- *
- * `byMfs`: CMS publishes only a TWO-band MFS schedule (lived-with-spouse):
- * no surcharge at/below the first single-filer threshold, the tier-4 surcharge
- * level in the wide middle band, and the tier-5 surcharge level above a single
- * high MFS threshold. That two-band shape is expressed in the fixed 5-entry
- * structure by repeating the high threshold + tier-5 surcharge in slots 2-5, so
- * `resolveTier` returns `tier1` for the middle band and `tier5` above the high
- * threshold, with the correct surcharge amounts at each. The intermediate tier
- * labels are unreachable by construction (equal thresholds).
- * Reached whenever a look-back or current-year unit files MFS.
+ * Full IRMAA table for one tax year, five tiers per schedule. HoH and QSS use `bySingle` (CMS practice).
+ * `byMfs` is the MFS lived-with-spouse schedule: CMS publishes only two bands, so slots 2-5 repeat the high
+ * threshold and tier-5 surcharge (equal thresholds make the middle tiers unreachable).
  */
 export interface IrmaaTable {
   bySingle: readonly [IrmaaTableEntry, IrmaaTableEntry, IrmaaTableEntry, IrmaaTableEntry, IrmaaTableEntry];
@@ -46,10 +24,7 @@ export interface IrmaaTable {
   byMfs: readonly [IrmaaTableEntry, IrmaaTableEntry, IrmaaTableEntry, IrmaaTableEntry, IrmaaTableEntry];
 }
 
-// ---------------------------------------------------------------------------
-// 2024 CMS values
-// Source: https://www.cms.gov/newsroom/fact-sheets/2024-medicare-parts-b-premiums-and-deductibles
-// ---------------------------------------------------------------------------
+// 2024: https://www.cms.gov/newsroom/fact-sheets/2024-medicare-parts-b-premiums-and-deductibles
 
 const table2024: IrmaaTable = {
   bySingle: [
@@ -66,10 +41,7 @@ const table2024: IrmaaTable = {
     { thresholdDollars: 386_000, partBMonthly: 384.3, partDMonthly: 74.2 },
     { thresholdDollars: 750_000, partBMonthly: 419.3, partDMonthly: 81.0 },
   ],
-  // MFS lived-with-spouse: no surcharge ≤ $103,000; the tier-4 surcharge in the
-  // middle band; the tier-5 surcharge ≥ $397,000 (the published 2024 CMS
-  // lived-with-spouse top threshold — see metadata.source). Slots 2-5 repeat the
-  // high threshold + tier-5 surcharge (two-band collapse — see IrmaaTable docs).
+  // MFS lived-with-spouse: top threshold $397,000 (published 2024 CMS figure; see metadata.source).
   byMfs: [
     { thresholdDollars: 103_000, partBMonthly: 384.3, partDMonthly: 74.2 },
     { thresholdDollars: 397_000, partBMonthly: 419.3, partDMonthly: 81.0 },
@@ -79,10 +51,7 @@ const table2024: IrmaaTable = {
   ],
 };
 
-// ---------------------------------------------------------------------------
-// 2025 CMS values
-// Source: https://www.cms.gov/newsroom/fact-sheets/2025-medicare-parts-b-premiums-and-deductibles
-// ---------------------------------------------------------------------------
+// 2025: https://www.cms.gov/newsroom/fact-sheets/2025-medicare-parts-b-premiums-and-deductibles
 
 const table2025: IrmaaTable = {
   bySingle: [
@@ -99,8 +68,7 @@ const table2025: IrmaaTable = {
     { thresholdDollars: 400_000, partBMonthly: 406.9, partDMonthly: 78.6 },
     { thresholdDollars: 750_000, partBMonthly: 443.9, partDMonthly: 85.8 },
   ],
-  // MFS lived-with-spouse: top threshold $394,000 (published 2025 CMS
-  // lived-with-spouse figure — see metadata.source).
+  // MFS lived-with-spouse: top threshold $394,000 (published 2025 CMS figure; see metadata.source).
   byMfs: [
     { thresholdDollars: 106_000, partBMonthly: 406.9, partDMonthly: 78.6 },
     { thresholdDollars: 394_000, partBMonthly: 443.9, partDMonthly: 85.8 },
@@ -110,10 +78,7 @@ const table2025: IrmaaTable = {
   ],
 };
 
-// ---------------------------------------------------------------------------
-// 2026 CMS values
-// Source: https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-deductibles
-// ---------------------------------------------------------------------------
+// 2026: https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-deductibles
 
 const table2026: IrmaaTable = {
   bySingle: [
@@ -130,8 +95,7 @@ const table2026: IrmaaTable = {
     { thresholdDollars: 410_000, partBMonthly: 446.3, partDMonthly: 83.3 },
     { thresholdDollars: 750_000, partBMonthly: 487.0, partDMonthly: 91.0 },
   ],
-  // MFS lived-with-spouse: top threshold $391,000 (published 2026 CMS
-  // lived-with-spouse figure — see metadata.source).
+  // MFS lived-with-spouse: top threshold $391,000 (published 2026 CMS figure; see metadata.source).
   byMfs: [
     { thresholdDollars: 109_000, partBMonthly: 446.3, partDMonthly: 83.3 },
     { thresholdDollars: 391_000, partBMonthly: 487.0, partDMonthly: 91.0 },
@@ -141,15 +105,6 @@ const table2026: IrmaaTable = {
   ],
 };
 
-// ---------------------------------------------------------------------------
-// Exported snapshot
-// ---------------------------------------------------------------------------
-
-/**
- * Canonical IRMAA calibration snapshot.
- * Update `values[<new-year>]` and `metadata.source` + `metadata.asOfDate`
- * when CMS publishes the new year's announcement (typically October–November).
- */
 export const IRMAA_TIERS: CalibrationSnapshot<IrmaaTable> = {
   values: {
     2024: table2024,
@@ -164,20 +119,9 @@ export const IRMAA_TIERS: CalibrationSnapshot<IrmaaTable> = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// Schedule + component selectors (shared by the whole-year and month-aware
-// IRMAA engines)
-// ---------------------------------------------------------------------------
-
 /**
- * Select the tier-schedule (5-entry array) a filing status reads from a table.
- * The single source of truth for IRMAA filing-status routing:
- *   - `MFJ`                       → `byMfj`
- *   - `MFS` + lived-with-spouse   → `byMfs` (the steeper two-band schedule)
- *   - `MFS` lived-apart / absent  → `bySingle` (individual ladder)
- *   - `Single` / `HoH` / `QSS`    → `bySingle` (QSS is an individual filer)
- * Consumed by both `computeIrmaa` (whole-year) and `computeMonthAwareIrmaa`
- * (month-aware), so the two engines can never disagree on routing.
+ * The schedule a filing status reads: MFJ uses `byMfj`; MFS lived with spouse uses `byMfs`; Single, HoH, QSS
+ * and MFS lived apart or unknown use `bySingle`. Shared by `computeIrmaa` and `computeMonthAwareIrmaa`.
  */
 export function selectIrmaaScheduleEntries(
   table: IrmaaTable,
@@ -189,11 +133,7 @@ export function selectIrmaaScheduleEntries(
   return table.bySingle;
 }
 
-/**
- * Annual Part B / Part D surcharge (integer cents) for one tier entry — the
- * B/D components exposed separately so month-aware proration can scale each part
- * by its own enrollment months. `Math.round(monthly × 12 × 100)`.
- */
+/** Annual Part B / Part D surcharge in integer cents, split so month-aware proration can scale each by its own enrollment months. */
 export function entryAnnualSurchargeCents(
   entry: IrmaaTableEntry,
 ): { partBCents: number; partDCents: number } {

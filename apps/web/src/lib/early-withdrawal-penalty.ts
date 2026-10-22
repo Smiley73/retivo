@@ -1,59 +1,6 @@
 /**
- * Early-withdrawal / HSA additional-tax engine.
- *
- * Models two IRS additional taxes on early distributions:
- *   - IRA / 401k-style 10% additional tax on taxable distributions before age
- *     59½ (IRC §72(t)).
- *   - HSA 20% additional tax on nonqualified distributions before age 65
- *     (IRC §223(f)(4)).
- *
- * Roth conversion exclusion: a Fill-mode pre-tax → Roth conversion
- * is NOT a distribution, so it incurs ordinary income tax but $0 §72(t) penalty
- * even before 59½. This engine only ever sees the dollars the caller routes in
- * as `penaltyBasisDollars`; the conversion is deliberately never added to the
- * per-year `penaltyAccounts` (it is recognized as ordinary income through a
- * separate channel), so it is structurally excluded here with no special case.
- *
- * Both are pro-rated in the transition year using the exact half-birthday
- * (59½ / 65) date the `retirementDate` helper computes, with the penalty
- * fraction `(halfMonth - 1) / 12` (0 = fully penalty-free year, 1 = fully
- * penalized). MIXED-treatment accounts apply the 10% only to the
- * pre-tax (includible-in-gross-income) tranche per IRC §72(t). For
- * MIXED Roth-designated types (401k/403b/457b/TSP), the post sub-bucket is
- * Roth-designated: any earnings portion above the owner's §408A basis is
- * penalized via the basis-ordering path in the projection engines,
- * not directly by this function — this function receives only the
- * pre-tax-tranche `penaltyBasisDollars`, as for any other MIXED account.
- * Scenario-marked exempt accounts skip the penalty. A missing or
- * unparseable owner birthdate skips the penalty and is flagged to the caller.
- *
- * Account eligibility by AccountType:
- *   RETIREMENT_401K / IRA / 403B / TSP / CASH_BALANCE → 10% before 59½
- *   RETIREMENT_457B  → none (governmental exception)
- *   RETIREMENT_ROTH_IRA → 10% before 59½ on the §408A ADDITIONAL-TAX BASE. That
- *     base is FACT-BASED: `roth-distribution-tax.ts` consumes the owner's
- *     recorded regular-contribution basis first, then conversion lots FIFO
- *     (aggregated by tax year), then earnings — and the base it hands this engine
- *     is nonqualified earnings PLUS taxable converted principal still inside its
- *     OWN five-tax-year recapture window. Regular contributions and nontaxable
- *     converted principal never reach here. Exemption waives only the 10% leg;
- *     the ordinary-income tax on the earnings (routed upstream) still applies.
- *   RETIREMENT_ROTH_401K / ROTH_403B / ROTH_TSP → 10% before 59½ on the
- *     designated-Roth additional-tax base. The basis/earnings
- *     split is PRO RATA per §402A(d)(4) against the account's own recorded basis
- *     (NOT contribution-first, and no longer "the whole at-retirement balance is
- *     basis"), plus any in-window taxable in-plan Roth rollover recapture
- *     (§402A(c)(4)(D)).
- *   RETIREMENT_ROTH_457B → governmental §72(t)(9) exception: ordinary Roth 457(b)
- *     earnings carry NO 10%, same as the traditional 457(b). The exception does
- *     NOT reach amounts attributable to a rollover from a different plan type, so
- *     the ordering engine keeps that recapture in the base and marks it
- *     `rothOrderedAdditionalTaxBase` — see that field for why the type test is
- *     bypassed for such a pre-resolved base.
- *   BROKERAGE / SAVINGS / MONEY_MARKET / CD / OTHER → none
- *   HSA → 20% before 65 (different rate + threshold)
- *   ANY inherited account (`inheritedFromDeceasedOwner`) → NO 10% leg at any
- *     beneficiary age (IRC §72(t)(2)(A)(ii) death exception).
+ * Early-withdrawal additional tax: 10% before 59½ (IRC §72(t)) and 20% on nonqualified HSA
+ * distributions before 65 (IRC §223(f)(4)), pro-rated in the transition year. A Roth conversion never reaches it.
  */
 
 import type { AccountType } from '../db/types';
@@ -64,83 +11,47 @@ export const EARLY_WITHDRAWAL_PENALTY_RATE = 0.1;
 /** 20% IRC §223(f)(4) HSA additional tax rate. */
 export const HSA_ADDITIONAL_TAX_RATE = 0.2;
 
-/** Per-account withdrawal input for the penalty computation. */
 export interface PenaltyAccountInput {
   readonly id: string;
   readonly type: AccountType;
-  /**
-   * Includible-in-gross-income (pre-tax) withdrawal dollars this year. For
-   * PRE_TAX accounts this is the whole withdrawal; for MIXED accounts it is
-   * the pre-tax tranche only (the post-tax basis tranche carries no penalty).
-   * For HSA accounts this is the nonqualified portion of the EMERGENCY
-   * draw only (the caller narrows the basis to `emergencyDollars × (1 − pct/100)`
-   * — medical-qualified HSA dollars carry $0 penalty); the 20% rate + the
-   * age-65 proration (`penaltyFractionForYear`, cutoff 65y0m) apply to that
-   * narrowed basis. For Roth accounts (fact-based) this is
-   * the §408A/§402A **additional-tax base** — nonqualified earnings PLUS taxable
-   * converted / in-plan-rolled-over principal still inside its own five-tax-year
-   * recapture window — already split by the ordering engine in the projection
-   * engines; recovered contribution basis and nontaxable converted principal are
-   * excluded here so they stay penalty-free.
-   */
   readonly penaltyBasisDollars: number;
-  /** Owner member's ISO birthdate (YYYY-MM-DD). Drives the age cutoff. */
   readonly ownerBirthdate: string | null | undefined;
   /**
-   * `true` when `penaltyBasisDollars` is a §408A/§402A **additional-tax
-   * base** already produced by the fact-based Roth ordering engine
-   * (`roth-distribution-tax.ts`), i.e. nonqualified earnings PLUS taxable
-   * conversion / in-plan-rollover principal still inside its own five-tax-year
-   * recapture window.
-   *
-   * That engine has ALREADY applied every source-level statutory exemption —
-   * notably the governmental-457(b) §72(t)(9) carve-out, which exempts ordinary
-   * Roth 457(b) earnings but NOT amounts attributable to a rollover from a
-   * different plan type. Re-testing the account type here would therefore DROP a
-   * legitimate 457(b) rollover recapture, so this flag suppresses the
-   * `PENALTY_10_TYPES` membership test only. Everything else is unchanged: the
-   * scenario-marked exempt-account-id skip still waives the leg, and the 59½
-   * half-birthday proration still applies.
+   * True when `penaltyBasisDollars` is a §408A/§402A additional-tax base the Roth ordering engine already
+   * exemption-resolved (e.g. the governmental-457(b) §72(t)(9) carve-out, which does not cover rollover
+   * recapture); suppresses only the `PENALTY_10_TYPES` test.
    */
   readonly rothOrderedAdditionalTaxBase?: boolean;
   /**
-   * `true` when this distribution comes from an INHERITED account, i.e. it
-   * is made on account of the ORIGINAL owner's death.
-   *
-   * IRC §72(t)(2)(A)(ii) exempts a distribution made on account of the employee's /
-   * IRA owner's death from the 10% additional tax REGARDLESS of the beneficiary's
-   * own age. Applying the beneficiary's 59½ test to an inherited distribution — as
-   * this engine once did — charged a 10% additional tax the statute does not
-   * impose, on money a beneficiary is in fact REQUIRED to withdraw. The exception
-   * waives the 10% §72(t) leg only; the ordinary income tax on the taxable portion
-   * (routed upstream) is unaffected, as is the HSA 20% leg (an inherited HSA's
-   * different §223(f)(8) treatment is not modeled).
+   * True for a distribution from an inherited account: made on account of the original owner's death, so
+   * IRC §72(t)(2)(A)(ii) waives the 10% leg at any beneficiary age. The HSA 20% leg is unaffected (an
+   * inherited HSA's §223(f)(8) treatment is not modeled).
    */
   readonly inheritedFromDeceasedOwner?: boolean;
 }
 
-/** Result of the per-year penalty computation. */
 export interface PenaltyResult {
-  /** Total early-distribution additional tax for the year, in dollars. */
   readonly penaltyDollars: number;
-  /** Portion attributable to the IRA/401k-style 10% penalty, in dollars. */
   readonly ira401kPenaltyDollars: number;
-  /** Portion attributable to the HSA 20% additional tax, in dollars. */
   readonly hsaAdditionalTaxDollars: number;
-  /** True when at least one penalizable account had an unparseable/missing
-   *  birthdate, so its penalty was skipped (caller flags an estimate note). */
+  /** True when a penalizable account had a missing or unparseable birthdate, so its penalty was skipped. */
   readonly skippedForMissingBirthdate: boolean;
 }
 
-/**
- * AccountTypes that carry the 10% §72(t) penalty before 59½.
- * The four designated-Roth employer-plan types are split: 401K/403B/TSP carry
- * the 10% (same as their pre-tax counterparts); 457B is exempt (governmental
- * §72(t) exception). `RETIREMENT_ROTH_IRA` is deliberately NOT in this set —
- * Roth IRA earnings are handled via the dedicated `isRothIra` branch below,
- * which keeps the contribution tranche penalty-free; only the earnings excess
- * above the owner's §408A basis is penalized.
- */
+// Account eligibility by AccountType:
+//   401K / IRA / 403B / TSP / CASH_BALANCE            → 10% before 59½ (MIXED: pre-tax tranche only)
+//   ROTH_401K / ROTH_403B / ROTH_TSP                  → 10% before 59½ on the designated-Roth additional-tax
+//     base: pro rata basis/earnings split per §402A(d)(4), plus in-window taxable in-plan rollover
+//     recapture (§402A(c)(4)(D))
+//   ROTH_IRA                                          → 10% before 59½ on the §408A additional-tax base:
+//     nonqualified earnings plus taxable converted principal inside its own five-tax-year recapture
+//     window (roth-distribution-tax.ts orders basis, then conversion lots FIFO, then earnings)
+//   457B                                              → none (governmental exception)
+//   ROTH_457B                                         → none on ordinary earnings (governmental §72(t)(9));
+//     rollover amounts from another plan type stay in the base, flagged `rothOrderedAdditionalTaxBase`
+//   BROKERAGE / SAVINGS / MONEY_MARKET / CD / OTHER   → none
+//   HSA                                               → 20% before 65
+//   inherited (`inheritedFromDeceasedOwner`)          → no 10% at any age (IRC §72(t)(2)(A)(ii))
 const PENALTY_10_TYPES: ReadonlySet<AccountType> = new Set<AccountType>([
   'RETIREMENT_401K',
   'RETIREMENT_IRA',
@@ -152,22 +63,15 @@ const PENALTY_10_TYPES: ReadonlySet<AccountType> = new Set<AccountType>([
   'RETIREMENT_ROTH_TSP',
 ]);
 
-/** True when this AccountType is subject to the 10% pre-59½ penalty. */
+/** True when the AccountType is subject to the 10% pre-59½ penalty. */
 export function carriesTenPercentPenalty(type: AccountType): boolean {
   return PENALTY_10_TYPES.has(type);
 }
 
 /**
- * Penalty fraction for a year given the owner's birthdate and the half-birthday
- * age cutoff (ageYears + ageMonths). Returns:
- *   - 1 for years entirely before the cutoff (fully penalized),
- *   - 0 for years entirely at/after the cutoff (penalty-free),
- *   - `(cutoffMonth0) / 12`-style proration in the transition year: the share
- *     of the year (in whole months) that falls BEFORE the cutoff month.
- *     The transition-year fraction is `(halfMonth - 1) / 12` where `halfMonth`
- *     is the 1-based calendar month the owner reaches the cutoff age.
- *
- * Returns `null` when the birthdate is missing or unparseable (caller skips).
+ * Penalty fraction for a year: 1 before the cutoff year, 0 after it, and `(halfMonth - 1) / 12` in the
+ * transition year, where `halfMonth` is the 1-based month the owner reaches the cutoff age. `null` when
+ * the birthdate is missing or unparseable.
  */
 export function penaltyFractionForYear(
   ownerBirthdate: string | null | undefined,
@@ -187,18 +91,10 @@ export function penaltyFractionForYear(
 
   if (taxYear < cutoffYear) return 1; // whole year before the cutoff
   if (taxYear > cutoffYear) return 0; // whole year at/after the cutoff
-  // Transition year: months before the cutoff month are penalized.
-  // halfMonth = cutoffMonth1 (1-based); fraction = (halfMonth - 1) / 12.
   return (cutoffMonth1 - 1) / 12;
 }
 
-/**
- * Compute the early-distribution additional tax for one projection year.
- *
- * @param accounts  Per-account penalty inputs (pre-tax/nonqualified basis).
- * @param taxYear   Calendar year.
- * @param exemptAccountIds  Scenario-marked exempt account ids (skip penalty).
- */
+/** Early-distribution additional tax for one projection year; `exemptAccountIds` are scenario-marked exempt accounts. */
 export function computeEarlyWithdrawalPenalty(
   accounts: readonly PenaltyAccountInput[],
   taxYear: number,
@@ -226,19 +122,10 @@ export function computeEarlyWithdrawalPenalty(
       continue;
     }
 
-    // Roth IRA earnings tranche. The owner-level tracker already split
-    // off the tax/penalty-free §408A contribution basis upstream, so
-    // `penaltyBasisDollars` here is the pre-59½ earnings excess. It carries the
-    // same 10% §72(t) additional tax at the 59½ cutoff. `RETIREMENT_ROTH_IRA`
-    // is deliberately NOT in `PENALTY_10_TYPES` (that set must stay
-    // contribution-penalty-free); this dedicated branch keeps the contribution
-    // tranche untouched. The exempt-id skip at the top of the loop already
-    // waived the penalty for an exempt Roth IRA (the income tax on the earnings
-    // is routed separately by the engine and is unaffected by the exemption).
-    // A §408A/§402A-ordered additional-tax base arrives exemption-resolved
-    // (the ordering engine already applied the governmental-457(b) carve-out and
-    // kept only the genuinely penalizable rollover recapture), so the type test
-    // is skipped for it — see `rothOrderedAdditionalTaxBase`.
+    // Roth IRA earnings tranche: the owner-level tracker already split off the penalty-free §408A
+    // contribution basis, so `penaltyBasisDollars` is the earnings excess. It is not in `PENALTY_10_TYPES`,
+    // which would exempt the contribution tranche. An ordering-engine base arrives exemption-resolved
+    // (`rothOrderedAdditionalTaxBase`), so the type test is skipped for it.
     const isRothIra = acc.type === 'RETIREMENT_ROTH_IRA';
     if (
       acc.rothOrderedAdditionalTaxBase !== true &&
@@ -248,11 +135,8 @@ export function computeEarlyWithdrawalPenalty(
       continue;
     }
 
-    // §72(t)(2)(A)(ii): a distribution made on account of the original owner's
-    // DEATH carries no 10% additional tax at ANY beneficiary age. Checked before
-    // the age proration so an inherited account never consumes the 59½ test (and
-    // never trips `skippedForMissingBirthdate` — the beneficiary's birthdate is
-    // irrelevant to it).
+    // §72(t)(2)(A)(ii): checked before the age proration so an inherited account never trips
+    // `skippedForMissingBirthdate`.
     if (acc.inheritedFromDeceasedOwner === true) continue;
 
     const fraction = penaltyFractionForYear(acc.ownerBirthdate, taxYear, {

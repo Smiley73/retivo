@@ -1,21 +1,6 @@
 /**
- * Resolve a working-years Roth-conversion entry's calendar-year window to the
- * INCLUSIVE `[startYear, endYear]` pair, the same way the deterministic
- * pre-pass (`roth-conversion-projection.ts`) collapses each entry's anchors.
- *
- * The entry's `start` / `end` are the `age` / `year` subset of
- * `ScheduleStart` / `ScheduleEnd`, so we reuse `resolveStartMonth` /
- * `resolveEndMonth` (the one canonical anchor math) rather than re-deriving
- * the age/year arithmetic. A `year` END anchor maps to Jan 1 of Y+1 (the
- * exclusive month boundary), so the inclusive end year is `endMonth.year - 1`.
- *
- * UI-only: the summary card uses the window to find the peak single-year tax
- * burden, and the editor uses it to flag a backwards (start-after-end) window.
- * Neither needs the engine's working-years / RMD / no-past bounds — those gate
- * what the projection actually converts, not what the user typed.
- *
- * Returns `null` when an `age` anchor can't resolve (missing birthdate) so the
- * caller can fall back gracefully instead of crashing.
+ * Resolves a working-years Roth-conversion entry's age/year window to an inclusive
+ * `[startYear, endYear]`; UI-only, so no working-years or RMD bounds. `null` when an age anchor can't resolve.
  */
 import type {
   Aggregate,
@@ -35,10 +20,7 @@ export interface RothConversionWindowEntry {
   readonly end: Extract<MagiCapWindow['end'], { kind: 'age' | 'year' }>;
 }
 
-/** Build the anchor-resolve context from the household members. Only the two
- *  members' birthdates matter for `age` anchors; the `year` anchors ignore the
- *  context entirely. `retirementYear` is unused by the `age` / `year` kinds but
- *  is required by the shared context type — pin it to 0. */
+/** Anchor-resolve context from the household members; `retirementYear` is unused by age/year anchors but required by the type. */
 export function buildRothConversionResolveCtx(
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
 ): ScheduleResolveContext {
@@ -55,9 +37,7 @@ export function buildRothConversionResolveCtx(
   };
 }
 
-/** Resolve a conversion entry to its inclusive `[startYear, endYear]`. Returns
- *  `null` when either anchor can't resolve (e.g. an `age` anchor whose member
- *  has no birthdate). */
+/** Inclusive `[startYear, endYear]`, or `null` when either anchor can't resolve. */
 export function resolveConversionYears(
   entry: RothConversionWindowEntry,
   ctx: ScheduleResolveContext,
@@ -66,7 +46,6 @@ export function resolveConversionYears(
   if (!startMonth) return null;
   const endMonth = resolveEndMonth(entry.end as ScheduleEnd, startMonth, ctx);
   if (!endMonth) return null;
-  // `endMonth.year` is the EXCLUSIVE boundary (Jan 1 of the year after the last
-  // active year), so the inclusive end year is one less.
+  // `endMonth.year` is the exclusive boundary (Jan 1 after the last active year).
   return { startYear: startMonth.year, endYear: endMonth.year - 1 };
 }

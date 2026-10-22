@@ -1,27 +1,6 @@
 /**
- * Federal income tax bracket tables for 2024–2026.
- *
- * Current law (post-OBBBA): the One Big Beautiful Bill Act (signed July 2025)
- * made the TCJA seven-rate structure (10/12/22/24/32/35/37%) permanent, so
- * 2026 keeps the TCJA rate schedule rather than reverting to pre-TCJA rates.
- *
- * Sources:
- *   2024 — IRS Rev. Proc. 2023-34 (inflation-adjusted 2024 amounts)
- *   2025 — IRS Rev. Proc. 2024-40 brackets/LTCG; standard deduction at the
- *          OBBBA-raised amounts (§70102: Single $15,750 / MFJ $31,500 /
- *          HoH $23,625)
- *   2026 — IRS Rev. Proc. 2025-32 (inflation-adjusted 2026 amounts under
- *          OBBBA-permanent TCJA brackets)
- *
- * OBBBA senior bonus deduction: the temporary $6,000/filer deduction for
- * taxpayers age 65+ (tax years 2025–2028, 6% MAGI phase-out above
- * $75k Single / $75k HoH / $150k MFJ) IS modeled — see the
- * `seniorBonusDeduction` slot on the 2025/2026 configs and the year-gated
- * extrapolation carry-forward for 2027/2028. The slot is absent for 2024 and
- * never carried past 2028 (statutory expiry), so those years are $0 by
- * construction.
- *
- * Engine: apps/web/src/lib/federal-tax.ts
+ * Federal income tax bracket tables for 2024–2026 (IRS Rev. Proc. 2023-34, 2024-40 and 2025-32).
+ * Refresh: docs/yearly-tax-refresh.md.
  */
 
 import type { CalibrationSnapshot } from './calibration';
@@ -32,66 +11,22 @@ import type {
   TaxConfig,
 } from './federal-tax';
 
-// ---------------------------------------------------------------------------
-// MFS / QSS calibration
-// ---------------------------------------------------------------------------
-//
-// Married-filing-separately (MFS) and qualifying-surviving-spouse (QSS) tables
-// are LIVE. The scalar `deriveFilingStatus` only returns Single/MFJ/HoH, but
-// the filing plan (`resolveFilingPlanForYear` → `applyTaxYearForFilingPlan`)
-// resolves each projection year into tax units, so a `separate` plan reaches
-// MFS and a survivor status window reaches QSS. See docs/math-taxes.md,
-// "Filing status and tax units".
-//
-// MFS ordinary brackets and the standard deduction are, by statute, exactly one
-// half of the MFJ figures (26 U.S.C. §1(j)(2) for brackets; §63(c)(2)(A)/(C) —
-// MFS standard deduction equals the Single amount, which equals MFJ/2). The
-// per-year MFS ordinary-bracket arrays below are therefore MFJ/2, verified
-// against the published Rev. Proc. MFS columns.
-//
-// MFS diverges from MFJ/2 in two places that are NOT symmetric and are set from
-// the primary sources directly, not derived:
-//   - NIIT threshold (IRC §1411): MFS = $125,000 (fixed), NOT MFJ $250,000 / 2.
-//   - LTCG/QDI 15%→20% breakpoint: separately inflation-adjusted, so it is not
-//     exactly MFJ/2. The MFS 0%→15% breakpoint equals the Single amount. The 20%
-//     MFS breakpoints below (2024 $291,850 / 2025 $300,000 / 2026 $306,850) are
-//     the published MFS maximum-15%-rate amounts, confirmed against the Rev.
-//     Proc. MFS capital-gains column for each year (Rev. Proc. 2023-34,
-//     2024-40, 2025-32 respectively).
-//
-// QSS is tax-computed on the MFJ schedule (26 U.S.C. §1(a)/§2(a)): each config
-// below sets its QSS keys to the SAME array references / values as MFJ (no data
-// duplication). QSS remains a distinct FilingStatus label everywhere else (SS
-// taxation, IRMAA, senior-deduction phase-out base) — see federal-tax.ts.
+// MFS is MFJ halved (26 U.S.C. §1(j)(2) brackets; §63(c)(2)(A)/(C) standard deduction) except NIIT (IRC §1411:
+// MFS $125,000 fixed) and the LTCG 15%→20% breakpoint (separately indexed; the published MFS max-15% amounts).
+// QSS shares the MFJ arrays (26 U.S.C. §1(a)/§2(a)). See docs/math-taxes.md, "Filing status and tax units".
 
-// ---------------------------------------------------------------------------
-// OBBBA senior bonus deduction (Pub. L. 119-21 §70103)
-// ---------------------------------------------------------------------------
-//
-// Temporary $6,000-per-filer deduction for taxpayers age 65+, available for
-// tax years 2025–2028 only, phased out at 6% of MAGI above the per-status
-// base ($75,000 Single / $75,000 HoH / $150,000 MFJ). The enacted non-joint
-// threshold is $75,000 — HoH shares the Single base, not a $112,500 base.
-// Statutory amounts are not CPI-indexed, so the same slot applies to every
-// in-window year (and to the inflation-extrapolated 2027/2028 configs, which
-// carry it forward unchanged — see federal-tax-extrapolation.ts). Lowers
+// OBBBA senior bonus deduction (Pub. L. 119-21 §70103): $6,000 per filer age 65+ for tax years 2025–2028,
+// phased out at 6% of MAGI above $75,000 (Single / HoH / QSS) or $150,000 (MFJ). Not CPI-indexed; lowers
 // taxable income, not MAGI.
 const SENIOR_BONUS_DEDUCTION_2025_2028: SeniorBonusDeduction = {
   perFilerCap: 6_000,
-  // Only a joint return uses the $150,000 base; the eligible non-joint statuses
-  // (Single / HoH / QSS) use the $75,000 base. MFS is INELIGIBLE (Pub. L.
-  // 119-21 §70103 / IRC §151(d)(5)(C)(v) require a married taxpayer to file
-  // JOINTLY): `computeSeniorBonusDeduction` returns $0 for MFS before reading
-  // this base, so the MFS key below is unused (kept only to satisfy the
-  // per-status record shape). QSS (a surviving-spouse return is not a joint
-  // return) stays eligible at $75,000.
+  // MFS is ineligible (Pub. L. 119-21 §70103 / IRC §151(d)(5)(C)(v) require a joint return):
+  // `computeSeniorBonusDeduction` returns $0 before reading the MFS key, which only fills the record shape.
   phaseoutBaseMagi: { Single: 75_000, MFJ: 150_000, HoH: 75_000, MFS: 75_000, QSS: 75_000 },
   phaseoutRatePct: 0.06,
 };
 
-// ---------------------------------------------------------------------------
-// 2024
-// ---------------------------------------------------------------------------
+// 2024: IRS Rev. Proc. 2023-34
 
 const mfjBrackets2024: readonly TaxBracket[] = [
   { floor: 0, rate: 0.10 },
@@ -102,7 +37,6 @@ const mfjBrackets2024: readonly TaxBracket[] = [
   { floor: 487450, rate: 0.35 },
   { floor: 731200, rate: 0.37 },
 ];
-// MFS = MFJ / 2 (§1(j)(2)).
 const mfsBrackets2024: readonly TaxBracket[] = [
   { floor: 0, rate: 0.10 },
   { floor: 11600, rate: 0.12 },
@@ -167,9 +101,7 @@ const config2024: TaxConfig = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// 2025
-// ---------------------------------------------------------------------------
+// 2025: IRS Rev. Proc. 2024-40
 
 const mfjBrackets2025: readonly TaxBracket[] = [
   { floor: 0, rate: 0.10 },
@@ -180,7 +112,6 @@ const mfjBrackets2025: readonly TaxBracket[] = [
   { floor: 501050, rate: 0.35 },
   { floor: 751600, rate: 0.37 },
 ];
-// MFS = MFJ / 2 (§1(j)(2)).
 const mfsBrackets2025: readonly TaxBracket[] = [
   { floor: 0, rate: 0.10 },
   { floor: 11925, rate: 0.12 },
@@ -225,9 +156,7 @@ const config2025: TaxConfig = {
     MFS: mfsBrackets2025,
     QSS: mfjBrackets2025, // QSS uses the MFJ schedule (§1(a)/§2(a)).
   },
-  // OBBBA §70102 raised the 2025 standard deduction above the Rev. Proc.
-  // 2024-40 amounts (Single $15,000 → $15,750, MFJ $30,000 → $31,500,
-  // HoH $22,500 → $23,625). MFS = Single; QSS = MFJ.
+  // OBBBA §70102 raised the 2025 standard deduction above the Rev. Proc. 2024-40 amounts.
   standardDeduction: { Single: 15750, MFJ: 31500, HoH: 23625, MFS: 15750, QSS: 31500 },
   age65AddOn: { singleOrHoH: 2000, mfj: 1600 },
   seniorBonusDeduction: SENIOR_BONUS_DEDUCTION_2025_2028,
@@ -249,11 +178,7 @@ const config2025: TaxConfig = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// 2026 — IRS Rev. Proc. 2025-32 (OBBBA-permanent TCJA rate schedule)
-// OBBBA made the TCJA seven-rate brackets (10/12/22/24/32/35/37%) permanent;
-// these are the inflation-adjusted 2026 amounts, NOT a pre-TCJA reversion.
-// ---------------------------------------------------------------------------
+// 2026: IRS Rev. Proc. 2025-32
 
 const mfjBrackets2026: readonly TaxBracket[] = [
   { floor: 0, rate: 0.10 },
@@ -264,7 +189,6 @@ const mfjBrackets2026: readonly TaxBracket[] = [
   { floor: 512450, rate: 0.35 },
   { floor: 768700, rate: 0.37 },
 ];
-// MFS = MFJ / 2 (§1(j)(2)).
 const mfsBrackets2026: readonly TaxBracket[] = [
   { floor: 0, rate: 0.10 },
   { floor: 12400, rate: 0.12 },
@@ -312,8 +236,7 @@ const config2026: TaxConfig = {
   standardDeduction: { Single: 16100, MFJ: 32200, HoH: 24150, MFS: 16100, QSS: 32200 },
   age65AddOn: { singleOrHoH: 2050, mfj: 1650 },
   seniorBonusDeduction: SENIOR_BONUS_DEDUCTION_2025_2028,
-  // NIIT thresholds are NOT CPI-indexed; frozen at 2013 enactment levels.
-  // MFS = $125,000 (§1411); QSS = MFJ $250,000.
+  // NIIT thresholds are frozen at their 2013 levels, not CPI-indexed.
   niitThresholds: { Single: 200000, MFJ: 250000, HoH: 200000, MFS: 125000, QSS: 250000 },
   ltcgBrackets: {
     Single: [
@@ -331,10 +254,6 @@ const config2026: TaxConfig = {
     QSS: mfjLtcg2026, // QSS uses the MFJ LTCG schedule.
   },
 };
-
-// ---------------------------------------------------------------------------
-// Export
-// ---------------------------------------------------------------------------
 
 export const FEDERAL_TAX_CONFIG: CalibrationSnapshot<TaxConfig> = {
   values: {
