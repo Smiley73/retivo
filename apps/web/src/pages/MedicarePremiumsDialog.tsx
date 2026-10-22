@@ -188,7 +188,7 @@ export const MedicarePremiumsDialog: React.FC<MedicarePremiumsDialogProps> = ({
       open
       onClose={onClose}
       title="Add Medicare premiums"
-      size="2xl"
+      size="4xl"
       scrollBodyLabel="Medicare premiums"
     >
       <div className="flex flex-col gap-4">
