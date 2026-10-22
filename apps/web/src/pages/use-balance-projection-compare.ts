@@ -1,0 +1,332 @@
+/**
+ * Balance Projection page — Compare tab data hook: which scenario to compare
+ * with (URL, then the remembered choice, then the parent, then none), the
+ * selector options, and the second `loadPageData` projection, run only while
+ * the tab is selected (the panel is force-mounted) and deferred to an idle
+ * slice. A result is kept across tab switches and recomputed only when an
+ * input of the page's own projection, or the comparison id, changes.
+ *
+ * Status: `none`, `pending`, `ready`, `unprojectable` (no retirement age
+ * resolves), `unavailable` (no usable Planned result on one side, e.g. an
+ * unconfigured pension election) or `error` (a configuration clash).
+ */
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
+import { hasPlannedProjection } from './balance-projection-compare-data';
+import { COMPARE_WITH_PARAM } from './balance-projection-page-constants';
+import { loadPageData, type PipelineData } from './balance-projection-page-data';
+import type { UseBalanceProjectionDataResult } from './use-balance-projection-data';
+import { TaxIntegrationInvalidInputError } from '../lib/balance-projection-runner-tax';
+import { friendlyProjectionErrorMessage } from '../lib/tax-integration';
+import {
+  buildScenarioTreeOptions,
+  scenarioOptionLabel,
+} from '../lib/scenario-tree-options';
+import type { ScenarioAggregate } from '../lib/scenario-resolution';
+import {
+  COMPARE_CHOICE_STORAGE_KEY,
+  parseCompareChoices,
+} from '../lib/view-deflator';
+import { yieldToIdle } from '../lib/yield-to-idle';
+
+type CompareStatus = 'none' | 'pending' | 'ready' | 'unprojectable' | 'unavailable' | 'error';
+
+interface CompareOption {
+  readonly value: string;
+  readonly label: string;
+  readonly depth: number;
+}
+
+export interface CompareWithAnchor {
+  readonly withParam: string;
+  readonly viewedId: string;
+}
+
+export interface UseBalanceProjectionCompareInput {
+  readonly dataLoad: UseBalanceProjectionDataResult;
+  /** The viewed scenario's projection — the page's own `data`. */
+  readonly data: PipelineData;
+  readonly withAnchor: CompareWithAnchor | null;
+  /** True while the Compare tab is the selected view. */
+  readonly isActive: boolean;
+  readonly nowYear: number;
+  readonly nowMonthIndex: number;
+}
+
+export interface UseBalanceProjectionCompareResult {
+  /** Every scenario but the viewed one, in the sidebar picker's tree order. */
+  readonly options: ReadonlyArray<CompareOption>;
+  readonly comparisonId: string | null;
+  readonly comparisonName: string | null;
+  readonly status: CompareStatus;
+  /** The comparison scenario's projection; non-null only when `status` is `ready`. */
+  readonly comparison: PipelineData | null;
+  readonly errorMessage: string | null;
+  /** Writes `?with=` (REPLACE) and the remembered choice. */
+  readonly choose: (id: string) => void;
+}
+
+const FALLBACK_ERROR_MESSAGE =
+  'This scenario can\'t be projected with its current settings.';
+
+type Outcome =
+  | { readonly status: 'ready'; readonly comparison: PipelineData }
+  | { readonly status: 'unprojectable' }
+  | { readonly status: 'unavailable' }
+  | { readonly status: 'error'; readonly message: string };
+
+function readRemembered(): ReadonlyMap<string, string> {
+  if (typeof window === 'undefined') return new Map();
+  try {
+    return parseCompareChoices(window.localStorage.getItem(COMPARE_CHOICE_STORAGE_KEY));
+  } catch {
+    return new Map();
+  }
+}
+
+function writeRemembered(choices: ReadonlyMap<string, string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      COMPARE_CHOICE_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(choices)),
+    );
+  } catch {
+    // Storage blocked or full: the URL still carries the choice for this visit.
+  }
+}
+
+/** Which scenario to compare the viewed one with, or null for none. */
+export function resolveComparisonId(args: {
+  readonly viewedId: string;
+  readonly scenarios: ReadonlyArray<ScenarioAggregate>;
+  readonly withParam: string | null;
+  readonly remembered: ReadonlyMap<string, string>;
+}): string | null {
+  const { viewedId, scenarios, withParam, remembered } = args;
+  const isLiveOther = (id: string | null | undefined): id is string =>
+    !!id && id !== viewedId && scenarios.some((s) => s.id === id);
+  if (isLiveOther(withParam)) return withParam;
+  const rememberedId = remembered.get(viewedId);
+  if (isLiveOther(rememberedId)) return rememberedId;
+  const parentId = scenarios.find((s) => s.id === viewedId)?.payload.parentScenarioId;
+  return isLiveOther(parentId) ? parentId : null;
+}
+
+function sameInputs(a: ReadonlyArray<unknown>, b: ReadonlyArray<unknown>): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * `?with=` applies to the scenario that was viewed when it arrived. After a
+ * sidebar switch it no longer overrides the remembered choice or the default
+ * and is dropped from the URL. The page calls this above its early returns, so
+ * a switch through a scenario that renders no Compare panel is still seen.
+ */
+export function useCompareWithAnchor(
+  viewedId: string | null,
+): CompareWithAnchor | null {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawWithParam = searchParams.get(COMPARE_WITH_PARAM);
+  const [anchor, setAnchor] = useState<CompareWithAnchor | null>(null);
+  if (rawWithParam === null) {
+    if (anchor !== null) setAnchor(null);
+  } else if (viewedId !== null && anchor?.withParam !== rawWithParam) {
+    setAnchor({ withParam: rawWithParam, viewedId });
+  }
+  const stale =
+    anchor !== null &&
+    rawWithParam === anchor.withParam &&
+    viewedId !== null &&
+    anchor.viewedId !== viewedId;
+  useEffect(() => {
+    if (!stale) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(COMPARE_WITH_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [stale, setSearchParams]);
+  return rawWithParam !== null && anchor?.withParam === rawWithParam ? anchor : null;
+}
+
+export function useBalanceProjectionCompare(
+  input: UseBalanceProjectionCompareInput,
+): UseBalanceProjectionCompareResult {
+  const { dataLoad, data, withAnchor, isActive, nowYear, nowMonthIndex } = input;
+  const {
+    scenarios,
+    ready,
+    members,
+    accounts,
+    balances,
+    expenses,
+    expenseCategories,
+    incomeStreams,
+    ssBenefits,
+  } = dataLoad;
+  const viewedId = data.selectedScenarioId;
+  const [, setSearchParams] = useSearchParams();
+  const withParam =
+    withAnchor !== null && withAnchor.viewedId === viewedId ? withAnchor.withParam : null;
+  const [remembered, setRemembered] = useState(readRemembered);
+
+  const options = useMemo(
+    () =>
+      buildScenarioTreeOptions([...scenarios])
+        .filter(({ scenario }) => scenario.id !== viewedId)
+        .map(({ scenario, depth }) => ({
+          value: scenario.id,
+          label: scenarioOptionLabel(scenario),
+          depth,
+        })),
+    [scenarios, viewedId],
+  );
+
+  const comparisonId = useMemo(
+    () =>
+      ready && scenarios.length > 0
+        ? resolveComparisonId({ viewedId, scenarios, withParam, remembered })
+        : null,
+    [ready, scenarios, viewedId, withParam, remembered],
+  );
+  const comparisonName =
+    scenarios.find((s) => s.id === comparisonId)?.payload.name ?? null;
+
+  // A stored result is current only while all of these are unchanged.
+  const inputs = useMemo(
+    () => [
+      comparisonId,
+      scenarios,
+      members,
+      accounts,
+      balances,
+      expenses,
+      expenseCategories,
+      incomeStreams,
+      ssBenefits,
+      nowYear,
+      nowMonthIndex,
+    ],
+    [
+      comparisonId,
+      scenarios,
+      members,
+      accounts,
+      balances,
+      expenses,
+      expenseCategories,
+      incomeStreams,
+      ssBenefits,
+      nowYear,
+      nowMonthIndex,
+    ],
+  );
+  const [result, setResult] = useState<{
+    readonly inputs: ReadonlyArray<unknown>;
+    readonly outcome: Outcome;
+  } | null>(null);
+  // An idle callback cannot throw to the error boundary; rethrow from render.
+  const [fatal, setFatal] = useState<{ readonly error: unknown } | null>(null);
+  if (fatal) throw fatal.error;
+
+  const outcome =
+    result !== null && sameInputs(result.inputs, inputs) ? result.outcome : null;
+  const current = outcome !== null;
+
+  useEffect(() => {
+    if (!isActive || comparisonId === null || current) return;
+    return yieldToIdle(() => {
+      try {
+        const comparison = loadPageData({
+          scenarios,
+          selectedScenarioId: comparisonId,
+          members,
+          accounts,
+          balances,
+          expenses,
+          incomeStreams,
+          ssBenefits,
+          categories: expenseCategories,
+          todayYear: nowYear,
+          todayMonthIndex: nowMonthIndex,
+        });
+        setResult({
+          inputs,
+          outcome: !comparison.pageResult
+            ? { status: 'unprojectable' }
+            : hasPlannedProjection(comparison)
+              ? { status: 'ready', comparison }
+              : { status: 'unavailable' },
+        });
+      } catch (e) {
+        if (e instanceof TaxIntegrationInvalidInputError) {
+          setResult({
+            inputs,
+            outcome: {
+              status: 'error',
+              message: friendlyProjectionErrorMessage(e) ?? FALLBACK_ERROR_MESSAGE,
+            },
+          });
+        } else {
+          setFatal({ error: e });
+        }
+      }
+    });
+  }, [
+    isActive,
+    comparisonId,
+    current,
+    inputs,
+    scenarios,
+    members,
+    accounts,
+    balances,
+    expenses,
+    expenseCategories,
+    incomeStreams,
+    ssBenefits,
+    nowYear,
+    nowMonthIndex,
+  ]);
+
+  const choose = (id: string): void => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set(COMPARE_WITH_PARAM, id);
+        return next;
+      },
+      { replace: true },
+    );
+    const next = new Map(readRemembered());
+    next.set(viewedId, id);
+    writeRemembered(next);
+    setRemembered(next);
+  };
+
+  // Without a Planned result on the viewed side the headline would read "Never".
+  const readyComparison =
+    outcome?.status === 'ready' && hasPlannedProjection(data) ? outcome.comparison : null;
+  const status: CompareStatus =
+    comparisonId === null
+      ? 'none'
+      : outcome === null
+        ? 'pending'
+        : outcome.status === 'ready' && readyComparison === null
+          ? 'unavailable'
+          : outcome.status;
+
+  return {
+    options,
+    comparisonId,
+    comparisonName,
+    status,
+    comparison: readyComparison,
+    errorMessage: outcome?.status === 'error' ? outcome.message : null,
+    choose,
+  };
+}

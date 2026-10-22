@@ -93,6 +93,7 @@ export function vm(
     cbpMembers: [],
     stressBaseInput: null,
     stressPairSignature: null,
+    runPending: false,
     longestLivedBirthYear: null,
     lastSurvivor: null,
     replayPath: () => null,

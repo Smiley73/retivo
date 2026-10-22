@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { idVersionSignature } from '../lib/aggregate-signature';
 import type { MonteCarloInput, MonteCarloSummary } from '../lib/monte-carlo';
 import { loadPageData } from './balance-projection-page-data';
+import { yieldToIdle } from '../lib/yield-to-idle';
 import { loadProjectionInputs, type ProjectionInputs } from '../lib/projection-inputs';
 import { useAggregates } from '../lib/use-aggregates';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
@@ -135,20 +136,6 @@ export interface ScenarioCardMetricsResult {
   ) => void;
   /** All scenario ids that can run MC (for "Recalculate all" to queue). */
   readonly recalcableScenarioIds: ReadonlyArray<string>;
-}
-
-/** Idle-yield shim: prefer `requestIdleCallback`, fall back to a macrotask. */
-function yieldToIdle(run: () => void): () => void {
-  const ric = (globalThis as { requestIdleCallback?: (cb: () => void) => number })
-    .requestIdleCallback;
-  if (typeof ric === 'function') {
-    const id = ric(run);
-    const cancel = (globalThis as { cancelIdleCallback?: (id: number) => void })
-      .cancelIdleCallback;
-    return () => cancel?.(id);
-  }
-  const id = setTimeout(run, 0);
-  return () => clearTimeout(id);
 }
 
 /**

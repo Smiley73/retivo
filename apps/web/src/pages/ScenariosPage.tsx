@@ -19,6 +19,7 @@
  * bar + Cancel and a per-card fine bar — see the recalc orchestration below.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { RefreshIcon } from '../components/icons';
 import { PlusIcon } from '../components/icons';
 import { useAuth } from '../auth/AuthContext';
@@ -27,11 +28,12 @@ import { PageHeader } from '../components/PageHeader';
 import { Muted } from '../components/Muted';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useSync } from '../sync/SyncContext';
-import { deleteScenarioCascade } from '../lib/scenario-mutations';
+import { deleteScenarioCascade, switchSelectedScenario } from '../lib/scenario-mutations';
 import { useAggregates } from '../lib/use-aggregates';
 import { useSelectedScenarioRevision } from '../lib/use-selected-scenario-revision';
 import { descendantIds } from '../lib/scenario-resolution';
 import type { Aggregate, ScenarioPayload } from '../db/types';
+import { compareDeepLink } from './balance-projection-page-constants';
 import { errorTextClass } from './scenarios-page-chrome';
 import { ScenariosPageRow } from './ScenariosPageRow';
 import { useScenarioCardMetrics } from './scenarios-page-metrics';
@@ -73,6 +75,7 @@ export const ScenariosPage: React.FC = () => {
   const { householdId } = useAuth();
   const { notifyPending } = useSync();
   const { confirm, dialog } = useConfirm();
+  const navigate = useNavigate();
   // Reactive scenario list: re-reads on any `scenario`-store write (add/edit/
   // delete, sync bootstrap, demo bulk fill). The active-scenario highlight
   // tracks the local selection pointer via the narrow revision below.
@@ -221,6 +224,23 @@ export const ScenariosPage: React.FC = () => {
     [householdId, scenarios, confirm, notifyPending],
   );
 
+  // Navigating before the pointer write lands would open the tab on the wrong pair.
+  const compareWithParent = useCallback(
+    async (scenario: ScenarioAggregate, parentId: string): Promise<void> => {
+      setActionError(null);
+      try {
+        await switchSelectedScenario(scenario.id);
+      } catch (e) {
+        setActionError(
+          e instanceof Error ? e.message : 'Could not switch the active scenario.',
+        );
+        return;
+      }
+      navigate(compareDeepLink(parentId));
+    },
+    [navigate],
+  );
+
   return (
     <>
       <PageHeader
@@ -314,6 +334,9 @@ export const ScenariosPage: React.FC = () => {
               const canRecalc =
                 cardMetrics?.canRunMc === true &&
                 cardMetrics.planSuccessState === 'missing';
+              const parent = scenarios.find(
+                (p) => p.id === s.payload.parentScenarioId,
+              );
               return (
                 <ScenariosPageRow
                   key={s.id}
@@ -331,6 +354,14 @@ export const ScenariosPage: React.FC = () => {
                   isRecalculating={isRecalculating}
                   recalcDone={recalcDone}
                   recalcTotal={recalcTotal}
+                  compareWithParent={
+                    parent
+                      ? {
+                          parentName: parent.payload.name,
+                          onActivate: () => void compareWithParent(s, parent.id),
+                        }
+                      : null
+                  }
                 />
               );
             })}

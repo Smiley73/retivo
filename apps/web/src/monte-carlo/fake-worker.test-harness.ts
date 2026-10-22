@@ -1,5 +1,6 @@
 /**
- * Shared fixtures for the `MonteCarloProvider.*.test.tsx` suites. TEST-ONLY.
+ * Shared fixtures for the `MonteCarloProvider.*.test.tsx` suites and the
+ * `createMcPool` consumers' hook tests. TEST-ONLY.
  *
  * `vi.mock` is hoisted, so each suite keeps its own `vi.mock(...)` calls and
  * its own `vi.hoisted` state. What lives here is what those suites only ever
@@ -8,6 +9,7 @@
  */
 import { act } from '@testing-library/react';
 import { ENGINE_VERSION, type MonteCarloInput, type MonteCarloSummary } from '../lib/monte-carlo';
+import type { MinimalMcWorker } from './mc-worker-pool';
 
 const HORIZON = 8;
 
@@ -99,4 +101,52 @@ export function neverRepliesWorkerModule(sink: { workers: Array<{ terminated: bo
     }
   }
   return { default: FakeMcWorker };
+}
+
+/** A fake `MinimalMcWorker` for `createMcPool` consumers: `posted` records every
+ *  run input, and the `emit*` / `resolveResult` methods deliver replies by hand. */
+export interface ControlledWorker extends MinimalMcWorker {
+  resolveResult(summary: MonteCarloSummary): void;
+  emitError(message: string): void;
+  emitProgress(done: number, total: number): void;
+  readonly posted: ReadonlyArray<MonteCarloInput>;
+  readonly terminated: boolean;
+}
+
+export function controlledWorker(): ControlledWorker {
+  const listeners = new Set<(ev: MessageEvent) => void>();
+  const posted: MonteCarloInput[] = [];
+  let terminated = false;
+  const emit = (data: unknown): void => {
+    const ev = { data } as MessageEvent;
+    listeners.forEach((fn) => fn(ev));
+  };
+  return {
+    posted,
+    get terminated() {
+      return terminated;
+    },
+    addEventListener(t, fn) {
+      if (t !== 'error') listeners.add(fn);
+    },
+    removeEventListener(t, fn) {
+      if (t !== 'error') listeners.delete(fn);
+    },
+    postMessage(msg: unknown) {
+      const m = msg as { kind: 'run'; input: MonteCarloInput };
+      posted.push(m.input);
+    },
+    terminate() {
+      terminated = true;
+    },
+    resolveResult(summary: MonteCarloSummary) {
+      emit({ kind: 'result', summary });
+    },
+    emitError(message: string) {
+      emit({ kind: 'error', message });
+    },
+    emitProgress(done: number, total: number) {
+      emit({ kind: 'progress', done, total });
+    },
+  };
 }

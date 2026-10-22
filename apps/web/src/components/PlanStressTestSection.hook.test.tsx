@@ -1400,18 +1400,26 @@ describe('usePlanStressTestVm — guardrail with/without comparison', () => {
           deferred.settle = resolve;
         }),
     );
+    expect(hook.current.runPending).toBe(false);
     currentInput = inputB;
     rerender({ runArgs: { ...buildRunArgs() } });
+    // Queued behind the debounce: a run is still to come.
+    expect(hook.current.runPending).toBe(true);
     await act(async () => {
       vi.advanceTimersByTime(900);
     });
     expect(runMock).toHaveBeenCalledTimes(2);
+    // Requested and outstanding: still pending until the request ends.
+    expect(hook.current.runPending).toBe(true);
     await act(async () => {
       deferred.settle?.(null);
     });
     await act(async () => {});
     // The settled run belongs to plan A; plan B is on screen → nothing to pair.
     expect(hook.current.stressPairSignature).toBeNull();
+    // Cancelled: nothing more is coming, which a watcher must be able to tell
+    // apart from a run that is merely queued.
+    expect(hook.current.runPending).toBe(false);
     // And the cancelled run stays cancelled.
     await act(async () => {
       vi.advanceTimersByTime(900);

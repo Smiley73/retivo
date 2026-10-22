@@ -48,14 +48,14 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     // The screen-only hide is a two-part join: styles.css matches
     // `.bp-view-panel[data-inert]`, and the page must put that class on the
     // SAME element React Aria decorates with `data-inert`. Count proves the
-    // join (four non-selected panels carry both — five views total, one
+    // join (five non-selected panels carry both — six views total, one
     // selected); hidden proves the rule actually applies under real CSS —
     // jsdom applies no stylesheet, and `styles.test.ts` only reads the CSS
     // text. Count goes first because `toBeHidden()` alone is also satisfied
     // by a locator matching nothing.
     const inertPanels = page.locator('.bp-view-panel[data-inert]');
-    await expect(inertPanels).toHaveCount(4);
-    for (let i = 0; i < 4; i++) {
+    await expect(inertPanels).toHaveCount(5);
+    for (let i = 0; i < 5; i++) {
       await expect(inertPanels.nth(i)).toBeHidden();
     }
     await expect(page).toHaveURL(/\?view=cashflow$/);
@@ -199,6 +199,27 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     // jsdom-only fallback re-measured against a different container — the
     // screen-only hide preserves the SAME layout width it had selected.
     expect(hiddenBox!.width).toBeCloseTo(selectedBox!.width, 0);
+  });
+
+  test('deep-links the Compare tab with a scenario selected and shows the headline figures', async ({
+    page,
+  }) => {
+    await loadDemo(page);
+    await page.goto('/balance-projection?view=compare&with=demo-scenario-delay');
+    await expect(page.getByRole('tab', { name: 'Compare' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(page.getByRole('button', { name: /Compare with/ })).toContainText(
+      'Delay — work to 70',
+      { timeout: 10_000 },
+    );
+    const endingBalance = page.getByRole('row', {
+      name: /Ending balance at the horizon/,
+    });
+    const figures = endingBalance.getByRole('gridcell');
+    await expect(figures.nth(0)).toHaveText(/^\$\d/, { timeout: 10_000 });
+    await expect(figures.nth(1)).toHaveText(/^\$\d/);
   });
 
   // The `lg` breakpoint itself: the content column is ~704px wide here, so
