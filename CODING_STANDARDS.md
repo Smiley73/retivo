@@ -86,15 +86,7 @@ Not complete until **all** true:
 
 ## Code quality
 
-**Shape limits** (flag before exceeding): functions ≤ 60 ln · files ≤ 800 ln · nesting ≤ 3 levels.
-
-**File-length exception note.** A file that cannot reasonably split may stay over 800 lines if its header carries a note labelled `SHAPE-LIMIT EXCEPTION (recorded justification; CODING_STANDARDS ≤ 800 lines):` that states:
-
-- that the file is over the 800-line limit (no line count, no date);
-- why it cannot be split;
-- the trigger: a change adding 5 or more lines must either refactor the file back under the limit or re-justify the exception in the note.
-
-The note carries no owner name, approval date, plan, decision tag or PR number. A re-justification is added to the note as a plain reason.
+**Shape limits** (flag before exceeding): functions ≤ 60 ln · files ≤ 800 ln · nesting ≤ 3 levels. Flagging means the PR says the file crossed the limit and why it was not split. A file over the limit is not by itself a reason to split it or to extract a one-caller helper; a split made only to satisfy the limit is not an improvement.
 
 **Types:** annotate all fn signatures; strict settings, never relax; no `any`/`object` without an inline comment.
 
@@ -104,7 +96,13 @@ The note carries no owner name, approval date, plan, decision tag or PR number. 
 
 **UI guards:** `obj?.flag === true` not `obj?.flag !== false` — negations silently pass `undefined` during fetch. Any explicit-Save surface must prompt before accidental discard: (1) `beforeunload` while dirty; (2) in-app guard on nav/modal-close (X, Esc, scrim); (3) Save visible when dirty. Explicit Cancel bypasses. Capture the pattern in `AGENTS.md` with a ref impl.
 
-**Comments:** why/how it fits, not what. File header on non-trivial files: a one-line purpose. Where a guide or math page explains the behaviour, the header or comment may name it once, in plain words, and only a section that exists. No links to planning documents; no decision, plan, phase, finding or PR ids. TSDoc on exported symbols (purpose, non-obvious params, throws, side effects). Inline on security/math/concurrency/framework-quirk/a11y decisions. No syntax narration.
+**Comments:** say why, not what.
+
+- A file header is at most two lines.
+- TSDoc goes on exported symbols only (purpose, non-obvious params, throws, side effects); a file-local function, constant or type gets none.
+- Any other comment names the rule, the bug, or the concurrency, security, framework-quirk or a11y decision the line works around, as one statement.
+- No comment restates the code, narrates a change's history, argues against an alternative, or repeats a paragraph `AGENTS.md` or a docs page holds: name that section instead, and only one that exists.
+- No emphasis capitals; no plan, spec, phase, decision, finding or PR identifiers, and no links to planning documents.
 
 ## Commit discipline (atomic commits)
 
@@ -186,11 +184,13 @@ When in doubt: would a PM or a teammate from a different stack understand this? 
 
 **TDD order:** (1) write failing test, confirm the right failure reason; (2) minimal code to pass; (3) refactor. Skipping red = process failure.
 
-**Coverage + naming:** ~80% line min; 100% of the acceptance criteria. Where a project wires a coverage gate (this repo: `pnpm test:coverage`, which CI runs on every PR), thresholds ratchet toward that target and are raise-only — lowering one requires a documented justification in the PR. **Documented redundancy reset (exception):** a PR that removes tests proven redundant — the deleted tests' lines stay covered by other tests — may re-baseline the threshold down to the new measured floor, with the coverage-overlap evidence documented in the PR. Normal work still ratchets up; silent regressions stay blocked. Behavior names (`should_return_404_when_resource_not_found`). Arrange → Act → Assert; one assertion cluster per test. Both happy-path and error/edge.
+**Coverage + naming:** ~80% line min; 100% of the acceptance criteria. Where a project wires a coverage gate (this repo: `pnpm test:coverage`, which CI runs on every PR), thresholds are a floor, not a target, and are raise-only — lowering one requires a documented justification in the PR. **Documented redundancy reset (exception):** a PR that removes tests proven redundant — the deleted tests' lines stay covered by other tests — may re-baseline the threshold down to the new measured floor, with the coverage-overlap evidence documented in the PR. Normal work still ratchets up; silent regressions stay blocked. Behavior names (`should_return_404_when_resource_not_found`). Arrange → Act → Assert; one assertion cluster per test. Both happy-path and error/edge.
 
 **Independence:** no shared mutable state; mock at the system boundary; unit tests < 250 ms; test behavior/contracts not impl details.
 
 **Minimums per feature:** API endpoint → one positive + one negative (+ an allowed-caller / denied-caller pair if protected) · UI component → render + one interaction/state test · validation rule → one pass + one fail · tests committed same commit as the feature.
+
+**One layer per behaviour:** a behaviour is tested at the lowest layer that can observe it; the minimums above are per behaviour, not per layer it passes through. A test that fails for the same reason as a sibling is deleted, and a PR that deletes one names the survivor. No export exists so a test can import it: a file-local behaviour is proved through the module's public entry, and a test is moved there rather than dropped when it was the only coverage.
 
 ## Error handling
 
