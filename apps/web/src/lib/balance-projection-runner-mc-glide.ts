@@ -1,8 +1,4 @@
-/**
- * Per-account glide-derivation helpers for the MC bundle assembler.
- * Extracted from `balance-projection-runner-mc.ts` to keep that file
- * within the ≤400-line shape cap.
- */
+/** Per-account glide-derivation helpers for the MC bundle assembler. */
 import {
   defaultAssetMixForAccountType,
   type AccountPayload,
@@ -23,20 +19,8 @@ export interface AccountBundleItem {
   readonly assetMixSeries: ReadonlyArray<AssetMix> | null;
 }
 
-/**
- * Derive the per-step asset-mix series for one account. Returns `null`
- * when no `retirementAllocation` override is set or the account is CBP.
- *
- * `retirementStepIdx` uses the month-precise
- * kernel convention — `Math.max(0, (retirementYear - todayYear) * 12 +
- * primaryRetirementMonth0)` — so `assetMixSeries[retirementStepIdx]` is the
- * FIRST drawdown step, aligning step-for-step with `buildStepInputs`.
- *
- * `primaryRetirementYear` is the actual calendar retirement year.
- * For already-retired households `retirementStepIdx` is clamped to 0,
- * so a `firstYear + floor(retirementStepIdx/12)` derivation would
- * collapse to `firstYear` — threading the real year avoids that.
- */
+// `retirementStepIdx` is month-precise, so `assetMixSeries[retirementStepIdx]` is the first drawdown step;
+// the real retirement year is passed because the index clamps to 0 for retired households.
 function deriveAssetMixSeriesForAccount(
   effectiveAccount: Aggregate<AccountPayload>,
   retirementAllocation: RetirementAllocationOverride | null,
@@ -72,19 +56,14 @@ export interface AccountBundleItemCtx {
   readonly retirementStepIdx: number;
   readonly stepCount: number;
   readonly todayYear: number;
-  /** Actual calendar retirement year of the primary member. Separate from
-   *  `retirementStepIdx` because for already-retired households the step
-   *  is clamped to 0 — threading the real year keeps the glide baseline
-   *  anchored to the user's past retirement year, not today. */
+  /**
+   * Calendar retirement year of the primary member; `retirementStepIdx` clamps to 0 for already-retired
+   * households.
+   */
   readonly primaryRetirementYear: number;
   readonly balancesByAccount: Map<string, ReadonlyArray<Aggregate<AccountBalancePayload>>>;
 }
 
-/**
- * Build the effective `AccountPayload` aggregate for one projection entry:
- * zeroes contributions when stopped and applies any per-account mix override.
- * Extracted from `buildAccountBundleItem` to keep that fn ≤40 lines.
- */
 function buildEffectiveAccount(
   p: AccountProjection,
   ctx: Pick<AccountBundleItemCtx, 'stopContributionsToday' | 'assetMixOverrides'>,
@@ -107,11 +86,7 @@ function buildEffectiveAccount(
   };
 }
 
-/**
- * Build one `AccountBundleItem` from a single `AccountProjection` entry.
- * Extracted so the `.map` call-site in `buildAccountBundles` is one
- * expression and the outer function stays ≤40 lines.
- */
+/** Builds one `AccountBundleItem` from a single `AccountProjection` entry. */
 export function buildAccountBundleItem(
   p: AccountProjection,
   ctx: AccountBundleItemCtx,
