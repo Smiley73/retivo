@@ -1,11 +1,5 @@
-/**
- * Single-pool branch of the monthly kernel — the shared fallback when no
- * per-account ledger is supplied (dispatched on whether accounts are present).
- *
- * Extracted from `kernel.ts` so the per-account branch + the single-
- * pool branch each fit the file shape cap. Public entry remains
- * `runStepKernel` in `kernel.ts`.
- */
+/** Single-pool branch of the monthly kernel, used when no per-account ledger is supplied.
+ * The entry point is `runStepKernel` in `kernel.ts`. */
 import {
   type WithdrawalStrategy,
   netNeedStrategy,
@@ -49,9 +43,6 @@ export function runSinglePoolKernel(s: StepInputs): StepOutcome {
   return buildSinglePoolOutcome(buf, state.depletionStepIdx);
 }
 
-/** One step of the single-pool kernel. Splits into accumulation vs.
- *  drawdown, then delegates to helpers. Extracted from
- *  `runSinglePoolKernel` to keep each function short. */
 function runSinglePoolStep(
   state: SinglePoolState,
   s: StepInputs,
@@ -138,12 +129,7 @@ function applyWithdrawalStep(
   });
   const rawTaken = Math.min(state.pool, target);
   if (rawTaken < target && state.depletionStepIdx === -1) state.depletionStepIdx = i;
-  // A negative target = surplus income. The strategy signals surplus as a
-  // negative net need, but the single-pool balance + tax math is unchanged —
-  // clamp to a non-negative withdrawal so balances, the depletion test, and
-  // downstream tax integration are the same as for a strategy that never
-  // returns a negative need. The surplus is NOT routed anywhere — clamping the
-  // recorded withdrawal to ≥ 0 simply reduces the effective draw to zero.
+  // A negative target is surplus income; clamp to 0 so balances, the depletion test and tax integration match a strategy that never returns a negative need.
   const taken = Math.max(0, rawTaken);
   buf.withdrawal[i] = taken;
   state.pool = Math.max(0, state.pool - taken);

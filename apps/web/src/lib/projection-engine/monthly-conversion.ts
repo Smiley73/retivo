@@ -1,21 +1,11 @@
-/**
- * Monthly-stepping conversion helpers shared between the deterministic
- * projection engine and the Monte Carlo runner.
- */
+/** Monthly-stepping conversion helpers shared by the deterministic engine and the Monte Carlo runner. */
 
-/**
- * Convert an annual percent rate (e.g. 7 for 7 %/yr) to its monthly
- * equivalent percent that compounds to the same annual factor:
- * `(1 + annual/100)^(1/12) - 1`, scaled back to percent. Used to thread
- * the user's annual-scalar inputs (`ratePct`, `inflationPct`) into the
- * kernel's monthly step factor without changing UX.
- */
+/** Annual percent rate to the monthly percent that compounds to the same annual factor: `(1 + annual/100)^(1/12) - 1`. */
 export function monthlyEquivalent(annualPct: number): number {
   return (Math.pow(1 + annualPct / 100, 1 / 12) - 1) * 100;
 }
 
-/** Whole-month gap from (yearA, monthA) to (yearB, monthB), with both
- *  month indices 0-based (Jan = 0). Negative when B precedes A. */
+/** Whole-month gap from (yearA, monthA) to (yearB, monthB); months are 0-based; negative when B precedes A. */
 export function monthsBetween(
   yearA: number,
   monthA: number,
@@ -25,8 +15,7 @@ export function monthsBetween(
   return (yearB - yearA) * 12 + (monthB - monthA);
 }
 
-/** Step index of a retirement date relative to the first projected
- *  month. Step 0 = January of `firstYear`. */
+/** Step index of a retirement date relative to January of `firstYear` (step 0). */
 export function stepIndexAtRetirement(
   retirementYear: number,
   retirementMonth: number,
@@ -35,9 +24,7 @@ export function stepIndexAtRetirement(
   return monthsBetween(firstYear, 0, retirementYear, retirementMonth);
 }
 
-/** Aggregate a length-`12·N` per-step `Float64Array` into a length-`N`
- *  array, summing each year's twelve values. `firstStep` is the index
- *  in `perStep` corresponding to January of the first emitted year. */
+/** Sums each year's twelve values of a per-step array; `firstStep` is the index of January of the first emitted year. */
 export function aggregateMonthlyToYearly(
   perStep: Float64Array,
   firstStep: number,

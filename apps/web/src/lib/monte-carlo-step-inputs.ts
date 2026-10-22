@@ -1,17 +1,5 @@
-/**
- * Monte-Carlo per-run / per-path step-input assembly, split out of
- * `monte-carlo.ts`: the
- * `(input, seed, ctx: RunContext) → BuildStepInputsResult` boundary that
- * resolves each path's per-step CPI / return / expense / income series plus its
- * per-account kernel inputs. Called at the top of every path.
- *
- * `monte-carlo.ts` imports `buildStepInputs` / `computeYearSums` /
- * `cpiShiftMonthlyFor` back as values while this module imports `RunContext`
- * as a TYPE — an inert import cycle: all cross-module references are
- * call-site bindings (never module-eval-time), same shape as the
- * `monte-carlo-shard.ts` / `monte-carlo-summary.ts` exceptions (see
- * `.dependency-cruiser.cjs`).
- */
+/** Per-run / per-path step-input assembly for the Monte Carlo runner: resolves each path's CPI, return, expense and income series
+ * and its per-account kernel inputs. */
 import {
   drawMonthlyIndices,
   historicalColumns,
@@ -26,38 +14,21 @@ import {
 } from './monte-carlo-per-account.js';
 import { DEFAULT_INFLATION_PCT } from '../db/types.js';
 import type { MonteCarloInput } from './monte-carlo-types.js';
-// Inert cycle: `RunContext` is type-only, erased at compile time.
 import type { RunContext } from './monte-carlo.js';
 
 export interface BuildStepInputsResult {
   readonly step: StepInputs;
   readonly stepCount: number;
   readonly retirementStepIdx: number;
-  /** The path's own full-horizon cumulative CPI factor by step
-   *  (`series.cumCpi`). Exposed so the strategy path can read
-   *  it directly instead of from the kernel `StepOutcome` — the kernel is
-   *  truncated at the retirement boundary there, so its `cumCpi` no longer
-   *  spans the full horizon, but this one always does (identical values by
-   *  construction: both are the same `cum *= 1 + cpiPct[i]/100` recurrence over
-   *  the same per-step `cpiPct`). */
+  /** The path's full-horizon cumulative CPI factor by step; read here because the kernel `StepOutcome.cumCpi` is truncated at the retirement boundary on the strategy path. */
   readonly cumCpi: Float64Array;
-  /** Per-year windowed nominal expense at the year-END step. ALWAYS present —
-   *  the tax path reads it. */
   readonly nominalExpenseByYear: Float64Array;
-  /** Per-step nominal HSA medical-demand (integer cents) — the
-   *  per-path-inflated `isMedical` subset of the expense series, fed to the
-   *  named-strategy engine's medical-first HSA pass. All-zero when no
-   *  `isMedical` category drives the base. */
+  /** Per-step nominal HSA medical demand in integer cents: the per-path-inflated `isMedical` subset of the expense series. */
   readonly medicalDemandCents: Float64Array;
-  /** Per-year modeled Medical expenses (every `isMedical` row) at the year-END
-   *  step, nominal dollars; the medical twin of `nominalExpenseByYear`. */
   readonly nominalMedicalExpenseByYear: Float64Array;
 }
 
-/** Helper: per-year sum of `base[i]` over that year's months
- *  (`firstStep = y*12` through `lastStep = min(stepCount-1, (y+1)*12-1)`) —
- *  computed once per run and shared by every path, so each product's operands
- *  stay bit-identical. */
+/** Per-year sum of `base[i]` over each year's months; computed once per run so every path's products keep bit-identical operands. */
 export function computeYearSums(
   base: readonly number[],
   stepCount: number,
@@ -80,23 +51,14 @@ export function buildStepInputs(
   ctx: RunContext,
 ): BuildStepInputsResult {
   const stepCount = ctx.stepCount;
-  // Month-precise retirement snap. `primaryRetirementMonth0` (0 = Jan,
-  // 11 = Dec) shifts the first drawdown step within the retirement year so a
-  // December retiree does not over-count ~11 months of retirement-year
-  // spending. Absent → January-of-retirementYear boundary snap.
+  // `primaryRetirementMonth0` shifts the first drawdown step within the retirement year so a December retiree does not over-count ~11 months of spending.
   const retirementStepIdx = Math.max(
     0,
     (input.retirementYear - input.firstYear) * 12 + (input.primaryRetirementMonth0 ?? 0),
   );
   const tuples = buildSampledOrInjectedTuples(input, seed, stepCount, ctx.cpiShiftMonthly);
   const series = buildHouseholdSeries(input, tuples.cpiPct, stepCount, retirementStepIdx, ctx);
-  // Account arrays are CLONED per path inside `buildPerAccountStepInputs`
-  // — mutating the caller's ledger from event-routing here would
-  // compound across paths and turn a 200-path sweep into a 200×
-  // contribution multiplier. `series.cumCpi` is the path's own cumulative
-  // CPI factor by step; tracks-inflation contributions are scaled per path
-  // (re-anchored at `todayMonthIndex` inside `scaleTracksInflationContrib`)
-  // so they stay flat-real on every inflation path.
+  // Accounts are cloned per path inside `buildPerAccountStepInputs`; mutating the caller's ledger would compound across paths.
   const accounts = buildPerAccountStepInputs({
     input,
     stepCount,
@@ -130,11 +92,6 @@ export function buildStepInputs(
   };
 }
 
-/**
- * Per-year modeled Medical expenses at the year-END step: each year's today's-dollar
- * sum times the cumulative CPI shifted by `(rate − general)/12`, per rate bucket,
- * inflated the way `nominalExpenseByYear` is.
- */
 function nominalMedicalExpenseByYear(
   input: MonteCarloInput,
   cpiPct: Float64Array,
@@ -169,13 +126,6 @@ function nominalMedicalExpenseByYear(
   return out;
 }
 
-/** Pack the resolved per-step arrays + per-account ledger into the
- *  kernel-facing `StepInputs`. Legacy single-pool fields are passed as
- *  zero-filled placeholders; the per-account branch ignores them. The
- *  read-only `legacyZero` backing array is shared across all paths when the
- *  per-account branch will run; for an empty ledger (single-pool branch reads
- *  these) it arrives length-0 and a correctly-sized fresh zero array is
- *  allocated here, preserving the all-zero status quo. */
 function assembleStepInputs(args: {
   stepCount: number;
   legacyZero: Float64Array;
@@ -185,8 +135,6 @@ function assembleStepInputs(args: {
   income: Float64Array;
   retirementStepIdx: number;
   accounts: KernelAccount[];
-  /** Per-step HSA medical-demand (integer cents) for the kernel's
-   *  medical-first HSA pass. */
   medicalDemandCents: Float64Array;
 }): StepInputs {
   const legacyZero =
@@ -209,30 +157,17 @@ function assembleStepInputs(args: {
   };
 }
 
-/** Resolve the per-step CPI series + per-account return source: either
- *  the path-sampled historical tuple set (sampling mode), or a caller-
- *  supplied injected return series (cross-engine-pin parity mode). */
-/** CPI bootstrap centering shift — seed-independent, so computed once per run
- *  and threaded through `buildSampledOrInjectedTuples`. shift_monthly =
- *  (scenarioAnnual − historicalAnnual) / 12; see the per-month application below
- *  for the variance/skew/autocorrelation-preserving rationale. */
-// The shift moves only CPI; the sampled nominal returns are untouched. A
-// scenario inflation rate ABOVE the historical sample mean (about 3.5% a year)
-// raises simulated CPI and so LOWERS real (inflation-adjusted) returns; a rate
-// BELOW it lowers CPI and RAISES real returns; at the mean the shift is about
-// zero. The methodology modal's "Inflation framing trims real returns" lean
-// (MonteCarloMethodologyModal.tsx) therefore holds only above the mean.
+/**
+ * CPI bootstrap centering shift, `(scenarioAnnual - historicalAnnual) / 12`; seed-independent, so computed once per run.
+ * It moves only CPI: a scenario inflation rate above the historical mean (about 3.5% a year) lowers real returns, below it raises them.
+ */
 export function cpiShiftMonthlyFor(input: MonteCarloInput): number {
   const base =
     input.scenarioInflationPct === undefined
       ? 0
       : (input.scenarioInflationPct - historicalMonthlySummary().cpi.arithMeanPct * 12) /
           12;
-  // The "Higher inflation" stress adds a flat
-  // percentage-point bump to the realized CPI. It rides on the SAME monthly
-  // mean-shift mechanism (percent units, `/12`) so the sampled residuals — and
-  // thus the random paths — are untouched. Absent / 0 → the exact unshifted
-  // value (guarded so the frozen parity fixtures stay byte-identical).
+  // The "Higher inflation" stress adds a flat percentage-point bump on the same monthly mean-shift (percent units, `/12`); guarded so 0 keeps the parity fixtures byte-identical.
   const shockPct = input.inflationShockPct ?? 0;
   return shockPct === 0 ? base : base + shockPct / 12;
 }
@@ -269,34 +204,17 @@ function buildSampledOrInjectedTuples(
     cpiPct.set(input.injectedCpi);
     return { cpiPct, sampledIdx: null, columns: null, injectedReturnPct: input.injectedReturns };
   }
-  // One historical tuple per simulated month per path. The same
-  // tuple is applied to each account's `assetMix` to produce its
-  // monthly return. The tuples are drawn as consecutive-month
-  // blocks (stationary bootstrap, mean L = `input.meanBlockLength` ??
-  // DEFAULT_MEAN_BLOCK_LENGTH) so volatility clustering carries across months.
+  // Tuples are drawn as consecutive-month blocks (stationary bootstrap) so volatility clustering carries across months.
   const rng = makeRng(seed);
-  // Struct-of-arrays: draw ROW INDICES (identical RNG sequence to `drawMonthlySeries`)
-  // and read the packed columns instead of per-row objects.
   const columns = historicalColumns();
   const sampledIdx = drawMonthlyIndices(rng, stepCount, input.meanBlockLength);
-  // Center the CPI bootstrap mean on scenario inflation. The shift is
-  // applied additively per-month so the historical residuals (variance, skew,
-  // autocorrelation within each sampled month) carry over — only the long-run
-  // mean moves. The shift itself is seed-independent (`cpiShiftMonthlyFor`),
-  // computed once per run and threaded in. `columns.cpiPct[idx[i]]` reads the
-  // SAME double `sampledTuple[i].cpiPct` did.
+  // The shift is additive per month, so residual variance, skew and autocorrelation carry over and only the long-run mean moves.
   for (let i = 0; i < stepCount; i += 1) {
     cpiPct[i] = columns.cpiPct[sampledIdx[i]] + cpiShiftMonthly;
   }
   return { cpiPct, sampledIdx, columns, injectedReturnPct: null };
 }
 
-/** Inflate the household-level expense / income series from today's-
- *  dollar scalars. Inflation base = today (firstYear); inputs
- *  inflate forward through accumulation + drawdown so the retirement-
- *  year cash flow matches the deterministic engine. The deposit
- *  series is initialised zero — household-level events route into it
- *  via `buildPerAccountStepInputs`. */
 function buildHouseholdSeries(
   input: MonteCarloInput,
   cpiPct: Float64Array,
@@ -308,19 +226,7 @@ function buildHouseholdSeries(
   income: Float64Array;
   deposit: Float64Array;
   cumCpi: Float64Array;
-  /** Per-year (offset from `firstYear`) nominal windowed expense at the
-   *  year-END step. ALWAYS built — the
-   *  tax fallback drawdown + `netAfterTax` display read it instead of a flat
-   *  `annualExpense × cumCpi[endStep]`. Scalar path: `sum(monthlyExpenseBase
-   *  [months∈year]) × cumCpi[endStep]`; bucketed path: `Σ_b (sum(bucketBase_b
-   *  [months∈year]) × bucketCumCpi_b[endStep])` (per-category year-sum × that
-   *  bucket's year-END mean-shifted factor). Equals the lifetime
-   *  `annualExpense × cumCpi[endStep]` for an all-lifetime expense (year-sum of
-   *  today's-base = annual base). */
   nominalExpenseByYear: Float64Array;
-  /** Per-step nominal HSA medical-demand (integer cents) — the
-   *  per-path-inflated `isMedical` subset of the expense series. All-zero when
-   *  no `isMedical` category drives the base. */
   medicalDemandCents: Float64Array;
 } {
   const expense = new Float64Array(stepCount);
@@ -332,20 +238,9 @@ function buildHouseholdSeries(
     cum *= 1 + cpiPct[i] / 100;
     cumCpi[i] = cum;
   }
-  // The windowed today's-dollar per-month
-  // base charges each expense only in its active window (0 outside). Recurring
-  // → run-rate ÷ 12 per active month; one-offs → full literal amount in the
-  // spike month (already encoded in `monthlyExpenseBase`).
   const monthlyExpenseBase = input.monthlyExpenseBase;
-  // Windowing × per-rate medical inflation: when per-effective-rate
-  // per-month buckets are supplied, each bucket's per-month base grows by the
-  // shared sampled CPI PLUS a percentage-point additive monthly mean-shift
-  // `(bucketRate − scenarioInflationPct)/12` added to a LOCAL `cpiPct` copy
-  // (mirrors `cpiShiftMonthlyFor`, percent units, no `/100`). The mean-shift
-  // factor is the FULL-HORIZON cumulative (cumCpi = 1 at today, NEVER reset at
-  // window open) — windowing enters ONLY through the per-month base, so a
-  // late-opening Medical window carries the full-horizon general+2pp
-  // differential. The shared `cpiPct` / `cumCpi` are NEVER mutated.
+  // Per-rate bucket: grows by the sampled CPI plus the mean-shift `(bucketRate - scenarioInflationPct)/12` on a local `cpiPct` copy (percent units, no `/100`).
+  // The factor is full-horizon cumulative (1 at today, never reset at window open); windowing enters only through the per-month base. Shared `cpiPct`/`cumCpi` are never mutated.
   const buckets = input.monthlyExpenseBucketsBase;
   const generalRatePct = input.scenarioInflationPct ?? DEFAULT_INFLATION_PCT;
   const bucketCumCpi: Float64Array[] | null = buckets
@@ -360,12 +255,7 @@ function buildHouseholdSeries(
         return arr;
       })
     : null;
-  // Per-year nominal at the year-END step (tax fallback/display).
-  // ALWAYS built (windowed). Scalar: year-sum of `monthlyExpenseBase` × year-END
-  // cumCpi; bucketed: Σ_b (per-bucket year-sum × that bucket's year-END factor).
-  // The today's-dollar year-SUM half of each product is seed-
-  // independent, hoisted into `ctx.baseExpenseYearSums` / `ctx.bucketBaseYearSums`
-  // — only the per-path CPI factor is computed here.
+  // Year-end nominal: year-sum of the base times the year-end cumCpi (per bucket when bucketed). The year-sum half is seed-independent, hoisted into `ctx.baseExpenseYearSums` / `ctx.bucketBaseYearSums`.
   const horizonYears = Math.ceil(stepCount / 12);
   const nominalExpenseByYear = new Float64Array(horizonYears);
   for (let y = 0; y < horizonYears; y += 1) {
@@ -380,32 +270,14 @@ function buildHouseholdSeries(
     }
     nominalExpenseByYear[y] = yearNominal;
   }
-  // CPI-scale SS + tracksInflation income streams per-path so the
-  // simulation reflects each path's realized inflation on COLAed benefits.
-  // Non-COLA income keeps the pre-computed nominal.
-  // `deterministicCumCpi[i]` = the running product of the scenario's flat
-  // monthly inflation rate — used to un-anchor the nominal pre-computed
-  // values and re-anchor to the path's sampled CPI. Seed-independent,
-  // hoisted onto `RunContext` and computed once per run instead of once per
-  // path.
+  // CPI-scale SS and tracksInflation income per path; `deterministicCumCpi` (seed-independent, hoisted onto `RunContext`) un-anchors the precomputed nominal values before re-anchoring to the path's CPI. Non-COLA income keeps the precomputed nominal.
   const deterministicCumCpi = ctx.deterministicCumCpi;
-  // HSA withdrawal reserve: inflate the today's-dollar medical-demand
-  // base per path by the medical effective rate's CPI (the SAME mean-shift the
-  // matching expense bucket uses, `(medicalRate − general)/12` added to the
-  // shared sampled `cpiPct`) so the nominal medical demand stays a SUBSET of the
-  // inflated expense. Converted to integer cents (the engine input contract).
-  // All-zero when no `isMedical` category drives the base.
+  // HSA reserve: medical demand inflates at the medical rate's mean-shift, like the matching expense bucket, so it stays a subset of inflated expense; converted to integer cents.
   const medicalDemandBase = input.monthlyMedicalDemandBase;
   const medicalBuckets = input.monthlyMedicalDemandBucketsBase;
   const medicalDemandCents = new Float64Array(stepCount);
   if (medicalBuckets && medicalBuckets.length > 0 && ctx.medicalBucketShiftPct) {
-    // Per-rate medical buckets — inflate EACH medical sub-series at its
-    // own effective rate's mean-shift, then sum. `Σ_b` of the inflated medical
-    // buckets equals the sum of the inflated per-category medical amounts, so
-    // the demand stays a strict subset of the inflated medical expense even when
-    // two medical categories carry different rates. Mirrors `bucketCumCpi`.
-    // The per-bucket shift is seed-independent — hoisted onto
-    // `ctx.medicalBucketShiftPct` instead of recomputed every step.
+    // Each medical bucket inflates at its own rate's mean-shift, then sums, so demand stays a subset of medical expense when categories carry different rates; the shift is hoisted onto `ctx.medicalBucketShiftPct`.
     const medCum = medicalBuckets.map(() => 1);
     for (let i = 0; i < stepCount; i += 1) {
       let monthDemand = 0;
@@ -427,8 +299,6 @@ function buildHouseholdSeries(
   for (let i = retirementStepIdx; i < stepCount; i += 1) {
     const yearOffset = Math.floor(i / 12);
     if (buckets && bucketCumCpi) {
-      // Bucketed: sum each bucket's per-month windowed base grown by ITS
-      // effective rate (windowing already encoded in the per-month base).
       let monthExpense = 0;
       for (let b = 0; b < buckets.length; b += 1) {
         monthExpense += buckets[b].amount[i] * bucketCumCpi[b][i];
@@ -437,8 +307,6 @@ function buildHouseholdSeries(
     } else {
       expense[i] = monthlyExpenseBase[i] * cumCpi[i];
     }
-    // CPI ratio scales SS + inflation-tracked income from the
-    // scenario-flat nominal to the path-sampled nominal.
     const cpiRatio = cumCpi[i] / deterministicCumCpi[i];
     const ssNominal = (input.ssByYear[yearOffset] ?? 0) / 12;
     const tracksInflNominal = input.tracksInflationIncomeByYear
@@ -455,10 +323,6 @@ function buildHouseholdSeries(
   return { expense, income, deposit, cumCpi, nominalExpenseByYear, medicalDemandCents };
 }
 
-/** Build the per-account `KernelAccount` set + route any household-
- *  level dated events (events without a ledger-resolvable
- *  `targetAccountId`) into either the household deposit series or
- *  per-account `contribPost` arrays via the sibling helper module. */
 function buildPerAccountStepInputs(args: {
   input: MonteCarloInput;
   stepCount: number;
@@ -467,13 +331,7 @@ function buildPerAccountStepInputs(args: {
   columns: HistoricalColumns | null;
   injectedReturnPct: Float64Array | null;
   deposit: Float64Array;
-  /** Path's own cumulative CPI factor by step. Scales the today's-dollars
-   *  base contribution of tracks-inflation accounts per path so it stays
-   *  flat-real (the accurate per-path site). */
   cumCpi: Float64Array;
-  /** Today-anchor month (0..11). The scaled contribution holds its today's-
-   *  dollars value at step `todayMonthIndex` (matches the deterministic
-   *  `asOfMonth` anchor). */
   todayMonthIndex: number;
 }): KernelAccount[] {
   const accounts = buildPerAccountKernelInputs({
@@ -484,8 +342,7 @@ function buildPerAccountStepInputs(args: {
     injectedReturnPct: args.injectedReturnPct,
     cumCpi: args.cumCpi,
     todayMonthIndex: args.todayMonthIndex,
-    // The fee/return market-stress shocks ride on the sampled return
-    // series only (skipped in CBP-fixed / injected-parity modes).
+    // Fee/return stress shocks ride on the sampled return series only (skipped in CBP-fixed and injected-parity modes).
     annualInvestmentCostPct: args.input.annualInvestmentCostPct ?? 0,
     ...(args.input.returnShock ? { returnShock: args.input.returnShock } : {}),
   });
