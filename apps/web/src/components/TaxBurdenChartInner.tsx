@@ -83,9 +83,7 @@ function makeTooltip(
           <Row label="ACA-PTC subsidy" value={-ptc} color={colors.acaPtc} />
         )}
         {creditApplied > 0 && (
-          // Part of the ACA-PTC subsidy above, not an extra benefit: it is the
-          // slice that lowered the year's withdrawal, so it is labelled in text
-          // and left out of the net cost.
+          // Part of the ACA-PTC subsidy above, so left out of the net cost.
           <div className="flex justify-between gap-4 text-muted">
             <span>Credit applied to premiums (part of the subsidy above)</span>
             <span>{formatCurrency(creditApplied)}</span>

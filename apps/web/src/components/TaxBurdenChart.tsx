@@ -26,12 +26,8 @@ export interface TaxBurdenChartRow {
    * mirrors the Portfolio Flows "withdrawals" bar).
    */
   readonly acaPtcSubsidy: number;
-  /**
-   * The part of the ACA credit that lowered the year's withdrawal because the
-   * premium is a modeled Medical expense (dollars, ≥ 0). Already inside the
-   * `acaPtcSubsidy` bar, so it is shown in the tooltip and the lifetime tiles
-   * only, never as a second bar.
-   */
+  /** The ACA credit applied to premiums (dollars, ≥ 0). Already inside the
+   *  `acaPtcSubsidy` bar, so never drawn as a second bar. */
   readonly acaCreditApplied: number;
   /** Fractional X position. Always omitted now — death = Dec 31 of
    *  `deathYear` (the terminal year), so every bar (including the

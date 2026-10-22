@@ -139,15 +139,10 @@ export function buildIncomeView(opts: {
     growthByYear.set(y, yearRow?.growth ?? 0);
     engineWithdrawnByYear.set(y, yearRow?.withdrawn ?? 0);
     fundedByYear.set(y, drawdown != null && yearRow != null && !yearRow.depleted);
-    // Portfolio tax cash = (federalTax + irmaaSurcharge − acaPtcSubsidy)
-    // from the resolved row, cents→dollars, nominal, clamped ≥ 0, MINUS the
-    // credit the engine applied to premiums (it lowered that year's draw, so
-    // the funded reconcile must not add it back). The two never overlap — the
-    // credit is applied only past the tax it first offsets — so the band is
-    // either the tax cash or minus the credit applied. Same fields the Tax &
-    // Health-Cost Burden chart sums, so the band ties out with it. Funded for
-    // every basis — named-strategy MC now funds tax per path (the suppression
-    // guard is gone).
+    // Portfolio tax cash = max(0, federalTax + irmaaSurcharge − acaPtcSubsidy)
+    // minus the credit applied to premiums (it lowered the draw, so the funded
+    // reconcile must not add it back), cents→dollars, nominal. Same fields the
+    // Tax & Health-Cost Burden chart sums, so the band ties out with it.
     taxCashByYear.set(
       y,
       (Math.max(

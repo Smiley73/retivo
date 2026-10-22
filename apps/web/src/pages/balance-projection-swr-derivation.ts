@@ -350,9 +350,8 @@ export function buildSwrComparisonData(
   for (let year = cashflowFromYear; year <= drawdownEndYear; year += 1) {
     const cfRow = yearlyCashflowByYear.get(year);
     const grossWithdrawal = cfRow?.withdrawal ?? 0;
-    // The band is negative in a year the ACA credit lowered the draw; the
-    // arithmetic keeps that sign so the draw is still the spending it funds,
-    // and only the reported tax layer is floored at 0.
+    // The band is negative in a year the ACA credit lowered the draw; only the
+    // reported tax layer is floored at 0.
     const netTax = noTaxFigures ? 0 : (cfRow?.taxes ?? 0);
     const tax = Math.max(0, netTax);
     const afterTaxDraw = Math.max(0, grossWithdrawal - netTax);

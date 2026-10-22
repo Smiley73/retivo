@@ -46,8 +46,7 @@ interface TaxDetailRow {
   readonly irmaaCashPaid: number;
   readonly acaPtcOffset: number;
   readonly taxFundedWithdrawals: number;
-  /** ACA credit left after the offset that lowered the year's draw because the
-   *  premium is a modeled Medical expense. */
+  /** ACA credit left after the offset that lowered the year's draw. */
   readonly acaCreditApplied: number;
   /** Net TAXABLE required minimum distribution after the QCD offset for the year
    *  (`gross IRA-pool RMD − min(Q, gross)`). 0 in years with no QCD. */

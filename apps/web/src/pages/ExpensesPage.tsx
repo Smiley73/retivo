@@ -621,9 +621,8 @@ export const ExpensesPage: React.FC = () => {
     editBtn?.focus({ preventScroll: true });
   }, [loading, searchParams]);
 
-  // Entry points (the Projections note, the Health coverage dialog) land here
-  // with `medicarePremiums=1`: open the preview once data is ready and strip
-  // the parameter so a reload does not reopen it.
+  // Entry points land here with `medicarePremiums=1`: open the preview once
+  // data is ready and strip the parameter so a reload does not reopen it.
   useEffect(() => {
     if (loading || premiumsEntryReadRef.current) return;
     premiumsEntryReadRef.current = true;
