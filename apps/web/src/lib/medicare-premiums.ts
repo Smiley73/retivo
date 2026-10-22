@@ -8,7 +8,7 @@
 import type { CalibrationSnapshot } from './calibration';
 
 /** One year's Medicare premium amounts, in dollars per month. */
-export interface MedicarePremiumYear {
+interface MedicarePremiumYear {
   /** CMS Part B standard monthly premium. */
   partBStandardMonthly: number;
   /** CMS Part D national base beneficiary premium. */
@@ -31,13 +31,8 @@ export const MEDICARE_PREMIUMS: CalibrationSnapshot<MedicarePremiumYear> = {
   },
 };
 
-/** The newest year in {@link MEDICARE_PREMIUMS} with its amounts. */
-export interface LatestMedicarePremiums extends MedicarePremiumYear {
-  year: number;
-}
-
 /** The newest year in the snapshot with its amounts. */
-export function latestMedicarePremiums(): LatestMedicarePremiums {
+export function latestMedicarePremiums(): MedicarePremiumYear & { year: number } {
   const year = Math.max(...Object.keys(MEDICARE_PREMIUMS.values).map(Number));
   return { year, ...MEDICARE_PREMIUMS.values[year] };
 }

@@ -14,10 +14,7 @@ import type {
 import { medicalCategoryIdsFrom } from '../lib/expense-category-resolvers';
 import { memberLabel } from '../lib/expense-format';
 import { resolveExpensesForScenarioSparse } from '../lib/expense-override-resolution';
-import {
-  latestMedicarePremiums,
-  type LatestMedicarePremiums,
-} from '../lib/medicare-premiums';
+import { latestMedicarePremiums } from '../lib/medicare-premiums';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 
 /** Query parameter that opens the preview when the Expenses page loads. */
@@ -86,58 +83,40 @@ export interface PremiumPreviewInput {
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
   expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
   categories: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>;
-  /** Defaults to the newest year of the built-in snapshot. */
-  premiums?: LatestMedicarePremiums;
 }
 
-/**
- * The expenses the scenario chain adds on top of the canonical list, shaped as
- * expense aggregates so the preview checks them like any other expense.
- */
-function scenarioAddedExpenses(
-  scenarioId: string,
-  scenarios: ScenarioAggregate[],
-): Aggregate<ExpensePayload>[] {
-  const scenario = scenarios.find((s) => s.id === scenarioId);
-  if (!scenario) return [];
-  return resolveExpensesForScenarioSparse(scenarioId, scenarios, [])
-    .filter((e) => e.source === 'added')
-    .map((e) => ({
-      id: e.id,
-      householdId: scenario.householdId,
-      aggregateType: 'expense',
-      schemaVersion: scenario.schemaVersion,
-      version: 1,
-      updatedAt: scenario.updatedAt,
-      deviceId: scenario.deviceId,
-      payload: e.payload,
-    }));
-}
-
-/** The canonical expenses the scenario renames, under their scenario names and
- *  with their canonical ids. */
-function scenarioRenamedExpenses(
+/** The rows the scenario chain adds, and the canonical rows it renames (under
+ *  their scenario names, with their canonical ids), as expense aggregates. */
+function scenarioExpenses(
   scenarioId: string,
   scenarios: ScenarioAggregate[],
   canonical: ReadonlyArray<Aggregate<ExpensePayload>>,
 ): Aggregate<ExpensePayload>[] {
+  const scenario = scenarios.find((s) => s.id === scenarioId);
+  if (!scenario) return [];
   const byId = new Map(canonical.map((c) => [`aggregate:${c.id}`, c]));
   const out: Aggregate<ExpensePayload>[] = [];
-  for (const e of resolveExpensesForScenarioSparse(
-    scenarioId,
-    scenarios,
-    canonical,
-  )) {
-    if (e.source !== 'patched') continue;
-    const original = byId.get(e.id);
-    if (!original) continue;
-    if (
-      normalizeName(e.payload.name ?? '') ===
-      normalizeName(original.payload.name ?? '')
-    ) {
-      continue;
+  for (const e of resolveExpensesForScenarioSparse(scenarioId, scenarios, canonical)) {
+    if (e.source === 'added') {
+      out.push({
+        id: e.id,
+        householdId: scenario.householdId,
+        aggregateType: 'expense',
+        schemaVersion: scenario.schemaVersion,
+        version: 1,
+        updatedAt: scenario.updatedAt,
+        deviceId: scenario.deviceId,
+        payload: e.payload,
+      });
+    } else if (e.source === 'patched') {
+      const original = byId.get(e.id);
+      if (
+        original &&
+        normalizeName(e.payload.name ?? '') !== normalizeName(original.payload.name ?? '')
+      ) {
+        out.push({ ...original, payload: e.payload });
+      }
     }
-    out.push({ ...original, payload: e.payload });
   }
   return out;
 }
@@ -157,12 +136,7 @@ export function premiumCheckExpenses(
       ? selectedScenarioId
       : (scenarios.find((s) => s.payload.isPrimary)?.id ?? null);
   if (effectiveId === null) return canonical;
-  const chain = scenarios as ScenarioAggregate[];
-  return [
-    ...canonical,
-    ...scenarioRenamedExpenses(effectiveId, chain, canonical),
-    ...scenarioAddedExpenses(effectiveId, chain),
-  ];
+  return [...canonical, ...scenarioExpenses(effectiveId, scenarios as ScenarioAggregate[], canonical)];
 }
 
 /** Same case-folding and trimming the expense form applies to a name. */
@@ -259,7 +233,7 @@ function findCandidates(
 export function buildMedicarePremiumPreview(
   input: PremiumPreviewInput,
 ): MedicarePremiumPreview {
-  const premiums = input.premiums ?? latestMedicarePremiums();
+  const premiums = latestMedicarePremiums();
   const medicalCategoryId = pickMedicalCategoryId(input.categories);
   const base = { year: premiums.year, medicalCategoryId };
   if (medicalCategoryId === null) return { ...base, members: [] };

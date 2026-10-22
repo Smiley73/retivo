@@ -105,29 +105,23 @@ function pension(annual: number): Aggregate<IncomeStreamPayload> {
 }
 
 interface Household {
-  /** Medical rows (not HSA-qualified), dollars a year. */
+  /** Medical rows (not HSA-qualified) and everything else, dollars a year. */
   readonly medical: number;
-  /** Everything else, dollars a year. */
   readonly other: number;
   readonly pensionAnnual?: number;
   /** Extra non-medical monthly spending in the first `months` months only. */
   readonly shortMonthly?: { readonly amount: number; readonly months: number };
   /** Medical dollars a month for life, instead of the yearly `medical` row. */
   readonly medicalMonthly?: number;
-  /** A pre-tax IRA instead of the Roth IRA (taxable draws). */
+  /** A pre-tax IRA instead of the Roth IRA. */
   readonly preTax?: boolean;
-  /** Leave the plan with no Medical category, so no credit can be applied. */
   readonly noMedicalCategory?: boolean;
-  /** No Social Security at all, so ACA MAGI is only the draw and the pension. */
   readonly noSocialSecurity?: boolean;
-  /** A Roth IRA first funded in 2025, so its withdrawals are nonqualified and the
-   *  earnings are taxable income. */
+  /** A Roth IRA first funded in 2025: nonqualified draws, taxable earnings. */
   readonly nonqualifiedRoth?: boolean;
-  /** Age at retirement on 2026-01-01 (default 63, which is also when Social Security starts).
-   *  Under 59½ a pre-tax draw carries the 10% early-withdrawal penalty. */
+  /** Age at retirement on 2026-01-01 (default 63, when Social Security starts). */
   readonly age?: number;
-  /** A taxable brokerage account of this balance instead of the Roth IRA: only the
-   *  gain in a draw is income. */
+  /** A taxable brokerage account of this balance instead of the Roth IRA. */
   readonly brokerageBalance?: number;
 }
 
@@ -403,9 +397,8 @@ describe('credit applied to premiums, uneven months and the funded draw', () => 
   });
 
   it('reports the line that funded the draw, not one restated after the draw fell', () => {
-    // A pre-tax IRA: the lower pass-2 draw lowers MAGI and would restate a larger
-    // credit, which never funded anything. The reported line is the whole fall in
-    // the draw against the same plan with no Medical category.
+    // The reported line is the whole fall in the draw against the same plan with
+    // no Medical category, not a credit restated from the lower pass-2 MAGI.
     const h: Household = { medical: 20_000, other: 25_000, preTax: true };
     const { row } = mcFirstRow(h);
     const { row: without } = mcFirstRow({ ...h, noMedicalCategory: true });
@@ -504,10 +497,9 @@ describe('credit applied to premiums, nonqualified Roth above the poverty line',
 
 describe('credit applied to premiums, early-withdrawal penalty years', () => {
   it('the stress test counts the penalty in the offset as the projection does, so its line is not the larger', () => {
-    // A 55-year-old draws a traditional IRA: the 10% penalty is a refundable credit's
-    // first call, so the line is what is left after federal tax AND the penalty. The
-    // stress test prices the credit once on the draw before the line, so it stays the
-    // smaller of the two, where it used to exceed the projection by about the penalty.
+    // A 55-year-old draws a traditional IRA: the line is what is left after federal
+    // tax AND the 10% penalty; the stress test prices the credit once, so its line
+    // stays the smaller of the two.
     const h: Household = { medical: 7_200, other: 22_800, preTax: true, noSocialSecurity: true, age: 55 };
     const det = detRow(h);
     const { row } = mcFirstRow(h);
@@ -518,10 +510,9 @@ describe('credit applied to premiums, early-withdrawal penalty years', () => {
 
 describe('credit applied to premiums, taxable brokerage near the poverty line', () => {
   it('only the gain in a brokerage draw is MAGI, so the draw can fall further before the credit ends', () => {
-    // A $14,000 pension and a brokerage account at the default half basis: ACA MAGI is
-    // the pension plus half of what is drawn. The $8,000 draw before the line puts MAGI
-    // 2,350 over the guideline, so a whole dollar of draw per dollar of MAGI would stop
-    // the line there, where the draw can fall by 4,700 before MAGI reaches it.
+    // A $14,000 pension and a brokerage account at the default half basis: the $8,000
+    // draw before the line puts MAGI 2,350 over the guideline, so the draw can fall by
+    // 4,700 before MAGI reaches it.
     const h: Household = {
       medical: 7_200, other: 14_796, pensionAnnual: 14_000, brokerageBalance: 100_000, noSocialSecurity: true,
     };

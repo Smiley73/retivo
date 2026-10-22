@@ -488,9 +488,8 @@ describe('solveTaxCashflow — credit applied to premiums', () => {
   });
 
   describe('near the poverty line', () => {
-    // No Social Security, all-pre-tax draws, a $7,200 benchmark: a $22,000 draw is
-    // 140.6% of the $15,650 poverty guideline and earns a $6,405.80 credit, but
-    // that line would lower the draw to $15,594.20, which is 99.6% and earns none.
+    // No Social Security, all-pre-tax draws: a $22,000 draw (140.6% of the $15,650
+    // guideline) earns a $6,405.80 credit that would lower it to 99.6%, where it earns none.
     const cliffArgs = (overrides: Partial<TaxCashflowSolveArgs> = {}): TaxCashflowSolveArgs =>
       baseArgs({
         ordinaryNetNeedDollars: 22_000,
@@ -512,16 +511,12 @@ describe('solveTaxCashflow — credit applied to premiums', () => {
       );
       const lineFree = solveTaxCashflow(cliffArgs({ medicalExpenseCents: undefined }));
       expect(result.taxCashflowConverged).toBe(true);
-      // The limit is measured on the line-free first pass: $22,000 of ACA MAGI
-      // less the $15,650 poverty guideline.
+      // The limit is measured on the line-free first pass.
       const headroomCents = (22_000 - 15_650) * 100;
       expect(result.acaCreditAppliedToPremiumsCents).toBe(headroomCents);
-      // No trial draw ever falls under the line, so none of them cycles.
       for (const target of targets) expect(target).toBeGreaterThanOrEqual(15_650);
-      // The committed draw is still on the line, and earns a credit there.
       expect(result.taxYearResult.fplPercentage).toBeGreaterThanOrEqual(100);
       expect(result.taxYearResult.acaPtcSubsidyCents).toBeGreaterThan(0);
-      // The line is a reduction of the line-free draw, and earned at the lowered draw.
       expect(result.acaCreditAppliedToPremiumsCents).toBeLessThanOrEqual(
         result.taxYearResult.acaPtcSubsidyCents - result.acaPtcCashflowOffsetCents,
       );
@@ -548,9 +543,8 @@ describe('solveTaxCashflow — credit applied to premiums', () => {
     });
 
     it('counts the taxable Roth earnings as MAGI the lowered draw sheds', () => {
-      // A nonqualified Roth draw: its earnings are already in the ordinary income
-      // and are ACA MAGI, so the line stops at the poverty guideline as with a
-      // pre-tax draw. Without the earnings the Roth draw looks MAGI-free.
+      // The earnings of a nonqualified Roth draw are ACA MAGI, so the line stops at
+      // the guideline as with a pre-tax draw; without them the draw looks MAGI-free.
       const earningsArgs = (overrides: Partial<TaxCashflowSolveArgs> = {}): TaxCashflowSolveArgs =>
         baseArgs({
           ordinaryNetNeedDollars: 18_000,
