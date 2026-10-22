@@ -5,28 +5,26 @@
  * pinned in `BalanceProjectionPage.compare.test.tsx`.
  */
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { cleanup, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import React from 'react';
-import {
-  clearAllStores,
-  listAggregates,
-  putAggregate,
-  writeSelectedScenario,
-} from '../db/store';
-import type { Aggregate, ScenarioOverrides, ScenarioPayload } from '../db/types';
+import { clearAllStores, listAggregates } from '../db/store';
+import type { ScenarioPayload } from '../db/types';
 import { ACCOUNT_BUCKET_LABEL } from '../lib/account-bucket';
-import { loadDemoData } from '../lib/demo-data-loader';
 import { formatCurrencyShort } from '../lib/format-currency';
 import { formatSignedDifference } from '../lib/signed-difference';
-import { MonteCarloProvider } from '../monte-carlo/MonteCarloProvider';
 import { expectNoA11yViolations } from '../test/a11y';
-import { withTheme } from '../test/theme-render';
-import { BalanceProjectionPage } from './BalanceProjectionPage';
 import { buildCompareData } from './balance-projection-compare-data';
-import { DRIVERS_NOTE } from './balance-projection-page-compare-drivers';
 import { loadPageData, type PipelineData } from './balance-projection-page-data';
+import {
+  BASE,
+  DELAY,
+  EARLY,
+  WAIT,
+  comparePath,
+  renderComparePage,
+  resetDemo,
+  seedChild,
+} from './__fixtures__/compare-page';
 
 vi.mock('./balance-projection-page-data', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./balance-projection-page-data')>();
@@ -34,46 +32,15 @@ vi.mock('./balance-projection-page-data', async (importOriginal) => {
 });
 const loadSpy = vi.mocked(loadPageData);
 
-const BASE = 'demo-scenario-base';
-const EARLY = 'demo-scenario-early';
-const DELAY = 'demo-scenario-delay';
-const WAIT = { timeout: 10_000 };
 /** Wording that would claim a row caused, explains or is responsible for the gap. */
 const CAUSAL = /caused|because of|explains|accounts for|responsible for|due to/i;
-
-async function seedChild(
-  id: string,
-  parentId: string,
-  overrides: ScenarioOverrides,
-): Promise<void> {
-  const parent = (await listAggregates('scenario')).find((s) => s.id === parentId)!;
-  await putAggregate('scenario', {
-    ...parent,
-    id,
-    payload: {
-      ...(parent.payload as ScenarioPayload),
-      name: id,
-      parentScenarioId: parentId,
-      isPrimary: false,
-      overrides,
-    },
-  } as Aggregate<ScenarioPayload>);
-}
+const DRIVERS_NOTE =
+  'These are differences between the totals of two complete projections. The ' +
+  'model does not apportion the gap among them, and one change usually moves ' +
+  'several lines at once, so read each row as a total, not as a share of the gap.';
 
 async function renderCompare(viewed: string, withId?: string): Promise<HTMLElement> {
-  await writeSelectedScenario({ scenarioId: viewed, updatedAt: new Date().toISOString() });
-  const search = withId ? `&with=${withId}` : '';
-  render(
-    withTheme(
-      'light',
-      <MemoryRouter initialEntries={[`/balance-projection?view=compare${search}`]}>
-        <MonteCarloProvider>
-          <BalanceProjectionPage />
-        </MonteCarloProvider>
-      </MemoryRouter>,
-    ),
-  );
-  return screen.findByRole('region', { name: 'Compare scenarios' }, WAIT);
+  return (await renderComparePage(viewed, { path: comparePath(withId) })).panel;
 }
 
 async function renderDrivers(viewed: string, withId?: string): Promise<HTMLElement> {
@@ -96,15 +63,12 @@ const IDENTICAL = /The Planned projections of (.+) and (.+) are identical/;
 
 describe('Compare tab — drivers', () => {
   beforeEach(async () => {
-    await clearAllStores();
-    window.localStorage.clear();
-    await loadDemoData({ householdId: 'hh-test', email: 'demo@example.test', displayName: 'Demo User' });
+    await resetDemo();
     loadSpy.mockClear();
   });
   afterEach(async () => {
     cleanup();
     await clearAllStores();
-    window.localStorage.clear();
   });
 
   it('renders each scenario’s totals in its own column, with an uncoloured signed difference', async () => {
@@ -182,15 +146,12 @@ describe('Compare tab — drivers', () => {
 
 describe('Compare tab — identical results', () => {
   beforeEach(async () => {
-    await clearAllStores();
-    window.localStorage.clear();
-    await loadDemoData({ householdId: 'hh-test', email: 'demo@example.test', displayName: 'Demo User' });
+    await resetDemo();
     loadSpy.mockClear();
   });
   afterEach(async () => {
     cleanup();
     await clearAllStores();
-    window.localStorage.clear();
   });
 
   async function findIdentical(panel: HTMLElement): Promise<void> {

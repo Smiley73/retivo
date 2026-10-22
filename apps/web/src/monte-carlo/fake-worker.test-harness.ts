@@ -1,5 +1,6 @@
 /**
- * Shared fixtures for the `MonteCarloProvider.*.test.tsx` suites. TEST-ONLY.
+ * Shared fixtures for the `MonteCarloProvider.*.test.tsx` suites and the
+ * `createMcPool` consumers' hook tests. TEST-ONLY.
  *
  * `vi.mock` is hoisted, so each suite keeps its own `vi.mock(...)` calls and
  * its own `vi.hoisted` state. What lives here is what those suites only ever
@@ -102,12 +103,8 @@ export function neverRepliesWorkerModule(sink: { workers: Array<{ terminated: bo
   return { default: FakeMcWorker };
 }
 
-/**
- * A fake `MinimalMcWorker` whose reply timing the test controls, for the
- * `createMcPool` consumers (`use-scenario-bulk-recompute`, `use-compare-stress`):
- * `posted` records every `{ kind: 'run' }` input, and `resolveResult` /
- * `emitError` / `emitProgress` deliver the reply by hand.
- */
+/** A fake `MinimalMcWorker` for `createMcPool` consumers: `posted` records every
+ *  run input, and the `emit*` / `resolveResult` methods deliver replies by hand. */
 export interface ControlledWorker extends MinimalMcWorker {
   resolveResult(summary: MonteCarloSummary): void;
   emitError(message: string): void;
@@ -130,8 +127,6 @@ export function controlledWorker(): ControlledWorker {
       return terminated;
     },
     addEventListener(t, fn) {
-      // Only the pool's `message` listener drives this fake; the `error`
-      // listener is never emitted here, so keep it out of the set.
       if (t !== 'error') listeners.add(fn);
     },
     removeEventListener(t, fn) {

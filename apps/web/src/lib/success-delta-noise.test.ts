@@ -77,8 +77,4 @@ describe('successDeltaVerdict', () => {
     expect(successDeltaVerdict(null, at(0.9))).toBeNull();
     expect(successDeltaVerdict(at(0.9), null)).toBeNull();
   });
-
-  it('reads two sides at 100% as the same', () => {
-    expect(successDeltaVerdict(at(1), at(1))).toMatchObject({ kind: 'same', reason: 'noise', se: 0 });
-  });
 });

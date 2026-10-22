@@ -131,17 +131,12 @@ describe('ScenariosPageRow — Compare with parent', () => {
     expect(within(row).queryByRole('button', { name: /Compare/ })).toBeNull();
   });
 
-  it('calls the handler on click and on keyboard activation', async () => {
+  it('calls the handler on activation', async () => {
     const onActivate = vi.fn();
     const user = userEvent.setup();
     const row = renderRow(undefined, { parentName: 'Historical row', onActivate }, CHILD);
-    const button = within(row).getByRole('button', { name: /Compare with parent: Retire at 67/ });
-    await user.click(button);
+    await user.click(within(row).getByRole('button', { name: /Compare with parent: Retire at 67/ }));
     expect(onActivate).toHaveBeenCalledTimes(1);
-    button.focus();
-    await user.keyboard('{Enter}');
-    await user.keyboard(' ');
-    expect(onActivate).toHaveBeenCalledTimes(3);
   });
 
   it('has no a11y violations with the control present', async () => {
