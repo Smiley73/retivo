@@ -406,8 +406,7 @@ describe('applyPerYearTaxForPath — tax cashflow', () => {
 
 describe('applyPerYearTaxForPath — credit applied to premiums', () => {
   // One retired single filer, 2026: $31,300 of Social Security, a $7,200
-  // benchmark, a Roth draw (no income). ACA MAGI is 200.0% of the poverty
-  // guideline, so the credit is $5,134.20 and there is no tax to offset.
+  // benchmark, a Roth draw: a $5,134.20 credit and no tax to offset.
   const ctx = makeMfjTaxContext({
     filingStatus: 'Single',
     members: [{ memberId: 'primary', isoBirthdate: '1963-01-01', onMedicare: false, hasAcaCoverage: true }],

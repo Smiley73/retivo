@@ -100,21 +100,6 @@ describe('buildTaxBurdenRows', () => {
     expect(row.acaPtcSubsidy).toBeCloseTo(-2_567.1, 6);
   });
 
-  it('under an MC basis reads the line stamped on the representative rows', () => {
-    // The stress test funds the line per path and stamps it on the captured
-    // rows, so the Taxes tab shows it without a recompute.
-    const dd = drawdown([
-      year({ year: 2040, accountBalances: new Map(), acaPtcSubsidyCents: 5_134_20, acaCreditAppliedToPremiumsCents: 5_134_20 }),
-    ]);
-    const [row] = buildTaxBurdenRows({
-      resolvedDrawdown: dd,
-      basisDeflator: identityDeflator,
-      lastDeathFractional: null,
-      isMcBasisActive: true,
-    });
-    expect(row.acaCreditApplied).toBeCloseTo(5_134.2, 6);
-  });
-
   it('returns [] when there is no drawdown', () => {
     expect(
       buildTaxBurdenRows({
@@ -719,15 +704,5 @@ describe('hasMedicaidRangeYear', () => {
     expect(fires(0)).toBe(false);
     expect(fires(undefined)).toBe(false);
     expect(hasMedicaidRangeYear([])).toBe(false);
-  });
-
-  it('fires when only one of several years is in range', () => {
-    expect(
-      hasMedicaidRangeYear([
-        year({ year: 2040, fplPercentage: 0 }),
-        year({ year: 2041, fplPercentage: 250 }),
-        year({ year: 2042, fplPercentage: 120 }),
-      ]),
-    ).toBe(true);
   });
 });

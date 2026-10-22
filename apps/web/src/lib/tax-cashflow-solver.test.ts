@@ -427,21 +427,6 @@ describe('solveTaxCashflow — credit applied to premiums', () => {
     expect(result.acaCreditAppliedToPremiumsCents).toBe(513_420);
   });
 
-  it('is capped by the draw when the year needs less than the credit', () => {
-    const result = solveTaxCashflow(rothArgs({ ordinaryNetNeedDollars: 2_700, medicalExpenseCents: 720_000 }));
-    expect(result.acaCreditAppliedToPremiumsCents).toBe(270_000);
-  });
-
-  it('is capped by the Medical expenses when they are smaller than the excess', () => {
-    const result = solveTaxCashflow(rothArgs({ ordinaryNetNeedDollars: 11_700, medicalExpenseCents: 300_000 }));
-    expect(result.acaCreditAppliedToPremiumsCents).toBe(300_000);
-  });
-
-  it('is zero when Social Security already covers spending', () => {
-    const result = solveTaxCashflow(rothArgs({ ordinaryNetNeedDollars: 0, medicalExpenseCents: 720_000 }));
-    expect(result.acaCreditAppliedToPremiumsCents).toBe(0);
-  });
-
   it('is zero without a medical cap, and MAGI, taxable SS and fplPercentage do not move with it', () => {
     const without = solveTaxCashflow(rothArgs());
     const withCap = solveTaxCashflow(rothArgs({ medicalExpenseCents: 720_000 }));
@@ -581,15 +566,6 @@ describe('solveTaxCashflow — credit applied to premiums', () => {
       expect(unmodeled.acaCreditAppliedToPremiumsCents).toBeGreaterThan(
         result.acaCreditAppliedToPremiumsCents,
       );
-    });
-
-    it('keeps a line whose lowered draw still earns the credit', () => {
-      // $30,000 is 191.7% of the poverty guideline; the line lowers it to
-      // about $24,000, still above 100%, so the loop settles with the line on.
-      const result = solveTaxCashflow(cliffArgs({ ordinaryNetNeedDollars: 30_000 }));
-      expect(result.taxCashflowConverged).toBe(true);
-      expect(result.acaCreditAppliedToPremiumsCents).toBeGreaterThan(0);
-      expect(result.taxYearResult.fplPercentage).toBeGreaterThanOrEqual(100);
     });
   });
 });

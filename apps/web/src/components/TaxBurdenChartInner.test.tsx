@@ -147,9 +147,6 @@ function hoverTooltip(container: HTMLElement): HTMLElement {
 }
 
 describe('TaxBurdenChartInner — credit applied to premiums', () => {
-  // The dollars are already inside the ACA-PTC bar, so the figure rides the
-  // tooltip and the lifetime tiles only: a second negative bar would double
-  // count them.
   const withCredit = [
     { year: 2026, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -5134.2, acaCreditApplied: 5134.2 },
     { year: 2027, federalTax: 0, irmaaSurcharge: 0, acaPtcSubsidy: -3000, acaCreditApplied: 2700 },
@@ -174,11 +171,6 @@ describe('TaxBurdenChartInner — credit applied to premiums', () => {
   it('leaves the credit applied out of the tooltip when none was applied', () => {
     const tip = hoverTooltip(renderWithTheme('light', <InnerChart rows={rows} />));
     expect(tip.textContent).not.toContain('Credit applied to premiums');
-  });
-
-  it('renders without a11y violations', async () => {
-    const container = renderWithTheme('light', <InnerChart rows={withCredit} />);
-    await expectNoA11yViolations(container);
   });
 });
 

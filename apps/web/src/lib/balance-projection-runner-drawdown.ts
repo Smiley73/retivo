@@ -355,8 +355,7 @@ function buildTaxCashflowHookForInput(
     // Same rollover-year RMD ordinary income the post-pass taxes — fund
     // its incremental tax in the same year (canonical inlet).
     rolledRmdIncomeByYear,
-    // Every `isMedical` row, not the HSA-qualified subset: caps the ACA credit
-    // that lowers the draw because the premium is entered as a Medical expense.
+    // Every `isMedical` row, not the HSA-qualified subset.
     medicalExpenseByMonthCents: series.medicalExpenseByMonth,
   });
 }

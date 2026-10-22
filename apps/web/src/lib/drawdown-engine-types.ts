@@ -195,9 +195,8 @@ export interface TaxCashflowYearOutcome {
    *  Security (`irmaaWithheldFromSsCents`): the withheld surcharge shrinks the
    *  member's SS check while the spendable income series spends gross SS, so the
    *  portfolio must fund the difference. Both components are counted
-   *  exactly once. MINUS the credit applied to premiums
-   *  (`acaCreditAppliedToPremiumsCents`), so it can be negative — never below
-   *  minus the year's ordinary need. */
+   *  exactly once. Minus `acaCreditAppliedToPremiumsCents`, so it can be
+   *  negative, never below minus the year's ordinary need. */
   readonly addedNeedDollars: number;
   readonly federalTaxCashNeedCents: number;
   readonly irmaaWithheldFromSsCents: number;
@@ -656,10 +655,8 @@ export interface DrawdownYear {
   irmaaCashNeedCents?: number;
   /** ACA PTC offset applied against the tax cashflow need, integer cents. */
   acaPtcCashflowOffsetCents?: number;
-  /** The part of the ACA credit that lowered the year's portfolio draw because
-   *  the premium is a modeled Medical expense, integer cents. Not part of
-   *  `totalTaxCashflowNeedCents`: the net effect on the draw is that need minus
-   *  this. */
+  /** The ACA credit that lowered the year's draw, integer cents; not part of
+   *  `totalTaxCashflowNeedCents`. */
   acaCreditAppliedToPremiumsCents?: number;
   /** Total same-year tax cashflow need funded into the withdrawal target,
    *  integer cents: `max(0, federalTax + irmaaCash − acaPtcOffset)`. */

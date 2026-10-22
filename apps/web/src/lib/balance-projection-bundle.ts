@@ -298,10 +298,8 @@ export interface BalanceProjectionMcBundle {
    *  inflates at its own rate. Threaded into
    *  `MonteCarloInput.monthlyMedicalDemandBucketsBase`. */
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
-  /** Per-month today's-dollar modeled Medical expenses (EVERY `isMedical` row —
-   *  `monthlyMedicalDemandBase` is its HSA-qualified subset), with its effective
-   *  rate and per-rate buckets. Present only when ≥ 1 category is flagged
-   *  `isMedical`. Threaded into the matching `MonteCarloInput` fields. */
+  /** Per-month today's-dollar modeled Medical expenses (every `isMedical` row),
+   *  rate and buckets, for the matching `MonteCarloInput` fields. */
   monthlyMedicalExpenseBase?: number[];
   medicalExpenseRatePct?: number;
   monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
@@ -441,9 +439,7 @@ export interface BalanceProjectionMcBundleArgs {
    *  inflates at its own rate. Carried through to
    *  `MonteCarloInput.monthlyMedicalDemandBucketsBase`. */
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
-  /** Modeled Medical expenses (every `isMedical` row) base, effective rate and
-   *  per-rate buckets. Carried through to the matching `MonteCarloInput`
-   *  fields. */
+  /** Modeled Medical expenses (every `isMedical` row) base, rate and buckets. */
   monthlyMedicalExpenseBase?: number[];
   medicalExpenseRatePct?: number;
   monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
