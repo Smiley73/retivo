@@ -18,16 +18,26 @@ import type { RetirementAgePerMember } from '../db/types';
 export interface AgeTransitionProps {
   /** Scenario's current claim age for this member, or `null` when unset. */
   readonly current: RetirementAgePerMember | null;
-  /** Optimizer's recommended whole-year claim age. */
+  /** Optimizer's recommended claim age, years part. */
   readonly recommendedYears: number;
+  /** Months part; absent or 0 is a whole year. */
+  readonly recommendedMonths?: number;
 }
 
 export const AgeTransition: React.FC<AgeTransitionProps> = ({
   current,
   recommendedYears,
+  recommendedMonths = 0,
 }) => {
-  if (!current || claimAgeMatches(current, recommendedYears)) {
-    return <>{recommendedYears}</>;
+  const recommendedLabel = formatAgeYearsMonths({
+    years: recommendedYears,
+    months: recommendedMonths,
+  });
+  if (
+    !current ||
+    claimAgeMatches(current, recommendedYears, recommendedMonths)
+  ) {
+    return <>{recommendedLabel}</>;
   }
   const currentLabel = formatAgeYearsMonths({
     years: current.ageYears,
@@ -40,7 +50,7 @@ export const AgeTransition: React.FC<AgeTransitionProps> = ({
         →
       </span>
       <span className="sr-only"> to </span>
-      {recommendedYears}
+      {recommendedLabel}
     </span>
   );
 };

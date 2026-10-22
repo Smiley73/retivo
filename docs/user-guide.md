@@ -454,7 +454,9 @@ What the cards do:
   HSA handled separately), **Proportional**, **Roth first** and **Custom order**.
   Tabs add a **MAGI cap** (a limit on pre-tax withdrawals; MAGI is the modified
   adjusted gross income figure that Medicare surcharges and ACA subsidies are
-  based on) and **Advanced** settings.
+  based on) and **Advanced** settings. A plan saved from the **Roth conversion
+  comparison** appears there as one cap window per year, each tab labelled with
+  its year.
 - **Tax assumptions**: tabs for **HSA** (how much emergency HSA spending still goes
   to medical care), **Penalty exemptions** (accounts that skip the 10% penalty on
   withdrawals before age 59½) and **Filing** (how your household files its tax
@@ -584,10 +586,18 @@ These three sit under **Planning** and each answers one question.
 
 *"Which claim age gives the best modeled result?"* The page is headed "Social
 Security claim-age comparison". For each scenario it compares the projected result
-at every eligible whole-year claim age for each household member, and shows the
-age with the highest modeled result. It says explicitly that this "does not tell
-you when to claim", and that the model leaves out some real-world Social Security
-rules, such as divorced-spouse benefits.
+at every eligible whole-year claim age for each household member, plus the age
+already set on the scenario, and shows the option with the highest modeled
+result. Every option is projected to one assumed death age, the scenario's Life
+expectancy setting. It says explicitly that this is a comparison, not a proven
+best age and not advice, that it "does not tell you when to claim", and that the
+model leaves out some real-world Social Security rules, such as divorced-spouse
+benefits.
+
+If the scenario's claim age includes months (for example 66 years 4 months),
+that exact age is compared too. The row shows your current result next to the
+best one, and if your setting already ranks highest it reads "Already set" with
+the age as "66 years 4 months".
 
 Choose the goal, **End-of-plan balance** (a quick comparison using the Planned and
 Historical projections) or **Plan success %** (the stress test; choose how many simulated paths, then **Run
@@ -598,7 +608,10 @@ under **Your Data → Social Security**.
 
 **Save to scenario** writes the winning claim age into that scenario's Social
 Security setting, after a confirmation that names the scenario and the ages. It
-replaces the claim ages but keeps the scenario's benefit reduction and COLA.
+replaces the claim ages but keeps the scenario's benefit reduction and COLA. The
+confirmation says when a member's current months are being replaced by a whole
+year, and that a member who is not changed keeps their current setting, months
+included.
 
 ### Roth conversion comparison
 
@@ -616,6 +629,82 @@ not tell you whether converting is right for you".
 Two buttons write results back to the selected scenario: **Save working-years
 conversions to scenario** and **Save retirement Fill window to scenario** (a
 pre-RMD MAGI-cap "Fill" window, set up on the scenario's **Withdrawal strategy**).
+
+**Compare conversion plans** (below the Retirement years table) tries a fixed set
+of conversion plans for the selected scenario and lists them next to its current
+plan. Each plan fills up to one tax bracket (12%, 22%, 24% or 32%) every year from
+retirement until required minimum distributions begin, with or without staying
+under the line where Medicare surcharges step up and the line where the
+health-insurance premium credit ends. Press the button to run it. A progress bar
+shows how many plans are done, and **Cancel** stops the run and throws its partial
+work away; nothing is kept, and you can run it again. The run happens in your
+browser, in the background, so the page stays usable, and nothing is sent to the
+server. Running it saves nothing to the scenario; only **Save plan to scenario**
+(below) does.
+
+The table ranks the plans by **After-tax ending balance**: the balance at the end
+of the projection in today's dollars, after taking the **Leftover-tax rate** off
+money still in pre-tax accounts. The rate is an input next to the other controls
+at the top of the page. It starts at the average rate the break-even uses for the
+years when required withdrawals begin (22% when that is not available), is not
+saved, and resets when you pick another scenario. Changing it re-ranks the rows
+you already have without running again. Roth and already-taxed balances count in
+full.
+
+Each row also shows the years converted, the total converted, the extra income
+tax and the Medicare surcharges compared with the current plan, and how much of
+the premium credit the plan keeps or loses. Differences carry a plus or minus
+sign, and a plan that converts less than the current one can show less tax. A
+row marked **†** moved spending withdrawals to a later account to stay under its
+ceiling, so part of its result comes from a change in withdrawal order. A plan
+whose ceiling could not be kept is listed last and is not ranked. If no bracket
+had room, the page says so instead of listing identical rows.
+
+Each row has a **Why each year** button. It opens a year-by-year table for that
+plan, one plan at a time: for each year of the window, what was converted, what
+stopped it, the figures that give the amount, and what the year cost (income tax,
+taxable Social Security, the Medicare surcharge and the premium credit). A year a
+Medicare surcharge or premium-credit line stopped also says what crossing it would
+have cost. The table is in each year's own dollars. Reach the button from the
+keyboard by tabbing into the table and moving to the last cell of the row with the
+arrow keys, then press Enter; Escape closes it. A worked year is in [Why each year
+in the Roth conversion maths](math-retirement-accounts.md#why-each-year). If the results were
+computed before you changed your data, the page says they may be out of date and
+asks you to run it again; it never runs on its own.
+
+**Save plan to scenario** appears on every ranked row (not on the current plan,
+and not on a plan whose ceiling could not be kept). A confirmation says what it
+writes: one cap window on the scenario's **Withdrawal strategy** for each year of
+the plan's window, each set to the fixed dollar ceiling the comparison worked out
+for that year, converting into the Roth IRA the comparison used (you cannot pick
+another here). It replaces every cap window the scenario has today, and the
+confirmation counts them, and says which scenario they come from when the
+scenario inherits them. Nothing else on the scenario changes. On a scenario that
+inherits its cap from a parent, saving a plan equal to the parent's leaves the
+scenario inheriting, and any other plan is saved on that scenario only; the parent
+is not touched. A window is a cap on pre-tax income, not an instruction to
+convert: in a year when your spending needs more pre-tax money than the ceiling
+allows, the projection draws on taxable or Roth accounts instead, and records
+that the cap could not be met when none are left. The confirmation names the years
+where that happens for the plan. The ceilings are fixed dollar amounts and do not
+rise with inflation.
+
+After a save, the card shows a line naming the saved plan and the date. It reads
+**Out of date** once anything the comparison used has changed since (accounts,
+balances, members, expenses, Social Security, or the scenario's settings, or a
+parent scenario's), because the fixed ceilings no longer match your data; run the
+comparison again to see how the plan looks now. The line goes away if the
+scenario's cap windows no longer match the saved plan, for example after you edit
+them by hand or save another plan. The line is remembered on this device only: it
+is not synced, and it does not appear on another device or browser.
+
+The comparison is not available when the scenario has no Roth IRA of your own
+(not an inherited one), when there is no retirement year before required
+distributions begin, or when it files married filing separately. It is a search
+over a fixed set of bracket targets at one assumed death age (the scenario's
+life-expectancy setting), on the planned basis and with federal tax only. The top
+row is the highest after-tax ending balance among those plans, not a proven
+optimum, and the page does not say which plan to pick.
 
 ### Report
 

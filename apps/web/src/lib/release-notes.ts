@@ -33,6 +33,52 @@ export interface ReleaseNote {
 /** The full changelog, newest-first. New entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-21',
+    kind: 'new',
+    title: 'Save a Roth conversion plan to a scenario',
+    blurb:
+      'Each ranked plan in the Roth conversion comparison now has a "Save plan to scenario" ' +
+      'button. It writes the plan as one income cap window per year on the scenario\'s Withdrawal ' +
+      'strategy, with the fixed dollar ceilings the comparison used, and says what it replaces ' +
+      'first. The card then shows which plan you saved and the date, and marks it out of date ' +
+      'when your data changes; that marker stays on this device only.',
+  },
+  {
+    date: '2026-10-21',
+    kind: 'improved',
+    title: 'See why each year of a Roth conversion plan converts what it does',
+    blurb:
+      'Each plan in the Roth conversion comparison now has a "Why each year" button that opens a ' +
+      'year-by-year table: the amount converted, the limit that stopped it, the figures that give ' +
+      'the amount, and what the year cost in income tax, taxable Social Security, the Medicare ' +
+      'surcharge and the health-insurance premium credit. A year that a Medicare surcharge or ' +
+      'premium-credit line stopped also shows what crossing it would have cost.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'improved',
+    title: 'Claim-age comparison understands months',
+    blurb:
+      'If a scenario\'s Social Security claim age includes months, such as 66 ' +
+      'years 4 months, the comparison now ranks that exact age next to the ' +
+      'whole years, shows it as your current result, and says "Already set" ' +
+      'when it comes out on top. Save to scenario now tells you when your ' +
+      'stored months are being replaced, and keeps the months of a member it ' +
+      'does not change. The page also states that it compares a fixed set of ' +
+      'options at one assumed death age and is not advice.',
+  },
+  {
+    date: '2026-10-20',
+    kind: 'new',
+    title: 'Compare Roth conversion plans on the Roth conversion comparison page',
+    blurb:
+      'A new panel tries filling the 12%, 22%, 24% and 32% brackets each year before required ' +
+      'withdrawals begin, with and without staying under the Medicare surcharge and ' +
+      'health-insurance premium credit lines, and lists each next to your current plan by ' +
+      'after-tax ending balance. It shows what each plan does in the model, not which one to pick, ' +
+      'and you can cancel a run at any time.',
+  },
+  {
     date: '2026-10-20',
     kind: 'new',
     title: 'Your AI assistant can try a what-if without saving it (beta)',

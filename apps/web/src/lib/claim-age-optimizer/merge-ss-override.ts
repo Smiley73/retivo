@@ -9,8 +9,11 @@
  *   and dropping `survivor` would erase the survivor input the
  *   ranked winner was simulated with, so the applied scenario would no
  *   longer reproduce the candidate the user accepted).
- * - **Whole-year search** — write `ageMonths: 0` on every emitted
- *   age. The grid only carries whole years.
+ * - **Whole-year search** — a searched member's candidate carries
+ *   `ageMonths` 0 (the grid only holds whole years); a member carried
+ *   through unsearched (the 1-D fallback) or a stored month-level pair
+ *   that won carries its stored months. Write the winner's months, absent
+ *   meaning 0.
  * - **Single-member household** (`hasSecondary: false`) — strip the
  *   `secondary` key from the merged payload entirely.
  * - **Partial secondary** — when `hasSecondary: true` and the
@@ -26,7 +29,9 @@ import type {
 
 interface OptimalPair {
   readonly primaryAgeYears: number;
+  readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
+  readonly secondaryAgeMonths?: number;
 }
 
 export interface MergeSsOverrideArgs {
@@ -40,7 +45,7 @@ export function mergeSsOverride(args: MergeSsOverrideArgs): SocialSecurityOverri
   const { currentResolvedOverride, optimalPair, hasSecondary, secondaryPastWindow } = args;
   const primary: RetirementAgePerMember = {
     ageYears: optimalPair.primaryAgeYears,
-    ageMonths: 0,
+    ageMonths: optimalPair.primaryAgeMonths ?? 0,
   };
   const merged: SocialSecurityOverride = { primary };
   if (currentResolvedOverride?.benefitReductionPct !== undefined) {
@@ -83,7 +88,7 @@ export function mergeSsOverride(args: MergeSsOverrideArgs): SocialSecurityOverri
   }
   merged.secondary = {
     ageYears: optimalPair.secondaryAgeYears,
-    ageMonths: 0,
+    ageMonths: optimalPair.secondaryAgeMonths ?? 0,
   };
   return merged;
 }

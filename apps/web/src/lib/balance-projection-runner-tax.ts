@@ -52,7 +52,8 @@
  * touched, lift the per-year solver loop (and its MAGI-buffer threading) into a
  * sibling module driven by `computeYearTaxWithMagiLookback`. Trigger: a change
  * adding 5 or more lines here must either refactor the file back under the
- * limit or re-justify this exception in this note.
+ * limit or re-justify this exception in this note. The zero-conversion
+ * repricing call in the loop reuses this file's per-year pass, so it cannot move out.
  */
 
 import type {
@@ -113,6 +114,7 @@ import {
   splitWithdrawalsByTaxTreatment,
   type BrokerageLikeBasisState,
 } from './balance-projection-runner-tax-helpers';
+import { stampZeroConversionPoint } from './balance-projection-runner-tax-zero-point';
 import {
   applyRothBasisOrdering,
   creditRothConversionToBasisCarrier,
@@ -901,6 +903,10 @@ export function applyTaxIntegrationToDrawdownYears(
     seedBasisFraction,
   };
   for (let i = 0; i < years.length; i += 1) {
+    // Repriced without its conversion on copies of the state; the row's own pass is unchanged.
+    stampZeroConversionPoint(years[i], (copy) =>
+      processTaxYear(copy, i, years, shared, [...magiBuffer], [...unitRing],
+        structuredClone(rothBasisCarrier), structuredClone(designatedRothCarrier), structuredClone(basisState)));
     const processed = processTaxYear(
       years[i],
       i,
@@ -1069,7 +1075,7 @@ function resolveYearFiling(args: {
 
 /** Member ids that attain age 65 by the END of `taxYear` (IRS born-Jan-1 rule),
  *  so the age add-on and senior bonus land on the return that claims them. */
-function age65PlusMemberIdsForYear(
+export function age65PlusMemberIdsForYear(
   ctx: PipelineContext,
   taxYear: number,
   primaryAlive: boolean,
@@ -1648,5 +1654,10 @@ export function buildTaxCashflowHook(args: {
     return Math.max(0, withConvCents - withoutConvCents) / 100;
   };
 
-  return { solveForYear, solveFillConversionForYear, fundConversionTaxForYear };
+  return {
+    recordsConversionZeroPoint: true,
+    solveForYear,
+    solveFillConversionForYear,
+    fundConversionTaxForYear,
+  };
 }

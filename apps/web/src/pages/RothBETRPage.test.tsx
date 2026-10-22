@@ -153,6 +153,37 @@ describe('RothBETRPage', () => {
     ).toBeInTheDocument();
   });
 
+  it('should_show_the_leftover_tax_rate_as_an_editable_whole_percent_with_its_hint', async () => {
+    await loadDemoData({ householdId: HH, email: 'demo@example.test', displayName: 'Demo User' });
+    renderPage();
+    await findHeader();
+    const input = await screen.findByRole('textbox', { name: 'Leftover-tax rate percent' });
+    // Defaults to the page's RMD-era rate rounded to a whole percent (or the
+    // documented fallback), never blank or fractional.
+    const initial = Number((input as HTMLInputElement).value);
+    expect(initial).toBeGreaterThan(0);
+    expect(Number.isInteger(initial)).toBe(true);
+    expect(screen.getByText(/Roth and already-taxed balances count in full/)).toBeInTheDocument();
+
+    await userEvent.clear(input);
+    await userEvent.type(input, '31');
+    expect((input as HTMLInputElement).value).toBe('31');
+  });
+
+  it('should_mount_the_plan_comparison_panel_after_the_retirement_years_card', async () => {
+    await loadDemoData({ householdId: HH, email: 'demo@example.test', displayName: 'Demo User' });
+    renderPage();
+    await findHeader();
+    const retirementYears = await screen.findByRole('heading', { name: 'Retirement years', level: 2 });
+    const comparison = await screen.findByRole('heading', { name: 'Compare conversion plans', level: 2 });
+    expect(
+      retirementYears.compareDocumentPosition(comparison) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Nothing runs until the user asks.
+    expect(screen.getByRole('button', { name: 'Compare conversion plans' })).toBeEnabled();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
   it('should_surface_the_apply_working_years_action', async () => {
     await loadDemoData({ householdId: HH, email: 'demo@example.test', displayName: 'Demo User' });
     await seedLowWorkingYearsIncome();

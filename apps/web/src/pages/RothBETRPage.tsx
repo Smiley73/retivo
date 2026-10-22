@@ -6,10 +6,12 @@
  * working-years conversion schedule or a pre-RMD MAGI-cap Fill window to the
  * active scenario.
  *
- * Read-only by default; the two mutation paths (the taxable-income field, and
+ * Read-only by default; the mutation paths (the taxable-income field, and
  * the two Apply dialogs) write through `saveScenario` / `queueLocalMutation`
- * with `expectedVersion`. Deterministic projection only — no Monte Carlo,
- * no Web Worker.
+ * with `expectedVersion`. Deterministic projection only — no Monte Carlo. The
+ * plan-comparison panel runs its own search in a Web Worker, on request, and
+ * writes nothing until the user confirms Save on a ranked plan, which goes
+ * through the same `persistOverrides`.
  *
  * Subcomponents + the projection/context build live under `./roth-betr/` so
  * this shell stays within the ≤400-line shape cap; it owns state + the React
@@ -32,6 +34,12 @@ import { useBalanceProjectionData } from './use-balance-projection-data';
 import { buildRothBETRPageData } from './roth-betr/roth-betr-data';
 import { WorkingYearsPanel } from './roth-betr/WorkingYearsPanel';
 import { RetirementYearsTable } from './roth-betr/RetirementYearsTable';
+import { RothSuggestionPanel } from './roth-betr/RothSuggestionPanel';
+import {
+  LEFTOVER_TAX_FALLBACK_PCT,
+  LEFTOVER_TAX_MAX_PCT,
+  defaultLeftoverTaxPct,
+} from './roth-betr/roth-suggestion-view-model';
 import { BETR_SOURCE_SELECT_OPTIONS } from './roth-betr/betr-presentation-shared';
 import { BackdoorRothCallout } from './roth-betr/BackdoorRothCallout';
 import { ApplyWorkingYearsDialog } from './roth-betr/ApplyWorkingYearsDialog';
@@ -54,6 +62,8 @@ export const RothBETRPage: React.FC = () => {
   const [scenarioOverride, setScenarioOverride] = useState<string | null>(null);
   const [source, setSource] = useState<BETRSource>('ira');
   const [dragPct, setDragPct] = useState(10);
+  // Leftover-tax rate in percent; `null` follows the page's RMD-era rate. Not persisted.
+  const [leftoverTaxOverride, setLeftoverTaxOverride] = useState<number | null>(null);
   const [wyDialogOpen, setWyDialogOpen] = useState(false);
   const [retDialogOpen, setRetDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,10 +116,11 @@ export const RothBETRPage: React.FC = () => {
   ]);
 
   // Persist the whole scenario payload with the merged override fragment. One
-  // path for the taxable-income field and both Apply dialogs.
+  // path for the taxable-income field, both Apply dialogs and the plan
+  // comparison's save. Resolves true when the scenario was written.
   const persistOverrides = useCallback(
-    async (fragment: Partial<ScenarioPayload['overrides']>): Promise<void> => {
-      if (!householdId || selectedScenario === null) return;
+    async (fragment: Partial<ScenarioPayload['overrides']>): Promise<boolean> => {
+      if (!householdId || selectedScenario === null) return false;
       const payload: ScenarioPayload = {
         ...selectedScenario.payload,
         overrides: { ...selectedScenario.payload.overrides, ...fragment },
@@ -119,8 +130,10 @@ export const RothBETRPage: React.FC = () => {
         // doesn't leave the error pinned.
         setError(null);
         await saveScenario({ scenario: selectedScenario, payload, householdId });
+        return true;
       } catch (e) {
         setError((e as Error).message ?? 'Failed to save.');
+        return false;
       }
     },
     [householdId, selectedScenario],
@@ -130,7 +143,13 @@ export const RothBETRPage: React.FC = () => {
   // scenario's unsaved income can't leak into another.
   useEffect(() => {
     setDraftIncome(null);
+    setLeftoverTaxOverride(null);
   }, [selectedScenarioId]);
+  const leftoverTaxPct =
+    leftoverTaxOverride ??
+    (pageData === null
+      ? LEFTOVER_TAX_FALLBACK_PCT
+      : defaultLeftoverTaxPct(pageData.workingSummary.T_future));
 
   const onTaxableIncomeChange = useCallback((next: number) => {
     setDraftIncome(Math.max(0, Math.round(next)));
@@ -235,6 +254,20 @@ export const RothBETRPage: React.FC = () => {
               ariaLabel="Taxable-account tax drag percent"
             />
           </Field>
+          <Field
+            htmlFor="betr-leftover-tax"
+            label="Leftover-tax rate"
+            className="w-64"
+            hint="Used by the plan comparison. Money still in pre-tax accounts at the end of the projection counts after this rate; Roth and already-taxed balances count in full. Starts at the average rate the break-even uses for the years when required withdrawals begin."
+          >
+            <PercentInput
+              id="betr-leftover-tax"
+              value={leftoverTaxPct}
+              onChange={setLeftoverTaxOverride}
+              max={LEFTOVER_TAX_MAX_PCT}
+              ariaLabel="Leftover-tax rate percent"
+            />
+          </Field>
         </div>
       </Card>
 
@@ -299,6 +332,15 @@ export const RothBETRPage: React.FC = () => {
               iraOwnerBoundary={pageData.iraConversionOwnerBoundary}
             />
           </Card>
+
+          <RothSuggestionPanel
+            pageData={pageData}
+            data={data}
+            selectedScenarioId={selectedScenarioId}
+            leftoverTaxPct={leftoverTaxPct}
+            persistOverrides={persistOverrides}
+            onError={setError}
+          />
 
           <ApplyWorkingYearsDialog
             open={wyDialogOpen}

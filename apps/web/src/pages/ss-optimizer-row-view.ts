@@ -36,20 +36,19 @@ export function resolveCurrentClaimAges(
 }
 
 /**
- * Does the current claim age already equal the whole-year recommendation?
- * The optimizer searches whole years, so a current age carrying any months
- * (e.g. 65 years 6 months) is NOT a match for a "65" recommendation. A
- * `null` recommendation (secondary past the claim-age window) matches only
- * a `null` current age. Single source of truth for both the "show just the
- * number" display rule and the already-applied button state.
+ * Does the current claim age already equal the recommendation, years and
+ * months both? Single source of truth for the "show just the age" display
+ * rule and the already-applied button state; callers skip a `null`
+ * recommendation (a member Save keeps as stored).
  */
 export function claimAgeMatches(
   current: RetirementAgePerMember | null,
   recommendedYears: number | null,
+  recommendedMonths = 0,
 ): boolean {
   const currentYears = current?.ageYears ?? null;
   if (currentYears !== recommendedYears) return false;
-  if ((current?.ageMonths ?? 0) !== 0) return false;
+  if ((current?.ageMonths ?? 0) !== recommendedMonths) return false;
   return true;
 }
 
@@ -78,7 +77,7 @@ export type RowView =
       alreadyAtOptimum: boolean;
       /** Metric value at the scenario's current claim ages — drives the
        *  "current → recommended" metric cell. `undefined` when the current
-       *  pair isn't a whole-year candidate in the searched grid. */
+       *  pair isn't a candidate (the 1-D primary-only fallback). */
       baselineMetricValue: number | undefined;
       parentName: string | null;
       resolvedFromAncestor: boolean;
@@ -143,9 +142,14 @@ function deriveRowView(
   // lands. Equivalent to the engine flag on the deterministic tab (which
   // re-runs), keeping both tabs consistent.
   const alreadyAtOptimum =
-    claimAgeMatches(current.primary, winner.primaryAgeYears) &&
+    claimAgeMatches(current.primary, winner.primaryAgeYears, winner.primaryAgeMonths) &&
     (secondary === undefined ||
-      claimAgeMatches(current.secondary, winner.secondaryAgeYears));
+      winner.secondaryAgeYears === null ||
+      claimAgeMatches(
+        current.secondary,
+        winner.secondaryAgeYears,
+        winner.secondaryAgeMonths,
+      ));
   // Assumed death age. Prefer the value the runner forwarded onto the
   // result; otherwise resolve it from the scenario chain (deterministic
   // tab / older payloads).
