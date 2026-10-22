@@ -1,42 +1,6 @@
 /**
- * RMD life-expectancy tables + explicit table selector.
- *
- * IRS Pub 590-B Appendix B publishes three life-expectancy tables. This module
- * exposes all three and the pure selector that chooses among them from explicit
- * facts:
- *
- *   - **Table III — Uniform Lifetime.** The default for a living account OWNER
- *     (and an owner whose sole spouse beneficiary is NOT more than ten years
- *     younger). Reused verbatim from the calibrated `RMD_DIVISORS` seed
- *     (`rmd-divisors.ts`) — the single source of truth this module does not
- *     duplicate.
- *   - **Table I — Single Life.** Life expectancy of one individual by attained
- *     age; used for a beneficiary taking a life-expectancy ("stretch")
- *     distribution from an INHERITED account.
- *   - **Table II — Joint Life and Last Survivor.** Joint life expectancy of two
- *     individuals by their attained ages; used for an OWNER whose SOLE
- *     beneficiary is a spouse MORE THAN ten years younger.
- *
- * All three tables are live: `computeRmd` (`rmd.ts`) picks the divisor through
- * `selectRmdTableDivisor`, using Table III for an owner by default, Table II for
- * an owner with a sole spouse beneficiary more than ten years younger, and
- * Table I for a beneficiary of an inherited account. See
- * docs/math-retirement-accounts.md, "Which life-expectancy table".
- *
- * ## Table data status (source-verification boundary)
- *
- * All three tables are now populated from IRS Publication 590-B (2023),
- * Appendix B, and carry the same stable archived-PDF permalink citation as the
- * Table III / `RMD_DIVISORS` seed. Table I (Single Life, ages 0–120) and Table II
- * (Joint Life and Last Survivor, the symmetric ages 20–120 matrix) were
- * mechanically parsed from the source PDF and verified (Table II's symmetry
- * confirmed across all directly-parsed cells; the reconstructed 101×101 matrix
- * has no missing or conflicting entries). The selector returns a `divisor` for any
- * populated entry and still WITHHOLDS (a conservative withhold, never a guessed
- * divisor) only when an entry is genuinely absent or an input is malformed. The
- * exact-value fixtures for all three tables live in `rmd-divisors.test.ts`.
- *
- * Config: apps/web/src/lib/rmd-divisors.ts (Table III)
+ * RMD life-expectancy tables (IRS Pub 590-B Appendix B Tables I, II, III) and the selector `computeRmd` uses
+ * to pick a divisor. See docs/math-retirement-accounts.md, "Which life-expectancy table".
  */
 
 import type { CalibrationSnapshot } from './calibration';
@@ -47,40 +11,20 @@ import {
   type RmdTable,
 } from './rmd-divisors';
 
-// ---------------------------------------------------------------------------
-// Table payload shapes
-// ---------------------------------------------------------------------------
-
-/** Payload T for `CalibrationSnapshot<SingleLifeTable>` — IRS Pub 590-B
- *  Appendix B Table I (Single Life). Maps integer attained age → life
- *  expectancy divisor. */
+/** Table I (Single Life): attained age to life expectancy. */
 export interface SingleLifeTable {
   readonly singleLife: Readonly<Record<number, number>>;
 }
 
-/** Payload T for `CalibrationSnapshot<JointLifeTable>` — IRS Pub 590-B Appendix
- *  B Table II (Joint Life and Last Survivor). Maps `ownerAge → beneficiaryAge →
- *  joint life expectancy divisor`. */
+/** Table II (Joint Life and Last Survivor): ownerAge to beneficiaryAge to joint life expectancy. */
 export interface JointLifeTable {
   readonly jointLastSurvivor: Readonly<Record<number, Readonly<Record<number, number>>>>;
 }
 
-// ---------------------------------------------------------------------------
-// Table III — Uniform Lifetime (reused; the verified single source of truth)
-// ---------------------------------------------------------------------------
-
-/** IRS Pub 590-B Appendix B Table III (Uniform Lifetime). Aliases the calibrated
- *  `RMD_DIVISORS` seed so this module never duplicates the verified divisors. */
+/** Table III (Uniform Lifetime), aliasing `RMD_DIVISORS`. */
 export const RMD_UNIFORM_LIFETIME_TABLE_III: CalibrationSnapshot<RmdTable> = RMD_DIVISORS;
 
-// ---------------------------------------------------------------------------
-// Table I — Single Life (populated + source-verified from IRS Pub 590-B, 2023)
-// ---------------------------------------------------------------------------
-
-/** IRS Pub 590-B Appendix B Table I (Single Life), ages 0–120. Populated from the
- *  source-verified transcription — see the module header's source-verification
- *  boundary note. The single `2024` snapshot key mirrors Table III's
- *  clamp-to-latest resolution so a populated future revision drops in cleanly. */
+/** Table I (Single Life), ages 0–120; the single 2024 key mirrors Table III's clamp-to-latest resolution. */
 export const RMD_SINGLE_LIFE_TABLE_I: CalibrationSnapshot<SingleLifeTable> = {
   values: {
     2024: {
@@ -218,13 +162,7 @@ export const RMD_SINGLE_LIFE_TABLE_I: CalibrationSnapshot<SingleLifeTable> = {
   },
 } as const;
 
-// ---------------------------------------------------------------------------
-// Table II — Joint Life and Last Survivor (populated + source-verified, Pub 590-B)
-// ---------------------------------------------------------------------------
-
-/** IRS Pub 590-B Appendix B Table II (Joint Life and Last Survivor), the
- *  symmetric ages 20–120 matrix. Populated from the source-verified transcription
- *  — see the module header's source-verification boundary note. */
+/** Table II (Joint Life and Last Survivor), the symmetric ages 20–120 matrix. */
 export const RMD_JOINT_LIFE_TABLE_II: CalibrationSnapshot<JointLifeTable> = {
   values: {
     2024: {
@@ -342,21 +280,13 @@ export const RMD_JOINT_LIFE_TABLE_II: CalibrationSnapshot<JointLifeTable> = {
   },
 } as const;
 
-// ---------------------------------------------------------------------------
-// Bundled tables + selector
-// ---------------------------------------------------------------------------
-
-/** The three life-expectancy table snapshots bundled for the selector. Passed as
- *  a parameter (never read from module scope) so a Monte Carlo path stays
- *  deterministic against a pinned calibration, matching the `computeRmd`
- *  snapshot-pinning contract. */
+/** The three table snapshots, passed as a parameter so a Monte Carlo path stays deterministic against a pinned calibration. */
 export interface RmdLifeExpectancyTables {
   readonly uniformLifetime: CalibrationSnapshot<RmdTable>;
   readonly singleLife: CalibrationSnapshot<SingleLifeTable>;
   readonly jointLastSurvivor: CalibrationSnapshot<JointLifeTable>;
 }
 
-/** The default (live-calibration) bundle of all three tables. */
 export const RMD_LIFE_EXPECTANCY_TABLES: RmdLifeExpectancyTables = {
   uniformLifetime: RMD_UNIFORM_LIFETIME_TABLE_III,
   singleLife: RMD_SINGLE_LIFE_TABLE_I,
@@ -364,17 +294,9 @@ export const RMD_LIFE_EXPECTANCY_TABLES: RmdLifeExpectancyTables = {
 };
 
 /**
- * A request for a specific table's divisor, keyed by which table applies and the
- * attained age(s) that index it.
- *
- * The Single Life (Table I) request carries the beneficiary-recalculation MODE,
- * because the two inherited stretch rules index Table I differently:
- *   - `recalculate` — a SURVIVING SPOUSE beneficiary re-looks-up the divisor by
- *     their CURRENT (this-tax-year) attained age every year.
- *   - `anchoredDecrement` — a NON-SPOUSE beneficiary FIXES the divisor in the
- *     year following the owner's death using their age THAT year (`baseAge`), then
- *     subtracts exactly 1.0 for each subsequent elapsed year (`elapsedYears`, 0 in
- *     the base year) — never a fresh current-age lookup.
+ * A request for one table's divisor. Single Life carries the inherited stretch mode: `recalculate` (surviving
+ * spouse) looks up the current attained age each year; `anchoredDecrement` (non-spouse) fixes the divisor at
+ * `baseAge` in the year after the owner's death, then subtracts 1.0 per elapsed year (`elapsedYears`, 0 in the base year).
  */
 export type RmdTableRequest =
   | { readonly table: 'uniformLifetime'; readonly ownerAge: number }
@@ -387,28 +309,19 @@ export type RmdTableRequest =
     }
   | { readonly table: 'jointLastSurvivor'; readonly ownerAge: number; readonly beneficiaryAge: number };
 
-/** Result of a table-divisor selection: the resolved table + divisor, or a
- *  conservative withhold when the required entry is unavailable. */
+/** The resolved table and divisor, or a withhold when the required entry is unavailable. */
 export type RmdTableSelection =
   | { readonly kind: 'divisor'; readonly table: RmdTableRequest['table']; readonly divisor: number }
   | { readonly kind: 'withheld'; readonly table: RmdTableRequest['table']; readonly reason: string };
 
-/** True for a finite, positive divisor (a valid life-expectancy entry). */
 function isUsableDivisor(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
-/** True for a finite, safe, non-negative integer — the only well-formed age /
- *  tax-year input for a table lookup. Rejects NaN, ±Infinity, negatives,
- *  and fractional values so a malformed input WITHHOLDS rather than silently
- *  clamping into the valid domain. */
 function isNonNegativeSafeInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
-/** Finalize a lookup: a usable divisor becomes a `divisor` selection, anything
- *  else the `withheld` selection with `reasonWhenMissing` (one shared
- *  finalizer for every table branch). */
 function divisorOrWithheld(
   table: RmdTableRequest['table'],
   divisor: number | undefined,
@@ -420,20 +333,14 @@ function divisorOrWithheld(
 }
 
 /**
- * Select the life-expectancy divisor for one RMD table request against a pinned
- * table bundle at `taxYear`, using clamp-to-latest year resolution.
- *
- * Every age and `taxYear` input must be a finite, safe, non-negative integer;
- * a malformed input WITHHOLDS rather than clamping into the valid domain.
- * A request whose table lacks a usable entry for the resolved age(s) likewise
- * returns a `withheld` selection (withhold, never guess a divisor).
+ * Divisor for one table request against a pinned bundle at `taxYear` (clamp-to-latest). A malformed age or
+ * `taxYear`, or a missing entry, returns `withheld` rather than a guessed divisor.
  */
 export function selectRmdTableDivisor(
   request: RmdTableRequest,
   tables: RmdLifeExpectancyTables,
   taxYear: number,
 ): RmdTableSelection {
-  // Reject a malformed taxYear BEFORE any clamp / snapshot resolution.
   if (!isNonNegativeSafeInteger(taxYear)) {
     return {
       kind: 'withheld',
@@ -474,7 +381,6 @@ export function selectRmdTableDivisor(
         `Single Life (Table I) divisor unavailable for age ${request.age}`,
       );
     }
-    // anchoredDecrement — fixed base-year divisor minus 1.0 per elapsed year.
     if (!isNonNegativeSafeInteger(request.baseAge) || !isNonNegativeSafeInteger(request.elapsedYears)) {
       return {
         kind: 'withheld',
@@ -492,8 +398,7 @@ export function selectRmdTableDivisor(
         reason: `Single Life (Table I) base-year divisor unavailable for age ${request.baseAge}`,
       };
     }
-    // Decrement 1.0 per subsequent year; a non-positive result means the stretch
-    // schedule is exhausted (account must be emptied) → withhold, never a guess.
+    // A non-positive result means the stretch schedule is exhausted (the account must be emptied).
     return divisorOrWithheld(
       'singleLife',
       baseDivisor - request.elapsedYears,

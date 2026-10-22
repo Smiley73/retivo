@@ -1,42 +1,17 @@
-/**
- * Input validation for the RMD engine.
- *
- * Extracted from rmd.ts to keep that file within the shape limit.
- * Validation runs BEFORE the trigger-age gate so malformed inputs always throw.
- * Engine: apps/web/src/lib/rmd.ts
- */
+/** Input validation for the RMD engine; runs before the trigger-age gate so malformed inputs always throw. */
 
 import { RmdInvalidInputError } from './rmd-errors';
 import type { AccountTaxTreatment, RmdInput, RmdAccountProfileFacts } from './rmd';
 
 /**
- * True when the account's tax treatment HAS a Roth-designated pocket, i.e. the
- * account can carry a `rothPortionCents` / `rothPortionTwoYearsPriorCents` slice
- * that SECURE 2.0 §325 keeps out of the RMD base: `MIXED` (a pre-tax employer plan
- * holding a designated-Roth sub-account) or a pure Roth account (`POST_TAX` /
- * `ROTH`, whose WHOLE balance is Roth money). `PRE_TAX` and `HSA` accounts have no
- * such pocket, so supplying a portion for them is incoherent input and throws.
- *
- * THE single §325 admission rule for the whole codebase: the RMD
- * engine's base resolvers, the validator below, and every producer that assembles
- * an `RmdAccountInput` (both engines' funded passes, the MC representative pass,
- * the deterministic snapshot builder) read it, so no two of them can disagree
- * about whether one account's Roth dollars belong in the base. It lives here
- * rather than in `rmd.ts` because `rmd.ts` imports this module (the reverse would
- * be a value cycle); `rmd.ts` re-exports it for callers.
+ * True when the tax treatment has a Roth-designated pocket (`MIXED`, or a pure Roth `POST_TAX` / `ROTH`) that
+ * SECURE 2.0 §325 keeps out of the RMD base; `PRE_TAX` and `HSA` have none, so a Roth portion for them throws.
+ * The one §325 admission rule for every RMD base resolver and producer; defined here because rmd.ts imports this module.
  */
 export function hasRothDesignatedPocket(taxTreatment: AccountTaxTreatment): boolean {
   return taxTreatment === 'MIXED' || taxTreatment === 'POST_TAX' || taxTreatment === 'ROTH';
 }
 
-// ---------------------------------------------------------------------------
-// Per-account validators (each ≤ 40 ln)
-// ---------------------------------------------------------------------------
-
-/**
- * Validate account id: must be non-empty and unique within the call.
- * @throws {RmdInvalidInputError} on empty or duplicate id.
- */
 function validateAccountIdentity(id: string, seenIds: Set<string>): void {
   if (!id) {
     throw new RmdInvalidInputError('account id must be a non-empty string');
@@ -47,10 +22,6 @@ function validateAccountIdentity(id: string, seenIds: Set<string>): void {
   seenIds.add(id);
 }
 
-/**
- * Validate balanceDec31PriorYearCents: must be a safe non-negative integer.
- * @throws {RmdInvalidInputError} on non-finite, negative, or non-integer value.
- */
 function validateAccountBalance(id: string, balanceDec31PriorYearCents: number): void {
   if (
     !Number.isSafeInteger(balanceDec31PriorYearCents) ||
@@ -63,11 +34,6 @@ function validateAccountBalance(id: string, balanceDec31PriorYearCents: number):
   }
 }
 
-/**
- * Validate rothPortionCents when present: must be a safe non-negative integer,
- * only on an account that has a Roth-designated pocket, and not exceed balance.
- * @throws {RmdInvalidInputError} on any invalid condition.
- */
 function validateRothPortion(
   id: string,
   rothPortionCents: number,
@@ -95,15 +61,7 @@ function validateRothPortion(
   }
 }
 
-/**
- * Validate the two-years-prior catch-up base pair when present: the balance
- * must be a safe non-negative integer, and its Roth-designated portion follows
- * the same rules as `rothPortionCents` (only on an account with a Roth-designated
- * pocket, never exceeding the balance).
- * Unvalidated, a `NaN` / negative value would silently poison a first-year
- * deferral catch-up amount.
- * @throws {RmdInvalidInputError} on any invalid condition.
- */
+// Unvalidated, a NaN or negative value would silently poison a first-year deferral catch-up amount.
 function validateTwoYearsPriorBase(
   id: string,
   balanceDec31TwoYearsPriorCents: number | undefined,
@@ -147,19 +105,8 @@ function validateTwoYearsPriorBase(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Public entry point
-// ---------------------------------------------------------------------------
-
-/**
- * Validate top-level and per-account RMD input.
- * Runs BEFORE the trigger-age gate so malformed inputs always throw.
- *
- * @throws {RmdInvalidInputError} on any invalid input condition.
- */
+/** Validates top-level and per-account RMD input. @throws {RmdInvalidInputError} on any invalid input. */
 export function validateRmdInput(input: RmdInput): void {
-  // taxYear must be a finite safe integer — checked first, before snapshot
-  // resolution or per-account loops, so callers get a clear error immediately.
   if (!Number.isSafeInteger(input.taxYear)) {
     throw new RmdInvalidInputError(
       `taxYear must be a finite safe integer; got ${input.taxYear}`,
@@ -170,8 +117,6 @@ export function validateRmdInput(input: RmdInput): void {
   for (const acct of input.accounts) {
     validateAccountIdentity(acct.id, seenIds);
     validateAccountBalance(acct.id, acct.balanceDec31PriorYearCents);
-    // RETIREMENT_IRA is PRE_TAX only — MIXED/POST_TAX are incoherent
-    // (Roth IRAs are RETIREMENT_ROTH_IRA, a separate type).
     if (acct.accountType === 'RETIREMENT_IRA' && acct.taxTreatment !== 'PRE_TAX') {
       throw new RmdInvalidInputError(
         `RETIREMENT_IRA must have taxTreatment 'PRE_TAX'; ` +
@@ -196,49 +141,26 @@ export function validateRmdInput(input: RmdInput): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Explicit missing-fact BLOCKERS for the fact-based RMD rule
-// resolver. Unlike `validateRmdInput` (which THROWS on malformed engine input),
-// this RETURNS a structured result listing the required facts that are absent —
-// the "validation result" pattern — so a caller (and the account-editor
-// readiness surface) can WITHHOLD an inherited-account RMD and show the user
-// exactly which inputs to supply (never silently guess an inherited
-// distribution rule). The editor's blocker list resolves the engine's own rule
-// to collect these, see `account-tax-profile.ts`.
-// ---------------------------------------------------------------------------
-
-/** One missing-required-fact blocker. */
 interface RmdProfileBlocker {
   readonly field: string;
   readonly reason: string;
 }
 
-/** Result of an RMD-profile fact check: `ok` when no required fact is missing. */
+/** `ok` when no required fact is missing. */
 export interface RmdProfileValidationResult {
   readonly ok: boolean;
   readonly blockers: readonly RmdProfileBlocker[];
 }
 
 /**
- * Return the BASELINE missing-fact blockers for an account's RMD profile. An
- * OWNER account has no required facts (absent facts resolve to the conservative
- * owner default), so it is always `ok`. An INHERITED account requires the
- * beneficiary category, the original-owner death date, and the died-on/after-RBD
- * flag before ANY post-death rule can be selected; each absent fact is reported
- * as a blocker — EXCEPT the died-on/after-RBD flag on a Roth account, whose owner
- * has no lifetime Required Beginning Date: `resolveRmdRule` always
- * forces that case to death-before-RBD and never reads the stored flag, so
- * demanding it here would withhold a fully-specified inherited Roth account on a
- * fact the engine provably cannot use. Conditional facts whose necessity depends
- * on the resolved rule (e.g. the beneficiary birthdate for a life-expectancy
- * stretch) are surfaced by `resolveRmdRule` itself, not here. Pure/never-throws.
+ * Missing-fact blockers for an account's RMD profile, returned rather than thrown so the account editor can
+ * withhold an inherited-account RMD and show which inputs to supply. An owner account has none. An inherited
+ * account needs the beneficiary category, owner death date and died-on/after-RBD flag; the flag is skipped
+ * when `ownerAlwaysDiedBeforeRbd` (a Roth account: `resolveRmdRule` forces death-before-RBD and never reads it).
+ * Facts whose need depends on the resolved rule are surfaced by `resolveRmdRule`.
  */
 export function validateRmdProfileFacts(
   facts: RmdAccountProfileFacts,
-  /** True when the account's owner has no lifetime Required Beginning Date (a
-   *  Roth account) — the caller passes the same test `resolveRmdRule`
-   *  uses, so this function and the engine can never disagree about whether the
-   *  died-on/after-RBD flag is required. Absent → required, as before. */
   ownerAlwaysDiedBeforeRbd = false,
 ): RmdProfileValidationResult {
   const blockers: RmdProfileBlocker[] = [];
