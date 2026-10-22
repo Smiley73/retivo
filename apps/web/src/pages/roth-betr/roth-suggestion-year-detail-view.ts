@@ -1,10 +1,4 @@
-/**
- * Words and formatted figures for the year-by-year table. Nominal dollars:
- * the limits and the cliffs are fixed amounts for the year, which is the only
- * basis the hand check closes on. The figures a person adds up (the amount,
- * the income before, the Social Security, the margin) carry cents so the sum
- * lands on the amount.
- */
+/** Words and formatted figures for the year-by-year table; the figures a person adds up carry cents. */
 import { formatCurrency, formatCurrencyExact } from '../../lib/format-currency';
 import type {
   YearDetailRow,
@@ -38,10 +32,8 @@ function line(value: number | null): string {
   return value === null ? NOT_APPLIED : formatCurrency(value);
 }
 
-/** The premium credit, with the income tier that set it only in a year the
- *  household had Marketplace coverage: the engine's tier reads "below the
- *  poverty line" by default in every other year. A year whose coverage is not
- *  worked out (past the window) shows the credit alone. */
+/** The credit, with its tier only in a year with Marketplace coverage (the
+ *  engine's tier defaults to "below the poverty line" otherwise). */
 function creditText(row: YearDetailRow): string {
   const amount = formatCurrency(row.acaCreditDollars);
   if (row.marketplaceMonths === null) return amount;

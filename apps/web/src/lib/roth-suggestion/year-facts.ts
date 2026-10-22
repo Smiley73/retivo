@@ -1,8 +1,4 @@
-/**
- * Per-year filing facts, read from the engine's own resolvers rather than
- * re-derived: which members are alive, which tax unit files, the household
- * size, the age-65 count and the health coverage the year's limits depend on.
- */
+/** Per-year filing facts, read from the engine's own resolvers. */
 import type { PipelineContext } from '../balance-projection-runner-types';
 import { buildMemberInputs, resolveHouseholdDeathYears } from '../balance-projection-runner-tax-helpers';
 import { age65PlusMemberIdsForYear, resolveTaxUnitsForYear } from '../balance-projection-runner-tax';
@@ -33,12 +29,11 @@ export interface LookbackFacts {
   readonly withinHorizon: boolean;
   /** Members with a Medicare month in year Y+2, the count IRMAA is billed for. */
   readonly medicareBeneficiaries: 0 | 1 | 2;
-  /** Each of them with the Part B and Part D months enrolled in year Y+2, the
-   *  months the surcharge for that year is prorated by. */
+  /** Their Part B and Part D months in year Y+2, which prorate the surcharge. */
   readonly irmaaBeneficiaries: readonly IrmaaBeneficiaryEnrollment[];
 }
 
-export type YearFactsResult =
+type YearFactsResult =
   | { readonly kind: 'ok'; readonly facts: YearFacts }
   | { readonly kind: 'unsupported'; readonly reason: RothSuggestionUnsupportedReason };
 
@@ -47,8 +42,7 @@ interface AliveFlags {
   readonly secondaryAlive: boolean;
 }
 
-/** A member is alive through the whole of their death year; an unusable
- *  birthdate has no death year and reads as alive, as it does in the engine. */
+/** Alive through the whole death year; no death year reads as alive, as in the engine. */
 function aliveFlags(ctx: PipelineContext, year: number): AliveFlags {
   const { primaryDeathYear, secondaryDeathYear } = resolveHouseholdDeathYears(ctx);
   return {
@@ -57,9 +51,8 @@ function aliveFlags(ctx: PipelineContext, year: number): AliveFlags {
   };
 }
 
-/** One year's filing facts, or why the search cannot handle the year: a
- *  separate-returns plan resolves to two tax units and an unresolvable plan to
- *  none, and neither has a single MAGI line to fill against. */
+/** One year's filing facts, or why the search cannot handle the year (two tax
+ *  units or none: no single MAGI line to fill against). */
 export function resolveYearFacts(ctx: PipelineContext, year: number): YearFactsResult {
   const { primaryAlive, secondaryAlive } = aliveFlags(ctx, year);
   const resolution = resolveTaxUnitsForYear(ctx, year, primaryAlive, secondaryAlive);
@@ -83,8 +76,7 @@ export function resolveYearFacts(ctx: PipelineContext, year: number): YearFactsR
   };
 }
 
-/** Whether year `year + 2` exists in the projection and has a living member
- *  with Medicare months, the only case year `year`'s MAGI can set a tier. */
+/** Whether year `year + 2` is projected and has a member with Medicare months. */
 export function resolveLookbackFacts(ctx: PipelineContext, year: number): LookbackFacts {
   const lookbackYear = year + 2;
   if (lookbackYear > ctx.horizonYear) {
@@ -101,9 +93,7 @@ export function resolveLookbackFacts(ctx: PipelineContext, year: number): Lookba
   };
 }
 
-/** The household's benchmark plan cost for the year, in cents, priced the way
- *  the tax pass prices it: the scenario's per-year override prorated to the
- *  Marketplace months, else the age-priced fallback. */
+/** The household's benchmark plan cost for the year in cents, priced as the tax pass prices it. */
 export function benchmarkSlcspCentsForYear(ctx: PipelineContext, facts: YearFacts): number {
   const override = storedAcaBenchmarkOverrides(ctx.resolvedScenario.acaPtcBenchmark).find(
     (o) => o.taxYear === facts.year,

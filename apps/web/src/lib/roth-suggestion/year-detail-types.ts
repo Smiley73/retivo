@@ -59,12 +59,9 @@ export interface YearDetailRow {
   readonly incomeAfterDollars: number | null;
   /** Social Security the conversion made taxable that was not before. */
   readonly extraTaxableSsDollars: number | null;
-  /** Income after the conversion beyond the income before, the conversion and
-   *  the extra Social Security: taxable income from the withdrawals that paid
-   *  the conversion's tax. */
+  /** Taxable income from the withdrawals that paid the conversion's tax. */
   readonly taxPaymentIncomeDollars: number | null;
-  /** Limit less income after: the search's few dollars of margin in a year a
-   *  limit stopped, the room left unused in a year none did. */
+  /** Limit less income after. */
   readonly keptUnderDollars: number | null;
   readonly reroutedDollars: number;
   readonly breachedDollars: number;
@@ -75,9 +72,8 @@ export interface YearDetailRow {
   readonly irmaaPaidDollars: number;
   readonly irmaaSetDollars: number | null;
   readonly acaCreditDollars: number;
-  /** Months of Marketplace coverage in the year; the engine's tier below means
-   *  something only when this is above 0. Null where the year's facts are not
-   *  worked out (outside the window). */
+  /** Marketplace coverage months; the tier below means something only above 0.
+   *  Null outside the window. */
   readonly marketplaceMonths: number | null;
   readonly acaTier: NonNullable<DrawdownYear['acaPtcTier']>;
   /** Pre-tax and mixed account money at year end. */

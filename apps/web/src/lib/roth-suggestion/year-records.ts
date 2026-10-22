@@ -1,8 +1,6 @@
 /**
- * The per-year record a person can check by hand: the ceiling and the limit
- * that set it, then what the engine's row shows for that year, in nominal
- * cents. Window years carry the ladder's ceiling; the year after the window is
- * included so "the window ended" can be shown as the reason conversions stop.
+ * The per-year record a person can check by hand: the ceiling, the limit that
+ * set it and the engine's row for the year, in nominal cents.
  */
 import type { AccountPayload } from '../../db/types';
 import type { DrawdownYear } from '../drawdown-engine-types';
@@ -13,16 +11,14 @@ import type { YearLimits, YearRecord, YearStop } from './types';
 const CENTS_PER_DOLLAR = 100;
 /** Fill bisects to $1 and rounds, so MAGI within this of the ceiling is "at" it. */
 const AT_CEILING_SLACK_DOLLARS = 2;
-/** The search leaves at most this many dollars of the row's MAGI under the
- *  limit it lands on: the offset margin, the solver's $1 step and rounding. */
+/** The most the search leaves under the limit: offset margin, $1 step and rounding. */
 const AT_LIMIT_SLACK_DOLLARS = 6;
 /** Pre-tax money below this many dollars counts as exhausted. */
 const EXHAUSTED_DOLLARS = 1;
 
 export type AccountsById = ReadonlyMap<string, AccountPayload>;
 
-/** Pre-tax and mixed account money (the RMD-qualifying set) at the end of a
- *  row, nominal dollars. Roth, brokerage and HSA are excluded. */
+/** Pre-tax and mixed (RMD-qualifying) account money at the end of a row, nominal dollars. */
 export function preTaxDollarsAtRowEnd(row: DrawdownYear, accounts: AccountsById): number {
   let total = 0;
   for (const [id, balance] of row.accountBalances ?? []) {
@@ -34,10 +30,8 @@ export function preTaxDollarsAtRowEnd(row: DrawdownYear, accounts: AccountsById)
   return total;
 }
 
-/** `ceilingDollars` is what the Fill step compares the MAGI it can see with;
- *  the row's MAGI also carries the taxable-account interest and dividends it
- *  cannot see, so it lands at `limitDollars` instead. That is the line a year
- *  that ran out of pre-tax money has to be at to count as stopped by a limit. */
+/** The row's MAGI lands at `limitDollars`, not `ceilingDollars`: it also carries
+ *  the taxable-account income the Fill step cannot see. */
 function classifyStop(
   row: DrawdownYear,
   limits: YearLimits,
@@ -92,11 +86,7 @@ function buildRecord(args: {
   };
 }
 
-/**
- * Records for each window year plus the year after it (when the projection
- * reaches it). `limits` is null on the reference candidate, whose ladder is
- * the scenario's own and has no limits of ours to show.
- */
+/** Records for each window year plus the year after it; `limits` is null on the reference. */
 export function buildYearRecords(args: {
   years: readonly DrawdownYear[];
   window: ConversionWindow;
