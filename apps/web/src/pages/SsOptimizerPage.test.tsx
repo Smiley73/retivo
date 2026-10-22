@@ -201,6 +201,8 @@ async function seedScenario(
     parentId?: string | null;
     benefitReductionPct?: number;
     colaPct?: number;
+    /** Verbatim override, instead of the whole-year ages above. */
+    socialSecurity?: ScenarioPayload['overrides']['socialSecurity'];
   } = {},
 ): Promise<void> {
   const payload: ScenarioPayload = {
@@ -211,7 +213,8 @@ async function seedScenario(
     notes: '',
     overrides: {
       socialSecurity:
-        opts.primaryAge !== undefined
+        opts.socialSecurity ??
+        (opts.primaryAge !== undefined
           ? {
               primary: { ageYears: opts.primaryAge, ageMonths: 0 },
               ...(opts.secondaryAge !== undefined
@@ -222,7 +225,7 @@ async function seedScenario(
                 : {}),
               ...(opts.colaPct !== undefined ? { colaPct: opts.colaPct } : {}),
             }
-          : undefined,
+          : undefined),
       retirementAge: {
         primary: { ageYears: 67, ageMonths: 0 },
         secondary: { ageYears: 67, ageMonths: 0 },
@@ -2600,6 +2603,280 @@ describe('SsOptimizerPage reactive re-read', () => {
       // land, then assert the dispatch count never moved.
       await new Promise((r) => setTimeout(r, 50));
       expect(dispatchCount).toBe(afterFirstRun);
+    } finally {
+      setOptimizerWorkerRunImpl(null);
+    }
+  });
+});
+
+describe('SsOptimizerPage — month-level claim ages', () => {
+  const STORED_SS = {
+    primary: { ageYears: 66, ageMonths: 4 },
+    secondary: { ageYears: 67, ageMonths: 0 },
+  };
+
+  async function seedHousehold(): Promise<void> {
+    await seedMember('m1', true, 'Alex', 1965);
+    await seedMember('m2', false, 'Sam', 1968);
+    await seedSsBenefit('m1', 3500);
+    await seedSsBenefit('m2', 2800);
+    await seedAccount();
+  }
+
+  const seedWithOverrides = (
+    id: string,
+    name: string,
+    socialSecurity: ScenarioPayload['overrides']['socialSecurity'],
+    parentId: string | null = null,
+  ): Promise<void> =>
+    seedScenario(id, name, { socialSecurity, parentId, isPrimary: parentId === null });
+
+  /** Monte Carlo tab with a fixed outcome per scenario; the engine flag is
+   *  false so the page must derive "Already set" itself. */
+  async function runMc(
+    outcomes: Record<
+      string,
+      | { winner: { primaryAgeYears: number; primaryAgeMonths?: number; secondaryAgeYears: number | null; metricValue: number } }
+      | 'empty'
+    >,
+  ): Promise<void> {
+    setMcRunImpl(async () =>
+      new Map(
+        Object.entries(outcomes).map(([id, o]) => [
+          id,
+          o === 'empty'
+            ? { kind: 'empty' as const, reason: 'no-retirement-date' as const }
+            : {
+                kind: 'result' as const,
+                winner: o.winner,
+                partial: false,
+                missingPiaMembers: [],
+                alreadyAtOptimum: false,
+                baselineMetricValue: 0.8,
+              },
+        ]),
+      ),
+    );
+    window.localStorage.setItem(METRIC_STORAGE_KEY, 'mc');
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /run comparison/i })).toBeDefined();
+    });
+    await userEvent.click(screen.getByRole('button', { name: /run comparison/i }));
+  }
+
+  async function openSaveDialog(): Promise<HTMLElement> {
+    await waitFor(
+      () => {
+        expect(
+          screen
+            .getAllByRole('button', { name: 'Save to scenario' })
+            .some((b) => !b.hasAttribute('disabled')),
+        ).toBe(true);
+      },
+      { timeout: WAIT_TIMEOUT_MS },
+    );
+    const btn = screen
+      .getAllByRole('button', { name: 'Save to scenario' })
+      .find((b) => !b.hasAttribute('disabled'));
+    if (!btn) throw new Error('No enabled Save button');
+    await userEvent.click(btn);
+    return await screen.findByRole('alertdialog');
+  }
+
+  const savedSs = (): ScenarioPayload['overrides']['socialSecurity'] =>
+    (
+      (saveScenario as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+        payload: ScenarioPayload;
+      }
+    ).payload.overrides.socialSecurity;
+
+  it('should_say_the_result_compares_a_fixed_set_at_one_assumed_death_age_not_advice', async () => {
+    await seedHousehold();
+    await seedWithOverrides('s1', 'Base', STORED_SS);
+    const { container } = renderPage();
+    const note = await screen.findByRole('note', {
+      name: /Social Security claim-age comparison disclaimer/i,
+    });
+    expect(note.textContent ?? '').toMatch(
+      /fixed set of options.*assumed death\s+age, the scenario's Life expectancy setting.*not a proven best age\s+and not advice/s,
+    );
+    expect(note.textContent ?? '').toMatch(/does not tell you when to claim/i);
+    expect(note.textContent ?? '').toMatch(/divorced-spouse benefits/i);
+    const subtitle =
+      container.querySelector('[data-testid="page-header-title-wrap"]')?.textContent ?? '';
+    expect(subtitle).toContain("one assumed death age, the scenario's Life expectancy setting");
+    expect(subtitle).toContain('not a proven best age');
+    expect(subtitle).not.toContain('each eligible whole-year Social Security claim age');
+  });
+
+  it('should_read_Already_set_with_the_stored_age_in_years_and_months_when_it_ranks_highest', async () => {
+    await seedHousehold();
+    await seedWithOverrides('s1', 'Base', STORED_SS);
+    await runMc({
+      s1: {
+        winner: { primaryAgeYears: 66, primaryAgeMonths: 4, secondaryAgeYears: 67, metricValue: 0.8 },
+      },
+    });
+    const already = await screen.findByRole(
+      'button',
+      { name: 'Already set' },
+      { timeout: WAIT_TIMEOUT_MS },
+    );
+    expect(already.hasAttribute('disabled')).toBe(true);
+    const cells = within(already.closest('tr') as HTMLElement)
+      .getAllByRole('gridcell')
+      .map((c) => c.textContent);
+    expect(cells).toContain('66 years 4 months');
+    expect(cells).toContain('67');
+    expect(screen.queryByText('→')).toBeNull();
+  });
+
+  it('should_read_Already_set_when_the_stored_primary_wins_and_the_secondary_was_not_searched', async () => {
+    await seedHousehold();
+    await seedWithOverrides('s1', 'Base', { ...STORED_SS, secondary: { ageYears: 72, ageMonths: 0 } });
+    await runMc({
+      s1: {
+        winner: { primaryAgeYears: 66, primaryAgeMonths: 4, secondaryAgeYears: null, metricValue: 0.8 },
+      },
+    });
+    const already = await screen.findByRole(
+      'button',
+      { name: 'Already set' },
+      { timeout: WAIT_TIMEOUT_MS },
+    );
+    expect(already.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('should_tell_the_user_the_stored_months_are_replaced_only_for_the_member_that_changes', async () => {
+    await seedHousehold();
+    await seedWithOverrides('s1', 'Base', STORED_SS);
+    await runMc({
+      s1: { winner: { primaryAgeYears: 70, secondaryAgeYears: 67, metricValue: 0.9 } },
+    });
+    const dialog = await openSaveDialog();
+    const text = dialog.textContent ?? '';
+    expect(text).toContain(
+      "The months in Alex's current claim age (66 years 4 months) are replaced.",
+    );
+    expect(text).toContain('Sam is already set to 67, keeping their current setting');
+    expect(text).not.toContain("The months in Sam's");
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(saveScenario).toHaveBeenCalled());
+    expect(savedSs()).toMatchObject({
+      primary: { ageYears: 70, ageMonths: 0 },
+      secondary: { ageYears: 67, ageMonths: 0 },
+    });
+  });
+
+  it('should_keep_a_carried_through_member_months_and_the_inherited_settings_on_a_child_scenario', async () => {
+    await seedHousehold();
+    const inherited = {
+      ...STORED_SS,
+      benefitReductionPct: 10,
+      colaPct: 2,
+      colaTracksInflation: true,
+      survivor: { primary: { ageYears: 65, ageMonths: 3 } },
+    };
+    await seedWithOverrides('parent', 'Parent', inherited);
+    await seedWithOverrides('child', 'Child', undefined, 'parent');
+    await runMc({
+      parent: 'empty',
+      child: { winner: { primaryAgeYears: 66, primaryAgeMonths: 4, secondaryAgeYears: 68, metricValue: 0.9 } },
+    });
+    const dialog = await openSaveDialog();
+    const text = dialog.textContent ?? '';
+    expect(text).toContain(
+      "Set Sam's claim age to 68 in scenario 'Child'? (Alex is already set to 66 years 4 months, keeping their current setting.)",
+    );
+    expect(text).not.toContain('are replaced');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(saveScenario).toHaveBeenCalled());
+    expect(savedSs()).toEqual({
+      primary: { ageYears: 66, ageMonths: 4 },
+      secondary: { ageYears: 68, ageMonths: 0 },
+      benefitReductionPct: 10,
+      colaPct: 2,
+      colaTracksInflation: true,
+      survivor: { primary: { ageYears: 65, ageMonths: 3 } },
+    });
+  });
+
+  it('should_show_the_stored_month_level_age_as_the_baseline_on_the_balance_tab_child_rows', async () => {
+    setOptimizerWorkerRunImpl(async (runId, input) => ({
+      kind: 'result',
+      runId,
+      scenarioId: input.scenarioId,
+      winner: {
+        primaryAgeYears: 70,
+        secondaryAgeYears: 67,
+        metricValue: 1_200_000,
+        alreadyAtOptimum: false,
+      },
+      partial: false,
+      missingPiaMembers: [],
+      baselineMetricValue: 1_000_000,
+    }));
+    try {
+      await seedHousehold();
+      await seedWithOverrides('s1', 'Base', STORED_SS);
+      renderPage();
+      await waitFor(
+        () => {
+          expect(screen.getAllByText('66 years 4 months').length).toBeGreaterThan(0);
+          expect(screen.getAllByText('→').length).toBeGreaterThan(0);
+        },
+        { timeout: WAIT_TIMEOUT_MS },
+      );
+      expect(screen.queryByRole('button', { name: 'Already set' })).toBeNull();
+    } finally {
+      setOptimizerWorkerRunImpl(null);
+    }
+  });
+
+  it('should_read_Already_set_with_the_stored_age_in_years_and_months_on_both_balance_tab_child_rows', async () => {
+    setOptimizerWorkerRunImpl(async (runId, input) => ({
+      kind: 'result',
+      runId,
+      scenarioId: input.scenarioId,
+      winner: {
+        primaryAgeYears: 66,
+        primaryAgeMonths: 4,
+        secondaryAgeYears: 67,
+        metricValue: 1_200_000,
+        alreadyAtOptimum: false,
+      },
+      partial: false,
+      missingPiaMembers: [],
+      baselineMetricValue: 1_200_000,
+    }));
+    try {
+      await seedHousehold();
+      await seedWithOverrides('s1', 'Base', STORED_SS);
+      renderPage();
+      const planned = await screen.findByText('Planned', undefined, {
+        timeout: WAIT_TIMEOUT_MS,
+      });
+      const historical = await screen.findByText('Historical', undefined, {
+        timeout: WAIT_TIMEOUT_MS,
+      });
+      for (const label of [planned, historical]) {
+        const row = label.closest('tr') as HTMLElement;
+        await waitFor(
+          () => {
+            expect(within(row).getByRole('button', { name: 'Already set' })).toBeDefined();
+          },
+          { timeout: WAIT_TIMEOUT_MS },
+        );
+        expect(
+          within(row).getByRole('button', { name: 'Already set' }).hasAttribute('disabled'),
+        ).toBe(true);
+        const cells = within(row)
+          .getAllByRole('gridcell')
+          .map((c) => c.textContent);
+        expect(cells).toContain('66 years 4 months');
+        expect(within(row).queryByText('→')).toBeNull();
+      }
     } finally {
       setOptimizerWorkerRunImpl(null);
     }

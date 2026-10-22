@@ -26,10 +26,12 @@ export const OptimizerDisclaimerCard: React.FC = () => (
     ariaLabel="Social Security claim-age comparison disclaimer"
     className="my-3"
   >
-    This compares the projected result at each eligible whole-year claim age
-    under the goal you selected and shows the claim age with the highest
-    modeled result; it does
-    not tell you when to claim. The model leaves out some real-world Social
+    This compares a fixed set of options under the goal you selected: each
+    eligible whole-year claim age, plus the claim age already set on the
+    scenario (months included). Every option is projected to one assumed death
+    age, the scenario&apos;s Life expectancy setting. It shows the option with
+    the highest modeled result. That is a comparison, not a proven best age
+    and not advice; it does not tell you when to claim. The model leaves out some real-world Social
     Security rules — including divorced-spouse benefits (see the full list on
     the Social Security page) — so verify claim-age
     figures with the Social Security Administration. Monte Carlo results also

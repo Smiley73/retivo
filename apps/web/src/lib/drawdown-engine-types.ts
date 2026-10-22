@@ -220,6 +220,10 @@ export interface TaxCashflowYearOutcome {
  * throws (graceful degradation).
  */
 export type TaxCashflowHook = {
+  /** True when the runner reprices each Fill-converted year without its
+   *  conversion, so the engine records the draws that paid the conversion's
+   *  tax (`DrawdownYear.rothConversionTaxFundingCentsByAccount`). */
+  readonly recordsConversionZeroPoint?: boolean;
   readonly solveForYear: (
     yearIndex: number,
     ordinaryNetNeedDollars: number,
@@ -626,6 +630,14 @@ export interface DrawdownYear {
    * RMD-breach year.
    */
   rothConvertedCents?: number;
+  /** Cents drawn from each account to pay the year's conversion tax; recorded
+   *  only when the tax hook sets `recordsConversionZeroPoint`. */
+  rothConversionTaxFundingCentsByAccount?: ReadonlyMap<string, number>;
+  /** The year's federal/IRMAA MAGI with the conversion and its tax draws taken
+   *  out, in integer cents; stamped on the deterministic path for a year that converted. */
+  rothZeroConversionMagiCents?: number;
+  /** Taxable Social Security of the same repricing, in integer cents. */
+  rothZeroConversionTaxableSsCents?: number;
   /**
    * True for a year where Fill mode was active with leftover cap headroom but
    * NO target Roth could be resolved (none designated, or the designated id is

@@ -305,7 +305,7 @@ function ltcgTaxOnStack(
 }
 
 /** Compute standard deduction including age-65 add-ons. */
-function computeStandardDeduction(
+export function computeStandardDeduction(
   filingStatus: FilingStatus,
   taxpayersAge65Plus: number,
   config: TaxConfig,
@@ -338,7 +338,7 @@ function computeStandardDeduction(
  * deduction. `QSS` (a surviving-spouse return is not "married" for this rule)
  * stays eligible at the $75,000 non-joint base.
  */
-function computeSeniorBonusDeduction(
+export function computeSeniorBonusDeduction(
   year: number,
   filingStatus: FilingStatus,
   taxpayersAge65Plus: number,

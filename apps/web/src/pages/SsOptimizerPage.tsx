@@ -393,6 +393,7 @@ export const SsOptimizerPage: React.FC = () => {
       const built = buildApplyConfirmArgs({
         row,
         members: aggregates.members,
+        scenarios: aggregates.scenarios,
         method,
       });
       if (!built) return;
@@ -422,7 +423,7 @@ export const SsOptimizerPage: React.FC = () => {
     <>
       <PageHeader
         title="Social Security claim-age comparison"
-        subtitle="For each scenario, compares the projected result at each eligible whole-year Social Security claim age per household member under the selected goal, and shows the claim age with the highest modeled result. Save to scenario writes a result into that scenario's Social Security override."
+        subtitle="For each scenario, compares a fixed set of Social Security claim ages per household member (each eligible whole year, plus the age already set on the scenario) at one assumed death age, the scenario's Life expectancy setting, under the selected goal. It shows the option with the highest modeled result, not a proven best age. Save to scenario writes a result into that scenario's Social Security override."
       />
       <OptimizerDisclaimerCard />
       <div className="mb-3 flex flex-wrap items-center gap-4">

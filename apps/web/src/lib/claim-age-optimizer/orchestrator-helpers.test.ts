@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPairs,
   buildSurvivorDimension,
+  resolvedSsPair,
   type PiaState,
   type SurvivorDimension,
 } from './orchestrator-helpers';
@@ -262,6 +263,99 @@ describe('buildPairs × survivor dimension (expandWithSurvivor)', () => {
       });
       expect(pair.candidate.secondary).toEqual({ ageYears: 65, ageMonths: 0 });
     }
+  });
+});
+
+describe('buildPairs × the stored claim-age pair (extra candidate)', () => {
+  const monthLevel: SocialSecurityOverride = {
+    primary: { ageYears: 66, ageMonths: 4 },
+    secondary: { ageYears: 67, ageMonths: 0 },
+  };
+  const joint = (resolvedOverride: SocialSecurityOverride | undefined) =>
+    buildPairs({
+      primaryGrid: [65, 66, 67],
+      secondaryGrid: [66, 67, 68],
+      hasSecondary: true,
+      resolvedOverride,
+      survivorDimension: {
+        candidates: [{ survivor: { secondary: { ageYears: 66, ageMonths: 0 } } }],
+      },
+    });
+
+  it('appends a month-level stored pair once, verbatim, crossed with the survivor dimension', () => {
+    const pairs = joint(monthLevel);
+    expect(pairs).toHaveLength(10);
+    expect(pairs[9]).toEqual({
+      primaryAgeYears: 66,
+      primaryAgeMonths: 4,
+      secondaryAgeYears: 67,
+      secondaryAgeMonths: 0,
+      candidate: {
+        primary: { ageYears: 66, ageMonths: 4 },
+        secondary: { ageYears: 67, ageMonths: 0 },
+        survivor: { secondary: { ageYears: 66, ageMonths: 0 } },
+      },
+    });
+  });
+
+  it('uses the fallback default for a two-member plan with no stored secondary age', () => {
+    const pairs = joint({ primary: { ageYears: 66, ageMonths: 4 } });
+    expect(pairs).toHaveLength(10);
+    expect(pairs[9].candidate.secondary).toEqual({ ageYears: 67, ageMonths: 0 });
+    expect(resolvedSsPair({ primary: { ageYears: 66, ageMonths: 4 } }, true)).toEqual({
+      primaryAgeYears: 66,
+      primaryAgeMonths: 4,
+      secondaryAgeYears: 67,
+      secondaryAgeMonths: 0,
+    });
+  });
+
+  it('resolves an unsearched secondary to null identity, like every candidate of the primary-only fallback', () => {
+    const stored = {
+      primary: { ageYears: 66, ageMonths: 4 },
+      secondary: { ageYears: 72, ageMonths: 0 },
+    };
+    const expected = {
+      primaryAgeYears: 66,
+      primaryAgeMonths: 4,
+      secondaryAgeYears: null,
+      secondaryAgeMonths: undefined,
+    };
+    expect(resolvedSsPair(stored, false)).toEqual(expected);
+    expect(resolvedSsPair({ primary: stored.primary }, false)).toEqual(expected);
+  });
+
+  it('secondary-only fallback carries the primary months on every pair, including the stored one', () => {
+    const pairs = buildPairs({
+      primaryGrid: [],
+      secondaryGrid: [65, 66],
+      hasSecondary: true,
+      resolvedOverride: monthLevel,
+    });
+    expect(pairs).toHaveLength(3);
+    for (const pair of pairs) {
+      expect(pair.primaryAgeYears).toBe(66);
+      expect(pair.primaryAgeMonths).toBe(4);
+      expect(pair.candidate.primary).toEqual({ ageYears: 66, ageMonths: 4 });
+    }
+    expect(pairs.map((p) => p.secondaryAgeYears)).toEqual([65, 66, 67]);
+    expect(pairs.map((p) => p.candidate.secondary?.ageMonths)).toEqual([0, 0, 0]);
+  });
+
+  it('primary-only fallback bakes the stored secondary into every pair without varying it', () => {
+    const stored = { ...monthLevel, secondary: { ageYears: 67, ageMonths: 3 } };
+    const pairs = buildPairs({
+      primaryGrid: [65, 66],
+      secondaryGrid: [],
+      hasSecondary: true,
+      resolvedOverride: stored,
+    });
+    expect(pairs).toHaveLength(3);
+    for (const pair of pairs) {
+      expect(pair.secondaryAgeYears).toBeNull();
+      expect(pair.candidate.secondary).toEqual({ ageYears: 67, ageMonths: 3 });
+    }
+    expect(pairs[2].primaryAgeMonths).toBe(4);
   });
 });
 

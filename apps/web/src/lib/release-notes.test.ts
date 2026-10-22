@@ -74,6 +74,19 @@ describe('release notes', () => {
     expect(`${openSource.title} ${openSource.blurb}`).toMatch(/open source/i);
   });
 
+  it('keeps the open-source announcement', () => {
+    const entry = RELEASE_NOTES.find((n) => n.title === 'RETIVO is open source');
+    expect(entry?.kind).toBe('new');
+    expect(`${entry?.title} ${entry?.blurb}`).toMatch(/open source/i);
+  });
+
+  it('keeps the Roth plan comparison announcement free of advice wording', () => {
+    const entry = RELEASE_NOTES.find((n) => n.title === 'Compare Roth conversion plans on the Roth conversion comparison page');
+    expect(entry?.kind).toBe('new');
+    expect(entry?.blurb).toMatch(/not which one to pick/i);
+    expect(`${entry?.title} ${entry?.blurb}`).not.toMatch(/recommend|best|optimal|\bIRMAA\b|\bMAGI\b/i);
+  });
+
   it('has no advice-toned "Social Security Optimizer" wording in any note', () => {
     for (const note of RELEASE_NOTES) {
       expect(`${note.title} ${note.blurb}`).not.toMatch(/Social Security Optimizer/);

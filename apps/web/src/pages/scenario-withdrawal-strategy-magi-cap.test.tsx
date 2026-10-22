@@ -13,7 +13,11 @@ import {
   MagiCapSection,
   resolveCliffThreshold,
 } from './scenario-withdrawal-strategy-magi-cap';
+import userEvent from '@testing-library/user-event';
 import { expectNoA11yViolations } from '../test/a11y';
+import { buildNextMagiCap } from '../lib/magi-cap-persistence';
+import { buildSuggestionCapWindows } from '../lib/roth-betr-apply-helpers';
+import { magiCapWindowsSaveError } from './scenario-withdrawal-strategy-magi-cap-validation';
 import type { MagiCapSectionProps } from './scenario-withdrawal-strategy-magi-cap';
 import type { DraftMagiCapWindow } from './scenario-withdrawal-strategy-shared';
 import type { Aggregate, HouseholdMemberPayload } from '../db/types';
@@ -78,6 +82,53 @@ describe('MagiCapSection — toggle', () => {
   it('renders no window controls when enabled is false', () => {
     render(<MagiCapSection {...makeProps({ enabled: false })} />);
     expect(screen.queryByLabelText(/annual max window/i)).toBeNull();
+  });
+});
+
+describe('MagiCapSection — a saved Roth conversion plan', () => {
+  // 25 single-year Fill windows, 2031 through 2055, as a saved suggestion writes them.
+  const saved = buildSuggestionCapWindows(
+    Array.from({ length: 25 }, (_, i) => ({
+      start: { kind: 'year' as const, year: 2031 + i },
+      end: { kind: 'year' as const, year: 2031 + i },
+      magiCeilingAnnualDollars: 150_000 + i * 1_000,
+      capMode: 'fill' as const,
+      capMagiLine: 'irmaa' as const,
+      targetRothAccountId: 'roth-1',
+    })),
+  );
+  const rothAccounts = [{ id: 'roth-1', name: 'Roth IRA' }];
+
+  it('labels every tab by its year and reaches each one with the arrow keys', async () => {
+    const user = userEvent.setup();
+    render(
+      <MagiCapSection {...makeProps({ enabled: true, windows: saved, rothAccounts })} />,
+    );
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((t) => t.textContent)).toEqual(
+      Array.from({ length: 25 }, (_, i) => String(2031 + i)),
+    );
+    tabs[0].focus();
+    for (let i = 1; i < tabs.length; i += 1) {
+      await user.keyboard('{ArrowRight}');
+      expect(tabs[i]).toHaveFocus();
+      expect(tabs[i]).toHaveAttribute('aria-selected', 'true');
+    }
+    // The Annual Max shown is the selected year's.
+    expect(screen.getByLabelText(/annual max window 25/i)).toHaveValue('174000.00');
+  });
+
+  it('opens and saves back unchanged: the save gate is clear and the same ladder is written', () => {
+    expect(
+      magiCapWindowsSaveError(saved, [PRIMARY], { retirementYear: 2028, retirementMonth0: 0 }),
+    ).toBeNull();
+    const fragment = buildNextMagiCap({
+      magiCapEnabled: true,
+      magiCapWindows: saved,
+      localOverrides: { magiCap: { windows: saved } },
+      parentCap: undefined,
+    });
+    expect(fragment).toEqual({ magiCap: { windows: saved } });
   });
 });
 
