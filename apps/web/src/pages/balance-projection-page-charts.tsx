@@ -139,11 +139,9 @@ export const BalanceProjectionCharts: React.FC<BalanceProjectionChartsProps> = (
     [drawdownByMethod, activeMethod, drawdownYears],
   );
 
-  /** True when any projection year has a household income at or below 138% of
-   *  the federal poverty line while on a Marketplace plan. Drives the Medicaid
-   *  paragraph in the standing estimate note. Read off the DETERMINISTIC
-   *  drawdown for the same reason as `medicareBasePremiumMissing`: the Monte
-   *  Carlo representative run never stamps `fplPercentage`. */
+  /** Medicaid paragraph flag, read off the DETERMINISTIC drawdown like
+   *  `medicareBasePremiumMissing`: the MC representative run never stamps
+   *  `fplPercentage`. */
   const medicaidMayApply = useMemo(
     () => hasMedicaidRangeYear(drawdownByMethod?.[activeMethod]?.years ?? []),
     [drawdownByMethod, activeMethod],
