@@ -1,14 +1,9 @@
 /**
  * Balance Projection page — the Compare tab's "Plan success" row. Renders
- * only: both sides' states and the noise-gate verdict come from
- * `useCompareStress`, and the signed difference from `formatSignedDifference`,
- * so nothing here decides whether a gap is real.
- *
- * A figure appears only for a side whose stress test has settled for the plan
- * on screen; until then it reads "—" and the figures dim and carry
- * `aria-busy`, so a number from another scenario or an older plan is never
- * painted. A difference is a sign glyph plus a direction word, or "about the
- * same" with the reason; the text carries every distinction, never colour.
+ * only: states and the noise-gate verdict come from `useCompareStress`. A side
+ * reads "—", dimmed and `aria-busy`, until its stress test has settled for the
+ * plan on screen; the difference is a glyph plus a word, or "about the same"
+ * with its reason, never colour.
  */
 import React, { useEffect, useState } from 'react';
 import { Button } from 'react-aria-components';
@@ -36,7 +31,6 @@ const percent = (side: CompareStressSide): string =>
     ? `${Math.round(side.probability * 100)}%`
     : '—';
 
-/** The one-line reason under the difference; `null` when there is no verdict. */
 function reasonLine(verdict: SuccessDeltaVerdict): string {
   const points = Math.round(verdict.se * 1000) / 10;
   const noise =
@@ -76,7 +70,6 @@ const SideProgress: React.FC<{ readonly name: string; readonly side: CompareStre
   />
 );
 
-/** One side's note: progress while it is working, a sentence when it cannot show a figure. */
 const SideStatus: React.FC<{
   readonly name: string;
   readonly side: CompareStressSide;
@@ -84,9 +77,8 @@ const SideStatus: React.FC<{
   readonly onRetry?: () => void;
   readonly onRun?: () => void;
 }> = ({ name, side, viewed, onRetry, onRun }) => {
-  // The Try again button stays MOUNTED, disabled, through the retry it started
-  // (as the market-stress retry does): unmounting it under the pointer dropped
-  // keyboard focus to `document.body` at the moment the user acted.
+  // Try again stays mounted, disabled, through the retry it started: unmounting
+  // it dropped keyboard focus to `document.body`.
   const [retried, setRetried] = useState(false);
   useEffect(() => {
     if (side.state !== 'error' && !isBusy(side)) setRetried(false);

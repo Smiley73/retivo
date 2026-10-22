@@ -1,23 +1,12 @@
 /**
- * Balance Projection page — the "Compare" tab panel body.
- *
- * Compares the scenario being viewed with one other scenario. Renders only:
- * the selection and the second projection come from
- * `useBalanceProjectionCompare`, and every figure and difference string from
- * `buildCompareData` / `formatSignedDifference`, so nothing here computes,
- * deflates or signs a number. Compare is always the Planned projection in
- * today's dollars, so unlike the sibling tabs the heading carries no
- * `resolvedBasisLabel` suffix and the panel says the header Basis and
- * Today's/Future dollars controls do not apply.
- *
- * Structure: heading, "Compare with" selector, basis sentence, then one of the
- * states — pick a scenario, nothing to compare with, projecting, cannot be
- * projected, error — or the headline table, the Plan success row and the
- * Drivers table, or, when the Planned projections are identical, the
- * identical-results sentence in place of the headline and the Drivers table.
- * The Plan success row (the stress test of each side, which never delays the
- * rest) stays in both, and is dropped only when the stress-test inputs are
- * identical too, since its answer is then known.
+ * Balance Projection page — the "Compare" tab panel: heading, "Compare with"
+ * selector, basis sentence, then a state (pick one, nothing to compare with,
+ * projecting, cannot be projected, error) or the headline table, the Plan
+ * success row and the Drivers table. Identical Planned projections swap the
+ * headline and Drivers for one sentence; the Plan success row stays unless the
+ * stress-test inputs match too. Renders only: selection and the second
+ * projection come from `useBalanceProjectionCompare`, every figure and
+ * difference from `buildCompareData` / `formatSignedDifference`.
  */
 import React, { useMemo } from 'react';
 import { Link } from 'react-router';
@@ -54,7 +43,6 @@ import {
 const HEADING_ID = 'balance-projection-compare-heading';
 const SELECT_ID = 'balance-projection-compare-with';
 
-/** The one-sentence basis statement; the header controls do not reach this tab. */
 const BASIS_SENTENCE =
   "Compare always uses the Planned projection (your entered growth rates, with " +
   "no market ups and downs) in today's dollars, so the Basis and Today's/Future " +
@@ -153,8 +141,7 @@ export const BalanceProjectionCompareSection: React.FC<
     incomeStreams,
     ssBenefits,
   } = dataLoad;
-  // The slices the page's own stress test is built from, categories included,
-  // so the comparison's cache key equals the one the Projections page writes.
+  // Categories included, or the cache key differs from the one the page writes.
   const mcInputs = useMemo<ScenarioMcInputs>(
     () => ({
       members,
@@ -189,8 +176,7 @@ export const BalanceProjectionCompareSection: React.FC<
     [data, comparison, stress.cacheKeys],
   );
   const name = comparisonName ?? 'the other scenario';
-  // Queued while another tab is showing is not "projecting": the run starts
-  // when the tab is selected, and a hidden panel announces nothing.
+  // A hidden panel announces nothing: the run starts when the tab is selected.
   const busy = status === 'pending' && props.isActive;
 
   let body: React.ReactNode = null;
@@ -281,9 +267,6 @@ export const BalanceProjectionCompareSection: React.FC<
               Projecting {name}&hellip;
             </p>
           )}
-          {/* Identical Planned results swap the headline and the Drivers table
-              for one sentence; the Plan success row sits outside that choice
-              and stays in both states unless the stress tests match too. */}
           {compare && (
             <div className="flex flex-col gap-6">
               {compare.identity.planned ? (
@@ -300,8 +283,7 @@ export const BalanceProjectionCompareSection: React.FC<
                   compare={compare}
                 />
               )}
-              {/* Hidden until the cache keys are known, so a pair that is
-                  identical on both counts never flashes a row it then removes. */}
+              {/* Hidden until the keys are known, so a fully identical pair never flashes the row. */}
               {stress.cacheKeys !== null &&
                 !(compare.identity.planned && compare.identity.stress === true) && (
                 <CompareStressRow
