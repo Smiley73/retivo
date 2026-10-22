@@ -1,8 +1,6 @@
 /**
- * The saved-plan marker's state for the selected scenario: the stored record
- * (read again on a scenario switch and on mount, so it survives a reload), the
- * status derived from it against the current data, and `remember` for the save.
- * The marker does not depend on the suggestion results still being on screen.
+ * The saved-plan marker's state for the selected scenario, read from storage on
+ * mount and on a scenario switch, plus `remember` for the save.
  */
 import { useCallback, useMemo, useState } from 'react';
 import type { MagiCapWindow } from '../../db/types';

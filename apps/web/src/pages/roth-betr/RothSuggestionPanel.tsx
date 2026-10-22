@@ -1,15 +1,7 @@
 /**
- * Roth conversion plan comparison panel. For the selected scenario it runs the
- * suggestion search (`lib/roth-suggestion`) in a Web Worker on request, shows
- * a determinate progress bar with Cancel, and lists each candidate plan next to
- * the scenario's current one. It sends nothing to the server and writes no
- * scenario field until the user confirms Save on a ranked row (the page's own
- * save path), after which a marker names the saved plan.
- *
- * Never auto-runs: a run costs seconds and the user asks for it. A result is
- * tagged with the aggregate signature it ran on and marked out of date when the
- * data changes under it; a leftover-tax-rate change re-ranks the shown result
- * from its stored per-bucket balances without a second run.
+ * Roth conversion plan comparison panel: runs the suggestion search in a Web
+ * Worker on request, shows progress with Cancel, lists each candidate plan next
+ * to the current one, and writes nothing until the user confirms Save on a row.
  */
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Alert } from '../../components/Alert';
@@ -97,8 +89,6 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
     [scenarios, selectedScenarioId, members],
   );
   const { state, run, cancel } = useRothSuggestion(selectedScenarioId, signature);
-  // The results were computed on data that has since changed; their ladders
-  // must not be saved as if they fit the data now.
   const resultsStale = state.phase === 'done' && state.signature !== signature;
   const save = useRothSuggestionSave({
     pageData,
@@ -118,9 +108,8 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
     [state, rate],
   );
 
-  // The action and Cancel swap places as a run starts and ends. A swap would
-  // drop keyboard focus to the page, so hand it to the button that replaces the
-  // one that held it (focus elsewhere, such as in the table, is left alone).
+  // The action and Cancel replace each other; keep keyboard focus on whichever
+  // mounts, unless focus is elsewhere.
   const actionRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const running = state.phase === 'running';
@@ -219,8 +208,7 @@ export const RothSuggestionPanel: React.FC<RothSuggestionPanelProps> = ({
                 onSave={resultsStale ? undefined : save.openFor}
               />
             )}
-            {/* Always mounted so a screen reader hears the text arrive; the other
-                outcomes carry their own Alerts. */}
+            {/* Always mounted so a screen reader hears the text arrive. */}
             <div aria-live="polite" className="sr-only">
               {table?.kind === 'rows' &&
                 `Comparison finished: ${table.rows.length} ${

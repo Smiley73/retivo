@@ -1,14 +1,8 @@
 /**
- * Roth conversion suggestion — run state. Owns the Web Worker (lazy spawn,
- * terminate on cancel, terminate on unmount, respawn on the next run) and the
- * state machine the panel renders: idle, running with ticks, done, cancelled,
- * error. A reply from a run the user cancelled, or from before a scenario
- * switch, is dropped by the run counter (the `isCurrentRun` idea in
- * `ss-optimizer-page-helpers.ts`).
- *
- * A finished run is tagged with the aggregate signature it ran on, so the
- * panel can mark it out of date. Nothing here runs on its own: a run costs
- * seconds and starts only from `run`.
+ * Roth conversion suggestion run state. Owns the Web Worker (lazy spawn,
+ * terminate on cancel and unmount, respawn on the next run) and the state the
+ * panel renders; a reply from a cancelled or superseded run is dropped by the
+ * run counter. Never runs on its own.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { buildCandidateGrid } from '../../lib/roth-suggestion/candidate-grid';
@@ -18,8 +12,6 @@ import type {
   RothSuggestionWorkerInput,
   RothSuggestionWorkerResult,
 } from '../../workers/roth-suggestion.worker';
-// Worker spawned via Vite's `?worker` ESM transform — a separate JS chunk
-// loaded on the first run.
 import RothSuggestionWorker from '../../workers/roth-suggestion.worker.ts?worker';
 
 type RothSuggestionOutcome =
@@ -43,7 +35,7 @@ const IDLE: RothSuggestionRunState = { phase: 'idle' };
 /** Candidates in a full search: the bar's total until the first tick. */
 const CANDIDATE_COUNT = buildCandidateGrid().length;
 
-export interface UseRothSuggestionResult {
+interface UseRothSuggestionResult {
   readonly state: RothSuggestionRunState;
   readonly run: (input: RothSuggestionWorkerInput) => void;
   readonly cancel: () => void;
@@ -56,8 +48,7 @@ export interface UseRothSuggestionResult {
 export function useRothSuggestion(scenarioId: string, signature: string): UseRothSuggestionResult {
   const [state, setState] = useState<RothSuggestionRunState>(IDLE);
   const [stateScenarioId, setStateScenarioId] = useState(scenarioId);
-  // Drop the previous scenario's result in the same render the scenario
-  // changes, so it is never painted against the new one.
+  // Reset in the same render the scenario changes, so the old result is never painted.
   if (stateScenarioId !== scenarioId) {
     setStateScenarioId(scenarioId);
     setState(IDLE);
@@ -97,7 +88,6 @@ export function useRothSuggestion(scenarioId: string, signature: string): UseRot
     [signature],
   );
 
-  // Cancel is termination: it stops the search whether or not it yields.
   const cancel = useCallback((): void => {
     dispose();
     setState({ phase: 'cancelled' });

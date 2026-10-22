@@ -1,9 +1,4 @@
-/**
- * The search's reference candidate IS the plan the Roth conversion comparison
- * page already shows. Comparing rows, not metrics, is what proves the overlay
- * (life expectancy, cap, scenario copy) perturbs nothing: a metric-only check
- * would pass with a perturbed overlay.
- */
+/** The search's reference candidate reproduces the page's planned rows exactly. */
 import 'fake-indexeddb/auto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { loadDemoProjection, resolvedDeathAges } from '../../lib/roth-suggestion/demo-fixture';

@@ -1,10 +1,6 @@
 /**
- * RothSuggestionPanel tests. The `?worker` module is mocked by a fake Worker
- * class that records what the page sends and lets a test post progress, then
- * hold the terminal reply until it chooses to release it (the harness in
- * `SsOptimizerPage.test.tsx`, extended with held replies). The fake keeps its
- * listeners after `terminate()`, so a late reply reaches the page and only the
- * run guard stands between it and the screen.
+ * The suggestion panel: run, progress, Cancel, stale replies, rate changes,
+ * framing copy and keyboard order.
  */
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -12,52 +8,17 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { ScenarioPayload } from '../../db/types';
 import { toyProjection } from '../../lib/roth-suggestion/test-fixtures';
 import { expectNoA11yViolations } from '../../test/a11y';
-import {
-  runRothSuggestion,
-  type RothSuggestionWorkerInbound,
-  type RothSuggestionWorkerOutbound,
-  type RothSuggestionWorkerResult,
+import type {
+  RothSuggestionWorkerOutbound,
+  RothSuggestionWorkerResult,
 } from '../../workers/roth-suggestion.worker';
 import { buildRothBETRPageData, type RothBETRPageData } from './roth-betr-data';
 import { RothSuggestionPanel } from './RothSuggestionPanel';
+import { fakeWorkers, seedToyPanel, type FakeWorkerShape } from './roth-suggestion-panel-fixture';
 
-const { fakeWorkers } = vi.hoisted(() => ({ fakeWorkers: [] as FakeWorkerShape[] }));
-
-interface FakeWorkerShape {
-  readonly sent: RothSuggestionWorkerInbound[];
-  terminated: boolean;
-  emit(msg: RothSuggestionWorkerOutbound): void;
-}
-
-vi.mock('../../workers/roth-suggestion.worker.ts?worker', () => {
-  class FakeRothSuggestionWorker implements FakeWorkerShape {
-    private readonly listeners = new Map<string, Set<(ev: Event) => void>>();
-    readonly sent: RothSuggestionWorkerInbound[] = [];
-    terminated = false;
-    constructor() {
-      fakeWorkers.push(this);
-    }
-    addEventListener(type: string, fn: (ev: Event) => void): void {
-      const set = this.listeners.get(type) ?? new Set();
-      set.add(fn);
-      this.listeners.set(type, set);
-    }
-    removeEventListener(type: string, fn: (ev: Event) => void): void {
-      this.listeners.get(type)?.delete(fn);
-    }
-    postMessage(msg: RothSuggestionWorkerInbound): void {
-      this.sent.push(msg);
-    }
-    terminate(): void {
-      this.terminated = true;
-    }
-    emit(msg: RothSuggestionWorkerOutbound): void {
-      const ev = new MessageEvent('message', { data: msg });
-      this.listeners.get('message')?.forEach((fn) => fn(ev));
-    }
-  }
-  return { default: FakeRothSuggestionWorker };
-});
+vi.mock('../../workers/roth-suggestion.worker.ts?worker', async () => ({
+  default: (await import('./roth-suggestion-panel-fixture')).FakeRothSuggestionWorker,
+}));
 
 const TIMEOUT = { timeout: 60_000 };
 
@@ -66,20 +27,7 @@ let pageData: RothBETRPageData;
 let baseResult: RothSuggestionWorkerResult;
 
 beforeAll(async () => {
-  const built = buildRothBETRPageData(projection);
-  if (built === null) throw new Error('toy page data is null');
-  pageData = built;
-  const { bundle: _bundle, ...rest } = projection;
-  void _bundle;
-  const posted: RothSuggestionWorkerOutbound[] = [];
-  await runRothSuggestion(
-    'seed',
-    { projection: rest, targetRothAccountId: 'roth', leftoverTaxRate: 0.2, deathAges: { primary: 90 } },
-    (m) => posted.push(m),
-  );
-  const terminal = posted[posted.length - 1];
-  if (terminal.kind !== 'result') throw new Error(`seed search gave ${terminal.kind}`);
-  baseResult = terminal.result;
+  ({ pageData, baseResult } = await seedToyPanel());
 }, 60_000);
 
 beforeEach(() => {

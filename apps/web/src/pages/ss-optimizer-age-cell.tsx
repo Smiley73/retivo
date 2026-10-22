@@ -20,8 +20,7 @@ export interface AgeTransitionProps {
   readonly current: RetirementAgePerMember | null;
   /** Optimizer's recommended claim age, years part. */
   readonly recommendedYears: number;
-  /** Months part; absent or 0 is a whole year. Non-zero only when the
-   *  stored month-level pair ranked highest. */
+  /** Months part; absent or 0 is a whole year. */
   readonly recommendedMonths?: number;
 }
 

@@ -1,22 +1,7 @@
 /**
- * The year-by-year table behind a plan. Everything is read off the plan's
- * records and engine rows. The two figures that need the year without its
- * conversion, the income on the limit's line before the conversion and the
- * Social Security the conversion pulled into tax, are the engine's own: the
- * tax pass prices every year the Fill step converts a second time with no
- * conversion and none of the draws that paid its tax, and stamps the result on
- * the row. So a person can check
- *
- *   amount = limit - income before - extra taxable SS - income from paying the
- *            tax - kept under
- *
- * where `income from paying the tax` is what the row's income carries beyond
- * the zero point, the conversion and the extra Social Security (taxable income
- * from the withdrawals that paid the conversion's tax), and `kept under` is the
- * limit less the income after the conversion. A row without the engine's
- * figures (the current plan, which converts nothing) has no conversion to take
- * out, so its income before is its income after. Nominal dollars throughout:
- * the limits are nominal for the year.
+ * The year-by-year table behind a plan, read off its records and engine rows in
+ * nominal dollars, so that a person can check
+ *   amount = limit - income before - extra taxable SS - income from paying the tax - kept under.
  */
 import type { AccountsById } from './year-records';
 import { preTaxDollarsAtRowEnd } from './year-records';
@@ -54,12 +39,11 @@ export interface YearDetailEnvironment {
   readonly bundle: TaxCalibrationBundle;
   readonly inflationPct: number;
   readonly acaFplRegion: AcaFplRegion | undefined;
-  /** The projection models tax-exempt interest as zero; carried so the rule
-   *  here stays the engine's if it ever stops. */
+  /** Zero in the projection today; carried so the rule stays the engine's. */
   readonly taxExemptInterestCents: number;
 }
 
-export interface YearDetailArgs {
+interface YearDetailArgs {
   readonly records: readonly YearRecord[];
   readonly rows: readonly DrawdownYear[];
   readonly years: ReadonlyMap<number, DetailYearInput>;
@@ -81,12 +65,9 @@ function dollars(valueCents: number): number {
   return valueCents / CENTS_PER_DOLLAR;
 }
 
-/** Income on the limit's line before and after the conversion, and the Social
- *  Security the conversion pulled into taxable income. A converted year reads
- *  the "before" side from the engine's zero-conversion figures on the row. A
- *  row without them converted nothing (or is not a projected year), so the
- *  conversion is backed out of its income with the engine's Social Security
- *  rule, which there changes nothing. */
+/** Income on the limit's line before and after the conversion. A converted row
+ *  carries the engine's own zero-conversion figures; otherwise the conversion
+ *  is backed out with the engine's Social Security rule. */
 function incomeFlow(
   record: YearRecord,
   row: DrawdownYear,
@@ -155,10 +136,8 @@ function limitKindOf(record: YearRecord, preTaxEndDollars: number): YearLimitKin
   return preTaxEndDollars < 1 && record.convertedCents > 0 ? 'pre-tax-ran-out' : 'plan-setting';
 }
 
-/** What converting the room the unguarded sibling would have taken would have
- *  cost: the bracket-top line less the cliff line, in the year's own filing
- *  status, with the Medicare enrolment months of year Y+2 and the Marketplace
- *  months of Y. */
+/** What converting the room up to the bracket top would have cost, with year
+ *  Y+2's Medicare enrolment and year Y's Marketplace months. */
 function crossingNote(
   record: YearRecord,
   limits: YearLimits,
@@ -249,11 +228,8 @@ function detailRow(
   };
 }
 
-/**
- * One display row per record: every window year (a year that converted $0
- * included) and the year after the window, which says why conversions stopped.
- * A record with no engine row is skipped; `buildYearRecords` never emits one.
- */
+/** One display row per record: every window year, $0 years included, and the
+ *  year after the window. */
 export function buildYearDetail(args: YearDetailArgs): YearDetailRow[] {
   const rowByYear = new Map(args.rows.map((row) => [row.year, row]));
   const out: YearDetailRow[] = [];

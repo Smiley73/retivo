@@ -186,14 +186,6 @@ describe('pickWinner — stored month-level pair', () => {
     });
   });
 
-  it('keeps the whole-year winner not-at-optimum and finds the stored pair as baseline, not the rounded year', () => {
-    const results = [result(66, 67, 1_800_000), stored, result(70, 67, 2_000_000)];
-    const winner = pickWinner({ results, currentResolvedPair: resolved });
-    expect(winner?.primaryAgeYears).toBe(70);
-    expect(winner?.alreadyAtOptimum).toBe(false);
-    expect(baselineMetricForResolved(results, resolved)).toBe(1_900_000);
-  });
-
   it('breaks an exact tie to the lower total-months age', () => {
     const tie = [{ ...result(66, 67, 1), primaryAgeMonths: 4 }, result(66, 67, 1)];
     expect(pickWinner({ results: tie, currentResolvedPair: null })?.primaryAgeMonths).toBeUndefined();

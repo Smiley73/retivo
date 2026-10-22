@@ -93,9 +93,6 @@ describe('year detail on the demo household', () => {
     });
 
     it('is exact in a year the withdrawals that paid the conversion tax added income, which the row names', () => {
-      // The converted row's own income runs above the zero point plus the conversion and the
-      // extra Social Security by the income of those withdrawals. Backing the conversion out of
-      // that row alone could not tell the two apart.
       const drawn = pairs.filter(({ row }) => row.amountDollars > 0 && (row.taxPaymentIncomeDollars ?? 0) > 1);
       expect(drawn.length).toBeGreaterThan(0);
       for (const { row, zero } of drawn) {
@@ -108,9 +105,6 @@ describe('year detail on the demo household', () => {
     });
   });
 
-  // The sum closes by construction once the income of the tax-paying withdrawals and the room
-  // left are named, so this checks the search left only its margin under the limit and the
-  // three lines appear; the derived figures are checked against the engine above.
   it('closes the hand check to the dollar in every limit-stopped year of every plan', () => {
     let checked = 0;
     const lines = new Set<string>();

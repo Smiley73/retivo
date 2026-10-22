@@ -1,8 +1,6 @@
 /**
  * Roth conversion comparison table: one row per candidate plan, the current
- * plan among them at its rank, plans whose cap was not met last and unranked.
- * Flags are text (a badge, or a `†` with sr-only words plus a footnote), never
- * colour alone. Rows are keyed by the search's candidate id.
+ * plan at its rank, unranked plans last. Flags are text, never colour alone.
  */
 import React, { useRef, useState } from 'react';
 import { Cell, Column, Row, Table, TableBody, TableHeader } from 'react-aria-components';
@@ -63,8 +61,7 @@ export const RothSuggestionTable: React.FC<RothSuggestionTableProps> = ({
   onSave,
 }) => {
   const anyRerouted = rows.some((row) => row.reroutedYears.length > 0);
-  // One plan's years open at a time. Closing from inside the detail hands focus
-  // back to the toggle that opened it, so the keyboard does not lose its place.
+  // One plan's years open at a time; closing refocuses the toggle that opened it.
   const [openId, setOpenId] = useState<string | null>(null);
   const toggles = useRef(new Map<string, HTMLButtonElement>());
   const open = rows.find((row) => row.id === openId);

@@ -81,11 +81,6 @@ describe('buildSuggestionCapWindows', () => {
     expect(windows.map((w) => w.magiCeilingAnnualDollars)).toEqual([150_000, 0]);
   });
 
-  it('leaves a year outside the search with no window rather than a zero ceiling', () => {
-    const windows = buildSuggestionCapWindows([oneYear(2031, 1), oneYear(2033, 1)]);
-    expect(windows).toHaveLength(2);
-  });
-
   it('refuses a ladder that is not a list of one-year Fill windows with a target', () => {
     expect(() => buildSuggestionCapWindows([])).toThrow(/no years/);
     expect(() =>

@@ -1,10 +1,6 @@
 /**
- * The conversion window and the ladder built over it. The window is the span
- * the Roth conversion comparison page's retirement Fill window already uses:
- * the primary's retirement year through the year before the primary reaches
- * the RMD trigger age. The ladder is one year-anchored Fill window per year in
- * the persisted `MagiCapWindow` shape, so saving it stores the object that was
- * ranked.
+ * The conversion window (retirement year through the year before the RMD
+ * trigger age) and the ladder of persisted-shape Fill windows built over it.
  */
 import type { AccountPayload, Aggregate, MagiCapWindow } from '../../db/types';
 import { isWorkingYearsRothConversionTarget } from '../roth-conversion-eligibility';
@@ -16,14 +12,8 @@ export interface ConversionWindow {
   readonly endYear: number;
 }
 
-/**
- * Retirement year through the year before the RMD trigger age, clipped to the
- * horizon and to today (the projection has no row for a year already past, so
- * a past year cannot be converted in). The cap window ends at the month the
- * member reaches the trigger age, and the engine collapses that to whole tax
- * years, so the trigger year itself is outside. Null when the span is empty,
- * including a span that ended before today, or the birth year is unusable.
- */
+/** Retirement year through the year before the RMD trigger age, clipped to the
+ *  horizon and to today; null when the span is empty or the birth year unusable. */
 export function conversionWindow(args: {
   readonly primaryBirthYear: number;
   readonly retirementYear: number;

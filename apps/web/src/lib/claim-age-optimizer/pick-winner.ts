@@ -3,11 +3,8 @@
  * values. Highest metric wins; flat-surface ties break
  * to **lower primary age** first, then **lower secondary age**, each
  * compared in total months. The `alreadyAtOptimum` flag is set when the
- * winner matches the scenario's resolved (inherited or local) pair —
- * and equality is "ageYears and ageMonths match, a missing `ageMonths`
- * counting as 0". The search grid is whole years, but a stored
- * month-level pair (and a member the search did not vary) rides along
- * with its months, so it can be a candidate, win, and read as already set.
+ * winner matches the scenario's resolved (inherited or local) pair, years
+ * and months both (a missing `ageMonths` counts as 0).
  */
 
 export interface CandidateResult {
@@ -30,10 +27,6 @@ export interface CandidateResult {
 
 export interface ResolvedPair {
   readonly primaryAgeYears: number;
-  /** ageMonths carried so `alreadyAtOptimum` can apply the
-   *  "ageMonths defaulted to 0" rule — a resolved primary of
-   *  `{70, 6}` is NOT the whole-year candidate `70`; it matches only a
-   *  candidate carrying the same months. */
   readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
   readonly secondaryAgeMonths?: number;
@@ -53,9 +46,7 @@ export interface Winner {
    *  age, and the merge helper requires a real primary age to write
    *  through Apply. */
   readonly primaryAgeYears: number;
-  /** Absent or 0 is a whole year. A stored month-level age that won, or
-   *  a member the search did not vary, carries its months here so Apply
-   *  writes them back unchanged. */
+  /** Absent or 0 is a whole year; Apply writes these months back. */
   readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
   readonly secondaryAgeMonths?: number;
@@ -88,8 +79,7 @@ function isBetter(candidate: CandidateResult, current: CandidateResult): boolean
   if (candidate.metricValue !== current.metricValue) {
     return candidate.metricValue > current.metricValue;
   }
-  // Flat metric tie → lower primary age wins, in total months (66 beats
-  // 66 years 4 months).
+  // Flat metric tie → lower primary age wins, in total months.
   const candidatePrimary = totalMonths(
     candidate.primaryAgeYears,
     candidate.primaryAgeMonths,
@@ -142,8 +132,6 @@ function pairsEqual(
 ): boolean {
   if (resolved === null) return false;
   if (result.primaryAgeYears !== resolved.primaryAgeYears) return false;
-  // Months count: `{70, 6}` is NOT the whole-year candidate `70`, but it
-  // is the stored candidate carrying `{70, 6}`.
   if ((result.primaryAgeMonths ?? 0) !== (resolved.primaryAgeMonths ?? 0)) return false;
   if (result.secondaryAgeYears !== resolved.secondaryAgeYears) return false;
   if ((result.secondaryAgeMonths ?? 0) !== (resolved.secondaryAgeMonths ?? 0)) return false;

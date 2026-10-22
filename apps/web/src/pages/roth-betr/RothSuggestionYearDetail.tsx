@@ -1,11 +1,4 @@
-/**
- * Year-by-year table for one plan of the comparison: for each year of the
- * conversion window, how much was converted, the limit that stopped it, the
- * figures that give the amount, and what the year cost. Words carry every
- * state (the limit that stopped the year, spending that was moved or could not
- * be met); none relies on colour or an icon. The figures are in each year's
- * own dollars, so a person can add them up with a calculator.
- */
+/** Year-by-year table for one plan of the comparison, in each year's own dollars. */
 import React, { useMemo } from 'react';
 import { Cell, Column, Row, Table, TableBody, TableHeader } from 'react-aria-components';
 import { TableScroll } from '../../components/TableScroll';

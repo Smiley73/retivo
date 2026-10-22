@@ -1,10 +1,7 @@
 /**
- * The engine's own zero point for a window year, for tests of the derived
- * "income before the conversion": the plan's ladder with that one year's
- * target Roth pointed at an account that does not exist. The engine then takes
- * its documented degrade-to-withdrawal-only path in that year, converting $0
- * while the ceiling still steers withdrawals, and every earlier year runs as
- * in the plan, so the year's reported income is what the conversion was added to.
+ * The engine's own zero point for a window year, for tests: the plan's ladder
+ * with that year's target Roth pointed at a missing account, so the engine
+ * converts $0 there while the ceiling still steers withdrawals.
  */
 import type { MagiCapWindow } from '../../db/types';
 import type { DrawdownYear } from '../drawdown-engine-types';
@@ -20,8 +17,7 @@ export interface ZeroPoint {
   readonly ssTier: NonNullable<DrawdownYear['ssTaxationTier']>;
 }
 
-/** The engine's year with that year's conversion removed, for each window year
- *  of `ladder`. */
+/** The engine's year with its conversion removed, for each window year of `ladder`. */
 export async function zeroPointByYear(
   request: RothSuggestionRequest,
   ladder: readonly MagiCapWindow[],

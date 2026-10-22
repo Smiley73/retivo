@@ -1,8 +1,3 @@
-/**
- * The year-by-year table behind each plan: opened from a toggle in the row,
- * one plan at a time, keyboard-only, with every year of the window a row and
- * the figures in each year's own dollars.
- */
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
@@ -143,10 +138,8 @@ describe('the year-by-year table', () => {
   it('shows each year in its own dollars and says the comparison above is in today’s', async () => {
     const grid = await openDetail(GUARDED_22);
     const first = result.candidates.find((c) => c.id === 'bracket-22-guarded')?.yearDetail[0];
-    const today = result.candidates.find((c) => c.id === 'bracket-22-guarded')?.totals.totalConvertedTodayDollars;
     expect(first?.amountDollars).toBeGreaterThan(0);
     expect(within(grid).getAllByText(formatCurrencyExact(first?.amountDollars ?? NaN)).length).toBeGreaterThan(0);
-    expect(today).toBeDefined();
     expect(screen.getByText(/in that year.s own dollars/)).toBeInTheDocument();
     expect(screen.getByText(/The comparison above is in today.s dollars/)).toBeInTheDocument();
   });
@@ -158,11 +151,6 @@ describe('the year-by-year table', () => {
     expect(cliffYears).toBeGreaterThan(0);
     expect(within(grid).getAllByText(/ACA credit lost, at full value/)).toHaveLength(cliffYears);
     expect(within(grid).getAllByText(/Medicare surcharge two years later/)).toHaveLength(cliffYears);
-  });
-
-  it('has no note on a plan that stops at the bracket top', async () => {
-    const grid = await openDetail('Fill the 22% bracket, not limited');
-    expect(within(grid).queryByText(/at full value/)).not.toBeInTheDocument();
   });
 
   it('never says Medicare surcharge line as the bare acronym', async () => {

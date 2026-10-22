@@ -43,12 +43,10 @@ export interface PairSpec {
    *  `missingPiaMembers` on the OptimizerResult; the page reads those
    *  to render the "PIA not set" callout in the primary cell. */
   readonly primaryAgeYears: number;
-  /** Months on top of `primaryAgeYears`. Set for a stored month-level
-   *  pair and for a primary the search did not vary (the secondary-only
-   *  fallback); absent for a whole-year grid candidate. */
+  /** Absent or 0 is a whole year; a stored month-level pair and a member
+   *  the search did not vary carry their stored months. */
   readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
-  /** Months on top of `secondaryAgeYears`; same rule as the primary's. */
   readonly secondaryAgeMonths?: number;
   readonly candidate: {
     readonly primary: RetirementAgePerMember;
@@ -225,15 +223,8 @@ export function buildPairs(args: BuildPairsArgs): PairSpec[] {
   return withStoredPair(buildGridPairs(args, dim), args, dim);
 }
 
-/**
- * Append the scenario's stored claim-age pair (both members verbatim,
- * months included) as one extra candidate, so a month-level setting has a
- * baseline and can rank. Skipped when the grid branch is empty (past-window
- * and missing-PIA outcomes stay as they were) and when an equal candidate
- * is already listed. A member the search does not vary keeps `null`
- * secondary identity, like every other pair of its branch. The survivor
- * dimension is crossed in so the stored pair competes like for like.
- */
+/** Append the stored claim-age pair (months included) as one extra
+ *  candidate, unless the grid is empty or an equal candidate is listed. */
 function withStoredPair(
   pairs: PairSpec[],
   args: BuildPairsArgs,
@@ -471,12 +462,8 @@ function ageYearsToday(
   return completedYears + fraction;
 }
 
-/** The scenario's stored pair in the identity `withStoredPair` gives its
- *  candidate. `secondarySearched` is whether the search varies the
- *  secondary (two members and a non-empty secondary grid): a two-member
- *  plan with no stored secondary age then resolves to the same default the
- *  fallbacks bake in, and an unsearched secondary (single member, or the
- *  1-D primary-only fallback) keeps `null` identity like every candidate. */
+/** The stored pair in the identity `withStoredPair` gives its candidate:
+ *  an unsearched secondary is `null`, a missing one is the fallback default. */
 export function resolvedSsPair(
   override: SocialSecurityOverride | undefined,
   secondarySearched: boolean,

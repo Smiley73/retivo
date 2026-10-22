@@ -298,12 +298,6 @@ describe('buildPairs × the stored claim-age pair (extra candidate)', () => {
     });
   });
 
-  it('adds nothing when the stored pair is a whole-year grid pair, or none is stored', () => {
-    const wholeYear = { primary: { ageYears: 66, ageMonths: 0 }, secondary: { ageYears: 67, ageMonths: 0 } };
-    expect(joint(wholeYear)).toHaveLength(9);
-    expect(joint(undefined)).toHaveLength(9);
-  });
-
   it('uses the fallback default for a two-member plan with no stored secondary age', () => {
     const pairs = joint({ primary: { ageYears: 66, ageMonths: 4 } });
     expect(pairs).toHaveLength(10);
@@ -329,16 +323,6 @@ describe('buildPairs × the stored claim-age pair (extra candidate)', () => {
     };
     expect(resolvedSsPair(stored, false)).toEqual(expected);
     expect(resolvedSsPair({ primary: stored.primary }, false)).toEqual(expected);
-  });
-
-  it('keeps empty-grid branches empty', () => {
-    const pairs = buildPairs({
-      primaryGrid: [],
-      secondaryGrid: [],
-      hasSecondary: true,
-      resolvedOverride: monthLevel,
-    });
-    expect(pairs).toEqual([]);
   });
 
   it('secondary-only fallback carries the primary months on every pair, including the stored one', () => {

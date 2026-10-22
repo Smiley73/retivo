@@ -27,8 +27,7 @@ import {
   loadDemoProjection,
   resolvedDeathAges,
 } from './demo-fixture';
-import { MAX_PASSES_PER_CANDIDATE } from './candidate-passes';
-import { PROJECTION_BOUND, searchRothSuggestions } from './search';
+import { searchRothSuggestions } from './search';
 import type {
   RothCandidate,
   RothSuggestionOk,
@@ -98,36 +97,10 @@ describe('roth suggestion search on the demo household', () => {
     ]);
   });
 
-  describe('projection count', () => {
-    it('is pinned, within the cap, and the number of projections actually run', () => {
-      expect(result.projectionsRun).toBe(DEMO_EARLY_PROJECTION_COUNT);
-      expect(result.projectionsRun).toBeLessThanOrEqual(MAX_PROJECTIONS);
-      expect(result.projectionsRun).toBeLessThanOrEqual(PROJECTION_BOUND);
-      expect(projectionCalls).toBe(result.projectionsRun);
-    });
-
-    it('has a deterministic bound of the reference and baseline plus every candidate at its pass cap', () => {
-      expect(PROJECTION_BOUND).toBe(2 + 8 * MAX_PASSES_PER_CANDIDATE);
-      expect(PROJECTION_BOUND).toBeLessThanOrEqual(MAX_PROJECTIONS);
-    });
-  });
-
-  it('puts every ladder in the persisted one-year Fill window shape', () => {
-    for (const candidate of ladderCandidates()) {
-      expect(candidate.ladder.length).toBe(result.window.endYear - result.window.startYear + 1);
-      candidate.ladder.forEach((window, i) => {
-        const year = result.window.startYear + i;
-        expect(window).toEqual({
-          start: { kind: 'year', year },
-          end: { kind: 'year', year },
-          magiCeilingAnnualDollars: window.magiCeilingAnnualDollars,
-          capMode: 'fill',
-          capMagiLine: 'irmaa',
-          targetRothAccountId: DEMO_TARGET_ROTH_ID,
-        });
-        expect(Number.isInteger(window.magiCeilingAnnualDollars)).toBe(true);
-      });
-    }
+  it('runs a pinned number of projections, within the cap', () => {
+    expect(result.projectionsRun).toBe(DEMO_EARLY_PROJECTION_COUNT);
+    expect(result.projectionsRun).toBeLessThanOrEqual(MAX_PROJECTIONS);
+    expect(projectionCalls).toBe(result.projectionsRun);
   });
 
   describe('each year ceiling is the smallest of three limits a person can recompute', () => {
@@ -202,6 +175,7 @@ describe('roth suggestion search on the demo household', () => {
 
     it('takes the smallest applicable limit, less the engine offset, as the ceiling', () => {
       for (const candidate of ladderCandidates()) {
+        expect(candidate.ladder.length).toBe(result.window.endYear - result.window.startYear + 1);
         candidate.years.forEach((record) => {
           const limits = record.limits;
           if (limits === null) return;

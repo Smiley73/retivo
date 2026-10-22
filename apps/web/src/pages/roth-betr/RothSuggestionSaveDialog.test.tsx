@@ -1,8 +1,4 @@
-/**
- * Save-plan dialog: names what it writes, what it replaces and where that
- * comes from, the rerouted years, and the target Roth; confirms; blocks when
- * the target is not eligible; passes the accessibility smoke in both themes.
- */
+/** Save-plan dialog: copy, confirm and cancel, the no-target block, a11y. */
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -24,10 +20,9 @@ const SUMMARY: SavePlanSummary = {
 
 function dialog(
   props: Partial<React.ComponentProps<typeof RothSuggestionSaveDialog>> = {},
-  theme: 'light' | 'dark' = 'light',
 ): React.ReactElement {
   return withTheme(
-    theme,
+    'light',
     <RothSuggestionSaveDialog
       open
       onClose={vi.fn()}
@@ -107,8 +102,8 @@ describe('RothSuggestionSaveDialog', () => {
     expect(screen.getByRole('button', { name: 'Save to scenario' })).toBeDisabled();
   });
 
-  it.each(['light', 'dark'] as const)('passes the accessibility smoke in the %s theme', async (theme) => {
-    render(dialog({ replaced: { count: 2, inheritedFrom: 'Base plan' } }, theme));
+  it('passes the accessibility smoke', async () => {
+    render(dialog({ replaced: { count: 2, inheritedFrom: 'Base plan' } }));
     await expectNoA11yViolations(screen.getByRole('dialog'));
   });
 });

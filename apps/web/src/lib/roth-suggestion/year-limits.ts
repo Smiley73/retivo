@@ -1,10 +1,6 @@
 /**
- * The three limits that cap a window year's MAGI, each expressed on the one
- * line the plan is held to: the federal MAGI the year's row reports as
- * `magiCents`, which is also what the IRMAA look-back later reads. A year's
- * limit is the smallest of them, so a person can recompute it from the
- * recorded components alone; the ceiling written to the ladder is that limit
- * less the income the Fill step cannot see (`YearLimits.engineOffsetDollars`).
+ * The three limits that cap a window year's MAGI, each on the federal MAGI line
+ * the row reports as `magiCents`, recorded with the components they recompute from.
  */
 import {
   computeSeniorBonusDeduction,
@@ -54,7 +50,7 @@ export interface ReferenceTiers {
   readonly acaPtcTier: string | null;
 }
 
-export interface YearLimitInputs {
+interface YearLimitInputs {
   readonly rate: number;
   readonly guarded: boolean;
   readonly facts: YearFacts;
@@ -123,13 +119,10 @@ export function taxableOrdinaryBoundDollars(g: BracketGeometry, magiDollars: num
   );
 }
 
-/**
- * Largest whole-dollar MAGI whose taxable ordinary income stays at the bracket
- * top. The senior bonus falls as MAGI rises, so the ceiling solves
- * `C = top + deductions + bonus(C)`; the right side is non-increasing in C, so
- * bisection from below always ends on the safe side of the root.
- */
-export function bracketLimit(g: BracketGeometry): BracketLimit {
+/** Largest whole-dollar MAGI whose taxable ordinary income stays at the bracket
+ *  top: solves `C = top + deductions + bonus(C)` by bisection from below, since
+ *  the senior bonus falls as MAGI rises. */
+function bracketLimit(g: BracketGeometry): BracketLimit {
   const base = g.topDollars + g.standardDeductionDollars + g.age65AddOnDollars;
   let lo = base;
   let hi = base + g.seniorBonusAt(base);
@@ -156,16 +149,10 @@ export function irmaaTierRank(tier: string): number {
   return IRMAA_TIER_ORDER.indexOf(tier as (typeof IRMAA_TIER_ORDER)[number]);
 }
 
-/**
- * The IRMAA line of year Y+2 just above the reference's tier, rounded DOWN to
- * whole dollars: the engine deflates the MAGI and compares it with the
- * unscaled table, so a rounded-up line could sit cents over. MAGI equal to a
- * threshold stays in the tier below it. A reference under every line is held
- * under tier 1's line; one already in tier N is held under tier N+1's, so a
- * guarded plan never moves Y+2 up a tier. Tier 5 has no line above it. The
- * schedule follows the filing status of year Y, the return Medicare reads.
- */
-export function irmaaLimit(
+/** The IRMAA line of year Y+2 just above the reference's tier, rounded down
+ *  (the engine compares deflated MAGI with the unscaled table), on the
+ *  schedule of year Y's filing status, the return Medicare reads. */
+function irmaaLimit(
   inputs: YearLimitInputs,
   env: LimitEnvironment,
 ): IrmaaLimit {
@@ -201,19 +188,10 @@ export function irmaaLimit(
   };
 }
 
-/**
- * The 400 % FPL line on the federal MAGI line. The ACA MAGI is the household's
- * other income plus ALL of its Social Security, while the federal MAGI adds
- * only the taxable part, so at the line the federal MAGI is
- * `line - (gross SS - taxable SS)`. The taxable part depends on the income
- * left after the gross SS is taken out of the line, which the engine's own §86
- * function evaluates directly: reading it off projected rows instead is a
- * fixed point that closes by a fraction of the gap per pass. The engine trips
- * on `floor(FPL %) > 400`, so 4 x FPL sits strictly inside the cliff. Only the
- * pre-ARPA regime has a hard cliff, and only a household with Marketplace
- * months has a credit to lose.
- */
-export function acaLimit(inputs: YearLimitInputs, env: LimitEnvironment): AcaLimit {
+/** The 400 % FPL line moved onto the federal MAGI line: the ACA MAGI adds back
+ *  nontaxable Social Security, so the federal line is `line - (gross SS -
+ *  taxable SS)`, with the taxable part evaluated by §86 at the line itself. */
+function acaLimit(inputs: YearLimitInputs, env: LimitEnvironment): AcaLimit {
   const { facts, reference, grossSsDollars } = inputs;
   if (!inputs.guarded) return { kind: 'aca', applies: false, reason: 'unguarded' };
   const { effectiveYear, thresholdScalingFactor } = resolveSnapshotYear(

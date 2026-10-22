@@ -60,10 +60,9 @@ function expectHandCheck(row: YearDetailRow): void {
 
 describe('a couple whose spouse dies inside the window', () => {
   const req = request({ iraBalance: 3_000_000 }, { primary: 90, secondary: 70 });
-  let result: RothSuggestionOk;
 
   it('closes the hand check in the Single years, on the Single return', TIMEOUT, async () => {
-    result = await search(req);
+    const result = await search(req);
     const plans = result.candidates.filter((c) => !c.isReference);
     const single = plans.flatMap((c) => c.yearDetail.filter((r) => r.year >= SURVIVOR_FIRST_YEAR && r.inWindow));
     expect(single.length).toBeGreaterThan(0);
@@ -72,22 +71,12 @@ describe('a couple whose spouse dies inside the window', () => {
     expect(stopped.length).toBeGreaterThan(0);
     for (const { row } of stopped) expectHandCheck(row);
     // The Single years' Social Security comes from the Single thresholds.
+    expect(single.some((r) => r.amountDollars > 0)).toBe(true);
     for (const plan of plans) {
       const zero = await zeroPointByYear(req, plan.ladder);
       for (const row of plan.yearDetail.filter((r) => r.year >= SURVIVOR_FIRST_YEAR && r.inWindow)) {
         expectZeroPoint(row, zero.get(row.year));
       }
-    }
-  });
-
-  it('reads the income before a Single-year conversion off the Single Social Security thresholds', TIMEOUT, async () => {
-    result = result ?? (await search(req));
-    const plan = result.candidates.find((c) => c.id === 'bracket-22-unguarded');
-    const zero = await zeroPointByYear(req, plan?.ladder ?? []);
-    const survivorYears = (plan?.yearDetail ?? []).filter((r) => r.year >= SURVIVOR_FIRST_YEAR && r.amountDollars > 0);
-    expect(survivorYears.length).toBeGreaterThan(0);
-    for (const row of survivorYears) {
-      expectZeroPoint(row, zero.get(row.year));
     }
   });
 });

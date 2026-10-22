@@ -29,12 +29,10 @@ interface PromptArgs {
   secondaryPastWindow: boolean;
   secondaryMissingPia: boolean;
   primaryMissingPia: boolean;
-  /** The winner's age for that member equals the stored one — Save
-   *  leaves them as they are. */
+  /** The winner's age equals the stored one, so Save leaves it. */
   primaryUnchanged: boolean;
   secondaryUnchanged: boolean;
-  /** Plain sentence naming each member whose stored months are being
-   *  replaced; empty when nothing is. */
+  /** One sentence per member whose stored months are replaced. */
   replacedMonthsNote: string;
 }
 
@@ -78,8 +76,6 @@ function sameAge(
   );
 }
 
-/** One sentence per member whose stored age carries months and is being
- *  replaced by a different age; empty when Save drops no months. */
 function replacedMonthsNote(
   members: ReadonlyArray<{
     readonly name: string;
@@ -90,24 +86,20 @@ function replacedMonthsNote(
 ): string {
   return members
     .filter((m) => m.written && !m.unchanged && (m.current?.ageMonths ?? 0) > 0)
-    .map(
-      (m) =>
-        `The months in ${m.name}'s current claim age (${formatClaimAge(m.current)}) are replaced. `,
-    )
+    .map((m) => {
+      const age = formatAgeYearsMonths({
+        years: m.current?.ageYears ?? 0,
+        months: m.current?.ageMonths ?? 0,
+      });
+      return `The months in ${m.name}'s current claim age (${age}) are replaced. `;
+    })
     .join('');
-}
-
-function formatClaimAge(age: ClaimAge): string {
-  return age
-    ? formatAgeYearsMonths({ years: age.ageYears, months: age.ageMonths })
-    : '';
 }
 
 export interface ApplyConfirmInputs {
   readonly row: ScenarioRow;
   readonly members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
-  /** Every scenario — the stored (current) claim ages resolve through the
-   *  row's override chain. */
+  /** Every scenario, so the stored claim ages resolve through the chain. */
   readonly scenarios: ReadonlyArray<ScenarioAggregate>;
   /** Deterministic tab passes `'planned'` or `'twr'` per-child Apply.
    *  When omitted, the helper reads `row.result` (legacy MC path). */

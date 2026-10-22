@@ -1,8 +1,6 @@
 /**
- * Saving a ranked plan from the panel: the Save action sits on ranked plans
- * only, confirming writes the row's ladder through the page's save path, and
- * the saved-plan marker follows the save, survives without results on screen
- * and reads "out of date" when the data moves.
+ * Saving a ranked plan from the panel: which rows offer Save, what confirming
+ * writes, and the saved-plan marker's states.
  */
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -10,71 +8,22 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { ScenarioPayload } from '../../db/types';
 import { buildSuggestionCapWindows } from '../../lib/roth-betr-apply-helpers';
 import { toyProjection } from '../../lib/roth-suggestion/test-fixtures';
-import {
-  runRothSuggestion,
-  type RothSuggestionWorkerInbound,
-  type RothSuggestionWorkerOutbound,
-  type RothSuggestionWorkerResult,
-} from '../../workers/roth-suggestion.worker';
-import { buildRothBETRPageData, type RothBETRPageData } from './roth-betr-data';
+import type { RothSuggestionWorkerResult } from '../../workers/roth-suggestion.worker';
+import type { RothBETRPageData } from './roth-betr-data';
 import { RothSuggestionPanel } from './RothSuggestionPanel';
-import {
-  SAVED_PLAN_STORAGE_PREFIX,
-  buildSavedPlanRecord,
-  writeSavedPlan,
-} from './roth-suggestion-saved-plan';
+import { fakeWorkers, seedToyPanel } from './roth-suggestion-panel-fixture';
+import { buildSavedPlanRecord, readSavedPlan, writeSavedPlan } from './roth-suggestion-saved-plan';
 
-const { fakeWorkers } = vi.hoisted(() => ({ fakeWorkers: [] as FakeWorkerShape[] }));
-
-interface FakeWorkerShape {
-  readonly sent: RothSuggestionWorkerInbound[];
-  emit(msg: RothSuggestionWorkerOutbound): void;
-}
-
-vi.mock('../../workers/roth-suggestion.worker.ts?worker', () => {
-  class FakeRothSuggestionWorker implements FakeWorkerShape {
-    private readonly listeners = new Set<(ev: Event) => void>();
-    readonly sent: RothSuggestionWorkerInbound[] = [];
-    constructor() {
-      fakeWorkers.push(this);
-    }
-    addEventListener(_type: string, fn: (ev: Event) => void): void {
-      this.listeners.add(fn);
-    }
-    removeEventListener(_type: string, fn: (ev: Event) => void): void {
-      this.listeners.delete(fn);
-    }
-    postMessage(msg: RothSuggestionWorkerInbound): void {
-      this.sent.push(msg);
-    }
-    terminate(): void {}
-    emit(msg: RothSuggestionWorkerOutbound): void {
-      const ev = new MessageEvent('message', { data: msg });
-      this.listeners.forEach((fn) => fn(ev));
-    }
-  }
-  return { default: FakeRothSuggestionWorker };
-});
+vi.mock('../../workers/roth-suggestion.worker.ts?worker', async () => ({
+  default: (await import('./roth-suggestion-panel-fixture')).FakeRothSuggestionWorker,
+}));
 
 let projection = toyProjection({ couple: false });
 let pageData: RothBETRPageData;
 let baseResult: RothSuggestionWorkerResult;
 
 beforeAll(async () => {
-  const built = buildRothBETRPageData(projection);
-  if (built === null) throw new Error('toy page data is null');
-  pageData = built;
-  const { bundle: _bundle, ...rest } = projection;
-  void _bundle;
-  const posted: RothSuggestionWorkerOutbound[] = [];
-  await runRothSuggestion(
-    'seed',
-    { projection: rest, targetRothAccountId: 'roth', leftoverTaxRate: 0.2, deathAges: { primary: 90 } },
-    (m) => posted.push(m),
-  );
-  const terminal = posted[posted.length - 1];
-  if (terminal.kind !== 'result') throw new Error(`seed search gave ${terminal.kind}`);
-  baseResult = terminal.result;
+  ({ pageData, baseResult } = await seedToyPanel());
 }, 60_000);
 
 beforeEach(() => {
@@ -178,11 +127,8 @@ describe('confirming a save', () => {
       magiCap: { windows: buildSuggestionCapWindows(target.ladder) },
     });
     expect(screen.queryByRole('dialog')).toBeNull();
-    // The marker is written once the save succeeded. (The page's data has not
-    // reloaded in this harness, so it is read back from storage.)
-    const stored = window.localStorage.getItem(`${SAVE_PREFIX}toy`);
-    expect(stored).not.toBeNull();
-    expect(JSON.parse(stored ?? '{}')).toMatchObject({
+    // The page's data has not reloaded in this harness, so the marker is read back from storage.
+    expect(readSavedPlan('toy')).toMatchObject({
       label: expect.stringMatching(/^Fill the \d+% bracket/),
     });
   });
@@ -194,7 +140,7 @@ describe('confirming a save', () => {
     await user.click(screen.getAllByRole('button', { name: SAVE })[0]);
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save to scenario' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(window.localStorage.getItem(`${SAVE_PREFIX}toy`)).toBeNull();
+    expect(readSavedPlan('toy')).toBeNull();
   });
 });
 
@@ -222,11 +168,9 @@ describe('results that are out of date', () => {
     rerender(panel(persist, edited()));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save to scenario' }));
     expect(persist).not.toHaveBeenCalled();
-    expect(window.localStorage.getItem(`${SAVE_PREFIX}toy`)).toBeNull();
+    expect(readSavedPlan('toy')).toBeNull();
   });
 });
-
-const SAVE_PREFIX = SAVED_PLAN_STORAGE_PREFIX;
 
 describe('the saved-plan marker', () => {
   function savedScenario() {

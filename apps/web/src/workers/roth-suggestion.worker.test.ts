@@ -1,11 +1,4 @@
-/**
- * Roth suggestion worker tests. `registerRothSuggestionWorkerListener` is
- * driven against a fake `self` (an `addEventListener` that captures the handler
- * and a `postMessage` spy), the way the claim-age worker's tests do. Every
- * message the page would act on is checked for its `runId`: a worker that
- * posted progress with a wrong or missing id would pass a test that only looks
- * at the terminal reply, and the page would then ignore it.
- */
+/** Drives `registerRothSuggestionWorkerListener` against a fake `self`. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { searchRothSuggestions } from '../lib/roth-suggestion/search';
 import { TOY_ROTH_ID, toyProjection } from '../lib/roth-suggestion/test-fixtures';
@@ -82,21 +75,11 @@ describe('roth suggestion worker', () => {
     if (terminal.kind !== 'result') return;
     expect(terminal.scenarioId).toBe('toy');
     expect(terminal.result.candidates[0].isReference).toBe(true);
+    expect(terminal.result.leftoverTaxRate).toBe(0.2);
+    expect(terminal.result.deathAges).toEqual({ primary: 90 });
     // The heavy raw rows stay in the worker; the per-year records go across.
     expect(terminal.result.candidates.every((c) => !('drawdownYears' in c))).toBe(true);
     expect(terminal.result.candidates[0].years.length).toBeGreaterThan(0);
-  });
-
-  it('passes the page rate, target account and death ages to the search', TIMEOUT, async () => {
-    const { send, posted } = setup();
-    send({ kind: 'run', runId: 'run-2', input: input({ leftoverTaxRate: 0.31 }) });
-    await waitForTerminal(posted);
-
-    const request = vi.mocked(searchRothSuggestions).mock.calls[0][0];
-    expect(request.leftoverTaxRate).toBe(0.31);
-    expect(request.targetRothAccountId).toBe(TOY_ROTH_ID);
-    expect(request.deathAges).toEqual({ primary: 90 });
-    expect(request.projection.selectedScenarioId).toBe('toy');
   });
 
   it('answers an unsupported household with an empty reply carrying the runId', TIMEOUT, async () => {

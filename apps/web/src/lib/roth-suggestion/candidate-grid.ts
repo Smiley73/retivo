@@ -4,9 +4,8 @@
  * reference every other candidate is measured against.
  */
 
-/** Brackets worth filling in retirement, as the rate fractions the federal
- *  table carries. */
-export const BRACKET_RATES: readonly number[] = [0.12, 0.22, 0.24, 0.32];
+/** Brackets worth filling in retirement, as the federal table's rate fractions. */
+const BRACKET_RATES: readonly number[] = [0.12, 0.22, 0.24, 0.32];
 
 export interface CandidateSpec {
   readonly id: string;
@@ -17,7 +16,7 @@ export interface CandidateSpec {
   readonly guarded: boolean | null;
 }
 
-export const REFERENCE_CANDIDATE_ID = 'current-plan';
+const REFERENCE_CANDIDATE_ID = 'current-plan';
 
 function ladderCandidateId(rate: number, guarded: boolean): string {
   return `bracket-${Math.round(rate * 100)}-${guarded ? 'guarded' : 'unguarded'}`;

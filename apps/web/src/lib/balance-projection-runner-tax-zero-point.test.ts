@@ -81,13 +81,9 @@ describe('stampZeroConversionPoint', () => {
 });
 
 describe('applyTaxIntegrationToDrawdownYears — zero-conversion repricing', () => {
-  // A Medicare-age owner (born 1958) on Social Security. 2026 and 2027 convert,
-  // their tax paid from the brokerage and the IRA, and draw from a Roth IRA and
-  // a designated Roth 401(k) whose basis runs out over the four years; the
-  // brokerage is drawn every year (cost basis carried), and 2028/2029 read the
-  // converted years' MAGI through IRMAA's two-year look-back. A repricing that
-  // leaked into the running state would spend a basis twice or shift the
-  // look-back, and move a later row.
+  // 2026 and 2027 convert and draw Roth basis that runs out over four years;
+  // 2028/2029 read their MAGI through IRMAA's look-back, so a repricing that
+  // leaked into the running state would move a later row.
   const accountProjections = [
     { id: 'ira', taxTreatment: 'PRE_TAX' as const, accountType: 'RETIREMENT_IRA' },
     { id: 'brok', taxTreatment: 'POST_TAX' as const, accountType: 'BROKERAGE' },

@@ -162,8 +162,10 @@ describe('limit that stopped the year', () => {
       engineRow: row({ magiCents: 20_000_000, rothConvertedCents: 5_000_000 }),
     });
     expect(only.incomeBeforeDollars).toBe(150_000);
+    expect(only.incomeAfterDollars).toBe(200_000);
     expect(only.extraTaxableSsDollars).toBe(0);
     expect(only.taxPaymentIncomeDollars).toBe(0);
+    expect(only.filingStatus).toBe('MFJ');
   });
 
   it('keeps the year after the window as a row that says no conversion was attempted', () => {
@@ -231,7 +233,6 @@ describe('the crossing-cost note', () => {
     expect(oneMember?.extraConvertedDollars).toBe(BRACKET_TOP - IRMAA_LINE);
     expect(oneMember?.medicareSurchargeDollars).toBeCloseTo(direct(1), 2);
     expect(twoMembers?.medicareSurchargeDollars).toBeCloseTo(direct(2), 2);
-    // The retirement-year count would have priced one member where two enrol.
     expect(twoMembers?.medicareSurchargeDollars).toBeGreaterThan(oneMember?.medicareSurchargeDollars ?? Infinity);
   });
 
@@ -264,7 +265,6 @@ describe('the crossing-cost note', () => {
       ).irmaaDeltaCents / 100;
     expect(full?.medicareSurchargeDollars).toBeGreaterThan(0);
     expect(sevenMonths?.medicareSurchargeDollars).toBeCloseTo(direct(7), 2);
-    // Seven of twelve months, not a whole year of surcharge.
     expect(sevenMonths?.medicareSurchargeDollars).toBeCloseTo((full?.medicareSurchargeDollars ?? NaN) * (7 / 12), 0);
   });
 
@@ -276,14 +276,6 @@ describe('the crossing-cost note', () => {
 });
 
 describe('the income on the limit line', () => {
-  it('adds back nothing when the year has no Social Security', () => {
-    const [only] = detail({ engineRow: row({ magiCents: 20_000_000, rothConvertedCents: 5_000_000 }) });
-    expect(only.incomeBeforeDollars).toBe(150_000);
-    expect(only.incomeAfterDollars).toBe(200_000);
-    expect(only.extraTaxableSsDollars).toBe(0);
-    expect(only.filingStatus).toBe('MFJ');
-  });
-
   // §86 worked by hand: provisional income = other income + half the benefit.
   // $30,000 of benefits, $20,000 of other income, then a $40,000 conversion.
   //   Before: $20,000 + $15,000 = $35,000.

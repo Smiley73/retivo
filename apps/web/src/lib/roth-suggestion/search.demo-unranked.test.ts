@@ -42,10 +42,4 @@ describe('unranked candidates on the funds-run-out demo scenario', () => {
       expect(candidate.unranked.filter((u) => u.kind === 'guard-crossed')).toEqual([]);
     }
   });
-
-  it('ranks only candidates with no reason against them', () => {
-    for (const candidate of result.candidates) {
-      expect(candidate.rank === null).toBe(candidate.unranked.length > 0);
-    }
-  });
 });

@@ -1,9 +1,4 @@
-/**
- * Progress bar for a running Roth conversion comparison, in the shape of
- * `OptimizerDetProgressBar` (React Aria `ProgressBar`, CSS-var width, sr-only
- * value text). Ticks are finished candidate plans; the accessible name says
- * which candidate is being worked on.
- */
+/** Progress bar for a running Roth conversion comparison; ticks are finished candidate plans. */
 import React from 'react';
 import { ProgressBar } from 'react-aria-components';
 

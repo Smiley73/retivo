@@ -14,9 +14,8 @@
  *    SECURE 2.0 §107), filling up to the chosen MAGI line's cliff (the IRMAA
  *    tier-1 threshold or the ACA 400%-FPL boundary), routed through
  *    `buildNextMagiCap` (the single MAGI-cap persistence rule).
- *  - `buildSuggestionCapWindows` / `buildSuggestionCap` — a ranked suggestion's
- *    ladder as the scenario's whole MAGI-cap ladder (one year-anchored Fill
- *    window per searched year), routed through `buildNextMagiCap` the same way.
+ *  - `buildSuggestionCap` — a ranked suggestion's ladder as the scenario's whole
+ *    MAGI-cap ladder, routed through `buildNextMagiCap` the same way.
  */
 
 import type {
@@ -193,19 +192,12 @@ export function buildRetirementFillWindow(args: {
 
 /**
  * A ranked suggestion's ladder in the stored shape: one Fill window per searched
- * year, `year` anchors on both ends with equal years (the end resolves to the
- * exclusive boundary the next year starts at, so adjacent windows do not
- * overlap), ascending, each ceiling a whole non-negative dollar never above the
- * search's figure. The line and target Roth ride along per window, unchanged:
- * the line picks the MAGI definition the Fill step sizes against and the target
- * decides whether a conversion happens at all, so dropping either would convert
- * different amounts than the row showed. This is the only place the saved shape
- * is decided; the dialog and the saved-plan marker reuse its output.
+ * year with equal `year` anchors (a year-anchored end is exclusive, so adjacent
+ * windows do not overlap), ascending, whole-dollar ceilings never rounded up, the
+ * line and target Roth carried through unchanged.
  *
  * @throws {Error} on an empty ladder, a window that is not a one-year Fill
- *   window on a year anchor with a target Roth, or two windows for one year
- *   (the search never produces any of them; saving anything else would store a
- *   ladder that was not ranked).
+ *   window with a target Roth, or two windows for one year.
  */
 export function buildSuggestionCapWindows(ladder: readonly MagiCapWindow[]): MagiCapWindow[] {
   if (ladder.length === 0) throw new Error('This plan has no years to save.');
@@ -240,11 +232,8 @@ export function buildSuggestionCapWindows(ladder: readonly MagiCapWindow[]): Mag
 
 /**
  * The `magiCap` fragment that saves a suggestion's ladder as the scenario's
- * whole ladder, through `buildNextMagiCap` so it obeys the same inheritance
- * rule as every other cap edit (omits the key when a child with no local cap
- * saves the parent's ladder; writes a local ladder over an explicit-disable
- * sentinel). Existing windows are replaced, as `buildRetirementFillWindow`
- * replaces them. Narrows the never-reached disable-sentinel branch the same way.
+ * whole ladder, through `buildNextMagiCap` so it obeys the same inheritance rule
+ * as every other cap edit; existing windows are replaced.
  */
 export function buildSuggestionCap(args: {
   ladder: readonly MagiCapWindow[];

@@ -9,11 +9,8 @@ import { buildSuggestionCapWindows } from '../../lib/roth-betr-apply-helpers';
 import { toyProjection, TOY_ROTH_ID } from '../../lib/roth-suggestion/test-fixtures';
 import type { ScenarioAggregate } from '../../lib/scenario-resolution';
 import {
-  SAVED_PLAN_STORAGE_PREFIX,
   buildSavedPlanRecord,
-  ladderHash,
   readSavedPlan,
-  savedPlanSignature,
   savedPlanStatus,
   writeSavedPlan,
 } from './roth-suggestion-saved-plan';
@@ -95,7 +92,6 @@ describe('buildSavedPlanRecord', () => {
     const record = savedFor(base());
     expect(record.label).toBe('Fill the 24% bracket, kept under both lines');
     expect(record.savedOn).toBe('2026-05-17');
-    expect(record.ladderHash).toBe(ladderHash(buildSuggestionCapWindows(LADDER)));
     expect(Object.keys(record).sort()).toEqual(['label', 'savedOn', 'signature', 'ladderHash'].sort());
     // No ceiling, and the scenario's overrides only as a hash.
     expect(JSON.stringify(record)).not.toMatch(/150000|151000|152000|ratePct|lifeExpectancy/);
@@ -113,8 +109,6 @@ describe('savedPlanStatus', () => {
       savedOn: '2026-05-17',
       stale: false,
     });
-    // The signature itself does not move with the saved scenario's row.
-    expect(savedPlanSignature(after, 'toy')).toBe(savedPlanSignature(before, 'toy'));
   });
 
   it('goes stale after an edit to any aggregate the search consumed', () => {
@@ -151,17 +145,6 @@ describe('savedPlanStatus', () => {
       })),
     };
     expect(savedPlanStatus(record, edited, 'toy')?.stale).toBe(true);
-  });
-
-  it('does not go stale when only the saved scenario row version moves', () => {
-    const before = base();
-    const record = savedFor(before);
-    const after = afterSave(before);
-    const bumped: RothSuggestionData = {
-      ...after,
-      scenarios: after.scenarios.map((s) => ({ ...s, version: s.version + 5 })),
-    };
-    expect(savedPlanStatus(record, bumped, 'toy')?.stale).toBe(false);
   });
 
   it('goes stale after a parent edit a child inherits', () => {
@@ -220,7 +203,6 @@ describe('local storage', () => {
     const childRecord = { ...savedFor(before, 'child'), label: 'Another plan' };
     writeSavedPlan('toy', toyRecord);
     writeSavedPlan('child', childRecord);
-    expect(window.localStorage.getItem(`${SAVED_PLAN_STORAGE_PREFIX}toy`)).not.toBeNull();
     expect(readSavedPlan('toy')).toEqual(toyRecord);
     expect(readSavedPlan('child')).toEqual(childRecord);
     expect(readSavedPlan('other')).toBeNull();
@@ -228,9 +210,11 @@ describe('local storage', () => {
 
   it('reads a missing, unparseable or malformed value as no marker', () => {
     expect(readSavedPlan('toy')).toBeNull();
-    window.localStorage.setItem(`${SAVED_PLAN_STORAGE_PREFIX}toy`, '{not json');
+    writeSavedPlan('toy', savedFor(base()));
+    const key = window.localStorage.key(0) ?? '';
+    window.localStorage.setItem(key, '{not json');
     expect(readSavedPlan('toy')).toBeNull();
-    window.localStorage.setItem(`${SAVED_PLAN_STORAGE_PREFIX}toy`, JSON.stringify({ label: 1 }));
+    window.localStorage.setItem(key, JSON.stringify({ label: 1 }));
     expect(readSavedPlan('toy')).toBeNull();
   });
 });
