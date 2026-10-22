@@ -1,31 +1,15 @@
-/**
- * Historical monthly returns + inflation data loader. Bundles the
- * pre-derived Shiller + Ken French CSVs (committed under
- * `apps/web/src/lib/historical-data/`) and exposes the joined dataset
- * + samplers consumed by the Monte Carlo runner.
- *
- * Source of record + refresh procedure: `historical-data/REFRESH.md`.
- *
- * Vite inlines the CSV strings at build time via `?raw`; we parse once
- * into `Float64Array` columns on first import and memoise the result.
- * No runtime fetch — the dataset is part of the worker chunk.
- */
+/** Historical monthly returns + CPI loader (Shiller + Ken French CSVs, inlined via `?raw`, parsed once) and bootstrap samplers.
+ * Source and refresh: `historical-data/REFRESH.md`. */
 import shillerCsv from './../historical-data/shiller-monthly.csv?raw';
 import frenchCsv from './../historical-data/french-rf-monthly.csv?raw';
 import type { Rng } from '../sfc32';
 
 export interface HistoricalMonth {
-  /** Calendar month identifier as `YYYY-MM`. */
   readonly date: string;
-  /** S&P 500 monthly total return, percent. */
   readonly stockPct: number;
-  /** 10-year US Treasury monthly total return, percent. */
   readonly bondPct: number;
-  /** 1-month T-bill total return, percent. */
   readonly cashPct: number;
-  /** Month-over-month CPI change, percent. Real on every row (the
-   *  prior-month index always exists; Shiller's CPI series predates the
-   *  1926-07 join window). */
+  /** Month-over-month CPI change in percent; real on every row (Shiller CPI predates the 1926-07 join window). */
   readonly cpiPct: number;
 }
 
@@ -77,15 +61,7 @@ function parseFrench(): FrenchRow[] {
   return rows;
 }
 
-/**
- * Sampler-window start. The joined Shiller × French series technically
- * begins 1926-07, but we cap the bootstrap at 1950-01 to drop the
- * Depression / WW2 / Bretton-Woods era — those decades distort modern
- * sequence-of-returns risk (much lower stock means, very different rate
- * regime). 1950+ keeps a wider sample than the prior 1972 annual series
- * while staying within the post-WW2 macro regime users intuitively
- * compare against.
- */
+// Start the bootstrap at 1950-01, not the joined series' 1926-07: the Depression, WW2 and Bretton-Woods eras (much lower stock means, a very different rate regime) distort modern sequence-of-returns risk.
 const SAMPLER_START_DATE = '1950-01';
 
 function joinAndDeriveCpi(): HistoricalMonth[] {
@@ -94,10 +70,7 @@ function joinAndDeriveCpi(): HistoricalMonth[] {
   const cashByDate = new Map<string, number>();
   for (const r of french) cashByDate.set(r.date, r.cashPct);
 
-  // Inner-join on `date`, then filter to `SAMPLER_START_DATE` onward.
-  // `prevCpi` tracks the Shiller CPI of the immediately prior month
-  // (even when that month is outside the join window) so each retained
-  // row carries a real month-over-month CPI change.
+  // `prevCpi` is the prior month's Shiller CPI even when that month is outside the join window, so every retained row has a real CPI change.
   const out: HistoricalMonth[] = [];
   let prevCpi: number | null = null;
   for (const s of shiller) {
@@ -128,7 +101,6 @@ function loadHistoricalMonthly(): readonly HistoricalMonth[] {
   return memoData;
 }
 
-/** Frozen joined dataset. First row's `cpiPct` is 0 (no prior month). */
 export const HISTORICAL_MONTHLY: readonly HistoricalMonth[] =
   /* @__PURE__ */ loadHistoricalMonthly();
 
@@ -171,9 +143,6 @@ let memoSummary: HistoricalMonthlySummary | null = null;
 export function historicalMonthlySummary(): HistoricalMonthlySummary {
   if (memoSummary) return memoSummary;
   const data = loadHistoricalMonthly();
-  // Skip index 0 for the sampler-aligned stats (first month's cpiPct = 0
-  // is synthetic), but include it in stock/bond/cash so the count
-  // matches the on-screen dataset row count.
   const stock = statsOf(data.map((r) => r.stockPct));
   const bond = statsOf(data.map((r) => r.bondPct));
   const cash = statsOf(data.map((r) => r.cashPct));
@@ -190,9 +159,7 @@ export function historicalMonthlySummary(): HistoricalMonthlySummary {
   return memoSummary;
 }
 
-/** Draw one month uniformly at random from the dataset (1950-01 →
- *  most recent). All four series are real on every row — the first
- *  row's `cpiPct` reflects the 1949-12 → 1950-01 change. */
+/** Draws one month uniformly at random from the dataset. */
 export function drawOneMonth(rng: Rng): HistoricalMonth {
   const data = loadHistoricalMonthly();
   const n = data.length;
@@ -201,51 +168,18 @@ export function drawOneMonth(rng: Rng): HistoricalMonth {
 }
 
 /**
- * Default mean block length L (months) for the stationary bootstrap. Selected
- * from the candidate set {1, 3, 6, 12, 18, 24} as the smallest L whose
- * lag-1 |return| autocorrelation clears the clustering bar
- * (≥ baseline_iid + 0.05 AND ≥ 0.5 × empirical) while keeping the
- * successProbability Monte Carlo SE within the recorded margin
- * (≤ baseline_iid_success_se × 1.5). L = 3 is the smallest candidate clearing
- * both bars; the per-candidate autocorrelation/SE table is recorded in
- * `__fixtures__/sampler-stats.json`.
+ * Default mean block length L (months): the smallest candidate whose lag-1 |return| autocorrelation clears the
+ * clustering bar while keeping the success-probability SE within the recorded margin; table in `__fixtures__/sampler-stats.json`.
  */
 export const DEFAULT_MEAN_BLOCK_LENGTH = 3;
 
 /**
- * Bootstrap a series of `monthCount` months via a **stationary bootstrap**
- * (Politis & Romano 1994). Instead of drawing each month independently, the
- * series is built from runs of *consecutive* historical months ("blocks"),
- * each block a whole `(stock, bond, cash, cpi)` tuple sequence with
- * wrap-around at the dataset end — so cross-asset correlations stay intact
- * AND multi-month volatility clustering / regime persistence carry over.
- *
- * Each block's length is a geometric random variable with mean `meanBlockLength`
- * (= L): a fresh block starts at a uniformly random dataset position, then
- * extends by one consecutive month with continuation probability `1 − 1/L` per
- * step (else a new block starts). Blocks concatenate until `monthCount` months
- * are filled.
- *
- * `meanBlockLength = 1` reduces EXACTLY to an IID sampler: the
- * continuation probability is `1 − 1/1 = 0`, so no continuation decision is
- * ever drawn and every month is a single `rng.uniformInt(0, n - 1)` draw — the
- * exact index sequence an IID sampler produces, with no extra RNG draws. The
- * two-arg call (no `meanBlockLength`) defaults to `DEFAULT_MEAN_BLOCK_LENGTH`.
- *
- * This is a thin object-returning wrapper over `drawMonthlyIndices` (the two
- * share one bootstrap loop): it draws the same row indices and maps each to its
- * `HistoricalMonth` row, so the RNG call sequence — and thus the sampled series
- * — is byte-for-byte identical to indexing `HISTORICAL_MONTHLY` by the indices.
- * Retained for the test / sampler-stats tooling that wants row objects; the MC
- * runner hot path uses `drawMonthlyIndices` + `historicalColumns()` directly.
+ * Stationary bootstrap (Politis & Romano 1994) of `monthCount` months: blocks of consecutive
+ * `(stock, bond, cash, cpi)` rows with wrap-around, so cross-asset correlation and volatility clustering carry over.
+ * Block length is geometric with mean `meanBlockLength` (continuation probability `1 - 1/L`).
+ * `meanBlockLength = 1` reduces exactly to an IID sampler: no continuation draw, one `rng.uniformInt(0, n - 1)` per month.
+ * Object-returning wrapper over `drawMonthlyIndices` for tests and sampler-stats tooling; draws the same RNG sequence.
  */
-// The sampled returns are GROSS of fees: nothing is deducted from the
-// historical series, and there is no base-plan investment-cost setting. The
-// only fee the app applies is the "Higher fees" market stress, applied as a
-// per-month drag in `buildPerAccountReturnSeries` (monte-carlo-per-account.ts);
-// `blendedReturnMonthly` is the reference definition of that same shock. The
-// methodology modal (MonteCarloMethodologyModal.tsx) discloses the
-// clustered-history sampling and the Shiller monthly-average prices.
 export function drawMonthlySeries(
   rng: Rng,
   monthCount: number,
@@ -258,12 +192,7 @@ export function drawMonthlySeries(
   return out;
 }
 
-/** Struct-of-arrays view of the joined historical dataset:
- *  four parallel `Float64Array` columns aligned to `loadHistoricalMonthly()`'s
- *  row order (`columns.stockPct[i] === HISTORICAL_MONTHLY[i].stockPct`, etc.).
- *  Built once and memoized. Lets the hottest per-account blend loops index
- *  packed columns by a sampled row index instead of chasing pointers through
- *  per-row objects — same doubles, same op order. */
+/** Struct-of-arrays view of the dataset: four `Float64Array` columns aligned to `loadHistoricalMonthly()` row order, so hot loops index by sampled row. */
 export interface HistoricalColumns {
   readonly stockPct: Float64Array;
   readonly bondPct: Float64Array;
@@ -273,7 +202,6 @@ export interface HistoricalColumns {
 
 let memoColumns: HistoricalColumns | null = null;
 
-/** Memoized struct-of-arrays view of `loadHistoricalMonthly()`. */
 export function historicalColumns(): HistoricalColumns {
   if (memoColumns) return memoColumns;
   const data = loadHistoricalMonthly();
@@ -293,17 +221,7 @@ export function historicalColumns(): HistoricalColumns {
   return memoColumns;
 }
 
-/**
- * Struct-of-arrays sampler: returns the sampled dataset ROW
- * INDICES (`Int32Array`) directly, so a caller can index the packed
- * `historicalColumns()` arrays. This is the canonical stationary-bootstrap loop
- * — `drawMonthlySeries` delegates to it and maps each index to its row object,
- * so `HISTORICAL_MONTHLY[drawMonthlyIndices(rng, n, L)[i]] ===
- * drawMonthlySeries(sameSeededRng, n, L)[i]` by object identity for every `i`.
- * The MC runner hot path (`monte-carlo.ts` → `buildStepInputs`) calls this
- * directly; `drawMonthlySeries` serves the test / sampler-stats tooling that
- * wants row objects.
- */
+/** Sampled dataset row indices as an `Int32Array`; the canonical bootstrap loop that `drawMonthlySeries` maps to row objects. */
 export function drawMonthlyIndices(
   rng: Rng,
   monthCount: number,
@@ -334,16 +252,8 @@ export interface BlendedMix {
 }
 
 /**
- * Market-stress return shock. `annualInvestmentCostPct`
- * is a flat portfolio drag; `returnShock` is a per-asset annual pp reduction.
- * The shape is the REFERENCE definition of the `−cost/12` and `−(blended
- * shock)/12` mean-shift. It is applied two different ways: the MC per-account
- * HOT PATH (`buildPerAccountReturnSeries` in `monte-carlo-per-account.ts`)
- * inlines the identical arithmetic per step to drop the call overhead and is NOT
- * a caller of `blendedReturnMonthly`; the reference `blendedReturnMonthly` below
- * carries the same definition for non-hot-path consumers. The two must stay in
- * lock-step — `historical.test.ts` pins the reference formula so a drift is
- * caught. Absent / all-zero → the gross blend, unchanged.
+ * Market-stress return shock: `annualInvestmentCostPct` is a flat portfolio drag, `returnShock` a per-asset annual pp reduction.
+ * The MC per-account hot path inlines the same arithmetic; `historical.test.ts` pins this reference formula so a drift is caught.
  */
 export interface BlendedReturnShock {
   readonly annualInvestmentCostPct?: number;
@@ -354,17 +264,7 @@ export interface BlendedReturnShock {
   };
 }
 
-/** Mix-weighted monthly return percent for the given sampled month, less any
- *  market-stress fee/return shock (absent shock ⇒ the gross blend). This is
- *  the REFERENCE shock definition; the MC per-account hot path inlines the same
- *  arithmetic (see `BlendedReturnShock`) rather than calling this. */
-// The sampled returns are GROSS of fees: nothing is deducted from the
-// historical series, and there is no base-plan investment-cost setting. The
-// only fee the app applies is the "Higher fees" market stress, applied as a
-// per-month drag in `buildPerAccountReturnSeries` (monte-carlo-per-account.ts);
-// `blendedReturnMonthly` is the reference definition of that same shock. The
-// methodology modal (MonteCarloMethodologyModal.tsx) discloses the
-// clustered-history sampling and the Shiller monthly-average prices.
+/** Mix-weighted monthly return percent for a sampled month, less any market-stress shock. Sampled returns are gross of fees; the only fee is the "Higher fees" stress. */
 export function blendedReturnMonthly(
   mix: BlendedMix,
   m: HistoricalMonth,

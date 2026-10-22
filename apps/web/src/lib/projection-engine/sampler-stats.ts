@@ -1,22 +1,11 @@
-/**
- * Pure statistical helpers for the Monte Carlo block-bootstrap sampler
- * validation suite. Shared by the red-first recorder (which records the
- * baseline constants into `__fixtures__/sampler-stats.json`) and the
- * statistical assertions in `monte-carlo.test.ts`, so the same maths backs
- * the recorded baselines and the live test bars.
- *
- * No randomness lives here — callers pass already-sampled month series.
- */
+/** Pure statistical helpers for the block-bootstrap sampler validation suite; callers pass sampled month series.
+ * Shared by the recorder of `__fixtures__/sampler-stats.json` and the assertions in `monte-carlo.test.ts`. */
 import type { BlendedMix } from './historical';
 import { blendedReturnMonthly, type HistoricalMonth } from './historical';
 
-/** Reference portfolio mix used for every clustering / tail statistic so the
- *  recorder and the tests measure the same |return| series. A balanced
- *  60/35/5 blend keeps both equity-clustering and bond/cash damping in view. */
 export const REFERENCE_MIX: BlendedMix = { stocksPct: 60, bondsPct: 35, cashPct: 5 };
 
-/** Lag-1 autocorrelation of a value series. Returns 0 for a degenerate
- *  (constant or <2-element) series. */
+// Lag-1 autocorrelation; 0 for a constant or shorter-than-2 series.
 function lag1Autocorr(values: readonly number[]): number {
   const n = values.length;
   if (n < 2) return 0;
@@ -33,7 +22,6 @@ function lag1Autocorr(values: readonly number[]): number {
   return den === 0 ? 0 : num / den;
 }
 
-/** Absolute mix-weighted monthly portfolio return for each month. */
 function absPortfolioReturns(
   months: readonly HistoricalMonth[],
   mix: BlendedMix = REFERENCE_MIX,
@@ -41,7 +29,6 @@ function absPortfolioReturns(
   return months.map((m) => Math.abs(blendedReturnMonthly(mix, m)));
 }
 
-/** Lag-1 autocorrelation of |monthly portfolio return| for a month series. */
 export function absReturnAutocorr(
   months: readonly HistoricalMonth[],
   mix: BlendedMix = REFERENCE_MIX,
@@ -49,9 +36,7 @@ export function absReturnAutocorr(
   return lag1Autocorr(absPortfolioReturns(months, mix));
 }
 
-/** Fraction of months that sit inside a sustained down-run of length ≥ `n`
- *  (a maximal run of consecutive negative portfolio returns whose length is
- *  at least `n` months). Measures multi-month drawdown clustering. */
+/** Fraction of months inside a maximal run of at least `n` consecutive negative portfolio returns. */
 export function drawdownRunFrequency(
   months: readonly HistoricalMonth[],
   runLength: number,
@@ -76,8 +61,7 @@ export function drawdownRunFrequency(
   return monthsInLongRuns / total;
 }
 
-/** Pearson correlation between two equal-length numeric series. 0 when either
- *  series is degenerate. */
+// Pearson correlation; 0 when either series is degenerate.
 function pearson(a: readonly number[], b: readonly number[]): number {
   const n = a.length;
   if (n < 2) return 0;
@@ -103,13 +87,10 @@ function pearson(a: readonly number[], b: readonly number[]): number {
   return denom === 0 ? 0 : cov / denom;
 }
 
-/** The four joined series (stock, bond, cash, cpi) extracted column-wise. */
 const SERIES_KEYS = ['stockPct', 'bondPct', 'cashPct', 'cpiPct'] as const;
 type SeriesKey = (typeof SERIES_KEYS)[number];
 
-/** Symmetric per-month cross-asset + return-CPI correlation matrix, keyed
- *  `"stockPct|bondPct"` style so a fixture diff is order-stable and
- *  human-readable. Diagonal entries (self-correlation) are omitted. */
+/** Per-month correlation matrix keyed `"stockPct|bondPct"`; diagonal omitted. */
 export function correlationMatrix(
   months: readonly HistoricalMonth[],
 ): Record<string, number> {

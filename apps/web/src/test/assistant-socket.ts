@@ -11,13 +11,23 @@ import { defaultConsentAnswer } from '../assistant/sharing/consent';
 
 // Captured before any test installs fake timers, so waiting stays real.
 const realSetImmediate = globalThis.setImmediate;
+const realNow = performance.now.bind(performance);
 
-/** Waits (in real macrotasks) until `condition` holds; WebCrypto resolves off the microtask queue. */
+// Below vitest's 5 s testTimeout, so the named error below fires before the generic timeout does.
+const UNTIL_TIMEOUT_MS = 4_000;
+
+/**
+ * Waits (in real macrotasks) until `condition` holds; WebCrypto resolves off the microtask queue. The
+ * limit is wall-clock: a starved CI runner can spin through any fixed count of ticks before the crypto
+ * thread answers.
+ */
 export async function until(condition: () => boolean, what = 'condition'): Promise<void> {
-  for (let attempt = 0; attempt < 500; attempt += 1) {
+  const deadline = realNow() + UNTIL_TIMEOUT_MS;
+  while (realNow() < deadline) {
     if (condition()) return;
     await new Promise<void>((resolve) => realSetImmediate(resolve));
   }
+  if (condition()) return;
   throw new Error(`timed out waiting for ${what}`);
 }
 
