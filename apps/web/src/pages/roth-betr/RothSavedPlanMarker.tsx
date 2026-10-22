@@ -1,8 +1,6 @@
 /**
- * Marker for the plan last saved to the selected scenario from this page:
- * which plan and when, and "Out of date" when an input the comparison used has
- * changed since. The stale state is text first (a prefix in the sentence), with
- * the warning tone on top, never colour alone. Kept on this device only.
+ * Marker for the plan last saved to the selected scenario from this device:
+ * which plan and when, and "Out of date" in words when an input has changed since.
  */
 import React from 'react';
 import { Alert } from '../../components/Alert';

@@ -1,9 +1,7 @@
 /**
- * Saving a ranked plan from the comparison table: which row the dialog is open
- * for, what it says, and the confirm that writes the plan as the scenario's cap
- * ladder and then remembers it for the saved-plan marker. The write goes
- * through the page's own `persistOverrides` (one save path, one error banner),
- * and the marker is written only when that save succeeded.
+ * Saving a ranked plan from the comparison table: the dialog's row and copy, and
+ * the confirm that writes the ladder through the page's `persistOverrides` and
+ * then remembers it for the marker.
  */
 import { useCallback, useState } from 'react';
 import type { ScenarioPayload } from '../../db/types';

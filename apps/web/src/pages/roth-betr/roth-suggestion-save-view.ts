@@ -1,7 +1,6 @@
 /**
  * What the save-plan dialog says, as data: the plan being saved, and the cap
- * windows the save replaces and where they come from. Pure, so the dialog stays
- * a layout over strings the tests can read directly.
+ * windows the save replaces and where they come from.
  */
 import { isMagiCapDisabled, type MagiCapOverride } from '../../db/types';
 import { scenarioChain, type ScenarioAggregate } from '../../lib/scenario-resolution';
@@ -54,10 +53,9 @@ export interface ReplacedCap {
 }
 
 /**
- * The cap the save replaces. `resolvedCap` is the scenario's resolved real cap
- * (the page's `parentCap`: the disable sentinel is already coerced away). The
- * inherited-from name follows the withdrawal strategy editor's rule: only when
- * the scenario has no cap of its own, the nearest ancestor with a real cap.
+ * The cap the save replaces; `resolvedCap` is the page's `parentCap`. The
+ * inherited-from name is the nearest ancestor with a real cap, only when the
+ * scenario has no cap of its own.
  */
 export function describeReplacedCap(
   scenarios: readonly ScenarioAggregate[],

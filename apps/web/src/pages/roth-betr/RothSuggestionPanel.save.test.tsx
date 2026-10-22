@@ -1,8 +1,6 @@
 /**
- * Saving a ranked plan from the panel: the Save action sits on ranked plans
- * only, confirming writes the row's ladder through the page's save path, and
- * the saved-plan marker follows the save, survives without results on screen
- * and reads "out of date" when the data moves.
+ * Saving a ranked plan from the panel: which rows offer Save, what confirming
+ * writes, and the saved-plan marker's states.
  */
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -18,11 +16,7 @@ import {
 } from '../../workers/roth-suggestion.worker';
 import { buildRothBETRPageData, type RothBETRPageData } from './roth-betr-data';
 import { RothSuggestionPanel } from './RothSuggestionPanel';
-import {
-  SAVED_PLAN_STORAGE_PREFIX,
-  buildSavedPlanRecord,
-  writeSavedPlan,
-} from './roth-suggestion-saved-plan';
+import { buildSavedPlanRecord, readSavedPlan, writeSavedPlan } from './roth-suggestion-saved-plan';
 
 const { fakeWorkers } = vi.hoisted(() => ({ fakeWorkers: [] as FakeWorkerShape[] }));
 
@@ -178,11 +172,8 @@ describe('confirming a save', () => {
       magiCap: { windows: buildSuggestionCapWindows(target.ladder) },
     });
     expect(screen.queryByRole('dialog')).toBeNull();
-    // The marker is written once the save succeeded. (The page's data has not
-    // reloaded in this harness, so it is read back from storage.)
-    const stored = window.localStorage.getItem(`${SAVE_PREFIX}toy`);
-    expect(stored).not.toBeNull();
-    expect(JSON.parse(stored ?? '{}')).toMatchObject({
+    // The page's data has not reloaded in this harness, so the marker is read back from storage.
+    expect(readSavedPlan('toy')).toMatchObject({
       label: expect.stringMatching(/^Fill the \d+% bracket/),
     });
   });
@@ -194,7 +185,7 @@ describe('confirming a save', () => {
     await user.click(screen.getAllByRole('button', { name: SAVE })[0]);
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save to scenario' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(window.localStorage.getItem(`${SAVE_PREFIX}toy`)).toBeNull();
+    expect(readSavedPlan('toy')).toBeNull();
   });
 });
 
@@ -222,11 +213,9 @@ describe('results that are out of date', () => {
     rerender(panel(persist, edited()));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save to scenario' }));
     expect(persist).not.toHaveBeenCalled();
-    expect(window.localStorage.getItem(`${SAVE_PREFIX}toy`)).toBeNull();
+    expect(readSavedPlan('toy')).toBeNull();
   });
 });
-
-const SAVE_PREFIX = SAVED_PLAN_STORAGE_PREFIX;
 
 describe('the saved-plan marker', () => {
   function savedScenario() {

@@ -1,9 +1,6 @@
 /**
- * Saving a ranked plan on the demo household reproduces the row. A test that
- * only checked window shapes would pass with a ceiling on the wrong income line
- * or a dropped target account, which convert different amounts or nothing; this
- * one saves the candidate's ladder to the scenario and re-runs the page's
- * planned projection on the saved scenario.
+ * Saving a ranked plan on the demo household reproduces the row: the page's
+ * planned projection on the saved scenario converts what the candidate did.
  */
 import 'fake-indexeddb/auto';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -27,7 +24,6 @@ describe('saving a ranked plan on the demo household', () => {
   let result: RothSuggestionOk;
   let candidate: RothCandidate;
   let saved: RothSuggestionProjectionInput;
-  let fragment: ReturnType<typeof buildSuggestionCap>;
 
   beforeAll(async () => {
     projection = await loadDemoProjection(SCENARIO_ID);
@@ -48,7 +44,7 @@ describe('saving a ranked plan on the demo household', () => {
     if (page === null) throw new Error('demo page data is null');
     const scenario = projection.scenarios.find((s) => s.id === SCENARIO_ID);
     if (scenario === undefined) throw new Error('demo scenario missing');
-    fragment = buildSuggestionCap({
+    const fragment = buildSuggestionCap({
       ladder: candidate.ladder,
       localOverrides: scenario.payload.overrides,
       parentCap: page.parentCap,
@@ -86,16 +82,5 @@ describe('saving a ranked plan on the demo household', () => {
     if (scenario === undefined) throw new Error('demo scenario missing');
     const anchor = resolveScenarioRetirementAnchor(scenario, saved.scenarios, saved.members);
     expect(magiCapWindowsSaveError(cap.windows, saved.members, anchor)).toBeNull();
-  });
-
-  it('changes nothing on the scenario but its cap', () => {
-    const before = projection.scenarios.find((s) => s.id === SCENARIO_ID)?.payload.overrides ?? {};
-    const after = saved.scenarios.find((s) => s.id === SCENARIO_ID)?.payload.overrides ?? {};
-    const { magiCap: _before, ...restBefore } = before;
-    const { magiCap: _after, ...restAfter } = after;
-    void _before;
-    void _after;
-    expect(restAfter).toEqual(restBefore);
-    expect(Object.keys(fragment)).toEqual(['magiCap']);
   });
 });

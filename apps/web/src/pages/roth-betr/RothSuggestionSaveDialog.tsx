@@ -1,11 +1,6 @@
 /**
- * Save a ranked conversion plan to the scenario. Shows what is written (one
- * Fill window per year, with the dollar ceiling the comparison worked out for
- * it), what it replaces, the Roth IRA it converts into (the one the search
- * used; not changeable here, because another target would convert different
- * amounts or nothing) and, in plain words, that the windows cap pre-tax income
- * and do not instruct a conversion. Confirm is blocked when the target is not
- * an eligible Roth IRA of this scenario.
+ * Confirm dialog for saving a ranked conversion plan to the scenario; Confirm is
+ * blocked when the target is not an eligible Roth IRA of this scenario.
  */
 import React from 'react';
 import { Alert } from '../../components/Alert';
