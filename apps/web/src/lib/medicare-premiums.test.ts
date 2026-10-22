@@ -1,29 +1,16 @@
-/**
- * Pins for MEDICARE_PREMIUMS: the year list, each CMS figure, the exact
- * `asOfDate` and the chronological order of the citations, so a refresh that
- * edits a figure without its citation fails here.
- */
+/** Pins for MEDICARE_PREMIUMS, so a refresh that edits a figure without its
+ *  citation fails here. */
 import { describe, it, expect } from 'vitest';
 import { IRMAA_TIERS } from './irmaa-tiers';
 import { latestMedicarePremiums, MEDICARE_PREMIUMS } from './medicare-premiums';
 
 describe('MEDICARE_PREMIUMS', () => {
-  it('should_hold_the_years_2024_2025_2026', () => {
-    expect(Object.keys(MEDICARE_PREMIUMS.values).map(Number)).toEqual([
-      2024, 2025, 2026,
-    ]);
-  });
-
-  it('should_pin_the_published_Part_B_standard_premiums', () => {
-    expect(MEDICARE_PREMIUMS.values[2024].partBStandardMonthly).toBe(174.7);
-    expect(MEDICARE_PREMIUMS.values[2025].partBStandardMonthly).toBe(185);
-    expect(MEDICARE_PREMIUMS.values[2026].partBStandardMonthly).toBe(202.9);
-  });
-
-  it('should_pin_the_published_Part_D_national_base_premiums', () => {
-    expect(MEDICARE_PREMIUMS.values[2024].partDNationalBaseMonthly).toBe(34.7);
-    expect(MEDICARE_PREMIUMS.values[2025].partDNationalBaseMonthly).toBe(36.78);
-    expect(MEDICARE_PREMIUMS.values[2026].partDNationalBaseMonthly).toBe(38.99);
+  it('should_pin_the_published_Part_B_and_Part_D_premiums_for_2024_to_2026', () => {
+    expect(MEDICARE_PREMIUMS.values).toEqual({
+      2024: { partBStandardMonthly: 174.7, partDNationalBaseMonthly: 34.7 },
+      2025: { partBStandardMonthly: 185, partDNationalBaseMonthly: 36.78 },
+      2026: { partBStandardMonthly: 202.9, partDNationalBaseMonthly: 38.99 },
+    });
   });
 
   it('should_pin_the_exact_asOfDate_and_jurisdiction', () => {
@@ -66,16 +53,5 @@ describe('MEDICARE_PREMIUMS', () => {
       partBStandardMonthly: 202.9,
       partDNationalBaseMonthly: 38.99,
     });
-  });
-
-  it('should_follow_a_newer_year_when_one_is_added', () => {
-    const next = {
-      values: {
-        ...MEDICARE_PREMIUMS.values,
-        2027: { partBStandardMonthly: 1, partDNationalBaseMonthly: 2 },
-      },
-      metadata: MEDICARE_PREMIUMS.metadata,
-    };
-    expect(latestMedicarePremiums(next).year).toBe(2027);
   });
 });

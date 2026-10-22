@@ -1,12 +1,7 @@
 /**
- * Preview dialog for the Expenses page "Add Medicare premiums" helper.
- *
- * Shows one Part B and one Part D row per household member with a birthdate,
- * each with the built-in CMS amount for the newest year on file, an include
- * toggle and an editable amount. Nothing is written until the person confirms;
- * Confirm then writes one ordinary monthly Medical expense per included row
- * through the same create path the expense form uses. The row and payload
- * logic is in `medicare-premium-helper.ts`.
+ * Preview dialog for the Expenses page "Add Medicare premiums" helper. Confirm
+ * writes one monthly Medical expense per included row through the expense form's
+ * create path; the row and payload logic is in `medicare-premium-helper.ts`.
  */
 import React, { useState } from 'react';
 import { Alert } from '../components/Alert';

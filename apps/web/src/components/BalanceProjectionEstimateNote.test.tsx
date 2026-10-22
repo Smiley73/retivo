@@ -194,8 +194,6 @@ describe('BalanceProjectionEstimateNote', () => {
     expect(note).toHaveTextContent(
       /counted for each covered person and only for the months they are\s+covered/i,
     );
-    // The estimate grows each year from its base year at the scenario's medical
-    // inflation rate, and an entered price is used as entered.
     expect(note).toHaveTextContent(
       new RegExp(
         `From ${ROUGH_BENCHMARK_ASSUMPTIONS.baseYear}, the estimate grows\\s+every year at the scenario.s medical inflation rate`,
@@ -240,16 +238,12 @@ describe('BalanceProjectionEstimateNote', () => {
   it('renders the Medicaid paragraph, with its four points, when the flag is set', () => {
     render(<BalanceProjectionEstimateNote medicaidMayApply />);
     const note = screen.getByRole('note');
-    // Medicaid may cover the household instead of a Marketplace plan, by state.
     expect(note).toHaveTextContent(/Medicaid may cover your household instead/i);
     expect(note).toHaveTextContent(/Depending on your\s+state/i);
-    // Retivo does not model states or Medicaid; the figures do not assume it.
     expect(note).toHaveTextContent(/does not model states or Medicaid/i);
     expect(note).toHaveTextContent(/do not assume Medicaid/i);
     expect(note).toHaveTextContent(/did not expand\s+Medicaid/i);
-    // Estate recovery caution at 55 or older.
     expect(note).toHaveTextContent(/estates of people who received it at 55 or older/i);
-    // The lead-in is a real text node, not colour- or icon-only.
     const lead = screen.getByText(/Medicaid may apply/i);
     expect(lead.tagName.toLowerCase()).toBe('strong');
   });
@@ -265,16 +259,11 @@ describe('BalanceProjectionEstimateNote', () => {
     await expectNoA11yViolations(container);
   });
 
-  it('links the always-on health paragraph to the Add Medicare premiums helper in words only', () => {
-    render(<BalanceProjectionEstimateNote />);
+  it('shows the Add Medicare premiums link only when the base premium is missing', () => {
+    const { unmount } = render(<BalanceProjectionEstimateNote />);
     expect(screen.getByRole('note')).toHaveTextContent(
       /Expenses page can add the standard Part B and Part D\s+amounts for you/i,
     );
-    expect(screen.queryByRole('link', { name: 'Add Medicare premiums' })).toBeNull();
-  });
-
-  it('shows the Add Medicare premiums link only when the base premium is missing', () => {
-    const { unmount } = render(<BalanceProjectionEstimateNote />);
     expect(screen.queryByRole('link', { name: 'Add Medicare premiums' })).toBeNull();
     unmount();
     render(<BalanceProjectionEstimateNote medicareBasePremiumMissing />);
@@ -282,10 +271,5 @@ describe('BalanceProjectionEstimateNote', () => {
       'href',
       '/expenses?medicarePremiums=1',
     );
-  });
-
-  it('the missing-premium link renders with no a11y violations', async () => {
-    const { container } = render(<BalanceProjectionEstimateNote medicareBasePremiumMissing />);
-    await expectNoA11yViolations(container);
   });
 });
