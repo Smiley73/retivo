@@ -17,6 +17,15 @@ import type { AccountType } from '../db/types';
 
 export type AccountBucket = 'pretax' | 'roth' | 'taxable' | 'cash' | 'tax_free';
 
+/** Plain-language bucket names, in the user guide's words. */
+export const ACCOUNT_BUCKET_LABEL: Readonly<Record<AccountBucket, string>> = {
+  pretax: 'Tax-deferred',
+  roth: 'Roth',
+  taxable: 'Taxable',
+  cash: 'Cash',
+  tax_free: 'HSA',
+};
+
 export function accountBucket(type: AccountType): AccountBucket {
   switch (type) {
     case 'RETIREMENT_ROTH_IRA':

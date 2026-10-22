@@ -19,6 +19,11 @@
  */
 import type { ScenarioAggregate } from './scenario-resolution';
 
+/** The label scenario pickers show: the name, with " (Base)" on the primary one. */
+export function scenarioOptionLabel(scenario: ScenarioAggregate): string {
+  return `${scenario.payload.name}${scenario.payload.isPrimary ? ' (Base)' : ''}`;
+}
+
 export interface ScenarioTreeEntry {
   scenario: ScenarioAggregate;
   depth: number;

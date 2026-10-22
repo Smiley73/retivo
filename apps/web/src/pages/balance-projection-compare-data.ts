@@ -80,7 +80,8 @@ export interface CompareData {
     readonly drivers: CompareDrivers | null;
   };
   readonly identity: {
-    /** The two planned year-by-year results are structurally equal. */
+    /** The planned years and every deflated figure are equal: equal nominal
+     *  years alone can hide an inflation-only difference. */
     readonly planned: boolean;
     /** The two stress-test cache keys are equal; `null` when either is unknown. */
     readonly stress: boolean | null;
@@ -98,6 +99,14 @@ function sum<T>(items: ReadonlyArray<T>, value: (item: T) => number): number {
 function plannedYears(data: PipelineData): ReadonlyArray<DrawdownYear> | null {
   const planned = data.pageResult?.planned;
   return planned && planned.years.length > 0 ? planned.years : null;
+}
+
+/** A runner result, no unconfigured CBP election, and at least one planned year. */
+export function hasPlannedProjection(data: PipelineData): boolean {
+  return (
+    plannedYears(data) !== null &&
+    drawdownByMethodFromPageResult(data.pageResult)?.planned != null
+  );
 }
 
 function withdrawalYears(
@@ -226,7 +235,11 @@ export function buildCompareData(args: {
       drivers: diffDrivers(v.drivers, c.drivers),
     },
     identity: {
-      planned: vYears !== null && cYears !== null && structurallyEqual(vYears, cYears),
+      planned:
+        vYears !== null &&
+        cYears !== null &&
+        structurallyEqual(vYears, cYears) &&
+        structurallyEqual(v, c),
       stress:
         stressCacheKeys.viewed === null || stressCacheKeys.comparison === null
           ? null

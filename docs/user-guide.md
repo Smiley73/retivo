@@ -395,8 +395,11 @@ A scenario is a "what if?" version of your plan. Open **Planning → Scenarios**
   [Reading projections](#reading-projections). **Recalculate** (or **Recalculate
   all**) refreshes the stress-test numbers.
 - The **Active** badge marks the scenario that is active. Change it with the
-  **Active Scenario** picker in the sidebar. The choice is stored per device, in
-  that browser.
+  **Active Scenario** picker in the sidebar, or with **Compare with parent** on a
+  card. The choice is stored per device, in that browser.
+- A scenario with a parent has a **Compare with parent** link under its name. It
+  makes that scenario the active one and opens **Projections** on the **Compare**
+  view against its parent. The base scenario has no parent, so no link.
 - Use the pencil icon to open a scenario. The active scenario and the base
   scenario cannot be deleted. Deleting a scenario with children deletes them too.
 
@@ -537,7 +540,7 @@ There is no separate Monte Carlo screen: the stress test is a basis on this page
 One is the other adjusted by the scenario's inflation rate. The Expenses screen
 has the same toggle.
 
-### The five views
+### The six views
 
 Tabs under the controls, **Projection views**, split the page:
 
@@ -562,6 +565,54 @@ Tabs under the controls, **Projection views**, split the page:
   portfolio with the "4% rule" and "4.5% rule" lines. These are rules of thumb
   from published research, not forecasts, and the page notes that they are stated
   before tax while the comparison is after tax.
+- **Compare**: sets the scenario you are viewing against one other scenario. Pick
+  it in the **Compare with** list, which shows every other scenario indented the
+  same way as the **Active Scenario** list in the sidebar. It starts on the
+  viewed scenario's parent; on Base, which has no parent, it asks you to pick
+  one, and with only one scenario it says there is nothing to compare with and
+  links to **Scenarios**. The choice is remembered in your browser for each
+  scenario you view, and a link ending `?view=compare&with=` plus a scenario's
+  id opens the tab with that scenario chosen. A table shows both scenarios side
+  by side, each headed by its name and its horizon year: the **ending balance at
+  the horizon**, the year money runs out (or "Never"), and a **Difference**
+  column that is the viewed scenario minus the other, written with a sign and a
+  word such as "more" or "later" so it never relies on colour. Compare always
+  uses the Planned projection in today's dollars, so the **Basis** menu and the
+  **Today's dollars** / **Future dollars** switch in the header do not apply to
+  it.
+  Below it a **Drivers** table sets the lifetime totals side by side in today's
+  dollars, each scenario using its own inflation, with the same
+  viewed-minus-other **Difference** column: **Federal income tax**, **Medicare
+  surcharges (IRMAA)**, **ACA health credits**, **Roth conversions**,
+  **Required minimum distributions** and **Qualified charitable distributions
+  (QCD)**, and a **Years of withdrawals** row for each type of account
+  (tax-deferred, Roth, taxable, cash, HSA), counting the years in which any
+  account of that type withdrew, required minimums and conversion-tax funding
+  included. The three tax rows always show; the others appear only when they are
+  not zero in both scenarios. A note under the table says these are differences
+  between the totals of two complete projections and that the model does not
+  split the gap among the rows, since one change usually moves several lines.
+  When one scenario's plan ends later than the other's, the note also says which
+  one runs longer, to which year, and that its totals cover those extra years.
+  When the two Planned projections are identical, one sentence says so in place
+  of the headline and the table, followed by what the child scenario changes
+  from its parent (grouped like the scenario page) or that it changes nothing;
+  the stress test is checked separately, and when both scenarios would run the
+  same stress test the sentence says so.
+  Between the headline and the Drivers table a **Plan success** row sets the two
+  scenarios' stress-test results side by side. Opening the tab starts whichever
+  stress test has no current result: your scenario's is the one the page already
+  runs, and the other scenario's is read from its saved result when there is one
+  and otherwise calculated in the background, with a progress bar. Nothing else
+  on the tab waits for it. A figure appears only once the stress test has
+  finished for the plan on screen, and goes back to "—" while it reruns after an
+  edit. The difference is written with a sign and a word ("+10pp higher"), or
+  reads **About the same** with a line explaining why: the stress test is a
+  random sample, so a gap smaller than its sampling noise is not a real
+  difference. If the other scenario's calculation fails, the row says so and
+  offers **Try again** without affecting the rest of the tab. Two scenarios that
+  would run the same stress test and whose Planned results are identical show no
+  row.
 
 Most charts and bands have a small **(i)** button that explains what they show.
 
@@ -574,7 +625,8 @@ Most charts and bands have a small **(i)** button that explains what they show.
   date, and the tax figure is a simplified estimate, not a tax return.
 - Comparing two plans that differ by a point or so of success is mostly noise: the
   stress test is a sample, and the same plan re-run can move by a fraction of a
-  point.
+  point. **Compare** applies this rule for you: a gap smaller than the sampling
+  noise reads "about the same" instead of a number.
 - The stress-test explainer lists what it does and does not model. Open the
   **(i)** beside **Success probability** to read it.
 

@@ -6,9 +6,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  COMPARE_WITH_PARAM,
   MC_BASIS_LABELS,
   METHOD_LABELS,
   VIEW_ORDER,
+  compareDeepLink,
   parseBalanceProjectionView,
   resolvedBasisLabel,
 } from './balance-projection-page-constants';
@@ -49,7 +51,21 @@ describe('parseBalanceProjectionView', () => {
     }
   });
 
-  it('places the safe-withdrawal-rate tab last (tab row AND print order)', () => {
-    expect(VIEW_ORDER[VIEW_ORDER.length - 1]).toBe('swr');
+  it('places the compare tab last, after safe withdrawal rate (tab row AND print order)', () => {
+    expect(VIEW_ORDER[VIEW_ORDER.length - 1]).toBe('compare');
+    expect(VIEW_ORDER[VIEW_ORDER.length - 2]).toBe('swr');
+  });
+
+  it('accepts compare', () => {
+    expect(parseBalanceProjectionView('compare')).toBe('compare');
+  });
+});
+
+describe('compareDeepLink', () => {
+  it('targets the Compare view with the comparison id in the shared param', () => {
+    const url = new URL(compareDeepLink('sc-base'), 'http://x');
+    expect(url.pathname).toBe('/balance-projection');
+    expect(parseBalanceProjectionView(url.searchParams.get('view'))).toBe('compare');
+    expect(url.searchParams.get(COMPARE_WITH_PARAM)).toBe('sc-base');
   });
 });

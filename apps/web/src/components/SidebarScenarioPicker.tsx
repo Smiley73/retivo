@@ -15,18 +15,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Select } from './Select';
 import { useAuth } from '../auth/AuthContext';
+import { listAggregates, readSelectedScenario } from '../db/store';
 import {
-  listAggregates,
-  readSelectedScenario,
-  writeSelectedScenario,
-} from '../db/store';
-import {
-  notifySelectedScenarioChanged,
   reconcileScenarios,
+  switchSelectedScenario,
 } from '../lib/scenario-mutations';
 import { useAggregates } from '../lib/use-aggregates';
 import { useSelectedScenarioRevision } from '../lib/use-selected-scenario-revision';
-import { buildScenarioTreeOptions } from '../lib/scenario-tree-options';
+import { buildScenarioTreeOptions, scenarioOptionLabel } from '../lib/scenario-tree-options';
 import type { Aggregate, ScenarioPayload } from '../db/types';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 
@@ -96,11 +92,7 @@ export const SidebarScenarioPicker: React.FC = () => {
 
   const onChange = async (next: string) => {
     setSelectedId(next);
-    await writeSelectedScenario({
-      scenarioId: next,
-      updatedAt: new Date().toISOString(),
-    });
-    notifySelectedScenarioChanged();
+    await switchSelectedScenario(next);
   };
 
   if (scenarios.length === 0 || selectedId === null) return null;
@@ -110,7 +102,7 @@ export const SidebarScenarioPicker: React.FC = () => {
   const treeOptions = buildScenarioTreeOptions(scenarios).map(
     ({ scenario: s, depth }) => ({
       value: s.id,
-      label: `${s.payload.name}${s.payload.isPrimary ? ' (Base)' : ''}`,
+      label: scenarioOptionLabel(s),
       depth,
     }),
   );

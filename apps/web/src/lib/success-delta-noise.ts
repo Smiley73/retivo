@@ -34,3 +34,38 @@ export function successDeltaGate(
   const delta = p1 - p2;
   return { delta, se, meaningful: Math.abs(delta) > se };
 }
+
+/** A success probability (0..1) and the path count of the run behind it. */
+export interface SuccessSample {
+  readonly probability: number;
+  readonly pathCount: number;
+}
+
+/** `signal` carries the signed whole-point difference (`first - second`);
+ *  `same` is noise (`|delta| <= se`) or a gap that rounds to 0 points, the
+ *  rule `GuardrailDeltaBadge` applies. */
+export type SuccessDeltaVerdict =
+  | { readonly kind: 'signal'; readonly points: number; readonly se: number }
+  | {
+      readonly kind: 'same';
+      readonly reason: 'noise' | 'rounds-to-zero';
+      readonly se: number;
+    };
+
+/** The verdict for `first - second`, or `null` while either side is missing. */
+export function successDeltaVerdict(
+  first: SuccessSample | null,
+  second: SuccessSample | null,
+): SuccessDeltaVerdict | null {
+  if (first === null || second === null) return null;
+  const { delta, se, meaningful } = successDeltaGate(
+    first.probability,
+    first.pathCount,
+    second.probability,
+    second.pathCount,
+  );
+  if (!meaningful) return { kind: 'same', reason: 'noise', se };
+  const magnitude = Math.round(Math.abs(delta) * 100);
+  if (magnitude === 0) return { kind: 'same', reason: 'rounds-to-zero', se };
+  return { kind: 'signal', points: delta > 0 ? magnitude : -magnitude, se };
+}

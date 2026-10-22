@@ -48,6 +48,32 @@ export function parseDisplayMode(stored: string | null): DisplayMode {
   return stored === 'future' ? 'future' : 'today';
 }
 
+/** localStorage key for the Compare tab's remembered choices: a JSON object
+ *  mapping each viewed scenario id to the scenario it was last compared with. */
+export const COMPARE_CHOICE_STORAGE_KEY =
+  'retivo.balanceProjection.compareWith';
+
+/** The stored map; anything but a JSON object of strings reads as empty, never throws. */
+export function parseCompareChoices(
+  stored: string | null,
+): ReadonlyMap<string, string> {
+  if (stored === null) return new Map();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stored);
+  } catch {
+    return new Map();
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return new Map();
+  }
+  return new Map(
+    Object.entries(parsed).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
+  );
+}
+
 /**
  * Granularity of the cashflow + income-breakdown chart bands.
  *

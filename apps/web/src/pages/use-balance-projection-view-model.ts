@@ -477,6 +477,10 @@ export function useBalanceProjectionViewModel(
       todayYear: nowYear,
       todayMonthIndex: nowMonthIndex,
       method: 'planned',
+      // Without it the stress test falls back to the legacy `cat-medical` default.
+      ...(data.medicalCategoryIds
+        ? { medicalCategoryIds: data.medicalCategoryIds }
+        : {}),
     };
   }, [
     data,

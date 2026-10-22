@@ -143,6 +143,9 @@ export interface PlanStressTestVm {
    *  comparison withholds itself on `null` rather than differencing a fresh
    *  input against a stale result. */
   stressPairSignature: string | null;
+  /** A run for the plan on screen is queued behind the debounce or requested
+   *  and not yet ended. False after a cancel: nothing more is coming. */
+  runPending: boolean;
   /** Birth year of the household's youngest member (the latest birth year)
    *  — the anchor for the longevity stress's age-105 cap. `null` when no
    *  member has a usable birthdate, which WITHHOLDS the stress comparison
@@ -308,9 +311,12 @@ interface PrimaryRunState {
     readonly signature: string;
     readonly summary: MonteCarloSummary;
   } | null;
+  /** Id of the last request that ended by any path (summary, cancel, error);
+   *  `status === 'running'` alone misses the provider's cache work. */
+  readonly endedId: number;
 }
 
-const NO_PRIMARY_RUN: PrimaryRunState = { requested: null, settled: null };
+const NO_PRIMARY_RUN: PrimaryRunState = { requested: null, settled: null, endedId: 0 };
 
 /**
  * Hook signature: takes `runArgs` + `cbpResolution` + `displayMode`
@@ -440,20 +446,29 @@ export function usePlanStressTestVm(
           // caller cannot hang). Nothing new reached the screen, so the run that
           // IS on screen stays settled — a cancelled Recalculate leaves the plan
           // and its displayed summary exactly as they were.
-          if (summary === null) return;
-          setPrimaryRun((prev) =>
-            prev.requested !== null && prev.requested.id === runId
-              ? { ...prev, settled: { signature: currentSignature, summary } }
-              : // A newer request already replaced this one — its own completion
-                // is the only thing allowed to settle the pair.
-                prev,
-          );
+          setPrimaryRun((prev) => {
+            // A newer request already replaced this one — its own completion
+            // is the only thing allowed to settle the pair or end the run.
+            if (prev.requested === null || prev.requested.id !== runId) return prev;
+            return summary === null
+              ? { ...prev, endedId: runId }
+              : {
+                  ...prev,
+                  endedId: runId,
+                  settled: { signature: currentSignature, summary },
+                };
+          });
         })
         .catch(() => {
           // A worker failure is already surfaced through the provider's `error`
           // (the retry button). It produces no new summary, so — as with a
           // cancel — the previously settled run stays settled; what withholds
           // the pair is a plan EDIT, via the signature comparison below.
+          setPrimaryRun((prev) =>
+            prev.requested !== null && prev.requested.id === runId
+              ? { ...prev, endedId: runId }
+              : prev,
+          );
         });
     },
     [mcInput, currentSignature, runToCompletion],
@@ -510,6 +525,11 @@ export function usePlanStressTestVm(
     currentSignature !== null &&
     lastRunSignature !== currentSignature;
   const isRunning = status === 'running';
+  const runPending =
+    mcInput !== null &&
+    !cbpFailed &&
+    (currentSignature !== lastRunSignature ||
+      (primaryRun.requested !== null && primaryRun.endedId !== primaryRun.requested.id));
 
   // Downturn-guardrail with/without comparison. The
   // hook owns the forced-off sibling run: when the active scenario ENABLES the
@@ -729,6 +749,7 @@ export function usePlanStressTestVm(
     // the cache read, or the worker withholds the comparison instead of pairing
     // across that edit.
     stressPairSignature: pairKey,
+    runPending,
     longestLivedBirthYear,
     lastSurvivor: extras.lastSurvivor,
     cbpValidation: cbpResolution,

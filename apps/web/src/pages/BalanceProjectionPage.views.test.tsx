@@ -109,6 +109,13 @@ const VIEW_MARKERS: Readonly<
       { name: /Safe withdrawal rate comparison/ },
       { timeout: 5000 },
     ),
+  // The panel heading renders before, and without, the second projection.
+  compare: () =>
+    screen.findByRole(
+      'heading',
+      { name: 'Compare scenarios' },
+      { timeout: 5000 },
+    ),
 };
 
 /** True when `el` or an ancestor carries `data-inert` — the attribute React

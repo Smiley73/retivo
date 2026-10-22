@@ -12,7 +12,7 @@ function scenario(
 }
 
 const keysOf = (list: ReturnType<typeof buildScenarioChangeList>) =>
-  list.groups.flatMap((g) => g.changes.map((c) => c.key));
+  list.groups.flatMap((g) => g.changes.flatMap((c) => c.keys));
 
 describe('buildScenarioChangeList', () => {
   it('counts the sparse sections only when they carry something', () => {
@@ -52,5 +52,24 @@ describe('buildScenarioChangeList', () => {
       'Withdrawals & taxes',
     ]);
     expect(keysOf(list)).toEqual(['retirementAge', 'inflation', 'acaFplRegion']);
+  });
+
+  it('lists a card once however many of its keys are set, and omits the working-years taxable income', () => {
+    const scenarios = [
+      scenario('base', null, {}),
+      scenario('leaf', 'base', {
+        withdrawalStrategy: { kind: 'taxEfficient' },
+        magiCap: { enabled: false } as never,
+        taxFilingPlan: undefined,
+        preRetirementTaxableIncomeDollars: 50_000,
+      }),
+    ];
+    const { groups } = buildScenarioChangeList('leaf', 'base', scenarios);
+    expect(groups).toEqual([
+      {
+        title: 'Withdrawals & taxes',
+        changes: [{ card: 'Withdrawal strategy', keys: ['withdrawalStrategy', 'magiCap'] }],
+      },
+    ]);
   });
 });

@@ -3,13 +3,13 @@
 This page explains how RETIVO turns a plan into balances over time and into the
 stress-test numbers. It covers the **Planned** and **Historical** projections,
 the Monte Carlo stress test and its **Typical**, **Pessimistic** and
-**Bad-luck** outcomes, the four market stress tests, spending guardrails and the
-safe withdrawal rate comparison. It is for anyone with basic personal-finance
-knowledge. You do not need to read code. For each topic it says what the number
-means, what goes in, the steps in words, the built-in figures and the dates they
-apply to, and what the app simplifies. It is an explanation of the model, not
-advice: the results are estimates built from what you entered, and a simulation
-is not a forecast.
+**Bad-luck** outcomes, the four market stress tests, spending guardrails, the
+safe withdrawal rate comparison and the comparison of two scenarios. It is for
+anyone with basic personal-finance knowledge. You do not need to read code. For
+each topic it says what the number means, what goes in, the steps in words, the
+built-in figures and the dates they apply to, and what the app simplifies. It is
+an explanation of the model, not advice: the results are estimates built from
+what you entered, and a simulation is not a forecast.
 
 It leaves out what other pages cover. The yearly withdrawal order and the tax
 loop are on the [withdrawals page](math-withdrawals.md). Planned return rates,
@@ -20,7 +20,7 @@ rules the projection applies each year are on the [taxes page](math-taxes.md),
 the
 [Social Security and health costs page](math-social-security-and-health.md) and
 the [retirement accounts page](math-retirement-accounts.md). For where the
-controls sit on screen (the **Basis** menu, the five views, the buttons), see
+controls sit on screen (the **Basis** menu, the six views, the buttons), see
 [Reading projections](user-guide.md#reading-projections) in the user guide. For
 how the calculation engine fits into the app, see
 [architecture.md](architecture.md).
@@ -39,6 +39,7 @@ how the calculation engine fits into the app, see
 | **Market stress tests** | The same 10,000 paths rerun with one change each: higher fees, lower returns, higher inflation or a longer life. |
 | **Spending guardrails** | An optional rule that trims spending after a bad stretch and restores it after a good one, inside every stress-test path. |
 | **Safe withdrawal rate** | A comparison of your plan's first full year of withdrawals with the 4% and 4.5% rules of thumb. |
+| **Compare** | The viewed scenario set beside one other scenario on the Planned projection in today's dollars: the ending balance at each one's own horizon and the year money runs out. |
 
 ## Planned and Historical
 
@@ -102,7 +103,9 @@ is displayed.
   set.
 - **Roth conversions card.** Its bars and its total always show the actual
   dollars converted in each year, in future dollars, whichever way the switch
-  is set. They are not adjusted for inflation.
+  is set. They are not adjusted for inflation. The
+  **Roth conversions** row in the Compare view's Drivers table is the exception:
+  it shows the same conversions in today's dollars.
 - **Safe withdrawal rate lines.** They are built from today's-dollar figures and
   turned back into each year's future dollars when you switch to Future dollars.
 
@@ -393,6 +396,114 @@ not shown when there is no retirement age, when the retirement date has already
 passed, when there is no full retirement year in the plan, or when the active
 basis has no result.
 
+## Comparing two scenarios
+
+The **Compare** view sets the scenario you are viewing beside one other scenario
+you choose, starting with the viewed scenario's parent. Each scenario is
+projected on its own, so the two sets of figures come from two separate
+projections and the view reports what each shows and how they differ. It does
+not say why.
+
+- **Always Planned, always today's dollars.** The header **Basis** menu and the
+  Today's and Future dollars switch do not apply. Planned exists for every
+  scenario, so the two sides always rest on the same basis.
+- **Each side keeps its own inflation.** Two scenarios can set different
+  inflation rates, so each side's amounts are divided by that scenario's own
+  rate, compounded from the current month to the December of the amount's year,
+  as under [Today's dollars and Future dollars](#todays-dollars-and-future-dollars).
+- **Each side ends at its own horizon.** A scenario that sets a different life
+  expectancy ends in a different year. The column heads name each scenario's
+  horizon year, and the ending balances are not taken in the same year.
+- **Ending balance.** The Planned balance at the horizon, in today's dollars:
+  the same figure as the **Planned · at horizon** total on the Overview.
+- **Year money runs out.** The first year the Planned projection cannot fund
+  spending plus tax, as described under [Planned and Historical](#planned-and-historical),
+  or "Never" when it always can.
+- **The difference.** Always the viewed scenario minus the other. A positive
+  amount reads "more", a negative one "less", and a year reads "later" or
+  "earlier". An amount that rounds to nothing reads "No difference". When only
+  one scenario runs out, there is no number to subtract and the view says which
+  one does.
+
+### Drivers
+
+Under the headline, a **Drivers** table sets the two scenarios' lifetime totals
+side by side, each with the same viewed-minus-other difference. Every dollar row
+is the Planned total for the years up to the last life-expectancy year, with
+each scenario's amounts divided by its own inflation, so the three tax rows are
+the same figures as the Taxes view's tiles (**Federal income tax**, **Medicare
+surcharges (IRMAA)**, **ACA health credits**, the last as a credit received).
+
+- **Roth conversions** is the one dollar row that differs from the Taxes view,
+  which shows the dollars converted in each year's own (future) dollars. Compare
+  shows them in today's dollars, like every other row.
+- **Required minimum distributions** is the full yearly requirement, the part
+  met plus any shortfall. **Qualified charitable distributions (QCD)** is the
+  amount given, in today's dollars.
+- **Years of withdrawals** has one row per account type (tax-deferred, Roth,
+  taxable, cash, HSA). It counts the Planned years, up to the last
+  life-expectancy year, in which any account of that type withdrew money.
+  Required minimum distributions and the withdrawals that pay a Roth
+  conversion's tax count. The difference reads "more" or "less" years.
+- **Rows that do not apply are left out.** The three tax rows always show. A
+  Roth conversions, RMD, QCD or account-type row that is zero in both scenarios
+  is omitted, as the Taxes view omits those bands when they do not apply.
+- **No attribution.** The table shows the totals of two complete projections.
+  The model does not apportion the gap among the rows, because changing one
+  input usually moves several lines at once (a later retirement age changes tax,
+  conversions, required distributions and which accounts are drawn on together),
+  so there is no decomposition to report, and the rows are not ranked.
+- **Different horizons.** When the two scenarios end in different years, the
+  longer one's lifetime totals cover the extra years, and the view says which
+  scenario runs longer and to which year.
+- **Identical results.** When the two Planned projections match year for year,
+  the headline and the table are replaced by a sentence saying so. For a pair on
+  the same inheritance line it lists the descendant's settings that differ from
+  the ancestor's (every scenario on the chain between them counts), grouped as
+  on the scenario page, or says it changes nothing. The check compares results,
+  not settings, so a scenario that sets a value its parent already has is
+  identical and still listed. The stress test is checked separately: a setting
+  that only the stress test reads, such as spending guardrails, can leave the
+  Planned projections identical.
+
+### Plan success in Compare
+
+Between the headline and the Drivers table, the **Plan success** row sets the
+two scenarios' stress-test success probabilities side by side.
+
+- **Rule.** The two runs are separate samples, so the error of their difference
+  is the independent two-proportion standard error,
+  `se = sqrt(p1(1−p1)/n1 + p2(1−p2)/n2)`, where `p` is each success probability
+  and `n` the number of paths behind it (10,000 each today, read from each
+  result). A difference is shown only when `|p1 − p2| > se`; otherwise the row
+  reads "about the same" and says the gap is within the stress test's sampling
+  noise. A gap that clears the noise but rounds to zero percentage points at
+  whole-point precision also reads "about the same", the rule the guardrail
+  comparison uses, so a row can read "92% vs 91%, about the same": the figures
+  shown are rounded, the difference is taken from the unrounded probabilities.
+  A difference that is shown is the viewed scenario minus the other, as a sign,
+  whole percentage points and a word ("higher" or "lower").
+- **Why this error.** The two runs share no per-path outcomes (the result keeps
+  summaries only), so the paired error is not available. The independent error
+  is the right one for independent draws and conservative if the two seeds
+  happen to match: it can hide a real gap, never invent one.
+- **Your scenario's figure** is the stress test the page already runs, and is
+  shown only once a completed run for the plan on screen has finished. Until
+  then, and again after any edit, it reads "—".
+- **The other scenario's figure** comes from its saved result when one exists
+  (the same one the Projections page and the Scenarios page use), and otherwise
+  from a run of the same 10,000 paths on a background worker, started once your
+  scenario's own run has finished so the two do not compete for the same cores.
+  A finished run is saved for the next visit. Leaving the tab does not stop it;
+  changing the other scenario, or an edit that changes its inputs, does.
+- **Recalculate** on either scenario draws a new sample for that scenario only,
+  so it can move the gap by noise alone.
+- **When there is no row.** If both scenarios would run exactly the same stress
+  test (identical inputs) and their Planned projections are identical, the row
+  is left out: the answer is the same by construction. A scenario that cannot
+  run the stress test (no retirement age, no active account, an incomplete
+  setup) shows "—" for its side and a short note.
+
 ## Built-in figures and years
 
 The market data is the only part of this page tied to dates. Everything else is
@@ -512,7 +623,11 @@ All paths are under `apps/web/src`.
 | `lib/monte-carlo-summary.ts` | Percentiles, the tiers, the example path and the alternatives. |
 | `lib/monte-carlo-input-signature.ts` | The plan's content signature and the seed an automatic run draws from it. |
 | `components/PlanStressTestSection.tsx` | Using that seed, and Recalculate. |
-| `lib/success-delta-noise.ts` | The noise check on a difference between two success probabilities. |
+| `pages/use-balance-projection-compare.ts`, `pages/balance-projection-page-compare.tsx` | Which scenario Compare uses, the second projection that runs only while the tab is open, and the headline table. |
+| `pages/balance-projection-page-compare-drivers.tsx`, `lib/account-bucket.ts` | The Drivers table, its note and horizon sentence, the identical-results sentence, and the account-type names. |
+| `lib/view-deflator.ts` | The remembered Compare choice, one comparison scenario per viewed scenario, kept in your browser beside the display mode. |
+| `lib/success-delta-noise.ts` | The noise check on a difference between two success probabilities, and what the Plan success row prints for it. |
+| `monte-carlo/use-compare-stress.ts`, `pages/balance-projection-page-compare-stress.tsx` | The Plan success row: your scenario's result from the page, the other scenario's from the saved result or one background run, and the row's rendering. |
 | `pages/balance-projection-compare-data.ts`, `lib/signed-difference.ts`, `lib/scenario-change-list.ts`, `lib/structural-equality.ts` | The figures two scenarios are compared on, how a difference reads, the list of settings that changed, and the identical-results check. |
 | `db/monte-carlo-cache.ts` | Saved results, checked against the engine version, and a read that leaves them untouched. |
 | `assistant/tools/stress-test.ts` | The AI assistant's stress test: the saved result if there is one, otherwise the page's 10,000 paths and seed, run in the open tab and saved nowhere. |

@@ -23,7 +23,12 @@
  * Note: the storage flag stays `isPrimary: boolean` — only the
  * user-facing role term renames to "base."
  */
-import { listAggregates, withBatchedStoreSignals, type Batch } from '../db/store';
+import {
+  listAggregates,
+  withBatchedStoreSignals,
+  writeSelectedScenario,
+  type Batch,
+} from '../db/store';
 import { queueLocalMutation } from '../sync/mutation-queue';
 import { resolveScenario, type ScenarioAggregate } from './scenario-resolution';
 import type { Aggregate, ScenarioPayload } from '../db/types';
@@ -80,6 +85,17 @@ export const SELECTED_SCENARIO_CHANGED_EVENT = 'retivo.scenarios.selected-change
 export function notifySelectedScenarioChanged(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
+}
+
+/** The one way to switch the active scenario: write the per-device pointer,
+ *  then notify. Resolves only after the write has landed, so a caller that
+ *  navigates next never mounts a page that reads the previous pointer. */
+export async function switchSelectedScenario(scenarioId: string): Promise<void> {
+  await writeSelectedScenario({
+    scenarioId,
+    updatedAt: new Date().toISOString(),
+  });
+  notifySelectedScenarioChanged();
 }
 
 interface PromotionMarker {
