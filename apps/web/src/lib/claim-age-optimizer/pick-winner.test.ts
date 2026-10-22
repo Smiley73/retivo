@@ -164,3 +164,38 @@ describe('baselineMetricForResolved', () => {
     expect(baseline).toBeUndefined();
   });
 });
+
+describe('pickWinner — stored month-level pair', () => {
+  const stored = { ...result(66, 67, 1_900_000), primaryAgeMonths: 4 };
+  const resolved = {
+    primaryAgeYears: 66,
+    primaryAgeMonths: 4,
+    secondaryAgeYears: 67,
+    secondaryAgeMonths: 0,
+  };
+
+  it('wins with its months, already at optimum, when it beats every whole year', () => {
+    const results = [result(66, 67, 1_800_000), stored, result(70, 67, 1_850_000)];
+    const winner = pickWinner({ results, currentResolvedPair: resolved });
+    expect(winner).toEqual({
+      primaryAgeYears: 66,
+      primaryAgeMonths: 4,
+      secondaryAgeYears: 67,
+      metricValue: 1_900_000,
+      alreadyAtOptimum: true,
+    });
+  });
+
+  it('breaks an exact tie to the lower total-months age', () => {
+    const tie = [{ ...result(66, 67, 1), primaryAgeMonths: 4 }, result(66, 67, 1)];
+    expect(pickWinner({ results: tie, currentResolvedPair: null })?.primaryAgeMonths).toBeUndefined();
+    const reversed = [...tie].reverse();
+    expect(pickWinner({ results: reversed, currentResolvedPair: null })?.primaryAgeMonths).toBeUndefined();
+    // Secondary months break a primary tie the same way.
+    const secondary = [
+      { ...result(66, 67, 1), secondaryAgeMonths: 3 },
+      result(66, 67, 1),
+    ];
+    expect(pickWinner({ results: secondary, currentResolvedPair: null })?.secondaryAgeMonths).toBeUndefined();
+  });
+});

@@ -63,6 +63,7 @@ import type {
 } from '../db/types';
 import { DEFAULT_LIFE_EXPECTANCY_AGE } from '../db/types';
 import type { MonteCarloInput } from './monte-carlo';
+import { totalMonths } from './claim-age-optimizer/pick-winner';
 // Vite `?worker` import — same pattern as `MonteCarloProvider.tsx`.
 import MCWorker from '../workers/monte-carlo.worker.ts?worker';
 import {
@@ -569,16 +570,24 @@ export async function runOptimizerMonteCarlo(
         // so the winner is identical regardless of reply ordering.
         const candidate: OptimizerMcWinner = {
           primaryAgeYears: triple.primaryAgeYears,
+          ...(triple.primaryAgeMonths !== undefined
+            ? { primaryAgeMonths: triple.primaryAgeMonths }
+            : {}),
           secondaryAgeYears: triple.secondaryAgeYears,
+          ...(triple.secondaryAgeMonths !== undefined
+            ? { secondaryAgeMonths: triple.secondaryAgeMonths }
+            : {}),
           metricValue: reply.summary.successProbability,
         };
         // Capture the baseline (success at the user's current claim ages)
-        // when this triple sits exactly on the resolved whole-year pair.
+        // when this triple sits exactly on the resolved pair, months included.
         if (
           matchesCurrentClaim(
             triple.primaryAgeYears,
             triple.secondaryAgeYears,
             currentSsFor(triple.scenarioId),
+            triple.primaryAgeMonths,
+            triple.secondaryAgeMonths,
           )
         ) {
           baselinesByScenario.set(triple.scenarioId, candidate.metricValue);
@@ -730,9 +739,17 @@ function breaksTieLowerAge(
   candidate: OptimizerMcWinner,
   prior: OptimizerMcWinner,
 ): boolean {
-  if (candidate.primaryAgeYears < prior.primaryAgeYears) return true;
-  if (candidate.primaryAgeYears > prior.primaryAgeYears) return false;
-  const cs = candidate.secondaryAgeYears ?? Number.POSITIVE_INFINITY;
-  const ps = prior.secondaryAgeYears ?? Number.POSITIVE_INFINITY;
+  // Total months, so 66 beats 66 years 4 months on an exact tie.
+  const cp = totalMonths(candidate.primaryAgeYears, candidate.primaryAgeMonths);
+  const pp = totalMonths(prior.primaryAgeYears, prior.primaryAgeMonths);
+  if (cp !== pp) return cp < pp;
+  const cs =
+    candidate.secondaryAgeYears === null
+      ? Number.POSITIVE_INFINITY
+      : totalMonths(candidate.secondaryAgeYears, candidate.secondaryAgeMonths);
+  const ps =
+    prior.secondaryAgeYears === null
+      ? Number.POSITIVE_INFINITY
+      : totalMonths(prior.secondaryAgeYears, prior.secondaryAgeMonths);
   return cs < ps;
 }

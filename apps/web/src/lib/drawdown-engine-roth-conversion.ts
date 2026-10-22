@@ -51,6 +51,9 @@ export interface RothConversionFillResult {
    *  be resolved (no/dangling Roth) — the engine degrades to withdrawal-only and
    *  the UI surfaces a notice. */
   readonly degradedNoTargetRoth: boolean;
+  /** Cents the tax funding drew from each account, by account id. Present only
+   *  when the hook records the zero-conversion point. */
+  readonly taxFundingCentsByAccount?: ReadonlyMap<string, number>;
 }
 
 const NO_CONVERSION: RothConversionFillResult = {
@@ -183,6 +186,9 @@ export function applyRothConversionFill(args: {
   const taxNeedDollars =
     taxCashflow.fundConversionTaxForYear?.(yearIndex, withdrawalClassification, movedDollars) ?? 0;
   const taxNeedCents = Math.round(taxNeedDollars * 100);
+  const postBeforeFunding = taxCashflow.recordsConversionZeroPoint === true
+    ? yearPostWithdrawnByAcct.slice()
+    : undefined;
   const fundedTaxCents = drawCapSafeTaxFunding({
     state,
     targetRothIndex,
@@ -193,7 +199,29 @@ export function applyRothConversionFill(args: {
     excludedIndices,
   });
 
-  return { convertedCents: movedCents, fundedTaxCents, taxNeedCents, degradedNoTargetRoth: false };
+  return {
+    convertedCents: movedCents,
+    fundedTaxCents,
+    taxNeedCents,
+    degradedNoTargetRoth: false,
+    ...(postBeforeFunding === undefined
+      ? {}
+      : { taxFundingCentsByAccount: fundingCentsByAccount(state, postBeforeFunding, yearPostWithdrawnByAcct) }),
+  };
+}
+
+/** What the tax funding added to each account's post-tax draw, in cents. */
+function fundingCentsByAccount(
+  state: readonly AccountRunState[],
+  before: readonly number[],
+  after: readonly number[],
+): ReadonlyMap<string, number> {
+  const out = new Map<string, number>();
+  for (let a = 0; a < state.length; a += 1) {
+    const cents = Math.round((after[a] - before[a]) * 100);
+    if (cents > 0) out.set(state[a].id, cents);
+  }
+  return out;
 }
 
 /**

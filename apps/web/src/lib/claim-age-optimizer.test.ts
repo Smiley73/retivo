@@ -12,7 +12,9 @@
  *     one winner per non-deleted scenario.
  */
 import { describe, expect, it } from 'vitest';
-import { optimiseClaimAgesForScenario } from './claim-age-optimizer';
+import { mergeSsOverride, optimiseClaimAgesForScenario } from './claim-age-optimizer';
+import { runBalanceProjection } from './balance-projection-runner';
+import type { OptimizerMcRunner } from './claim-age-optimizer/types';
 import type {
   AccountBalancePayload,
   AccountPayload,
@@ -21,6 +23,7 @@ import type {
   HouseholdMemberPayload,
   IncomeStreamPayload,
   SocialSecurityBenefitPayload,
+  SocialSecurityOverride,
 } from '../db/types';
 import type { ScenarioAggregate } from './scenario-resolution';
 
@@ -560,5 +563,169 @@ describe('BPP-equivalence: previously-Unsupported categories now compute', () =>
     });
     expect(result.winner).not.toBeNull();
     expect(result.winner?.metricValue).toBeGreaterThan(0);
+  });
+});
+
+describe('optimiseClaimAgesForScenario — stored month-level claim age', () => {
+  const STORED: SocialSecurityOverride = {
+    primary: { ageYears: 66, ageMonths: 4 },
+    secondary: { ageYears: 67, ageMonths: 0 },
+  };
+  const withSs = (ss: SocialSecurityOverride): ScenarioAggregate => {
+    const sc = scenarioFixture('s', 'Base');
+    return { ...sc, payload: { ...sc.payload, overrides: { ...sc.payload.overrides, socialSecurity: ss } } };
+  };
+  const bothMembers = () => [member('m1', true, 'Alex', 1965), member('m2', false, 'Sam', 1968)];
+  const bothBenefits = () => [ssBenefit('m1', 3500), ssBenefit('m2', 2800)];
+
+  /** Plan-success stand-in: records every candidate the orchestrator tries. */
+  function recordingRunner(score: (c: Parameters<OptimizerMcRunner>[0]['candidate']) => number) {
+    const calls: Parameters<OptimizerMcRunner>[0]['candidate'][] = [];
+    const mcRunner: OptimizerMcRunner = async ({ candidate }) => {
+      calls.push(candidate);
+      return { successProbability: score(candidate) };
+    };
+    return { calls, mcRunner };
+  }
+  const run = (
+    sc: ScenarioAggregate,
+    members: Aggregate<HouseholdMemberPayload>[],
+    ssBenefits: Aggregate<SocialSecurityBenefitPayload>[],
+    mcRunner: OptimizerMcRunner,
+  ) =>
+    optimiseClaimAgesForScenario({
+      scenario: sc,
+      scenarios: [sc],
+      members,
+      ssBenefits,
+      ...baseInputs({ members, ssBenefits, scenarios: [sc], expenseAmount: 80_000, portfolio: 1_200_000 }),
+      metric: 'mc',
+      mcRunner,
+      today: TODAY,
+    });
+
+  it('simulates the stored pair exactly once and its baseline is the stored pair, not the rounded year', async () => {
+    const members = bothMembers();
+    const ssBenefits = bothBenefits();
+    const sc = withSs(STORED);
+    const base = baseInputs({ members, ssBenefits, scenarios: [sc], expenseAmount: 80_000, portfolio: 1_200_000 });
+    const direct = (primaryMonths: number): number =>
+      runBalanceProjection({
+        scenarioId: sc.id,
+        scenarios: [sc],
+        ...base,
+        members,
+        ssBenefits,
+        todayYear: TODAY.getUTCFullYear(),
+        todayMonthIndex: TODAY.getUTCMonth(),
+        method: 'planned',
+        candidateOverlay: {
+          socialSecurity: {
+            primary: { ageYears: 66, ageMonths: primaryMonths },
+            secondary: { ageYears: 67, ageMonths: 0 },
+          },
+        },
+      }).atHorizonTodayDollars;
+    // The fixture must tell the stored pair from the rounded year.
+    expect(direct(4)).not.toBe(direct(0));
+
+    const result = await optimiseClaimAgesForScenario({
+      scenario: sc,
+      scenarios: [sc],
+      members,
+      ssBenefits,
+      ...base,
+      metric: 'balance',
+      today: TODAY,
+    });
+    expect(result.baselineMetricValue).toBe(direct(4));
+  });
+
+  it('counts the stored month-level pair once on top of the grid, and dedups a whole-year pair', async () => {
+    const { calls, mcRunner } = recordingRunner(() => 0.5);
+    await run(withSs(STORED), bothMembers(), bothBenefits(), mcRunner);
+    expect(calls).toHaveLength(82);
+    expect(calls.filter((c) => c.primary.ageMonths === 4)).toHaveLength(1);
+
+    const whole = recordingRunner(() => 0.5);
+    await run(
+      withSs({ primary: { ageYears: 66, ageMonths: 0 }, secondary: { ageYears: 67, ageMonths: 0 } }),
+      bothMembers(),
+      bothBenefits(),
+      whole.mcRunner,
+    );
+    expect(whole.calls).toHaveLength(81);
+  });
+
+  it('a stored pair that ranks highest wins "already at optimum" carrying its months; a tie goes to the lower age', async () => {
+    const best = recordingRunner((c) => (c.primary.ageMonths === 4 ? 0.9 : 0.5));
+    const won = await run(withSs(STORED), bothMembers(), bothBenefits(), best.mcRunner);
+    expect(won.winner).toMatchObject({ primaryAgeYears: 66, primaryAgeMonths: 4, secondaryAgeYears: 67, alreadyAtOptimum: true });
+    expect(won.baselineMetricValue).toBe(0.9);
+
+    const flat = recordingRunner(() => 0.5);
+    const tied = await run(withSs(STORED), bothMembers(), bothBenefits(), flat.mcRunner);
+    expect(tied.winner).toMatchObject({ primaryAgeYears: 62, secondaryAgeYears: 62, alreadyAtOptimum: false });
+    expect(tied.baselineMetricValue).toBe(0.5);
+  });
+
+  it('adds no winner when every grid is empty, even with a month-level stored pair', async () => {
+    const members = [member('m1', true, 'Alex', 1955), member('m2', false, 'Sam', 1955)];
+    const { calls, mcRunner } = recordingRunner(() => 0.5);
+    const result = await run(withSs(STORED), members, bothBenefits(), mcRunner);
+    expect(result.winner).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('secondary-only fallback keeps the primary stored months through to the saved override', async () => {
+    const ssBenefits = [ssBenefit('m1', null), ssBenefit('m2', 2800)];
+    const { calls, mcRunner } = recordingRunner((c) => (c.secondary?.ageYears ?? 0) / 100);
+    const result = await run(withSs(STORED), bothMembers(), ssBenefits, mcRunner);
+    for (const c of calls) expect(c.primary).toEqual({ ageYears: 66, ageMonths: 4 });
+    expect(result.winner).toMatchObject({ primaryAgeYears: 66, primaryAgeMonths: 4, secondaryAgeYears: 70 });
+    const merged = mergeSsOverride({
+      currentResolvedOverride: STORED,
+      optimalPair: result.winner!,
+      hasSecondary: true,
+      secondaryPastWindow: false,
+    });
+    expect(merged.primary).toEqual({ ageYears: 66, ageMonths: 4 });
+    expect(merged.secondary).toEqual({ ageYears: 70, ageMonths: 0 });
+  });
+
+  it('primary-only fallback bakes the stored secondary months into every candidate and Save keeps them', async () => {
+    const members = [member('m1', true, 'Alex', 1965), member('m2', false, 'Sam', 1955)];
+    const stored = { primary: { ageYears: 66, ageMonths: 0 }, secondary: { ageYears: 67, ageMonths: 3 } };
+    const { calls, mcRunner } = recordingRunner((c) => c.primary.ageYears / 100);
+    const result = await run(withSs(stored), members, bothBenefits(), mcRunner);
+    for (const c of calls) expect(c.secondary).toEqual({ ageYears: 67, ageMonths: 3 });
+    expect(result.winner).toMatchObject({ primaryAgeYears: 70, secondaryAgeYears: null });
+    const merged = mergeSsOverride({
+      currentResolvedOverride: stored,
+      optimalPair: result.winner!,
+      hasSecondary: true,
+      secondaryPastWindow: true,
+    });
+    expect(merged.primary).toEqual({ ageYears: 70, ageMonths: 0 });
+    expect(merged.secondary).toEqual({ ageYears: 67, ageMonths: 3 });
+  });
+
+  it('primary-only fallback: a winning stored pair has a baseline and reads already at optimum, with or without a stored secondary age', async () => {
+    const members = [member('m1', true, 'Alex', 1965), member('m2', false, 'Sam', 1955)];
+    const stored = {
+      primary: { ageYears: 66, ageMonths: 4 },
+      secondary: { ageYears: 67, ageMonths: 3 },
+    };
+    for (const ss of [stored, { primary: stored.primary }]) {
+      const best = recordingRunner((c) => (c.primary.ageMonths === 4 ? 0.9 : 0.5));
+      const result = await run(withSs(ss), members, bothBenefits(), best.mcRunner);
+      expect(result.winner).toMatchObject({
+        primaryAgeYears: 66,
+        primaryAgeMonths: 4,
+        secondaryAgeYears: null,
+        alreadyAtOptimum: true,
+      });
+      expect(result.baselineMetricValue).toBe(0.9);
+    }
   });
 });

@@ -202,6 +202,7 @@ const PrimaryAgeCell: React.FC<{ view: Extract<RowView, { kind: 'ready' }> }> = 
     <AgeTransition
       current={view.current.primary}
       recommendedYears={view.winner.primaryAgeYears}
+      recommendedMonths={view.winner.primaryAgeMonths}
     />
   );
 };
@@ -228,6 +229,7 @@ const SecondaryAgeCell: React.FC<{
     <AgeTransition
       current={view.current.secondary}
       recommendedYears={view.winner.secondaryAgeYears}
+      recommendedMonths={view.winner.secondaryAgeMonths}
     />
   );
 };

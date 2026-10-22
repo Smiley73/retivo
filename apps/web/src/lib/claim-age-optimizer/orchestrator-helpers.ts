@@ -43,7 +43,11 @@ export interface PairSpec {
    *  `missingPiaMembers` on the OptimizerResult; the page reads those
    *  to render the "PIA not set" callout in the primary cell. */
   readonly primaryAgeYears: number;
+  /** Absent or 0 is a whole year; a stored month-level pair and a member
+   *  the search did not vary carry their stored months. */
+  readonly primaryAgeMonths?: number;
   readonly secondaryAgeYears: number | null;
+  readonly secondaryAgeMonths?: number;
   readonly candidate: {
     readonly primary: RetirementAgePerMember;
     readonly secondary?: RetirementAgePerMember;
@@ -216,6 +220,57 @@ export interface BuildPairsArgs {
 
 export function buildPairs(args: BuildPairsArgs): PairSpec[] {
   const dim = args.survivorDimension ?? NO_SURVIVOR_DIMENSION;
+  return withStoredPair(buildGridPairs(args, dim), args, dim);
+}
+
+/** Append the stored claim-age pair (months included) as one extra
+ *  candidate, unless the grid is empty or an equal candidate is listed. */
+function withStoredPair(
+  pairs: PairSpec[],
+  args: BuildPairsArgs,
+  dim: SurvivorDimension,
+): PairSpec[] {
+  const stored = args.resolvedOverride;
+  if (!stored || pairs.length === 0) return pairs;
+  const secondary = args.hasSecondary
+    ? (stored.secondary ?? DEFAULT_SECONDARY_CLAIM_AGE)
+    : undefined;
+  const secondarySearched = secondary !== undefined && args.secondaryGrid.length > 0;
+  const identity = {
+    primaryAgeYears: stored.primary.ageYears,
+    primaryAgeMonths: stored.primary.ageMonths,
+    secondaryAgeYears: secondarySearched ? secondary.ageYears : null,
+    ...(secondarySearched ? { secondaryAgeMonths: secondary.ageMonths } : {}),
+  };
+  if (pairs.some((p) => sameClaimIdentity(p, identity))) return pairs;
+  return [
+    ...pairs,
+    ...expandWithSurvivor(
+      {
+        ...identity,
+        candidate: {
+          primary: stored.primary,
+          ...(secondary ? { secondary } : {}),
+        },
+      },
+      dim,
+    ),
+  ];
+}
+
+function sameClaimIdentity(
+  a: Omit<PairSpec, 'candidate'>,
+  b: Omit<PairSpec, 'candidate'>,
+): boolean {
+  return (
+    a.primaryAgeYears === b.primaryAgeYears &&
+    (a.primaryAgeMonths ?? 0) === (b.primaryAgeMonths ?? 0) &&
+    a.secondaryAgeYears === b.secondaryAgeYears &&
+    (a.secondaryAgeMonths ?? 0) === (b.secondaryAgeMonths ?? 0)
+  );
+}
+
+function buildGridPairs(args: BuildPairsArgs, dim: SurvivorDimension): PairSpec[] {
   if (!args.hasSecondary) return buildSingleMemberPairs(args.primaryGrid);
   if (args.primaryGrid.length === 0 && args.secondaryGrid.length === 0) {
     return [];
@@ -316,6 +371,7 @@ function buildSecondaryOnlyPairs(
       ...expandWithSurvivor(
         {
           primaryAgeYears: primaryFallback.ageYears,
+          primaryAgeMonths: primaryFallback.ageMonths,
           secondaryAgeYears: s,
           candidate: {
             primary: primaryFallback,
@@ -406,22 +462,21 @@ function ageYearsToday(
   return completedYears + fraction;
 }
 
+/** The stored pair in the identity `withStoredPair` gives its candidate:
+ *  an unsearched secondary is `null`, a missing one is the fallback default. */
 export function resolvedSsPair(
   override: SocialSecurityOverride | undefined,
-  hasSecondary: boolean,
+  secondarySearched: boolean,
 ): ResolvedPair | null {
   if (!override) return null;
+  const secondary = secondarySearched
+    ? (override.secondary ?? DEFAULT_SECONDARY_CLAIM_AGE)
+    : undefined;
   return {
     primaryAgeYears: override.primary.ageYears,
     primaryAgeMonths: override.primary.ageMonths,
-    secondaryAgeYears:
-      hasSecondary && override.secondary
-        ? override.secondary.ageYears
-        : null,
-    secondaryAgeMonths:
-      hasSecondary && override.secondary
-        ? override.secondary.ageMonths
-        : undefined,
+    secondaryAgeYears: secondary ? secondary.ageYears : null,
+    secondaryAgeMonths: secondary ? secondary.ageMonths : undefined,
   };
 }
 

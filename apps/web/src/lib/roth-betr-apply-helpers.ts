@@ -14,6 +14,8 @@
  *    SECURE 2.0 §107), filling up to the chosen MAGI line's cliff (the IRMAA
  *    tier-1 threshold or the ACA 400%-FPL boundary), routed through
  *    `buildNextMagiCap` (the single MAGI-cap persistence rule).
+ *  - `buildSuggestionCap` — a ranked suggestion's ladder as the scenario's whole
+ *    MAGI-cap ladder, routed through `buildNextMagiCap` the same way.
  */
 
 import type {
@@ -35,7 +37,7 @@ export type PreRetirementRothConversionWindow = NonNullable<
 
 const CENTS_FACTOR = 100;
 /** ACA subsidy cliff — the §36B 400%-of-FPL boundary used by the retirement Fill window. */
-const ACA_FPL_CLIFF_MULTIPLE = 4;
+export const ACA_FPL_CLIFF_MULTIPLE = 4;
 
 /**
  * One flat working-years conversion window from the IRA-source tranche set.
@@ -179,6 +181,71 @@ export function buildRetirementFillWindow(args: {
   // false; with it true the result is the real `{ windows }` override or `{}`
   // (inheritance preserved). Narrow out the never-reached sentinel branch so the
   // caller's merge type stays a real MagiCapOverride.
+  if ('magiCap' in fragment && fragment.magiCap !== undefined && 'disabled' in fragment.magiCap) {
+    return {};
+  }
+  return fragment as
+    | { magiCap: MagiCapOverride }
+    | { magiCap?: undefined }
+    | Record<string, never>;
+}
+
+/**
+ * A ranked suggestion's ladder in the stored shape: one Fill window per searched
+ * year with equal `year` anchors (a year-anchored end is exclusive, so adjacent
+ * windows do not overlap), ascending, whole-dollar ceilings never rounded up, the
+ * line and target Roth carried through unchanged.
+ *
+ * @throws {Error} on an empty ladder, a window that is not a one-year Fill
+ *   window with a target Roth, or two windows for one year.
+ */
+export function buildSuggestionCapWindows(ladder: readonly MagiCapWindow[]): MagiCapWindow[] {
+  if (ladder.length === 0) throw new Error('This plan has no years to save.');
+  const windows = ladder.map((w): MagiCapWindow => {
+    if (
+      w.start.kind !== 'year' ||
+      w.end.kind !== 'year' ||
+      w.start.year !== w.end.year ||
+      w.capMode !== 'fill' ||
+      w.targetRothAccountId === undefined
+    ) {
+      throw new Error('This plan is not a list of one-year Fill windows, so it cannot be saved.');
+    }
+    return {
+      start: { kind: 'year', year: w.start.year },
+      end: { kind: 'year', year: w.end.year },
+      magiCeilingAnnualDollars: Math.max(0, Math.floor(w.magiCeilingAnnualDollars)),
+      capMode: 'fill',
+      capMagiLine: w.capMagiLine,
+      targetRothAccountId: w.targetRothAccountId,
+    };
+  });
+  const yearOf = (w: MagiCapWindow): number => (w.start.kind === 'year' ? w.start.year : 0);
+  windows.sort((a, b) => yearOf(a) - yearOf(b));
+  for (let i = 1; i < windows.length; i += 1) {
+    if (yearOf(windows[i]) === yearOf(windows[i - 1])) {
+      throw new Error('This plan has two windows for the same year, so it cannot be saved.');
+    }
+  }
+  return windows;
+}
+
+/**
+ * The `magiCap` fragment that saves a suggestion's ladder as the scenario's
+ * whole ladder, through `buildNextMagiCap` so it obeys the same inheritance rule
+ * as every other cap edit; existing windows are replaced.
+ */
+export function buildSuggestionCap(args: {
+  ladder: readonly MagiCapWindow[];
+  localOverrides: ScenarioOverrides;
+  parentCap: MagiCapOverride | undefined;
+}): { magiCap: MagiCapOverride } | { magiCap?: undefined } | Record<string, never> {
+  const fragment = buildNextMagiCap({
+    magiCapEnabled: true,
+    magiCapWindows: buildSuggestionCapWindows(args.ladder),
+    localOverrides: args.localOverrides,
+    parentCap: args.parentCap,
+  });
   if ('magiCap' in fragment && fragment.magiCap !== undefined && 'disabled' in fragment.magiCap) {
     return {};
   }

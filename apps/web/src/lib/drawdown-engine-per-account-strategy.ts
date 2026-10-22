@@ -901,6 +901,7 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
     yearMagiCapTierOverrideDollars,
     rothConvertedCents: conversionResult.convertedCents,
     rothConversionDegradedNoTarget: conversionResult.degradedNoTargetRoth,
+    taxFundingCentsByAccount: conversionResult.taxFundingCentsByAccount,
   });
   // The strategy path keeps the solver's own (non-honest) shortfall, so
   // it stamps via the PLAIN row stamper — never the honest-shortfall variant
@@ -952,12 +953,14 @@ function assembleStrategyYearRow(args: {
   readonly rothConvertedCents: number;
   /** True when Fill mode had room but no target Roth resolved. */
   readonly rothConversionDegradedNoTarget: boolean;
+  /** Draws that paid the conversion's tax, when the hook records them. */
+  readonly taxFundingCentsByAccount?: ReadonlyMap<string, number>;
 }): DrawdownYear {
   const { state, calendarYear, yearWithdrawn, yearNetNeedRow, yearGrowth,
     yearDeposit, depleted, yearWithdrawnByAcct, yearPreWithdrawnByAcct,
     yearPostWithdrawnByAcct, yearDepositByAcct, yearMedicalQualifiedByAcct, surplusResult,
     yearMagiCapBreachDollars, yearMagiCapTierOverrideDollars, rothConvertedCents,
-    rothConversionDegradedNoTarget } = args;
+    rothConversionDegradedNoTarget, taxFundingCentsByAccount } = args;
   const accountBalances = new Map<string, DrawdownAccountYear>();
   let totalBalance = 0;
   for (let a = 0; a < state.length; a += 1) {
@@ -1007,6 +1010,9 @@ function assembleStrategyYearRow(args: {
       yearMagiCapTierOverrideDollars > 0 ? yearMagiCapTierOverrideDollars : undefined,
     rothConvertedCents: rothConvertedCents > 0 ? rothConvertedCents : undefined,
     rothConversionDegradedNoTarget: rothConversionDegradedNoTarget ? true : undefined,
+    ...(rothConvertedCents > 0 && taxFundingCentsByAccount !== undefined
+      ? { rothConversionTaxFundingCentsByAccount: taxFundingCentsByAccount }
+      : {}),
   };
 }
 

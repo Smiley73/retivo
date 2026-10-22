@@ -367,6 +367,239 @@ reach the ceiling, or when no window covers the year. With no valid target Roth
 IRA, Fill only limits withdrawals, and the scenario shows a notice. Fill
 conversions also run in the stress test, with the same sizing on each path.
 
+### Comparing conversion plans
+
+The **Compare conversion plans** panel on the Roth conversion comparison page
+tries a fixed set of Fill plans for the selected scenario and ranks them by what
+is left at the end. Running it only reads your data and saves nothing. A ranked
+plan is written to the scenario only when you press **Save plan to scenario** on
+its row and confirm (see **Saving a plan** below).
+
+**What goes in.** The same accounts, balances, members, Social Security,
+expenses and income the page's own planned projection uses, today's date, and
+three more things.
+
+- A **target Roth IRA**: an active Roth IRA of your own, never an inherited one.
+  The panel uses the first one on the page's list and names it.
+- The **leftover-tax rate**, an input on the page. It starts at the average
+  marginal rate the break-even uses for the years when required withdrawals
+  begin, rounded to a whole percent, and is 22% when there are no such years.
+- An **assumed death age** for each household member: the scenario's
+  life-expectancy setting, or 95 where it sets none for the primary member. A
+  partner age the scenario does not set is left unset, so the comparison reads
+  it exactly as the page's own projection does.
+
+A scenario that files married filing separately is left out, because the ACA
+premium credit is never available on separate returns.
+
+**How it is worked out.**
+
+1. **Find the window.** It runs from the primary member's retirement year (or
+   this year, if later) through the year before they reach their RMD trigger age,
+   cut off at the end of the projection. With no such year there is nothing to
+   compare.
+2. **List the plans.** The current plan, as the scenario has it, plus four
+   target brackets (12%, 22%, 24% and 32%) each with and without the cliff
+   guards: nine plans.
+3. **Set a ceiling for each year.** A plan's ceiling for a window year is the
+   smallest of up to three limits, all measured on the MAGI line the Fill
+   ceiling uses.
+   - *Bracket top.* The floor of the next bracket up, plus the year's standard
+     deduction, the extra deduction for each member who turns 65 by year end and
+     the senior bonus deduction where it applies. The senior bonus shrinks as
+     income rises, so it is worked out at the ceiling itself.
+   - *Medicare surcharge line* (guarded plans only). A year's income sets the
+     surcharge two years later, so this is the next surcharge line above the tier
+     the scenario sits in that later year in the baseline projection (described
+     below). Under every line, that is the first line. It applies when someone is on Medicare then.
+   - *Premium credit line* (guarded plans only). Four times the poverty
+     guideline for the household less the Social Security that is not taxable,
+     because the ACA income adds that back. It applies in years with Marketplace
+     coverage while the credit has a cliff at that line, and only where the
+     baseline projection is not already over it.
+
+   Both guards are held against the baseline projection, not against the current
+   plan. The baseline is the scenario projected with no MAGI cap windows at all:
+   no Fill conversions, and no Minimize caps limiting pre-tax withdrawals either.
+   The current plan stands in for it only when the scenario has no cap windows of
+   any mode. With cap windows, whether Fill or Minimize, the current plan's own
+   conversions or capped withdrawals may already move a year's income into a
+   different surcharge tier or across the credit cliff, so the current plan
+   cannot be the reference. A Fill window with no valid target Roth converts
+   nothing but is still a cap window, so it also rules the current plan out. A
+   guarded plan is therefore held to stay under the line that the baseline stays
+   under: it never takes a year into a higher surcharge tier, or over the credit
+   cliff, than it would be in with no cap windows. For example, if the current
+   plan puts a year's income in surcharge tier 1 but the baseline is under every
+   line, a guarded plan is held under the first line, not the tier 2 line. If the
+   baseline is under the credit cliff, the guard applies even where the current
+   plan is over it. A plan that still
+   crosses a line it is held to is flagged in step 6.
+
+   The Fill step cannot see the interest and dividends that taxable accounts
+   throw off while it sizes a conversion, so the ceiling is the limit less that
+   gap, measured from the previous projection.
+4. **Project and settle.** Each plan is projected with one Fill window per year
+   at its ceilings. The ceilings are then worked out again from the new
+   projection, and this repeats until no ceiling moves by more than a dollar, at
+   most ten projections per plan. Each year is filled on its own, with no
+   look-ahead to later years.
+5. **Rank.** The score is the **after-tax ending balance**:
+
+   *ending balance in today's dollars − pre-tax and mixed balances left in
+   today's dollars × leftover-tax rate.*
+
+   Roth, brokerage and cash balances count in full. Ties go to fewer dollars
+   converted, then the lower bracket, then the order above. Totals shown beside
+   the score (converted, income tax, Medicare surcharges, premium credit) are
+   each year's figure brought to today's dollars with that year's December
+   deflator, so they share a basis with the ending balance. Changing the rate
+   re-ranks from the stored balances without projecting again.
+6. **Flag.** A plan whose cap could not be kept (the engine had no taxable money
+   left to move spending to, an RMD alone sat above the ceiling, income stayed
+   above the bracket top, or a guarded plan still crossed its line) is shown but
+   not ranked. A plan in which the
+   ceiling moved spending withdrawals to a later taxable account is ranked and
+   marked, because part of its result is a change in withdrawal order.
+
+The search runs at most 500 projections and stops with an error beyond that;
+nine plans at ten projections each stay far below it.
+
+**Simplified or left out.**
+
+- **One death age.** Every plan is scored at the assumed death ages. It is not a
+  forecast and not the stress test; no Monte Carlo runs.
+- **Planned basis, federal tax only.** No state tax, and the IRA pro-rata rule is
+  not modeled.
+- **A fixed set of targets.** Four brackets, guarded or not, held for the whole
+  window. The top row is the highest score among them, not a proven optimum.
+- **Capital gains and qualified dividends** are not counted in the bracket top,
+  so the ceiling is a little conservative.
+- **One flat leftover-tax rate** for everything still in pre-tax accounts.
+- It shows what each plan does in this model and does not say which to pick.
+
+**Saving a plan.** **Save plan to scenario** turns a ranked row into the
+scenario's cap schedule on its **Withdrawal strategy** card, so the projection
+and the Fill conversions described above then run it. It is offered on ranked
+rows only, not on the current plan and not on a plan whose cap could not be kept.
+What is written:
+
+- *One window per year.* Each year of the plan's window gets its own Fill window,
+  with the same year as its start and its end, so adjacent windows do not overlap.
+  The windows are anchored to calendar years, not to ages, so they stay put if
+  you later change a retirement or birth year. They are saved in ascending year
+  order, one per year.
+- *Whole-dollar ceilings.* Each ceiling is the figure the search settled on for
+  that year, rounded down to a whole dollar (never below zero), so a saved
+  ceiling is never above the one the row was ranked on. It is a fixed amount in
+  that year's own dollars: it does not rise with inflation.
+- *The Medicare (IRMAA) income line.* Every window is measured on that line,
+  the line the comparison sized its ceilings on, with Fill mode and the target
+  Roth IRA the comparison used. Dropping either would convert different amounts
+  than the row showed, so you cannot pick another target in the dialog.
+- *Everything else is replaced.* Every cap window the scenario had is replaced by
+  the plan's windows. Nothing else on the scenario changes. A scenario that
+  inherits its cap from a parent and saves a plan equal to the parent's goes on
+  inheriting; any other plan is saved on that scenario only and the parent is
+  untouched.
+
+A window caps pre-tax income, as in the Fill description above; it does not order
+a conversion. In a year when spending needs more pre-tax money than the ceiling
+leaves, the projection draws on taxable or Roth accounts, and records that the
+cap could not be met when none are left. The ceilings were worked out against
+the data as it stood, so they are a snapshot: the page marks a saved plan **Out
+of date** once an account, balance, member, expense, income, Social Security or
+scenario setting it used has changed, and the comparison has to be run again to
+refresh it.
+
+**Code.** Paths are under `apps/web/src`. `lib/roth-suggestion/search.ts` runs
+the search; `candidate-grid.ts` lists the plans, `year-limits.ts` works out the
+three limits, `candidate-passes.ts` is the settle loop, `summarise.ts` and
+`ranking.ts` score and rank. `workers/roth-suggestion.worker.ts` runs it in the
+background and `pages/roth-betr/RothSuggestionPanel.tsx` shows it.
+`year-detail.ts` builds each plan's year-by-year table and
+`pages/roth-betr/RothSuggestionYearDetail.tsx` shows it. `lib/roth-suggestion/ladder.ts`
+makes the one-year windows, `lib/roth-betr-apply-helpers.ts`
+(`buildSuggestionCap`) fixes the saved shape, and
+`pages/roth-betr/use-roth-suggestion-save.ts` writes it through the page's save
+path.
+
+#### Why each year
+
+The **Why each year** button on a row opens a table with one line per year of the
+window, then the year after it, for that plan. It uses each year's own (future)
+dollars, because the limits and cliffs are fixed amounts for the year; the
+comparison above is in today's dollars. The columns are:
+
+- *Converted*, and *Stopped by*: the bracket top, the Medicare surcharge line,
+  the health-subsidy line, the end of the window, withdrawals that had already
+  reached the ceiling (a year the ceiling moved spending withdrawals, or could
+  not be held, is listed here), or no pre-tax money left to convert.
+- *Bracket line*, *Medicare surcharge line* and *Health-subsidy line*: the three
+  limits on the income line. *Limit* is the lowest that applies.
+- *Income before conversion*, *Extra Social Security taxed*, *Income from paying
+  the tax* and *Kept under the limit*, which give the amount below. The first two
+  are the projection's own figures for the same year with the conversion left out:
+  for every year it converts, the projection prices the year a second time with no
+  conversion and none of the extra withdrawals that paid the conversion's tax, and
+  keeps the income and the taxable Social Security from that run. Nothing is worked
+  back from the converted year.
+- *Income tax*, *Taxable Social Security*, *Surcharge paid*, *Surcharge it sets*,
+  *ACA credit* and *Pre-tax at year end*: what the year cost and left.
+
+**One year by hand.** Take 2039 for the "Fill the 12% bracket" plan that stays
+under both lines, a married couple filing jointly.
+
+1. The three lines. *Bracket line* $197,700: the 12% bracket top of $148,000 plus
+   the $47,300 standard deduction and the $2,400 extra deduction for the member
+   who is 65. *Medicare surcharge line* $339,636: the first surcharge threshold,
+   $218,000, scaled to 2041, the year that reads 2039's income. *Health-subsidy
+   line* $121,554: four times the poverty guideline for two ($21,150, scaled to
+   2039) is $124,237.95, less the $2,683.01 of Social Security that is not
+   taxable, because the ACA income adds it back, is $121,554.94, rounded down. The
+   lowest is the health-subsidy line, so the *Limit* is $121,554 and *Stopped by*
+   says so.
+2. *Income before conversion*, $43,268.84. This is the year's income on that line
+   with no conversion: the projection's own figure for 2039 with the conversion
+   left out, withdrawals the same.
+3. *Extra Social Security taxed*, $8,187.31: $15,203.73 taxable now less $7,016.42
+   taxable with no conversion (the same rule that taxes up to 50% or 85% of
+   benefits). Each converted dollar raises provisional income, and in the 50% and
+   85% tiers it pulls more benefit into taxable income too, so it uses up room on
+   the line twice.
+4. *Income from paying the tax*, $334.99. The conversion's own tax is paid from
+   savings-type accounts, Roth money and the health savings account, and any part
+   of those withdrawals that is taxable income lands on the same line. It is the year's income after
+   ($121,551.29) less the income before, the conversion and the extra Social
+   Security.
+5. The amount. The conversion fills the room that is left, to within one dollar:
+
+   *$121,554 − $43,268.84 − $8,187.31 − $334.99 = $69,762.86*
+
+   and the table shows $69,760.15. The $2.71 between them is *Kept under the
+   limit*, the limit less the year's income after ($121,554 − $121,551.29): the
+   search leaves a couple of dollars under each limit, plus the dollar the solver
+   rounds down by, so that the income never lands above it. In a year no limit
+   stopped, the same column is the room the plan did not use (and negative where
+   income was already over the limit). $121,554 − $43,268.84 − $8,187.31 −
+   $334.99 − $2.71 = $69,760.15, the *Converted* column.
+
+**A year a cliff stopped.** In 2043 the "Fill the 22% bracket" plan that stays
+under both lines has a *Bracket line* of $408,100 and a *Medicare surcharge line*
+of $382,264; the health-subsidy line does not apply (no Marketplace coverage), so
+the surcharge line is the limit. It converts $237,806.07, which is $382,264 less
+$140,075.72 of income before conversion, no extra Social Security (benefits are
+already 85% taxable), $4,379.49 of income from paying the tax and $2.72 kept
+under. The row then says what the next dollars
+over the cliff would have cost: the plan without the guard would have converted
+another $25,836 (the room up to the bracket line), which would have added
+$4,027.45 of Medicare surcharge two years later, priced for the months each
+household member is on Medicare then and the year's own filing status. It also shows the premium
+credit that would have been lost, at full value. The projection credits the
+premium credit only up to that year's federal tax plus the Medicare surcharge it
+offsets, so the plan that does cross shows a smaller loss on its own row. Here the
+credit lost is $0.
+
 ### Simplified or left out
 
 - **The whole converted amount is taxable.** After-tax money already in your
