@@ -8,67 +8,22 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { ScenarioPayload } from '../../db/types';
 import { buildSuggestionCapWindows } from '../../lib/roth-betr-apply-helpers';
 import { toyProjection } from '../../lib/roth-suggestion/test-fixtures';
-import {
-  runRothSuggestion,
-  type RothSuggestionWorkerInbound,
-  type RothSuggestionWorkerOutbound,
-  type RothSuggestionWorkerResult,
-} from '../../workers/roth-suggestion.worker';
-import { buildRothBETRPageData, type RothBETRPageData } from './roth-betr-data';
+import type { RothSuggestionWorkerResult } from '../../workers/roth-suggestion.worker';
+import type { RothBETRPageData } from './roth-betr-data';
 import { RothSuggestionPanel } from './RothSuggestionPanel';
+import { fakeWorkers, seedToyPanel } from './roth-suggestion-panel-fixture';
 import { buildSavedPlanRecord, readSavedPlan, writeSavedPlan } from './roth-suggestion-saved-plan';
 
-const { fakeWorkers } = vi.hoisted(() => ({ fakeWorkers: [] as FakeWorkerShape[] }));
-
-interface FakeWorkerShape {
-  readonly sent: RothSuggestionWorkerInbound[];
-  emit(msg: RothSuggestionWorkerOutbound): void;
-}
-
-vi.mock('../../workers/roth-suggestion.worker.ts?worker', () => {
-  class FakeRothSuggestionWorker implements FakeWorkerShape {
-    private readonly listeners = new Set<(ev: Event) => void>();
-    readonly sent: RothSuggestionWorkerInbound[] = [];
-    constructor() {
-      fakeWorkers.push(this);
-    }
-    addEventListener(_type: string, fn: (ev: Event) => void): void {
-      this.listeners.add(fn);
-    }
-    removeEventListener(_type: string, fn: (ev: Event) => void): void {
-      this.listeners.delete(fn);
-    }
-    postMessage(msg: RothSuggestionWorkerInbound): void {
-      this.sent.push(msg);
-    }
-    terminate(): void {}
-    emit(msg: RothSuggestionWorkerOutbound): void {
-      const ev = new MessageEvent('message', { data: msg });
-      this.listeners.forEach((fn) => fn(ev));
-    }
-  }
-  return { default: FakeRothSuggestionWorker };
-});
+vi.mock('../../workers/roth-suggestion.worker.ts?worker', async () => ({
+  default: (await import('./roth-suggestion-panel-fixture')).FakeRothSuggestionWorker,
+}));
 
 let projection = toyProjection({ couple: false });
 let pageData: RothBETRPageData;
 let baseResult: RothSuggestionWorkerResult;
 
 beforeAll(async () => {
-  const built = buildRothBETRPageData(projection);
-  if (built === null) throw new Error('toy page data is null');
-  pageData = built;
-  const { bundle: _bundle, ...rest } = projection;
-  void _bundle;
-  const posted: RothSuggestionWorkerOutbound[] = [];
-  await runRothSuggestion(
-    'seed',
-    { projection: rest, targetRothAccountId: 'roth', leftoverTaxRate: 0.2, deathAges: { primary: 90 } },
-    (m) => posted.push(m),
-  );
-  const terminal = posted[posted.length - 1];
-  if (terminal.kind !== 'result') throw new Error(`seed search gave ${terminal.kind}`);
-  baseResult = terminal.result;
+  ({ pageData, baseResult } = await seedToyPanel());
 }, 60_000);
 
 beforeEach(() => {
