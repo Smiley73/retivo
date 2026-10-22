@@ -41,7 +41,7 @@ interface MedicarePremiumsDialogProps {
 function blockText(block: PremiumBlock, row: PremiumRow): string {
   switch (block.kind) {
     case 'nameTaken':
-      return `An expense named "${block.expense.name}" already exists in ${block.expense.categoryName}, so this one cannot be added. Rename or delete that expense to add this row.`;
+      return `An expense named "${block.expense.name}" already exists in ${block.expense.categoryName}, so this one cannot be added.`;
     case 'nameRepeated':
       return `Another row in this list would be named "${row.expenseName}", so this one cannot be added.`;
     case 'nameTooLong':
@@ -51,11 +51,12 @@ function blockText(block: PremiumBlock, row: PremiumRow): string {
 
 const PremiumRowItem: React.FC<{
   row: PremiumRow;
+  year: number;
   included: boolean;
   amount: number;
   onToggle: (next: boolean) => void;
   onAmount: (next: number) => void;
-}> = ({ row, included, amount, onToggle, onAmount }) => (
+}> = ({ row, year, included, amount, onToggle, onAmount }) => (
   <li className="border-t border-line py-3 first:border-t-0">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <ToggleSwitch
@@ -78,7 +79,8 @@ const PremiumRowItem: React.FC<{
       </div>
     </div>
     <Muted as="p" className="m-0 mt-1 text-sm">
-      Built-in amount: {formatCurrencyExact(row.monthly)} a month.
+      {row.part === 'B' ? 'Standard' : 'National base'} {year} premium:{' '}
+      {formatCurrencyExact(row.monthly)} a month.
     </Muted>
     {row.alreadyEntered.length > 0 && (
       <Muted as="p" className="m-0 mt-1 text-sm">
@@ -86,7 +88,7 @@ const PremiumRowItem: React.FC<{
         {row.alreadyEntered
           .map((m) => `"${m.name}" in ${m.categoryName}`)
           .join(', ')}
-        . Turn this row on if that is not the same premium.
+        .
       </Muted>
     )}
     {row.block !== null && (
@@ -100,11 +102,12 @@ const PremiumRowItem: React.FC<{
 
 const MemberSection: React.FC<{
   group: PremiumMemberGroup;
+  year: number;
   includeEdits: Record<string, boolean>;
   amountEdits: Record<string, number>;
   setInclude: (key: string, next: boolean) => void;
   setAmount: (key: string, next: number) => void;
-}> = ({ group, includeEdits, amountEdits, setInclude, setAmount }) => (
+}> = ({ group, year, includeEdits, amountEdits, setInclude, setAmount }) => (
   <section aria-label={group.label} className="rounded-lg border border-line p-4">
     <h3 className="m-0 mb-1 text-base font-semibold text-ink">{group.label}</h3>
     {group.missingBirthdate ? (
@@ -118,6 +121,7 @@ const MemberSection: React.FC<{
           <PremiumRowItem
             key={row.key}
             row={row}
+            year={year}
             included={isRowIncluded(row, includeEdits)}
             amount={amountEdits[row.key] ?? row.monthly}
             onToggle={(next) => setInclude(row.key, next)}
@@ -195,7 +199,7 @@ export const MedicarePremiumsDialog: React.FC<MedicarePremiumsDialogProps> = ({
         <p className="m-0 text-sm">
           Adds each person&apos;s Medicare Part B and Part D premiums as
           monthly Medical expenses that start at age 65 and last for life.
-          The built-in amounts are the {preview.year} figures from the
+          The amounts shown are the {preview.year} figures from the
           Centers for Medicare &amp; Medicaid Services: the standard Part B
           premium and the national base Part D premium. They are in
           today&apos;s dollars and grow with the scenario&apos;s medical
@@ -215,6 +219,7 @@ export const MedicarePremiumsDialog: React.FC<MedicarePremiumsDialogProps> = ({
             <MemberSection
               key={group.memberId}
               group={group}
+              year={preview.year}
               includeEdits={includeEdits}
               amountEdits={amountEdits}
               setInclude={(key, next) =>

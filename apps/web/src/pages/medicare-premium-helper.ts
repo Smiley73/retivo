@@ -53,7 +53,7 @@ export interface PremiumRow {
   part: MedicarePart;
   /** The exact name the helper would write. */
   expenseName: string;
-  /** The built-in CMS monthly amount, before any edit. */
+  /** The CMS monthly amount, before any edit. */
   monthly: number;
   /** Expenses whose name suggests this premium is already entered. */
   alreadyEntered: MatchedExpense[];
@@ -71,7 +71,7 @@ export interface PremiumMemberGroup {
 }
 
 export interface MedicarePremiumPreview {
-  /** The CMS year the built-in amounts belong to. */
+  /** The CMS year the amounts belong to. */
   year: number;
   /** The Medical category the rows would be written to; null when none exists. */
   medicalCategoryId: string | null;

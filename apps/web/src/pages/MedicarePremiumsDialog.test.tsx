@@ -128,6 +128,20 @@ describe('MedicarePremiumsDialog', () => {
     await expectNoA11yViolations(baseElement);
   });
 
+  it('labels each reference amount as the standard Part B or national base Part D premium', async () => {
+    renderDialog();
+    const latest = latestMedicarePremiums();
+    const dialog = await screen.findByRole('dialog', { name: 'Add Medicare premiums' });
+    const money = (n: number): string => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+    expect(dialog).toHaveTextContent(
+      `Standard ${latest.year} premium: ${money(latest.partBStandardMonthly)} a month.`,
+    );
+    expect(dialog).toHaveTextContent(
+      `National base ${latest.year} premium: ${money(latest.partDNationalBaseMonthly)} a month.`,
+    );
+    expect(dialog).not.toHaveTextContent(/built-in/i);
+  });
+
   it('writes nothing on Cancel', async () => {
     const { onClose } = renderDialog();
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
