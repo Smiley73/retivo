@@ -3,6 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  allocateCentsByWeight,
   anyMemberHasAcaCoverage,
   anyMemberOnMedicare,
   automaticMedicareMonthsInYear,
@@ -18,6 +19,8 @@ import {
   type TaxMemberInput,
 } from './tax-integration-helpers';
 import { roughMonthlyBenchmarkCentsForMember } from './aca-ptc';
+import { computeIrmaa } from './irmaa';
+import { IRMAA_TIERS } from './irmaa-tiers';
 
 function member(overrides: Partial<TaxMemberInput> = {}): TaxMemberInput {
   return {
@@ -588,5 +591,45 @@ describe('coverage engagement gates', () => {
         member({ memberId: 'b', onMedicare: false }),
       ]),
     ).toEqual([{ memberId: 'a', partBMonths: 7, partDMonths: 7 }]);
+  });
+});
+
+describe('allocateCentsByWeight — exact cent conservation', () => {
+  const sum = (parts: readonly number[]): number => parts.reduce((total, part) => total + part, 0);
+
+  it('splits an odd-cent total across equal weights without rounding both halves up', () => {
+    expect(allocateCentsByWeight(10_000_001, [1, 1])).toEqual([5_000_001, 5_000_000]);
+  });
+
+  it('conserves for uneven weights, odd counts, and an all-zero weight set', () => {
+    for (const [total, weights] of [
+      [1_234_567, [123_456, 765_432]],
+      [100_001, [1, 1, 1]],
+      [7, [100, 200, 300]],
+      [99_999, [0, 0]],
+    ] as const) {
+      expect(sum(allocateCentsByWeight(total, weights))).toBe(total);
+    }
+  });
+
+  it('never gives a zero weight a share', () => {
+    const parts = allocateCentsByWeight(300_001, [100_000, 0, 100_000]);
+    expect(parts[1]).toBe(0);
+    expect(sum(parts)).toBe(300_001);
+  });
+
+  it('does not push a return over an IRMAA tier threshold on a rounding cent', () => {
+    // $106,000 is the 2026 single-filer tier-1 threshold and the comparison is strictly greater-than, so a return exactly on it owes no surcharge.
+    // Rounding both equal halves up tipped each a cent past it and charged two tier-1 surcharges the household does not owe.
+    const threshold = IRMAA_TIERS.values[2026]!.bySingle[0].thresholdDollars;
+    const [first, second] = allocateCentsByWeight(threshold * 200 + 1, [1, 1]);
+    const tierOf = (magiCents: number): string =>
+      computeIrmaa(
+        { taxYear: 2026, magiTwoYearsPriorCents: magiCents, filingStatus: 'Single', beneficiariesOnMedicareCount: 1 },
+        IRMAA_TIERS,
+      ).tier;
+    expect([first, second]).toEqual([threshold * 100 + 1, threshold * 100]);
+    expect(tierOf(second)).toBe('none');
+    expect(tierOf(first)).toBe('tier1');
   });
 });

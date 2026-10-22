@@ -504,11 +504,8 @@ interface MedicalBaseArgs {
   stepCount: number;
 }
 
-/**
- * Per-month today's-dollar HSA medical-demand base (the `isMedical` subset of `monthlyExpenseBase`); `{}` when no category is flagged.
- * `medicalDemandRatePct` is the categories' effective inflation rate, so the MC engine inflates the demand at the matching CPI and it stays a subset of the inflated expense.
- */
-export function computeMedicalDemandBase(args: MedicalBaseArgs): {
+// `medicalDemandRatePct` is the categories' effective inflation rate, so the demand inflates at the matching CPI and stays a subset of the inflated expense.
+function computeMedicalDemandBase(args: MedicalBaseArgs): {
   monthlyMedicalDemandBase?: number[];
   medicalDemandRatePct?: number;
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;

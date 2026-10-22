@@ -1,11 +1,4 @@
-/**
- * Tests for the Monte Carlo per-year tax estimator (`monte-carlo-tax.ts`).
- *
- * `applyPerYearTaxForPath` must recompute filing status, household
- * size, and the age-65 taxpayer count each year from per-year alive-state
- * derived from `primaryDeathYear` / `secondaryDeathYear`. A survivor
- * year does not receive MFJ filing + two-member IRMAA.
- */
+/** The MC per-year tax estimator: alive-state, withdrawal classification, RMD floor, penalties, IRMAA and ACA, with parity against the deterministic engine. */
 import { describe, expect, it } from 'vitest';
 import {
   advanceAfterTaxBase,
@@ -15,7 +8,6 @@ import {
   buildPreTaxCentsByOwnerIdx,
   buildPriorPreTaxByOwnerFromIdx,
   buildYearClassification,
-  buildYearMemberFlags,
   classifyMcWithdrawal,
   computeMcPenaltyDollars,
   computeMcRmdFloorCents,
@@ -64,15 +56,32 @@ function makeMfjTaxContext(overrides: Partial<McTaxContext> = {}): McTaxContext 
   };
 }
 
+// Member flags as the per-path loop resolves them, through the production entry `deriveMcSurvivors`.
+function memberFlags(
+  member: TaxMemberInput,
+  taxYear: number,
+  retirementYear: number,
+  optedOut: ReadonlySet<string> = new Set(),
+  healthCoverageMonths?: McTaxContext['healthCoverageMonths'],
+): TaxMemberInput {
+  const taxCtx = {
+    taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
+    filingStatus: 'Single',
+    members: [member],
+    householdSize: 1,
+    inflationRatePct: 0,
+    ...(optedOut.size > 0 ? { acaMarketplaceOptOutMemberIds: [...optedOut] } : {}),
+    ...(healthCoverageMonths !== undefined ? { healthCoverageMonths } : {}),
+  } as unknown as McTaxContext;
+  return deriveMcSurvivors(taxCtx, taxYear, retirementYear)!.survivors[0];
+}
+
 describe('applyPerYearTaxForPath — per-year alive-state', () => {
   it('survivor year (secondary deceased) → no tax math attempted with full MFJ context', () => {
-    // Primary born 1960 alive through 2055 (age 95). Secondary born 1962
-    // dies in projected 2047 (age 85). Tax year 2050: only primary alive.
     const ctx = makeMfjTaxContext({
       primaryDeathYear: 2055,
       secondaryDeathYear: 2047,
     });
-    // Same expense, same income — only the alive-state differs from year-1.
     const result = applyPerYearTaxForPath({
       taxCtx: ctx,
       taxYear: 2050,
@@ -85,7 +94,6 @@ describe('applyPerYearTaxForPath — per-year alive-state', () => {
       magiMinus2: undefined,
     });
     expect(result).not.toBeNull();
-    // Compare to the same year with BOTH alive (no death years set):
     const ctxBothAlive = makeMfjTaxContext();
     const bothAliveResult = applyPerYearTaxForPath({
       taxCtx: ctxBothAlive,
@@ -98,7 +106,6 @@ describe('applyPerYearTaxForPath — per-year alive-state', () => {
       priorPreTaxByOwner: new Map<string, number>(),
       magiMinus2: undefined,
     });
-    // Single filing → much higher tax than MFJ on the same gross.
     expect(result!.fedTax).toBeGreaterThan(bothAliveResult!.fedTax);
   });
 
@@ -122,8 +129,6 @@ describe('applyPerYearTaxForPath — per-year alive-state', () => {
   });
 
   it('survivor year — taxpayersAge65Plus recounts against living members only', () => {
-    // Both members born 1960 (age 65 in 2025). Secondary dies 2030.
-    // Year 2035: primary age 75 → 1 age-65+ taxpayer (was 2 when both alive).
     const ctx = makeMfjTaxContext({
       members: [
         { memberId: 'primary', isoBirthdate: '1960-01-01', onMedicare: false, hasAcaCoverage: false },
@@ -132,9 +137,6 @@ describe('applyPerYearTaxForPath — per-year alive-state', () => {
       primaryDeathYear: 2055,
       secondaryDeathYear: 2030,
     });
-    // Year 2035 — survivor. The federal-tax engine reads age-65+ count
-    // for the standard-deduction add-on; with 1 survivor that's exactly 1.
-    // The recompute should NOT use the original 2-member count.
     const result = applyPerYearTaxForPath({
       taxCtx: ctx,
       taxYear: 2035,
@@ -147,10 +149,6 @@ describe('applyPerYearTaxForPath — per-year alive-state', () => {
       magiMinus2: undefined,
     });
     expect(result).not.toBeNull();
-    // The Single filing standard deduction with one age-65 add-on
-    // is significantly higher than MFJ-on-same-income but lower than
-    // MFJ-with-two-age-65-add-ons; the assertion below is just smoke —
-    // value is positive, finite.
     expect(result!.fedTax).toBeGreaterThanOrEqual(0);
     expect(Number.isFinite(result!.fedTax)).toBe(true);
   });
@@ -183,8 +181,7 @@ describe('classifyMcWithdrawal — per-account routing', () => {
     expect(cls.preTaxDollars).toBe(0);
   });
 
-  // An INHERITED Roth IRA is wholesale tax-free: its dollars carry no basis
-  // state and must leave the ordered pool BEFORE the carrier is touched.
+  // An inherited Roth IRA is wholesale tax-free: its dollars carry no basis state and leave the ordered pool before the carrier is touched.
   it('routes an INHERITED Roth IRA withdrawal to the wholesale tax-free bucket', () => {
     const cls = classifyMcWithdrawal([
       acc({
@@ -196,13 +193,10 @@ describe('classifyMcWithdrawal — per-account routing', () => {
     ]);
     expect(cls.rothWholesaleTaxFreeDollars).toBe(8_000);
     expect(cls.rothBasisOrderedDollars).toBe(0);
-    // Wholesale dollars never reach the §408A carrier, so they carry no
-    // penalty-exempt accumulation on the ordered leg either.
     expect(cls.rothOrderedPenaltyExemptDollars).toBe(0);
   });
 
-  // The scope is exactly `RETIREMENT_ROTH_IRA` AND inherited — an inherited
-  // designated-Roth employer plan keeps its existing §402A treatment.
+  // Only an inherited `RETIREMENT_ROTH_IRA` is wholesale tax-free; an inherited designated-Roth employer plan keeps its §402A treatment.
   it('keeps an INHERITED designated-Roth plan in the basis-ordered Roth bucket', () => {
     const cls = classifyMcWithdrawal([
       acc({
@@ -214,10 +208,7 @@ describe('classifyMcWithdrawal — per-account routing', () => {
     ]);
     expect(cls.rothBasisOrderedDollars).toBe(8_000);
     expect(cls.rothWholesaleTaxFreeDollars).toBe(0);
-    // … but §72(t)(2)(A)(ii) still waives the 10% on the whole draw: the ordered
-    // dollars stay in the pool for the §402A split while carrying full
-    // penalty-exempt provenance (the deterministic twin's
-    // `inheritedFromDeceasedOwner` short-circuit).
+    // §72(t)(2)(A)(ii) still waives the 10% on the whole draw: the ordered dollars stay in the pool for the §402A split with full penalty-exempt provenance.
     expect(cls.rothOrderedPenaltyExemptDollars).toBe(8_000);
   });
 
@@ -267,7 +258,6 @@ describe('classifyMcWithdrawal — per-account routing', () => {
   });
 
   it('MIXED Roth-designated 401K splits pre to preTax, post to rothBasisOrderedDollars', () => {
-    // 80/20 pre/post balance split. $10k withdrawal → $8k pre-tax + $2k Roth-ordered.
     const cls = classifyMcWithdrawal([
       acc({
         taxTreatment: 'MIXED',
@@ -305,7 +295,6 @@ describe('classifyMcWithdrawal — per-account routing', () => {
   });
 
   it('MIXED Roth-designated with zero total balance falls back to all-pre-tax', () => {
-    // When both pre + post balance are 0, ratio is undefined → whole draw = preTax.
     const cls = classifyMcWithdrawal([
       acc({
         taxTreatment: 'MIXED',
@@ -320,7 +309,6 @@ describe('classifyMcWithdrawal — per-account routing', () => {
   });
 
   it('MIXED OTHER type (non-Roth-designated) still routes post to postTaxNonRothDollars', () => {
-    // RETIREMENT_IRA is not a Roth-designated type — post stays non-Roth.
     const cls = classifyMcWithdrawal([
       acc({
         taxTreatment: 'MIXED',
@@ -343,11 +331,7 @@ describe('classifyMcWithdrawal — per-account routing', () => {
 });
 
 describe('applyPerYearTaxForPath — tax cashflow', () => {
-  // Pre-RMD member (born 1990 → age 60 in 2050) so the RMD-floor gross-up
-  // is inert and these routing assertions isolate the per-account
-  // classification effect (Roth → $0 taxable income). At RMD age the synthetic
-  // floor would force taxable income on a Roth draw — covered separately in the
-  // "RMD-floor grossing" block below.
+  // Pre-RMD member (born 1990) so the RMD-floor gross-up is inert and these cases isolate per-account classification; an RMD-age floor would force taxable income on a Roth draw.
   const ctx = makeMfjTaxContext({ filingStatus: 'Single', members: [
     { memberId: 'primary', isoBirthdate: '1990-06-15', onMedicare: false, hasAcaCoverage: false },
   ], householdSize: 1 });
@@ -405,8 +389,7 @@ describe('applyPerYearTaxForPath — tax cashflow', () => {
 });
 
 describe('applyPerYearTaxForPath — credit applied to premiums', () => {
-  // One retired single filer, 2026: $31,300 of Social Security, a $7,200
-  // benchmark, a Roth draw: a $5,134.20 credit and no tax to offset.
+  // One retired single filer, 2026: $31,300 of Social Security, a $7,200 benchmark and a Roth draw give a $5,134.20 credit and no tax to offset.
   const ctx = makeMfjTaxContext({
     filingStatus: 'Single',
     members: [{ memberId: 'primary', isoBirthdate: '1963-01-01', onMedicare: false, hasAcaCoverage: true }],
@@ -439,17 +422,13 @@ describe('applyPerYearTaxForPath — credit applied to premiums', () => {
     const result = run(71_208, 7_200);
     expect(result.ptc).toBeCloseTo(5_134.2, 2);
     expect(result.acaCreditAppliedToPremiums).toBeCloseTo(5_134.2, 2);
-    // The tax need keeps its zero floor; the cashflow is that need less the line.
     expect(result.taxCashflowDollars).toBeCloseTo(-5_134.2, 2);
   });
 
   it('is capped by the draw and by the Medical expenses', () => {
-    // Draw: 26,796 + 7,200 − 31,300 = 2,696.
     expect(run(33_996, 7_200).acaCreditAppliedToPremiums).toBeCloseTo(2_696, 2);
     expect(run(33_996, 7_200).taxCashflowDollars).toBeCloseTo(-2_696, 2);
-    // Medical: 3,000 against a 11,700 draw.
     expect(run(43_000, 3_000).acaCreditAppliedToPremiums).toBeCloseTo(3_000, 2);
-    // A year Social Security already covers has no draw to lower.
     expect(run(30_000, 7_200).acaCreditAppliedToPremiums).toBe(0);
   });
 
@@ -461,8 +440,7 @@ describe('applyPerYearTaxForPath — credit applied to premiums', () => {
   });
 
   it('holds the line to the MAGI above the poverty line, where the credit ends', () => {
-    // No Social Security and a $17,000 pre-tax draw (108.6% of the $15,650
-    // guideline): the line stops at the $1,350 of MAGI above it.
+    // No Social Security and a $17,000 pre-tax draw (108.6% of the $15,650 guideline): the line stops at the $1,350 of MAGI above the poverty line.
     const result = applyPerYearTaxForPath({
       taxCtx: ctx,
       taxYear: 2026,
@@ -483,8 +461,7 @@ describe('applyPerYearTaxForPath — credit applied to premiums', () => {
   });
 
   it('counts the early-withdrawal penalty in what the credit offsets, as the projection does', () => {
-    // A 55-year-old draws $30,000 from a traditional IRA: the $3,000 penalty is
-    // paid out of the credit before any of it lowers the draw.
+    // A 55-year-old draws $30,000 from a traditional IRA: the $3,000 penalty is paid out of the credit before any of it lowers the draw.
     const earlyCtx = makeMfjTaxContext({
       filingStatus: 'Single',
       members: [{ memberId: 'primary', isoBirthdate: '1971-01-01', onMedicare: false, hasAcaCoverage: true }],
@@ -507,13 +484,11 @@ describe('applyPerYearTaxForPath — credit applied to premiums', () => {
     const penalty = 3_000;
     expect(result.acaCreditAppliedToPremiums).toBeCloseTo(result.ptc - result.fedTax - penalty, 2);
     expect(result.acaCreditAppliedToPremiums).toBeGreaterThan(0);
-    // The bill the credit covers is paid out of it, so only the line moves the draw.
     expect(result.taxCashflowDollars).toBeCloseTo(-result.acaCreditAppliedToPremiums, 2);
   });
 
   it('keeps a negative cumulative draw from adding balance back to the RMD base', () => {
-    // The credit outran the tax so far (cumulative draw below zero): the
-    // after-tax base is the raw balance, as `applyAfterTaxAdjustment` leaves it.
+    // The credit outran the tax so far (cumulative draw below zero): the after-tax base stays the raw balance.
     expect(advanceAfterTaxBase({ base: 0, depleted: false }, 500_000, -5_000)).toEqual({
       base: 500_000,
       depleted: false,
@@ -522,7 +497,6 @@ describe('applyPerYearTaxForPath — credit applied to premiums', () => {
 });
 
 describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
-  /** Single-member context; member born `birthYear-01-01`. */
   function singleMemberCtx(birthYear: number): McTaxContext {
     return makeMfjTaxContext({
       filingStatus: 'Single',
@@ -538,9 +512,7 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
     });
   }
 
-  // Common args: tiny net drawdown (well below any RMD floor on a $1.5M pre-tax
-  // base). The floor derives from `priorPreTaxByOwner` (per-owner
-  // pre-tax cents), NOT the whole-portfolio `priorBalance`.
+  // A tiny net draw, well below any RMD floor on a $1.5M pre-tax base; the floor derives from `priorPreTaxByOwner`, not the whole-portfolio `priorBalance`.
   const subFloorArgs = {
     taxYear: 2024,
     retirementYear: 2020,
@@ -548,30 +520,22 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
     nominalExpense: 8_000,
     otherIncome: 0,
     priorBalance: 1_500_000,
-    // $1.5M pre-tax owned by the primary → age-73 floor ≈ $56,600 (÷26.5).
     priorPreTaxByOwner: new Map<string, number>([['primary', 1_500_000_00]]),
     magiMinus2: undefined,
   } as const;
 
   it('RMD-age path with a sub-floor pre-tax draw grosses fedTax up to the floor', () => {
-    // Born 1951 → age 73 in 2024 → RMD applies. The $8,000 draw is far below
-    // the ~$56,600 floor, so taxable income is forced up to the floor.
     const grossed = applyPerYearTaxForPath({ taxCtx: singleMemberCtx(1951), ...subFloorArgs });
-    // Under-age control: born 1971 (age 53) → no RMD → taxed on the $8,000 draw.
     const underAge = applyPerYearTaxForPath({ taxCtx: singleMemberCtx(1971), ...subFloorArgs });
 
     expect(grossed).not.toBeNull();
     expect(underAge).not.toBeNull();
-    // $56k+ of ordinary income produces federal tax; $8k (under the standard
-    // deduction) produces $0 — so the grossed path owes strictly more.
     expect(grossed!.fedTax).toBeGreaterThan(0);
     expect(grossed!.fedTax).toBeGreaterThan(underAge!.fedTax);
     expect(grossed!.taxCashflowDollars).toBeGreaterThan(0);
   });
 
   it('under-age path is unchanged (no floor applied below the trigger age)', () => {
-    // Born 1971 — far below the trigger age. Taxable income is the actual
-    // $8,000 draw; an $8k single filer is under the standard deduction → $0.
     const result = applyPerYearTaxForPath({ taxCtx: singleMemberCtx(1971), ...subFloorArgs });
     expect(result).not.toBeNull();
     expect(result!.fedTax).toBe(0);
@@ -579,11 +543,7 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
   });
 
   it('all-Roth/all-taxable RMD-age path has a $0 floor (no phantom RMD income)', () => {
-    // RMD-age member (born 1951) but the prior portfolio carries NO pre-tax
-    // sub-bucket (empty `priorPreTaxByOwner` — Roth-heavy / all-taxable). The
-    // legacy whole-portfolio synthetic floor would have grossed the $1.5M to a
-    // ~$56k floor; the per-owner floor correctly returns $0, so the $8k draw is
-    // taxed as-is (under the standard deduction → $0).
+    // Empty `priorPreTaxByOwner` (Roth-heavy or all-taxable): a whole-portfolio synthetic floor would gross $1.5M up to ~$56k; the per-owner floor is $0.
     const result = applyPerYearTaxForPath({
       taxCtx: singleMemberCtx(1951),
       ...subFloorArgs,
@@ -595,9 +555,7 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
   });
 
   it('couple floor fires on the SECONDARY when only the secondary is RMD-age', () => {
-    // Primary born 1971 (age 53 in 2024 → pre-RMD); secondary born 1951
-    // (age 73 → RMD applies). The pre-tax is owned by the secondary, so the
-    // floor fires on the secondary's age.
+    // Primary is pre-RMD and the secondary (born 1951) owns the pre-tax, so the floor fires on the secondary's age.
     const ctx = makeMfjTaxContext({
       filingStatus: 'MFJ',
       members: [
@@ -611,8 +569,6 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
       ...subFloorArgs,
       priorPreTaxByOwner: new Map<string, number>([['secondary', 1_500_000_00]]),
     });
-    // Control: same couple but the secondary is ALSO pre-RMD (born 1971) → no
-    // member is RMD-age → floor is $0 → taxed on the actual $8,000 draw.
     const noFloor = applyPerYearTaxForPath({
       taxCtx: makeMfjTaxContext({
         filingStatus: 'MFJ',
@@ -627,22 +583,13 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
     });
     expect(grossed).not.toBeNull();
     expect(noFloor).not.toBeNull();
-    // With the secondary RMD-age the floor forces taxable income up, producing
-    // positive federal tax and a ~$56.6k MAGI. The no-floor control owes less.
     expect(grossed!.fedTax).toBeGreaterThan(0);
     expect(grossed!.fedTax).toBeGreaterThan(noFloor!.fedTax);
     expect(grossed!.magiDollars).toBeGreaterThan(50_000);
   });
 
   it('couple floor SUMS each owner\'s own per-owner floor (not max over a shared pool)', () => {
-    // BOTH members RMD-age, EACH owning their OWN $1.5M pre-tax sub-bucket
-    // (tax year 2024):
-    //   primary  born 1951 → age 73 → divisor 26.5 → floor ≈ $56,604
-    //   secondary born 1945 → age 79 → divisor 21.1 → floor ≈ $71,090
-    // The per-owner floor SUMS them (each owner's RMD applies to their own
-    // accounts) — NOT a max over a shared pool. With a large enough draw to keep
-    // SS untaxed out of scope, the couple's grossed income == primaryFloor +
-    // secondaryFloor.
+    // Both members are RMD-age and each owns a $1.5M pre-tax sub-bucket: the per-owner floors SUM (primary ≈ $56,604 at divisor 26.5, secondary ≈ $71,090 at 21.1), not a max over a shared pool.
     const coupleCtx = makeMfjTaxContext({
       filingStatus: 'MFJ',
       members: [
@@ -659,8 +606,6 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
         ['secondary', 1_500_000_00],
       ]),
     });
-    // Reference floors: each owner's floor in isolation (same couple ctx so the
-    // standard deduction / age-65 add-ons match — only the owned pre-tax differs).
     const primaryOnly = applyPerYearTaxForPath({
       taxCtx: coupleCtx,
       ...subFloorArgs,
@@ -674,10 +619,7 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
     expect(couple).not.toBeNull();
     expect(primaryOnly).not.toBeNull();
     expect(secondaryOnly).not.toBeNull();
-    // The two owners produce DISTINCT floors (older = larger).
     expect(secondaryOnly!.magiDollars).toBeGreaterThan(primaryOnly!.magiDollars);
-    // SUM (not max): the couple's grossed income ≈ each owner's floor combined,
-    // strictly more than the larger single owner's floor.
     expect(couple!.magiDollars).toBeGreaterThan(secondaryOnly!.magiDollars);
     expect(couple!.magiDollars).toBeCloseTo(
       primaryOnly!.magiDollars + secondaryOnly!.magiDollars,
@@ -687,11 +629,7 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
   });
 
   it('draw already at/above the floor leaves the floor inert (taxed on the actual draw)', () => {
-    // Born 1951 (RMD age) but a large expense → net drawdown far exceeds the
-    // floor, so max(draw, floor) === draw and the floor adds nothing. Compare
-    // the same RMD-age member with a LARGE pre-tax base (large floor) vs a TINY
-    // pre-tax base (floor ≈ 0): both clear the floor with the $200k draw, so the
-    // federal tax is identical.
+    // A large draw clears any floor, so max(draw, floor) is the draw: a large and a tiny pre-tax base owe the same tax.
     const aboveFloorArgs = {
       ...subFloorArgs,
       nominalExpense: 200_000, // net drawdown $200,000 — well above any floor here
@@ -713,11 +651,7 @@ describe('applyPerYearTaxForPath — per-owner RMD-floor grossing', () => {
 });
 
 describe('applyPerYearTaxForPath — MC Roth basis carrier parity', () => {
-  // Single pre-59½ member (born 1990 → age 35 in 2025) so the §408A earnings
-  // tranche above remaining basis is hit with the 10% pre-59½ penalty AND the
-  // RMD-floor gross-up stays inert (no RMD at age 35). The whole year's
-  // net drawdown is a Roth withdrawal so the only tax/penalty in play is the
-  // Roth earnings split — isolating the carrier behaviour.
+  // Pre-59½ member (born 1990) so the §408A earnings above remaining basis take the 10% penalty and the RMD floor stays inert; the whole $20k draw is Roth, isolating the carrier.
   const ownerId = 'primary';
   const ctx = (): McTaxContext => ({
     taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
@@ -729,7 +663,6 @@ describe('applyPerYearTaxForPath — MC Roth basis carrier parity', () => {
     inflationRatePct: 3,
   });
 
-  // $20k net Roth drawdown for the year (expense $20k, no SS / other income).
   const baseArgs = {
     taxYear: 2025,
     retirementYear: 2022,
@@ -749,10 +682,6 @@ describe('applyPerYearTaxForPath — MC Roth basis carrier parity', () => {
   } as const;
 
   it('pre-59½ Roth earnings excess → penalty funds extra tax cashflow', () => {
-    // Carrier seeded (under the aggregate key) with only $10k basis → $20k
-    // draw consumes $10k basis, leaving $10k of earnings excess: taxed as
-    // ordinary income + the 10% pre-59½ penalty, both funded into the tax
-    // cashflow.
     const partialBasis = seedRothBasisCarrier(new Map([[MC_AGGREGATE_ROTH_OWNER_KEY, 10_000 * 100]]));
     const withExcess = applyPerYearTaxForPath({
       ...baseArgs,
@@ -760,20 +689,13 @@ describe('applyPerYearTaxForPath — MC Roth basis carrier parity', () => {
       rothBasisCarrier: partialBasis,
     });
     expect(withExcess).not.toBeNull();
-    // $10k earnings excess is ordinary income → non-zero federal tax + a 10%
-    // ($1,000) pre-59½ penalty, so the funded tax cashflow is strictly positive.
     expect(withExcess!.taxCashflowDollars).toBeGreaterThan(0);
-    // The carrier was mutated in place: $10k basis fully consumed (0 remaining),
-    // $20k cumulative withdrawn.
     const entry = partialBasis.get(MC_AGGREGATE_ROTH_OWNER_KEY)!;
     expect(entry.rothBasisRemainingCents).toBe(0);
     expect(entry.rothCumulativeWithdrawnCents).toBe(20_000 * 100);
   });
 
   it('full Roth basis coverage → no penalty, zero tax cashflow', () => {
-    // Carrier seeded (under the aggregate key) with $50k basis fully covers
-    // the $20k draw → $0 earnings excess → no ordinary income, no penalty, so the
-    // tax cashflow is zero.
     const fullBasis = seedRothBasisCarrier(new Map([[MC_AGGREGATE_ROTH_OWNER_KEY, 50_000 * 100]]));
     const noExcess = applyPerYearTaxForPath({
       ...baseArgs,
@@ -783,15 +705,12 @@ describe('applyPerYearTaxForPath — MC Roth basis carrier parity', () => {
     expect(noExcess).not.toBeNull();
     expect(noExcess!.fedTax).toBe(0);
     expect(noExcess!.taxCashflowDollars).toBe(0);
-    // Carrier mutated: $20k basis consumed, $30k remaining, $20k cumulative.
     const entry = fullBasis.get(MC_AGGREGATE_ROTH_OWNER_KEY)!;
     expect(entry.rothBasisRemainingCents).toBe(30_000 * 100);
     expect(entry.rothCumulativeWithdrawnCents).toBe(20_000 * 100);
   });
 
   it('no carrier supplied → Roth draw funds zero tax (backward-compat skip)', () => {
-    // Omitting the carrier (no taxContext basis) leaves the path with no Roth
-    // ordering: the whole Roth draw is tax-free.
     const noCarrier = applyPerYearTaxForPath({ ...baseArgs, taxCtx: ctx() });
     expect(noCarrier).not.toBeNull();
     expect(noCarrier!.fedTax).toBe(0);
@@ -799,12 +718,7 @@ describe('applyPerYearTaxForPath — MC Roth basis carrier parity', () => {
   });
 
   it('a SECONDARY owner\'s Roth basis is consumed, not stranded', () => {
-    // Two owners each hold $10k §408A basis (primary + secondary). A carrier
-    // seeded per-owner but consumed only under the primary key would strand the
-    // secondary's $10k basis, so a $20k Roth draw would see only $10k
-    // shielded ($10k earnings → taxed + penalized). The aggregate key sums
-    // both owners' basis ($20k) into one carrier entry, so the full $20k draw is
-    // shielded → $0 earnings excess → $0 tax cashflow.
+    // The aggregate key sums both owners' §408A basis into one carrier entry; consuming only the primary's key would strand the secondary's.
     const carrier = seedMcAggregateRothBasisCarrier(
       new Map([
         ['primary', 10_000 * 100],
@@ -817,10 +731,8 @@ describe('applyPerYearTaxForPath — MC Roth basis carrier parity', () => {
       rothBasisCarrier: carrier,
     });
     expect(result).not.toBeNull();
-    // Full $20k household basis shields the $20k draw → no earnings, no tax.
     expect(result!.fedTax).toBe(0);
     expect(result!.taxCashflowDollars).toBe(0);
-    // The aggregate entry consumed the whole $20k summed basis.
     const entry = carrier.get(MC_AGGREGATE_ROTH_OWNER_KEY)!;
     expect(entry.rothBasisRemainingCents).toBe(0);
     expect(entry.rothCumulativeWithdrawnCents).toBe(20_000 * 100);
@@ -828,12 +740,7 @@ describe('applyPerYearTaxForPath — MC Roth basis carrier parity', () => {
 });
 
 describe('creditMcConversionToBasisCarrier — Fill conversion → §408A basis', () => {
-  // Single pre-59½ member (born 1990 → age 35 in 2025) so a Roth earnings
-  // tranche above remaining basis would be taxed as ordinary income + the 10%
-  // pre-59½ penalty. Isolates the converted-principal-as-basis behaviour: a
-  // later-year Roth withdrawal beyond the SEEDED basis but within
-  // (seeded + converted) must be treated as tax/penalty-free basis (mirrors the
-  // deterministic `creditRothConversionToBasisCarrier`), not re-taxed earnings.
+  // Converted principal credited at year-END is §408A basis for later years, as in the deterministic `creditRothConversionToBasisCarrier`; crediting before the same year's ordering would wrongly shield it.
   const ownerId = 'primary';
   const ctx = (): McTaxContext => ({
     taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
@@ -845,7 +752,6 @@ describe('creditMcConversionToBasisCarrier — Fill conversion → §408A basis'
     inflationRatePct: 3,
   });
 
-  // $20k net Roth drawdown each year (expense $20k, no SS / other income).
   const yearArgs = (taxYear: number) =>
     ({
       taxYear,
@@ -866,26 +772,16 @@ describe('creditMcConversionToBasisCarrier — Fill conversion → §408A basis'
     }) as const;
 
   it('converted principal credited at year-END shields a LATER-year Roth withdrawal (no earnings, no penalty)', () => {
-    // Seed only $20k §408A basis. Year 1: $20k Roth draw consumes it all (0 left).
-    // Year 1 ALSO converts $30k pre-tax → target Roth (taxed as ordinary income
-    // that year by the engine). Year 2: a $20k Roth draw exceeds the seeded basis
-    // (now 0) but is within the $30k converted principal → fully basis-shielded.
     const carrier = seedMcAggregateRothBasisCarrier(new Map([[ownerId, 20_000 * 100]]));
 
-    // Year 1 withdrawal (consumes the seeded $20k basis).
     const y1 = applyPerYearTaxForPath({ ...yearArgs(2025), taxCtx: ctx(), rothBasisCarrier: carrier });
     expect(y1).not.toBeNull();
     expect(y1!.taxCashflowDollars).toBe(0); // fully covered by seeded basis
     expect(carrier.get(MC_AGGREGATE_ROTH_OWNER_KEY)!.rothBasisRemainingCents).toBe(0);
 
-    // Year-END: credit the year's $30k converted principal (the fix). MUST run
-    // AFTER the same-year ordering above — converted dollars are basis only for
-    // LATER years.
     creditMcConversionToBasisCarrier(carrier, 30_000 * 100);
     expect(carrier.get(MC_AGGREGATE_ROTH_OWNER_KEY)!.rothBasisRemainingCents).toBe(30_000 * 100);
 
-    // Year 2 withdrawal: $20k Roth draw, seeded basis exhausted, but covered by
-    // the credited converted principal → $0 earnings excess → $0 tax/penalty.
     const y2 = applyPerYearTaxForPath({ ...yearArgs(2026), taxCtx: ctx(), rothBasisCarrier: carrier });
     expect(y2).not.toBeNull();
     expect(y2!.fedTax).toBe(0); // earningsExcess = 0 → no ordinary income
@@ -894,12 +790,8 @@ describe('creditMcConversionToBasisCarrier — Fill conversion → §408A basis'
   });
 
   it('WITHOUT the credit the same later-year withdrawal is re-taxed as earnings + penalty (pins the pre-fix bug)', () => {
-    // Identical setup, but DO NOT credit the converted principal. The year-2 draw
-    // then sees 0 remaining basis → the full $20k is earnings → ordinary income +
-    // a 10% ($2k) pre-59½ penalty: the double-taxation the fix removes.
     const carrier = seedMcAggregateRothBasisCarrier(new Map([[ownerId, 20_000 * 100]]));
     applyPerYearTaxForPath({ ...yearArgs(2025), taxCtx: ctx(), rothBasisCarrier: carrier });
-    // (no creditMcConversionToBasisCarrier call here)
     const y2 = applyPerYearTaxForPath({ ...yearArgs(2026), taxCtx: ctx(), rothBasisCarrier: carrier });
     expect(y2).not.toBeNull();
     expect(y2!.fedTax).toBeGreaterThan(0); // $20k earnings taxed as ordinary income
@@ -907,22 +799,15 @@ describe('creditMcConversionToBasisCarrier — Fill conversion → §408A basis'
   });
 
   it('crediting BEFORE same-year ordering would wrongly shield the same year (guards call ordering)', () => {
-    // Demonstrates WHY the credit must land at year-END: if a year's converted
-    // principal were credited before that same year's Roth ordering, the year's
-    // own withdrawal would be wrongly shielded. Seed $0 basis, convert $30k, then
-    // withdraw $20k in the SAME year. Correct (credit after) → $20k earnings taxed.
     const carrier = seedMcAggregateRothBasisCarrier(new Map([[ownerId, 0]]));
     const sameYear = applyPerYearTaxForPath({ ...yearArgs(2025), taxCtx: ctx(), rothBasisCarrier: carrier });
     creditMcConversionToBasisCarrier(carrier, 30_000 * 100); // year-END, after ordering
     expect(sameYear).not.toBeNull();
-    // The same-year draw saw 0 basis → fully earnings → taxed + penalized. The credit
-    // offsets that bill (penalty included) before any cash is needed.
     expect(sameYear!.fedTax).toBeGreaterThan(0);
     expect(sameYear!.taxCashflowDollars).toBeCloseTo(
       Math.max(0, sameYear!.fedTax + 2_000 - sameYear!.ptc),
       2,
     );
-    // The converted principal is now available for NEXT year only.
     expect(carrier.get(MC_AGGREGATE_ROTH_OWNER_KEY)!.rothBasisRemainingCents).toBe(30_000 * 100);
   });
 
@@ -935,9 +820,6 @@ describe('creditMcConversionToBasisCarrier — Fill conversion → §408A basis'
 });
 
 describe('applyPerYearTaxForPath — MC penalty exemption parity', () => {
-  // Single pre-59½ member (born 1990 → age 35 in 2025) so the §72(t) 10% leg
-  // is fully in force on a pre-tax draw, and the RMD-floor gross-up stays
-  // inert (no RMD at age 35). A pre-tax-only draw isolates the §72(t) leg.
   const ctx = (overrides: Partial<McTaxContext> = {}): McTaxContext => ({
     taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
     filingStatus: 'Single',
@@ -975,16 +857,11 @@ describe('applyPerYearTaxForPath — MC penalty exemption parity', () => {
     });
     expect(notExempt).not.toBeNull();
     expect(exempt).not.toBeNull();
-    // The $40k pre-tax draw at age 35 carries a 10% ($4,000) §72(t) penalty when
-    // not exempt; the exempt path waives exactly that penalty leg.
     expect(notExempt!.taxCashflowDollars - exempt!.taxCashflowDollars).toBeCloseTo(4_000, 6);
-    // Income tax (federal) is identical — only the penalty leg changed.
     expect(exempt!.fedTax).toBeCloseTo(notExempt!.fedTax, 6);
   });
 
   it('Roth-earnings leg exempt → 10% penalty waived, ordinary income tax unchanged', () => {
-    // $20k Roth draw, only $10k basis → $10k earnings excess: ordinary income +
-    // a 10% ($1,000) pre-59½ penalty. The exempt path waives only the penalty.
     const rothArgs = {
       ...baseArgs,
       nominalExpense: 20_000,
@@ -1008,9 +885,7 @@ describe('applyPerYearTaxForPath — MC penalty exemption parity', () => {
     });
     expect(notExempt).not.toBeNull();
     expect(exempt).not.toBeNull();
-    // Penalty waived: the $1,000 10% leg disappears from the funded cashflow.
     expect(notExempt!.taxCashflowDollars - exempt!.taxCashflowDollars).toBeCloseTo(1_000, 6);
-    // The ordinary-income tax on the $10k earnings tranche is unaffected.
     expect(exempt!.fedTax).toBeCloseTo(notExempt!.fedTax, 6);
   });
 });
@@ -1075,19 +950,12 @@ describe('in-step tax second pass (runMonteCarlo TAXHEAVY)', () => {
   it('funding tax in-step lowers (or matches) success vs the no-tax baseline', () => {
     const noTax = runMonteCarlo(taxHeavyInput(false));
     const taxed = runMonteCarlo(taxHeavyInput(true));
-    // Pass-2 expenses include the estimated tax draw, so the portfolio is
-    // drained faster → success cannot exceed the no-tax run.
     expect(taxed.successProbability).toBeLessThanOrEqual(noTax.successProbability);
     expect(mcParityBaselines.taxHeavy_successProbability_preFix).toBeGreaterThan(0);
   });
 });
 
-// ---------------------------------------------------------------------------
-// MC years 0–1 IRMAA via the threaded MAGI bootstrap
-// ---------------------------------------------------------------------------
 describe('applyPerYearTaxForPath — years 0–1 IRMAA bootstrap parity', () => {
-  // Single Medicare member (born 1951 → age 75 in 2026 → on Medicare). The MC
-  // ring delivers the bootstrap as `magiMinus2` for projection year 0.
   const medicareCtx = makeMfjTaxContext({
     filingStatus: 'Single',
     members: [
@@ -1122,28 +990,9 @@ describe('applyPerYearTaxForPath — years 0–1 IRMAA bootstrap parity', () => 
     expect(withBootstrap).not.toBeNull();
     expect(withBootstrap!.irmaa).toBeGreaterThan(0);
   });
-
-  it('year 0 WITHOUT bootstrap (magiMinus2 undefined) charges $0 IRMAA (no-bootstrap deferral)', () => {
-    const noBootstrap = applyPerYearTaxForPath({
-      taxCtx: medicareCtx,
-      ...yearArgs,
-      magiMinus2: undefined, // ring stayed undefined → MC charges $0
-    });
-    expect(noBootstrap).not.toBeNull();
-    expect(noBootstrap!.irmaa).toBe(0);
-  });
 });
 
-// ---------------------------------------------------------------------------
-// Windowed nominalExpense drives tax feedback
-// ---------------------------------------------------------------------------
 describe('applyPerYearTaxForPath — windowed nominalExpense drives tax feedback', () => {
-  // Single member born 1955 → age 71 in 2026: ON Medicare (≥65) but PRE-RMD
-  // (<73), so the synthetic RMD floor does NOT gross up MAGI and the year's
-  // drawdown drives MAGI directly. A higher windowed `nominalExpense` (e.g. a
-  // year inside a late-life LTC window, or a faster-growing Medical bucket)
-  // raises the drawdown → taxable pre-tax income → federal tax, and lifts the
-  // year's MAGI across the first Part B IRMAA tier.
   const ctx = makeMfjTaxContext({
     filingStatus: 'Single',
     members: [
@@ -1156,9 +1005,6 @@ describe('applyPerYearTaxForPath — windowed nominalExpense drives tax feedback
     taxYear: 2026,
     retirementYear: 2026,
     grossSsDollars: 0,
-    // Windowed nominal = 60_000 (below the Single tier-1 IRMAA MAGI threshold).
-    // The fully-pre-tax classification makes the whole drawdown taxable so the
-    // year's `nominalExpense` moves MAGI directly.
     nominalExpense: 60_000,
     otherIncome: 0,
     priorBalance: 3_000_000,
@@ -1176,8 +1022,6 @@ describe('applyPerYearTaxForPath — windowed nominalExpense drives tax feedback
     const low = applyPerYearTaxForPath({ ...base, magiMinus2: 0 });
     const high = applyPerYearTaxForPath({
       ...base,
-      // Medical-heavy / in-window nominal spend (≈ +60% vs low) — the
-      // classification mirrors the larger drawdown.
       nominalExpense: 200_000,
       classification: {
         preTaxDollars: 200_000,
@@ -1191,14 +1035,10 @@ describe('applyPerYearTaxForPath — windowed nominalExpense drives tax feedback
     expect(low).not.toBeNull();
     expect(high).not.toBeNull();
     expect(high!.fedTax).toBeGreaterThan(low!.fedTax);
-    // The larger modeled spend funds more tax cashflow from the portfolio.
     expect(high!.taxCashflowDollars).toBeGreaterThan(low!.taxCashflowDollars);
   });
 
   it('the higher windowed nominalExpense lifts the year MAGI across the first Part B IRMAA tier (tolerance-free step)', () => {
-    // Feed each year's resulting MAGI as the Y+2 IRMAA look-back. The low MAGI
-    // stays below tier 1 (no surcharge); the high MAGI crosses it (a discrete
-    // surcharge step appears).
     const low = applyPerYearTaxForPath({ ...base, magiMinus2: 0 })!;
     const high = applyPerYearTaxForPath({
       ...base,
@@ -1225,30 +1065,22 @@ describe('applyPerYearTaxForPath — windowed nominalExpense drives tax feedback
   });
 });
 
-// ---------------------------------------------------------------------------
-// No-bootstrap parity-INTENT (documented, tested deferral)
-// ---------------------------------------------------------------------------
 describe('no-bootstrap deterministic-vs-MC IRMAA divergence (APPROVED DEFERRAL)', () => {
   it('deterministic engine estimates NON-zero IRMAA + flag while MC charges $0', async () => {
-    // ONE shared no-bootstrap scenario: a single member on Medicare in
-    // projection year 0 with high projected income and NO stored lookback.
     const { applyTaxIntegrationToDrawdownYears } = await import('./balance-projection-runner-tax');
     const { makeCtx, makeDrawdownYear, REAL_BUNDLE } = await import(
       './balance-projection-runner-tax-test-fixtures'
     );
 
-    // --- Deterministic engine: non-zero estimated IRMAA + disclosure flag. ---
     const detYears = [makeDrawdownYear(2026, 300_000)];
     const detCtx = makeCtx({
       primaryBirthdate: '1951-01-01', // age 75 in 2026 → on Medicare
       primaryRetirementYear: 2026,
-      // no stored bootstrap → the deterministic engine estimates the look-back MAGI from the projection
     });
     applyTaxIntegrationToDrawdownYears(detYears, [], [], [], detCtx, REAL_BUNDLE);
     expect(detYears[0].irmaaSurchargeCents).toBeGreaterThan(0);
     expect(detYears[0].magiEstimatedFromProjection).toBe(true);
 
-    // --- MC kernel: ring minus2 undefined (no bootstrap) → $0 IRMAA year 0. ---
     const mcCtx = makeMfjTaxContext({
       filingStatus: 'Single',
       members: [
@@ -1279,23 +1111,8 @@ describe('no-bootstrap deterministic-vs-MC IRMAA divergence (APPROVED DEFERRAL)'
   });
 });
 
-// ---------------------------------------------------------------------------
-// Medical-cost inflation — MC-vs-deterministic fed-tax parity (≤2%)
-// ---------------------------------------------------------------------------
 describe('applyPerYearTaxForPath — AC-(i) MC fed-tax within ≤2% of the deterministic engine', () => {
   it('a bucketed-draw named-strategy year: |mcFed − detFed| / detFed ≤ 0.02', async () => {
-    // Drive the SAME gross ordinary draw through BOTH engines and compare the
-    // federal income tax. A "bucketed-draw named-strategy year" = the higher
-    // (medical-heavy) nominal spend the bucketed override produces, drawn fully
-    // pre-tax under a named (taxEfficient) strategy. Single member born 1990
-    // (age 36 in 2026): pre-Medicare + pre-RMD, so no IRMAA / RMD-floor gross-up
-    // — the year reduces to a plain federal-tax comparison on the gross draw.
-    //
-    // Tax year 2026 is the LATEST published federal-tax snapshot year, so
-    // `resolveFederalTaxSnapshotForYear` does NOT extrapolate/scale on either
-    // side (factor = 1, inflation-independent) — both engines index the
-    // identical 2026 brackets + standard deduction. DEFAULT_TAX_CALIBRATION_BUNDLE
-    // and the deterministic REAL_BUNDLE share the same FEDERAL_TAX_CONFIG.
     const { applyTaxIntegrationToDrawdownYears } = await import('./balance-projection-runner-tax');
     const { makeCtx, makeDrawdownYear, REAL_BUNDLE } = await import(
       './balance-projection-runner-tax-test-fixtures'
@@ -1303,7 +1120,6 @@ describe('applyPerYearTaxForPath — AC-(i) MC fed-tax within ≤2% of the deter
     const TAX_YEAR = 2026;
     const GROSS = 130_000; // bucketed (medical-heavy) nominal annual draw
 
-    // --- Deterministic engine: federalTaxCents on the gross pre-tax draw. ---
     const detYears = [makeDrawdownYear(TAX_YEAR, GROSS)];
     const detCtx = makeCtx({
       withdrawalStrategy: { kind: 'taxEfficient' },
@@ -1314,7 +1130,6 @@ describe('applyPerYearTaxForPath — AC-(i) MC fed-tax within ≤2% of the deter
     const detFed = (detYears[0].federalTaxCents ?? 0) / 100;
     expect(detFed).toBeGreaterThan(0);
 
-    // --- MC per-year estimator: fedTax on the same fully-pre-tax gross. ---
     const mcCtx = makeMfjTaxContext({
       filingStatus: 'Single',
       members: [
@@ -1342,7 +1157,6 @@ describe('applyPerYearTaxForPath — AC-(i) MC fed-tax within ≤2% of the deter
     });
     expect(mc).not.toBeNull();
     const mcFed = mc!.fedTax;
-    // MC fed tax tracks the deterministic engine to within ≤2%.
     expect(Math.abs(mcFed - detFed) / detFed).toBeLessThanOrEqual(0.02);
   });
 });
@@ -1355,9 +1169,6 @@ describe('buildYearMemberFlags — Medicare 65th-birthday month onset', () => {
     hasAcaCoverage: false,
   };
 
-  // Cross-engine parity: the MC twin and the deterministic engine resolve
-  // the SAME months for the same member/year, because both call the one shared
-  // resolver.
   it('agrees with the deterministic twin for every birth month and edge input', () => {
     type StatedMonths = { partBMonths?: number; partDMonths?: number; marketplaceMonths?: number };
     type ParityInput = {
@@ -1372,20 +1183,15 @@ describe('buildYearMemberFlags — Medicare 65th-birthday month onset', () => {
       inputs.push({ iso: `1960-${String(month).padStart(2, '0')}-15`, taxYear: 2025, retirementYear: 2024 });
     }
     inputs.push(
-      // Turning-65 year and the following whole year.
       { iso: '1960-07-15', taxYear: 2026, retirementYear: 2024 },
-      // Stored Part B / D / Marketplace months overlay the automatic derivation.
       { iso: '1960-03-01', taxYear: 2024, retirementYear: 2024, stated: { partBMonths: 7, partDMonths: 0, marketplaceMonths: 5 } },
-      // Clamp: stated Marketplace months cannot coexist with Medicare months.
       { iso: '1960-07-15', taxYear: 2025, retirementYear: 2024, stated: { partBMonths: 7, partDMonths: 7, marketplaceMonths: 12 } },
-      // Empty / impossible birthdates charge no automatic months; stated Part B survives.
       { iso: '', taxYear: 2025, retirementYear: 2024 },
       { iso: '', taxYear: 2025, retirementYear: 2024, stated: { partBMonths: 6, marketplaceMonths: 12 } },
       { iso: '1961-99-99', taxYear: 2030, retirementYear: 2024 },
       { iso: '1961-13-15', taxYear: 2030, retirementYear: 2024 },
       { iso: '1961-02-30', taxYear: 2030, retirementYear: 2024 },
       { iso: '1961-02-29', taxYear: 2030, retirementYear: 2024 },
-      // Malformed imported overrides read as nothing stated.
       { iso: '1960-03-01', taxYear: 2025, retirementYear: 2024, nullPerMember: true },
       { iso: '1960-03-01', taxYear: 2025, retirementYear: 2024, stated: null },
     );
@@ -1396,7 +1202,7 @@ describe('buildYearMemberFlags — Medicare 65th-birthday month onset', () => {
           : input.stated === undefined
             ? undefined
             : { perMember: { [id]: { [input.taxYear]: input.stated } } };
-      const mc = buildYearMemberFlags(
+      const mc = memberFlags(
         { ...member, isoBirthdate: input.iso },
         input.taxYear,
         input.retirementYear,
@@ -1424,14 +1230,6 @@ describe('buildYearMemberFlags — Medicare 65th-birthday month onset', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Born-Jan-1 age-65 boundary (Monte Carlo twin). The age-65 standard-
-// deduction COUNT follows the born-Jan-1 rule (a Jan 1 birthday attains the age
-// at the end of the prior year); the birthday-MONTH Medicare entitlement only
-// affects the member's Medicare months (asserted in the buildYearMemberFlags
-// block above), not this count.
-// ---------------------------------------------------------------------------
-
 describe('countTaxpayersAge65Plus — born-Jan-1 age-65 boundary', () => {
   const jan1_1960: TaxMemberInput = {
     memberId: 'jan1',
@@ -1441,8 +1239,7 @@ describe('countTaxpayersAge65Plus — born-Jan-1 age-65 boundary', () => {
   };
 
   it('jan1_1960_counts_as_65plus_for_tax_year_2024', () => {
-    // IRS born-Jan-1 rule: treated as reaching 65 on 2023-12-31 → qualifies for
-    // tax year 2024 (one year earlier than the naive taxYear − birthYear = 64).
+    // IRS born-Jan-1 rule: treated as reaching 65 on 2023-12-31, so it qualifies for tax year 2024, one year earlier than taxYear minus birth year.
     expect(countTaxpayersAge65Plus([jan1_1960], 2024)).toBe(1);
   });
 });
@@ -1457,32 +1254,28 @@ describe('buildYearMemberFlags — ACA opt-out (parity)', () => {
   };
 
   it('should_keep_hasAcaCoverage_true_when_not_opted_out', () => {
-    const flags = buildYearMemberFlags(member, 2024, RET, new Set());
+    const flags = memberFlags(member, 2024, RET, new Set());
     expect(flags.hasAcaCoverage).toBe(true);
   });
 
   it('should_force_hasAcaCoverage_false_when_the_member_id_is_opted_out', () => {
-    const flags = buildYearMemberFlags(member, 2024, RET, new Set(['m1']));
+    const flags = memberFlags(member, 2024, RET, new Set(['m1']));
     expect(flags.hasAcaCoverage).toBe(false);
   });
 
   it('should_default_to_no_opt_out_when_the_set_arg_is_omitted (back-compat)', () => {
-    const flags = buildYearMemberFlags(member, 2024, RET);
+    const flags = memberFlags(member, 2024, RET);
     expect(flags.hasAcaCoverage).toBe(true);
   });
 
   it('should_gate_on_member_id_not_a_boolean — only the named member is affected', () => {
     const other: TaxMemberInput = { ...member, memberId: 'm2' };
     const optedOut = new Set(['m1']);
-    expect(buildYearMemberFlags(member, 2024, RET, optedOut).hasAcaCoverage).toBe(false);
-    expect(buildYearMemberFlags(other, 2024, RET, optedOut).hasAcaCoverage).toBe(true);
+    expect(memberFlags(member, 2024, RET, optedOut).hasAcaCoverage).toBe(false);
+    expect(memberFlags(other, 2024, RET, optedOut).hasAcaCoverage).toBe(true);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Per-owner RMD floor (computeMcRmdFloorCents) replaces the whole-portfolio
-// synthetic floor.
-// ---------------------------------------------------------------------------
 describe('computeMcRmdFloorCents — per-owner pre-tax RMD floor', () => {
   const RMD = DEFAULT_TAX_CALIBRATION_BUNDLE.rmd;
   const owner = (memberId: string, isoBirthdate: string): TaxMemberInput => ({
@@ -1492,22 +1285,8 @@ describe('computeMcRmdFloorCents — per-owner pre-tax RMD floor', () => {
     hasAcaCoverage: false,
   });
 
-  it('all-Roth household at RMD age → 0 (no pre-tax balance)', () => {
-    // An RMD-age member but an EMPTY pre-tax map (Roth-heavy) → $0 floor.
-    const survivors = [owner('m1', '1951-01-01')]; // age 73 in 2024
-    expect(computeMcRmdFloorCents(new Map(), survivors, 2024, RMD)).toBe(0);
-  });
-
-  it('all-brokerage household at RMD age → 0 (no pre-tax balance)', () => {
-    // Same as all-Roth from the floor's perspective: the brokerage carries no
-    // pre-tax sub-bucket, so the per-owner map is empty → $0 floor.
-    const survivors = [owner('m1', '1951-01-01')];
-    expect(computeMcRmdFloorCents(new Map(), survivors, 2024, RMD)).toBe(0);
-  });
-
   it('mixed IRA+Roth at RMD age → floor on the IRA pre-tax portion only', () => {
-    // The map carries ONLY the traditional-IRA pre-tax cents (the Roth portion
-    // never enters `priorPreTaxByOwner`). Age-73 divisor 26.5.
+    // The map carries only the traditional-IRA pre-tax cents (the Roth portion never enters `priorPreTaxByOwner`); age-73 divisor 26.5.
     const survivors = [owner('m1', '1951-01-01')];
     const floor = computeMcRmdFloorCents(
       new Map([['m1', 1_000_000_00]]),
@@ -1515,7 +1294,6 @@ describe('computeMcRmdFloorCents — per-owner pre-tax RMD floor', () => {
       2024,
       RMD,
     );
-    // ≈ $1,000,000 / 26.5 ≈ $37,736.
     expect(floor).toBeGreaterThan(37_000_00);
     expect(floor).toBeLessThan(38_000_00);
   });
@@ -1561,9 +1339,6 @@ describe('computeMcRmdFloorCents — per-owner pre-tax RMD floor', () => {
 
 });
 
-// ---------------------------------------------------------------------------
-// Per-owner pre-tax map-builder (account-type filtering).
-// ---------------------------------------------------------------------------
 describe('buildPreTaxCentsByOwnerIdx — account-type filtering', () => {
   const OWNERS = ['m1'];
   const ledgerEntry = (
@@ -1604,7 +1379,6 @@ describe('buildPreTaxCentsByOwnerIdx — account-type filtering', () => {
   });
 
   it('MIXED 401k uses the pre-tax sub-bucket only (§325 Roth-designated post excluded)', () => {
-    // preEnd = pre-tax, postEnd = designated-Roth → only preEnd counts.
     const bal = new Map([['a', acctRow(300_000, 200_000)]]);
     const idx = buildPreTaxCentsByOwnerIdx(bal, [ledgerEntry('a', 'RETIREMENT_401K', 'MIXED')], OWNERS);
     expect(idx).toEqual([300_000_00]);
@@ -1652,9 +1426,6 @@ describe('buildPreTaxCentsByOwnerIdx — account-type filtering', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// No-ledger kernel fallback whole-portfolio floor (max over owners).
-// ---------------------------------------------------------------------------
 describe('buildKernelWholePortfolioPreTaxByOwner — kernel fallback', () => {
   const RMD = DEFAULT_TAX_CALIBRATION_BUNDLE.rmd;
   const owner = (memberId: string, isoBirthdate: string): TaxMemberInput => ({
@@ -1665,14 +1436,10 @@ describe('buildKernelWholePortfolioPreTaxByOwner — kernel fallback', () => {
   });
 
   it('assigns the whole balance to the OLDEST RMD-age owner (largest floor)', () => {
-    // The no-ledger fallback reproduces the legacy MAX-over-survivors whole-pool
-    // floor through the per-owner function: the whole $1.5M is assigned to one
-    // owner, and the resulting floor equals the OLDER owner's floor (smallest
-    // divisor) — NOT the sum.
+    // The no-ledger fallback reproduces the legacy max-over-survivors floor: the whole $1.5M goes to one owner and the floor equals the older owner's (smallest divisor), not the sum.
     const survivors = [owner('m1', '1951-01-01'), owner('m2', '1945-01-01')];
     const map = buildKernelWholePortfolioPreTaxByOwner(survivors, 1_500_000, 2024, RMD);
     const floor = computeMcRmdFloorCents(map, survivors, 2024, RMD);
-    // Reference: the whole $1.5M owned by the OLDER member alone.
     const olderFloor = computeMcRmdFloorCents(
       new Map([['m2', 1_500_000_00]]),
       survivors,
@@ -1680,7 +1447,6 @@ describe('buildKernelWholePortfolioPreTaxByOwner — kernel fallback', () => {
       RMD,
     );
     expect(floor).toBe(olderFloor);
-    // It is NOT the sum (a single-owner map, no double-count).
     const sumIfBoth =
       computeMcRmdFloorCents(new Map([['m1', 1_500_000_00]]), survivors, 2024, RMD) + olderFloor;
     expect(floor).toBeLessThan(sumIfBoth);
@@ -1693,9 +1459,6 @@ describe('buildKernelWholePortfolioPreTaxByOwner — kernel fallback', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// QCD — per-path QCD floor offset + income exclusion.
-// ---------------------------------------------------------------------------
 describe('computeMcRmdFloorCents — QCD per-owner RMD offset', () => {
   const RMD = DEFAULT_TAX_CALIBRATION_BUNDLE.rmd;
   const member = (id: string, iso: string): TaxMemberInput => ({
@@ -1710,7 +1473,6 @@ describe('computeMcRmdFloorCents — QCD per-owner RMD offset', () => {
     const basis = new Map([['m1', 1_500_000_00]]);
     const gross = computeMcRmdFloorCents(basis, survivors, 2024, RMD);
     expect(gross).toBeGreaterThan(0);
-    // A $20k QCD offsets the floor by exactly $20k (the offset ≤ gross).
     const offset20k = computeMcRmdFloorCents(
       basis,
       survivors,
@@ -1719,7 +1481,6 @@ describe('computeMcRmdFloorCents — QCD per-owner RMD offset', () => {
       new Map([['m1', 20_000_00]]),
     );
     expect(offset20k).toBe(gross - 20_000_00);
-    // An offset ≥ gross zeroes the taxable floor (never negative).
     const offsetHuge = computeMcRmdFloorCents(
       basis,
       survivors,
@@ -1731,8 +1492,7 @@ describe('computeMcRmdFloorCents — QCD per-owner RMD offset', () => {
   });
 
   it('offsets ONLY the owner whose pre-tax basis is in the map (no cross-owner)', () => {
-    // Couple, BOTH RMD-age, each owning their own $1.5M pre-tax IRA pool. A QCD
-    // by m1 offsets only m1's floor; m2's floor is untouched.
+    // Both RMD-age, each owning a $1.5M IRA pool: a QCD by m1 offsets only m1's floor.
     const survivors = [member('m1', '1951-01-01'), member('m2', '1945-01-01')];
     const basis = new Map([
       ['m1', 1_500_000_00],
@@ -1746,13 +1506,11 @@ describe('computeMcRmdFloorCents — QCD per-owner RMD offset', () => {
       RMD,
       new Map([['m1', 10_000_00]]),
     );
-    // Total floor drops by exactly m1's $10k offset — m2's floor never moves.
     expect(m1Only).toBe(gross - 10_000_00);
   });
 
   it('a below-trigger owner has no floor to offset (70½–72 pre-RMD)', () => {
-    // Born 1953 → age 71 in 2024: QCD-eligible (70½) but NOT yet RMD-age (73).
-    // The owner has a $0 RMD floor, so an offset leaves it at 0 (never negative).
+    // Born 1953 (age 71 in 2024): QCD-eligible (70½) but not yet RMD-age (73), so an offset leaves the $0 floor at 0.
     const survivors = [member('m1', '1953-06-01')];
     const basis = new Map([['m1', 1_500_000_00]]);
     const gross = computeMcRmdFloorCents(basis, survivors, 2024, RMD);
@@ -1765,27 +1523,6 @@ describe('computeMcRmdFloorCents — QCD per-owner RMD offset', () => {
       new Map([['m1', 50_000_00]]),
     );
     expect(offset).toBe(0);
-  });
-
-  it('IRA + 401k same owner: only the IRA-pool basis is offset', () => {
-    // The MC RMD floor reads `priorPreTaxByOwner` (the per-owner pre-tax sum).
-    // The QCD offset only ever reduces the IRA pool's contribution — modeled
-    // here as the offset applying against the owner's floor. The 401k's pre-tax
-    // dollars still enforce their own RMD: an offset capped at the IRA RMD never
-    // erases the employer-plan floor. With the owner's whole pre-tax basis at
-    // $1.5M and an offset BELOW the gross, the floor stays positive.
-    const survivors = [member('m1', '1951-01-01')];
-    const basis = new Map([['m1', 1_500_000_00]]);
-    const gross = computeMcRmdFloorCents(basis, survivors, 2024, RMD);
-    const offset = computeMcRmdFloorCents(
-      basis,
-      survivors,
-      2024,
-      RMD,
-      new Map([['m1', 5_000_00]]),
-    );
-    expect(offset).toBe(gross - 5_000_00);
-    expect(offset).toBeGreaterThan(0); // 401k RMD still enforced
   });
 });
 
@@ -1800,9 +1537,7 @@ describe('applyPerYearTaxForPath — QCD income exclusion', () => {
     });
   }
 
-  // An RMD-age member with a $200k pre-tax sub-bucket. The actual pre-tax draw
-  // ($60k via classification) EXCEEDS the floor, so the exclusion (not the floor
-  // offset) is what removes the QCD from income.
+  // An RMD-age member with a $200k pre-tax sub-bucket; the $60k draw exceeds the floor, so the exclusion (not the floor offset) is what removes the QCD from income.
   const drawArgs = {
     taxYear: 2024,
     retirementYear: 2020,
@@ -1831,14 +1566,11 @@ describe('applyPerYearTaxForPath — QCD income exclusion', () => {
     });
     expect(noQcd).not.toBeNull();
     expect(withQcd).not.toBeNull();
-    // The QCD drops MAGI by exactly the gift (1×, never 2×) and lowers fed tax.
     expect(noQcd!.magiDollars - withQcd!.magiDollars).toBeCloseTo(20_000, 2);
     expect(withQcd!.fedTax).toBeLessThan(noQcd!.fedTax);
   });
 
   it('the floor offset alone (no exclusion) leaves a sub-floor draw correct', () => {
-    // A small draw ($8k) below the floor: the offset shrinks the floor so the
-    // gross-up no longer re-adds the QCD as phantom taxable income.
     const subFloor = {
       ...drawArgs,
       nominalExpense: 8_000,
@@ -1853,15 +1585,9 @@ describe('applyPerYearTaxForPath — QCD income exclusion', () => {
     });
     expect(grossUp).not.toBeNull();
     expect(withOffset).not.toBeNull();
-    // The offset + exclusion lower the grossed-up MAGI vs the no-QCD floor gross-up.
     expect(withOffset!.magiDollars).toBeLessThan(grossUp!.magiDollars);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Taxable income + engine parity (yield drag / evolving basis /
-// cash-like interest / 457(b)-source-aware pooled penalty)
-// ---------------------------------------------------------------------------
 
 describe('advanceMcTaxableIncomeState — shared accumulator parity', () => {
   const singleCtx = (): McTaxContext => ({
@@ -1876,9 +1602,7 @@ describe('advanceMcTaxableIncomeState — shared accumulator parity', () => {
   });
 
   it('reproduces the deterministic helpers exactly on identical rows', () => {
-    // One brokerage (yield/basis), one CD (interest), one HSA (excluded — stays
-    // tax-free), one pre-tax (excluded). The MC advance must return the SAME
-    // numbers as running the deterministic helpers directly on the same rows.
+    // One brokerage (yield/basis), one CD (interest), one HSA (stays tax-free) and one pre-tax row: the MC advance must return the numbers of the deterministic helpers on the same rows.
     const rows = [
       {
         id: 'brok', taxTreatment: 'POST_TAX' as const, accountType: 'BROKERAGE' as const,
@@ -1911,11 +1635,8 @@ describe('advanceMcTaxableIncomeState — shared accumulator parity', () => {
     expect(mc.brokerageLikeStartBalanceDollars).toBe(det.startBalanceDollars);
     expect(mc.costBasisFraction).toBe(det.preWithdrawalBasisFraction);
     expect(mc.cashInterestDollars).toBe(detInterest);
-    // CD interest = end + withdrawn − deposits − start = 103k + 1k − 0 − 100k.
     expect(mc.cashInterestDollars).toBe(4_000);
-    // The two accumulators carry the same per-account basis forward.
     expect(mcState.basisByAccountId.get('brok')).toBe(detState.basisByAccountId.get('brok'));
-    // HSA + pre-tax rows never enter either set (HSA stays tax-free).
     expect(mcState.basisByAccountId.has('hsa')).toBe(false);
     expect(mcState.basisByAccountId.has('ira')).toBe(false);
   });
@@ -1948,8 +1669,7 @@ describe('advanceMcTaxableIncomeState — shared accumulator parity', () => {
     });
     expect(withoutTaxableIncome).not.toBeNull();
     expect(withTaxableIncome).not.toBeNull();
-    // MAGI delta = $20k yield (2% × $1M, QDI + ordinary) + $5k interest
-    // + $10k extra LTCG (basis fraction 0.25 vs static 0.5 on the $40k draw).
+    // MAGI delta = $20k yield (2% of $1M) + $5k interest + $10k extra LTCG (basis fraction 0.25 vs the static 0.5 on the $40k draw).
     expect(withTaxableIncome!.magiDollars - withoutTaxableIncome!.magiDollars).toBeCloseTo(35_000, 6);
   });
 });
@@ -1959,7 +1679,6 @@ describe('pooled penalty — 457(b) source exemption parity', () => {
     taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
     filingStatus: 'Single',
     members: [
-      // Born 1980 → mid-40s in 2026: squarely pre-59½.
       { memberId: 'primary', isoBirthdate: '1980-05-20', onMedicare: false, hasAcaCoverage: false },
     ],
     householdSize: 1,
@@ -1986,27 +1705,16 @@ describe('pooled penalty — 457(b) source exemption parity', () => {
   });
 
   it('an all-457(b) pre-tax household (source-exempt flag) funds NO §72(t) penalty', () => {
-    // Mirrors the deterministic engine: a governmental 457(b) distribution
-    // carries no 10% additional tax, so the pooled leg is waived when
-    // `resolveMcPenaltyExemptions` resolved every pre-tax source as 457(b).
+    // A governmental 457(b) distribution carries no 10% additional tax, so the pooled leg is waived when every pre-tax source resolved as 457(b).
     const exempt = applyPerYearTaxForPath(drawArgs(youngCtx({ mcPreTaxPenaltyAllExempt: true })));
     const penalized = applyPerYearTaxForPath(drawArgs(youngCtx({})));
     expect(exempt).not.toBeNull();
     expect(penalized).not.toBeNull();
-    // The waived leg is exactly the 10% × $50k pre-59½ penalty (the MC glue
-    // funds the penalty via `taxCashflowDollars`, not `fedTax`).
     expect(penalized!.taxCashflowDollars - exempt!.taxCashflowDollars).toBeCloseTo(5_000, 6);
-    // Ordinary income tax is unchanged by the waiver.
     expect(exempt!.fedTax).toBe(penalized!.fedTax);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Per-source pooled penalty split (mixed 457(b)+penalized pools).
-// The classifier preserves withdrawal provenance into the penalty-exempt
-// sub-buckets, and `computeMcPenaltyDollars` penalizes only the
-// non-exempt-source portion — matching the deterministic per-account engine.
-// ---------------------------------------------------------------------------
 describe('per-source pooled penalty — mixed 457(b) pools', () => {
   const row = (o: Partial<McAccountYearWithdrawal>): McAccountYearWithdrawal => ({
     taxTreatment: 'PRE_TAX',
@@ -2020,7 +1728,6 @@ describe('per-source pooled penalty — mixed 457(b) pools', () => {
     taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
     filingStatus: 'Single',
     members: [
-      // Born 1980 → mid-40s in 2026: squarely pre-59½ (full 10% penalty year).
       { memberId: 'primary', isoBirthdate: '1980-05-20', onMedicare: false, hasAcaCoverage: false },
     ],
     householdSize: 1,
@@ -2089,9 +1796,7 @@ describe('per-source pooled penalty — mixed 457(b) pools', () => {
   });
 
   it('mixed pre-tax pool (457(b) + IRA): only the IRA-sourced portion is penalized', () => {
-    // $30k 457(b) + $20k IRA. The pooled flag stays false (mixed pool), but the
-    // per-source split penalizes ONLY the $20k IRA share: 10% × $20k = $2,000 —
-    // NOT 10% × $50k = $5,000 (an all-or-nothing pooled penalty).
+    // The pooled flag stays false (mixed pool) but the per-source split penalizes only the $20k IRA share (10% x $20k = $2,000), not 10% x $50k.
     const mixedCls = classifyMcWithdrawal([
       row({ accountType: 'RETIREMENT_457B', withdrawalDollars: 30_000 }),
       row({ accountType: 'RETIREMENT_IRA', withdrawalDollars: 20_000 }),
@@ -2115,25 +1820,13 @@ describe('per-source pooled penalty — mixed 457(b) pools', () => {
     const allIra = applyPerYearTaxForPath(args(allIraCls));
     expect(mixed).not.toBeNull();
     expect(allIra).not.toBeNull();
-    // Delta = the waived 457(b)-sourced penalty share: 10% × $30k = $3,000.
     expect(allIra!.taxCashflowDollars - mixed!.taxCashflowDollars).toBeCloseTo(3_000, 6);
-    // Ordinary income tax is identical — only the penalty leg differs.
     expect(mixed!.fedTax).toBe(allIra!.fedTax);
   });
 
   it('mixed Roth pool (Roth 457(b) + Roth IRA): the SOURCE-RESOLVED additional-tax base is not re-prorated', () => {
-    // (An ALL-457(b) ordered draw is still fully exempt — the waiver is
-    // all-or-nothing rather than prorated; see the sibling case below.)
-    // The §408A/§402A ordering engine hands this leg an
-    // ALREADY-SOURCE-RESOLVED additional-tax base (it applies the governmental
-    // 457(b) §72(t)(9) carve-out at the source — only on an all-457(b) designated
-    // pool, so a non-457(b) sibling's genuine penalty is never waived). Scaling that
-    // base a SECOND time by the pool's non-exempt WITHDRAWAL share would discount real
-    // IRA conversion recapture merely because unrelated 457(b) dollars were drawn in
-    // the same year. The base flows straight through, so a mixed pool pays the
-    // same 10% as an all-IRA pool on the same $10k earnings excess — the
-    // conservative direction, and the only one that cannot silently drop a
-    // legitimate recapture.
+    // The ordering engine hands this leg an already source-resolved additional-tax base (the §72(t)(9) carve-out applies only to an all-457(b) pool),
+    // so re-prorating it by the 457(b) withdrawal share would discount genuine IRA recapture; the mixed pool pays the same 10% as the all-IRA twin.
     const mixedCls = classifyMcWithdrawal([
       row({ taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_457B', withdrawalDollars: 12_000 }),
       row({ taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA', withdrawalDollars: 8_000 }),
@@ -2160,18 +1853,12 @@ describe('per-source pooled penalty — mixed 457(b) pools', () => {
     const allIra = applyPerYearTaxForPath(args(allIraCls));
     expect(mixed).not.toBeNull();
     expect(allIra).not.toBeNull();
-    // No re-proration → the mixed pool owes the SAME penalty as the all-IRA twin.
     expect(allIra!.taxCashflowDollars - mixed!.taxCashflowDollars).toBeCloseTo(0, 6);
-    // The ordinary-income tax on the full $10k earnings excess is unchanged.
     expect(mixed!.fedTax).toBe(allIra!.fedTax);
   });
 
-  // §72(t)(2)(A)(ii) — an INHERITED designated-Roth plan. A distribution made on
-  // account of the original owner's death carries no 10% at ANY beneficiary age,
-  // which is what the deterministic twin does (`computeDesignatedRothDistribution`
-  // short-circuits on `inheritedFromDeceasedOwner`). The MC Roth leg omitted
-  // `deathExemptInherited`, so the same beneficiary's earnings were charged the
-  // full 10% on one engine and none on the other.
+  // §72(t)(2)(A)(ii): a distribution on account of the original owner's death carries no 10% at any beneficiary age. The MC Roth leg once omitted
+  // `deathExemptInherited`, charging the full 10% where the deterministic twin charged none.
   it('inherited designated-Roth plan: no 10% on the ordered Roth leg before 59½', () => {
     const survivorState = {
       survivors: [
@@ -2184,9 +1871,7 @@ describe('per-source pooled penalty — mixed 457(b) pools', () => {
       ],
       filingStatus: 'Single',
     } as McSurvivorState;
-    // A $20,000 pre-59½ draw from ONE designated-Roth plan whose §402A five-year
-    // participation clock is unmet, $10,000 of which is the year's additional-tax
-    // base (the earnings tranche the ordering engine resolved upstream).
+    // A $20,000 pre-59½ draw from one designated-Roth plan with an unmet §402A five-year clock; $10,000 is the additional-tax base the ordering engine resolved upstream.
     const penaltyFor = (inherited: boolean): number => {
       const classification = classifyMcWithdrawal([
         row({
@@ -2210,20 +1895,12 @@ describe('per-source pooled penalty — mixed 457(b) pools', () => {
       };
       return computeMcPenaltyDollars(args, survivorState, 10_000);
     };
-    // The beneficiary's OWN plan: the full 10% × $10,000 base.
     expect(penaltyFor(false)).toBeCloseTo(1_000, 6);
-    // Inherited: the whole ordered leg is source-exempt, so no 10% at all.
     expect(penaltyFor(true)).toBe(0);
   });
 
   it('funded strategy path: a mixed 457(b)+IRA household outlives an all-IRA twin (provenance reaches the funded loop)', () => {
-    // Two identical strategy-path runs (same seed, same balances, same member)
-    // differing ONLY in the first account's TYPE: RETIREMENT_457B vs
-    // RETIREMENT_IRA. Account type does not affect growth or drawdown ordering
-    // (both PRE_TAX, same tier), so any funded-balance difference is purely the
-    // per-source §72(t) penalty split reaching the funded per-path loop: the
-    // 457(b)-sourced share of each year's pre-59½ pooled withdrawal is
-    // penalty-free, so the mixed run funds less penalty and ends higher.
+    // Two identical runs differing only in the first account's type (457(b) vs IRA): type does not affect growth or ordering, so any balance difference is the per-source §72(t) split reaching the funded loop.
     const firstYear = 2026;
     const horizonYear = 2041;
     const years = horizonYear - firstYear + 1;
@@ -2259,7 +1936,6 @@ describe('per-source pooled penalty — mixed 457(b) pools', () => {
         taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
         filingStatus: 'Single',
         members: [
-          // Born 1985 → pre-59½ across the whole horizon (through 2041, age 56).
           { memberId: 'primary', isoBirthdate: '1985-03-15', onMedicare: false, hasAcaCoverage: false },
         ],
         householdSize: 1,
@@ -2269,7 +1945,6 @@ describe('per-source pooled penalty — mixed 457(b) pools', () => {
     const mixed = runMonteCarlo(input('RETIREMENT_457B'));
     const allIra = runMonteCarlo(input('RETIREMENT_IRA'));
     const last = years - 1;
-    // Less funded penalty → strictly higher median funded balance.
     expect(mixed.percentilesNominal.p50[last]).toBeGreaterThan(
       allIra.percentilesNominal.p50[last],
     );
@@ -2282,8 +1957,6 @@ describe('run-level invariants — display-exact vs funded-approximate', () => {
   const years = horizonYear - firstYear + 1;
   const stepCount = years * 12;
 
-  /** Brokerage + CD single-filer household — the captured baseline
-   *  (`p8_brokerageCd_*` entries in mc-parity-baselines.json). */
   function brokerageCdInput(): MonteCarloInput {
     const ledger = (
       id: string,
@@ -2342,9 +2015,7 @@ describe('run-level invariants — display-exact vs funded-approximate', () => {
   }
 
   it('funded bands stay at the earlier baseline (the display-only funded design)', () => {
-    // The FUNDED per-path tax keeps the shared pre-commit approximation, so the
-    // success probability and the banded federal tax reproduce the captured
-    // baseline exactly — a silent funded-model change would break this.
+    // The funded per-path tax keeps the shared pre-commit approximation, so success and the banded federal tax reproduce the captured baseline exactly.
     const out = runMonteCarlo(brokerageCdInput());
     expect(out.successProbability).toBe(
       mcParityBaselines.p8_brokerageCd_successProbability_preFix,
@@ -2359,10 +2030,7 @@ describe('run-level invariants — display-exact vs funded-approximate', () => {
   });
 
   it('representative DISPLAY federal tax turns positive (yield drag + evolving basis + CD interest)', () => {
-    // The funded model's banded median above is $0 federal tax for this household
-    // (static 0.5 basis, no yield drag, no interest). The representative display
-    // carries the deterministic taxable-income model, so its stamped cents are
-    // positive.
+    // The funded banded median is $0 federal tax here (static 0.5 basis, no yield drag, no interest); the representative display carries the deterministic taxable-income model, so its stamped cents are positive.
     const out = runMonteCarlo(brokerageCdInput());
     const rep = out.representativeByBasis?.['mc-typical'];
     expect(rep).toBeDefined();
@@ -2371,17 +2039,12 @@ describe('run-level invariants — display-exact vs funded-approximate', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Filing-plan activation across the MC engine
-// ---------------------------------------------------------------------------
-
 describe('filing-plan activation — MC per-path tax', () => {
   const firstYear = 2026;
   const horizonYear = 2060;
   const years = horizonYear - firstYear + 1;
   const stepCount = years * 12;
-  /** The secondary spouse dies partway through the horizon, so the survivor
-   *  years are the ones the activated plan re-files. */
+  // The secondary dies partway through the horizon, so the survivor years are the ones the activated plan re-files.
   const secondaryDeathYear = 2045;
 
   function coupleInput(
@@ -2446,12 +2109,7 @@ describe('filing-plan activation — MC per-path tax', () => {
   };
 
   it('reproduces the legacy scalar path when the joint plan resolves identically (no death in horizon)', () => {
-    // Baseline contract: with nobody dying inside the horizon a `joint` plan
-    // resolves to MFJ in every year — exactly what the frozen scalar derived —
-    // so activation must not move a single number.
-    expect(mcParityBaselines.p11_jointPlan_noDeath_reproducesLegacyScalar).toBe(
-      'byte-identical',
-    );
+    // With nobody dying in the horizon a `joint` plan resolves to MFJ every year, exactly what the frozen scalar derived: activation must not move a number.
     const legacy = runMonteCarlo(
       coupleInput({ secondaryDeathYear: undefined, filingStatusOverride: 'MFJ' }),
     );
@@ -2463,13 +2121,7 @@ describe('filing-plan activation — MC per-path tax', () => {
   });
 
   it('applies a user-entered QSS survivor window on top of the post-death Single default', () => {
-    // The plan's post-death default is `Single`; a year-bounded `QSS` window
-    // overlays it with the MFJ bracket/deduction mapping for the dependent
-    // years, which is strictly less tax, so the median real ending balance
-    // rises. This exercises the status-window model.
-    expect(mcParityBaselines.p11_survivorQssWindow_medianEndingBalanceReal_direction).toBe(
-      'above-single-default',
-    );
+    // A year-bounded QSS window overlays the post-death Single default with the MFJ bracket mapping, which is strictly less tax.
     const singleDefault = medianEndingReal(coupleInput({ taxFilingPlan: { kind: 'joint' } }));
     const qssWindow = medianEndingReal(
       coupleInput({
@@ -2489,9 +2141,7 @@ describe('filing-plan activation — MC per-path tax', () => {
   });
 
   it('applies a QSS window on EXACTLY its covered years (boundary)', () => {
-    // Direction alone cannot catch an off-by-one, so pin the four boundary
-    // years: `end` is EXCLUSIVE, so [start, end) is covered and start-1 / end
-    // are not. The death year itself stays MFJ (death-year joint treatment).
+    // `end` is exclusive: [start, end) is covered, start-1 and end are not, and the death year stays MFJ. Direction alone cannot catch an off-by-one.
     const start = secondaryDeathYear + 1;
     const end = secondaryDeathYear + 3;
     const taxCtx: McTaxContext = {
@@ -2519,13 +2169,7 @@ describe('filing-plan activation — MC per-path tax', () => {
   });
 
   it('withholds tax units for an unresolved two-member scalar and keeps the legacy path', () => {
-    // A two-member household carrying a `Single` scalar cannot say whose tax
-    // unit is dropped, so the resolver refuses. The engine must NOT guess: it
-    // reports no units and keeps filing exactly as the frozen scalar did while
-    // the scenario editor prompts for a resolution.
-    expect(mcParityBaselines.p11_unresolvedTwoMemberScalar_taxUnits).toBe(
-      'withheld-legacy-path',
-    );
+    // A two-member household carrying a `Single` scalar cannot say whose tax unit is dropped, so the resolver reports no units and the legacy scalar path is kept.
     const taxCtx: McTaxContext = {
       taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
       filingStatus: 'Single',
@@ -2539,7 +2183,6 @@ describe('filing-plan activation — MC per-path tax', () => {
     };
     const bothAlive = deriveMcSurvivors(taxCtx, 2030, firstYear);
     expect(bothAlive?.taxUnits).toBeUndefined();
-    // The legacy scalar keeps producing `Single`.
     expect(bothAlive?.filingStatus).toBe('Single');
   });
 
@@ -2555,27 +2198,16 @@ describe('filing-plan activation — MC per-path tax', () => {
       secondaryDeathYear: 2045,
       taxFilingPlan: { kind: 'joint' },
     };
-    expect(mcParityBaselines.p11_survivorIrmaaLookbackStatus).toBe('lookback-return-status');
-    // 2046 is the survivor's first `Single` year; its IRMAA look-back is the
-    // 2044 return, which the couple filed jointly.
+    // 2046 is the survivor's first Single year; its IRMAA look-back is the 2044 return, filed jointly.
     const survivorFirstSingleYear = deriveMcSurvivors(taxCtx, 2046, firstYear);
     expect(survivorFirstSingleYear?.filingStatus).toBe('Single');
     expect(survivorFirstSingleYear?.irmaaLookbackFilingStatus).toBe('MFJ');
-    // By 2048 the look-back (2046) is itself a Single return.
     const laterSurvivorYear = deriveMcSurvivors(taxCtx, 2048, firstYear);
     expect(laterSurvivorYear?.irmaaLookbackFilingStatus).toBe('Single');
-    // The death year itself still files jointly (death-year joint treatment).
     expect(deriveMcSurvivors(taxCtx, 2045, firstYear)?.filingStatus).toBe('MFJ');
   });
   it('runs a SEPARATE (MFS) plan end to end and lands below the joint plan', () => {
-    // The headline filing-plan feature, exercised at RUN level. Spouses who file apart
-    // while having lived together lose the §86(c)(1)(C)(ii) base amounts
-    // entirely, so their Social Security is taxable from the first dollar on
-    // top of the halved MFS brackets — strictly more tax, so the median real
-    // ending balance falls below the joint plan's.
-    expect(mcParityBaselines.p11_separateMfsPlan_medianEndingBalanceReal_direction).toBe(
-      'below-joint',
-    );
+    // Spouses filing apart while having lived together lose the §86(c)(1)(C)(ii) base amounts, so Social Security is taxable from the first dollar atop halved MFS brackets: strictly more tax than the joint plan.
     const joint = medianEndingReal(coupleInput({ taxFilingPlan: { kind: 'joint' } }));
     const separate = medianEndingReal(
       coupleInput({
@@ -2587,7 +2219,6 @@ describe('filing-plan activation — MC per-path tax', () => {
             { memberId: 'secondary', filingStatus: 'MFS', householdSize: 1 },
           ],
         },
-        // The whole benefit is the primary's, so §86 runs on ONE return.
         ssSharesByYear: Array.from({ length: years }, (_, i) => ({
           year: firstYear + i,
           primaryShare: 1,
@@ -2598,10 +2229,7 @@ describe('filing-plan activation — MC per-path tax', () => {
   });
 
   it('attributes gross Social Security per recipient on the MC path', () => {
-    // §86 is non-linear PER RETURN, so a 50/50 split of a benefit only one
-    // spouse receives yields a different taxable-SS figure — and therefore
-    // different FUNDED balances — than attributing it to its recipient. MC used
-    // to have no way to express this while the deterministic engine did.
+    // §86 is non-linear per return, so a 50/50 split of a benefit only one spouse receives gives different funded balances than attributing it to its recipient.
     const separatePlan: TaxFilingPlan = {
       kind: 'separate',
       units: [
@@ -2623,8 +2251,7 @@ describe('filing-plan activation — MC per-path tax', () => {
   });
 
   it('leaves a SINGLE-return household byte-identical when SS shares are supplied', () => {
-    // The attribution reaches only the multi-unit branch, so threading shares
-    // through a joint household must not move a single number.
+    // Attribution reaches only the multi-unit branch, so a joint household must not move.
     const shares = Array.from({ length: years }, (_, i) => ({
       year: firstYear + i,
       primaryShare: 0.8,
@@ -2638,21 +2265,13 @@ describe('filing-plan activation — MC per-path tax', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The BOOTSTRAP-year IRMAA look-back is per RETURN, not one collapsed
-// status shared by both spouses.
-// ---------------------------------------------------------------------------
-
 describe('bootstrap-year IRMAA look-back per return', () => {
   const MEMBERS = [
     { memberId: 'primary', isoBirthdate: '1955-01-01', onMedicare: true, hasAcaCoverage: false },
     { memberId: 'secondary', isoBirthdate: '1955-01-01', onMedicare: true, hasAcaCoverage: false },
   ];
-  /** Two returns, both spouses alive, differing only in the SECOND spouse's
-   *  status. `livedTogether` is what puts an `MFS` return on the steeper
-   *  married-filing-separately Medicare schedule while a `HoH` return stays on
-   *  the single-filer one — so this pair is the smallest household whose two
-   *  returns tier on genuinely different ladders. */
+  // Two returns differing only in the second spouse's status: `livedTogether` puts an MFS return on the steeper separate-filer Medicare schedule while a HoH return stays on the single-filer one,
+  // the smallest household whose returns tier on different ladders.
   const separatePlan = (secondStatus: 'MFS' | 'HoH'): TaxFilingPlan => ({
     kind: 'separate',
     livedTogether: true,
@@ -2668,10 +2287,7 @@ describe('bootstrap-year IRMAA look-back per return', () => {
     householdSize: 2,
     taxFilingPlan: separatePlan(secondStatus),
   });
-  /** One BOOTSTRAP projection year: no per-return ring entry yet, only the
-   *  household-wide look-back MAGI the user stored. $300k splits to $150k per
-   *  return — above the tier-1 threshold on BOTH ladders, but landing on very
-   *  different surcharges. */
+  // One bootstrap year: no per-return ring entry yet, only the household look-back MAGI; $300k splits to $150k per return, above tier 1 on both ladders but landing on very different surcharges.
   const bootstrapYearIrmaa = (secondStatus: 'MFS' | 'HoH'): number => {
     const result = applyPerYearTaxForPath({
       taxCtx: taxCtxFor(secondStatus),
@@ -2683,7 +2299,6 @@ describe('bootstrap-year IRMAA look-back per return', () => {
       priorBalance: 3_000_000,
       priorPreTaxByOwner: new Map<string, number>(),
       magiMinus2: 300_000,
-      // The bootstrap years have no per-return ring entry — the whole point.
       irmaaLookbackUnitsMinus2: undefined,
       classification: {
         preTaxDollars: 40_000,
@@ -2706,8 +2321,6 @@ describe('bootstrap-year IRMAA look-back per return', () => {
   });
 
   it('reports no per-return bootstrap look-back for a single-return year', () => {
-    // A joint household has one return; the household-wide look-back scalars
-    // already say everything there is to say, so nothing is materialized.
     const jointCtx: McTaxContext = {
       taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
       filingStatus: 'MFJ',
@@ -2719,11 +2332,8 @@ describe('bootstrap-year IRMAA look-back per return', () => {
   });
 
   it('does not tier a HoH spouse on the other spouse married-filing-separately schedule', () => {
-    // The regression: both returns collapsed onto `units[0]`'s status, so the
-    // head-of-household spouse was charged the (much steeper) separate-filer
-    // surcharge for the first two projection years and then dropped to their
-    // own schedule once the per-return ring filled — a discontinuity with no
-    // cause in the filing plan.
+    // Regression: both returns collapsed onto units[0]'s status, so the head-of-household spouse was charged the separate-filer surcharge for two years
+    // and then dropped to their own schedule once the per-return ring filled.
     const bothMfs = bootstrapYearIrmaa('MFS');
     const mixed = bootstrapYearIrmaa('HoH');
     expect(bothMfs).toBeGreaterThan(0);
@@ -2732,13 +2342,8 @@ describe('bootstrap-year IRMAA look-back per return', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Fact-based MC Roth ordering: the two regimes are genuinely different.
-// ---------------------------------------------------------------------------
-
 describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () => {
   const OWNER = 'mc-p12-owner';
-  /** Pre-59½ owner (born 1980), so an additional-tax base exists at all. */
   const PRE_59_MEMBER: TaxMemberInput = {
     memberId: OWNER,
     isoBirthdate: '1980-01-01',
@@ -2755,9 +2360,7 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
       ...(profile !== undefined ? { rothOrderedProfile: profile } : {}),
     }) as unknown as McTaxContext;
 
-  /** A $10,000 §408A-ordered Roth draw in 2030. The designated slice runs the
-   *  SHARED stateful engine against a pooled carrier entry, so the pool has to be
-   *  seeded (and, across a multi-year sequence, REUSED) exactly as the engine does. */
+  // The designated slice runs the shared stateful engine against a pooled carrier entry, so the pool is seeded (and across a multi-year sequence reused) exactly as the engine does.
   const args = (
     carrier: ReturnType<typeof seedMcAggregateRothBasisCarrier>,
     profile?: McRothOrderedProfile,
@@ -2809,8 +2412,7 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
   });
 
   it('a conversion lot INSIDE its five-year window enters the 10% base but is NOT re-taxed as income', () => {
-    // No regular basis; one $10,000 fully-taxable conversion in 2028 → the 2030 draw
-    // is inside the five-tax-year window and the owner is pre-59½.
+    // No regular basis; one $10,000 fully-taxable 2028 conversion: the 2030 draw is inside the five-tax-year window and the owner is pre-59½.
     const carrier = seedMcAggregateRothBasisCarrier(
       [],
       profile({
@@ -2825,9 +2427,7 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
         }),
       ),
     );
-    // Converted principal is never re-taxed as ordinary income …
     expect(out.earningsExcessDollars).toBe(0);
-    // … but the in-window recapture IS in the 10% §72(t) base.
     expect(out.additionalTaxBaseDollars).toBe(10_000);
   });
 
@@ -2842,9 +2442,6 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
   });
 
   it('the designated-Roth slice splits PRO RATA, not contributions-first', () => {
-    // All-designated pool with half the balance recorded as basis. A $10,000 draw
-    // therefore recovers $5,000 of basis and realises $5,000 of growth — a
-    // contribution-first rule would have made the whole draw tax-free.
     const p = profile({
       iraShareOfOrderedPool: 0,
       designatedBasisCents: 50_000 * 100,
@@ -2854,12 +2451,6 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
     const out = applyMcRothBasisOrdering(args(carrier, p));
     expect(out.earningsExcessDollars).toBe(5_000);
     expect(out.additionalTaxBaseDollars).toBe(5_000);
-    // Without this the designated slice would share one
-    // contribution-first pool, so the same draw would come out entirely tax-free.
-    expect(mcParityBaselines.p12_designatedRothOrdering_preFix).toBe('contributions-first');
-    expect(mcParityBaselines.p12_pureRothEmployerBasis_preFix).toBe(
-      'whole-at-retirement-balance-as-basis',
-    );
   });
 
   it('an all-governmental-457(b) designated pool owes income tax on growth but NO 10% (§72(t)(9))', () => {
@@ -2890,16 +2481,12 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
   it('with no profile the whole ordered draw runs the Roth-IRA path (earlier shape preserved)', () => {
     const carrier = seedMcAggregateRothBasisCarrier([{ ownerId: OWNER, cents: 4_000 * 100 }]);
     const out = applyMcRothBasisOrdering(args(carrier));
-    // $4,000 basis shields $4,000; the remaining $6,000 is growth.
     expect(out.earningsExcessDollars).toBe(6_000);
     expect(out.additionalTaxBaseDollars).toBe(6_000);
-    expect(mcParityBaselines.p12_noRothRmdFacts_reproducesLegacyEngine).toBe('byte-identical');
   });
 
-  // The designated split is STATEFUL: the pool's remaining basis
-  // decrements on every draw, so its LIFETIME basis shelter is capped at the
-  // recorded basis. A stateless split would re-apply a frozen fraction to
-  // every future withdrawal and could shelter multiples of the recorded basis.
+  // The designated split is stateful: the pool's remaining basis decrements on every draw, capping its lifetime shelter at the recorded basis;
+  // a stateless split would re-apply a frozen fraction to every withdrawal.
   it('decrements the designated pool basis across a multi-year withdrawal sequence', () => {
     const p = profile({
       iraShareOfOrderedPool: 0,
@@ -2908,8 +2495,6 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
     });
     const carrier = seedMcAggregateRothBasisCarrier([], p);
     const pool = seedMcDesignatedRothPool(p);
-    // Four $10,000 draws against a $20,000 pocket holding $10,000 of basis. The
-    // whole sequence can shelter AT MOST the recorded $10,000.
     const shelteredByYear: number[] = [];
     for (let year = 2030; year < 2034; year += 1) {
       const out = applyMcRothBasisOrdering(
@@ -2921,15 +2506,10 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
       );
       shelteredByYear.push(10_000 - out.earningsExcessDollars);
     }
-    // Year 1: $10k draw / $20k balance × $10k basis = $5,000 sheltered.
     expect(shelteredByYear[0]).toBeCloseTo(5_000, 6);
-    // Every later year shelters STRICTLY LESS, because the remaining basis fell.
-    // A stateless split would re-apply the frozen 50% fraction and shelter
-    // $5,000 EVERY year — $20,000 lifetime against $10,000 of recorded basis.
     for (let i = 1; i < shelteredByYear.length; i += 1) {
       expect(shelteredByYear[i]).toBeLessThan(shelteredByYear[i - 1]);
     }
-    // Lifetime shelter can never exceed the household's recorded basis.
     const lifetime = shelteredByYear.reduce((sum, v) => sum + v, 0);
     expect(lifetime).toBeLessThanOrEqual(10_000);
     expect(pool!.entry.designatedRothBasisRemainingCents).toBeCloseTo(
@@ -2938,9 +2518,7 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
     );
   });
 
-  // The MC designated profile carries in-plan
-  // rollover lots, so taxable rollover principal withdrawn inside its own
-  // five-tax-year §402A(c)(4)(D) window is recaptured on a Monte Carlo path too.
+  // The MC designated profile carries in-plan rollover lots, so taxable rollover principal withdrawn inside its own five-tax-year §402A(c)(4)(D) window is recaptured on an MC path too.
   it('recaptures in-window taxable in-plan rollover principal on the pooled designated slice', () => {
     const inWindow = profile({
       iraShareOfOrderedPool: 0,
@@ -2955,13 +2533,9 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
     const out = applyMcRothBasisOrdering(
       args(carrier, inWindow, { designatedRothPoolBalanceDollars: 10_000 }),
     );
-    // The whole draw is basis (balance === basis), so no ordinary income …
     expect(out.earningsExcessDollars).toBe(0);
-    // … but the 2028 taxable rollover principal is inside its window in 2030 and
-    // the owner is pre-59½, so it enters the 10% base.
     expect(out.additionalTaxBaseDollars).toBe(10_000);
 
-    // The SAME lot outside its window carries no recapture.
     const outOfWindow = profile({
       ...inWindow,
       designatedInPlanRolloverLots: [
@@ -2976,9 +2550,7 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
     expect(laterOut.additionalTaxBaseDollars).toBe(0);
   });
 
-  // §408A's five-year period and the age-59½ event are both PER
-  // INDIVIDUAL, and the MC bucket pools both spouses' Roth dollars. The pooled tests
-  // must therefore be the ones no owner can beat.
+  // §408A's five-year period and the age-59½ event are per individual while the MC bucket pools both spouses' Roth dollars, so the pooled tests must be the ones no owner can beat.
   it('keeps the pooled Roth-IRA five-year clock and 59½ test per-owner-conservative', () => {
     const OLDER = 'primary';
     const YOUNGER = 'secondary';
@@ -2987,9 +2559,7 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
         taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
         filingStatus: 'MFJ',
         members: [
-          // Older spouse is comfortably past 59½ in 2030 …
           { memberId: OLDER, isoBirthdate: '1960-01-15', onMedicare: false, hasAcaCoverage: false },
-          // … the younger one is only 45.
           { memberId: YOUNGER, isoBirthdate: '1985-01-15', onMedicare: false, hasAcaCoverage: false },
         ],
         householdSize: 2,
@@ -3008,17 +2578,10 @@ describe('applyMcRothBasisOrdering — fact-based §408A / §402A regimes', () =
       >),
       taxCtx: twoOwnerCtx({}),
     } as unknown as Parameters<typeof applyMcRothBasisOrdering>[0]);
-    // The YOUNGER owner has not reached 59½, so the pooled draw is nonqualified and
-    // penalized even though the primary member is well past it (a
-    // primary-only test would make this whole draw tax- and penalty-free).
     expect(out.earningsExcessDollars).toBe(10_000);
     expect(out.additionalTaxBaseDollars).toBe(10_000);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Month-aware health coverage crosses into the MC path
-// ---------------------------------------------------------------------------
 
 describe('MC month-aware health coverage', () => {
   const HEALTH_MEMBER: TaxMemberInput = {
@@ -3029,8 +2592,7 @@ describe('MC month-aware health coverage', () => {
   };
 
   it('resolves a whole Medicare year once the member is past 65', () => {
-    // 2030: the member is 70 → Medicare all year, off the Marketplace.
-    const flags = buildYearMemberFlags(HEALTH_MEMBER, 2030, 2026);
+    const flags = memberFlags(HEALTH_MEMBER, 2030, 2026);
     expect(flags.onMedicare).toBe(true);
     expect(flags.partBEnrollmentMonths).toBe(12);
     expect(flags.partDEnrollmentMonths).toBe(12);
@@ -3041,16 +2603,11 @@ describe('MC month-aware health coverage', () => {
     const healthCoverageMonths = {
       perMember: { primary: { 2024: { partBMonths: 7, partDMonths: 0, marketplaceMonths: 5 } } },
     };
-    // 2024 — the member is 64 all year, so nothing is Medicare-entitled and the
-    // stated counts pass through untouched.
-    const flags = buildYearMemberFlags(HEALTH_MEMBER, 2024, 2024, new Set(), healthCoverageMonths);
+    const flags = memberFlags(HEALTH_MEMBER, 2024, 2024, new Set(), healthCoverageMonths);
     expect(flags.partBEnrollmentMonths).toBe(7);
     expect(flags.partDEnrollmentMonths).toBe(0);
     expect(flags.marketplaceCoverageMonths).toBe(5);
-    // A DIFFERENT year in the same map falls back to the automatic derivation:
-    // born March 1 1960 → entitlement starts February 2025 (first-of-month
-    // rule), so 2026 is a whole Medicare year.
-    const other = buildYearMemberFlags(HEALTH_MEMBER, 2026, 2024, new Set(), healthCoverageMonths);
+    const other = memberFlags(HEALTH_MEMBER, 2026, 2024, new Set(), healthCoverageMonths);
     expect(other.partBEnrollmentMonths).toBe(12);
   });
 
@@ -3082,19 +2639,13 @@ describe('MC month-aware health coverage', () => {
     const state = deriveMcSurvivors(taxCtx, 2025, 2024);
     expect(state?.survivors[0].partBEnrollmentMonths).toBe(7);
     expect(state?.survivors[0].marketplaceCoverageMonths).toBe(5);
-    // The direction pins below are asserted against REAL engine output
-    // rather than against their own JSON literal.
     const wholeYear = deriveMcSurvivors(
       { ...taxCtx, healthCoverageMonths: undefined } as unknown as McTaxContext,
       2030,
       2024,
     );
-    expect(mcParityBaselines.p13_partialMedicareMonths_irmaa_direction).toBe('below-whole-year');
     expect(state!.survivors[0].partBEnrollmentMonths!).toBeLessThan(
       wholeYear!.survivors[0].partBEnrollmentMonths!,
-    );
-    expect(mcParityBaselines.p13_partialMarketplaceMonths_benchmark_direction).toBe(
-      'below-full-year',
     );
     expect(defaultHouseholdSlcspByAge(state!.survivors, 2025)).toBeLessThan(
       defaultHouseholdSlcspByAge(
@@ -3104,11 +2655,7 @@ describe('MC month-aware health coverage', () => {
     );
   });
 
-  // `deriveMcSurvivors` gates each member's automatic
-  // Marketplace months on THAT member's own retirement year. The end-to-end
-  // deterministic-vs-MC parity proof lives in
-  // `balance-projection-runner-tax-helpers.test.ts`; this pins the MC
-  // resolution itself, including the fallback when the table is absent.
+  // `deriveMcSurvivors` gates each member's automatic Marketplace months on that member's own retirement year; the end-to-end parity proof lives in `balance-projection-runner-tax-helpers.test.ts`.
   describe('per-member retirement year (staggered households)', () => {
     const staggeredCtx = (
       retirementYearByMember?: readonly { memberId: string; retirementYear: number }[],
@@ -3117,8 +2664,7 @@ describe('MC month-aware health coverage', () => {
         taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
         filingStatus: 'MFJ',
         members: [
-          // Both are pre-65 in 2028, so retirement is the ONLY thing that can
-          // turn Marketplace coverage on.
+          // Both are pre-65 in 2028, so retirement is the only thing that can turn Marketplace coverage on.
           { memberId: 'primary', isoBirthdate: '1970-03-15', onMedicare: false, hasAcaCoverage: false },
           { memberId: 'secondary', isoBirthdate: '1972-03-15', onMedicare: false, hasAcaCoverage: false },
         ],
@@ -3153,11 +2699,8 @@ describe('MC month-aware health coverage', () => {
         2028,
         2026,
       );
-      // The listed primary is still working; the unlisted secondary keeps the
-      // household scalar (retired since 2026).
       expect(partial?.survivors[0].marketplaceCoverageMonths).toBe(0);
       expect(partial?.survivors[1].marketplaceCoverageMonths).toBe(12);
-      // A corrupted (NaN) entry must not read as "never retired".
       const corrupt = deriveMcSurvivors(
         staggeredCtx([{ memberId: 'secondary', retirementYear: Number.NaN }]),
         2028,
@@ -3168,21 +2711,10 @@ describe('MC month-aware health coverage', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// An economically SENSITIVE integrated cross-engine case
-// ---------------------------------------------------------------------------
-//
-// The demo BPP parity fixture is inert for month-aware health coverage (its
-// MAGI sits
-// above the 400% FPL cliff and far below the IRMAA tier-1 floor, so both
-// engines contribute $0 either way). This case is deliberately parameterised
-// INTO the sensitive band: a single filer crossing ACA → Medicare mid-year,
-// with a look-back MAGI above IRMAA tier 1 and a current-year ACA MAGI inside
-// 100–400% FPL, so BOTH engines contribute a non-zero figure and both
-// engines must agree on it.
+// The demo parity fixture is inert for month-aware health coverage; this case sits in the sensitive band: a single filer crossing ACA to Medicare mid-year, a look-back MAGI above IRMAA tier 1
+// and a current-year ACA MAGI inside 100-400% FPL, so both engines contribute non-zero figures that must agree.
 describe('integrated ACA→Medicare transition year (both engines)', () => {
   const TAX_YEAR = 2026;
-  /** Turns 65 on 1 July 2026 → Medicare July–December, Marketplace Jan–June. */
   const BIRTHDATE = '1961-07-15';
 
   const memberSeed: TaxMemberInput = {
@@ -3199,15 +2731,13 @@ describe('integrated ACA→Medicare transition year (both engines)', () => {
     accounts: [],
     householdSize: 1,
     grossSsDollars: 0,
-    // Inside 100–400% FPL for a single filer in 2026 ($15,650 base → 400% is
-    // $62,600), so the sliding scale — not the cliff — applies.
+    // Inside 100-400% FPL for a single filer in 2026 ($62,600 at 400%), so the sliding scale, not the cliff, applies.
     preTaxWithdrawalDollars: 50_000,
     postTaxNonRothWithdrawalDollars: 0,
     postTaxCashLikeWithdrawalDollars: 0,
     rothWithdrawalDollars: 0,
     otherOrdinaryIncomeDollars: 0,
     taxExemptInterestDollars: 0,
-    // Above the 2026 single IRMAA tier-1 floor, so a surcharge is really charged.
     magiTwoYearsPriorDollars: 200_000,
     inflationRatePct: 0,
     taxpayersAge65Plus: 1,
@@ -3219,7 +2749,7 @@ describe('integrated ACA→Medicare transition year (both engines)', () => {
     true,
     false,
   );
-  const mcMembers = [buildYearMemberFlags(memberSeed, TAX_YEAR, 2024)];
+  const mcMembers = [memberFlags(memberSeed, TAX_YEAR, 2024)];
 
   it('resolves the same 6/6 month split on both engines', () => {
     expect(detMembers[0].partBEnrollmentMonths).toBe(6);
@@ -3235,7 +2765,6 @@ describe('integrated ACA→Medicare transition year (both engines)', () => {
     const mc = applyTaxYear(yearInput(mcMembers), REAL_BUNDLE);
     expect(det.irmaaSurchargeCents).toBeGreaterThan(0);
     expect(det.irmaaSurchargeCents).toBe(mc.irmaaSurchargeCents);
-    // Half a year of enrolment costs about half a whole year's surcharge.
     const wholeYear = applyTaxYear(
       yearInput([
         { ...detMembers[0], partBEnrollmentMonths: 12, partDEnrollmentMonths: 12 },
@@ -3252,10 +2781,7 @@ describe('integrated ACA→Medicare transition year (both engines)', () => {
     expect(det.acaPtcSubsidyCents).toBeGreaterThan(0);
     expect(det.acaPtcTier).toBe('sliding');
     expect(det.acaPtcSubsidyCents).toBe(mc.acaPtcSubsidyCents);
-    // Proration on BOTH sides: six covered months credit close to half
-    // of the same household's whole-year credit. Without proration the full annual
-    // contribution would be subtracted from the half-year benchmark, which would
-    // floor this to a small fraction (often $0).
+    // Six covered months credit about half the whole-year credit; without proration the full annual contribution would be subtracted from the half-year benchmark and floor it to a fraction.
     const wholeYear = applyTaxYear(
       yearInput([
         {

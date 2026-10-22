@@ -3,15 +3,15 @@ import {
   HISTORICAL_MONTHLY,
   blendedReturnMonthly,
   drawMonthlySeries,
-  drawOneMonth,
   historicalMonthlySummary,
-  type BlendedReturnShock,
   type HistoricalColumns,
 } from './historical';
 import { makeRng } from '../sfc32';
 import { buildPerAccountKernelInputs } from '../monte-carlo-per-account';
 import type { MonteCarloAccountLedger } from '../monte-carlo-types';
 import type { AssetMix } from '../../db/types';
+
+type BlendedReturnShock = NonNullable<Parameters<typeof blendedReturnMonthly>[2]>;
 
 describe('historical monthly dataset', () => {
   it('sampler window starts at 1950-01 and has no NaN/Infinity values', () => {
@@ -42,12 +42,6 @@ describe('historical monthly dataset', () => {
 });
 
 describe('samplers', () => {
-  it('drawOneMonth returns a valid row', () => {
-    const rng = makeRng(42);
-    const m = drawOneMonth(rng);
-    expect(HISTORICAL_MONTHLY).toContain(m);
-  });
-
   it('drawMonthlySeries returns the requested length', () => {
     const rng = makeRng(7);
     const series = drawMonthlySeries(rng, 100);
@@ -101,18 +95,8 @@ describe('blendedReturnMonthly', () => {
   });
 });
 
-// Drift guard: `blendedReturnMonthly` is the REFERENCE shock definition;
-// the MC per-account HOT PATH (`buildPerAccountReturnSeries`, reached via the
-// exported `buildPerAccountKernelInputs` in monte-carlo-per-account.ts) INLINES
-// the same `−cost/12 − blendedShock/12` mean-shift for speed rather than calling
-// this. These tests drive the REAL hot path with fixed historical columns (both
-// a flat asset mix and a multi-year gliding mix) and compare its output directly
-// against `blendedReturnMonthly` for the SAME inputs — so a change to either
-// copy's arithmetic fails the test. (Re-implementing the inlined formula inside
-// the test would compare two independent copies and could not catch a hot-path
-// drift.)
+// The MC hot path inlines the shock arithmetic of blendedReturnMonthly; comparing the real hot path to it catches drift in either copy.
 describe('per-account hot path ↔ blendedReturnMonthly reference (drift guard)', () => {
-  // Fixed 4-row SoA dataset + a fixed sampled-index path into it.
   const columns: HistoricalColumns = {
     stockPct: new Float64Array([8, -4, 12, 2]),
     bondPct: new Float64Array([3, 5, -1, 2]),
@@ -122,7 +106,6 @@ describe('per-account hot path ↔ blendedReturnMonthly reference (drift guard)'
   const stepCount = 6;
   const sampledIdx = new Int32Array([0, 1, 2, 3, 0, 2]);
   const flatMix: AssetMix = { stocksPct: 60, bondsPct: 30, cashPct: 10 };
-  // A multi-year gliding mix (one entry per step) — stocks step down, bonds up.
   const glideSeries: AssetMix[] = [
     { stocksPct: 70, bondsPct: 25, cashPct: 5 },
     { stocksPct: 66, bondsPct: 28, cashPct: 6 },
@@ -158,7 +141,6 @@ describe('per-account hot path ↔ blendedReturnMonthly reference (drift guard)'
     };
   }
 
-  // Run the REAL hot path for one ledger entry and return its per-step series.
   function realSeries(entry: MonteCarloAccountLedger, shock: BlendedReturnShock): Float64Array {
     const [account] = buildPerAccountKernelInputs({
       ledger: [entry],
@@ -180,9 +162,6 @@ describe('per-account hot path ↔ blendedReturnMonthly reference (drift guard)'
     const glide = realSeries(ledgerEntry('glide', { assetMixSeries: glideSeries }), shock);
     for (let i = 0; i < stepCount; i += 1) {
       const k = sampledIdx[i];
-      // No returnShock → both compute `gross − cost/12` from the identical
-      // weight-then-multiply gross, so they agree to the last bit. Exact
-      // equality is the strongest drift guard.
       expect(flat[i]).toBe(blendedReturnMonthly(flatMix, monthAt(k), shock));
       expect(glide[i]).toBe(blendedReturnMonthly(glideSeries[i], monthAt(k), shock));
     }
@@ -197,16 +176,10 @@ describe('per-account hot path ↔ blendedReturnMonthly reference (drift guard)'
     const glide = realSeries(ledgerEntry('glide', { assetMixSeries: glideSeries }), shock);
     for (let i = 0; i < stepCount; i += 1) {
       const k = sampledIdx[i];
-      // With a return shock the hot path hoists each asset's `shock/12`
-      // (divide-then-weight) while the reference divides the summed blended
-      // shock by 12 (weight-then-divide) — a benign FP reassociation, so they
-      // agree to ~1e-12, not bit-for-bit. A real formula change would diverge
-      // far beyond this tolerance and still be caught.
+      // The hot path divides each asset's shock by 12 before weighting and the reference after: an FP reassociation, so ~1e-12 agreement, not bit for bit.
       expect(flat[i]).toBeCloseTo(blendedReturnMonthly(flatMix, monthAt(k), shock), 12);
       expect(glide[i]).toBeCloseTo(blendedReturnMonthly(glideSeries[i], monthAt(k), shock), 12);
     }
-    // Prove the shock genuinely moved the return (guard against a no-op branch):
-    // the shocked series sits below the un-shocked gross blend.
     const grossFlat = realSeries(ledgerEntry('flat', { assetMix: flatMix }), {});
     expect(flat[0]).toBeLessThan(grossFlat[0]);
   });

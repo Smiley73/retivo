@@ -13,17 +13,6 @@
  * published year, a sparse-clamped year, and an extrapolated year, with a
  * cache-bypass mechanism (a `structuredClone`d snapshot forces a
  * guaranteed WeakMap-key miss).
- *
- * SHAPE-LIMIT EXCEPTION (recorded justification; CODING_STANDARDS ≤ 800 lines):
- * this file is over the 800-line limit. Why it cannot be split: it is the
- * byte-identity assert test plus the memo-equivalence suite for every hot-path
- * memoization site (resolution memo, federal-config memo, birthdate memos ×2,
- * survivor precompute + tri-state consumer, tier prebuild) — splitting would
- * fragment one cohesive byte-identity contract across files with no natural
- * seam. The fixture deep-equal assert pins the numbers, so a refactor here is
- * checked against a frozen baseline, not by eye.
- * Trigger: a change adding 5 or more lines here must either refactor the file
- * back under 800 lines or re-justify this exception in this note.
  */
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import fixtureJson from './__fixtures__/mc-perf-identity.json';

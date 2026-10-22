@@ -101,12 +101,8 @@ export interface McRmdBalanceCents {
   readonly postCents: number;
 }
 
-/**
- * Builds the shared `RmdAccountInput` for one MC account; the one place the representative floor and the funded per-path floor assemble an RMD base.
- * The full balance goes in plus any Roth-designated pocket as its Roth portion, which the engine nets out (SECURE 2.0 §325): PRE_TAX bases the whole
- * balance, MIXED the pre-tax slice, and pure Roth nets to zero (never grossed up as ordinary income).
- */
-export function buildMcRmdAccountInput(args: {
+// The one place the representative floor and the funded per-path floor assemble an RMD base: the full balance goes in plus any Roth-designated pocket as its Roth portion, which the engine nets out (SECURE 2.0 §325), so PRE_TAX bases the whole balance, MIXED the pre-tax slice, and pure Roth nets to zero.
+function buildMcRmdAccountInput(args: {
   readonly id: string;
   readonly accountType: RmdAccountType;
   readonly taxTreatment: AccountTaxTreatment;

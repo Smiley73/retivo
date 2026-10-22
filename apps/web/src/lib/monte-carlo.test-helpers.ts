@@ -35,7 +35,6 @@ function normalizeForComparison(value: unknown): unknown {
 
 /** Normalises a summary (minus wall-clock `computedAt`) into a JSON-stable shape so a fresh summary and a reloaded fixture compare equal. */
 export function summaryToComparable(summary: MonteCarloSummary): unknown {
-  // `-readonly` so `delete` is legal on the local copy.
   const rest: Partial<{ -readonly [K in keyof MonteCarloSummary]: MonteCarloSummary[K] }> = {
     ...summary,
   };

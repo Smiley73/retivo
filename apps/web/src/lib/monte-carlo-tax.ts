@@ -1082,8 +1082,8 @@ export function buildPriorPreTaxByOwnerFromIdx(
   return map;
 }
 
-/** The namespaced `priorPreTaxByOwner` key for an owner's fact-based required cents; the `::` segment cannot appear in a member id, mirroring `poolKeyForRmdAccount`'s `pool:` / `acct:` discriminants. */
-export function mcFactRmdRequiredKey(ownerId: string): string {
+// The `::` segment cannot appear in a member id, mirroring `poolKeyForRmdAccount`'s `pool:` / `acct:` discriminants.
+function mcFactRmdRequiredKey(ownerId: string): string {
   return `${ownerId}::rmdRequiredCents`;
 }
 
@@ -1244,11 +1244,11 @@ function assembleMcTaxResult(
   };
 }
 
-/** Per-year member flags (Medicare timing, Marketplace months, ACA opt-out, §36B(c)(2)(B) overlap) from the one shared `resolveMemberHealthCoverage` the deterministic `buildMemberInputs` also calls, so the engines cannot resolve different coverage. `healthCoverageMonths` is read through the same shape-validating reader, so an imported `{ perMember: null }` reads as nothing stated instead of throwing in the per-path loop. */
-export function buildYearMemberFlags(
+// Resolves coverage through the one `resolveMemberHealthCoverage` the deterministic `buildMemberInputs` also calls, so the engines cannot differ; `healthCoverageMonths` goes through the shape-validating reader, so an imported `{ perMember: null }` reads as nothing stated instead of throwing in the per-path loop.
+function buildYearMemberFlags(
   m: TaxMemberInput,
   taxYear: number,
-  /** This member's own separation-from-service year (via `mcMemberRetirementYear`), not a household scalar; the resolver gates automatic Marketplace months on it. */
+  // This member's own separation-from-service year (via `mcMemberRetirementYear`), not a household scalar; the resolver gates automatic Marketplace months on it.
   retirementYear: number,
   optedOut: ReadonlySet<string> = new Set(),
   healthCoverageMonths?: McTaxContext['healthCoverageMonths'],
@@ -1339,33 +1339,15 @@ export interface AfterTaxBaseState {
   depleted: boolean;
 }
 
-/** One absorbing step: the after-tax balance through year y, which is the base year y+1 reads. Depletion latches only once real tax has been drawn and the year had a positive raw balance wiped to <= 0, as in `applyAfterTaxAdjustment`; once latched the base stays 0 despite a raw recovery, while a no-tax or zero-balance year does not latch. */
+/** One absorbing step: the after-tax balance through year y, which is the base year y+1 reads. Depletion latches only once real tax has been drawn and the year had a positive raw balance wiped to <= 0; once latched the base stays 0 despite a raw recovery, while a no-tax or zero-balance year does not latch. */
 export function advanceAfterTaxBase(
   prev: AfterTaxBaseState,
   rawNominalThisYear: number,
   cumTaxThroughThisYear: number,
 ): AfterTaxBaseState {
   if (prev.depleted) return { base: 0, depleted: true };
-  // A cumulative draw below zero adds nothing back, as `applyAfterTaxAdjustment` skips it.
+  // A cumulative draw below zero adds nothing back.
   const afterTax = Math.max(0, rawNominalThisYear - Math.max(0, cumTaxThroughThisYear));
   const depleted = cumTaxThroughThisYear > 0 && rawNominalThisYear > 0 && afterTax <= 0;
   return { base: afterTax, depleted };
 }
-
-/** Absorbing forward pass over the synthetic-RMD-account prior-year bases: y=0 is the year's own nominal, y>0 the prior year's after-tax balance (nominal minus cumulative tax, floored at 0), so a prior tax-funded withdrawal shrinks the next RMD floor as on the deterministic side. Once the base hits <= 0 it stays 0, like `applyAfterTaxAdjustment`. */
-export function priorYearTaxBases(
-  rawNominalByYear: number[],
-  taxDrawByYear: number[],
-): number[] {
-  const bases = new Array<number>(rawNominalByYear.length);
-  let cumTax = 0;
-  let state: AfterTaxBaseState = { base: 0, depleted: false };
-  for (let y = 0; y < rawNominalByYear.length; y += 1) {
-    bases[y] = y === 0 ? rawNominalByYear[0] : state.base;
-    cumTax += taxDrawByYear[y];
-    state = advanceAfterTaxBase(state, rawNominalByYear[y], cumTax);
-  }
-  return bases;
-}
-
-export { dollarsToCents };
