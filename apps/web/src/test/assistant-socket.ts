@@ -13,7 +13,8 @@ import { defaultConsentAnswer } from '../assistant/sharing/consent';
 const realSetImmediate = globalThis.setImmediate;
 const realNow = performance.now.bind(performance);
 
-const UNTIL_TIMEOUT_MS = 10_000;
+// Below vitest's 5 s testTimeout, so the named error below fires before the generic timeout does.
+const UNTIL_TIMEOUT_MS = 4_000;
 
 /**
  * Waits (in real macrotasks) until `condition` holds; WebCrypto resolves off the microtask queue. The
