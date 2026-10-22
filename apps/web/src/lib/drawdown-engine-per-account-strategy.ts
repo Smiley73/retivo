@@ -104,8 +104,7 @@ function stampTaxCashflowRow(row: DrawdownYear, outcome: TaxCashflowYearOutcome)
 
 export type {  MagiCapRuntimeConfig,   } from './drawdown-engine-per-account-strategy-helpers';
 
-/** Reads a monthly cashflow series into a typed buffer of length `stepCount`. */
-export function readSeriesIntoBuffer(series: MonthlyCashflowSeries, stepCount: number): Float64Array {
+function readSeriesIntoBuffer(series: MonthlyCashflowSeries, stepCount: number): Float64Array {
   // An exact-length `Float64Array` is returned as is: downstream only reads `deposits` and `depositsPost`,
   // and the MC per-path buffers are private. Anything shorter or untyped zero-pads via the copy below.
   if (series.values instanceof Float64Array && series.values.length === stepCount) {

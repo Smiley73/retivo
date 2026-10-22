@@ -1,13 +1,4 @@
-/**
- * Helper-wiring regression for `buildBalanceExpenseContext`. A Balance
- * Projection page that built the expense context inline and omitted
- * `todayMonthIndex` would let the engine default the anchor month to
- * January even when the page rendered mid-year — a silent drift against
- * the view deflator (which uses the current month). This test pins the
- * wired anchor: the returned context must carry the supplied `nowYear` /
- * `nowMonthIndex` verbatim and the surrounding pass-through fields, so any
- * regression of that wiring fails here.
- */
+/** `buildBalanceExpenseContext` must carry the supplied `nowYear` and `nowMonthIndex` verbatim, or a mid-year page would drift from the view deflator. */
 import { describe, expect, it } from 'vitest';
 import { buildBalanceExpenseContext } from './balance-projection-context';
 
@@ -73,14 +64,14 @@ describe('buildBalanceExpenseContext', () => {
       retirementYear: 2030,
       discretionarySpending,
     });
-    // Context is a passthrough — clamping to [-100, +100] is the engine's job.
+    // Passthrough: clamping to [-100, +100] is the engine's job.
     expect(ctx.discretionarySpending).toBe(discretionarySpending);
     expect(ctx.discretionarySpending?.bumpPct).toBe(-25);
   });
 
   it('passes legacy out-of-range bumpPct through unchanged (clamp lives downstream)', () => {
-    // Older snapshots may store bumpPct: 200; the context layer must NOT
-    // clamp so the engine can apply the authoritative clamp at use-site.
+    // Older snapshots may store bumpPct: 200; the context layer must not clamp, so the engine applies the authoritative clamp at
+    // use.
     const discretionarySpending = { bumpPct: 200, durationYears: null };
     const ctx = buildBalanceExpenseContext({
       nowYear: 2026,

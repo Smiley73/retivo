@@ -79,10 +79,7 @@ export interface RunBalanceProjectionArgs {
   readonly medicalCategoryIds?: ReadonlyArray<string>;
 }
 
-/**
- * Narrow at-horizon result for the optimizer's per-candidate hot path, which skips the page-rendering bundle.
- */
-export interface RunBalanceProjectionAtHorizonResult {
+interface RunBalanceProjectionAtHorizonResult {
   readonly atHorizonTodayDollars: number;
   readonly ssStartYear: number;
   readonly retirementYear: number;
@@ -95,8 +92,6 @@ export interface RunBalanceProjectionAtHorizonResult {
    */
   readonly methodAvailable: boolean;
 }
-
-export type RunBalanceProjectionResult = RunBalanceProjectionAtHorizonResult;
 
 /** Per-account, per-year balance breakdown for the chart and table; dollar values are nominal. */
 export interface AccountYearRow {

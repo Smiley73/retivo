@@ -27,11 +27,7 @@ import {
 } from './drawdown-engine-per-account-qcd-hsa';
 import type { TaxCashflowYearClassification } from './drawdown-engine-types';
 
-/**
- * Distributes `target` within a single tier and returns the dollars drawn; `sequentialWithinTier` drains in
- * listed order (customOrder) via `drainTierSequential`.
- */
-export function distributeOneTier(args: {
+function distributeOneTier(args: {
   state: AccountRunState[];
   tier: ReadonlyArray<number>;
   excludedIndices: ReadonlySet<number>;

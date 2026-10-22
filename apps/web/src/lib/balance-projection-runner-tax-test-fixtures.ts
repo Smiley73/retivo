@@ -1,12 +1,4 @@
-/**
- * Shared test fixtures for the tax-integration runner suites. Extracted so
- * `balance-projection-runner-tax.test.ts` (annotation post-pass) and
- * `balance-projection-runner-tax-cashflow.test.ts` (the `buildTaxCashflowHook`
- * coverage, split out for the 800-ln file cap) consume one set of
- * builders instead of duplicating ~160 lines of `PipelineContext` scaffolding.
- *
- * Test-only: not imported by production code.
- */
+/** Shared `PipelineContext` and ledger builders for the tax-integration runner suites. */
 import type { DrawdownYear, DrawdownAccountInput, DrawdownAccountYear } from './drawdown-engine-types';
 import type { RothDistributionFacts } from './roth-distribution-tax';
 import type { RmdAccountProfileFacts } from './rmd';
@@ -47,7 +39,7 @@ export function makeDrawdownYear(
   };
 }
 
-/** Build a minimal DrawdownAccountYear (for accountBalances maps). */
+/** Builds a minimal DrawdownAccountYear for accountBalances maps. */
 export function makeAccountBalance(
   balance: number,
   withdrawn: number,
@@ -64,9 +56,7 @@ export function makeAccountBalance(
   };
 }
 
-/** Minimal DrawdownAccountInput. `accountType` / `taxTreatment` are
- *  overridable so a test can build an HSA or cash-like (SAVINGS/CD/MM) ledger
- *  account; default to a PRE_TAX IRA for the existing callers. */
+/** Minimal ledger account; defaults to a PRE_TAX IRA, overridable to an HSA or cash-like type. */
 export function makeLedgerAccount(
   id: string,
   initialPre: number,
@@ -103,56 +93,30 @@ interface MakeCtxOverrides {
   primaryBirthdate?: string;
   secondaryBirthdate?: string;
   primaryRetirementYear?: number;
-  /** The secondary's OWN separation-from-service year (seeds
-   *  `retirementByMember`), so a test can build a STAGGERED-retirement
-   *  household. Default: absent → the secondary inherits the primary's year,
-   *  which is what the same-date anchor produces. */
+  /** Default: absent → the secondary inherits the primary's year (the same-date anchor). */
   secondaryRetirementYear?: number;
   accountProjections?: MakeCtxAccountProjections;
-  /** Per-owner derived Roth-IRA contribution basis in CENTS, keyed by
-   *  ownerId. Seeds the deterministic §408A cumulative basis tracker. */
   rothBasisCentsByOwner?: ReadonlyMap<string, number>;
-  /** Per-owner pure designated-Roth employer-plan at-retirement
-   *  balance in CENTS (ROTH_401K / ROTH_403B / ROTH_457B / ROTH_TSP). */
   pureRothBasisCentsByOwner?: ReadonlyMap<string, number>;
-  /** Per-owner MIXED Roth-designated post sub-bucket
-   *  at-retirement balance in CENTS (MIXED 401K/403B/457B/TSP). */
   mixedRothDesignatedBasisCentsByOwner?: ReadonlyMap<string, number>;
-  /** OQ-conversion — per-owner working-years Roth-conversion principal in CENTS.
-   *  Deterministic-only; not seeded into the MC §408A carrier. */
+  /** Deterministic-only; not seeded into the MC §408A carrier. */
   preRetirementConversionBasisCentsByOwner?: ReadonlyMap<string, number>;
   earlyWithdrawalPenaltyExemptAccountIds?: readonly string[];
-  /** ACA opt-out — household member ids treated as NOT on the ACA Marketplace.
-   *  Seeds both the resolved-scenario override and the `PipelineContext` Set the
-   *  member-flag derivation reads. Default: no opt-outs. */
   acaMarketplaceOptOutMemberIds?: readonly string[];
-  /** Scenario medical inflation rate (percent). Default: absent → no growth. */
+  /** Default: absent → no growth. */
   medicalInflationRatePct?: number;
-  /** The stored per-member/per-year health-coverage MONTHS the engines
-   *  overlay on the automatic birthday-based derivation. Default: none stated. */
   healthCoverageMonths?: PipelineContext['healthCoverageMonths'];
-  /** Share of EMERGENCY HSA withdrawals treated as qualified (percent).
-   *  Drives the nonqualified HSA-income / 20% additional-tax share on the
-   *  emergency-reserve HSA pass only; modeled medical-qualified withdrawals are
-   *  always 100% qualified, unaffected by this setting. Default 100. */
+  /** Applies to the emergency-reserve HSA pass only; modeled medical-qualified withdrawals are always 100% qualified. Default 100. */
   hsaQualifiedMedicalExpensePct?: number;
-  /** The Fill-mode target Roth account id, so the conversion basis-carrier
-   *  credit (`creditRothConversionToBasisCarrier`) can resolve its owner. */
   magiCapTargetRothAccountId?: string;
-  /** A FULL multi-window `magiCap` override. When
-   *  present it takes precedence over the single-window `magiCapTargetRothAccountId`
-   *  default, so a test can credit conversions across distinct windows / years. */
+  /** Takes precedence over the single-window `magiCapTargetRothAccountId` default. */
   magiCap?: MagiCapOverride;
-  /** The fact-based Roth tax profile (per-owner Roth-IRA facts + per-ACCOUNT
-   *  designated-Roth facts). Defaults to empty (no recorded facts → conservative
-   *  $0 basis and unsatisfied five-year clocks everywhere). */
+  /** Default: empty (no recorded facts → $0 basis and unmet five-year clocks everywhere). */
   rothDistributionFacts?: RothDistributionFacts;
-  /** Per-account normalized RMD profile facts. Default: none recorded, so
-   *  the RMD engine keeps its legacy Uniform-Lifetime path. */
+  /** Default: none recorded, so the RMD engine keeps its legacy Uniform-Lifetime path. */
   rmdProfileFactsByAccountId?: ReadonlyMap<string, RmdAccountProfileFacts>;
 }
 
-/** Build the primary + optional secondary household members. */
 function makeMembers(
   primaryBirthdate: string,
   secondaryBirthdate: string | undefined,
@@ -188,7 +152,6 @@ function makeMembers(
   return { primary, secondary };
 }
 
-/** Map the lightweight account-projection overrides to full fixtures. */
 function makeAccountProjections(
   accountProjections: NonNullable<MakeCtxOverrides['accountProjections']>,
 ): unknown[] {
@@ -215,7 +178,6 @@ function makeAccountProjections(
   }));
 }
 
-/** Build the resolved-scenario fixture slice read by the tax helpers. */
 function makeResolvedScenario(
   withdrawalStrategy: NonNullable<MakeCtxOverrides['withdrawalStrategy']>,
   costBasisFraction: number | undefined,
@@ -237,10 +199,7 @@ function makeResolvedScenario(
     earlyWithdrawalPenaltyExemptAccountIds,
     acaMarketplaceOptOutMemberIds,
     hsaQualifiedMedicalExpensePct,
-    // A full multi-window override wins; otherwise a
-    // single always-active window (retirement → primary's age 200) carrying the
-    // conversion target, so `creditRothConversionToBasisCarrier` resolves it for
-    // any test year.
+    // A full multi-window override wins; otherwise one always-active window carries the conversion target.
     magiCap:
       magiCapOverride ??
       (magiCapTargetRothAccountId
@@ -260,11 +219,7 @@ function makeResolvedScenario(
   } as unknown as PipelineContext['resolvedScenario'];
 }
 
-/**
- * Build a minimal PipelineContext for testing.
- * Only fields read by `applyTaxIntegrationToDrawdownYears` /
- * `buildTaxCashflowHook` are set.
- */
+/** Builds a minimal PipelineContext with the fields read by the tax post-pass and the cashflow hook. */
 export function makeCtx(overrides: MakeCtxOverrides = {}): PipelineContext {
   const {
     withdrawalStrategy = { kind: 'taxEfficient' as const },
@@ -289,16 +244,11 @@ export function makeCtx(overrides: MakeCtxOverrides = {}): PipelineContext {
     medicalInflationRatePct,
     rmdProfileFactsByAccountId = new Map<string, RmdAccountProfileFacts>(),
   } = overrides;
-  // `rothBasisCentsByOwner` IS the per-owner Roth-IRA regular-contribution
-  // basis fact, so an explicit `rothDistributionFacts` override wins and
-  // otherwise the per-owner map is lifted into the fact shape the deterministic
-  // §408A carrier seeds from. Designated-Roth facts are per ACCOUNT and cannot be
-  // derived from a per-owner roll-up, so a test that needs them passes them
-  // explicitly.
+  // An explicit `rothDistributionFacts` wins; otherwise the per-owner map lifts into the fact shape the §408A carrier seeds
+  // from. Designated-Roth facts are per account and must be passed explicitly.
   const rothDistributionFacts: RothDistributionFacts =
     overrides.rothDistributionFacts ?? {
-      // Keyed by §408A POOL; a per-owner roll-up lifts into the owner's OWN pool,
-      // whose key is the bare owner id (`rothIraPoolKey`).
+      // Keyed by §408A pool; a per-owner roll-up lifts into the owner's own pool (key = bare owner id).
       rothIraByPool: new Map(
         [...rothBasisCentsByOwner.entries()].map(([ownerId, cents]) => [
           ownerId,

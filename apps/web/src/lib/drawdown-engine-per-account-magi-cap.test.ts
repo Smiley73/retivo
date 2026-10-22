@@ -1,14 +1,4 @@
-/**
- * Unit tests for `drawdown-engine-per-account-magi-cap.ts`.
- *
- * Covers the `findLaterTaxableIndex` resolver built by `buildMagiCapConfig`:
- * which later-tier accounts count as cap-safe overflow targets (POST_TAX
- * non-Roth, MIXED, AND Roth — all zero-added-MAGI buckets, per the
- * tax-funding sourcing precedence). End-to-end the same precedence is proven
- * against `distributeWithdrawalByCustomTiersWithCap` (taxable depleted, Roth
- * available → no breach; Roth also depleted → breach). The precedence is
- * taxable / Roth before capped pre-tax.
- */
+/** Unit tests for `drawdown-engine-per-account-magi-cap.ts`: the cap-safe overflow targets resolved by `buildMagiCapConfig`. */
 import { describe, expect, it, vi } from 'vitest';
 import { buildMagiCapConfig } from './drawdown-engine-per-account-magi-cap';
 import { distributeWithdrawalByCustomTiersWithCap } from './drawdown-engine-per-account-strategy-cap';
@@ -94,16 +84,14 @@ describe('buildMagiCapConfig — findTargetRothIndex resolver', () => {
   });
 
   it('should_degrade_to_undefined_when_the_target_id_resolves_to_a_non_Roth_account', () => {
-    // Guards a stale id: a user-designated id that points at a pre-tax account (e.g.
-    // the Roth was deleted and the id reused) must NOT receive conversions.
+    // A stale user-designated id that points at a pre-tax account must not receive conversions.
     const cfg = buildMagiCapConfig({ ...CAP, targetRothAccountId: 'pre-1' }, 2040);
     expect(cfg.findTargetRothIndex([PRE, ROTH])).toBeUndefined();
   });
 
   it('should_degrade_to_undefined_when_the_target_is_a_designated_Roth_employer_type', () => {
-    // Employer Roth accounts are not valid conversion targets: routing a
-    // pre-tax → designated-Roth employer conversion would silently no-op the
-    // at-retirement basis fold and re-tax the principal.
+    // Employer Roth accounts are not valid conversion targets: a pre-tax → designated-Roth employer conversion would silently
+    // no-op the at-retirement basis fold and re-tax the principal.
     for (const accountType of [
       'RETIREMENT_ROTH_401K',
       'RETIREMENT_ROTH_403B',
@@ -122,9 +110,8 @@ describe('buildMagiCapConfig — findTargetRothIndex resolver', () => {
   });
 
   it('should_degrade_to_undefined_when_the_target_Roth_IRA_is_inherited', () => {
-    // A beneficiary cannot roll into an inherited IRA, and the basis credit
-    // (`creditRothConversionToBasisCarrier`) keys on the BENEFICIARY's own §408A
-    // pool — converting into one would buy tax-free basis on their own Roth IRAs.
+    // A beneficiary cannot roll into an inherited IRA, and converting into one would buy tax-free basis on their own Roth IRAs
+    // via the §408A pool credit.
     const inheritedRoth = makeState({
       id: 'roth-inh',
       post: 50_000,
@@ -134,8 +121,7 @@ describe('buildMagiCapConfig — findTargetRothIndex resolver', () => {
     });
     const cfg = buildMagiCapConfig({ ...CAP, targetRothAccountId: 'roth-inh' }, 2040);
     expect(cfg.findTargetRothIndex([PRE, inheritedRoth])).toBeUndefined();
-    // The same account without the marker still resolves — the marker is what
-    // rejects it, not the id or the type.
+    // Without the marker the same account still resolves: the marker rejects it, not the id or type.
     expect(
       cfg.findTargetRothIndex([PRE, { ...inheritedRoth, inheritedAccount: false }]),
     ).toBe(1);
@@ -144,10 +130,8 @@ describe('buildMagiCapConfig — findTargetRothIndex resolver', () => {
 
 describe('buildMagiCapConfig — findLaterTaxableIndex', () => {
   it('should_treat_a_later_Roth_account_as_a_cap_safe_overflow_target', () => {
-    // Paying the over-cap draw from already-taxed buckets (taxable AND
-    // Roth) avoids inflating MAGI. A Roth account in a later tier (ROTH
-    // treatment, balance in `post`) is a zero-added-MAGI target — must be
-    // selected.
+    // Paying the over-cap draw from already-taxed buckets (taxable and Roth) avoids inflating MAGI, so a later-tier Roth
+    // account is a valid target.
     const { findLaterTaxableIndex } = buildMagiCapConfig(CAP, 2040);
     const state: AccountRunState[] = [
       makeState({ id: 'a0', pre: 50_000, taxTreatment: 'PRE_TAX' }),
@@ -183,9 +167,8 @@ describe('buildMagiCapConfig — findLaterTaxableIndex', () => {
 });
 
 describe('MAGI-cap tax-funding precedence — Roth before breach', () => {
-  // taxEfficient tier layout: tier0 = taxable, tier1 = pre-tax, tier2 = Roth.
-  // With taxable already depleted, the over-cap draw must source the Roth
-  // tier before breaching the pre-tax cap — magiCapBreachDollars stays 0.
+  // taxEfficient layout: tier0 taxable, tier1 pre-tax, tier2 Roth; with taxable depleted, the over-cap draw sources Roth
+  // before breaching.
   it('should_draw_Roth_before_breaching_when_taxable_depleted_and_Roth_available', () => {
     const state: AccountRunState[] = [
       makeState({ id: 'taxable', post: 0, taxTreatment: 'POST_TAX', accountType: 'BROKERAGE' }),
@@ -198,7 +181,7 @@ describe('MAGI-cap tax-funding precedence — Roth before breach', () => {
     const onPreTaxDrawn = vi.fn();
     const magiCapConfig = buildMagiCapConfig(CAP, 2040);
 
-    // Cap = $10k; target = $15k → $10k pre-tax (cap), $5k must come from Roth.
+    // Cap = $10k; target = $15k → $10k pre-tax (cap), $5k from Roth.
     const drawn = distributeWithdrawalByCustomTiersWithCap({
       state,
       tiers: [[0], [1], [2]],
@@ -213,12 +196,9 @@ describe('MAGI-cap tax-funding precedence — Roth before breach', () => {
     });
 
     expect(drawn).toBeCloseTo(15_000, 5);
-    // Pre-tax capped at $10k.
     expect(state[1].pre).toBeCloseTo(40_000, 1);
-    // Roth absorbs the $5k over-cap remainder (zero added MAGI).
     expect(state[2].post).toBeCloseTo(45_000, 1);
     expect(onTierOverrideDollars).toHaveBeenCalledWith(expect.closeTo(5_000, 1));
-    // No breach — Roth covered the overflow.
     expect(onCapBreachDollars).not.toHaveBeenCalled();
   });
 
@@ -249,12 +229,10 @@ describe('MAGI-cap tax-funding precedence — Roth before breach', () => {
     });
 
     expect(drawn).toBeCloseTo(15_000, 5);
-    // Roth fully drained ($3k).
     expect(state[2].post).toBeCloseTo(0, 1);
     // Pre-tax: $10k cap + $2k breach = $12k.
     expect(state[1].pre).toBeCloseTo(38_000, 1);
     expect(onTierOverrideDollars).toHaveBeenCalledWith(expect.closeTo(3_000, 1));
-    // Breach fires only after taxable AND Roth deplete.
     expect(onCapBreachDollars).toHaveBeenCalledWith(expect.closeTo(2_000, 1));
   });
 });
