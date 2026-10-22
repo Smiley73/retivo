@@ -81,6 +81,8 @@ const PremiumRowItem: React.FC<{
     <Muted as="p" className="m-0 mt-1 text-sm">
       {row.part === 'B' ? 'Standard' : 'National base'} {year} premium:{' '}
       {formatCurrencyExact(row.monthly)} a month.
+      {row.part === 'D' &&
+        ' Your plan sets its own price; this is Medicare’s national benchmark.'}
     </Muted>
     {row.alreadyEntered.length > 0 && (
       <Muted as="p" className="m-0 mt-1 text-sm">

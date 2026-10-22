@@ -142,6 +142,18 @@ describe('MedicarePremiumsDialog', () => {
     expect(dialog).not.toHaveTextContent(/built-in/i);
   });
 
+  it('tells the person the Part D amount is a benchmark, not their plan price, and says nothing of the kind for Part B', async () => {
+    renderDialog();
+    await screen.findByRole('dialog', { name: 'Add Medicare premiums' });
+    const benchmark = /Your plan sets its own price; this is Medicare.s national benchmark\./;
+    const partD = screen.getAllByText(/National base \d{4} premium/);
+    const partB = screen.getAllByText(/Standard \d{4} premium/);
+    expect(partD).toHaveLength(2);
+    expect(partB).toHaveLength(2);
+    for (const el of partD) expect(el).toHaveTextContent(benchmark);
+    for (const el of partB) expect(el).not.toHaveTextContent(benchmark);
+  });
+
   it('writes nothing on Cancel', async () => {
     const { onClose } = renderDialog();
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
