@@ -1,24 +1,6 @@
 /**
- * On-device diagnostics logger. Two capped in-memory ring buffers — one for
- * errors/warnings, one for breadcrumbs (info/log) — so breadcrumbs can never
- * evict error/warning history. The rings are the authoritative store; a
- * guarded, fire-and-forget debounced flush mirrors new entries into the
- * local-only `diagnosticLogs` IDB store (via `db/store.ts` helpers) so they
- * survive a crash/reload. Everything client-side — nothing leaves the device
- * (zero-knowledge / no-tracking).
- *
- * Must-not-throw contract: every public entry point — and the flush — is
- * wrapped so a logger-internal failure (IDB unavailable in private mode,
- * quota-exceeded, a `redactArgs` throw) NEVER propagates into a `console.*`
- * call site, `componentDidCatch`, or the sync state machine. On IDB failure the
- * in-memory rings remain authoritative.
- *
- * Bounded throughput: the debounced flush caps per-window enqueue work
- * (`MAX_FLUSH_BATCH`), and consecutive identical entries are coalesced — a tight
- * error loop / chatty hot-path `console.log` bumps a `count` on the existing
- * most-recent ring entry instead of re-running `redactMessage`/`redactArgs` and
- * pushing a fresh entry, so the main thread is not pinned on redaction. The
- * coalescing window resets on any differing entry.
+ * On-device diagnostics logger: two capped in-memory rings (errors/warnings, breadcrumbs) mirrored by a debounced, fire-and-forget flush into the local `diagnosticLogs` IDB store.
+ * It must not throw into any caller (console sites, componentDidCatch, sync); consecutive identical entries are coalesced so a tight error loop does not pin the main thread on redaction.
  */
 import {
   appendDiagnosticLogs,
@@ -34,9 +16,10 @@ export type DiagnosticSource = 'console' | 'window' | 'boundary' | 'sync';
 export interface DiagnosticEntry {
   /** Stable unique id (primary key in IDB). */
   id: string;
-  /** Strictly-monotonic insertion order — drives the IDB prune cursor.
-   *  Allocated authoritatively inside the append transaction; the in-memory
-   *  value is a provisional placeholder until the flush re-stamps it. */
+  /**
+   * Monotonic insertion order for the IDB prune cursor; provisional in memory until the flush
+   * re-stamps it.
+   */
   seq: number;
   /** ISO 8601 UTC capture time. */
   ts: string;
@@ -51,64 +34,39 @@ export interface DiagnosticEntry {
   buildId: string;
   /** `location.pathname` at capture time. */
   path: string;
-  /** Count of consecutive identical captures coalesced into this entry.
-   *  Absent / 1 = a single capture; >1 = that many identical lines collapsed.
-   *  Bumped in place on the most-recent ring entry instead of pushing a fresh
-   *  entry so a tight identical loop never re-runs redaction. */
+  /** Consecutive identical captures coalesced into this entry; absent or 1 is a single capture. */
   count?: number;
 }
 
-// Ring caps. Errors/warnings keep ~1000 of history; breadcrumbs ~200 so
-// a chatty info/log stream never evicts error/warning entries.
+// Breadcrumbs get the smaller ring so a chatty info/log stream never evicts error history.
 const MAX_ERRORS = 1000;
 const MAX_BREADCRUMBS = 200;
-// Combined IDB cap (errors + breadcrumbs) — the persisted store mirrors both
-// rings; prune keeps it from growing unbounded across reloads. Exported so the
-// startup backstop prune (main.tsx) trims with the same bound.
+// Combined IDB cap; also the bound for the startup backstop prune in main.tsx.
 export const MAX_PERSISTED = MAX_ERRORS + MAX_BREADCRUMBS;
 
-// Debounce + bounded-throughput knobs.
 const FLUSH_DEBOUNCE_MS = 1_000;
-// Max entries drained into a single flush transaction so one window can't pin
-// the main thread serializing a flood.
+// Max entries per flush transaction, so one flood can't pin the main thread.
 const MAX_FLUSH_BATCH = 200;
 
-/** Two capped rings + the flush queue + debounce timer. Module singleton. */
 const errorRing: DiagnosticEntry[] = [];
 const breadcrumbRing: DiagnosticEntry[] = [];
-// Entries appended since the last successful flush, awaiting persistence.
 let flushQueue: DiagnosticEntry[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 // Provisional in-memory seq; the IDB append re-stamps the authoritative value.
 let memSeq = 0;
 
-// Coalescing window. The key + the entry it produced are tracked so a
-// consecutive identical capture (same level/source/namespace/message/detail)
-// bumps `count` on the existing ring entry instead of re-redacting + pushing a
-// fresh one. `null` = no open window (next capture always starts fresh). The
-// key is computed BEFORE the redaction pass so a duplicate short-circuits ahead
-// of `redactMessage`/`redactArgs`.
+// Coalescing window: the key is computed before redaction so a duplicate skips it; null means no
+// open window.
 let lastCoalesceKey: string | null = null;
 let lastCoalesceEntry: DiagnosticEntry | null = null;
 
-// Monotonic clear epoch. `clear()` bumps this; an in-flight `flush()`
-// captures it before its `await appendDiagnosticLogs` and, on return, treats a
-// changed epoch as authoritative: it bails WITHOUT resurrecting the drained
-// batch (a cross-user wipe between drain and rejection must not re-queue the
-// prior user's entries into the now-cleared queue — a cross-user leak).
+// Bumped by clear(): an in-flight flush that sees a changed epoch bails instead of re-queueing the
+// prior user's entries (cross-user leak).
 let clearEpoch = 0;
 
-/**
- * Saved-original `console.error`, shared from `install.ts`. `recordCaught`
- * re-emits to devtools through THIS reference — never the shimmed `console.error`
- * — so an ErrorBoundary catch is recorded exactly once (source `boundary`) and
- * is not also re-captured by the console shim. Defaults to the live binding so
- * the logger is usable before `install.ts` wires the saved original (and in
- * tests that don't install).
- */
+// Saved-original console.error, so recordCaught re-emits to devtools without the console shim
+// re-capturing it; defaults to the live binding until install.ts wires it.
 let devtoolsError: (...args: unknown[]) => void = (...args) => {
-  // Explicit devtools passthrough for recordCaught — uses the live
-  // binding until install.ts wires the saved original.
   console.error(...args);
 };
 
@@ -141,10 +99,8 @@ function newId(): string {
 }
 
 /**
- * Parse a leading `[namespace]` token out of the first string arg (the repo's
- * existing console convention, e.g. `[sync] …`, `[auth] …`). Returns the parsed
- * namespace + the message remainder, or no namespace when the first arg is not
- * a `[ns] …`-prefixed string.
+ * Split a leading `[namespace]` token off the first string arg (e.g. `[sync] …`); no namespace when
+ * absent.
  */
 export function parseNamespace(first: unknown): {
   namespace?: string;
@@ -156,7 +112,6 @@ export function parseNamespace(first: unknown): {
   return { namespace: match[1], rest: match[2] };
 }
 
-/** Push to the right ring with cap-eviction; enqueue for the debounced flush. */
 function pushEntry(entry: DiagnosticEntry, isBreadcrumb: boolean): void {
   const ring = isBreadcrumb ? breadcrumbRing : errorRing;
   const cap = isBreadcrumb ? MAX_BREADCRUMBS : MAX_ERRORS;
@@ -166,21 +121,13 @@ function pushEntry(entry: DiagnosticEntry, isBreadcrumb: boolean): void {
   scheduleFlush();
 }
 
-// Delimiter between coalesce-key tokens: a unit-separator (U+001F) that won't
-// occur in normal console output, so adjacent-token-boundary collisions
-// (`['ab','c']` vs `['a','bc']`) can't over-coalesce.
+// A unit separator that won't occur in console output, so token-boundary collisions can't
+// over-coalesce.
 const COALESCE_DELIM = '\x1F';
-// Cap the per-Error message token so a giant message can't bloat the key;
-// mirrors redact.ts MAX_STRING_LENGTH.
 const COALESCE_MESSAGE_CAP = 2_000;
 
-/**
- * Reduce a single raw arg to a coalesce token. An `Error` keys on
- * `name + ':' + message` — `JSON.stringify(new Error(...))` is `'{}'` (Error
- * own-props are non-enumerable), so two DIFFERENT errors would otherwise share a
- * key and over-coalesce, dropping the second message. Other non-strings keep a
- * bounded `JSON.stringify`. A throw propagates to the caller's guard.
- */
+// Errors key on name + message: JSON.stringify(new Error()) is '{}', which would over-coalesce
+// distinct errors.
 function coalesceToken(arg: unknown): string {
   if (typeof arg === 'string') return arg;
   if (arg instanceof Error) {
@@ -191,15 +138,8 @@ function coalesceToken(arg: unknown): string {
   return JSON.stringify(arg) ?? '';
 }
 
-/**
- * Cheap coalescing key from the level/source + the RAW (un-redacted) args.
- * Computed before the redaction pass so a consecutive duplicate short-circuits
- * ahead of `redactMessage`/`redactArgs`. Error-aware (so two distinct errors
- * never collapse) and delimiter-joined (so token-boundary collisions can't
- * over-coalesce). Stringification is guarded so a hostile arg never throws here
- * (must-not-throw); on failure the key is `null` so the entry is treated as
- * non-duplicate and follows the normal path.
- */
+// Key from the raw args, computed before redaction; null on a stringify failure so the entry takes
+// the normal path.
 function coalesceKey(
   level: DiagnosticLevel,
   source: DiagnosticSource,
@@ -212,13 +152,6 @@ function coalesceKey(
   }
 }
 
-/**
- * Record one entry (coalescing). On a consecutive identical capture, bump
- * `count` on the most-recent ring entry (and its queued copy, if still pending)
- * instead of re-redacting + pushing a fresh entry — the short-circuit happens
- * BEFORE `buildEntry`'s redaction pass. Any differing capture resets the window
- * and pushes a new entry.
- */
 function recordEntry(
   level: DiagnosticLevel,
   source: DiagnosticSource,
@@ -227,14 +160,11 @@ function recordEntry(
 ): void {
   const key = coalesceKey(level, source, args);
   if (key !== null && key === lastCoalesceKey && lastCoalesceEntry !== null) {
-    // Duplicate of the most-recent entry → bump its count in place; never
-    // re-redact, never push a new entry. The queued copy is the same object
-    // reference (pushEntry enqueues the entry it pushed), so a still-pending
-    // flush picks up the bump automatically.
+    // Duplicate: bump count in place. The queued copy is the same object, so a pending flush picks
+    // it up.
     lastCoalesceEntry.count = (lastCoalesceEntry.count ?? 1) + 1;
     if (!flushQueue.includes(lastCoalesceEntry)) {
-      // The prior entry already flushed (drained from the queue) — re-enqueue
-      // it so the updated count is re-persisted (the IDB put overwrites by id).
+      // Already flushed: re-enqueue so the new count is persisted (the put overwrites by id).
       flushQueue.push(lastCoalesceEntry);
       scheduleFlush();
     }
@@ -246,11 +176,6 @@ function recordEntry(
   lastCoalesceEntry = entry;
 }
 
-/**
- * Build an entry from a level/source + arg list. Redaction is wrapped so
- * a `redactArgs`/`redactMessage` throw collapses to a placeholder rather than
- * propagating.
- */
 function buildEntry(
   level: DiagnosticLevel,
   source: DiagnosticSource,
@@ -300,10 +225,7 @@ export function recordWarn(...args: unknown[]): void {
   }
 }
 
-/**
- * Record an info/log breadcrumb. Breadcrumbs land in the smaller ring so they
- * never evict error/warning history. Never throws.
- */
+/** Record an info/log breadcrumb in the smaller ring. Never throws. */
 export function recordBreadcrumb(level: 'info' | 'log', ...args: unknown[]): void {
   try {
     recordEntry(level, 'console', args, true);
@@ -312,10 +234,7 @@ export function recordBreadcrumb(level: 'info' | 'log', ...args: unknown[]): voi
   }
 }
 
-/**
- * Record a non-console capture from a global handler (`window` error /
- * unhandledrejection). Sourced `window`; never throws.
- */
+/** Record a capture from a global handler (`window` error / unhandledrejection). Never throws. */
 export function recordWindowError(...args: unknown[]): void {
   try {
     recordEntry('error', 'window', args, false);
@@ -324,10 +243,7 @@ export function recordWindowError(...args: unknown[]): void {
   }
 }
 
-/**
- * Record a non-console capture from a `setSyncState({kind:'error'})` transition.
- * Sourced `sync`; never throws.
- */
+/** Record a `setSyncState({kind:'error'})` transition. Never throws. */
 export function recordSyncError(...args: unknown[]): void {
   try {
     recordEntry('error', 'sync', args, false);
@@ -337,10 +253,8 @@ export function recordSyncError(...args: unknown[]): void {
 }
 
 /**
- * Record a non-error `sync` transition worth keeping for debugging — notably the
- * `stale` / "refresh needed" state and the per-mutation conflict reasons behind
- * it. Sourced `sync` at `warn` level so it lands in the durable error/warn ring
- * (not the evictable breadcrumb ring) without implying a crash. Never throws.
+ * Record a non-error sync transition (e.g. `stale`, per-mutation conflict reasons) at `warn`, so it
+ * lands in the durable ring. Never throws.
  */
 export function recordSyncWarn(...args: unknown[]): void {
   try {
@@ -351,10 +265,8 @@ export function recordSyncWarn(...args: unknown[]): void {
 }
 
 /**
- * Record an `ErrorBoundary.componentDidCatch`. Sourced `boundary` and
- * recorded EXACTLY ONCE — re-emit to devtools through the SAVED-ORIGINAL
- * `console.error` (never the shimmed one) so output is preserved without the
- * shim re-capturing it. Never throws into React's error lifecycle.
+ * Record an `ErrorBoundary.componentDidCatch` once, re-emitting through the saved-original
+ * `console.error` so the shim does not re-capture it. Never throws.
  */
 export function recordCaught(
   error: unknown,
@@ -368,8 +280,7 @@ export function recordCaught(
   } catch {
     /* must-not-throw */
   }
-  // Devtools passthrough via the saved original (NOT console.error directly,
-  // which the shim would re-capture). Guarded so it can't throw into React.
+  // Via the saved original: console.error would be re-captured by the shim.
   try {
     devtoolsError('ErrorBoundary caught:', error, info?.componentStack);
   } catch {
@@ -383,10 +294,8 @@ export function getEntries(): DiagnosticEntry[] {
 }
 
 /**
- * Empty both rings + the flush queue and cancel any pending flush. Called by
- * the card Clear AND by every `dropLocalDatabase()` wipe path so a
- * surviving session / the next cross-user account can't re-persist or export
- * the prior user's captured data from the in-memory rings.
+ * Empty both rings and the flush queue and cancel any pending flush; every `dropLocalDatabase()`
+ * wipe calls it so the next cross-user account cannot re-persist or export prior data.
  */
 export function clear(): void {
   errorRing.length = 0;
@@ -394,9 +303,7 @@ export function clear(): void {
   flushQueue = [];
   lastCoalesceKey = null;
   lastCoalesceEntry = null;
-  // Bump the epoch so an in-flight flush awaiting `appendDiagnosticLogs` treats
-  // the cleared state as authoritative and does NOT resurrect its drained batch
-  // (cross-user leak closure).
+  // Bump the epoch so an in-flight flush does not resurrect its drained batch.
   clearEpoch += 1;
   if (flushTimer !== null) {
     clearTimeout(flushTimer);
@@ -413,30 +320,22 @@ function scheduleFlush(): void {
 }
 
 /**
- * Persist the queued entries into the `diagnosticLogs` IDB store, append+prune
- * in one transaction. Fire-and-forget + fully guarded: an IDB
- * failure (private mode / quota) leaves the rings authoritative and is
- * swallowed. Drains at most `MAX_FLUSH_BATCH` entries per call; a larger
- * backlog re-schedules itself.
+ * Persist queued entries to the `diagnosticLogs` store (append and prune in one transaction), at
+ * most `MAX_FLUSH_BATCH` per call; an IDB failure leaves the rings authoritative.
  */
 export async function flush(): Promise<void> {
   if (flushQueue.length === 0) return;
   const batch = flushQueue.slice(0, MAX_FLUSH_BATCH);
-  // Optimistically remove the drained slice; restore on failure so nothing is
-  // silently lost from the persistence queue.
   flushQueue = flushQueue.slice(batch.length);
-  // Capture the clear epoch BEFORE the await. A `clear()` (cross-user wipe)
-  // that interleaves with this in-flight flush bumps the epoch; on return we
-  // treat the cleared state as authoritative and bail WITHOUT touching the
-  // (now-cleared) rings or queue — so the prior user's drained batch is never
-  // resurrected into a fresh user's queue.
+  // Capture the clear epoch before the await: a clear() during the flush must not see its drained
+  // batch resurrected.
   const epochAtStart = clearEpoch;
   try {
     const rows: DiagnosticLogEntry[] = batch.map((e) => ({ ...e }));
     const persisted = await appendDiagnosticLogs(rows, MAX_PERSISTED);
     if (clearEpoch !== epochAtStart) return; // cleared mid-flight — drop silently.
-    // Re-stamp the in-memory entries with the authoritative cross-tab seq so a
-    // later getEntries()/export orders consistently with the persisted store.
+    // Re-stamp with the authoritative cross-tab seq so getEntries() orders like the persisted
+    // store.
     const bySeq = new Map(persisted.map((row) => [row.id, row.seq]));
     for (const ring of [errorRing, breadcrumbRing]) {
       for (const entry of ring) {
@@ -446,20 +345,14 @@ export async function flush(): Promise<void> {
     }
   } catch {
     if (clearEpoch !== epochAtStart) return; // cleared mid-flight — do NOT re-queue.
-    // IDB unavailable / quota-exceeded — keep the rings authoritative and
-    // re-queue the drained batch so a later flush retries it.
+    // IDB unavailable or over quota: re-queue the batch so a later flush retries.
     flushQueue = [...batch, ...flushQueue];
     return;
   }
-  // More backlog than one batch — schedule another window.
   if (flushQueue.length > 0) scheduleFlush();
 }
 
-/**
- * Wipe BOTH the in-memory rings and the persisted IDB store. The card Clear
- * action. Guarded so a card click can't throw on IDB failure (the rings
- * are still cleared synchronously first).
- */
+/** Wipe the in-memory rings and the persisted IDB store; never throws on IDB failure. */
 export async function clearAll(): Promise<void> {
   clear();
   try {

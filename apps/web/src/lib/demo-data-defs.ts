@@ -1,15 +1,6 @@
 /**
- * Pure demo-dataset definitions, extracted from `demo-data-loader.ts`
- * so the loader file stays within reach of the shape limit.
- *
- * This module is data + pure helpers ONLY — no IndexedDB access, no
- * mutation-queue writes, no side effects. It holds the hand-tuned demo
- * roster the loader materializes: historical return sequences, the
- * account roster, the per-year balance generator, the canonical expense
- * set, the single CBP-payout income stream, and the deterministic
- * expense-category id map. `demo-data-loader.ts` imports these and does
- * all the transactional orchestration (preconditions, id computation,
- * queueing, snapshot/sync wiring).
+ * Pure demo-dataset definitions (data and helpers only, no IndexedDB or mutation-queue access) that `demo-data-loader.ts` materializes.
+ * Covers the return sequences, account roster, per-year balance generator, expense set, the single CBP-payout income stream and the expense-category id map.
  */
 import { DEFAULT_EXPENSE_CATEGORY_IDS } from './expense-categories-bootstrap';
 import type {
@@ -33,31 +24,20 @@ export interface BalanceRow {
   endingBalance: number;
   endingBalancePreTax?: number;
   endingBalancePostTax?: number;
-  /** Recorded designated-Roth IN-PLAN ROLLOVER principal for this year
-   *  (§402A(c)(4)), taxable half. Sparse — set only on the one year the
-   *  rollover happened, and always alongside a matching inbound `rollover`
-   *  leg on the same row. */
+  /**
+   * Recorded in-plan rollover principal, taxable half; sparse, set only on the rollover year
+   * alongside a matching inbound `rollover` leg.
+   */
   rothInPlanRolloverTaxableAmount?: number;
 }
 
 export type ReturnProfile = 'equityHeavy' | 'balanced' | 'conservative' | 'stableValue' | 'cash';
 
-// Hand-tuned 10-year return % sequences (oldest → newest). Designed to
-// feel like a realistic decade — drawdowns, recoveries, rate-driven cash
-// bumps — rather than the prior flat-return placeholder. Falls back to
-// the last value if a longer demo window is ever generated.
-//
-// The geometric mean of each sequence (equityHeavy ≈ 6.9%, balanced ≈
-// 6.6%, conservative ≈ 5.9%, stableValue ≈ 4.1%) is tuned to sit close
-// to the *planning* return of the accounts that use it, so the seeded
-// 10-year history (which drives the Historical / time-weighted-return
-// projection) lands in the same place as the forward Planned projection
-// AND inside the middle of the Monte Carlo fan — the three views tell one
-// coherent story instead of three unrelated ones. These are deliberately
-// a notch below the long-run market average (a conservative "don't assume
-// the good decade repeats" posture); the Monte Carlo engine samples the
-// fuller 1950+ history on top of the per-account asset mix, so its upside
-// tail still runs well above these lines.
+// Hand-tuned 10-year return % sequences (oldest → newest) shaped like a realistic decade; the last
+// value repeats if a longer window is generated. Each geometric mean (equityHeavy ≈ 6.9%, balanced
+// ≈ 6.6%, conservative ≈ 5.9%, stableValue ≈ 4.1%) sits near its accounts' planning return, so the
+// Historical, Planned and Monte Carlo views tell one story. They sit a notch below the long-run
+// average; Monte Carlo's fuller 1950+ sampling still runs well above them.
 export const RETURN_SEQUENCES: Record<ReturnProfile, readonly number[]> = {
   equityHeavy: [15, -6, 16, 9, -9, 14, 8, 11, 5, 9],
   balanced: [13, -3, 14, 8, -5, 12, 7, 9, 5, 8],
@@ -128,9 +108,10 @@ export function generateBalances(
 }
 
 export interface AccountDef {
-  /** Stable slug used to derive deterministic aggregate IDs so repeated
-   *  demo-data loads (e.g. multi-device) produce the same UUIDs and
-   *  IndexedDB `put` overwrites instead of creating duplicates. */
+  /**
+   * Stable slug deriving deterministic aggregate IDs, so repeated loads (e.g. multi-device)
+   * overwrite rather than duplicate.
+   */
   slug: string;
   name: string;
   type: AccountType;
@@ -147,38 +128,36 @@ export interface AccountDef {
   returnProfile: ReturnProfile;
   preTaxPct: number | undefined;
   active?: boolean;
-  /** Inclusive year of the last contribution. After this year, contributions
-   *  drop to 0 (models a paused/closed contribution stream — role change,
-   *  Roth pivot, etc.). Omitted = contribute every year in the window. */
+  /**
+   * Inclusive year of the last contribution; later years contribute 0. Omitted means every year.
+   */
   contributionsStopYear?: number;
   plannedContributionPreTax: number;
   plannedContributionPostTax: number;
-  /** Optional per-account contribution annual-increase rate (percent).
-   *  Absent → tracks inflation (the default — holds real value). Explicit
-   *  number incl. `0` → fixed COLA (`0` = flat-nominal). Exercises all
-   *  three tiers across the demo accounts. */
+  /**
+   * Contribution annual-increase rate (percent): absent tracks inflation, an explicit number
+   * including `0` is a fixed COLA (`0` = flat-nominal).
+   */
   contributionGrowthPct?: number;
-  /** Optional recorded designated-Roth IN-PLAN ROLLOVER (§402A(c)(4)) — money
-   *  moved from an employer plan's pre-tax side to its Roth side in ONE tax
-   *  year. `yearOffset` is the 0-based index into the account's generated
-   *  balance years. Only meaningful on a designated-Roth employer account, and
-   *  deliberately NOT on a MIXED plan, where the same event is a pre-tax →
-   *  post-tax shift inside that row's own split fields rather than money
-   *  arriving. */
+  /**
+   * Recorded designated-Roth in-plan rollover (§402A(c)(4)): money moved from an employer plan's
+   * pre-tax side to its Roth side in one tax year, `yearOffset` indexing the generated balance
+   * years. Only on a designated-Roth employer account, not a MIXED plan, where the same event is a
+   * pre-tax → post-tax shift inside the row's own split fields.
+   */
   inPlanRollover?: { yearOffset: number; taxableDollars: number };
-  /** Slug of the sibling account this CLOSED account was consolidated into.
-   *  Only meaningful with `active: false`: the closure rollover-OUT the loader
-   *  writes is then matched by an inbound `rollover` leg of the same size on the
-   *  named account's row for the same year, so the money the closure moved is
-   *  still held by the household. Required on a closed account whose recorded
-   *  history is BASIS somewhere (a Roth IRA's contributions stay §408A basis in
-   *  the owner's pool after the account closes) — otherwise the pool would resolve
-   *  basis with no balance behind it. */
+  /**
+   * Slug of the sibling account a closed (`active: false`) account was consolidated into: the
+   * loader's closure rollover-out is matched by an inbound `rollover` leg of the same size on that
+   * account's row, so the household still holds the money. Required when the closed account's
+   * history is basis (a Roth IRA's contributions stay §408A basis in the owner's pool).
+   */
   consolidatedIntoSlug?: string;
-  /** Demo asset mix — varied per account so the Monte Carlo page shows
-   *  a non-trivial fan. Cash wrappers stay 100% cash; retirement/HSA
-   *  lean equity-heavy with primary being the more aggressive
-   *  accumulator. CBP carries a stub mix that the engine ignores. */
+  /**
+   * Varied per account so the Monte Carlo page shows a non-trivial fan: cash wrappers are 100%
+   * cash, retirement/HSA lean equity with the primary more aggressive; the CBP carries a stub mix
+   * the engine ignores.
+   */
   assetMixStocks: number;
   assetMixBonds: number;
   assetMixCash: number;
@@ -186,104 +165,62 @@ export interface AccountDef {
 
 export function accountDefs(): AccountDef[] {
   return [
-    // A realistic middle-class dual-earner household of two, ~10 years
-    // into serious saving, holding roughly $515k of usable retirement
-    // savings today spread across 401(k), IRA, Roth, HSA, a cash balance
-    // plan, and a taxable joint brokerage.
-    //
-    // IMPORTANT — `initialBalance` is the balance ~10 YEARS AGO, not today.
-    // The loader seeds a 10-year history (startYear = currentYear − 9) by
-    // compounding `initialBalance` forward through the returnProfile
-    // sequence with `annualContrib` each year, so the *ending* balance of
-    // the current-year row is today's value. The small initial anchors
-    // below grow (with modest ~$18k/yr total contributions) to ~$515k
-    // today — the story is "an ordinary family that got serious about
-    // saving about a decade ago," not a wealthy one.
-    //
-    // Planning return %s are deliberately conservative forward
-    // assumptions (~6.25–7.25%, a notch below the long-run market
-    // average), so the Planned projection lands in the MIDDLE of the
-    // Monte Carlo fan rather than at its optimistic top — the planned and
-    // historical lines read as a sober central estimate, not a best case.
-    // Asset mixes are a moderate couple-in-their-50s posture (45–65%
-    // stocks), varied per account so the Monte Carlo page (which samples
-    // the fuller 1950+ history on top of the mix) shows a non-trivial fan.
-    // The base scenario stays solvent through plan end and its modified
-    // adjusted gross income (MAGI) stays BELOW the inflation-extrapolated
-    // MFJ IRMAA tier-1 threshold in its first Medicare years (no surcharge).
-    // Institution names are deliberately fictional (Northbrook, Lakeside,
-    // Summit, …) so no real-world brand from any production export appears
-    // in the demo. Balances are current-year approximations, not anchored
-    // to a fixed calendar year.
+    // A realistic dual-earner household ~10 years into saving, holding about $515k of retirement
+    // savings across 401(k), IRA, Roth, HSA, a cash balance plan and a taxable joint brokerage.
+    // `initialBalance` is the balance ~10 years ago, not today: the loader seeds a 10-year history
+    // (startYear = currentYear − 9) by compounding it with `annualContrib` through the return
+    // profile, so the current-year row's ending balance is today's value.
+    // Planning returns (~6.25–7.25%) and moderate mixes (45–65% stocks) are deliberately
+    // conservative so the Planned line sits mid-fan; the base scenario stays solvent and its MAGI
+    // stays below the MFJ IRMAA tier-1 threshold in its first Medicare years.
+    // Institution names are fictional so no real brand appears in the demo.
     { slug: 'john-401k', name: 'Demo Primary 401(k)', type: 'RETIREMENT_401K', ownership: 'INDIVIDUAL', tax: 'MIXED', ownerKey: 'primary', institution: 'Northbrook Investments', notes: 'Primary employer plan; match up to 6%', initialBalance: 26000, annualContrib: 10000, returnPct: 7.0, returnProfile: 'equityHeavy', preTaxPct: 0.75, plannedContributionPreTax: 7500, plannedContributionPostTax: 2500, contributionGrowthPct: 4, assetMixStocks: 60, assetMixBonds: 35, assetMixCash: 5 },
     { slug: 'john-ira', name: 'Demo Primary IRA', type: 'RETIREMENT_IRA', ownership: 'INDIVIDUAL', tax: 'PRE_TAX', ownerKey: 'primary', institution: 'Northbrook Investments', notes: 'Rollover IRA; receives the cash-balance-plan lump sum at retirement', initialBalance: 21000, annualContrib: 0, returnPct: 6.5, returnProfile: 'balanced', preTaxPct: undefined, plannedContributionPreTax: 0, plannedContributionPostTax: 0, assetMixStocks: 50, assetMixBonds: 40, assetMixCash: 10 },
     { slug: 'john-roth-ira', name: 'Demo Primary Roth IRA', type: 'RETIREMENT_ROTH_IRA', ownership: 'INDIVIDUAL', tax: 'ROTH', ownerKey: 'primary', institution: 'Lakeside Brokerage', notes: null, initialBalance: 0, annualContrib: 3000, returnPct: 7.25, returnProfile: 'equityHeavy', preTaxPct: undefined, plannedContributionPreTax: 0, plannedContributionPostTax: 3000, assetMixStocks: 65, assetMixBonds: 30, assetMixCash: 5 },
-    // Carries the demo's one designated-Roth IN-PLAN ROLLOVER: $20,000
-    // moved from the employer plan's pre-tax side into its Roth side five years
-    // ago. It sits on this PURE-Roth account rather than the MIXED `john-401k`
-    // because, modelled as a separate account, the money genuinely arrives — so
-    // an inbound `rollover` leg on that row is correct balance arithmetic. That
-    // principal is this account's whole designated-Roth basis.
+    // Carries the demo's one designated-Roth in-plan rollover ($20,000 five years ago). It sits on
+    // this pure-Roth account, not the MIXED `john-401k`, because a separate account genuinely
+    // receives the money, so the inbound `rollover` leg is correct; that principal is the account's
+    // whole designated-Roth basis.
     { slug: 'john-roth-401k', name: 'Demo Primary Roth 401(k)', type: 'RETIREMENT_ROTH_401K', ownership: 'INDIVIDUAL', tax: 'ROTH', ownerKey: 'primary', institution: 'Northbrook Investments', notes: 'Designated-Roth slice of the primary employer plan; after-tax contributions', initialBalance: 8000, annualContrib: 2500, returnPct: 7.0, returnProfile: 'equityHeavy', preTaxPct: undefined, plannedContributionPreTax: 0, plannedContributionPostTax: 2500, inPlanRollover: { yearOffset: 4, taxableDollars: 20000 }, assetMixStocks: 70, assetMixBonds: 25, assetMixCash: 5 },
-    // Consolidated, CLOSED Roth IRA — a decade of real contribution
-    // history rolled into `john-roth-ira` in the current year. Its closure row
-    // is a positive start → $0 end fully explained by an outbound `rollover`,
-    // so it imputes no withdrawal; its recorded contributions are still John's
-    // §408A basis and enter his pool with no status gate. `consolidatedIntoSlug`
-    // is what makes that honest: the closure is TWO-SIDED, so every pooled basis
-    // dollar is still backed by a balance dollar in the pool.
+    // A consolidated, closed Roth IRA: its closure row (positive start → $0 end, explained by an
+    // outbound `rollover`) imputes no withdrawal, and its contributions remain John's §408A basis.
+    // `consolidatedIntoSlug` makes the two-sided closure honest, so every pooled basis dollar is
+    // backed by a balance dollar.
     { slug: 'john-roth-ira-old', name: 'Demo Primary Consolidated Roth IRA', type: 'RETIREMENT_ROTH_IRA', ownership: 'INDIVIDUAL', tax: 'ROTH', ownerKey: 'primary', institution: 'Cedarpoint Retirement', notes: 'Former Roth IRA; consolidated into the primary Roth IRA', initialBalance: 12000, annualContrib: 2000, returnPct: 6.75, returnProfile: 'balanced', preTaxPct: undefined, active: false, consolidatedIntoSlug: 'john-roth-ira', plannedContributionPreTax: 0, plannedContributionPostTax: 0, assetMixStocks: 55, assetMixBonds: 40, assetMixCash: 5 },
     { slug: 'john-hsa', name: 'Demo Primary HSA', type: 'HSA', ownership: 'INDIVIDUAL', tax: 'HSA', ownerKey: 'primary', institution: 'Summit Health Savings', notes: 'Triple-tax-advantaged; invested', initialBalance: 0, annualContrib: 1500, returnPct: 6.75, returnProfile: 'balanced', preTaxPct: undefined, plannedContributionPreTax: 1500, plannedContributionPostTax: 0, assetMixStocks: 55, assetMixBonds: 40, assetMixCash: 5 },
     { slug: 'john-old-401k', name: 'Demo Primary Old 401(k)', type: 'RETIREMENT_401K', ownership: 'INDIVIDUAL', tax: 'PRE_TAX', ownerKey: 'primary', institution: 'Cedarpoint Retirement', notes: 'Closed former-employer plan; rolled out, zero balance', initialBalance: 0, annualContrib: 0, returnPct: 6.5, returnProfile: 'balanced', preTaxPct: undefined, active: false, plannedContributionPreTax: 0, plannedContributionPostTax: 0, assetMixStocks: 50, assetMixBonds: 45, assetMixCash: 5 },
     { slug: 'jane-401k', name: 'Demo Secondary 401(k)', type: 'RETIREMENT_401K', ownership: 'INDIVIDUAL', tax: 'PRE_TAX', ownerKey: 'secondary', institution: 'Harborview Funds', notes: 'Current employer plan; contribution held flat-nominal', initialBalance: 12000, annualContrib: 5500, returnPct: 6.75, returnProfile: 'balanced', preTaxPct: undefined, plannedContributionPreTax: 5500, plannedContributionPostTax: 0, contributionGrowthPct: 0, assetMixStocks: 55, assetMixBonds: 40, assetMixCash: 5 },
     { slug: 'jane-401k-former', name: 'Demo Secondary Former 401(k)', type: 'RETIREMENT_401K', ownership: 'INDIVIDUAL', tax: 'MIXED', ownerKey: 'secondary', institution: 'Maplewood Retirement', notes: 'Funded former-employer plan; no new contributions', initialBalance: 28000, annualContrib: 0, returnPct: 6.75, returnProfile: 'balanced', preTaxPct: 0.7, active: false, plannedContributionPreTax: 0, plannedContributionPostTax: 0, assetMixStocks: 55, assetMixBonds: 40, assetMixCash: 5 },
     { slug: 'jane-roth-ira', name: 'Demo Secondary Roth IRA', type: 'RETIREMENT_ROTH_IRA', ownership: 'INDIVIDUAL', tax: 'ROTH', ownerKey: 'secondary', institution: 'Lakeside Brokerage', notes: null, initialBalance: 0, annualContrib: 2500, returnPct: 7.0, returnProfile: 'equityHeavy', preTaxPct: undefined, plannedContributionPreTax: 0, plannedContributionPostTax: 2500, assetMixStocks: 60, assetMixBonds: 35, assetMixCash: 5 },
-    // Inherited Roth IRA — the one account shape the demo lacked. Its
-    // beneficiary rule is seeded complete in the loader, so it raises no
-    // required-withdrawal blocker; withdrawals from it are entirely tax-free and
-    // it carries no Roth basis state of any kind.
+    // Inherited Roth IRA: its beneficiary rule is seeded complete in the loader so it raises no
+    // required-withdrawal blocker; withdrawals are entirely tax-free and it carries no Roth basis
+    // state.
     { slug: 'jane-inherited-roth-ira', name: 'Demo Secondary Inherited Roth IRA', type: 'RETIREMENT_ROTH_IRA', ownership: 'INDIVIDUAL', tax: 'ROTH', ownerKey: 'secondary', institution: 'Harborview Funds', notes: 'Inherited from a parent; beneficiary withdrawals only', initialBalance: 9000, annualContrib: 0, returnPct: 6.75, returnProfile: 'balanced', preTaxPct: undefined, plannedContributionPreTax: 0, plannedContributionPostTax: 0, assetMixStocks: 55, assetMixBonds: 40, assetMixCash: 5 },
     { slug: 'jane-hsa', name: 'Demo Secondary HSA', type: 'HSA', ownership: 'INDIVIDUAL', tax: 'HSA', ownerKey: 'secondary', institution: 'Summit Health Savings', notes: 'Triple-tax-advantaged; invested', initialBalance: 0, annualContrib: 1500, returnPct: 6.25, returnProfile: 'conservative', preTaxPct: undefined, plannedContributionPreTax: 1500, plannedContributionPostTax: 0, assetMixStocks: 45, assetMixBonds: 45, assetMixCash: 10 },
     { slug: 'cash-balance-plan', name: 'Demo Cash Balance Plan', type: 'RETIREMENT_CASH_BALANCE', ownership: 'INDIVIDUAL', tax: 'PRE_TAX', ownerKey: 'primary', institution: 'Northbrook Investments', notes: 'Active employer cash-balance plan; ~$4k/yr pay credits', initialBalance: 4000, annualContrib: 4000, returnPct: 4.0, returnProfile: 'stableValue', preTaxPct: undefined, plannedContributionPreTax: 0, plannedContributionPostTax: 0, assetMixStocks: 0, assetMixBonds: 0, assetMixCash: 100 },
-    // Taxable joint brokerage — the demo's bridge between pre-tax-heavy
-    // retirement accounts and tax-free Roth. POST_TAX BROKERAGE
-    // withdrawals realize the long-term-capital-gains proxy the tax
-    // engine models, so the LTCG path is exercised in the demo rather
-    // than invisible. Sized as a modest non-retirement cushion.
+    // Taxable joint brokerage bridging pre-tax-heavy retirement accounts and tax-free Roth;
+    // POST_TAX BROKERAGE withdrawals realize the LTCG proxy, so the LTCG path is exercised in the
+    // demo.
     { slug: 'joint-brokerage', name: 'Demo Joint Brokerage', type: 'BROKERAGE', ownership: 'JOINT', tax: 'POST_TAX', ownerKey: 'primary', institution: 'Lakeside Brokerage', notes: 'Taxable joint brokerage — index funds', initialBalance: 5000, annualContrib: 2000, returnPct: 6.75, returnProfile: 'balanced', preTaxPct: undefined, plannedContributionPreTax: 0, plannedContributionPostTax: 2000, assetMixStocks: 55, assetMixBonds: 35, assetMixCash: 10 },
   ];
 }
 
-// Reuses the same id-per-name map the auto-bootstrap seeds with so a
-// fresh sign-up (bootstrap creates 8 categories) followed by Load
-// Demo Data upserts in place rather than producing 16 categories.
+// Reuses the auto-bootstrap's id-per-name map so a fresh sign-up followed by Load Demo Data upserts
+// in place instead of producing 16 categories.
 export const DEMO_CATEGORY_BY_NAME = DEFAULT_EXPENSE_CATEGORY_IDS;
 
 /**
- * Demo expenses cover each timepoint kind so the projection chart band
- * renders a representative spend curve from first paint.
- *
- * Budget is hand-tuned so the base scenario (retire 65, both members)
- * funds comfortably through life expectancy while the "Funds Run Out"
- * scenario exhausts the portfolio mid-retirement.
- *
- * Mix exercises every default category (Housing, Utilities, Food,
- * Transportation, Medical, Insurance, Entertainment, Other) with a
- * balanced essential / discretionary split, plus two one-off events
- * for the spike pattern in the chart.
- *
- * Year-anchored windows (mortgage, new-car one-off) use `currentYear + N`
- * offsets so they stay realistic whichever calendar year the demo
- * loads in: mortgage runs from `currentYear` to `currentYear + 8`; the
- * new-car one-off fires at `currentYear + 8`.
+ * Demo expenses covering each timepoint kind so the chart band renders a representative spend curve
+ * from first paint. The budget is tuned so the base scenario (retire 65, both members) funds
+ * comfortably through life expectancy while "Funds Run Out" exhausts the portfolio mid-retirement.
+ * Year-anchored windows use `currentYear + N` offsets so they stay realistic in any load year.
  */
 export function demoExpenseDefs(
   currentYear: number,
 ): ReadonlyArray<{ id: string; payload: ExpensePayload }> {
   return [
-  // Housing — mortgage runs to retirement-year payoff, then property
-  // costs (taxes, HOA, upkeep) continue for life. Renovation one-off
-  // mid-retirement exercises the spike pattern.
+  // Housing — mortgage to payoff, then property costs for life; a renovation one-off exercises the
+  // spike pattern.
   {
     id: 'demo-exp-mortgage',
     payload: {
@@ -370,8 +307,8 @@ export function demoExpenseDefs(
     },
   },
 
-  // Food — essential groceries plus a discretionary dining-out line so
-  // the category renders two stacked sub-bands.
+  // Food — essential groceries plus discretionary dining out, so the category renders two stacked
+  // sub-bands.
   {
     id: 'demo-exp-groceries',
     payload: {
@@ -394,13 +331,9 @@ export function demoExpenseDefs(
       categoryId: DEMO_CATEGORY_BY_NAME.Food,
       start: { kind: 'retirementStart' },
       end: { kind: 'lifetime', whose: 'last' },
-      // Canonical spending glide: dining-out spend glides down to 70%
-      // of today's real spend from John's age 65 to when the expense
-      // ends — its own `lifetime(last)` end — then holds flat.
-      // Showcases the `expenseEnd` glide-end anchor; the curve moves
-      // automatically if a scenario patches the expense's end. Visible
-      // on the Expenses / cashflow bands from first paint (every
-      // scenario inherits it unless it patches the expense).
+      // Dining-out spend glides to 70% of today's real spend from John's age 65 to the expense's
+      // own end, then holds; shows the `expenseEnd` glide-end anchor, which follows a scenario
+      // patch of the end.
       discretionaryGlide: {
         endMultiplierPct: 70,
         glideStart: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
@@ -409,8 +342,7 @@ export function demoExpenseDefs(
     },
   },
 
-  // Transportation — fuel + maintenance ongoing; new-car one-offs at
-  // the start and again mid-retirement.
+  // Transportation — ongoing fuel and maintenance, with new-car one-offs.
   {
     id: 'demo-exp-fuel-maintenance',
     payload: {
@@ -446,15 +378,11 @@ export function demoExpenseDefs(
     },
   },
 
-  // Medical — COBRA bridge to Medicare, then Medicare Part B for both
-  // members + Medigap supplement, then a two-stage end-of-life
-  // long-term-care cost (assisted living → nursing home) in the final
-  // years.
+  // Medical — a private plan bridging to Medicare, Part B for both, a Medigap supplement, then
+  // two-stage long-term care.
   {
-    // ID kept as 'demo-exp-cobra' for demo-reload stability — the
-    // display name + economics evolved (private pre-Medicare health
-    // coverage until 65) but the aggregate identity is the same row,
-    // upserted in place on reload.
+    // ID kept for demo-reload stability: the row is upserted in place though its name and economics
+    // evolved.
     id: 'demo-exp-cobra',
     payload: {
       name: 'Private health plan (bridge to Medicare)',
@@ -463,15 +391,11 @@ export function demoExpenseDefs(
       classification: 'essential',
       categoryId: DEMO_CATEGORY_BY_NAME.Medical,
       start: { kind: 'retirementStart' },
-      // Bridge runs from retirement until John (the PRIMARY, and the
-      // younger spouse) reaches 65 and ages into Medicare. In the base
-      // plan John retires at 65, so this window is empty (he goes
-      // straight to Medicare). It only bites in the early-retirement
-      // scenarios: John retires at 62, so he buys a private/ACA plan for
-      // his 62→65 gap. Jane (older) is already Medicare-eligible by then,
-      // so the bridge covers John alone — sized for one adult.
+      // Runs from retirement until John (primary, the younger spouse) reaches 65; empty in the base
+      // plan (he retires at 65) and only bites in early-retirement scenarios, sized for one adult
+      // as Jane is already Medicare-eligible.
       end: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
-      // Pre-65 marketplace / COBRA premiums are NOT HSA-qualified (§223(d)(2)).
+      // Pre-65 marketplace / COBRA premiums are not HSA-qualified (§223(d)(2)).
       hsaQualified: false,
     },
   },
@@ -499,7 +423,6 @@ export function demoExpenseDefs(
       categoryId: DEMO_CATEGORY_BY_NAME.Medical,
       start: { kind: 'age', memberId: 'secondary', years: 65, months: 0 },
       end: { kind: 'lifetime', whose: 'secondary' },
-      // Medicare Part B premiums are HSA-qualified once the member is 65+ (§213(d)(1)(D)).
       hsaQualified: true,
     },
   },
@@ -513,20 +436,14 @@ export function demoExpenseDefs(
       categoryId: DEMO_CATEGORY_BY_NAME.Medical,
       start: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
       end: { kind: 'lifetime', whose: 'last' },
-      // Medigap (Medicare Supplement) premiums are NOT HSA-qualified (§223(d)(2)(C)).
+      // Medigap (Medicare Supplement) premiums are not HSA-qualified (§223(d)(2)(C)).
       hsaQualified: false,
     },
   },
-  // End-of-life long-term-care cost, modelled as a realistic two-stage
-  // escalation over the household's final ~5 years: assisted living
-  // first, then full nursing-home care at the very end. Both anchored to
-  // the primary (John,
-  // the younger spouse and therefore the last to die at the default life
-  // expectancy of 95). The `age` end boundary is EXCLUSIVE, so the two
-  // windows tile with no overlap and no gap: assisted living covers ages
-  // 90–92, nursing home covers age 93 through death. Amounts are ~US
-  // national medians (Genworth): assisted living ≈ $5,500/mo, private
-  // nursing-home room ≈ $10,000/mo.
+  // End-of-life long-term care in two stages anchored to John (the last to die at the default life
+  // expectancy of 95): assisted living at ages 90–92, then nursing home from 93. The `age` end is
+  // exclusive so the windows tile; amounts are ~US national medians (Genworth, ≈ $5,500/mo and ≈
+  // $10,000/mo).
   {
     id: 'demo-exp-ltc-care',
     payload: {
@@ -551,13 +468,11 @@ export function demoExpenseDefs(
       categoryId: DEMO_CATEGORY_BY_NAME.Medical,
       start: { kind: 'age', memberId: 'primary', years: 93, months: 0 },
       end: { kind: 'lifetime', whose: 'last' },
-      // Qualified LTC services for a chronically ill person are HSA-qualified (§213(d)(1)(C)).
       hsaQualified: true,
     },
   },
 
-  // Insurance — auto, plus an umbrella line. Term life burns off well
-  // before retirement so it only shows on the pre-retirement leg.
+  // Insurance — auto plus an umbrella line.
   {
     id: 'demo-exp-car-insurance',
     payload: {
@@ -583,8 +498,7 @@ export function demoExpenseDefs(
     },
   },
 
-  // Entertainment — go-go years travel taper, plus ongoing hobbies +
-  // subscriptions for the long tail.
+  // Entertainment — go-go years travel taper plus ongoing hobbies.
   {
     id: 'demo-exp-travel',
     payload: {
@@ -610,8 +524,7 @@ export function demoExpenseDefs(
     },
   },
 
-  // Other — charitable giving + gifts to grandkids. Both discretionary
-  // and continuous through life.
+  // Other — charitable giving and family gifts, discretionary and continuous.
   {
     id: 'demo-exp-charity',
     payload: {
@@ -640,15 +553,9 @@ export function demoExpenseDefs(
 }
 
 /**
- * Demo income stream — one — mirrors the real export's single-stream
- * structure: a Cash Balance Plan lump-sum rollover into the primary's
- * IRA at retirement.
- *
- * `payoutType: 'lumpSum'` + `linkedCbpAccountId` → the engine derives
- * the deposit from the source CBP account's projected balance at the
- * event month and routes it to `targetAccountId`; the entered
- * `lumpSumAmount` is hidden/forced to 0 for linked CBP lump sums,
- * so the ~$100k estimate is reference only.
+ * The demo's single income stream, mirroring the real export: a Cash Balance Plan lump-sum rollover
+ * into the primary's IRA at retirement. A linked CBP lump sum derives its deposit from the plan's
+ * projected balance at the event month, so the entered `lumpSumAmount` (~$100k) is reference only.
  */
 export const DEMO_INCOME_DEFS: ReadonlyArray<{
   id: string;
@@ -665,7 +572,6 @@ export const DEMO_INCOME_DEFS: ReadonlyArray<{
       memberId,
       kind: 'pension',
       payoutType: 'lumpSum',
-      // Fires at the primary owner's retirement date.
       start: { kind: 'retirementStart' },
       linkedCbpAccountId: 'demo-account-cash-balance-plan',
       targetAccountId: 'demo-account-john-ira',
