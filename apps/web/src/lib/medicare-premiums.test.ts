@@ -1,5 +1,4 @@
-/** Pins for MEDICARE_PREMIUMS, so a refresh that edits a figure without its
- *  citation fails here. */
+// Pins for MEDICARE_PREMIUMS, so a refresh that edits a figure without its citation fails here.
 import { describe, it, expect } from 'vitest';
 import { IRMAA_TIERS } from './irmaa-tiers';
 import { latestMedicarePremiums, MEDICARE_PREMIUMS } from './medicare-premiums';
@@ -37,8 +36,7 @@ describe('MEDICARE_PREMIUMS', () => {
   });
 
   it('should_agree_with_the_IRMAA_tier_2_Part_B_surcharge_each_year', () => {
-    // The tier-2 Part B surcharge is 100% of the standard premium by
-    // construction, so the two CMS tables cannot drift apart unseen.
+    // The tier-2 Part B surcharge is 100% of the standard premium by construction, so the two CMS tables cannot drift apart.
     for (const [year, entry] of Object.entries(MEDICARE_PREMIUMS.values)) {
       expect(
         IRMAA_TIERS.values[Number(year)].bySingle[1].partBMonthly,

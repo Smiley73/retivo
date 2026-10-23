@@ -6,7 +6,7 @@ import type { IrmaaTable, IrmaaTableEntry } from './irmaa-tiers';
 import { selectIrmaaScheduleEntries, entryAnnualSurchargeCents } from './irmaa-tiers';
 
 /** Filing status for IRMAA lookups: HoH and QSS use the Single tiers; MFS lived with spouse uses the steeper `byMfs` schedule. */
-export type IrmaaFilingStatus = FilingStatus;
+type IrmaaFilingStatus = FilingStatus;
 
 export type { IrmaaTable } from './irmaa-tiers';
 
@@ -27,7 +27,7 @@ export interface IrmaaResult {
   totalHouseholdAnnualCents: number;
 }
 
-export interface IrmaaInput {
+interface IrmaaInput {
   taxYear: number;
   magiTwoYearsPriorCents: number;
   filingStatus: IrmaaFilingStatus;
@@ -38,7 +38,7 @@ export interface IrmaaInput {
 }
 
 /** Thrown when taxYear is not in the snapshot; IRMAA looks up the strict year (no clamp-to-latest). */
-export class UnsupportedTaxYearError extends Error {
+class UnsupportedTaxYearError extends Error {
   readonly code = 'UNSUPPORTED_TAX_YEAR' as const;
   constructor(public readonly year: number) {
     super(`IRMAA brackets not available for tax year ${year}`);
@@ -47,7 +47,7 @@ export class UnsupportedTaxYearError extends Error {
 }
 
 /** Thrown when any field of IrmaaInput fails validation. */
-export class IrmaaInvalidInputError extends Error {
+class IrmaaInvalidInputError extends Error {
   readonly code = 'IRMAA_INVALID_INPUT' as const;
   constructor(public readonly reason: string) {
     super(`Invalid IRMAA input: ${reason}`);
@@ -177,7 +177,7 @@ export interface IrmaaBeneficiaryEnrollment {
   readonly partDMonths: number;
 }
 
-export interface MonthAwareIrmaaInput {
+interface MonthAwareIrmaaInput {
   readonly taxYear: number;
   /** Look-back return's MAGI and filing status (two years prior); tiering uses its status, so a surviving-spouse Single unit is still tiered on the MFJ ladder. */
   readonly lookback: IrmaaLookback;

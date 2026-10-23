@@ -1,15 +1,6 @@
-/**
- * Schema validation tests for IRMAA_TIERS.
- * Verifies structural integrity of the published CMS values.
- */
-
 import { describe, it, expect } from 'vitest';
 import { IRMAA_TIERS } from './irmaa-tiers';
 import type { IrmaaTable, IrmaaTableEntry } from './irmaa-tiers';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function validateEntries(entries: readonly IrmaaTableEntry[], label: string): void {
   it(`${label}: has 5 entries (tier1–tier5)`, () => {
@@ -75,10 +66,6 @@ function validateYearTable(table: IrmaaTable, year: number): void {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot-level tests
-// ---------------------------------------------------------------------------
-
 describe('IRMAA_TIERS snapshot', () => {
   it('has values for 2024, 2025, and 2026', () => {
     expect(Object.keys(IRMAA_TIERS.values).map(Number).sort()).toEqual([2024, 2025, 2026]);
@@ -97,10 +84,6 @@ describe('IRMAA_TIERS snapshot', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Per-year structural tests
-// ---------------------------------------------------------------------------
-
 describe('IRMAA_TIERS 2024', () => {
   validateYearTable(IRMAA_TIERS.values[2024]!, 2024);
 });
@@ -112,10 +95,6 @@ describe('IRMAA_TIERS 2025', () => {
 describe('IRMAA_TIERS 2026', () => {
   validateYearTable(IRMAA_TIERS.values[2026]!, 2026);
 });
-
-// ---------------------------------------------------------------------------
-// byMfs two-band structure — NOT strictly-ascending by design.
-// ---------------------------------------------------------------------------
 
 describe('IRMAA_TIERS byMfs (MFS lived-with-spouse)', () => {
   for (const year of [2024, 2025, 2026] as const) {
@@ -150,10 +129,6 @@ describe('IRMAA_TIERS byMfs (MFS lived-with-spouse)', () => {
     expect(IRMAA_TIERS.values[2026]!.byMfs[1].thresholdDollars).toBe(391_000);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Source URL assertions
-// ---------------------------------------------------------------------------
 
 describe('IRMAA_TIERS metadata.source URLs', () => {
   it('contains corrected 2024 CMS source URL', () => {

@@ -16,7 +16,7 @@ import type { CalibrationSnapshot } from './calibration';
 export type FilingStatus = 'Single' | 'MFJ' | 'HoH' | 'MFS' | 'QSS';
 
 /** Tax years with compiled bracket tables. Outside → UnsupportedTaxYearError. */
-export type TaxYear = 2024 | 2025 | 2026;
+type TaxYear = 2024 | 2025 | 2026;
 
 export interface TaxBracket {
   readonly floor: number;
@@ -119,7 +119,7 @@ export interface TaxResult {
   readonly marginalLtcgRate: number;
 }
 
-export class UnsupportedTaxYearError extends Error {
+class UnsupportedTaxYearError extends Error {
   readonly code = 'UNSUPPORTED_TAX_YEAR' as const;
   constructor(public readonly year: number) {
     super(
@@ -130,7 +130,7 @@ export class UnsupportedTaxYearError extends Error {
   }
 }
 
-export class InvalidTaxInputError extends Error {
+class InvalidTaxInputError extends Error {
   readonly code = 'INVALID_TAX_INPUT' as const;
   constructor(public readonly field: string, value: number) {
     super(`TaxInput.${field} must be ≥ 0 and finite, got ${value}.`);
@@ -145,7 +145,7 @@ const CENTS_FACTOR = 100;
 export const SENIOR_BONUS_DEDUCTION_LAST_YEAR = 2028;
 
 /** Rounds dollars to integer cents, half-up. */
-export function toCents(dollars: number): number {
+function toCents(dollars: number): number {
   return Math.round(dollars * CENTS_FACTOR);
 }
 
@@ -422,22 +422,4 @@ export function federalOrdinaryTaxCents(
   const brackets = config.brackets[filingStatus];
   const taxableIncomeDollars = Math.max(0, taxableIncomeCents) / CENTS_FACTOR;
   return toCents(computeOrdinaryTax(taxableIncomeDollars, brackets));
-}
-
-/**
- * Marginal LTCG/QDI rate; `totalTaxableIncome` is ordinary taxable plus LTCG (the stacked total).
- *
- * @throws {UnsupportedTaxYearError} when `year` is not in the snapshot.
- */
-export function marginalLtcgRate(
-  year: TaxYear,
-  filingStatus: FilingStatus,
-  totalTaxableIncome: number,
-  snapshot: CalibrationSnapshot<TaxConfig>,
-): number {
-  const config = snapshot.values[year];
-  if (config === undefined) throw new UnsupportedTaxYearError(year);
-  if (totalTaxableIncome <= 0) return 0;
-  const ltcgBrackets = config.ltcgBrackets[filingStatus];
-  return marginalLtcgBracket(totalTaxableIncome, ltcgBrackets).rate;
 }

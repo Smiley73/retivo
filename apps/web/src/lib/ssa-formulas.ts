@@ -63,7 +63,7 @@ const FRA_TABLE: Record<number, number> = {
   1959: 66 * 12 + 10,
 };
 
-export function fraMonthsForBirthYear(year: number): number {
+function fraMonthsForBirthYear(year: number): number {
   if (year < 1943) throw new InvalidBirthYearError(year);
   if (year <= 1954) return 66 * 12;
   if (year >= 1960) return 67 * 12;
@@ -76,7 +76,7 @@ export function fraMonthsForBirthYear(year: number): number {
  * retirement 66y8m, survivor 66y4m); the two converge at 67 for births from 1962. Throws
  * `InvalidBirthYearError` before 1943.
  */
-export function survivorFraMonthsForBirthYear(year: number): number {
+function survivorFraMonthsForBirthYear(year: number): number {
   if (year < 1943) throw new InvalidBirthYearError(year);
   // Statutory widow(er) schedule: 1940→65y2m … 1944→65y10m; 1945–1956→66; 1957–1961 graduated; ≥1962→67.
   if (year <= 1944) return 65 * 12 + (year - 1939) * 2;

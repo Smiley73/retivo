@@ -209,10 +209,7 @@ export function resolveAssumedYieldComponents(
   return { qdiFraction, taxExemptFraction, ordinaryFraction };
 }
 
-export {
-  buildScaledFederalTaxConfig,
-  resolveFederalTaxSnapshotForYear,
-} from './federal-tax-extrapolation';
+export { resolveFederalTaxSnapshotForYear } from './federal-tax-extrapolation';
 
 /**
  * True for `RETIREMENT_ROTH_IRA` only. Designated-Roth employer plans follow their own pro rata rules
@@ -547,7 +544,7 @@ const HEALTH_YEAR_FACTS_CACHE = new WeakMap<
  * when absent the whole-year boolean it replaces governs (true is 12, false is 0). Part B and Part D resolve independently,
  * and values are clamped to 0..12 and floored so a corrupt stored value cannot over-charge a surcharge.
  */
-export interface ResolvedCoverageMonths {
+interface ResolvedCoverageMonths {
   readonly partBMonths: number;
   readonly partDMonths: number;
   readonly marketplaceMonths: number;
@@ -583,7 +580,7 @@ function marketplaceMonthsOf(m: TaxMemberInput): number {
  * production pricing path shares (`acaCoveredMembers`, `irmaaBeneficiaryEnrollments`), so the two engines cannot resolve
  * different months for a member. The boolean gates below stay scalar to avoid per-member allocation in the Monte Carlo loop.
  */
-export function resolveCoverageMonths(m: TaxMemberInput): ResolvedCoverageMonths {
+function resolveCoverageMonths(m: TaxMemberInput): ResolvedCoverageMonths {
   return {
     partBMonths: partBMonthsOf(m),
     partDMonths: partDMonthsOf(m),
@@ -645,7 +642,7 @@ export interface IrmaaMemberEnrollment extends IrmaaBeneficiaryEnrollment {
  * member as attaining 65 in that year too, Pub 590-B). A whole-year approximation would charge a full year of IRMAA to a
  * June birthday and none to an October one. An empty, malformed or impossible birthdate gives 0 (`isUsableBirthdate`).
  */
-export function automaticMedicareMonthsInYear(
+function automaticMedicareMonthsInYear(
   isoBirthdate: string | null | undefined,
   taxYear: number,
 ): number {

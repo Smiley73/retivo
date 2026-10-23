@@ -48,7 +48,7 @@ export interface AcaPtcTable {
   readonly bands: readonly AcaApplicableFigureBand[];
 }
 
-export class UnsupportedTaxYearError extends Error {
+class UnsupportedTaxYearError extends Error {
   readonly code = 'UNSUPPORTED_TAX_YEAR' as const;
   constructor(readonly year: number) {
     super(`ACA PTC: no calibration data for tax year ${year}`);

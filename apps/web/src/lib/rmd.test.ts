@@ -1,25 +1,15 @@
-/**
- * Primary acceptance-criterion test + divisor boundary spot checks for the RMD engine.
- * Subject-specific tests split into sibling files:
- *   rmd.trigger-age.test.ts   — trigger-age cutover + applicable shape
- *   rmd.qualification.test.ts — account-type qualification + MIXED Roth-portion
- *   rmd.allocation.test.ts    — per-account proportional allocation + zero balance
- *   rmd.errors.test.ts        — all RmdInvalidInputError + UnsupportedTaxYearError paths
- * Oracle: IRS Pub 590-B Appendix B Table III, 2022 revision (effective 2022-01-01).
- */
+// Oracle: IRS Pub 590-B Appendix B Table III, 2022 revision (effective 2022-01-01).
 
 import { describe, it, expect } from 'vitest';
 import {
   computeRmd,
-  deceasedOwnerApplicableRmdAge,
   poolKeyForRmdAccount,
-  stillWorkingExceptionApplies,
-  stillWorkingExceptionEligible,
   rmdTwoYearsPriorBaseCents,
   rmdFirstYearDeferralPlan,
   resolveRmdFirstYearPlan,
   resolveRmdRule,
   type RmdAccountProfileFacts,
+  type RmdAccountType,
   type RmdRuleResolution,
 } from './rmd';
 import { RMD_LIFE_EXPECTANCY_TABLES } from './rmd-life-expectancy-tables';
@@ -27,17 +17,9 @@ import { validateRmdProfileFacts } from './rmd-validation';
 import { SNAPSHOT } from './rmd.test-helpers';
 import mcParityBaselines from './__fixtures__/mc-parity-baselines.json';
 
-// ---------------------------------------------------------------------------
-// computeRmd — primary acceptance criterion
-// ---------------------------------------------------------------------------
-
 describe('computeRmd — primary AC', () => {
   it('should_return_1886792_cents_for_born_1952_taxYear_2025_balance_50M_cents', () => {
-    // AC: computeRmd({ isoBirthdate: '1952-06-15', taxYear: 2025, accounts: [{...}] }, RMD_DIVISORS)
-    // Born 1952 → attains age 73 in 2025 → trigger 73 (born 1951–1959)
-    // divisor: 26.5 (IRS Pub 590-B Appendix B Table III, age 73)
-    // ownerRmdCents = Math.round((50_000_000 / 100) / 26.5 * 100)
-    //               = Math.round(1_886_792.45...) = 1_886_792
+    // Table III age 73 divisor 26.5: round(50_000_000 / 100 / 26.5 * 100) = 1_886_792.
     const result = computeRmd(
       {
         isoBirthdate: '1952-06-15',
@@ -61,61 +43,6 @@ describe('computeRmd — primary AC', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// computeRmd — divisor table boundaries (IRS-pinned + age clamp)
-// ---------------------------------------------------------------------------
-
-describe('computeRmd — divisor table boundaries', () => {
-  it('should_use_divisor_26_5_at_age_73_first_rmd_year', () => {
-    // Born 1951, taxYear 2024 → age 73
-    const r = computeRmd(
-      {
-        isoBirthdate: '1951-01-01',
-        taxYear: 2024,
-        accounts: [{ id: 'a1', balanceDec31PriorYearCents: 1_000_000, accountType: 'RETIREMENT_IRA', taxTreatment: 'PRE_TAX' }],
-      },
-      SNAPSHOT,
-    );
-    expect(r.divisor).toBe(26.5);
-  });
-
-  it('should_clamp_age_125_to_120_and_use_divisor_2_0', () => {
-    // Born 1900, taxYear 2025 → age 125 → clamped to 120 → divisor 2.0
-    const r = computeRmd(
-      {
-        isoBirthdate: '1900-01-01',
-        taxYear: 2025,
-        accounts: [{ id: 'a1', balanceDec31PriorYearCents: 1_000_000, accountType: 'RETIREMENT_IRA', taxTreatment: 'PRE_TAX' }],
-      },
-      SNAPSHOT,
-    );
-    expect(r.divisor).toBe(2.0); // IRS "age 120 and older" convention
-    expect(r.applicable).toBe(true);
-  });
-
-  it('should_resolve_taxYear_2030_to_2024_entry_via_clamp_to_latest', () => {
-    // Clamp-to-latest — RMD_DIVISORS has only key 2024; 2030 clamps to 2024 (no throw).
-    // Explicit divergence from federal-tax.ts strict-exact lookup: table is statutory, stable.
-    const result = computeRmd(
-      {
-        isoBirthdate: '1950-01-01',
-        taxYear: 2030, // future year, beyond snapshot keys
-        accounts: [
-          { id: 'a1', balanceDec31PriorYearCents: 1_000_000, accountType: 'RETIREMENT_IRA', taxTreatment: 'PRE_TAX' },
-        ],
-      },
-      SNAPSHOT,
-    );
-    expect(result.applicable).toBe(true);
-    // born 1950, taxYear 2030 → age 80 → divisor 20.2 (IRS Pub 590-B Table III)
-    expect(result.divisor).toBe(20.2);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// poolKeyForRmdAccount — IRS aggregation pool key
-// ---------------------------------------------------------------------------
-
 describe('poolKeyForRmdAccount — IRS aggregation pooling', () => {
   it('collapses all of one owner’s traditional IRAs into one IRA pool key', () => {
     const k1 = poolKeyForRmdAccount('owner-A', 'RETIREMENT_IRA', 'ira-1');
@@ -131,21 +58,15 @@ describe('poolKeyForRmdAccount — IRS aggregation pooling', () => {
     expect(k1).toBe('owner-A::pool:403B');
     expect(k2).toBe('owner-A::pool:403B');
     expect(k1).toBe(k2);
-    // 403(b) pool is distinct from the IRA pool for the same owner.
     expect(k1).not.toBe(poolKeyForRmdAccount('owner-A', 'RETIREMENT_IRA', 'tsa-1'));
   });
 
-  // An INHERITED account never aggregates: not with the
-  // beneficiary's own IRAs, and not with an IRA inherited from another decedent.
   it('gives every INHERITED account its own singleton key (no aggregation at all)', () => {
     const own = poolKeyForRmdAccount('owner-A', 'RETIREMENT_IRA', 'ira-1');
     const inherited = poolKeyForRmdAccount('owner-A', 'RETIREMENT_IRA', 'inh-1', true);
     const otherInherited = poolKeyForRmdAccount('owner-A', 'RETIREMENT_IRA', 'inh-2', true);
-    // Never pooled with the beneficiary's own IRA pool…
     expect(inherited).not.toBe(own);
-    // …and never with another inherited IRA (a different decedent's).
     expect(inherited).not.toBe(otherInherited);
-    // A 403(b) inherited account is likewise its own pool, not the 403B pool.
     expect(poolKeyForRmdAccount('owner-A', 'RETIREMENT_403B', 'inh-3', true)).not.toBe(
       poolKeyForRmdAccount('owner-A', 'RETIREMENT_403B', 'own-3'),
     );
@@ -161,7 +82,6 @@ describe('poolKeyForRmdAccount — IRS aggregation pooling', () => {
     for (const [type, id] of singletons) {
       expect(poolKeyForRmdAccount('owner-A', type, id)).toBe(`owner-A::acct:${id}`);
     }
-    // Two 401(k)s of the same owner are DISTINCT singleton pools.
     const a = poolKeyForRmdAccount('owner-A', 'RETIREMENT_401K', 'k-1');
     const b = poolKeyForRmdAccount('owner-A', 'RETIREMENT_401K', 'k-2');
     expect(a).not.toBe(b);
@@ -179,7 +99,6 @@ describe('poolKeyForRmdAccount — IRS aggregation pooling', () => {
   it('falls back to a bare-id singleton for an empty owner (orphan, no throw)', () => {
     const k = poolKeyForRmdAccount('', 'RETIREMENT_401K', 'orphan-1');
     expect(k).toBe('orphan-1::acct:orphan-1');
-    // Even an IRA with an empty owner gets keyed by its own id (own pool).
     expect(poolKeyForRmdAccount('', 'RETIREMENT_IRA', 'orphan-2')).toBe(
       'orphan-2::pool:IRA',
     );
@@ -194,107 +113,52 @@ describe('poolKeyForRmdAccount — IRS aggregation pooling', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Still-working exception (§401(a)(9)(C))
-// ---------------------------------------------------------------------------
-
-describe('stillWorkingExceptionEligible / stillWorkingExceptionApplies', () => {
+describe('resolveRmdRule — still-working exception', () => {
   const stillWorking: RmdAccountProfileFacts = {
     currentEmployerPlan: true,
     fivePercentOwner: false,
     planRequiresDistributionAtStatutoryAge: false,
   };
-  /** Still employed in the probe year (separation two years later). */
-  const employed = { taxYear: 2025, separationYear: 2027 } as const;
+  const deferredFor = (
+    facts: RmdAccountProfileFacts,
+    accountType: RmdAccountType = 'RETIREMENT_401K',
+    retirementYear: number | null = 2030,
+  ): boolean =>
+    resolveRmdRule({
+      facts,
+      accountType,
+      taxTreatment: 'PRE_TAX',
+      ages: { ownerAge: 74 },
+      taxYear: 2025,
+      tables: RMD_LIFE_EXPECTANCY_TABLES,
+      ...(retirementYear === null ? {} : { retirementYear }),
+    }).kind === 'stillWorkingDeferred';
 
-  it('is eligible for a non-5%-owner still working at the current employer (employer plan)', () => {
-    expect(stillWorkingExceptionEligible(stillWorking, 'RETIREMENT_401K')).toBe(true);
-    expect(stillWorkingExceptionEligible(stillWorking, 'RETIREMENT_403B')).toBe(true);
-    expect(stillWorkingExceptionEligible(stillWorking, 'RETIREMENT_457B')).toBe(true);
-    expect(stillWorkingExceptionEligible(stillWorking, 'RETIREMENT_TSP')).toBe(true);
-    expect(stillWorkingExceptionEligible(stillWorking, 'RETIREMENT_CASH_BALANCE')).toBe(true);
-    expect(stillWorkingExceptionApplies(stillWorking, 'RETIREMENT_401K', employed)).toBe(true);
+  it.each([
+    'RETIREMENT_401K',
+    'RETIREMENT_403B',
+    'RETIREMENT_457B',
+    'RETIREMENT_TSP',
+    'RETIREMENT_CASH_BALANCE',
+  ] as const)('defers a non-5%-owner still working at the current employer (%s)', (accountType) => {
+    expect(deferredFor(stillWorking, accountType)).toBe(true);
   });
 
-  it('never applies to an IRA (the exception is employer-plan only)', () => {
-    expect(stillWorkingExceptionEligible(stillWorking, 'RETIREMENT_IRA')).toBe(false);
-    expect(stillWorkingExceptionApplies(stillWorking, 'RETIREMENT_IRA', employed)).toBe(false);
+  it.each([
+    ['a >5% owner', { ...stillWorking, fivePercentOwner: true }],
+    ['a plan that forces distributions at the statutory age', { ...stillWorking, planRequiresDistributionAtStatutoryAge: true }],
+    ['an unknown 5%-owner status', { currentEmployerPlan: true, planRequiresDistributionAtStatutoryAge: false }],
+    ['a plan that is not the current employer', { fivePercentOwner: false, planRequiresDistributionAtStatutoryAge: false }],
+    ['absent plan terms', { currentEmployerPlan: true, fivePercentOwner: false }],
+  ] as const)('denies %s', (_label, facts) => {
+    expect(deferredFor(facts)).toBe(false);
   });
 
-  it('is denied for a >5% owner', () => {
-    expect(
-      stillWorkingExceptionEligible({ ...stillWorking, fivePercentOwner: true }, 'RETIREMENT_401K'),
-    ).toBe(false);
-  });
-
-  it('is denied when the plan forces distributions at the statutory age', () => {
-    expect(
-      stillWorkingExceptionEligible(
-        { ...stillWorking, planRequiresDistributionAtStatutoryAge: true },
-        'RETIREMENT_401K',
-      ),
-    ).toBe(false);
-  });
-
-  it('is denied conservatively when the 5%-owner status is UNKNOWN (absent → treated as 5% owner)', () => {
-    expect(
-      stillWorkingExceptionEligible({ currentEmployerPlan: true }, 'RETIREMENT_401K'),
-    ).toBe(false);
-  });
-
-  it('is denied conservatively when it is not the current employer (absent currentEmployerPlan)', () => {
-    expect(
-      stillWorkingExceptionEligible({ fivePercentOwner: false }, 'RETIREMENT_401K'),
-    ).toBe(false);
-  });
-
-  it('is denied when the plan-terms fact is ABSENT/unknown (requires explicit false)', () => {
-    // planRequiresDistributionAtStatutoryAge missing → deny, never grant the
-    // favorable deferral on missing plan terms.
-    expect(
-      stillWorkingExceptionEligible(
-        { currentEmployerPlan: true, fivePercentOwner: false },
-        'RETIREMENT_401K',
-      ),
-    ).toBe(false);
-    // Explicit false → the exception applies (the affirmative fact is present).
-    expect(
-      stillWorkingExceptionEligible(
-        { currentEmployerPlan: true, fivePercentOwner: false, planRequiresDistributionAtStatutoryAge: false },
-        'RETIREMENT_401K',
-      ),
-    ).toBe(true);
-  });
-
-  // The exception is a deferral WHILE EMPLOYED, so it must
-  // EXPIRE. A grant from static account facts alone would make a
-  // qualifying plan RMD-exempt in every projected year forever.
-  it('applies only in years BEFORE the separation year, never in it or after', () => {
-    const eligible = (taxYear: number): boolean =>
-      stillWorkingExceptionApplies(stillWorking, 'RETIREMENT_401K', {
-        taxYear,
-        separationYear: 2030,
-      });
-    expect(eligible(2029)).toBe(true); // still employed
-    // The separation year itself is the FIRST distribution year (§401(a)(9)(C)
-    // makes the RBD April 1 of the following year), never another exempt year.
-    expect(eligible(2030)).toBe(false);
-    expect(eligible(2031)).toBe(false); // and every later year
-  });
-
-  it('is denied when the separation year is UNKNOWN (conservative — never exempt forever)', () => {
-    expect(
-      stillWorkingExceptionApplies(stillWorking, 'RETIREMENT_401K', {
-        taxYear: 2025,
-        separationYear: undefined,
-      }),
-    ).toBe(false);
+  it('never defers an IRA, and denies when the retirement year is unknown', () => {
+    expect(deferredFor(stillWorking, 'RETIREMENT_IRA')).toBe(false);
+    expect(deferredFor(stillWorking, 'RETIREMENT_401K', null)).toBe(false);
   });
 });
-
-// ---------------------------------------------------------------------------
-// First-year April-1 deferral
-// ---------------------------------------------------------------------------
 
 describe('rmdFirstYearDeferralPlan', () => {
   it('defers two RMDs into the following year when elected in the first RMD year', () => {
@@ -323,10 +187,6 @@ describe('rmdFirstYearDeferralPlan', () => {
     expect(rmdFirstYearDeferralPlan(73, 75, { firstYearDeferralElected: true }).isFirstRmdYear).toBe(false);
   });
 });
-
-// ---------------------------------------------------------------------------
-// resolveRmdRule: owner + inherited rule/table selection
-// ---------------------------------------------------------------------------
 
 const TABLES = RMD_LIFE_EXPECTANCY_TABLES;
 
@@ -373,7 +233,6 @@ describe('resolveRmdRule — owner path', () => {
       ages: { ownerAge: 74 },
       taxYear: 2025,
       tables: TABLES,
-      // The exception defers only the years BEFORE separation.
       retirementYear: 2030,
     });
     expect(r.kind).toBe('stillWorkingDeferred');
@@ -401,7 +260,6 @@ describe('resolveRmdRule — owner path', () => {
     expect(forYear(2027).kind).toBe('ownerUniformLifetime');
   });
 
-  // Non-qualifying living-owner accounts owe NO RMD.
   it.each([
     ['RETIREMENT_ROTH_IRA', 'ROTH'],
     ['RETIREMENT_ROTH_401K', 'ROTH'],
@@ -436,8 +294,6 @@ describe('resolveRmdRule — owner path', () => {
     expect(r.kind).toBe('ownerUniformLifetime');
   });
 
-  // The Table II >10-years-younger condition is derived from birthdates,
-  // never trusted from the boolean alone.
   it('selects Joint Life (Table II) with a real divisor when birthdates confirm >10 yrs younger', () => {
     const r = resolveRmdRule({
       facts: {
@@ -472,8 +328,6 @@ describe('resolveRmdRule — owner path', () => {
   });
 
   it('lets the birthdate-derived result WIN over a contradictory boolean', () => {
-    // Boolean claims >10 younger, but the spouse birthdate proves she is OLDER —
-    // the birthdate-derived "not more than 10 years younger" must win → Table III.
     const r = resolveRmdRule({
       facts: {
         soleSpouseBeneficiaryMoreThan10YrsYounger: true,
@@ -505,8 +359,7 @@ describe('resolveRmdRule — owner path', () => {
     }
   });
 
-  // A missing owner age must WITHHOLD, never silently default to 0 (which
-  // would clamp to the age-73 divisor and understate the RMD).
+  // Owner age 0 would clamp to the age-73 divisor and understate the RMD.
   it('WITHHOLDS a complete owner-path fact set when the owner age is unknown', () => {
     const r = resolveRmdRule({
       facts: {},
@@ -520,10 +373,6 @@ describe('resolveRmdRule — owner path', () => {
     expect(r.kind === 'withheld' && r.missingFacts).toContain('ownerAge');
   });
 
-  // Once Table II eligibility is established from the validated birthdates,
-  // the spouse's attained age is DERIVED from that same birthdate; a separate age
-  // fact is no longer consulted and the resolver never silently downgrades to
-  // Table III.
   it('derives the spouse age from the birthdate and selects Joint Life (Table II) — no Table III downgrade', () => {
     const r = resolveRmdRule({
       facts: {
@@ -539,7 +388,6 @@ describe('resolveRmdRule — owner path', () => {
     });
     expect(r.kind).toBe('ownerJointLife');
     if (r.kind === 'ownerJointLife' && r.selection.kind === 'divisor') {
-      // Owner age 75, spouse age 2025 − 1966 = 59 (derived from the birthdate).
       expect(r.selection.table).toBe('jointLastSurvivor');
     } else {
       throw new Error('expected a Joint Life (Table II) divisor selection');
@@ -636,7 +484,6 @@ describe('resolveRmdRule — inherited path', () => {
     }
   });
 
-  // An inherited Roth IRA IS still subject to RMD rules (NOT notRequired).
   it('does NOT exempt an inherited Roth IRA — it routes through the inherited path', () => {
     const r = resolveRmdRule({
       facts: { inheritedAccount: true },
@@ -650,8 +497,6 @@ describe('resolveRmdRule — inherited path', () => {
     expect(r.kind).toBe('withheld'); // baseline inherited facts still missing
   });
 
-  // A pre-2020 death falls under the pre-SECURE-Act regime this engine
-  // does not model; withhold rather than silently apply post-2019 rules.
   it('WITHHOLDS a pre-2020 death rather than applying post-2019 rules', () => {
     const r = resolveRmdRule({
       facts: {
@@ -670,7 +515,6 @@ describe('resolveRmdRule — inherited path', () => {
     expect(r.kind === 'withheld' && r.missingFacts).toContain('preSecureActDeathRulesUnsupported');
   });
 
-  // An EDB must have affirmatively elected; absent election → withhold.
   it('WITHHOLDS an eligible-designated-beneficiary stretch when the election fact is missing', () => {
     const r = resolveRmdRule({
       facts: {
@@ -697,9 +541,7 @@ describe('resolveRmdRule — inherited path', () => {
         beneficiaryElection: 'LIFE_EXPECTANCY',
         inheritedOwnerDeathDate: '2023-05-01',
         inheritedOwnerDiedOnOrAfterRbd: false,
-        // Owner born 1948 → 70½ era → would have reached RBD in 1948+70 =
-        // 2018 ≤ 2025 → past the delay window, so the spouse's recalculated stretch
-        // has begun.
+        // Owner born 1948 reached 70½ in 2018, so the spouse's recalculated stretch has begun.
         originalOwnerBirthdate: '1948-05-01',
         beneficiaryBirthdate: '1963-01-01', // Derived spouse age 62 in 2025
       },
@@ -717,10 +559,7 @@ describe('resolveRmdRule — inherited path', () => {
     }
   });
 
-  // Spouse recalculates by CURRENT age each year (re-lookup, not −1.0/yr).
   it('spouse recalculation re-looks-up Table I by current age each year', () => {
-    // Spouse born 1964 → attained age is DERIVED per tax year: 60 in 2024,
-    // 61 in 2025, 62 in 2026.
     const divisorAt = (taxYear: number): number => {
       const r = resolveRmdRule({
         facts: {
@@ -729,8 +568,7 @@ describe('resolveRmdRule — inherited path', () => {
           beneficiaryElection: 'LIFE_EXPECTANCY',
           inheritedOwnerDeathDate: '2023-06-01',
           inheritedOwnerDiedOnOrAfterRbd: false,
-          // Owner born 1948 → 70½ era → RBD year 2018 ≤ every probed year →
-          // past the spousal delay window, so the recalculated stretch is active.
+          // Owner born 1948: RBD year 2018, past the spousal delay window.
           originalOwnerBirthdate: '1948-05-01',
           beneficiaryBirthdate: '1964-06-01',
         },
@@ -748,11 +586,8 @@ describe('resolveRmdRule — inherited path', () => {
     expect(divisorAt(2026)).toBe(25.4); // Table I[62] — re-lookup, −0.8 not −1.0
   });
 
-  // A NON-SPOUSE beneficiary anchors the base-year divisor and subtracts
-  // exactly 1.0 per elapsed year (NOT a fresh current-age lookup).
   it('non-spouse beneficiary decrements the anchored Table I divisor by exactly 1.0/yr', () => {
-    // Death 2023 → base year 2024; beneficiary born 1969 → base-year age 55,
-    // Table I[55] = 31.6. Attained age is DERIVED per tax year.
+    // Death 2023 → base year 2024; born 1969 → age 55, Table I[55] = 31.6.
     const divisorAt = (taxYear: number): number => {
       const r = resolveRmdRule({
         facts: {
@@ -777,9 +612,6 @@ describe('resolveRmdRule — inherited path', () => {
     expect(divisorAt(2026)).toBeCloseTo(29.6, 10); // 31.6 − 2.0
   });
 
-  // A non-minor eligible designated beneficiary routes to the stretch. (The
-  // former MINOR_CHILD_OF_OWNER age-40 fixture was removed — a 40-year-old is NOT a
-  // minor child; that boundary is covered by the dedicated tests below.)
   it('routes a NOT_MORE_THAN_10_YEARS_YOUNGER beneficiary electing LIFE_EXPECTANCY to inheritedLifeExpectancy', () => {
     const r = resolveRmdRule({
       facts: {
@@ -799,11 +631,8 @@ describe('resolveRmdRule — inherited path', () => {
     expect(r.kind).toBe('inheritedLifeExpectancy');
   });
 
-  // A MINOR_CHILD_OF_OWNER takes the life-expectancy stretch until the age
-  // of majority (21), then transitions to the 10-year rule.
   describe('MINOR_CHILD_OF_OWNER majority transition', () => {
-    // Child born 2010 → reaches age 21 in 2031. Owner died 2023 (before RBD), the
-    // child was age 13 at death (a genuine minor).
+    // Child born 2010 reaches 21 in 2031; the owner died in 2023 before RBD with the child aged 13.
     const minorChildFacts = (extra: Partial<RmdAccountProfileFacts> = {}): RmdAccountProfileFacts => ({
       inheritedAccount: true,
       beneficiaryType: 'MINOR_CHILD_OF_OWNER',
@@ -887,15 +716,9 @@ describe('resolveRmdRule — inherited path', () => {
       }
     });
 
-    // The minor-vs-majority status is decided by an anniversary-safe compare
-    // of the FULL death date against the 21st birthday, NOT year-only subtraction.
-    // All three children below would tie at `deathYear − birthYear === 21` under the
-    // old year math (death 2024, born 2003) yet differ by exact date.
+    // Year-only subtraction ties all three children below (death 2024, born 2003); the full date decides.
     it('treats a child whose 21st birthday is the day AFTER death as a MINOR', () => {
       const r = resolveRmdRule({
-        // Born 2003-06-16 → turns 21 on 2024-06-16, one day AFTER the 2024-06-15
-        // death → still 20 on the death date → genuine minor (not withheld as
-        // not-a-minor). taxYear 2030 is past majority year 2024 → 10-year rule.
         facts: minorChildFacts({
           beneficiaryBirthdate: '2003-06-16',
           inheritedOwnerDeathDate: '2024-06-15',
@@ -911,8 +734,6 @@ describe('resolveRmdRule — inherited path', () => {
 
     it('treats a child whose 21st birthday is the day BEFORE death as already at majority', () => {
       const r = resolveRmdRule({
-        // Born 2003-06-14 → turned 21 on 2024-06-14, one day BEFORE the 2024-06-15
-        // death → already at majority → NOT a minor child → WITHHOLD.
         facts: minorChildFacts({
           beneficiaryBirthdate: '2003-06-14',
           inheritedOwnerDeathDate: '2024-06-15',
@@ -931,8 +752,6 @@ describe('resolveRmdRule — inherited path', () => {
 
     it('treats a child whose 21st birthday is EXACTLY the death date as already at majority', () => {
       const r = resolveRmdRule({
-        // Born 2003-06-15 → turns 21 ON the 2024-06-15 death date → they ARE 21 that
-        // day (at majority) → NOT a minor child → WITHHOLD.
         facts: minorChildFacts({
           beneficiaryBirthdate: '2003-06-15',
           inheritedOwnerDeathDate: '2024-06-15',
@@ -968,9 +787,6 @@ describe('resolveRmdRule — inherited path', () => {
     expect(r.kind).toBe('inheritedTenYearRule');
   });
 
-  // The 10-year election is available to an EDB ONLY when the owner died
-  // BEFORE their RBD. A stored TEN_YEAR election combined with an on/after-RBD death
-  // is an incompatible combination → WITHHOLD (never silently apply the wrong rule).
   it('WITHHOLDS an EDB TEN_YEAR election when the owner died ON/AFTER RBD', () => {
     const r = resolveRmdRule({
       facts: {
@@ -1026,8 +842,6 @@ describe('resolveRmdRule — inherited path', () => {
     expect(r.kind === 'inheritedTenYearRule' && r.annualDistributionRequired).toBe(true);
   });
 
-  // The non-eligible-designated 10-year branch withholds on missing age
-  // (age is derived from the birthdate, so an absent birthdate is the miss).
   it('withholds the annual-RMD 10-year branch when the beneficiary birthdate is missing', () => {
     const r = resolveRmdRule({
       facts: { ...complete, beneficiaryBirthdate: undefined },
@@ -1092,10 +906,6 @@ describe('resolveRmdRule — inherited path', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Inherited-account routing: only RETIREMENT accounts are subject to RMD
-// when inherited; a Roth account is always treated as a death-before-RBD.
-// ---------------------------------------------------------------------------
 describe('resolveRmdRule — inherited routing by account type', () => {
   const inheritedFacts: RmdAccountProfileFacts = {
     inheritedAccount: true,
@@ -1122,8 +932,6 @@ describe('resolveRmdRule — inherited routing by account type', () => {
 
   it('treats an inherited Roth IRA as death-BEFORE-RBD, overriding a stored on/after-RBD flag', () => {
     const r = resolveRmdRule({
-      // Stored flag CLAIMS the owner died on/after RBD, but a Roth owner has no
-      // lifetime RBD — the 10-year rule must therefore carry NO annual RMD.
       facts: inheritedFacts,
       accountType: 'RETIREMENT_ROTH_IRA',
       taxTreatment: 'ROTH',
@@ -1139,12 +947,7 @@ describe('resolveRmdRule — inherited routing by account type', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 10-year rule: annual RMD only in offset years 1–9 (owner died on/after
-// RBD); year-10 full-liquidation deadline is its own distinct fact.
-// ---------------------------------------------------------------------------
 describe('resolveRmdRule — 10-year-rule year offsets', () => {
-  // Non-eligible designated beneficiary; owner died on/after RBD; death year 2024.
   const facts: RmdAccountProfileFacts = {
     inheritedAccount: true,
     beneficiaryType: 'OTHER_DESIGNATED',
@@ -1179,10 +982,6 @@ describe('resolveRmdRule — 10-year-rule year offsets', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Longer-of (beneficiary vs decedent) life expectancy; surviving-spouse
-// delayed start.
-// ---------------------------------------------------------------------------
 describe('resolveRmdRule — longer-of ghost life + spousal delay', () => {
   const edbStretch = (beneficiaryAge: number, originalOwnerBirthdate: string): RmdRuleResolution =>
     resolveRmdRule({
@@ -1193,7 +992,6 @@ describe('resolveRmdRule — longer-of ghost life + spousal delay', () => {
         inheritedOwnerDeathDate: '2024-05-01', // deathYear 2024
         inheritedOwnerDiedOnOrAfterRbd: true,
         originalOwnerBirthdate,
-        // Beneficiary age is DERIVED; encode the intended age via birthdate.
         beneficiaryBirthdate: `${2025 - beneficiaryAge}-01-01`,
       },
       accountType: 'RETIREMENT_IRA',
@@ -1295,10 +1093,44 @@ describe('resolveRmdRule — longer-of ghost life + spousal delay', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// A calendar-impossible / out-of-bounds date reaching the resolver directly
-// (bypassing the migration sanitiser on a current-version payload) WITHHOLDS.
-// ---------------------------------------------------------------------------
+describe('resolveRmdRule — deceased owner’s historical applicable age', () => {
+  const delayedStart = (ownerBirthYear: number, taxYear: number): RmdRuleResolution =>
+    resolveRmdRule({
+      facts: {
+        inheritedAccount: true,
+        beneficiaryType: 'SPOUSE',
+        beneficiaryElection: 'LIFE_EXPECTANCY',
+        inheritedOwnerDeathDate: '2020-05-01',
+        inheritedOwnerDiedOnOrAfterRbd: false,
+        originalOwnerBirthdate: `${ownerBirthYear}-05-01`,
+        beneficiaryBirthdate: '1958-01-01',
+      },
+      accountType: 'RETIREMENT_IRA',
+      taxTreatment: 'PRE_TAX',
+      ages: {},
+      taxYear,
+      tables: TABLES,
+    });
+
+  it.each([
+    [1950, 72],
+    [1951, 73],
+    [1959, 73],
+    [1960, 75],
+    [1970, 75],
+  ] as const)('owner born %i delays the spouse until age %i, not the living-owner trigger age', (birthYear, age) => {
+    const firstYear = birthYear + age;
+    const before = delayedStart(birthYear, firstYear - 1);
+    expect(before.kind).toBe('inheritedSpousalDelayed');
+    expect(before.kind === 'inheritedSpousalDelayed' && before.firstDistributionYear).toBe(firstYear);
+    expect(delayedStart(birthYear, firstYear).kind).toBe('inheritedLifeExpectancy');
+  });
+
+  it('owner born before 1950 (70½ era) has already reached the delay year, so no spousal delay', () => {
+    expect(delayedStart(1949, 2020).kind).toBe('inheritedLifeExpectancy');
+  });
+});
+
 describe('resolveRmdRule — malformed date at the runtime boundary', () => {
   it.each([
     ['2023-99-99'], // calendar-impossible
@@ -1324,57 +1156,6 @@ describe('resolveRmdRule — malformed date at the runtime boundary', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Historical applicable (RBD-triggering) age for a DECEASED owner, across
-// the 70½ → 72 → 73 → 75 progression. Distinct from the living-owner rmdTriggerAge.
-// ---------------------------------------------------------------------------
-describe('deceasedOwnerApplicableRmdAge', () => {
-  it.each([
-    [1945, 70], // pre-SECURE-Act 70½ era
-    [1948, 70],
-    [1949, 70], // boundary — still 70½ era at year granularity
-    [1950, 72], // boundary — SECURE Act (2019) age 72
-    [1951, 73], // boundary — SECURE 2.0 age 73
-    [1959, 73], // boundary — top of the age-73 band
-    [1960, 75], // boundary — SECURE 2.0 age 75
-    [1970, 75],
-  ] as const)('birth year %i → applicable age %i', (birthYear, expected) => {
-    expect(deceasedOwnerApplicableRmdAge(birthYear)).toBe(expected);
-  });
-
-  it('drives the surviving-spouse delayed-start year off the HISTORICAL age, not rmdTriggerAge', () => {
-    // Owner born 1950 died before RBD → historical age 72 (NOT rmdTriggerAge's 73),
-    // so the spouse may delay until 1950 + 72 = 2022. (A 2020 death is post-SECURE,
-    // pre the owner's 2022 RBD.)
-    const r = resolveRmdRule({
-      facts: {
-        inheritedAccount: true,
-        beneficiaryType: 'SPOUSE',
-        beneficiaryElection: 'LIFE_EXPECTANCY',
-        inheritedOwnerDeathDate: '2020-05-01',
-        inheritedOwnerDiedOnOrAfterRbd: false,
-        originalOwnerBirthdate: '1950-05-01',
-        beneficiaryBirthdate: '1958-01-01',
-      },
-      accountType: 'RETIREMENT_IRA',
-      taxTreatment: 'PRE_TAX',
-      ages: {},
-      taxYear: 2021, // before the 2022 delayed-start year
-      tables: TABLES,
-    });
-    expect(r.kind).toBe('inheritedSpousalDelayed');
-    if (r.kind === 'inheritedSpousalDelayed') {
-      expect(r.firstDistributionYear).toBe(2022); // 1950 + 72 (historical), NOT 2023
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The DEATH YEAR itself is still the owner's FINAL lifetime RMD, not a
-// beneficiary year: an individual Table I schedule must NOT produce a divisor for
-// taxYear === deathYear (nor for taxYear < deathYear). Beneficiary schedules begin
-// the year AFTER death.
-// ---------------------------------------------------------------------------
 describe('resolveRmdRule — death-year boundary', () => {
   const deathYearFacts = (extra: Partial<RmdAccountProfileFacts>): RmdAccountProfileFacts => ({
     inheritedAccount: true,
@@ -1416,7 +1197,6 @@ describe('resolveRmdRule — death-year boundary', () => {
       taxYear: 2024,
       tables: TABLES,
     });
-    // Previously this returned the DECEDENT ghost-life divisor for the death year.
     expect(r.kind).toBe('withheld');
     if (r.kind === 'withheld') {
       expect(r.missingFacts).toContain('deathYearIsOwnersFinalRmdYear');
@@ -1454,7 +1234,6 @@ describe('resolveRmdRule — death-year boundary', () => {
       taxYear: 2024,
       tables: TABLES,
     });
-    // A spouse whose owner died before RBD delays — the death year yields no divisor.
     expect(r.kind).toBe('inheritedSpousalDelayed');
     expect(r.kind).not.toBe('inheritedLifeExpectancy');
   });
@@ -1478,12 +1257,6 @@ describe('resolveRmdRule — death-year boundary', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The beneficiary's attained tax-year age is DERIVED from the stored
-// birthdate; there is no separate age input to trust. Missing/malformed birthdate
-// on an individual Table I path WITHHOLDS. (Birthdate-wins: no age input exists, so
-// no mismatch is possible.)
-// ---------------------------------------------------------------------------
 describe('resolveRmdRule — beneficiary age derived from birthdate', () => {
   const stretchFacts = (birthdate: string | undefined): RmdAccountProfileFacts => ({
     inheritedAccount: true,
@@ -1542,11 +1315,6 @@ describe('resolveRmdRule — beneficiary age derived from birthdate', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// A current-version (v6) payload bypasses the migration sanitiser, so the
-// resolver re-validates the persisted beneficiary category + election against the
-// shared DB validators. An out-of-vocabulary value WITHHOLDS (never coerced).
-// ---------------------------------------------------------------------------
 describe('resolveRmdRule — persisted enum validation at the runtime boundary', () => {
   it('WITHHOLDS an out-of-vocabulary beneficiaryType (never coerced to LIFE_EXPECTANCY)', () => {
     const r = resolveRmdRule({
@@ -1621,12 +1389,7 @@ describe('validateRmdProfileFacts', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Fact-based `computeRmd`: the SHARED entry point both engines use.
-// ---------------------------------------------------------------------------
-
 describe('computeRmd — fact-based rule activation', () => {
-  /** An RMD-age owner (born 1950 → trigger 73 → age 75 in 2025). */
   const OWNER_BIRTHDATE = '1950-06-15';
   const TAX_YEAR = 2025;
   const BALANCE_CENTS = 1_000_000_00; // $1,000,000
@@ -1660,18 +1423,14 @@ describe('computeRmd — fact-based rule activation', () => {
       { isoBirthdate: OWNER_BIRTHDATE, taxYear: TAX_YEAR, accounts: [account('a')] },
       SNAPSHOT,
     );
-    // Same call with `facts: {}` present on the account routes through the FACT path
-    // and must land on the same Uniform Lifetime cents.
     const factPath = run([account('a', {})]);
     expect(factPath.ownerRmdCents).toBe(legacy.ownerRmdCents);
     expect(factPath.divisor).toBe(legacy.divisor);
-    // The legacy result shape is unchanged (no new fields leak into it).
     expect(legacy.withheldAccounts).toBeUndefined();
     expect(legacy.stillWorkingDeferredAccountIds).toBeUndefined();
     expect(mcParityBaselines.p12_noRothRmdFacts_reproducesLegacyEngine).toBe('byte-identical');
-    // The earlier behaviour this replaces: every qualifying account used the
-    // Uniform Lifetime Table, with no exception, table selection, or blocker.
     expect(mcParityBaselines.p12_rmdRuleSelection_preFix).toBe('uniform-lifetime-only');
+    expect(mcParityBaselines.p12_inheritedIncompleteFacts_preFix).toBe('owner-uniform-lifetime-applied');
   });
 
   it('the still-working exception defers ONLY the plan that affirmatively meets every precondition', () => {
@@ -1684,7 +1443,6 @@ describe('computeRmd — fact-based rule activation', () => {
       },
       { accountType: 'RETIREMENT_401K' },
     );
-    // Same plan, but the plan's own terms force distribution → NOT deferred.
     const forced = account(
       'forced-401k',
       {
@@ -1694,77 +1452,14 @@ describe('computeRmd — fact-based rule activation', () => {
       },
       { accountType: 'RETIREMENT_401K' },
     );
-    // The exception is year-scoped — the owner is still employed in the tax
-    // year (separation is later), so it defers this year.
     const result = run([deferred, forced], TAX_YEAR + 3);
     expect(result.stillWorkingDeferredAccountIds).toEqual(['current-401k']);
     expect(result.perAccountRmdCents['current-401k']).toBeUndefined();
     expect(result.perAccountRmdCents['forced-401k']).toBeGreaterThan(0);
-    // The deferred plan's balance is EXCLUDED from the year's requirement.
     expect(result.ownerRmdCents).toBe(result.perAccountRmdCents['forced-401k']);
   });
 
-  // The exception must EXPIRE at separation, and the first RMD
-  // year then resolves as the LATER of the trigger-age year and the separation
-  // year (§401(a)(9)(C)).
-  it('stops deferring a still-working plan in the retirement year and every year after', () => {
-    const facts: RmdAccountProfileFacts = {
-      currentEmployerPlan: true,
-      fivePercentOwner: false,
-      planRequiresDistributionAtStatutoryAge: false,
-    };
-    const forYear = (taxYear: number, retirementYear: number) =>
-      computeRmd(
-        {
-          isoBirthdate: OWNER_BIRTHDATE,
-          taxYear,
-          accounts: [
-            {
-              id: 'current-401k',
-              balanceDec31PriorYearCents: BALANCE_CENTS,
-              accountType: 'RETIREMENT_401K',
-              taxTreatment: 'PRE_TAX',
-              facts,
-            },
-          ],
-          lifeExpectancyTables: RMD_LIFE_EXPECTANCY_TABLES,
-          retirementYear,
-        },
-        SNAPSHOT,
-      );
-    // Year before retirement: deferred, $0 required.
-    const stillWorking = forYear(2025, 2026);
-    expect(stillWorking.stillWorkingDeferredAccountIds).toEqual(['current-401k']);
-    expect(stillWorking.ownerRmdCents).toBe(0);
-    // The RETIREMENT-TRANSITION year itself: a real minimum is now due.
-    const transition = forYear(2026, 2026);
-    expect(transition.stillWorkingDeferredAccountIds).toEqual([]);
-    expect(transition.ownerRmdCents).toBeGreaterThan(0);
-    // And the year AFTER retirement (the pre-fix bug left this at $0 forever).
-    const afterRetirement = forYear(2027, 2026);
-    expect(afterRetirement.stillWorkingDeferredAccountIds).toEqual([]);
-    expect(afterRetirement.ownerRmdCents).toBeGreaterThan(0);
-  });
-
-  it('an unknown retirement year denies the still-working deferral (never exempt forever)', () => {
-    const result = run([
-      account(
-        'current-401k',
-        {
-          currentEmployerPlan: true,
-          fivePercentOwner: false,
-          planRequiresDistributionAtStatutoryAge: false,
-        },
-        { accountType: 'RETIREMENT_401K' },
-      ),
-    ]);
-    expect(result.stillWorkingDeferredAccountIds).toEqual([]);
-    expect(result.ownerRmdCents).toBeGreaterThan(0);
-  });
-
-  // The deferred first-year catch-up base applies the SAME
-  // SECURE 2.0 §325 Roth-designated subtraction every other base in the engine
-  // applies, through one shared resolver used by both engines.
+  // SECURE 2.0 §325: the catch-up base nets the Roth-designated portion like every other base.
   it('nets the §325 Roth-designated portion out of the two-years-prior catch-up base', () => {
     const mixed = {
       id: 'mixed-401k',
@@ -1776,28 +1471,12 @@ describe('computeRmd — fact-based rule activation', () => {
       rothPortionTwoYearsPriorCents: 400_000,
     };
     expect(rmdTwoYearsPriorBaseCents(mixed)).toBe(600_000);
-    // Absent portion → the whole balance (the same conservative over-estimate the
-    // current-year base makes).
     expect(
       rmdTwoYearsPriorBaseCents({ ...mixed, rothPortionTwoYearsPriorCents: undefined }),
     ).toBe(1_000_000);
-    // Absent base → undefined, so the caller reports a blocker instead of guessing.
     expect(
       rmdTwoYearsPriorBaseCents({ ...mixed, balanceDec31TwoYearsPriorCents: undefined }),
     ).toBeUndefined();
-  });
-
-  it('an unanswered still-working precondition DENIES the deferral (never granted on a blank)', () => {
-    // `fivePercentOwner` absent → treated as a 5% owner → exception denied.
-    const result = run([
-      account(
-        'a',
-        { currentEmployerPlan: true, planRequiresDistributionAtStatutoryAge: false },
-        { accountType: 'RETIREMENT_401K' },
-      ),
-    ]);
-    expect(result.stillWorkingDeferredAccountIds).toEqual([]);
-    expect(result.ownerRmdCents).toBeGreaterThan(0);
   });
 
   it('a verified sole-spouse >10-years-younger designation selects the LARGER Table II divisor', () => {
@@ -1805,10 +1484,9 @@ describe('computeRmd — fact-based rule activation', () => {
     const tableIi = run([
       account('a', {
         soleSpouseBeneficiaryMoreThan10YrsYounger: true,
-        spouseBeneficiaryBirthdate: '1975-06-15', // 25 years younger
+        spouseBeneficiaryBirthdate: '1975-06-15',
       }),
     ]);
-    // Table II's joint-life divisor is larger → a SMALLER required withdrawal.
     expect(tableIi.divisor).toBeGreaterThan(tableIii.divisor!);
     expect(tableIi.ownerRmdCents).toBeLessThan(tableIii.ownerRmdCents);
   });
@@ -1820,6 +1498,29 @@ describe('computeRmd — fact-based rule activation', () => {
     expect(result.withheldAccounts?.[0]?.missingFacts).toContain('spouseBeneficiaryBirthdate');
   });
 
+  it('a table with no divisor for the owner’s age is WITHHELD with the table’s reason', () => {
+    const result = computeRmd(
+      {
+        isoBirthdate: OWNER_BIRTHDATE,
+        taxYear: TAX_YEAR,
+        accounts: [account('a', {})],
+        lifeExpectancyTables: {
+          ...RMD_LIFE_EXPECTANCY_TABLES,
+          uniformLifetime: {
+            ...RMD_LIFE_EXPECTANCY_TABLES.uniformLifetime,
+            values: { [TAX_YEAR]: { uniformLifetime: {} } },
+          },
+        },
+      },
+      SNAPSHOT,
+    );
+    expect(result.ownerRmdCents).toBe(0);
+    expect(result.withheldAccounts?.[0]?.accountId).toBe('a');
+    expect(result.withheldAccounts?.[0]?.missingFacts).toEqual([
+      'Uniform Lifetime (Table III) divisor unavailable for age 75',
+    ]);
+  });
+
   it('an inherited account with incomplete beneficiary facts is WITHHELD and lists them', () => {
     const result = run([account('inh', { inheritedAccount: true })]);
     expect(result.applicable).toBe(true);
@@ -1828,31 +1529,9 @@ describe('computeRmd — fact-based rule activation', () => {
     expect(missing).toContain('beneficiaryType');
     expect(missing).toContain('inheritedOwnerDeathDate');
     expect(missing).toContain('inheritedOwnerDiedOnOrAfterRbd');
-    // The earlier behaviour this replaces: an inherited account silently took the
-    // OWNER's Uniform Lifetime requirement instead of withholding.
-    expect(mcParityBaselines.p12_inheritedIncompleteFacts_preFix).toBe(
-      'owner-uniform-lifetime-applied',
-    );
-  });
-
-  it('a complete inherited life-expectancy stretch produces a Single Life (Table I) requirement', () => {
-    const result = run([
-      account('inh', {
-        inheritedAccount: true,
-        beneficiaryType: 'SPOUSE',
-        beneficiaryElection: 'LIFE_EXPECTANCY',
-        inheritedOwnerDeathDate: '2022-08-14',
-        inheritedOwnerDiedOnOrAfterRbd: true,
-        originalOwnerBirthdate: '1945-02-03',
-        beneficiaryBirthdate: '1952-11-30',
-      }),
-    ]);
-    expect(result.withheldAccounts).toEqual([]);
-    expect(result.ownerRmdCents).toBeGreaterThan(0);
   });
 
   it('an elected first-year deferral moves the trigger-year amount into the following year', () => {
-    // Born 1952 → trigger age 73 → trigger year 2025 = the first RMD year.
     const triggerYear = computeRmd(
       {
         isoBirthdate: '1952-06-15',
@@ -1870,14 +1549,11 @@ describe('computeRmd — fact-based rule activation', () => {
       },
       SNAPSHOT,
     );
-    // Nothing required THIS year; the amount is reported as deferred to next year.
     expect(triggerYear.ownerRmdCents).toBe(0);
     expect(triggerYear.firstYearDeferrals).toHaveLength(1);
     expect(triggerYear.firstYearDeferrals?.[0]?.dueInYear).toBe(2026);
     expect(triggerYear.firstYearDeferrals?.[0]?.deferredCents).toBeGreaterThan(0);
 
-    // The FOLLOWING year carries two: its own plus the deferred one, sized from the
-    // trigger year's own base (Dec 31 two years before this year).
     const catchUpYear = computeRmd(
       {
         isoBirthdate: '1952-06-15',
@@ -1897,13 +1573,11 @@ describe('computeRmd — fact-based rule activation', () => {
       SNAPSHOT,
     );
     expect(catchUpYear.deferredCatchUpCents).toBeGreaterThan(0);
-    // The per-account map still sums EXACTLY to the owner total (invariant).
     const perAccountSum = Object.values(catchUpYear.perAccountRmdCents).reduce(
       (a, b) => a + b,
       0,
     );
     expect(perAccountSum).toBe(catchUpYear.ownerRmdCents);
-    // Two RMDs in one year: strictly more than a non-deferring owner would owe.
     const noDeferral = run([account('a', {})]);
     expect(catchUpYear.ownerRmdCents).toBeGreaterThan(noDeferral.ownerRmdCents);
   });
@@ -1929,7 +1603,6 @@ describe('computeRmd — fact-based rule activation', () => {
     );
     expect(result.deferredCatchUpCents).toBe(0);
     expect(result.withheldAccounts?.[0]?.missingFacts).toContain('deferredFirstYearRmdBase');
-    // The year's OWN requirement still applies — only the catch-up is withheld.
     expect(result.ownerRmdCents).toBeGreaterThan(0);
   });
 

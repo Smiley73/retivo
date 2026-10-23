@@ -48,7 +48,7 @@ export class UnsupportedTaxYearError extends Error {
 }
 
 /** Thrown when an input field fails boundary validation, before snapshot resolution. */
-export class SsTaxationInvalidInputError extends Error {
+class SsTaxationInvalidInputError extends Error {
   readonly code = 'SS_TAXATION_INVALID_INPUT' as const;
   constructor(public readonly reason: string) {
     super(`Invalid SS taxation input: ${reason}`);
@@ -142,7 +142,7 @@ function computeTierAndTaxable(
  * Provisional income in cents, rounded half-up: otherAGI + taxExemptInterest + 0.5 × grossSS. Unvalidated
  * and snapshot-free, so callers can show PI without the full computation.
  */
-export function provisionalIncomeCents(
+function provisionalIncomeCents(
   grossSsCents: number,
   otherAgiCents: number,
   taxExemptInterestCents: number,

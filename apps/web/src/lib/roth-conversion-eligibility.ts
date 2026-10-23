@@ -15,7 +15,7 @@ export interface AccountEligibilityPayload {
   readonly rmdInheritedAccount?: boolean;
 }
 
-export interface AccountEligibilityRecord {
+interface AccountEligibilityRecord {
   readonly id: string;
   readonly payload: AccountEligibilityPayload;
 }

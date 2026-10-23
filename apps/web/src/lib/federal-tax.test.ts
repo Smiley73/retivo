@@ -1,45 +1,11 @@
-/**
- * Core tests for the federal income tax engine — ordinary brackets,
- * standard deduction, age-65 add-on, effective rate, rounding, 2026
- * OBBBA-permanent brackets.
- */
-
 import { describe, expect, it } from 'vitest';
 import {
   computeFederalTax,
   federalOrdinaryTaxCents,
   marginalOrdinaryRate,
   nextBracketCeiling,
-  toCents,
-  UnsupportedTaxYearError,
 } from './federal-tax';
 import { FEDERAL_TAX_CONFIG } from './federal-tax-config';
-
-// ---------------------------------------------------------------------------
-// toCents — half-up rounding contract lock
-// ---------------------------------------------------------------------------
-
-describe('toCents', () => {
-  it('should_round_half_cent_up', () => {
-    expect(toCents(0.005)).toBe(1);
-  });
-
-  it('should_truncate_below_half_cent', () => {
-    expect(toCents(0.0049)).toBe(0);
-  });
-
-  it('should_return_zero_for_zero', () => {
-    expect(toCents(0)).toBe(0);
-  });
-
-  it('should_round_exact_dollars_without_fractional_error', () => {
-    expect(toCents(500)).toBe(50000);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Zero income
-// ---------------------------------------------------------------------------
 
 describe('zero income', () => {
   it('should_return_zero_tax_for_zero_income', () => {
@@ -55,10 +21,6 @@ describe('zero income', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Standard deduction — income below deduction
-// ---------------------------------------------------------------------------
-
 describe('income below standard deduction', () => {
   it('should_owe_zero_tax_when_ordinary_income_below_standard_deduction_single_2025', () => {
     // Standard deduction Single 2025 = $15,750 (OBBBA-raised)
@@ -70,10 +32,6 @@ describe('income below standard deduction', () => {
     expect(result.totalTax).toBe(0);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Ordinary brackets
-// ---------------------------------------------------------------------------
 
 describe('ordinary brackets', () => {
   it('should_compute_10pct_bracket_correctly_single_2025', () => {
@@ -123,10 +81,6 @@ describe('ordinary brackets', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Age-65 add-on
-// ---------------------------------------------------------------------------
-
 describe('age-65 standard deduction add-on', () => {
   it('should_apply_single_age65_addon_2025', () => {
     // Single 2025: base $15,750 + $2,000 add-on + $6,000 OBBBA senior bonus
@@ -151,7 +105,6 @@ describe('age-65 standard deduction add-on', () => {
   });
 
   it('should_cap_mfj_age65_at_2_persons', () => {
-    // taxpayersAge65Plus: 3 on MFJ should use only 2
     const r2 = computeFederalTax(
       { year: 2025, filingStatus: 'MFJ', ordinaryIncome: 50000, ltcgAndQdi: 0, taxpayersAge65Plus: 2 },
       FEDERAL_TAX_CONFIG,
@@ -164,10 +117,7 @@ describe('age-65 standard deduction add-on', () => {
   });
 
   it('should_cap_single_age65_at_1_person', () => {
-    // Single 2025 add-on caps at 1 filer; the OBBBA senior bonus likewise
-    // caps at 1 (max 1 for Single). Both the add-on ($2,000) and the senior
-    // bonus ($6,000, MAGI $20k ≪ $75k → no phase-out) apply once.
-    // Deduction = $15,750 + $2,000 + $6,000 = $23,750 ≥ $20,000 → taxable 0.
+    // The add-on and the $6,000 senior bonus each clamp to one filer: deduction $23,750 ≥ $20,000.
     const r1 = computeFederalTax(
       { year: 2025, filingStatus: 'Single', ordinaryIncome: 20000, ltcgAndQdi: 0, taxpayersAge65Plus: 1 },
       FEDERAL_TAX_CONFIG,
@@ -176,20 +126,14 @@ describe('age-65 standard deduction add-on', () => {
       { year: 2025, filingStatus: 'Single', ordinaryIncome: 20000, ltcgAndQdi: 0, taxpayersAge65Plus: 5 },
       FEDERAL_TAX_CONFIG,
     );
-    // Both clamp the add-on AND the senior bonus to 1 filer → same tax (0).
     expect(r1.ordinaryTax).toBe(0);
     expect(r5.ordinaryTax).toBe(r1.ordinaryTax);
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2026 — OBBBA-permanent TCJA brackets (no sunset reversion)
-// ---------------------------------------------------------------------------
-
 describe('2026 OBBBA-permanent TCJA brackets', () => {
   it('should_keep_37pct_top_bracket_for_2026', () => {
-    // OBBBA repealed the TCJA sunset — $800k ordinary Single 2026 lands in the
-    // 37% marginal bracket, NOT the pre-TCJA 39.6% it would have reverted to.
+    // OBBBA repealed the TCJA sunset: 37%, not the 39.6% it would have reverted to.
     const result = computeFederalTax(
       { year: 2026, filingStatus: 'Single', ordinaryIncome: 800000, ltcgAndQdi: 0 },
       FEDERAL_TAX_CONFIG,
@@ -198,9 +142,7 @@ describe('2026 OBBBA-permanent TCJA brackets', () => {
   });
 
   it('should_compute_slightly_lower_tax_in_2026_vs_2025_at_high_income_mfj', () => {
-    // Same income, OBBBA-permanent schedule: 2026 brackets + standard deduction
-    // are inflation-adjusted above 2025, so 2026 tax is slightly LOWER (bracket
-    // creep relief), not higher as under the old sunset assumption.
+    // 2026 brackets and standard deduction are inflation-adjusted above 2025, so the same income owes slightly less.
     const r2025 = computeFederalTax(
       { year: 2025, filingStatus: 'MFJ', ordinaryIncome: 200000, ltcgAndQdi: 20000 },
       FEDERAL_TAX_CONFIG,
@@ -213,20 +155,14 @@ describe('2026 OBBBA-permanent TCJA brackets', () => {
   });
 
   it('should_use_TCJA_22pct_second_band_in_2026_single', () => {
-    // 2026 Single: std $16,100; taxable $40,000 - reaches the 22% band only
-    // above $50,400 of taxable income, so $40k taxable stays in the 12% band.
+    // 2026 Single: std $16,100; the 22% band starts above $50,400 taxable, so $40,000 stays in 12%.
     const result = computeFederalTax(
       { year: 2026, filingStatus: 'Single', ordinaryIncome: 56100, ltcgAndQdi: 0 },
       FEDERAL_TAX_CONFIG,
     );
-    // taxable = 56100 - 16100 = 40000 → marginal 12% (50400 floor not crossed)
     expect(result.marginalOrdinaryRate).toBe(0.12);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 2024 brackets
-// ---------------------------------------------------------------------------
 
 describe('2024 brackets', () => {
   it('should_compute_positive_tax_for_single_100k_ordinary_2024', () => {
@@ -239,10 +175,6 @@ describe('2024 brackets', () => {
     expect(result.marginalOrdinaryRate).toBe(0.22);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Standalone helpers
-// ---------------------------------------------------------------------------
 
 describe('marginalOrdinaryRate helper', () => {
   it('should_return_10pct_for_income_in_first_bracket', () => {
@@ -257,7 +189,6 @@ describe('marginalOrdinaryRate helper', () => {
   });
 
   it('should_return_0_when_taxable_income_is_zero', () => {
-    // marginalOrdinaryRate on 0 income should be 0, not brackets[0].rate
     const result = computeFederalTax(
       { year: 2025, filingStatus: 'Single', ordinaryIncome: 0, ltcgAndQdi: 0 },
       FEDERAL_TAX_CONFIG,
@@ -266,12 +197,10 @@ describe('marginalOrdinaryRate helper', () => {
   });
 
   it('should_return_0_when_standalone_taxable_income_is_zero', () => {
-    // Standalone helper should return 0, not first-bracket rate
     expect(marginalOrdinaryRate(2025, 'Single', 0, FEDERAL_TAX_CONFIG)).toBe(0);
   });
 
   it('should_return_0_when_standalone_taxable_income_is_negative', () => {
-    // Negative taxableIncome should return 0
     expect(marginalOrdinaryRate(2025, 'Single', -1000, FEDERAL_TAX_CONFIG)).toBe(0);
   });
 });
@@ -284,13 +213,12 @@ describe('nextBracketCeiling helper', () => {
   });
 
   it('should_return_Infinity_for_a_top_bracket_income', () => {
-    // MFJ 2025: 37% top bracket has no higher boundary.
     expect(nextBracketCeiling(900_000_00, 2025, 'MFJ', FEDERAL_TAX_CONFIG)).toBe(Infinity);
   });
 
   it('should_throw_UnsupportedTaxYearError_for_an_unknown_year', () => {
     expect(() => nextBracketCeiling(150_000_00, 2099, 'MFJ', FEDERAL_TAX_CONFIG)).toThrow(
-      UnsupportedTaxYearError,
+      expect.objectContaining({ name: 'UnsupportedTaxYearError' }),
     );
   });
 });
@@ -309,14 +237,10 @@ describe('federalOrdinaryTaxCents helper', () => {
 
   it('should_throw_UnsupportedTaxYearError_for_an_unknown_year', () => {
     expect(() => federalOrdinaryTaxCents(68_500_00, 2099, 'MFJ', FEDERAL_TAX_CONFIG)).toThrow(
-      UnsupportedTaxYearError,
+      expect.objectContaining({ name: 'UnsupportedTaxYearError' }),
     );
   });
 });
-
-// ---------------------------------------------------------------------------
-// Effective rate
-// ---------------------------------------------------------------------------
 
 describe('effective rate', () => {
   it('should_compute_effective_rate_as_total_tax_over_gross_income', () => {
@@ -328,10 +252,6 @@ describe('effective rate', () => {
     expect(result.effectiveRatePct).toBeCloseTo(expected, 5);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Rounding — integer cents
-// ---------------------------------------------------------------------------
 
 describe('rounding', () => {
   it('should_return_integer_cent_values', () => {
@@ -345,6 +265,17 @@ describe('rounding', () => {
     expect(Number.isInteger(result.totalTax)).toBe(true);
   });
 
+  it('should_round_a_half_cent_of_tax_up_and_a_fraction_below_it_down', () => {
+    // Taxable $12.25 and $12.24 in the 10% bracket: tax of $1.225 and $1.224.
+    const taxCents = (ordinaryIncome: number) =>
+      computeFederalTax(
+        { year: 2025, filingStatus: 'Single', ordinaryIncome, ltcgAndQdi: 0 },
+        FEDERAL_TAX_CONFIG,
+      ).ordinaryTax;
+    expect(taxCents(15762.25)).toBe(123);
+    expect(taxCents(15762.24)).toBe(122);
+  });
+
   it('should_sum_components_to_totalTax', () => {
     const result = computeFederalTax(
       { year: 2025, filingStatus: 'Single', ordinaryIncome: 250000, ltcgAndQdi: 50000 },
@@ -353,10 +284,6 @@ describe('rounding', () => {
     expect(result.totalTax).toBe(result.ordinaryTax + result.ltcgTax + result.niitTax);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Age-65 add-on — MFJ one spouse
-// ---------------------------------------------------------------------------
 
 describe('age-65 standard deduction add-on — MFJ one spouse', () => {
   it('should_apply_mfj_one_spouse_age65_addon_2025', () => {
@@ -378,16 +305,8 @@ describe('age-65 standard deduction add-on — MFJ one spouse', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// OBBBA senior bonus deduction (2025–2028), 6% MAGI phase-out
-// ---------------------------------------------------------------------------
-
 describe('OBBBA senior bonus deduction', () => {
-  // Helper: ordinary tax (cents) for an MFJ household whose ordinary income is
-  // entirely above the standard + age-65 + senior deductions, so the whole
-  // deduction lands in the 10% bracket → Δtax = 0.10 × Δdeduction. We isolate
-  // the senior-deduction effect by comparing taxpayersAge65Plus on the SAME
-  // year (2025) at a MAGI where the standard deduction + add-on are identical.
+  // Ordinary tax in cents for an MFJ household whose income sits above all deductions, so Δtax = rate × Δdeduction.
   function mfjOrdinaryTax(ordinaryIncome: number, age65: number, magi?: number): number {
     return computeFederalTax(
       {
@@ -403,20 +322,14 @@ describe('OBBBA senior bonus deduction', () => {
   }
 
   it('full_deduction_65plus_mfj_year_2025_subtracts_12000_from_taxable', () => {
-    // 2 qualifying filers, MAGI $140k < $150k base → full $12,000 deduction.
-    // Hold ordinary income at $300k (entirely inside the 24% MFJ bracket, which
-    // spans $206,700–$394,600 in 2025) so the whole $12,000 deduction sits at a
-    // single marginal rate. Compare against a fully-phased-out twin at the SAME
-    // $300k ordinary income (forced off via a high MAGI) → Δtax = 0.24 × $12,000.
+    // 2 qualifying filers, MAGI $140k < $150k base: full $12,000. At $300k the 24% MFJ bracket holds all of it, so Δtax = 0.24 × $12,000 against a phased-out twin.
     const withSenior = mfjOrdinaryTax(300_000, 2, /* magi */ 140_000);
     const phasedOut = mfjOrdinaryTax(300_000, 2, /* magi */ 350_000);
     expect(withSenior).toBe(phasedOut - Math.round(0.24 * 12_000 * 100));
   });
 
   it('full_deduction_magi_returned_by_engine_is_unchanged_by_the_deduction', () => {
-    // The senior deduction lowers taxable income, NOT MAGI. The federal engine's
-    // own MAGI (ordinaryIncome + ltcgAndQdi) is unaffected: NIIT base is the same
-    // whether or not the deduction applies.
+    // The senior deduction lowers taxable income, not MAGI, so NIIT is unchanged.
     const withSenior = computeFederalTax(
       { year: 2025, filingStatus: 'MFJ', ordinaryIncome: 140_000, ltcgAndQdi: 0, taxpayersAge65Plus: 2 },
       FEDERAL_TAX_CONFIG,
@@ -425,17 +338,13 @@ describe('OBBBA senior bonus deduction', () => {
       { year: 2024, filingStatus: 'MFJ', ordinaryIncome: 140_000, ltcgAndQdi: 0, taxpayersAge65Plus: 2 },
       FEDERAL_TAX_CONFIG,
     );
-    // NIIT is 0 below threshold in both → MAGI parity is observable via niitTax = 0.
     expect(withSenior.niitTax).toBe(0);
     expect(noSenior.niitTax).toBe(0);
-    // The 2025 (senior-deduction) tax is strictly lower than the same nominal
-    // 2024 case purely from the extra $12,000 deduction (brackets are close).
     expect(withSenior.ordinaryTax).toBeLessThan(noSenior.ordinaryTax);
   });
 
   it('phaseout_boundary_at_base_magi_150k_mfj_keeps_full_deduction', () => {
-    // Phase-out starts STRICTLY above the base, so MAGI exactly $150,000 gets the
-    // full $12,000 (2 filers). Equal to a MAGI just below the base.
+    // The phase-out starts strictly above the base, so MAGI exactly $150,000 keeps the full $12,000.
     const atBase = mfjOrdinaryTax(200_000, 2, 150_000);
     const belowBase = mfjOrdinaryTax(200_000, 2, 149_000);
     expect(atBase).toBe(belowBase);
@@ -446,7 +355,6 @@ describe('OBBBA senior bonus deduction', () => {
     // becomes $3,000; 2 filers → $6,000 total deduction (down from $12,000).
     const partial = mfjOrdinaryTax(220_000, 2, 200_000);
     const full = mfjOrdinaryTax(220_000, 2, 150_000);
-    // Extra taxable income from the $6,000 lost deduction at the 22% bracket.
     expect(partial).toBe(full + Math.round(0.22 * 6_000 * 100));
   });
 
@@ -456,15 +364,12 @@ describe('OBBBA senior bonus deduction', () => {
     const atFloor = mfjOrdinaryTax(400_000, 2, 250_000);
     const wayPast = mfjOrdinaryTax(400_000, 2, 500_000);
     expect(atFloor).toBe(wayPast);
-    // And both equal the no-senior-deduction baseline at that income.
     const noSenior = mfjOrdinaryTax(400_000, 2, 9_999_999);
     expect(atFloor).toBe(noSenior);
   });
 
   it('hoh_uses_75000_base_single_uses_75000_base', () => {
-    // HoH shares the Single $75,000 base (enacted non-joint threshold), NOT a
-    // $112,500 base. Full deduction at MAGI = base $75,000; partial just above,
-    // and full above the old (wrong) $112,500 value is now already phasing out.
+    // HoH shares the Single $75,000 base, not a $112,500 one.
     const hohFull = computeFederalTax(
       { year: 2025, filingStatus: 'HoH', ordinaryIncome: 130_000, ltcgAndQdi: 0, taxpayersAge65Plus: 1, magiForSeniorDeduction: 75_000 },
       FEDERAL_TAX_CONFIG,
@@ -473,27 +378,22 @@ describe('OBBBA senior bonus deduction', () => {
       { year: 2025, filingStatus: 'HoH', ordinaryIncome: 130_000, ltcgAndQdi: 0, taxpayersAge65Plus: 1, magiForSeniorDeduction: 74_000 },
       FEDERAL_TAX_CONFIG,
     ).ordinaryTax;
-    // At and just below the $75,000 base the full $6,000 deduction applies.
     expect(hohFull).toBe(hohBelowBase);
 
     const hohPartial = computeFederalTax(
       { year: 2025, filingStatus: 'HoH', ordinaryIncome: 130_000, ltcgAndQdi: 0, taxpayersAge65Plus: 1, magiForSeniorDeduction: 95_000 },
       FEDERAL_TAX_CONFIG,
     ).ordinaryTax;
-    // $95,000 − $75,000 = $20,000 over base → 0.06 × 20,000 = $1,200 phase-out.
-    // Lost deduction $1,200 at HoH 22% bracket (≈$130k taxable) → higher tax.
+    // $95,000 − $75,000 over base → 0.06 × 20,000 = $1,200 phase-out.
     expect(hohPartial).toBeGreaterThan(hohFull);
 
-    // A MAGI at the old wrong $112,500 base is now well into the phase-out, so
-    // it must produce a strictly higher tax than the correct $75,000-base full
-    // deduction — this is the regression guard against reverting to $112,500.
+    // Regression guard: a MAGI at the old wrong $112,500 base is well into the phase-out.
     const hohAtOldWrongBase = computeFederalTax(
       { year: 2025, filingStatus: 'HoH', ordinaryIncome: 130_000, ltcgAndQdi: 0, taxpayersAge65Plus: 1, magiForSeniorDeduction: 112_500 },
       FEDERAL_TAX_CONFIG,
     ).ordinaryTax;
     expect(hohAtOldWrongBase).toBeGreaterThan(hohFull);
 
-    // Single: base $75,000. Full at $75,000, partial above.
     const singleFull = computeFederalTax(
       { year: 2025, filingStatus: 'Single', ordinaryIncome: 100_000, ltcgAndQdi: 0, taxpayersAge65Plus: 1, magiForSeniorDeduction: 75_000 },
       FEDERAL_TAX_CONFIG,
@@ -504,22 +404,15 @@ describe('OBBBA senior bonus deduction', () => {
     ).ordinaryTax;
     expect(singlePartial).toBeGreaterThan(singleFull);
 
-    // HoH and Single now share the same base: identical MAGI over base yields
-    // the same phase-out amount, so the deduction lost is identical.
+    // Identical MAGI over the shared base loses the same deduction.
     expect(hohPartial - hohFull).toBe(singlePartial - singleFull);
   });
 
   it('year_gate_2024_and_2029_apply_zero_senior_deduction', () => {
-    // 2024: config has no slot → $0 deduction. The ordinary tax equals the
-    // standard + age-65-only deduction case.
     const r2024WithAge65 = computeFederalTax(
       { year: 2024, filingStatus: 'MFJ', ordinaryIncome: 100_000, ltcgAndQdi: 0, taxpayersAge65Plus: 2 },
       FEDERAL_TAX_CONFIG,
     ).ordinaryTax;
-    // Synthesize a 2029 config by copying 2026 + an extrapolated future config
-    // that should NOT carry the slot: drive the engine via the integration layer
-    // is heavier; here assert the engine's own year-gate by passing a synthetic
-    // snapshot keyed 2029 that DOES carry the slot, and confirm the gate zeroes it.
     const snapshot2029WithSlot = {
       ...FEDERAL_TAX_CONFIG,
       values: { 2029: FEDERAL_TAX_CONFIG.values[2025] },
@@ -528,10 +421,8 @@ describe('OBBBA senior bonus deduction', () => {
       { year: 2029, filingStatus: 'MFJ', ordinaryIncome: 100_000, ltcgAndQdi: 0, taxpayersAge65Plus: 2, magiForSeniorDeduction: 100_000 },
       snapshot2029WithSlot,
     );
-    // 2024 should not throw and yields a positive tax (sanity).
     expect(r2024WithAge65).toBeGreaterThan(0);
-    // 2029 with the slot present but past the statutory window → gate zeroes the
-    // deduction, so the tax matches the same config with the slot stripped.
+    // Past the statutory window the gate zeroes the slot, so tax matches the slot-stripped config.
     const snapshot2029NoSlot = {
       ...FEDERAL_TAX_CONFIG,
       values: { 2029: { ...FEDERAL_TAX_CONFIG.values[2025], seniorBonusDeduction: undefined } },
@@ -544,9 +435,7 @@ describe('OBBBA senior bonus deduction', () => {
   });
 
   it('never_negative_deduction_across_a_swept_magi_range', () => {
-    // Across a wide MAGI sweep the ordinary tax is monotonically non-decreasing
-    // in MAGI (the deduction shrinks then floors at 0 — never goes negative,
-    // which would otherwise make tax DROP as MAGI rises past the floor).
+    // Tax is non-decreasing in MAGI: the deduction floors at 0 rather than going negative.
     let prevTax = -1;
     for (let magi = 100_000; magi <= 400_000; magi += 10_000) {
       const tax = mfjOrdinaryTax(300_000, 2, magi);
@@ -556,16 +445,9 @@ describe('OBBBA senior bonus deduction', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// MFS / QSS age-65 add-on + senior bonus eligibility
-// ---------------------------------------------------------------------------
-
 describe('MFS / QSS age-65 add-on and senior bonus', () => {
   it('MFS uses the married-rate age-65 add-on and gets ZERO senior bonus', () => {
-    // 2026 MFS: std ded $16,100 + married age-65 add-on $1,650 = $17,750;
-    // taxable $12,250 (all in the 10% band, MFS 12% floor $12,400); senior bonus
-    // = $0 (MFS ineligible). If the single-rate add-on ($2,050) or a $6,000
-    // senior bonus were applied, the tax would be lower than this.
+    // 2026 MFS: std $16,100 + married add-on $1,650 = $17,750, taxable $12,250 (10% band); senior bonus $0 (MFS ineligible).
     const r = computeFederalTax(
       { year: 2026, filingStatus: 'MFS', ordinaryIncome: 30_000, ltcgAndQdi: 0, taxpayersAge65Plus: 1 },
       FEDERAL_TAX_CONFIG,
@@ -577,15 +459,12 @@ describe('MFS / QSS age-65 add-on and senior bonus', () => {
     const base = { year: 2026 as const, filingStatus: 'MFS' as const, ordinaryIncome: 40_000, ltcgAndQdi: 0 };
     const with65 = computeFederalTax({ ...base, taxpayersAge65Plus: 1 }, FEDERAL_TAX_CONFIG);
     const without = computeFederalTax({ ...base, taxpayersAge65Plus: 0 }, FEDERAL_TAX_CONFIG);
-    // The affected deduction range [$22,250, $23,900] is entirely in the MFS 12%
-    // bracket, so the ONLY gap is the $1,650 age-65 add-on × 12%. A wrongly
-    // applied $6,000 senior bonus would make the gap far larger.
+    // The affected range [$22,250, $23,900] sits in the MFS 12% bracket; a wrongly applied $6,000 bonus would widen the gap.
     expect(without.totalTax - with65.totalTax).toBe(Math.round(1_650 * 0.12 * 100));
   });
 
   it('QSS gets the married-rate age-65 add-on AND the senior bonus at the $75k base (c)', () => {
-    // Below both phase-out bases → QSS is identical to MFJ with one age-65 filer
-    // (QSS uses the MFJ tables + one married-rate add-on + full $6,000 bonus).
+    // Below both bases QSS equals MFJ with one age-65 filer.
     const base = { year: 2026 as const, ordinaryIncome: 60_000, ltcgAndQdi: 0, taxpayersAge65Plus: 1 };
     const qss = computeFederalTax({ ...base, filingStatus: 'QSS' }, FEDERAL_TAX_CONFIG);
     const mfj = computeFederalTax({ ...base, filingStatus: 'MFJ' }, FEDERAL_TAX_CONFIG);
@@ -593,8 +472,7 @@ describe('MFS / QSS age-65 add-on and senior bonus', () => {
   });
 
   it('QSS senior bonus phases out at the $75k base, unlike MFJ at $150k (c)', () => {
-    // MAGI $100k: QSS ($75k base) phases the bonus by 6%×$25k=$1,500 → $4,500;
-    // MFJ ($150k base) keeps the full $6,000. QSS taxable higher → more tax.
+    // MAGI $100k: QSS ($75k base) phases the bonus down by $1,500; MFJ ($150k base) keeps the full $6,000.
     const base = {
       year: 2026 as const,
       ordinaryIncome: 130_000,
