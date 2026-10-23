@@ -1491,6 +1491,36 @@ describe('computeRmd — fact-based rule activation', () => {
     expect(tableIi.ownerRmdCents).toBeLessThan(tableIii.ownerRmdCents);
   });
 
+  it('a sole-spouse designation with a MISSING spouse birthdate is WITHHELD, not downgraded to Table III', () => {
+    const result = run([account('a', { soleSpouseBeneficiaryMoreThan10YrsYounger: true })]);
+    expect(result.ownerRmdCents).toBe(0);
+    expect(result.withheldAccounts?.[0]?.accountId).toBe('a');
+    expect(result.withheldAccounts?.[0]?.missingFacts).toContain('spouseBeneficiaryBirthdate');
+  });
+
+  it('a table with no divisor for the owner’s age is WITHHELD with the table’s reason', () => {
+    const result = computeRmd(
+      {
+        isoBirthdate: OWNER_BIRTHDATE,
+        taxYear: TAX_YEAR,
+        accounts: [account('a', {})],
+        lifeExpectancyTables: {
+          ...RMD_LIFE_EXPECTANCY_TABLES,
+          uniformLifetime: {
+            ...RMD_LIFE_EXPECTANCY_TABLES.uniformLifetime,
+            values: { [TAX_YEAR]: { uniformLifetime: {} } },
+          },
+        },
+      },
+      SNAPSHOT,
+    );
+    expect(result.ownerRmdCents).toBe(0);
+    expect(result.withheldAccounts?.[0]?.accountId).toBe('a');
+    expect(result.withheldAccounts?.[0]?.missingFacts).toEqual([
+      'Uniform Lifetime (Table III) divisor unavailable for age 75',
+    ]);
+  });
+
   it('an inherited account with incomplete beneficiary facts is WITHHELD and lists them', () => {
     const result = run([account('inh', { inheritedAccount: true })]);
     expect(result.applicable).toBe(true);
