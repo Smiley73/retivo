@@ -1,16 +1,10 @@
-/**
- * Tests for the §408A basis derivation (`roth-basis-derivation.ts`). Every worked
- * example of its pooling, ordering and imputation rules lives here — figures are dollars as stored, and
- * the assertions are on the integer cents the module returns.
- */
+// Worked examples of the §408A basis pooling, ordering and imputation rules; figures are dollars as stored, assertions are integer cents.
+
 import { describe, expect, it } from 'vitest';
 
 import { gainLoss } from './balance-calc';
 import { applyFactBasedRothIraOrdering } from './balance-projection-runner-roth-basis';
-import {
-  deriveRothPoolBasisCents,
-  type DerivedRothPoolBasisCents,
-} from './roth-basis-derivation';
+import { deriveRothPoolBasisCents } from './roth-basis-derivation';
 import type { AccountBalancePayload } from '../db/types';
 
 function payload(overrides: Partial<AccountBalancePayload> = {}): AccountBalancePayload {
@@ -45,14 +39,11 @@ function pool(...ids: string[]): ReadonlyArray<{ id: string }> {
   return ids.map((id) => ({ id }));
 }
 
-/** Whole dollars → the integer cents the module returns. */
 function c(dollars: number): number {
   return Math.round(dollars * 100);
 }
 
-/** A sibling account seeding a large personal-contribution basis before every
- *  test year, so an outflow the walk charges shows up as a drop in the remaining
- *  basis rather than disappearing into an already-empty pool. */
+// A sibling account seeds a large personal-contribution basis before every test year, so a charged outflow shows as a drop in remaining basis.
 const PROBE_ACCOUNT_ID = 'probe';
 const PROBE_YEAR = 1999;
 const PROBE_DOLLARS = 100_000_000;
@@ -63,12 +54,7 @@ const probeRow = row({
   endingBalance: PROBE_DOLLARS,
 });
 
-/**
- * Total outflow (recorded plus imputed) the derivation charged the pool, in cents:
- * the seeded basis plus whatever basis `rows` credit themselves, minus what
- * remains. The probe row starts at $0 so it is skipped at every boundary and can
- * never take part in a comparison of its own.
- */
+// Total outflow (recorded plus imputed) the derivation charged the pool, in cents: seeded basis plus what rows credit, minus what remains. The probe row starts at $0, so it is skipped at every boundary.
 function totalChargedCents(
   rows: ReadonlyArray<{ payload: AccountBalancePayload }>,
   accountIds: readonly string[],
@@ -83,9 +69,7 @@ function totalChargedCents(
 
 describe('pooling and chronology', () => {
   it('pools at the pool level, never per-account-then-sum', () => {
-    // A holds $50k of contributions and no withdrawal; rollover-funded sibling B
-    // holds $0 of contributions and a $50k withdrawal. Per-account-then-sum with a
-    // floor wrongly reports $50,000.
+    // A holds $50k of contributions and no withdrawal; rollover-funded sibling B holds $0 and a $50k withdrawal. Per-account-then-sum with a floor wrongly reports $50,000.
     const derived = deriveRothPoolBasisCents(pool('acc-a', 'acc-b'), [
       row({ accountId: 'acc-a', year: 2020, totalContributions: 50_000, endingBalance: 50_000 }),
       row({ accountId: 'acc-b', year: 2020, rollover: 50_000, endingBalance: 50_000 }),
@@ -102,9 +86,7 @@ describe('pooling and chronology', () => {
   });
 
   it('sums two accounts’ same-year contributions into one year credit', () => {
-    // The within-year step sums every pool row's personal share into ONE credit
-    // for the year — one person funding two Roth IRAs in the same year. Overwriting
-    // the year's entry instead keeps a single account's credit ($4,000 or $3,000).
+    // One person funding two Roth IRAs in a year: the credits sum into ONE year credit; overwriting keeps a single account's ($4,000 or $3,000).
     expect(
       deriveRothPoolBasisCents(pool('acc-1', 'acc-2'), [
         row({ year: 2020, totalContributions: 4_000, endingBalance: 4_000 }),
@@ -112,9 +94,7 @@ describe('pooling and chronology', () => {
       ]).regularContributionBasisCents,
     ).toBe(c(7_000));
 
-    // And the summed credit is consumed as one figure by that same year's outflow:
-    // a $6,000 withdrawal larger than either single credit leaves $1,000, where
-    // either overwritten credit is wiped to $0.
+    // The summed credit is consumed as one figure: a $6,000 withdrawal leaves $1,000, where either overwritten credit is wiped to $0.
     const drawn = deriveRothPoolBasisCents(pool('acc-1', 'acc-2'), [
       row({ year: 2020, totalContributions: 4_000, endingBalance: 4_000 }),
       row({
@@ -144,9 +124,7 @@ describe('pooling and chronology', () => {
   });
 
   it('credits $0, never a negative, when a row records more company money than total', () => {
-    // A flat row whose `companyContributions` was recorded while `totalContributions`
-    // was never recomputed to include it — the stale-flat-field shape an import-bundle
-    // row can carry. Without the $0 floor the row credits MINUS $2,000.
+    // A flat row whose companyContributions was recorded without recomputing totalContributions (an import-bundle shape): without the $0 floor it credits MINUS $2,000.
     const staleRow = row({ year: 2020, companyContributions: 2_000, totalContributions: 0 });
 
     const credited = deriveRothPoolBasisCents(pool('acc-1'), [
@@ -174,8 +152,7 @@ describe('pooling and chronology', () => {
       }),
     ]);
 
-    // A negative basis is drawn as `fromBasis`, which GROWS the year's outflow: the
-    // lot would lose $12,000 to a $10,000 recorded withdrawal.
+    // A negative basis is drawn as fromBasis, which GROWS the outflow: the lot would lose $12,000 to a $10,000 withdrawal.
     expect(drawn.regularContributionBasisCents).toBe(0);
     expect(drawn.conversionLots).toEqual([
       {
@@ -187,11 +164,7 @@ describe('pooling and chronology', () => {
   });
 
   it('credits only the personal share when the row carries MIXED splits', () => {
-    // The flat `companyContributions` deliberately DISAGREES with the split company
-    // fields — the shape an import-bundle row can carry, and the one the entry modal
-    // only keeps in sync while the MIXED company inputs are being edited. Subtracting
-    // that stale flat $0 from the splits' $8,000 total credits the whole $8,000,
-    // overstating basis and understating tax.
+    // The flat companyContributions disagrees with the split company fields (an import-bundle shape): subtracting the stale flat $0 from the splits' $8,000 credits all $8,000, overstating basis.
     const derived = deriveRothPoolBasisCents(pool('acc-1'), [
       row({
         year: 2020,
@@ -209,10 +182,7 @@ describe('pooling and chronology', () => {
   });
 
   it('credits both personal splits of a MIXED row and neither company split', () => {
-    // On a MIXED row, basis is `totalContributions − company contributions`, resolved on
-    // the splits — the recorded personal money ($23,000 + $7,000) is basis and the
-    // recorded employer money ($5,000) is not. Reachable without a corrupt import: a
-    // MIXED 401(k) re-typed to a Roth IRA keeps its MIXED rows, splits and all.
+    // On a MIXED row basis is totalContributions − company contributions, resolved on the splits: personal $23,000 + $7,000 is basis, employer $5,000 is not (a MIXED 401(k) re-typed to a Roth IRA keeps these rows).
     const derived = deriveRothPoolBasisCents(pool('acc-1'), [
       row({
         year: 2020,
@@ -220,24 +190,19 @@ describe('pooling and chronology', () => {
         contributionsPostTax: 7_000,
         companyContributionsPreTax: 5_000,
         companyContributionsPostTax: 0,
-        // In sync with the splits, as the entry modal writes them: the splits alone
-        // separate employer money out, so subtracting the flat field again would
-        // charge the same $5,000 twice and credit $25,000.
+        // In sync with the splits as the entry modal writes them: subtracting the flat field again would charge the same $5,000 twice and credit $25,000.
         companyContributions: 5_000,
         totalContributions: 35_000,
         endingBalance: 35_000,
       }),
     ]);
 
-    // Crediting `contributionsPostTax` alone drops the $23,000 personal pre-tax
-    // split ($7,000); crediting the four-way total keeps the employer money
-    // ($35,000).
+    // Crediting contributionsPostTax alone drops the $23,000 personal pre-tax split ($7,000); crediting the four-way total keeps the employer money ($35,000).
     expect(derived.regularContributionBasisCents).toBe(c(30_000));
   });
 
   it('consumes chronologically, not by whole-history subtraction', () => {
-    // $10k/yr 2000–2010 against a $100k withdrawal in 2001 leaves $90k; whole-
-    // history subtraction would say $10k.
+    // $10k/yr 2000–2010 against a $100k withdrawal in 2001 leaves $90k; whole-history subtraction would say $10k.
     const contributing = [
       row({ accountId: 'acc-c', year: 2000, totalContributions: 10_000, endingBalance: 10_000 }),
       ...Array.from({ length: 10 }, (_unused, i) => {
@@ -296,8 +261,7 @@ describe('pooling and chronology', () => {
   });
 
   it('walks an account’s rows chronologically whatever order they arrive in', () => {
-    // Handed newest-first, as a store is free to return them. The boundary chain
-    // walks the array it is given, so the rows are sorted per account before it runs.
+    // Handed newest-first, as a store may return them: the boundary chain walks the array as given, so rows are sorted per account first.
     const charged = totalChargedCents(
       [
         row({ year: 2021, startingBalance: 90_000, endingBalance: 90_000 }),
@@ -306,14 +270,12 @@ describe('pooling and chronology', () => {
       ['acc-1'],
     );
 
-    // Walked in arrival order, 2021 is the first not-skipped row and is compared
-    // against nothing, and 2020's own span reads as a $10,000 increase and floors to
-    // $0 — charging nothing at all for a drop that really happened.
+    // Walked in arrival order, 2021 is compared against nothing and 2020's span reads as a $10,000 increase, flooring to $0: no charge for a real drop.
     expect(charged).toBe(c(10_000));
   });
 
   it('returns $0 and no lots for an empty pool and for a pool with no rows', () => {
-    const empty: DerivedRothPoolBasisCents = {
+    const empty: ReturnType<typeof deriveRothPoolBasisCents> = {
       regularContributionBasisCents: 0,
       conversionLots: [],
     };
@@ -389,10 +351,7 @@ describe('closure shapes', () => {
       creditedDollars: 6_000,
     },
     {
-      // The −gainLoss assertion below reads `totalContributions` from balance-calc,
-      // so this case pins the module's own MIXED split resolution against it: the
-      // balance arithmetic must use the FULL $8,000 the splits sum to, not the stale
-      // flat $0, while only the $6,000 personal share is credited as basis.
+      // Pins the module's own MIXED split resolution against balance-calc: the balance arithmetic uses the FULL $8,000 the splits sum to, not the stale flat $0, while only the $6,000 personal share is credited.
       name: 'MIXED contribution splits whose flat fields are stale',
       recorded: {
         contributionsPreTax: 0,
@@ -407,11 +366,7 @@ describe('closure shapes', () => {
       creditedDollars: 6_000,
     },
     {
-      // The same pinning for a MIXED row carrying all four splits: the balance
-      // arithmetic counts every split ($10,000, which the −gainLoss assertion reads
-      // back), while basis credits the $8,000 the two PERSONAL splits sum to —
-      // `totalContributions − company contributions` on the splits — excluding the
-      // $2,000 of company money.
+      // A MIXED row with all four splits: balance arithmetic counts every split ($10,000, read back by −gainLoss), while basis credits the $8,000 personal splits and excludes $2,000 of company money.
       name: 'MIXED company splits the balance arithmetic counts but basis does not',
       recorded: {
         contributionsPreTax: 2_000,
@@ -474,9 +429,7 @@ describe('closure shapes', () => {
   });
 
   it('charges the same residual on an inactive account', () => {
-    // The module applies no account-level filter — it reads `id` and nothing
-    // else, so an account's `active` flag cannot change the answer. Passing the
-    // wider account shape a caller holds proves it structurally.
+    // The module applies no account-level filter (it reads only id), so an account's active flag cannot change the answer; the wider account shape proves it.
     const rows = [row({ year: 2020, startingBalance: 100_000, endingBalance: 0 })];
     const inactiveAccount: ReadonlyArray<{ id: string; active: boolean }> = [
       { id: 'acc-1', active: false },
@@ -502,9 +455,7 @@ describe('closure shapes', () => {
   });
 
   it('imputes nothing when a positive ending is lower than the row explains', () => {
-    // The ending half of the gate: the residual rule fires only on an exactly-$0
-    // ending, and both spans here net to zero, so the rules as written charge
-    // nothing at all. A gate broadened to any drop would charge $40,000 on top.
+    // The residual rule fires only on an exactly-$0 ending and both spans here net to zero, so nothing is charged; a gate broadened to any drop would charge $40,000.
     const charged = totalChargedCents(
       [
         row({ year: 2020, startingBalance: 100_000, endingBalance: 100_000 }),
@@ -518,8 +469,7 @@ describe('closure shapes', () => {
   });
 
   it('imputes nothing on a $0-start row that ends at $0 recording its own contribution', () => {
-    // The starting half of the gate: it is the only thing stopping this row's own
-    // $7,000 from being imputed straight back out, wiping the basis it credits.
+    // The starting half of the gate: it stops this row's own $7,000 being imputed straight back out, wiping the basis it credits.
     const rows = [row({ year: 2020, totalContributions: 7_000, endingBalance: 0 })];
 
     expect(totalChargedCents(rows, ['acc-1'], c(7_000))).toBe(0);
@@ -564,10 +514,7 @@ describe('boundary and skip shapes', () => {
   });
 
   it('dates a boundary shortfall in the far side’s own year', () => {
-    // The within-year discriminating shape: prior ending $50,000, next row
-    // starting $40,000 and recording its own $10,000 contribution. Dated in 2021,
-    // the shortfall consumes that contribution and resolves to $0; dated a year
-    // earlier it would leave $10,000.
+    // Prior ending $50,000, next row starting $40,000 and recording its own $10,000: dated in 2021 the shortfall consumes that contribution and resolves to $0; dated a year earlier it would leave $10,000.
     const derived = deriveRothPoolBasisCents(pool('acc-1'), [
       row({ year: 2020, startingBalance: 50_000, endingBalance: 50_000 }),
       row({
@@ -608,10 +555,7 @@ describe('boundary and skip shapes', () => {
       row({ year: 2022, startingBalance: 100_000, endingBalance: 100_000 }),
     ];
 
-    // The span is balance arithmetic — 100,000 + 8,000 − 100,000 — so it nets the
-    // row's FULL $8,000, while only the $6,000 personal share is credited as basis.
-    // Netting the personal share instead charges $6,000, dropping $2,000 of real
-    // inflow from the span and charging it as a phantom outflow against basis.
+    // The span is balance arithmetic (100,000 + 8,000 − 100,000), so it nets the FULL $8,000; netting the $6,000 personal share charges a phantom $2,000 outflow against basis.
     expect(totalChargedCents(rows, ['acc-1'], c(6_000))).toBe(c(8_000));
   });
 
@@ -623,8 +567,7 @@ describe('boundary and skip shapes', () => {
       row({ year: 2023, startingBalance: 60_000, endingBalance: 60_000 }),
     ];
 
-    // max(0, 100,000 − 30,000 + 5,000 − 60,000). Dropping the skipped rollover
-    // term, or accumulating only the LAST skipped row, charges $45,000 instead.
+    // max(0, 100,000 − 30,000 + 5,000 − 60,000); dropping the skipped rollover, or accumulating only the last skipped row, charges $45,000 instead.
     expect(totalChargedCents(rows, ['acc-1'], c(5_000))).toBe(c(15_000));
   });
 
@@ -632,8 +575,7 @@ describe('boundary and skip shapes', () => {
     const charged = totalChargedCents(
       [
         row({ year: 2020, startingBalance: 100_000, endingBalance: 100_000 }),
-        // Honestly recorded on a pre-filled $0 starting balance: the 2022 span nets
-        // to exactly $0 because this $40,000 belongs to it.
+        // Honestly recorded on a pre-filled $0 starting balance: the 2022 span nets to $0 because this $40,000 belongs to it.
         row({ year: 2021, distributions: 40_000, endingBalance: 60_000 }),
         row({ year: 2022, startingBalance: 60_000, endingBalance: 60_000 }),
         row({ year: 2023, startingBalance: 50_000, endingBalance: 50_000 }),
@@ -641,9 +583,7 @@ describe('boundary and skip shapes', () => {
       ['acc-1'],
     );
 
-    // $40,000 recorded plus a $10,000 shortfall imputed in 2023. Left un-reset, the
-    // stale −$40,000 nets the 2023 span to $0 too and the total reads $40,000 —
-    // suppressing every later shortfall on the account, not just this one.
+    // $40,000 recorded plus a $10,000 shortfall imputed in 2023; left un-reset, the stale −$40,000 nets the 2023 span to $0 too, suppressing every later shortfall on the account.
     expect(charged).toBe(c(50_000));
   });
 
@@ -661,8 +601,7 @@ describe('boundary and skip shapes', () => {
       ...laterRows,
     ];
 
-    // The last boundary imputes nothing: its near side is the $0 ending, and the
-    // skipped 2021 row's own $7,000 nets in.
+    // The last boundary imputes nothing: its near side is the $0 ending, and the skipped 2021 row's own $7,000 nets in.
     expect(totalChargedCents(imputedRun, ['acc-1'], c(7_000))).toBe(c(20_000));
     expect(totalChargedCents(recordedRun, ['acc-1'], c(7_000))).toBe(c(20_000));
     expect(
@@ -696,8 +635,7 @@ describe('boundary and skip shapes', () => {
       ['acc-1'],
     );
 
-    // The $0-start 2023 row is skipped, but the span from 2022's ending balance to
-    // 2024's starting balance still imputes the $40,000 drop.
+    // The $0-start 2023 row is skipped, but the span from 2022's ending to 2024's starting balance still imputes the $40,000 drop.
     expect(charged).toBe(c(40_000));
   });
 
@@ -707,8 +645,7 @@ describe('boundary and skip shapes', () => {
       row({ year: 2023, totalContributions: 7_000, endingBalance: 7_000 }),
     ];
 
-    // A genuine $0-start year's own contribution is credited as basis, not
-    // dropped.
+    // A genuine $0-start year's own contribution is credited as basis, not dropped.
     expect(
       deriveRothPoolBasisCents(pool('acc-1'), rows).regularContributionBasisCents,
     ).toBe(c(7_000));
@@ -763,11 +700,7 @@ describe('boundary and skip shapes', () => {
   });
 
   it('never carries one account’s near side into another account’s first row', () => {
-    // Two Roth IRAs in one pool, each holding a positive-starting row of its own.
-    // acc-2's first row has nothing before it ON ITS OWN ACCOUNT, so it is compared
-    // against nothing — even though acc-1 is walked first and leaves a $100,000
-    // ending behind as its near side. The boundary chain is per account (the near
-    // side and the skipped accumulators alike); only the year walk is pool-level.
+    // Two Roth IRAs: acc-2's first row has nothing before it on its own account, so it is compared against nothing even though acc-1, walked first, leaves a $100,000 ending; the boundary chain is per account, the year walk pool-level.
     const rows = [
       row({
         year: 2020,
@@ -866,10 +799,7 @@ describe('conversion lots', () => {
   });
 
   it('builds a lot from a conversion row whose only recorded amount is nontaxable', () => {
-    // A nondeductible-IRA ("backdoor") conversion: the whole converted principal is
-    // nontaxable basis and nothing is taxable. A lot gate reading the taxable amount
-    // alone builds no lot at all, and the principal falls through as untracked
-    // earnings.
+    // A nondeductible-IRA (backdoor) conversion: the whole principal is nontaxable basis, nothing taxable. A lot gate reading only the taxable amount builds no lot and the principal falls through as untracked earnings.
     const conversionRow = row({
       year: 2015,
       rollover: 30_000,
@@ -916,8 +846,7 @@ describe('conversion lots', () => {
     ]);
   });
 
-  /** Two accounts converting in 2015 merge into one $90,000-taxable /
-   *  $60,000-nontaxable lot; a third lot of $25,000 / $5,000 lands in 2018. */
+  // Two accounts converting in 2015 merge into one $90,000-taxable / $60,000-nontaxable lot; a third lot of $25,000 / $5,000 lands in 2018.
   const mergedLotRows = [
     row({
       year: 2015,
@@ -943,8 +872,7 @@ describe('conversion lots', () => {
     }),
   ];
 
-  /** The same two lots as the engine's mutable carrier holds them, fresh each
-   *  call because `applyFactBasedRothIraOrdering` mutates the entry. */
+  // The same two lots as the engine's mutable carrier holds them, fresh per call because applyFactBasedRothIraOrdering mutates the entry.
   const mergedLotEntry = () => ({
     rothBasisRemainingCents: 0,
     rothCumulativeWithdrawnCents: 0,
@@ -954,7 +882,6 @@ describe('conversion lots', () => {
     ],
   });
 
-  /** The engine's remaining lots, in the derivation's own shape. */
   const asDerivedLots = (entry: ReturnType<typeof mergedLotEntry>) =>
     entry.conversionLots.map((lot) => ({
       taxYear: lot.taxYear,
@@ -973,9 +900,7 @@ describe('conversion lots', () => {
       }),
     ]);
 
-    // The same lots run through the engine's own ordered allocator must leave the
-    // same remainders. (A lot consumed to nothing is omitted from the derivation's
-    // output; none is here — the case below is.)
+    // The same lots through the engine's own ordered allocator must leave the same remainders (a lot consumed to nothing is omitted from the derivation's output).
     const entry = mergedLotEntry();
     applyFactBasedRothIraOrdering(entry, {
       withdrawalCents: c(120_000),
@@ -1017,7 +942,6 @@ describe('conversion lots', () => {
       ownerReached59Half: true,
     });
 
-    // Both prunings have to agree at the one shape where either can fire.
     expect(derived.conversionLots).toEqual(asDerivedLots(entry));
     expect(derived.conversionLots).toEqual([
       {
@@ -1029,9 +953,7 @@ describe('conversion lots', () => {
   });
 
   it('draws a lot converted in the very year of the outflow', () => {
-    // A lot is available in its OWN year, so the year's lot is made available
-    // before the year's outflow is consumed; available only from the following
-    // year, the whole $200,000 would stand untouched.
+    // A lot is available in its own year, before that year's outflow is consumed; available only from the following year, the whole $200,000 would stand untouched.
     const derived = deriveRothPoolBasisCents(pool('acc-1', 'acc-2'), [
       row({
         year: 2020,
@@ -1086,10 +1008,7 @@ describe('conversion lots', () => {
 });
 
 describe('import-bundle validation boundary', () => {
-  /** A magnitude just past `isValidRothMoney`'s bound whose ×100 is nonetheless a
-   *  safe integer — what the shared cents conversion alone would let through, and
-   *  reachable because a current-schema row from an import bundle never meets the
-   *  migrations that sanitise these keys. */
+  // A magnitude just past isValidRothMoney's bound whose ×100 is still a safe integer: what the cents conversion alone would let through, reachable because an import-bundle row never meets the migrations.
   const OUT_OF_RANGE_DOLLARS = 90_071_992_547_409.02;
 
   it('reads an out-of-range imported amount as $0 in every nonnegative field', () => {
@@ -1112,8 +1031,7 @@ describe('import-bundle validation boundary', () => {
 
     expect(contributed.regularContributionBasisCents).toBe(0);
     expect(converted.conversionLots).toEqual([]);
-    // An out-of-range starting balance imputes no residual at all, and out-of-range
-    // distributions charge nothing — leaving the row's own $100,000 imputed.
+    // An out-of-range starting balance imputes no residual, and out-of-range distributions charge nothing, leaving the row's own $100,000 imputed.
     expect(
       totalChargedCents(
         [row({ year: 2020, startingBalance: OUT_OF_RANGE_DOLLARS, endingBalance: 0 })],
@@ -1148,8 +1066,7 @@ describe('import-bundle validation boundary', () => {
     expect(derived.regularContributionBasisCents).toBe(c(8_000));
   });
 
-  /** $50T is a valid SINGLE field against `isValidRothMoney`'s ~$90.07T bound; two of
-   *  them sum past it — the shape only a MIXED row's split fields can carry. */
+  // $50T is valid for a single field against isValidRothMoney's ~$90.07T bound but two sum past it: the shape only a MIXED row's split fields carry.
   const IN_RANGE_SPLIT_DOLLARS = 50_000_000_000_000;
 
   it('converts MIXED contribution splits per field, not as one out-of-range total', () => {
@@ -1175,9 +1092,7 @@ describe('import-bundle validation boundary', () => {
       }),
     ]);
 
-    // Resolved through the shared dollar total, the $100T aggregate is out of range
-    // and reads as $0, taking the valid $50T post-tax split down with it; the 2021
-    // withdrawal then falls past an empty basis and eats the 2015 conversion lot.
+    // Resolved through the shared dollar total, the $100T aggregate reads as $0 and takes the valid $50T post-tax split with it; the 2021 withdrawal then eats the 2015 conversion lot.
     expect(derived.regularContributionBasisCents).toBe(c(30_000_000_000_000));
     expect(derived.conversionLots).toEqual([
       {
@@ -1189,11 +1104,7 @@ describe('import-bundle validation boundary', () => {
   });
 
   it('credits neither MIXED company split, whatever their sum reads as', () => {
-    // Employer money is never §408A basis, and on a MIXED row it is the splits — not
-    // the flat `companyContributions` — that separate it out. Crediting the row's
-    // four-way total instead reads $110T here, a figure past `Number.MAX_SAFE_INTEGER`
-    // in cents that collapses to $0 and loses the real $10T as well. (The row starts
-    // at $0 and has no successor, so its balance fields take no part.)
+    // Employer money is never §408A basis and on a MIXED row the splits separate it out; crediting the four-way total reads $110T, past MAX_SAFE_INTEGER cents, collapsing to $0 and losing the real $10T.
     const derived = deriveRothPoolBasisCents(pool('acc-1'), [
       row({
         year: 2020,
@@ -1231,13 +1142,7 @@ describe('import-bundle validation boundary', () => {
       }),
     ]);
 
-    // Every stored field is valid on its own, but the two accounts merge into one
-    // 2015 lot whose $100T of taxable principal is past `Number.MAX_SAFE_INTEGER` in
-    // cents. Collapsing that half alone leaves the lot shaped $0 taxable / $2
-    // nontaxable, and a pre-59½ distribution inside the five-year window then draws
-    // the $2 of nontaxable principal with NO §72(t) recapture base — so the whole lot
-    // goes and the outflow falls through to untracked earnings instead. The in-range
-    // 2018 lot is untouched.
+    // Every field is valid alone, but the two accounts merge into one 2015 lot whose $100T taxable principal exceeds MAX_SAFE_INTEGER cents; collapsing that half alone leaves a $0/$2 lot and a pre-59½ draw would take the $2 with no §72(t) recapture base, so the whole lot goes and the outflow falls through to untracked earnings.
     expect(derived.conversionLots).toEqual([
       {
         taxYear: 2018,
@@ -1261,8 +1166,7 @@ describe('import-bundle validation boundary', () => {
       ['acc-1'],
     );
 
-    // Only the $10,000 shortfall; a negative let through would credit $5,000 of
-    // outflow back and charge $5,000.
+    // Only the $10,000 shortfall; a negative let through would credit $5,000 of outflow back and charge $5,000.
     expect(charged).toBe(c(10_000));
   });
 
@@ -1293,8 +1197,7 @@ describe('import-bundle validation boundary', () => {
         rothConversionTaxableAmount: 50_000,
       });
 
-      // Kept, the row would credit $5,000 of basis, carry a lot of its own, and
-      // (dated mid-span) net its contributions into the $40,000 shortfall.
+      // Kept, the row would credit $5,000 of basis, carry a lot, and net its contributions into the $40,000 shortfall.
       expect(deriveRothPoolBasisCents(pool('acc-1'), [...spanRows, invalidRow])).toEqual(
         deriveRothPoolBasisCents(pool('acc-1'), spanRows),
       );

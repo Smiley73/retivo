@@ -1,6 +1,3 @@
-/**
- * Unit tests for the pure downturn-guardrail math (`guardrails.ts`).
- */
 import { describe, it, expect } from 'vitest';
 import {
   fundedRatio,
@@ -8,12 +5,11 @@ import {
   initGuardrailState,
   isGuardrailConfigValid,
   DEFAULT_GUARDRAIL_CONFIG,
-  GUARDRAIL_LIABILITY_REAL_RATE,
   type GuardrailConfig,
-  type FundedRatioInput,
 } from './guardrails';
 
-/** Build a funded-ratio input with sensible defaults (flat CPI, no tax). */
+type FundedRatioInput = Parameters<typeof fundedRatio>[0];
+
 function frInput(over: Partial<FundedRatioInput> = {}): FundedRatioInput {
   return {
     portfolioNominal: 1_000_000,
@@ -35,7 +31,6 @@ const CFG: GuardrailConfig = {
 
 describe('fundedRatio', () => {
   it('divides real portfolio by the discounted real net-need liability', () => {
-    // Flat CPI, no tax, single year of $50k need, $50k portfolio → PV = 50k, ratio 1.0.
     const r = fundedRatio(frInput({ portfolioNominal: 50_000, netNeedNominalByYear: [50_000], cumCpiByYear: [1] }));
     expect(r).toBeCloseTo(1.0, 6);
   });
@@ -55,13 +50,12 @@ describe('fundedRatio', () => {
 
   it('discounts later years at the conservative real rate (index 0 undiscounted)', () => {
     // Two $50k real years: PV = 50k + 50k/(1+r). Portfolio real = that PV → ratio 1.0.
-    const pv = 50_000 + 50_000 / (1 + GUARDRAIL_LIABILITY_REAL_RATE);
+    const pv = 50_000 + 50_000 / 1.01; // 1% conservative real rate
     const r = fundedRatio(frInput({ portfolioNominal: pv, netNeedNominalByYear: [50_000, 50_000], cumCpiByYear: [1, 1] }));
     expect(r).toBeCloseTo(1.0, 6);
   });
 
   it('uses the currently-settled spend path (not the baseline) in the denominator', () => {
-    // A cut path passes a smaller net-need series → a larger funded ratio than baseline.
     const baseline = fundedRatio(frInput({ netNeedNominalByYear: [50_000], cumCpiByYear: [1] }));
     const cut = fundedRatio(frInput({ netNeedNominalByYear: [40_000], cumCpiByYear: [1] }));
     expect(cut).not.toBeNull();
@@ -85,7 +79,6 @@ describe('fundedRatio', () => {
   });
 
   it('net-need ≤ 0 → SUPPRESSED (null), never +∞', () => {
-    // Guaranteed income covers all remaining spending every year.
     const r = fundedRatio(frInput({ netNeedNominalByYear: [-10_000, -5_000], cumCpiByYear: [1, 1] }));
     expect(r).toBeNull();
   });
@@ -159,11 +152,7 @@ describe('applyGuardrailStep — band behavior', () => {
   });
 
   it('suppressed ratio (null) still LIFTS a settled factor below the floor UP to it', () => {
-    // A prior downturn cut settled BELOW the floor; a later net-need ≤ 0 year is
-    // suppressed. The floor is unconditional, so the factor is lifted to it —
-    // guaranteed income covers the full baseline in a suppressed year, so
-    // modeling spending below essentials (+ the kept discretionary share) would
-    // be wrong.
+    // A cut settled below the floor, then a net-need ≤ 0 year is suppressed: the unconditional floor still lifts the factor.
     const state = initGuardrailState();
     state.settledFactor = 0.5; // cut below the effective floor
     // essentialShare 0.6, discretionaryFloorPct 50 → floor = 0.6 + 0.5×0.4 = 0.8.
@@ -231,17 +220,12 @@ describe('applyGuardrailStep — floor + cap saturation', () => {
   });
 
   it('lifts a below-floor settled factor to a LATER year rising essential floor on a HOLD (no band breach)', () => {
-    // Essentials rise as a share of total spend across years. An early cut
-    // settles the factor below a later year's higher essential floor; that later
-    // year's ratio HOLDS (strictly between the bands, no cut/raise). The floor
-    // must still bind — spending is never below essentials.
+    // An early cut settles below a later year's higher essential floor; the later HOLD year must still lift to it.
     const state = initGuardrailState(); // 1.0
     // Early year: floor 0.5, cut 1.0 → 0.9.
     applyGuardrailStep({ state, ratio: 0.8, config: CFG, essentialFloorFactor: 0.5 });
-    // Cut again to settle below the later floor: 0.9 → 0.8.
     applyGuardrailStep({ state, ratio: 0.8, config: CFG, essentialFloorFactor: 0.5 });
     expect(state.settledFactor).toBeCloseTo(0.8, 6);
-    // Later year: essentials have risen to 0.85 of baseline; the ratio HOLDS.
     const held = applyGuardrailStep({ state, ratio: 1.0, config: CFG, essentialFloorFactor: 0.85 });
     expect(held.factor).toBeCloseTo(0.85, 6); // lifted to the later floor
     expect(held.changed).toBe(true); // 0.8 → 0.85 is a change
@@ -249,8 +233,6 @@ describe('applyGuardrailStep — floor + cap saturation', () => {
   });
 
   it('lifts a below-floor settled factor on a RAISE that lands below the risen floor', () => {
-    // A raise step alone lands below the later year's higher essential floor; the
-    // unconditional floor clamp lifts it the rest of the way.
     const state = initGuardrailState();
     state.settledFactor = 0.6;
     // Raise 0.6 → 0.7, but this year's floor is 0.9 → lifted to 0.9.
@@ -269,7 +251,6 @@ describe('applyGuardrailStep — discretionary floor compose', () => {
 
   it('discretionaryFloorPct = 0 reproduces the essentials-only floor (0.5)', () => {
     const state = initGuardrailState();
-    // Stack cuts far below the floor; they settle exactly at essentialShare.
     for (let i = 0; i < 10; i += 1) {
       applyGuardrailStep({ state, ratio: 0.8, config: cfgFloor(0), essentialFloorFactor: 0.5 });
     }
@@ -298,7 +279,6 @@ describe('applyGuardrailStep — discretionary floor compose', () => {
       for (let i = 0; i < 10; i += 1) {
         applyGuardrailStep({ state, ratio: 0.8, config: cfgFloor(pct), essentialFloorFactor: 0.6 });
       }
-      // Never below essentials (0.6); the dial only lifts UP from there.
       expect(state.settledFactor).toBeGreaterThanOrEqual(0.6 - 1e-9);
     }
   });

@@ -54,12 +54,8 @@ export {
   friendlyProjectionErrorMessage,
   dollarsToCents,
   centsToDollars,
-  resolveSnapshotYear,
-  buildScaledFederalTaxConfig,
   isRothAccount,
-  computeMagi,
   resolveAssumedTaxableYieldConfig,
-  resolveAssumedYieldComponents,
   allocateCentsByWeight,
   bootstrapLookbackRing,
 } from './tax-integration-helpers';

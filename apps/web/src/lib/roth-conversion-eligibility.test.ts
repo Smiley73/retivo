@@ -1,20 +1,3 @@
-/**
- * Predicate matrix for all eligibility helpers.
- *
- * Covers:
- *  - PRE_TAX 401k source kept
- *  - MIXED 401k/403b/457b/TSP source kept
- *  - PRE_TAX/MIXED OTHER source kept (has real pre-tax sub-bucket)
- *  - CBP source excluded
- *  - Inactive source excluded
- *  - Roth IRA target kept for any valid source
- *  - Same-account MIXED Roth-designated target kept only when ids match
- *  - Same-account MIXED OTHER target excluded (post bucket is taxable)
- *  - Dedicated Roth 401k/403b/457b/TSP excluded as pair target
- *  - Cross-owner denied pair (IRC §408A is per-individual)
- *  - Same-owner accepted pair
- *  - shouldCreditWorkingYearsConversionBasisSeparately: Roth IRA → true; MIXED → false
- */
 import { describe, it, expect } from 'vitest';
 import {
   isConvertibleRothConversionSource,
@@ -22,9 +5,10 @@ import {
   isSameAccountMixedInPlanConversion,
   isValidWorkingYearsRothConversionPair,
   shouldCreditWorkingYearsConversionBasisSeparately,
-  type AccountEligibilityRecord,
 } from './roth-conversion-eligibility';
 import type { AccountPayload, AccountType } from '../db/types';
+
+type AccountEligibilityRecord = Parameters<typeof isValidWorkingYearsRothConversionPair>[0];
 
 function rec(
   id: string,
@@ -38,8 +22,6 @@ function rec(
     payload: { active, type, taxTreatment, ownerId },
   };
 }
-
-// ── isConvertibleRothConversionSource ────────────────────────────────────────
 
 describe('isConvertibleRothConversionSource', () => {
   it('accepts an active PRE_TAX 401k', () => {
@@ -155,8 +137,6 @@ describe('isConvertibleRothConversionSource', () => {
   });
 });
 
-// ── isWorkingYearsRothConversionTarget ────────────────────────────────────────
-
 describe('isWorkingYearsRothConversionTarget', () => {
   it('accepts an active RETIREMENT_ROTH_IRA', () => {
     expect(
@@ -224,8 +204,6 @@ describe('isWorkingYearsRothConversionTarget', () => {
   });
 });
 
-// ── isSameAccountMixedInPlanConversion ────────────────────────────────────────
-
 describe('isSameAccountMixedInPlanConversion', () => {
   it('accepts same-id active MIXED 401k (Roth-designated post bucket)', () => {
     const r = rec('x', 'RETIREMENT_401K', 'MIXED', 'o1');
@@ -269,10 +247,7 @@ describe('isSameAccountMixedInPlanConversion', () => {
   });
 });
 
-// ── isValidWorkingYearsRothConversionPair ─────────────────────────────────────
-
 describe('isValidWorkingYearsRothConversionPair', () => {
-  // Valid source + Roth IRA target, same owner
   it('accepts PRE_TAX 401k → Roth IRA (same owner)', () => {
     const src = rec('s', 'RETIREMENT_401K', 'PRE_TAX', 'o1');
     const tgt = rec('t', 'RETIREMENT_ROTH_IRA', 'ROTH', 'o1');
@@ -303,7 +278,6 @@ describe('isValidWorkingYearsRothConversionPair', () => {
     expect(isValidWorkingYearsRothConversionPair(src, tgt)).toBe(false);
   });
 
-  // Invalid source
   it('rejects inactive PRE_TAX source', () => {
     const src = rec('s', 'RETIREMENT_401K', 'PRE_TAX', 'o1', false);
     const tgt = rec('t', 'RETIREMENT_ROTH_IRA', 'ROTH', 'o1');
@@ -316,7 +290,6 @@ describe('isValidWorkingYearsRothConversionPair', () => {
     expect(isValidWorkingYearsRothConversionPair(src, tgt)).toBe(false);
   });
 
-  // Denied pair: MIXED source + cross-account dedicated-Roth target
   it('rejects MIXED source + separate dedicated Roth 401k target (deferral)', () => {
     const src = rec('s', 'RETIREMENT_401K', 'MIXED', 'o1');
     const tgt = rec('t', 'RETIREMENT_ROTH_401K', 'ROTH', 'o1');
@@ -329,15 +302,13 @@ describe('isValidWorkingYearsRothConversionPair', () => {
     expect(isValidWorkingYearsRothConversionPair(src, tgt)).toBe(false);
   });
 
-  // Denied pair: MIXED source + MIXED OTHER cross-account target
   it('rejects MIXED 401k source + MIXED OTHER cross-account target', () => {
     const src = rec('s', 'RETIREMENT_401K', 'MIXED', 'o1');
     const tgt = rec('t', 'OTHER', 'MIXED', 'o1');
     expect(isValidWorkingYearsRothConversionPair(src, tgt)).toBe(false);
   });
 
-  // An inherited Roth IRA can never be a target — the converted principal
-  // would credit the beneficiary's OWN §408A pool.
+  // An inherited Roth IRA can never be a target: the converted principal would credit the beneficiary's own §408A pool.
   it('rejects PRE_TAX 401k → INHERITED Roth IRA (same owner)', () => {
     const src = rec('s', 'RETIREMENT_401K', 'PRE_TAX', 'o1');
     const base = rec('t', 'RETIREMENT_ROTH_IRA', 'ROTH', 'o1');
@@ -348,14 +319,11 @@ describe('isValidWorkingYearsRothConversionPair', () => {
     expect(isValidWorkingYearsRothConversionPair(src, tgt)).toBe(false);
   });
 
-  // PRE_TAX employer plan source → same-account in-plan is invalid (not MIXED)
   it('rejects PRE_TAX 401k → same-account in-plan (not MIXED, so the MIXED rule does not apply)', () => {
     const src = rec('s', 'RETIREMENT_401K', 'PRE_TAX', 'o1');
     expect(isValidWorkingYearsRothConversionPair(src, src)).toBe(false);
   });
 });
-
-// ── shouldCreditWorkingYearsConversionBasisSeparately ─────────────────────────
 
 describe('shouldCreditWorkingYearsConversionBasisSeparately', () => {
   it('returns true for a Roth IRA target', () => {

@@ -12,20 +12,20 @@ import {
 } from './rmd-divisors';
 
 /** Table I (Single Life): attained age to life expectancy. */
-export interface SingleLifeTable {
+interface SingleLifeTable {
   readonly singleLife: Readonly<Record<number, number>>;
 }
 
 /** Table II (Joint Life and Last Survivor): ownerAge to beneficiaryAge to joint life expectancy. */
-export interface JointLifeTable {
+interface JointLifeTable {
   readonly jointLastSurvivor: Readonly<Record<number, Readonly<Record<number, number>>>>;
 }
 
 /** Table III (Uniform Lifetime), aliasing `RMD_DIVISORS`. */
-export const RMD_UNIFORM_LIFETIME_TABLE_III: CalibrationSnapshot<RmdTable> = RMD_DIVISORS;
+const RMD_UNIFORM_LIFETIME_TABLE_III: CalibrationSnapshot<RmdTable> = RMD_DIVISORS;
 
 /** Table I (Single Life), ages 0–120; the single 2024 key mirrors Table III's clamp-to-latest resolution. */
-export const RMD_SINGLE_LIFE_TABLE_I: CalibrationSnapshot<SingleLifeTable> = {
+const RMD_SINGLE_LIFE_TABLE_I: CalibrationSnapshot<SingleLifeTable> = {
   values: {
     2024: {
       singleLife: {
@@ -163,7 +163,7 @@ export const RMD_SINGLE_LIFE_TABLE_I: CalibrationSnapshot<SingleLifeTable> = {
 } as const;
 
 /** Table II (Joint Life and Last Survivor), the symmetric ages 20–120 matrix. */
-export const RMD_JOINT_LIFE_TABLE_II: CalibrationSnapshot<JointLifeTable> = {
+const RMD_JOINT_LIFE_TABLE_II: CalibrationSnapshot<JointLifeTable> = {
   values: {
     2024: {
       jointLastSurvivor: {

@@ -1,21 +1,9 @@
-/**
- * Tests for isQualifyingAccount helper and account-type qualification in computeRmd.
- * Covers all 6 PRE_TAX types, non-qualifying types, and MIXED rothPortion variants.
- */
 
 import { describe, it, expect } from 'vitest';
 import { computeRmd, isQualifyingAccount, RmdInvalidInputError } from './rmd';
 import { SNAPSHOT, OWNER_1950_2025 } from './rmd.test-helpers';
 
-// ---------------------------------------------------------------------------
-// isQualifyingAccount helper
-// ---------------------------------------------------------------------------
-
 describe('isQualifyingAccount', () => {
-  // Traditional IRAs are PRE_TAX only; MIXED applies to employer plans.
-  // validateRmdInput rejects RETIREMENT_IRA + MIXED upstream so that row is
-  // defensive, but isQualifyingAccount must also return false for correctness.
-  // Roth IRA is always non-qualifying; POST_TAX on IRA mirrors Roth.
   it.each([
     ['RETIREMENT_IRA', 'PRE_TAX', true],
     ['RETIREMENT_IRA', 'MIXED', false],
@@ -38,10 +26,6 @@ describe('isQualifyingAccount', () => {
     expect(isQualifyingAccount(accountType, taxTreatment)).toBe(expected);
   });
 });
-
-// ---------------------------------------------------------------------------
-// computeRmd — qualifying account types (all 6 PRE_TAX types, positive tests)
-// ---------------------------------------------------------------------------
 
 describe('computeRmd — qualifying account types', () => {
   const BASE_INPUT = (accountType: string) => ({
@@ -81,12 +65,7 @@ describe('computeRmd — qualifying account types', () => {
     expect(r.ownerRmdCents).toBe(0);
     expect(r.perAccountRmdCents).toEqual({});
   });
-
 });
-
-// ---------------------------------------------------------------------------
-// computeRmd — MIXED account handling (SECURE 2.0 §325)
-// ---------------------------------------------------------------------------
 
 describe('computeRmd — MIXED account rothPortionCents', () => {
   it('should_use_whole_balance_when_rothPortionCents_omitted_on_MIXED', () => {
@@ -99,12 +78,10 @@ describe('computeRmd — MIXED account rothPortionCents', () => {
       },
       SNAPSHOT,
     );
-    expect(r.qualifyingBalanceCents).toBe(20_000_000); // whole balance used (over-estimate)
     expect(r.ownerRmdCents).toBeGreaterThan(0);
   });
 
   it('should_subtract_rothPortionCents_from_qualifying_balance_on_MIXED', () => {
-    // $200k total, $50k Roth → $150k pre-tax base
     const r = computeRmd(
       {
         ...OWNER_1950_2025,
@@ -121,7 +98,6 @@ describe('computeRmd — MIXED account rothPortionCents', () => {
       SNAPSHOT,
     );
     expect(r.qualifyingBalanceCents).toBe(15_000_000); // $150k base
-    // divisor at age 75 = 24.6; rmd = round(150000 / 24.6 * 100) = round(609756.10...) = 609756
     expect(r.ownerRmdCents).toBe(Math.round((15_000_000 / 100 / 24.6) * 100));
   });
 
@@ -147,16 +123,9 @@ describe('computeRmd — MIXED account rothPortionCents', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// computeRmd — RETIREMENT_IRA incoherent tax-treatment
-// ---------------------------------------------------------------------------
-
 describe('computeRmd — RETIREMENT_IRA must be PRE_TAX', () => {
-  it('should_throw_RmdInvalidInputError_for_RETIREMENT_IRA_with_MIXED_treatment', () => {
-    // Traditional IRAs are always PRE_TAX; MIXED applies only to employer plans
-    // (401k/403b/TSP) where pre-tax and Roth-designated sub-accounts coexist.
-    // RETIREMENT_IRA + MIXED is structurally incoherent → validation rejects it.
-    expect(() =>
+  it.each(['MIXED', 'POST_TAX'] as const)('should_throw_RmdInvalidInputError_for_RETIREMENT_IRA_with_%s_treatment', (taxTreatment) => {
+    const run = () =>
       computeRmd(
         {
           ...OWNER_1950_2025,
@@ -165,65 +134,13 @@ describe('computeRmd — RETIREMENT_IRA must be PRE_TAX', () => {
               id: 'ira',
               balanceDec31PriorYearCents: 5_000_000,
               accountType: 'RETIREMENT_IRA',
-              taxTreatment: 'MIXED',
+              taxTreatment,
             },
           ],
         },
         SNAPSHOT,
-      ),
-    ).toThrow(RmdInvalidInputError);
-    expect(() =>
-      computeRmd(
-        {
-          ...OWNER_1950_2025,
-          accounts: [
-            {
-              id: 'ira',
-              balanceDec31PriorYearCents: 5_000_000,
-              accountType: 'RETIREMENT_IRA',
-              taxTreatment: 'MIXED',
-            },
-          ],
-        },
-        SNAPSHOT,
-      ),
-    ).toThrowError(/RETIREMENT_IRA must have taxTreatment 'PRE_TAX'/);
-  });
-
-  it('should_throw_RmdInvalidInputError_for_RETIREMENT_IRA_with_POST_TAX_treatment', () => {
-    // POST_TAX on a RETIREMENT_IRA is also incoherent — Roth IRAs are the separate
-    // RETIREMENT_ROTH_IRA type; a RETIREMENT_IRA flagged POST_TAX is nonsensical data.
-    expect(() =>
-      computeRmd(
-        {
-          ...OWNER_1950_2025,
-          accounts: [
-            {
-              id: 'ira',
-              balanceDec31PriorYearCents: 5_000_000,
-              accountType: 'RETIREMENT_IRA',
-              taxTreatment: 'POST_TAX',
-            },
-          ],
-        },
-        SNAPSHOT,
-      ),
-    ).toThrow(RmdInvalidInputError);
-    expect(() =>
-      computeRmd(
-        {
-          ...OWNER_1950_2025,
-          accounts: [
-            {
-              id: 'ira',
-              balanceDec31PriorYearCents: 5_000_000,
-              accountType: 'RETIREMENT_IRA',
-              taxTreatment: 'POST_TAX',
-            },
-          ],
-        },
-        SNAPSHOT,
-      ),
-    ).toThrowError(/RETIREMENT_IRA must have taxTreatment 'PRE_TAX'/);
+      );
+    expect(run).toThrow(RmdInvalidInputError);
+    expect(run).toThrowError(/RETIREMENT_IRA must have taxTreatment 'PRE_TAX'/);
   });
 });

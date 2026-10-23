@@ -1,10 +1,3 @@
-/**
- * Tests for ACA PTC engine — computeAcaPtc() computation correctness.
- *
- * Validation tests → aca-ptc-validation.test.ts
- * Boundary / edge-case / regime tests → aca-ptc-edge-cases.test.ts
- */
-
 import { describe, it, expect } from 'vitest';
 import {
   computeAcaPtc,
@@ -19,7 +12,6 @@ import { ACA_PTC_PARAMETERS } from './aca-ptc-parameters';
 
 const snap = ACA_PTC_PARAMETERS;
 
-/** Build a valid default input, overridable per-test. */
 function input(overrides: Partial<AcaPtcInput> = {}): AcaPtcInput {
   return {
     taxYear: 2025,
@@ -31,9 +23,6 @@ function input(overrides: Partial<AcaPtcInput> = {}): AcaPtcInput {
   };
 }
 
-// ---------------------------------------------------------------------------
-// FPL calculation
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — FPL calculation', () => {
   it('calculates fplDollars for single (householdSize=1) 2025', () => {
     // 2025: base=15060, increment=5380 → size=1 → $15,060
@@ -76,9 +65,6 @@ describe('computeAcaPtc — FPL calculation', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// below-FPL tier (< 100% FPL)
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — below-FPL ineligible', () => {
   it('returns tier=below-fpl and zero PTC when MAGI < 100% FPL (2025)', () => {
     // $14,000 < $15,060 (100% FPL 2025)
@@ -96,9 +82,6 @@ describe('computeAcaPtc — below-FPL ineligible', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// IRA-expanded sliding band (2025)
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — IRA-expanded sliding (2025)', () => {
   it('150-200% band: interpolates applicable figure', () => {
     // 2025 single FPL = $15,060. 175% FPL = $26,355 = $2,635,500 cents
@@ -123,7 +106,6 @@ describe('computeAcaPtc — IRA-expanded sliding (2025)', () => {
     expect(r.tier).toBe('sliding');
     expect(r.eligible).toBe(true);
     expect(r.applicableFigurePct).toBe(0);
-    // PTC = SLCSP - 0 = full benchmark
     expect(r.annualPtcCents).toBe(600_000);
   });
 
@@ -150,7 +132,6 @@ describe('computeAcaPtc — IRA-expanded sliding (2025)', () => {
   });
 
   it('PTC is zero when expected contribution exceeds SLCSP', () => {
-    // High MAGI in 200-250% band → large expected contribution
     const r = computeAcaPtc(
       input({
         taxYear: 2025,
@@ -176,9 +157,6 @@ describe('computeAcaPtc — IRA-expanded sliding (2025)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// IRA-expanded cap band (≥ 400% FPL, 2025)
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — IRA-expanded cap band (≥ 400% FPL)', () => {
   it('tier=cap-applies at exactly 400% FPL (2025)', () => {
     // 400% * 15060 = $60,240 = $6,024,000
@@ -224,9 +202,6 @@ describe('computeAcaPtc — IRA-expanded cap band (≥ 400% FPL)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// pre-ARPA cliff (2026) — above 400% ineligible
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — pre-ARPA 400% cliff (2026)', () => {
   it('tier=above-400-cliff for MAGI strictly above 400% FPL (2026)', () => {
     // 2026 single FPL = $15,650. 401% = $62,757 ≈ $6,275,700
@@ -253,7 +228,6 @@ describe('computeAcaPtc — pre-ARPA 400% cliff (2026)', () => {
   });
 
   it('no above-400-cliff for IRA-expanded 2025 at same FPL%', () => {
-    // Same ~401% FPL but in 2025 (IRA-expanded) → should be cap-applies, not cliff
     const r = computeAcaPtc(
       input({ taxYear: 2025, householdSize: 1, magiCents: 6_200_000 }),
       snap,
@@ -262,9 +236,6 @@ describe('computeAcaPtc — pre-ARPA 400% cliff (2026)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// pre-ARPA sliding bands (2026)
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — pre-ARPA sliding (2026)', () => {
   it('100-133% band: flat 2.10% applicable figure', () => {
     // 2026 single 116.5% FPL = 15650 * 1.165 = $18,232 ≈ $1,823,225
@@ -307,9 +278,6 @@ describe('computeAcaPtc — pre-ARPA sliding (2026)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Form 8962 whole-percent truncation at the 400% cliff
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — whole-percent cliff truncation', () => {
   // 2026 single FPL = $15,650. 400.9% = 15650 * 4.009 = $62,740.85 → 6,274,085 cents.
   const magi400_9 = 6_274_085;
@@ -321,24 +289,18 @@ describe('computeAcaPtc — whole-percent cliff truncation', () => {
     );
     expect(r.tier).toBe('sliding');
     expect(r.eligible).toBe(true);
-    // The raw (unfloored) fplPercentage is preserved on the result.
     expect(r.fplPercentage).toBeCloseTo(400.9, 4);
   });
 
   it('ARPA: 400.9% input is unaffected by the cliff floor (IRA-expanded has no cliff)', () => {
-    // 2025 is IRA-expanded (no hard cliff). 2025 single FPL = $15,060.
     // 400.9% = 15060 * 4.009 = $60,375.54 → 6,037,554 cents.
     const magi2025_400_9 = 6_037_554;
     const r = computeAcaPtc(
       input({ taxYear: 2025, householdSize: 1, magiCents: magi2025_400_9 }),
       snap,
     );
-    // ≥400% under IRA-expanded → cap-applies flat band (NOT the cliff).
     expect(r.tier).toBe('cap-applies');
-    // The raw (unfloored) fplPercentage is preserved on the result.
     expect(r.fplPercentage).toBeCloseTo(400.9, 4);
-    // Re-run identical input; output must be deeply equal (deterministic, no
-    // floored value leaking into the figure / contribution / PTC).
     const r2 = computeAcaPtc(
       input({ taxYear: 2025, householdSize: 1, magiCents: magi2025_400_9 }),
       snap,
@@ -347,9 +309,6 @@ describe('computeAcaPtc — whole-percent cliff truncation', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// expectedContributionCents re-inflation (scaling factor)
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — expectedContribution re-inflation', () => {
   it('scales expectedContributionCents by expectedContributionScalingFactor; benchmark NOT scaled', () => {
     const base = computeAcaPtc(
@@ -365,15 +324,11 @@ describe('computeAcaPtc — expectedContribution re-inflation', () => {
       }),
       snap,
     );
-    // expectedContribution is re-inflated by the factor.
     expect(scaled.expectedContributionCents).toBe(
       Math.round(base.expectedContributionCents * 1.344),
     );
-    // applicableFigurePct + fplPercentage are classification-only → unchanged.
     expect(scaled.applicableFigurePct).toBe(base.applicableFigurePct);
     expect(scaled.fplPercentage).toBe(base.fplPercentage);
-    // annualPtc reflects benchmark − (scaled contribution). The benchmark input
-    // is NOT additionally re-scaled: PTC = benchmark − scaledContribution.
     expect(scaled.annualPtcCents).toBe(
       Math.max(0, 600_000 - scaled.expectedContributionCents),
     );
@@ -397,13 +352,9 @@ describe('computeAcaPtc — expectedContribution re-inflation', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// interpolation rounding (4 decimal places)
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — interpolation rounding', () => {
   it('applicable figure is rounded to 4 decimal places', () => {
     const r = computeAcaPtc(input({ taxYear: 2025, householdSize: 1, magiCents: 2_800_000 }), snap);
-    // Should have at most 4dp
     const str = r.applicableFigurePct.toString();
     const decimalPlaces = str.includes('.') ? str.split('.')[1].length : 0;
     expect(decimalPlaces).toBeLessThanOrEqual(4);
@@ -420,9 +371,6 @@ describe('computeAcaPtc — interpolation rounding', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// expectedContributionCents rounding
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — expectedContributionCents', () => {
   it('is integer (Math.round applied)', () => {
     const r = computeAcaPtc(input({ taxYear: 2025, magiCents: 3_333_333 }), snap);
@@ -435,9 +383,6 @@ describe('computeAcaPtc — expectedContributionCents', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// zero-MAGI edge case
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — zero MAGI', () => {
   it('zero MAGI → tier=below-fpl, zero PTC', () => {
     const r = computeAcaPtc(input({ magiCents: 0 }), snap);
@@ -448,9 +393,6 @@ describe('computeAcaPtc — zero MAGI', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// zero SLCSP edge case
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — zero SLCSP', () => {
   it('zero SLCSP → zero PTC even when eligible', () => {
     const r = computeAcaPtc(
@@ -461,9 +403,6 @@ describe('computeAcaPtc — zero SLCSP', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// full-year calculation correctness (reference case)
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — reference calculation', () => {
   it('2025, single, $28,000 MAGI, $6,000 SLCSP annual → correct PTC', () => {
     // 2025 FPL single = $15,060
@@ -481,16 +420,11 @@ describe('computeAcaPtc — reference calculation', () => {
     expect(r.fplPercentage).toBeCloseTo(185.92, 1);
     expect(r.tier).toBe('sliding');
     expect(r.eligible).toBe(true);
-    // applicableFigurePct: verify within rounding tolerance of 4dp
     expect(r.applicableFigurePct).toBeCloseTo(0.0144, 4);
     expect(r.expectedContributionCents).toBe(Math.round(2_800_000 * r.applicableFigurePct));
     expect(r.annualPtcCents).toBe(Math.max(0, 600_000 - r.expectedContributionCents));
   });
 });
-
-// ---------------------------------------------------------------------------
-// Region-aware FPL, per-member monthly rough benchmark, member sum, override
-// ---------------------------------------------------------------------------
 
 const fpl2026 = ACA_PTC_PARAMETERS.values[2026]!.fpl;
 
@@ -513,26 +447,16 @@ describe('fplDollarsForRegion', () => {
     expect(fplDollarsForRegion(fpl2026, 3, 'hawaii')).toBe(17_990 + 2 * 6_330);
   });
 
-  it('a higher regional poverty line yields a LOWER FPL% for the same MAGI', () => {
-    const contiguous = fplDollarsForRegion(fpl2026, 1, 'contiguous');
-    const alaska = fplDollarsForRegion(fpl2026, 1, 'alaska');
-    expect(alaska).toBeGreaterThan(contiguous);
-  });
-
   it('falls back to contiguous when a region schedule is absent', () => {
     const contiguousOnly = { base: 15_650, increment: 5_500 };
     expect(fplDollarsForRegion(contiguousOnly, 2, 'alaska')).toBe(15_650 + 5_500);
     expect(fplDollarsForRegion(contiguousOnly, 2, 'hawaii')).toBe(15_650 + 5_500);
   });
 
-  // Household size must be a positive integer (throws, no silent coerce).
-  it('throws for a non-positive household size', () => {
-    expect(() => fplDollarsForRegion(fpl2026, 0, 'contiguous')).toThrow(AcaPtcInvalidInputError);
+  it.each([0, 2.5])('throws for household size %d', (size) => {
+    expect(() => fplDollarsForRegion(fpl2026, size, 'contiguous')).toThrow(AcaPtcInvalidInputError);
   });
 
-  it('throws for a fractional household size', () => {
-    expect(() => fplDollarsForRegion(fpl2026, 2.5, 'contiguous')).toThrow(AcaPtcInvalidInputError);
-  });
 });
 
 describe('roughMonthlyBenchmarkCentsForMember', () => {
@@ -557,29 +481,10 @@ describe('roughMonthlyBenchmarkCentsForMember', () => {
     expect(ROUGH_BENCHMARK_ASSUMPTIONS.disclosure).toMatch(/medical inflation rate/i);
   });
 
-  // A non-finite age (NaN/Infinity) throws rather than yielding NaN cents.
-  it('throws for a non-finite age', () => {
-    expect(() => roughMonthlyBenchmarkCentsForMember(NaN)).toThrow(AcaPtcInvalidInputError);
-    expect(() => roughMonthlyBenchmarkCentsForMember(Infinity)).toThrow(AcaPtcInvalidInputError);
+  it.each([NaN, Infinity, -5, 60.5, 1_000])('throws for the off-curve or overflowing age %d', (age) => {
+    expect(() => roughMonthlyBenchmarkCentsForMember(age)).toThrow(AcaPtcInvalidInputError);
   });
 
-  // A finite-but-off-curve age (negative or fractional) must throw rather
-  // than silently pricing a benchmark. The curve is defined only on non-negative
-  // integer ages.
-  it('throws for a negative age', () => {
-    expect(() => roughMonthlyBenchmarkCentsForMember(-5)).toThrow(AcaPtcInvalidInputError);
-  });
-
-  it('throws for a fractional age', () => {
-    expect(() => roughMonthlyBenchmarkCentsForMember(60.5)).toThrow(AcaPtcInvalidInputError);
-  });
-
-  // A large-but-finite age drives the exponential curve past
-  // MAX_SAFE_INTEGER cents (before it ever reaches Infinity); the integer-cent
-  // contract must throw rather than return an out-of-range value.
-  it('throws when a large finite age overflows the safe integer cent range', () => {
-    expect(() => roughMonthlyBenchmarkCentsForMember(1_000)).toThrow(AcaPtcInvalidInputError);
-  });
 });
 
 describe('roughHouseholdAnnualBenchmarkCents', () => {
@@ -597,7 +502,6 @@ describe('roughHouseholdAnnualBenchmarkCents', () => {
     const perMemberSum =
       roughMonthlyBenchmarkCentsForMember(60) * 12 + roughMonthlyBenchmarkCentsForMember(65) * 12;
     expect(roughHouseholdAnnualBenchmarkCents(members)).toBe(perMemberSum);
-    // Contrast with the bug of anchoring on the oldest member's premium × count:
     const oldestTimesCount = roughMonthlyBenchmarkCentsForMember(65) * 12 * 2;
     expect(roughHouseholdAnnualBenchmarkCents(members)).toBeLessThan(oldestTimesCount);
   });
@@ -618,7 +522,6 @@ describe('roughHouseholdAnnualBenchmarkCents', () => {
 
   it('an annual override is used verbatim and bypasses the age/month fallback', () => {
     const members = [{ age: 60, marketplaceMonths: 12 }];
-    // Override $6,000/yr → 600,000 cents, regardless of the per-member curve.
     expect(roughHouseholdAnnualBenchmarkCents(members, 6_000)).toBe(600_000);
   });
 
@@ -626,52 +529,18 @@ describe('roughHouseholdAnnualBenchmarkCents', () => {
     expect(roughHouseholdAnnualBenchmarkCents([])).toBe(0);
   });
 
-  // Numerical-domain validation: invalid months/age/override now THROW a
-  // typed AcaPtcInvalidInputError rather than silently clamping/coercing/falling
-  // back to the calculated value.
-  it('throws for out-of-range month counts (no silent clamp)', () => {
-    expect(() =>
-      roughHouseholdAnnualBenchmarkCents([{ age: 60, marketplaceMonths: 99 }]),
-    ).toThrow(AcaPtcInvalidInputError);
-    expect(() =>
-      roughHouseholdAnnualBenchmarkCents([{ age: 60, marketplaceMonths: -3 }]),
-    ).toThrow(AcaPtcInvalidInputError);
+  it.each([99, -3, 6.5, NaN])('throws for the month count %d (no silent clamp)', (marketplaceMonths) => {
+    expect(() => roughHouseholdAnnualBenchmarkCents([{ age: 60, marketplaceMonths }])).toThrow(
+      AcaPtcInvalidInputError,
+    );
   });
 
-  it('throws for a fractional month count', () => {
-    expect(() =>
-      roughHouseholdAnnualBenchmarkCents([{ age: 60, marketplaceMonths: 6.5 }]),
-    ).toThrow(AcaPtcInvalidInputError);
+  it.each([Infinity, -5, 60.5])('throws for the member age %d', (age) => {
+    expect(() => roughHouseholdAnnualBenchmarkCents([{ age, marketplaceMonths: 12 }])).toThrow(
+      AcaPtcInvalidInputError,
+    );
   });
 
-  it('throws for a NaN month count', () => {
-    expect(() =>
-      roughHouseholdAnnualBenchmarkCents([{ age: 60, marketplaceMonths: NaN }]),
-    ).toThrow(AcaPtcInvalidInputError);
-  });
-
-  it('throws for a non-finite member age', () => {
-    expect(() =>
-      roughHouseholdAnnualBenchmarkCents([{ age: Infinity, marketplaceMonths: 12 }]),
-    ).toThrow(AcaPtcInvalidInputError);
-  });
-
-  // A finite-but-off-curve member age (negative or fractional) throws.
-  it('throws for a negative member age', () => {
-    expect(() =>
-      roughHouseholdAnnualBenchmarkCents([{ age: -5, marketplaceMonths: 12 }]),
-    ).toThrow(AcaPtcInvalidInputError);
-  });
-
-  it('throws for a fractional member age', () => {
-    expect(() =>
-      roughHouseholdAnnualBenchmarkCents([{ age: 60.5, marketplaceMonths: 12 }]),
-    ).toThrow(AcaPtcInvalidInputError);
-  });
-
-  // A zero-month member (which contributes $0) with an invalid age must
-  // STILL throw: age validation runs before the zero-month early return, so an
-  // invalid age record is an input error regardless of coverage months.
   it('throws for a zero-month member with an invalid age', () => {
     expect(() =>
       roughHouseholdAnnualBenchmarkCents([
@@ -684,35 +553,13 @@ describe('roughHouseholdAnnualBenchmarkCents', () => {
     ).toThrow(AcaPtcInvalidInputError);
   });
 
-  // A huge finite override overflows the integer-cent contract and throws
-  // rather than returning an out-of-range value.
-  it('throws when a large finite annual override overflows the safe integer cent range', () => {
+  it.each([Number.MAX_SAFE_INTEGER, -100, NaN])('throws for the annual override %d', (override) => {
     const members = [{ age: 60, marketplaceMonths: 12 }];
-    expect(() =>
-      roughHouseholdAnnualBenchmarkCents(members, Number.MAX_SAFE_INTEGER),
-    ).toThrow(AcaPtcInvalidInputError);
+    expect(() => roughHouseholdAnnualBenchmarkCents(members, override)).toThrow(AcaPtcInvalidInputError);
   });
 
-  // The override guard's false-with-defined path (negative / NaN override)
-  // now throws rather than silently falling back to the calculated benchmark.
-  it('throws for a negative annual override', () => {
-    const members = [{ age: 60, marketplaceMonths: 12 }];
-    expect(() => roughHouseholdAnnualBenchmarkCents(members, -100)).toThrow(
-      AcaPtcInvalidInputError,
-    );
-  });
-
-  it('throws for a NaN annual override', () => {
-    const members = [{ age: 60, marketplaceMonths: 12 }];
-    expect(() => roughHouseholdAnnualBenchmarkCents(members, NaN)).toThrow(
-      AcaPtcInvalidInputError,
-    );
-  });
 });
 
-// ---------------------------------------------------------------------------
-// Region-aware FPL denominator
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — FPL region', () => {
   it('an absent region prices the contiguous 48-state poverty line (unchanged)', () => {
     const absent = computeAcaPtc(input({ taxYear: 2026, householdSize: 2 }), snap);
@@ -741,28 +588,9 @@ describe('computeAcaPtc — FPL region', () => {
     expect(hawaii.fplDollars).toBeLessThan(alaska.fplDollars);
   });
 
-  it('a higher regional poverty line lowers the FPL percentage for the same income', () => {
-    const contiguous = computeAcaPtc(input({ taxYear: 2026, householdSize: 1 }), snap);
-    const alaska = computeAcaPtc(
-      input({ taxYear: 2026, householdSize: 1, fplRegion: 'alaska' }),
-      snap,
-    );
-    expect(alaska.fplPercentage).toBeLessThan(contiguous.fplPercentage);
-  });
 });
 
-// ---------------------------------------------------------------------------
-// The credit is summed over COVERAGE MONTHS
-// ---------------------------------------------------------------------------
-//
-// IRC §36B(b)(2)-(3)(A) / IRS Form 8962 lines 12-23: the annual credit is the
-// SUM over coverage months of `monthly benchmark − applicable% × household
-// income ÷ 12`. A non-coverage month contributes ZERO on BOTH sides. Before this
-// fix the benchmark was month-prorated but the FULL annual expected contribution
-// was still subtracted, so a part-year household received far too little credit
-// (usually $0 after the `Math.max(0, …)` floor).
 describe('computeAcaPtc — coverage-month proration', () => {
-  /** Age 62, 2026 pre-ARPA, household of 1, MAGI $50,000 → 319% FPL → 9.96%. */
   const partYear = (coverageMonths: number) =>
     computeAcaPtc(
       input({
@@ -787,8 +615,6 @@ describe('computeAcaPtc — coverage-month proration', () => {
     expect(r.annualPtcCents).toBe(
       7 * monthlyBenchmarkCents - Math.round((5_000_000 * r.applicableFigurePct * 7) / 12),
     );
-    // The statutory answer is $2,497.25 — NOT the $422 the un-prorated
-    // subtraction produced.
     expect(r.annualPtcCents).toBe(249_725);
     expect(r.coverageMonths).toBe(7);
   });

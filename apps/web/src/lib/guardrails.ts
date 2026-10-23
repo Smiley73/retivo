@@ -37,7 +37,7 @@ export const DEFAULT_GUARDRAIL_CONFIG: GuardrailConfig = {
  * Conservative bond-like real discount rate per year for the funded-ratio liability, not the scenario's equity-tilted
  * return, so the ratio does not under-cut in the early-sequence tail the guardrail protects.
  */
-export const GUARDRAIL_LIABILITY_REAL_RATE = 0.01;
+const GUARDRAIL_LIABILITY_REAL_RATE = 0.01;
 
 /**
  * Effective-tax gross-up proxy: the liability is divided by `(1 − this)` to reflect pre-tax withdrawals funding after-tax
@@ -73,7 +73,7 @@ export function isGuardrailConfigValid(cfg: {
 }
 
 /** Inputs to a single-year funded-ratio computation; dollar figures are nominal and the helper deflates both legs by the path's cumulative CPI. */
-export interface FundedRatioInput {
+interface FundedRatioInput {
   readonly portfolioNominal: number;
   readonly portfolioCumCpi: number;
   /**

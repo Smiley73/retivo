@@ -17,7 +17,7 @@ export function deemedFilingEligible(
 }
 
 /** RIB-LIM floor fraction (POMS RS 00615.320): a widow(er) benefit is capped at the larger of the deceased's actual reduced benefit and this share of the PIA. */
-export const RIB_LIM_PIA_FRACTION = 0.825;
+const RIB_LIM_PIA_FRACTION = 0.825;
 
 /** Statutory spousal fraction (42 USC 402(b)/(c)): 50% of the worker's PIA; the dual-entitlement excess is `max(0, fraction × workerPIA − recipientPIA)`. */
 export const SPOUSAL_PIA_FRACTION = 0.5;
@@ -57,7 +57,7 @@ function survivorStartMonthIdx(
 }
 
 /** First month0 of `year` the survivor benefit is payable: 0 after the start year, the start month0 in it, 12 (none) before it, and 0 when withheld. */
-export function survivorStartMonth0(
+function survivorStartMonth0(
   survivor: SurvivorMember,
   deceased: DeceasedMember,
   year: number,

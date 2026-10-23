@@ -1,21 +1,15 @@
-/**
- * Unit tests for the tax-integration layer.
- */
 import { describe, it, expect } from 'vitest';
 import {
   dollarsToCents,
   centsToDollars,
-  resolveSnapshotYear,
-  resolveAssumedYieldComponents,
-  buildScaledFederalTaxConfig,
   isRothAccount,
-  computeMagi,
   applyTaxYear,
   applyTaxYearForFilingPlan,
   computeRmdFloorCents,
   TaxIntegrationInvalidInputError,
   friendlyProjectionErrorMessage,
 } from './tax-integration';
+import { computeMagi, resolveAssumedYieldComponents, resolveSnapshotYear } from './tax-integration-helpers';
 import { roughMonthlyBenchmarkCentsForMember } from './aca-ptc';
 import type {
   ApplyFilingPlanYearInput,
@@ -36,10 +30,6 @@ import { ACA_PTC_PARAMETERS } from './aca-ptc-parameters';
 import { RMD_DIVISORS } from './rmd-divisors';
 import { DEFAULT_ASSUMED_TAXABLE_YIELD_CONFIG } from './assumed-taxable-yield-config';
 
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
-
 const REAL_BUNDLE: TaxCalibrationBundle = {
   federalTax: FEDERAL_TAX_CONFIG,
   ssTax: SS_TAX_THRESHOLDS,
@@ -49,7 +39,6 @@ const REAL_BUNDLE: TaxCalibrationBundle = {
   assumedTaxableYield: DEFAULT_ASSUMED_TAXABLE_YIELD_CONFIG,
 };
 
-/** Minimal single-member, no-SS, no-RMD input for 2024. */
 function baseInput(overrides: Partial<TaxYearInput> = {}): TaxYearInput {
   const member: TaxMemberInput = {
     memberId: 'test-primary',
@@ -74,15 +63,8 @@ function baseInput(overrides: Partial<TaxYearInput> = {}): TaxYearInput {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Friendly error mapping
-// ---------------------------------------------------------------------------
-
 describe('friendlyProjectionErrorMessage', () => {
-  // There is no withdrawal-strategy ⨯ allocation conflict (allocation works with
-  // every strategy), so there is no longer a
-  // recognised configuration conflict to translate; the mapper returns null for
-  // everything and callers fall back to the raw error message.
+  // The mapper returns null for everything (no withdrawal-strategy ⨯ allocation conflict remains), so callers fall back to the raw error message.
   it('returns null for a generic TaxIntegrationInvalidInputError', () => {
     expect(
       friendlyProjectionErrorMessage(new TaxIntegrationInvalidInputError('birthdate missing')),
@@ -95,10 +77,6 @@ describe('friendlyProjectionErrorMessage', () => {
     expect(friendlyProjectionErrorMessage(undefined)).toBeNull();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Unit helpers
-// ---------------------------------------------------------------------------
 
 describe('dollarsToCents', () => {
   it('converts whole dollars', () => {
@@ -125,10 +103,6 @@ describe('centsToDollars', () => {
     expect(centsToDollars(0)).toBe(0);
   });
 });
-
-// ---------------------------------------------------------------------------
-// resolveSnapshotYear
-// ---------------------------------------------------------------------------
 
 describe('resolveSnapshotYear', () => {
   const snapshot: CalibrationSnapshot<unknown> = {
@@ -173,10 +147,6 @@ describe('resolveSnapshotYear', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// isRothAccount
-// ---------------------------------------------------------------------------
-
 describe('isRothAccount', () => {
   it('returns true for RETIREMENT_ROTH_IRA', () => {
     expect(isRothAccount({ type: 'RETIREMENT_ROTH_IRA' })).toBe(true);
@@ -190,10 +160,6 @@ describe('isRothAccount', () => {
     expect(isRothAccount({ type: 'BROKERAGE' })).toBe(false);
   });
 });
-
-// ---------------------------------------------------------------------------
-// computeMagi
-// ---------------------------------------------------------------------------
 
 describe('computeMagi', () => {
   it('sums ordinary income + LTCG + tax-exempt interest', () => {
@@ -221,35 +187,8 @@ describe('computeMagi', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Rough age-priced benchmark curve (the live curve is the per-member MONTHLY one)
-// ---------------------------------------------------------------------------
-
-/** The annual whole-year premium for one member at `age`, off the live curve. */
 const annualBenchmarkForAge = (age: number): number =>
   (roughMonthlyBenchmarkCentsForMember(age) * 12) / 100;
-
-describe('rough age-priced benchmark curve', () => {
-  it('returns $8,400/yr at age 60 (base)', () => {
-    expect(annualBenchmarkForAge(60)).toBeCloseTo(8_400, 0);
-  });
-
-  it('grows 5% per year of age above 60', () => {
-    expect(annualBenchmarkForAge(61)).toBeCloseTo(8_400 * 1.05, 1);
-  });
-
-  it('age 65 benchmark is higher than age 60', () => {
-    expect(annualBenchmarkForAge(65)).toBeGreaterThan(annualBenchmarkForAge(60));
-  });
-
-  it('age 55 benchmark is lower than age 60 (decay below base)', () => {
-    expect(annualBenchmarkForAge(55)).toBeLessThan(annualBenchmarkForAge(60));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// applyTaxYear — happy paths
-// ---------------------------------------------------------------------------
 
 describe('applyTaxYear', () => {
   describe('zero-income baseline', () => {
@@ -269,7 +208,6 @@ describe('applyTaxYear', () => {
   describe('federal tax engine wired', () => {
     it('computes non-zero federal tax on $50k pre-tax withdrawal Single 2024', () => {
       const result = applyTaxYear(baseInput(), REAL_BUNDLE);
-      // $50k pre-tax single — expect tax >$0 and < $15k
       expect(result.federalTaxCents).toBeGreaterThan(0);
       expect(result.federalTaxCents).toBeLessThan(15_000 * 100);
     });
@@ -289,7 +227,6 @@ describe('applyTaxYear', () => {
 
   describe('SS taxation wired (order)', () => {
     it('taxableSsCents is zero when grossSsDollars is zero', () => {
-      // Even if the §86 tier logic fires (PI above threshold), 0 × rate = 0
       const result = applyTaxYear(baseInput({ grossSsDollars: 0 }), REAL_BUNDLE);
       expect(result.taxableSsCents).toBe(0);
     });
@@ -304,7 +241,6 @@ describe('applyTaxYear', () => {
       );
       expect(result.ssTaxationTier).toBe('eighty-five');
       expect(result.taxableSsCents).toBeGreaterThan(0);
-      // taxable SS must be ≤ 85% of gross SS
       expect(result.taxableSsCents).toBeLessThanOrEqual(dollarsToCents(24_000 * 0.85) + 1);
     });
 
@@ -314,7 +250,6 @@ describe('applyTaxYear', () => {
         baseInput({ grossSsDollars: 24_000, preTaxWithdrawalDollars: 50_000 }),
         REAL_BUNDLE,
       );
-      // MAGI should be higher when SS benefits are present (taxable portion included)
       expect(withSs.magiCents).toBeGreaterThan(noSs.magiCents);
     });
   });
@@ -346,7 +281,6 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // All cost basis → no LTCG → federal tax ≈ 0 (ordinary income = 0)
       expect(result.federalTaxCents).toBe(0);
     });
 
@@ -390,7 +324,6 @@ describe('applyTaxYear', () => {
     });
 
     it('IRMAA applies a non-zero surcharge for Medicare member with high prior MAGI', () => {
-      // Single with $200k MAGI 2-years prior → above tier1 threshold
       const result = applyTaxYear(
         baseInput({
           members: [{ memberId: 'test-primary', isoBirthdate: '1950-01-01', onMedicare: true, hasAcaCoverage: false }],
@@ -415,10 +348,7 @@ describe('applyTaxYear', () => {
     });
 
     it('inflation extrapolation — MAGI just above 2026 tier1 but below inflation-adjusted tier1 does not trigger IRMAA', () => {
-      // 2026 Single tier-1 = $109,000. At 2.5% inflation for 4 years (taxYear 2030),
-      // the effective threshold is $109,000 × (1.025)^4 ≈ $120,315.
-      // A look-back MAGI of $115,000 (above the raw 2026 threshold but below
-      // the inflation-adjusted threshold) should NOT trigger IRMAA.
+      // 2026 Single tier-1 = $109,000; at 2.5% inflation for 4 years (taxYear 2030) the effective threshold is $109,000 × 1.025^4 ≈ $120,315, so a $115,000 look-back (above the raw threshold, below the adjusted one) must NOT trigger IRMAA.
       const result = applyTaxYear(
         baseInput({
           taxYear: 2030,
@@ -449,16 +379,11 @@ describe('applyTaxYear', () => {
     });
 
     it('OUTPUT surcharge cents re-inflate by thresholdScalingFactor; tier classification unchanged', () => {
-      // taxYear 2036 @3% inflation: latest IRMAA snapshot key is 2026, so
-      // thresholdScalingFactor = 1.03^10 ≈ 1.34392. The MAGI look-back is
-      // deflated for tier classification; the surcharge DOLLARS must be
-      // re-inflated by that same factor.
+      // taxYear 2036 @3%: the latest IRMAA key is 2026, so thresholdScalingFactor = 1.03^10 ≈ 1.34392; the MAGI look-back is deflated for tier classification, and the surcharge dollars re-inflate by the same factor.
       const taxYear = 2036;
       const inflationRatePct = 3;
       const scaling = Math.pow(1.03, taxYear - 2026);
-      // Pick a deflated-MAGI that lands cleanly in the SAME tier as the 2026
-      // frozen computation so we can compare the dollars directly. Use a high
-      // MAGI well inside tier4 to avoid boundary ambiguity after deflation.
+      // A deflated MAGI well inside tier4 lands in the same tier as the frozen 2026 computation, avoiding boundary ambiguity.
       const lookbackMagi = 500_000 * scaling; // deflates back to $500k
       const result = applyTaxYear(
         baseInput({
@@ -469,7 +394,6 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // Frozen 2026 surcharge for the SAME deflated MAGI (no scaling applied).
       const frozen2026 = computeIrmaa(
         {
           taxYear: 2026,
@@ -483,9 +407,7 @@ describe('applyTaxYear', () => {
       expect(result.irmaaSurchargeCents).toBe(
         Math.round(frozen2026.totalHouseholdAnnualCents * scaling),
       );
-      // Tier classification is unchanged by the re-inflation (no double-deflation).
       expect(result.irmaaTier).toBe(frozen2026.tier);
-      // The scaled dollars are strictly larger than the frozen 2026 dollars.
       expect(result.irmaaSurchargeCents).toBeGreaterThan(
         frozen2026.totalHouseholdAnnualCents,
       );
@@ -515,7 +437,6 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // Should compute some PTC (eligible range)
       expect(result.acaPtcTier).not.toBe('below-fpl');
       expect(result.fplPercentage).toBeGreaterThan(0);
     });
@@ -539,17 +460,11 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // Different benchmark → different PTC
       expect(withOverride.acaPtcSubsidyCents).not.toBe(withFormula.acaPtcSubsidyCents);
     });
 
     it('default SLCSP is the per-member age-priced month sum; the override bypasses it', () => {
-      // Spouse-only-on-ACA household: primary younger and NOT on ACA; the
-      // covered spouse is older. The default benchmark must be priced off the
-      // COVERED member's own age (the primary contributes $0 — zero covered
-      // months), and the override must bypass that fallback. An "oldest covered
-      // member's annual premium × covered count" rule would agree here, because
-      // there is only one covered member; the per-member sum is what is pinned.
+      // Spouse-only-on-ACA household: the default benchmark must be priced off the covered spouse's own age (the primary has zero covered months) and the override must bypass it.
       const members = [
         { memberId: 'primary', isoBirthdate: '1973-01-01', onMedicare: false, hasAcaCoverage: false },
         { memberId: 'spouse', isoBirthdate: '1960-01-01', onMedicare: false, hasAcaCoverage: true },
@@ -575,25 +490,16 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // Default benchmark = the ONE covered member (spouse, age 64 in 2024)
-      // priced off their own age, 12 covered months.
-      // Expected PTC = max(0, benchmark − expectedContribution).
+      // Default benchmark = the one covered member (spouse, age 64 in 2024) priced off their own age, 12 months; expected PTC = max(0, benchmark − expectedContribution).
       const coveredSpouseAge = 2024 - 1960;
       const expectedDefaultBenchmark = annualBenchmarkForAge(coveredSpouseAge); // 1 covered
-      // Both produce eligible (non-below-fpl) results; the benchmark differs, so
-      // the PTC subsidy differs → the override is NOT the default formula.
+      // The benchmark differs, so the PTC differs: the override is not the default formula.
       expect(withDefault.acaPtcTier).not.toBe('below-fpl');
       expect(withOverride.acaPtcSubsidyCents).not.toBe(withDefault.acaPtcSubsidyCents);
-      // Sanity: the default benchmark is age-driven (the covered member's own
-      // age), confirmed by the fact that changing the override changes the PTC.
       expect(expectedDefaultBenchmark).toBeGreaterThan(0);
     });
 
-    // The MIRROR of the fallback case above. The editor collects a
-    // WHOLE-YEAR benchmark price, but §36B(b)(2) sums the credit over coverage
-    // months, so the override must be prorated by the SAME month count the
-    // expected contribution is. This case combines coverage months with an
-    // override.
+    // The mirror of the fallback case: the editor collects a whole-year benchmark price, but §36B(b)(2) sums the credit over coverage months, so the override must be prorated by the same month count as the expected contribution.
     it('a whole-year benchmark override is prorated to the household coverage months', () => {
       const member = (marketplaceCoverageMonths: number): TaxMemberInput => ({
         memberId: 'test-primary',
@@ -621,24 +527,20 @@ describe('applyTaxYear', () => {
       expect(fullYear.acaPtcSubsidyCents).toBeGreaterThan(0);
       const annualContributionCents = overrideCents - fullYear.acaPtcSubsidyCents;
 
-      // 7 covered months: BOTH sides are prorated over the same range, so the
-      // credit is `round(B × 7/12) − round(C × 7/12)`.
+      // 7 covered months: both sides are prorated, so the credit is round(B × 7/12) − round(C × 7/12).
       const proratedBenchmarkCents = Math.round((overrideCents * 7) / 12);
       const proratedContributionCents = Math.round((annualContributionCents * 7) / 12);
       expect(partYear.acaPtcSubsidyCents).toBe(
         proratedBenchmarkCents - proratedContributionCents,
       );
 
-      // Self-verifying against the defect: leaving the override at its full
-      // 12-month value while prorating only the contribution credits
-      // `12·B − 7·C`, which over-states the subsidy by `(12 − 7) × B/12`.
+      // Leaving the override at its full 12-month value while prorating only the contribution credits 12·B − 7·C, over-stating the subsidy by (12 − 7) × B/12.
       const defectiveCents = overrideCents - proratedContributionCents;
       expect(defectiveCents - partYear.acaPtcSubsidyCents).toBe(
         overrideCents - proratedBenchmarkCents,
       );
       expect(defectiveCents).toBeGreaterThan(partYear.acaPtcSubsidyCents);
 
-      // Equivalently: the part-year credit is 7/12 of the full-year credit.
       expect(partYear.acaPtcSubsidyCents).toBeCloseTo(
         (fullYear.acaPtcSubsidyCents * 7) / 12,
         -1,
@@ -657,10 +559,7 @@ describe('applyTaxYear', () => {
     });
 
     it('ACA opt-out changes ONLY the SLCSP/PTC — MAGI, taxable SS, §86 tier are invariant', () => {
-      // Spouse-and-primary both on ACA. Opting the YOUNGER member out (flipping
-      // hasAcaCoverage false — the engine's view of the deterministic opt-out)
-      // must change only the household benchmark + PTC; every MAGI path and the
-      // §86 SS-taxation result stay identical (the tax family is unchanged).
+      // Opting the younger member out (hasAcaCoverage false) changes only the household benchmark and PTC; every MAGI path and the §86 SS-taxation result stay identical.
       const grossSs = 30_000;
       const both = [
         { memberId: 'primary', isoBirthdate: '1962-01-01', onMedicare: false, hasAcaCoverage: true },
@@ -682,13 +581,11 @@ describe('applyTaxYear', () => {
         baseInput({ ...args, members: youngerOptedOut }),
         REAL_BUNDLE,
       );
-      // Invariant: every MAGI / SS-taxation field unchanged.
       expect(optedOut.magiCents).toBe(baseline.magiCents);
       expect(optedOut.taxableSsCents).toBe(baseline.taxableSsCents);
       expect(optedOut.ssTaxationTier).toBe(baseline.ssTaxationTier);
       expect(optedOut.federalTaxCents).toBe(baseline.federalTaxCents);
       expect(optedOut.irmaaSurchargeCents).toBe(baseline.irmaaSurchargeCents);
-      // Changed: the covered set shrinks 2 → 1, so the benchmark + PTC shrink.
       expect(baseline.acaPtcSubsidyCents).toBeGreaterThan(0);
       expect(optedOut.acaPtcSubsidyCents).toBeLessThan(baseline.acaPtcSubsidyCents);
     });
@@ -716,7 +613,6 @@ describe('applyTaxYear', () => {
   });
 
   describe('RMD computation (independent pre-pass)', () => {
-
     it('rmdFloorCents > 0 for member at RMD trigger age (73+)', () => {
       // Born 1951 → trigger age 73 → in 2024 is age 73 ✓
       const accounts: TaxAccountSnapshot[] = [
@@ -741,7 +637,6 @@ describe('applyTaxYear', () => {
       expect(result.rmdFloorCents).toBeGreaterThan(1_000_000);
       expect(result.rmdPerAccountCents['ira1']).toBeGreaterThan(0);
     });
-
   });
 
   describe('rmdApplicable trigger-age signal', () => {
@@ -801,7 +696,6 @@ describe('applyTaxYear', () => {
         REAL_BUNDLE,
       );
       expect(result.taxYearExtrapolated).toBe(true);
-      // Should still produce a valid (non-zero) tax estimate
       expect(result.federalTaxCents).toBeGreaterThan(0);
     });
 
@@ -810,10 +704,6 @@ describe('applyTaxYear', () => {
       expect(result.taxYearExtrapolated).toBe(false);
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // Cash-like POST_TAX withdrawals excluded from LTCG + MAGI
-  // ---------------------------------------------------------------------------
 
   describe('postTaxCashLikeWithdrawalDollars excluded from LTCG + MAGI', () => {
     it('cash-like withdrawal contributes $0 to LTCG and $0 to MAGI', () => {
@@ -826,7 +716,6 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // No LTCG, no ordinary income → MAGI = 0, federal tax = 0.
       expect(result.magiCents).toBe(0);
       expect(result.federalTaxCents).toBe(0);
     });
@@ -862,15 +751,9 @@ describe('applyTaxYear', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Federal threshold inflation extrapolation for future years
-  // ---------------------------------------------------------------------------
-
   describe('federal bracket/deduction inflation extrapolation', () => {
     it('scales federal thresholds + deductions by inflation for a post-2026 year', () => {
-      // Same nominal income; a far-future year with positive inflation scales
-      // the brackets + standard deduction upward → lower federal tax than the
-      // frozen latest-year (2026) table would produce.
+      // A far-future year with positive inflation scales brackets and the standard deduction upward, so the same nominal income owes less than the frozen 2026 table gives.
       const latest = applyTaxYear(
         baseInput({ taxYear: 2026, preTaxWithdrawalDollars: 120_000, inflationRatePct: 3 }),
         REAL_BUNDLE,
@@ -881,7 +764,6 @@ describe('applyTaxYear', () => {
       );
       expect(future.taxYearExtrapolated).toBe(true);
       expect(latest.taxYearExtrapolated).toBe(false);
-      // Wider brackets + bigger deduction → strictly less tax on the same income.
       expect(future.federalTaxCents).toBeLessThan(latest.federalTaxCents);
     });
 
@@ -893,48 +775,11 @@ describe('applyTaxYear', () => {
       expect(result.taxYearExtrapolated).toBe(true);
       expect(result.federalTaxCents).toBeGreaterThan(0);
     });
-
-    it('buildScaledFederalTaxConfig rounds ordinary floors DOWN status-aware ($25/$50), LTCG down to $50, deductions to nearest $50', () => {
-      const base = FEDERAL_TAX_CONFIG.values[2026];
-      const factor = 1.0935; // arbitrary non-round factor to force rounding
-      const scaled = buildScaledFederalTaxConfig(base, factor);
-      // First ordinary floor stays 0; a non-zero Single floor rounds DOWN to $25
-      // (IRC §1(f)(7); MFJ/HoH/QSS use $50, Single/MFS stay $25 — see federal-tax-extrapolation.test.ts).
-      expect(scaled.brackets.Single[0].floor).toBe(0);
-      expect(scaled.brackets.Single[1].floor).toBe(
-        Math.floor((base.brackets.Single[1].floor * factor) / 25) * 25,
-      );
-      // MFJ ordinary floor rounds DOWN to $50 ($50-granularity table; §1(f)(7)).
-      expect(scaled.brackets.MFJ[1].floor).toBe(
-        Math.floor((base.brackets.MFJ[1].floor * factor) / 50) * 50,
-      );
-      // Standard deduction scaled + rounded to the nearest $50.
-      expect(scaled.standardDeduction.MFJ).toBe(
-        Math.round((base.standardDeduction.MFJ * factor) / 50) * 50,
-      );
-      // Age-65 add-on scaled + rounded to the nearest $50.
-      expect(scaled.age65AddOn.mfj).toBe(
-        Math.round((base.age65AddOn.mfj * factor) / 50) * 50,
-      );
-      // LTCG floor rounds DOWN to $50 (§1(j)(5)(C)).
-      expect(scaled.ltcgBrackets.Single[1].floor).toBe(
-        Math.floor((base.ltcgBrackets.Single[1].floor * factor) / 50) * 50,
-      );
-      // NIIT thresholds FROZEN (not scaled).
-      expect(scaled.niitThresholds.Single).toBe(base.niitThresholds.Single);
-      expect(scaled.niitThresholds.MFJ).toBe(base.niitThresholds.MFJ);
-    });
   });
-
-  // ---------------------------------------------------------------------------
-  // ACA FPL inflation extrapolation (deflate MAGI by the factor)
-  // ---------------------------------------------------------------------------
 
   describe('ACA FPL inflation extrapolation', () => {
     it('deflates the FPL-comparison MAGI by the inflation factor for a far-future year', () => {
-      // Same nominal MAGI: at a far-future year the FPL bands are effectively
-      // inflated (MAGI deflated), so fplPercentage is LOWER than if the raw
-      // latest-year FPL were used. Consistent with IRMAA's MAGI-deflation.
+      // At a far-future year the FPL bands are effectively inflated (MAGI deflated), so fplPercentage is lower than with the raw latest-year FPL; consistent with IRMAA's MAGI deflation.
       const member: TaxMemberInput = {
         memberId: 'aca-primary',
         isoBirthdate: '1975-01-01',
@@ -962,7 +807,6 @@ describe('applyTaxYear', () => {
         REAL_BUNDLE,
       );
       expect(far.taxYearExtrapolated).toBe(true);
-      // Deflated MAGI compares against the same bands → lower FPL%.
       expect(far.fplPercentage).toBeLessThan(near.fplPercentage);
       expect(far.fplPercentage).toBeGreaterThan(0);
     });
@@ -970,7 +814,6 @@ describe('applyTaxYear', () => {
 
   describe('MAGI output', () => {
     it('magiCents includes taxable SS', () => {
-      // High income SS case → taxable SS portion adds to MAGI
       const result = applyTaxYear(
         baseInput({
           grossSsDollars: 24_000,
@@ -978,7 +821,6 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // MAGI should be > pre-tax withdrawal alone
       expect(result.magiCents).toBeGreaterThan(dollarsToCents(80_000));
     });
 
@@ -1034,16 +876,13 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // Both should have surcharge > 0
       expect(one.irmaaSurchargeCents).toBeGreaterThan(0);
-      // Two beneficiaries should pay exactly twice
       expect(two.irmaaSurchargeCents).toBe(one.irmaaSurchargeCents * 2);
     });
   });
 
   describe('custom minimal bundle (isolation)', () => {
     it('works with a custom SS-only bundle slice that forces no-SS tier', () => {
-      // Inject a real SS snapshot but a real federal-tax bundle with forced minimal income
       const result = applyTaxYear(
         baseInput({
           grossSsDollars: 0,
@@ -1054,10 +893,6 @@ describe('applyTaxYear', () => {
       expect(result.ssTaxationTier).toBe('none');
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // SS taxation tier thresholds (additional coverage)
-  // ---------------------------------------------------------------------------
 
   describe('SS taxation tier boundaries', () => {
     it('tier is none when provisional income is well below Single threshold', () => {
@@ -1095,10 +930,6 @@ describe('applyTaxYear', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // otherOrdinaryIncomeDollars wired into MAGI and federal tax
-  // ---------------------------------------------------------------------------
-
   describe('otherOrdinaryIncomeDollars', () => {
     it('increases MAGI when added', () => {
       const without = applyTaxYear(baseInput({ otherOrdinaryIncomeDollars: 0 }), REAL_BUNDLE);
@@ -1130,10 +961,6 @@ describe('applyTaxYear', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // LTCG proxy edge cases
-  // ---------------------------------------------------------------------------
-
   describe('LTCG proxy edge cases', () => {
     it('0% cost basis fraction → all POST_TAX withdrawal is LTCG', () => {
       const result = applyTaxYear(
@@ -1144,9 +971,7 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // Entire $50k is LTCG → MAGI = $50k (no ordinary income, only LTCG)
-      // Federal tax: LTCG portion taxed at 0%/15%/20% rate
-      // At low income, 0% LTCG rate → federal tax = 0
+      // The entire $50k is LTCG → MAGI = $50k; at a low income the 0% LTCG rate leaves federal tax at 0.
       expect(result.magiCents).toBeGreaterThan(0);
     });
 
@@ -1172,14 +997,9 @@ describe('applyTaxYear', () => {
         baseInput({ preTaxWithdrawalDollars: 50_000, rothWithdrawalDollars: 100_000 }),
         REAL_BUNDLE,
       );
-      // Federal tax identical: Roth doesn't change tax
       expect(withRoth.federalTaxCents).toBe(preTaxOnly.federalTaxCents);
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // IRMAA tier levels
-  // ---------------------------------------------------------------------------
 
   describe('IRMAA tier levels', () => {
     it('tier1 at moderate MAGI above threshold (Single ~$103k–$129k in 2024)', () => {
@@ -1211,13 +1031,11 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // Higher MAGI → higher tier → higher surcharge
       expect(higherResult.irmaaSurchargeCents).toBeGreaterThan(tier1Result.irmaaSurchargeCents);
     });
 
     it('MFJ IRMAA threshold is roughly double the Single threshold', () => {
-      // Single tier1 ≈ $103k; MFJ tier1 ≈ $206k → same $110k MAGI clears Single
-      // but falls below MFJ threshold
+      // Single tier1 ≈ $103k; MFJ tier1 ≈ $206k: the same $110k MAGI clears Single but not MFJ.
       const single = applyTaxYear(
         baseInput({
           members: [{ memberId: 'test-primary', isoBirthdate: '1950-01-01', onMedicare: true, hasAcaCoverage: false }],
@@ -1234,15 +1052,10 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // Single triggers tier1; MFJ at same MAGI likely stays 'none'
       expect(single.irmaaTier).not.toBe('none');
       expect(mfj.irmaaTier).toBe('none');
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // ACA PTC tier levels
-  // ---------------------------------------------------------------------------
 
   describe('ACA PTC tier levels', () => {
     it('above-400-cliff tier when income well above 400% FPL', () => {
@@ -1256,9 +1069,7 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // Above 400% FPL → subsidyCents = 0 (cliff effect pre-2022 law)
-      // Under ARPA 2021 extension (if tables reflect it), cap may not apply
-      // Either way: verify tier is not 'below-fpl'
+      // Above 400% FPL the credit is 0 (pre-2022 cliff); under ARPA/IRA the cap may not apply. Either way the tier is not below-fpl.
       expect(result.fplPercentage).toBeGreaterThan(100);
     });
 
@@ -1294,12 +1105,7 @@ describe('applyTaxYear', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // RMD per-account breakdown
-  // ---------------------------------------------------------------------------
-
   describe('RMD per-account breakdown', () => {
-
     it('rmdFloorCents equals sum of rmdPerAccountCents values', () => {
       const accounts: TaxAccountSnapshot[] = [
         {
@@ -1330,12 +1136,7 @@ describe('applyTaxYear', () => {
       const sum = Object.values(result.rmdPerAccountCents).reduce((a, b) => a + b, 0);
       expect(result.rmdFloorCents).toBe(sum);
     });
-
   });
-
-  // ---------------------------------------------------------------------------
-  // Unit helpers — additional edge cases
-  // ---------------------------------------------------------------------------
 
   describe('dollarsToCents — additional', () => {
     it('handles negative dollars', () => {
@@ -1361,11 +1162,7 @@ describe('applyTaxYear', () => {
         metadata: { source: 't', asOfDate: '2024-01-01', jurisdiction: 'US-federal' as const },
       };
       const r = resolveSnapshotYear(sparse, 2020);
-      // 2020 < 2024: still need the highest key ≤ 2020, but there is none
-      // → resolved = keys[0] = 2024 (loop never increments resolved above 2024)
-      // Actually resolveSnapshotYear sets resolved = keys[0] = 2024 since
-      // no key <= 2020 passes the 'if (k <= taxYear)' check — resolved
-      // remains keys[0]
+      // 2020 < 2024 and no key ≤ 2020 exists, so resolved stays keys[0] = 2024.
       expect(r.effectiveYear).toBe(2024);
       expect(r.taxYearExtrapolated).toBe(false);
     });
@@ -1389,9 +1186,7 @@ describe('applyTaxYear', () => {
     });
 
     it('thresholdScalingFactor scales IRMAA threshold forward when extrapolating', () => {
-      // 2026 IRMAA Single tier-1 = $109,000; taxYear = 2030 at 2.5% inflation
-      // Expected scaling: (1.025)^4 ≈ 1.10381; adjusted threshold ≈ $120,315
-      // A look-back MAGI of $115,000 deflated: $115,000 / 1.10381 ≈ $104,182 < $109,000 → no IRMAA
+      // 2026 IRMAA Single tier-1 = $109,000; taxYear 2030 at 2.5% scales by 1.025^4 ≈ 1.10381 (≈ $120,315). A $115,000 look-back deflates to ≈ $104,182 < $109,000 → no IRMAA.
       const irmaaSnapshot = {
         values: { 2026: {} },
         metadata: { source: 't', asOfDate: '2026-01-01', jurisdiction: 'US-federal' as const },
@@ -1401,25 +1196,6 @@ describe('applyTaxYear', () => {
       expect(r.thresholdScalingFactor).toBeCloseTo(Math.pow(1.025, 4), 5);
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // Rough age-priced benchmark curve — additional
-  // ---------------------------------------------------------------------------
-
-  describe('rough age-priced benchmark curve — additional', () => {
-    it('exact value at age 62 matches geometric formula', () => {
-      const expected = 8_400 * Math.pow(1.05, 2);
-      expect(annualBenchmarkForAge(62)).toBeCloseTo(expected, 1);
-    });
-
-    it('returns a positive number at age 30', () => {
-      expect(annualBenchmarkForAge(30)).toBeGreaterThan(0);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // applyTaxYear — HoH filing status
-  // ---------------------------------------------------------------------------
 
   describe('HoH filing status', () => {
     it('HoH has lower federal tax than Single at same income', () => {
@@ -1433,10 +1209,6 @@ describe('applyTaxYear', () => {
       expect(result.federalTaxCents).toBeGreaterThanOrEqual(0);
     });
   });
-
-  // ---------------------------------------------------------------------------
-  // applyTaxYear input validation matrix
-  // ---------------------------------------------------------------------------
 
   describe('applyTaxYear input validation', () => {
     it('throws TaxIntegrationInvalidInputError for negative grossSsDollars', () => {
@@ -1487,10 +1259,6 @@ describe('applyTaxYear', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // 30-year reference integration test
-  // ---------------------------------------------------------------------------
-
   describe('30-year reference integration', () => {
     it('produces non-negative tax and positive MAGI across 30 projection years', () => {
       const startYear = 2025;
@@ -1510,10 +1278,6 @@ describe('applyTaxYear', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Mixed-age household (primary 66, spouse 62)
-  // ---------------------------------------------------------------------------
-
   describe('mixed-age household: primary on Medicare, spouse on ACA', () => {
     it('IRMAA applies when primary is on Medicare, not spouse', () => {
       // Primary born 1959 → age 66 in 2025 (Medicare)
@@ -1531,7 +1295,6 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // IRMAA surcharge: only primary's Medicare triggers it; high prior MAGI → tier1+
       expect(result.irmaaTier).not.toBe('none');
       expect(result.irmaaSurchargeCents).toBeGreaterThan(0);
     });
@@ -1552,15 +1315,10 @@ describe('applyTaxYear', () => {
         }),
         REAL_BUNDLE,
       );
-      // ACA-PTC engagement gate: secondary has hasAcaCoverage = true → subsidy computed
       expect(result.acaPtcSubsidyCents).toBeGreaterThanOrEqual(0);
     });
   });
 });
-
-// ---------------------------------------------------------------------------
-// computeRmdFloorCents — the exported MC-reuse wrapper
-// ---------------------------------------------------------------------------
 
 describe('computeRmdFloorCents', () => {
   const member = (isoBirthdate: string): TaxMemberInput => ({
@@ -1588,14 +1346,10 @@ describe('computeRmdFloorCents', () => {
     );
     expect(floor).toBeGreaterThan(1_000_000);
   });
-
 });
 
 describe('ACA PTC MAGI separation — nontaxable SS counts for ACA', () => {
-  // A pre-Medicare retiree with ACA coverage, modest pre-tax income, and a
-  // Social Security benefit whose taxable portion is below the gross. ACA MAGI
-  // (per §36B) must add back the nontaxable SS, so the ACA FPL% is higher than
-  // it would be on the federal/IRMAA MAGI alone.
+  // A pre-Medicare retiree with ACA coverage and a Social Security benefit whose taxable portion is below the gross: ACA MAGI (§36B) adds back the nontaxable SS, so the ACA FPL% is higher than on federal/IRMAA MAGI alone.
   const acaMember: TaxMemberInput = {
     memberId: 'aca-primary',
     isoBirthdate: '1962-06-15', // age 62 in 2024 — pre-Medicare, ACA-eligible
@@ -1617,27 +1371,19 @@ describe('ACA PTC MAGI separation — nontaxable SS counts for ACA', () => {
 
   it('ACA FPL% reflects gross SS, not just the taxable portion', () => {
     const withSs = applyTaxYear(acaInput(), REAL_BUNDLE);
-    // Federal MAGI excludes nontaxable SS; ACA MAGI includes it. The taxable
-    // SS portion here is < gross, so ACA FPL% must exceed the FPL% that the
-    // federal MAGI alone would produce.
-    // Build a comparison where the SAME total income is all taxable (no SS):
-    // federal MAGI then equals ACA MAGI and FPL% is the federal-basis figure.
+    // Federal MAGI excludes nontaxable SS, ACA MAGI includes it. The all-taxable comparison (20k pre-tax, no SS) has federal MAGI equal to ACA MAGI.
     const allTaxable = applyTaxYear(
       acaInput({ grossSsDollars: 0, preTaxWithdrawalDollars: 20_000 }),
       REAL_BUNDLE,
     );
-    // The SS case has gross income 44k (20k pre-tax + 24k SS); the all-taxable
-    // case has only 20k. The ACA FPL% for the SS case must be strictly higher
-    // because gross SS is fully counted in ACA MAGI.
+    // The SS case has gross income 44k (20k pre-tax + 24k SS), the all-taxable case 20k: its ACA FPL% must be strictly higher because gross SS counts in full.
     expect(withSs.fplPercentage).toBeGreaterThan(allTaxable.fplPercentage);
     expect(withSs.acaPtcTier).not.toBe('below-fpl');
   });
 
   it('federal/IRMAA MAGI still excludes nontaxable SS (unchanged basis)', () => {
     const result = applyTaxYear(acaInput(), REAL_BUNDLE);
-    // magiCents is the federal/IRMAA MAGI: pre-tax + taxable SS (+ LTCG +
-    // tax-exempt interest, both 0 here). It must be strictly less than the
-    // gross-SS-inclusive figure, i.e. below pre-tax + full gross SS.
+    // magiCents is the federal/IRMAA MAGI: pre-tax + taxable SS (+ LTCG + tax-exempt interest, both 0 here), strictly below pre-tax + full gross SS.
     const grossInclusiveCents = dollarsToCents(20_000 + 24_000);
     expect(result.magiCents).toBeLessThan(grossInclusiveCents);
     // And it equals pre-tax + taxable SS exactly.
@@ -1687,12 +1433,7 @@ describe('HSA + early-withdrawal additional tax wired through applyTaxYear', () 
     );
     // 20% of $5,000 = $1,000 additional tax (cents).
     expect(r.hsaAdditionalTaxCents).toBe(dollarsToCents(1_000));
-    // The nonqualified $5,000 is ordinary income (here below the standard
-    // deduction, so $0 income tax), and the 20% additional tax is folded into
-    // federalTaxCents — so federalTaxCents includes at least the 20%.
     expect(r.federalTaxCents).toBeGreaterThanOrEqual(r.hsaAdditionalTaxCents);
-    // Compared to a fully-qualified HSA draw (no income, no additional tax),
-    // the nonqualified case must owe strictly more federal tax.
     const qualified = applyTaxYear(
       penInput({
         hsaQualifiedMedicalExpensePct: 100,
@@ -1735,10 +1476,6 @@ describe('HSA + early-withdrawal additional tax wired through applyTaxYear', () 
   });
 });
 
-// ---------------------------------------------------------------------------
-// §223 medical-qualified / emergency HSA split through applyTaxYear
-// ---------------------------------------------------------------------------
-
 describe('HSA §223 medical-qualified split', () => {
   const young: TaxMemberInput = {
     memberId: 'p',
@@ -1758,8 +1495,7 @@ describe('HSA §223 medical-qualified split', () => {
   }
 
   it('medical-qualified dollars add $0 income + $0 20% tax at any owner age', () => {
-    // $8,000 HSA draw, $8,000 medical-qualified → fully tax-free even pre-65 with
-    // hsaQualifiedMedicalExpensePct: 0 (the pct scopes only the emergency residual).
+    // $8,000 HSA draw, all medical-qualified: tax-free even pre-65, since hsaQualifiedMedicalExpensePct: 0 scopes only the emergency residual.
     const pre = applyTaxYear(
       input(young, {
         hsaQualifiedMedicalExpensePct: 0,
@@ -1836,15 +1572,9 @@ describe('HSA §223 medical-qualified split', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Annual assumed-yield tax drag on brokerage-like balances
-// ---------------------------------------------------------------------------
-
 describe('assumed taxable-yield drag', () => {
   it('one_million_brokerage_balance_2pct_50pct_qdi_raises_magi_by_20k', () => {
-    // $1,000,000 brokerage-like start balance × 2% = $20,000 total yield,
-    // split 50% → $10,000 QDI (LTCG/QDI) + $10,000 ordinary interest. Both feed
-    // MAGI, so MAGI rises by $20,000 vs the no-yield baseline.
+    // $1,000,000 brokerage × 2% = $20,000 yield, split 50% → $10,000 QDI + $10,000 ordinary interest; both feed MAGI, so it rises by $20,000.
     const noYield = applyTaxYear(
       baseInput({ preTaxWithdrawalDollars: 50_000, brokerageLikeStartBalanceDollars: 0 }),
       REAL_BUNDLE,
@@ -1857,26 +1587,18 @@ describe('assumed taxable-yield drag', () => {
   });
 
   it('niit_base_includes_the_ordinary_interest_yield_stream', () => {
-    // The integration layer passes an explicit NIIT base of
-    // `ltcg + ordinaryInterest` (the FULL yield), not the engine's
-    // `ltcgAndQdi`-only default. With $1M brokerage @ 2% / 50% QDI and income
-    // above the $200k Single NIIT threshold, NII = $10k QDI + $10k ordinary
-    // interest = $20k. We replicate the engine call with the narrower default
-    // (NII = QDI only = $10k) and confirm the integration layer taxes $10k MORE
-    // of NII at 3.8% → $380 (38_000 cents) extra federal tax.
+    // The integration layer passes an explicit NIIT base of ltcg + ordinaryInterest (the full yield), not the engine's ltcgAndQdi-only default.
+    // $1M @ 2% / 50% QDI with income above the $200k NIIT threshold: NII = $10k QDI + $10k interest = $20k, versus the narrower default $10k → $380 (38_000 cents) more federal tax.
     const integration = applyTaxYear(
       baseInput({ taxYear: 2026, preTaxWithdrawalDollars: 300_000, brokerageLikeStartBalanceDollars: 1_000_000 }),
       REAL_BUNDLE,
     );
-    // Engine replica with NII defaulted to ltcgAndQdi only:
-    // ordinaryIncome = $300k pre-tax + $10k ordinary-interest yield = $310k;
-    // ltcgAndQdi = $10k QDI yield; NII omitted → defaults to ltcgAndQdi ($10k).
+    // Engine replica with NII defaulted: ordinaryIncome = $300k + $10k yield = $310k, ltcgAndQdi = $10k QDI.
     const oldBehavior = computeFederalTax(
       { year: 2026, filingStatus: 'Single', ordinaryIncome: 310_000, ltcgAndQdi: 10_000, taxpayersAge65Plus: 0 },
       FEDERAL_TAX_CONFIG,
     );
-    // MAGI ($320k) clears the $200k threshold and the extra $10k of NII is fully
-    // below MAGI−threshold, so the difference is exactly 0.038 × $10,000.
+    // MAGI ($320k) clears the $200k threshold and the extra $10k of NII is below MAGI − threshold, so the difference is exactly 0.038 × $10,000.
     expect(integration.federalTaxCents).toBe(oldBehavior.totalTax + Math.round(0.038 * 10_000 * 100));
     expect(integration.magiCents).toBeGreaterThan(dollarsToCents(200_000));
   });
@@ -1886,14 +1608,9 @@ describe('assumed taxable-yield drag', () => {
       baseInput({ preTaxWithdrawalDollars: 50_000, brokerageLikeStartBalanceDollars: 0 }),
       REAL_BUNDLE,
     );
-    // MAGI is just the $50k pre-tax withdrawal — no yield added.
     expect(r.magiCents).toBe(dollarsToCents(50_000));
   });
 });
-
-// ---------------------------------------------------------------------------
-// Cash-like interest + explicit yield tax character (ordinary/QDI/muni)
-// ---------------------------------------------------------------------------
 
 describe('cash-like interest (savings/money-market/CD)', () => {
   it('cash_interest_is_ordinary_income_raising_magi_dollar_for_dollar', () => {
@@ -1910,9 +1627,7 @@ describe('cash-like interest (savings/money-market/CD)', () => {
   });
 
   it('cash_interest_is_niit_base_income_1411c', () => {
-    // Above the $200k Single NIIT threshold, $10k of cash interest adds both
-    // ordinary tax AND 3.8% NIIT. Replicate the engine call without the NII
-    // term to isolate the 3.8% × $10k = $380 NIIT delta.
+    // Above the $200k Single NIIT threshold $10k of cash interest adds ordinary tax and 3.8% NIIT; replicate the engine call without the NII term to isolate $380.
     const integration = applyTaxYear(
       baseInput({ taxYear: 2026, preTaxWithdrawalDollars: 300_000, cashInterestDollars: 10_000 }),
       REAL_BUNDLE,
@@ -1927,8 +1642,7 @@ describe('cash-like interest (savings/money-market/CD)', () => {
   });
 
   it('cash_interest_feeds_86_provisional_income_raising_taxable_ss', () => {
-    // §86 provisional income includes interest, so cash interest can pull more
-    // of the SS benefit into taxable income.
+    // §86 provisional income includes interest, so cash interest can pull more SS into taxable income.
     const noInterest = applyTaxYear(
       baseInput({ grossSsDollars: 30_000, preTaxWithdrawalDollars: 20_000 }),
       REAL_BUNDLE,
@@ -1945,9 +1659,7 @@ describe('cash-like interest (savings/money-market/CD)', () => {
   });
 
   it('cash_interest_is_excluded_from_the_effective_rate_denominator', () => {
-    // The interest is assumed reinvested (like the assumed yield), so it is not
-    // spendable gross income: the denominator stays the same while the tax
-    // rises → the effective rate strictly rises.
+    // The interest is assumed reinvested, so it is not spendable gross income: the denominator stays the same while tax rises → the effective rate rises.
     const noInterest = applyTaxYear(
       baseInput({ preTaxWithdrawalDollars: 80_000 }),
       REAL_BUNDLE,
@@ -1957,7 +1669,6 @@ describe('cash-like interest (savings/money-market/CD)', () => {
       REAL_BUNDLE,
     );
     expect(withInterest.effectiveTaxRate).toBeGreaterThan(noInterest.effectiveTaxRate);
-    // Same denominator: rate ratio equals tax ratio.
     expect(withInterest.effectiveTaxRate * 80_000).toBeCloseTo(
       withInterest.federalTaxCents / 100,
       6,
@@ -1972,8 +1683,7 @@ describe('cash-like interest (savings/money-market/CD)', () => {
 });
 
 describe('explicit yield tax character (ordinary / QDI / tax-exempt muni)', () => {
-  /** REAL_BUNDLE with an explicit 25% tax-exempt municipal yield component
-   *  (0.5 QDI / 0.25 muni / 0.25 ordinary of the 2% total). */
+  // REAL_BUNDLE with an explicit 25% tax-exempt municipal yield component (0.5 QDI / 0.25 muni / 0.25 ordinary of the 2% total).
   const MUNI_BUNDLE: TaxCalibrationBundle = {
     ...REAL_BUNDLE,
     assumedTaxableYield: {
@@ -2008,7 +1718,6 @@ describe('explicit yield tax character (ordinary / QDI / tax-exempt muni)', () =
       taxExemptFraction: expect.closeTo(0.2, 12) as number,
       ordinaryFraction: 0,
     });
-    // Seed default: no muni component unless explicitly calibrated.
     expect(
       resolveAssumedYieldComponents(
         DEFAULT_ASSUMED_TAXABLE_YIELD_CONFIG.values[2026],
@@ -2017,10 +1726,7 @@ describe('explicit yield tax character (ordinary / QDI / tax-exempt muni)', () =
   });
 
   it('muni_component_feeds_magi_addback_but_not_federal_taxable_income', () => {
-    // $1M brokerage @ 2%: default split taxes $10k QDI + $10k ordinary.
-    // The muni bundle re-characterizes $5k of the ordinary stream as
-    // tax-exempt: MAGI is unchanged (the §36B add-back keeps the full $20k in
-    // MAGI) but federal tax falls (only $5k ordinary remains taxable).
+    // $1M brokerage @ 2%: the default split taxes $10k QDI + $10k ordinary. The muni bundle re-characterizes $5k of the ordinary stream as tax-exempt: MAGI is unchanged (§36B add-back) but federal tax falls.
     const defaultSplit = applyTaxYear(
       baseInput({
         taxYear: 2026,
@@ -2042,9 +1748,7 @@ describe('explicit yield tax character (ordinary / QDI / tax-exempt muni)', () =
   });
 
   it('muni_component_still_counts_toward_86_provisional_income', () => {
-    // §86 counts tax-exempt interest in provisional income, so the muni
-    // stream pulls the same SS fraction into taxable income as an equal
-    // ordinary-interest stream would.
+    // §86 counts tax-exempt interest in provisional income, so the muni stream pulls the same SS fraction into taxable income as equal ordinary interest.
     const muni = applyTaxYear(
       baseInput({
         taxYear: 2026,
@@ -2067,11 +1771,7 @@ describe('explicit yield tax character (ordinary / QDI / tax-exempt muni)', () =
   });
 
   it('senior_deduction_magi_excludes_tax_exempt_interest_obbba', () => {
-    // The OBBBA senior-deduction MAGI is AGI-based — it does NOT add back
-    // tax-exempt interest. A 65+ single filer with base MAGI below the $75k
-    // phase-out keeps the FULL senior deduction even when muni interest pushes
-    // the §36B/IRMAA MAGI over the threshold: federal tax must be UNCHANGED by
-    // the muni interest (no SS in this input, so §86 is inert).
+    // The OBBBA senior-deduction MAGI is AGI-based and does NOT add back tax-exempt interest: a 65+ single filer below the $75k phase-out keeps the full senior deduction even when muni interest pushes the §36B/IRMAA MAGI over it, so federal tax is unchanged (no SS, so §86 is inert).
     const senior: TaxMemberInput = {
       memberId: 'senior',
       isoBirthdate: '1958-06-15', // 68 in 2026
@@ -2089,9 +1789,7 @@ describe('explicit yield tax character (ordinary / QDI / tax-exempt muni)', () =
       { ...base, taxExemptInterestDollars: 40_000 },
       REAL_BUNDLE,
     );
-    // MAGI rises by the muni add-back…
     expect(withMuni.magiCents - withoutMuni.magiCents).toBe(dollarsToCents(40_000));
-    // …but the senior-deduction base ignores it → identical federal tax.
     expect(withMuni.federalTaxCents).toBe(withoutMuni.federalTaxCents);
   });
 });
@@ -2106,15 +1804,13 @@ describe('applyTaxYear — QCD income exclusion', () => {
       baseInput({ preTaxWithdrawalDollars: 50_000, qcdIncomeExclusionDollars: 20_000 }),
       REAL_BUNDLE,
     );
-    // The $20k QCD drops MAGI by exactly $20k (the only income is the pre-tax
-    // withdrawal here), and the lower taxable income lowers federal tax.
+    // The $20k QCD drops MAGI by exactly $20k (the only income is the pre-tax withdrawal) and lowers federal tax.
     expect(withQcd.magiCents).toBe(noQcd.magiCents - dollarsToCents(20_000));
     expect(withQcd.federalTaxCents).toBeLessThan(noQcd.federalTaxCents);
   });
 
   it('clamps the exclusion at the pre-tax withdrawal total (never negative income)', () => {
-    // A QCD larger than the pre-tax withdrawal cannot drive taxable pre-tax
-    // income below 0 — MAGI floors at the other income (0 here).
+    // A QCD larger than the pre-tax withdrawal cannot drive taxable income below 0: MAGI floors at the other income (0 here).
     const r = applyTaxYear(
       baseInput({ preTaxWithdrawalDollars: 30_000, qcdIncomeExclusionDollars: 50_000 }),
       REAL_BUNDLE,
@@ -2131,10 +1827,6 @@ describe('applyTaxYear — QCD income exclusion', () => {
     ).toThrow();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Per-tax-unit filing pipeline
-// ---------------------------------------------------------------------------
 
 import { computeSsTaxation } from './ss-taxation';
 import { computeAcaPtc, acaPtcEligibleForFilingStatus, AcaPtcInvalidInputError } from './aca-ptc';
@@ -2183,7 +1875,6 @@ describe('ss-taxation — MFS lived-with-spouse zero base', () => {
   it('MFS lived-together taxes 85% of benefits from the first PI dollar', () => {
     const r = computeSsTaxation({ ...args, filingStatus: 'MFS', mfsLivedWithSpouse: true }, SS_TAX_THRESHOLDS);
     expect(r.tier).toBe('eighty-five');
-    // Full 85% cap binds: 0.85 × grossSS.
     expect(r.taxableSsCents).toBe(Math.round(0.85 * 30_000_00));
   });
   it('MFS NOT-lived-together uses the Single threshold pair (some benefits shielded)', () => {
@@ -2203,18 +1894,15 @@ describe('irmaa / aca — MFS / QSS routing', () => {
     const mfs = computeIrmaa({ ...common, filingStatus: 'MFS', mfsLivedWithSpouse: true }, IRMAA_TIERS);
     const single = computeIrmaa({ ...common, filingStatus: 'Single' }, IRMAA_TIERS);
     const qss = computeIrmaa({ ...common, filingStatus: 'QSS' }, IRMAA_TIERS);
-    // $150k: MFS-lived-together is already in its wide surcharge band; Single is only tier1.
     expect(mfs.totalHouseholdAnnualCents).toBeGreaterThan(single.totalHouseholdAnnualCents);
     expect(qss).toEqual(single);
   });
   it('IRMAA routes MFS-lived-APART to the individual bySingle ladder', () => {
-    // §36B-parallel CMS rule: an MFS filer who lived apart all year uses the
-    // single ladder, NOT the steeper two-band byMfs schedule.
+    // §36B-parallel CMS rule: an MFS filer who lived apart all year uses the single ladder, not the steeper byMfs schedule.
     const common = { taxYear: 2026, magiTwoYearsPriorCents: 150_000_00, beneficiariesOnMedicareCount: 1 as const };
     const apart = computeIrmaa({ ...common, filingStatus: 'MFS', mfsLivedWithSpouse: false }, IRMAA_TIERS);
     const together = computeIrmaa({ ...common, filingStatus: 'MFS', mfsLivedWithSpouse: true }, IRMAA_TIERS);
     const single = computeIrmaa({ ...common, filingStatus: 'Single' }, IRMAA_TIERS);
-    // Absent flag defaults to lived-apart → single ladder.
     const absent = computeIrmaa({ ...common, filingStatus: 'MFS' }, IRMAA_TIERS);
     expect(apart.totalHouseholdAnnualCents).toBe(single.totalHouseholdAnnualCents);
     expect(absent.totalHouseholdAnnualCents).toBe(single.totalHouseholdAnnualCents);
@@ -2250,12 +1938,7 @@ describe('deterministic runner filing-plan resolution seam', () => {
     const res = resolveTaxUnitsForYear(pipelineCtx({ secondary: true }), 2026, true, true);
     expect(res).toEqual({ kind: 'resolved', taxUnits: [{ memberIds: ['primary', 'secondary'], filingStatus: 'MFJ' }] });
   });
-
 });
-
-// ---------------------------------------------------------------------------
-// applyTaxYearForFilingPlan — the PRODUCTION per-year orchestrator
-// ---------------------------------------------------------------------------
 
 describe('applyTaxYearForFilingPlan — 3-way branch', () => {
   const couple: TaxMemberInput[] = [
@@ -2280,7 +1963,6 @@ describe('applyTaxYearForFilingPlan — 3-way branch', () => {
   ];
 
   it('should_use_the_legacy_status_when_taxUnits_is_absent', () => {
-    // An unresolvable legacy scalar keeps filing exactly as before.
     const input = coupleInput();
     expect(applyTaxYearForFilingPlan(input, REAL_BUNDLE).federalTaxCents).toBe(
       applyTaxYear(input, REAL_BUNDLE).federalTaxCents,
@@ -2312,11 +1994,7 @@ describe('applyTaxYearForFilingPlan — 3-way branch', () => {
   });
 
   it('should_run_the_engine_per_unit_and_sum_for_a_separate_couple', () => {
-    // With income attributed to ONE spouse the progressive schedule bites: two
-    // MFS returns on a lopsided household cost MORE than one joint return.
-    // (An even 50/50 split is the degenerate case where two MFS returns sum
-    // exactly to MFJ — two MFS deductions = the MFJ deduction, MFS brackets =
-    // MFJ ÷ 2 — so it proves nothing about per-unit execution.)
+    // With income attributed to ONE spouse the progressive schedule bites: two MFS returns on a lopsided household cost MORE than one joint return (an even split is degenerate: two MFS deductions = the MFJ deduction, MFS brackets = MFJ ÷ 2).
     const merged = applyTaxYearForFilingPlan(
       coupleInput({
         taxUnits: MFS_UNITS,
@@ -2333,9 +2011,7 @@ describe('applyTaxYearForFilingPlan — 3-way branch', () => {
 });
 
 describe('mergeUnitResults contract — UNEQUAL units', () => {
-  // Deliberately lopsided: only the primary owns the pre-tax account (so only
-  // that return carries an RMD floor and a §72(t) penalty), only the primary
-  // receives Social Security, and the two returns file different statuses.
+  // Deliberately lopsided: only the primary owns the pre-tax account (RMD floor and §72(t) penalty) and receives SS, and the two returns file different statuses.
   const members: TaxMemberInput[] = [
     { memberId: 'p', isoBirthdate: '1948-03-10', onMedicare: true, hasAcaCoverage: false },
     { memberId: 's', isoBirthdate: '1975-04-02', onMedicare: false, hasAcaCoverage: false },
@@ -2387,19 +2063,16 @@ describe('mergeUnitResults contract — UNEQUAL units', () => {
     const magiSum = (merged.filingUnitMagi ?? []).reduce((n, u) => n + u.magiCents, 0);
     expect(merged.magiCents).toBe(magiSum);
     expect(merged.federalTaxCents).toBeGreaterThan(0);
-    // Only the primary owns the RMD-qualifying account, so the merged floor is
-    // that ONE return's floor — never doubled by the merge.
+    // Only the primary owns the RMD-qualifying account, so the merged floor is that one return's floor, never doubled.
     expect(merged.rmdFloorCents).toBeGreaterThan(0);
     expect(Object.keys(merged.rmdPerAccountCents)).toEqual(['ira-p']);
-    // Only the secondary's account carries a §72(t) basis, and they are 51 — the
-    // penalty lands once, on their return.
+    // Only the secondary's account carries a §72(t) basis (age 51): the penalty lands once, on their return.
     expect(merged.earlyWithdrawalPenaltyCents).toBe(dollarsToCents(20_000 * 0.1));
     expect(merged.hsaAdditionalTaxCents).toBe(0);
   });
 
   it('should_compute_the_effective_rate_on_the_HOUSEHOLD_denominator', () => {
-    // Same formula the single-return path uses, so a separate year's displayed
-    // rate stays comparable with a joint year's.
+    // Same formula as the single-return path, so a separate year's displayed rate stays comparable with a joint year's.
     const grossIncome = 48_000 + 120_000;
     expect(merged.effectiveTaxRate).toBeCloseTo(
       centsToDollars(merged.federalTaxCents) / grossIncome,
@@ -2410,8 +2083,7 @@ describe('mergeUnitResults contract — UNEQUAL units', () => {
   it('should_collapse_the_categorical_fields_to_the_most_affected_return', () => {
     const perUnitTiers = ['none', 'fifty', 'eighty-five'];
     expect(perUnitTiers).toContain(merged.ssTaxationTier);
-    // The SS recipient is the only Medicare beneficiary, so the household badge
-    // is whatever THAT return landed on — never 'none' while a surcharge is due.
+    // The SS recipient is the only Medicare beneficiary, so the household badge is whatever that return landed on, never 'none' while a surcharge is due.
     if (merged.irmaaSurchargeCents > 0) expect(merged.irmaaTier).not.toBe('none');
     expect(merged.acaPtcTier).toBe('below-fpl');
     expect(merged.taxYearExtrapolated).toBe(false);
@@ -2443,16 +2115,13 @@ describe('per-owner income attribution', () => {
   });
 
   it('should_report_each_owners_withdrawals_on_their_own_return', () => {
-    // The whole $200k comes out of the PRIMARY's accounts. Attributed, that is
-    // one big MFS return plus one empty one; blanket-split it would be two
-    // $100k returns — a materially different bill in a progressive system.
+    // The whole $200k comes from the PRIMARY's accounts: attributed it is one big MFS return plus an empty one; blanket-split it would be two $100k returns, a materially different bill.
     const attributed = applyTaxYearForFilingPlan(
       input({ ownerAttributedAmounts: { preTaxWithdrawalDollars: { p: 200_000 } } }),
       REAL_BUNDLE,
     );
     const evenSplit = applyTaxYearForFilingPlan(input({}), REAL_BUNDLE);
     expect(attributed.federalTaxCents).toBeGreaterThan(evenSplit.federalTaxCents);
-    // Per-return MAGI proves the attribution rather than just the total moving.
     const [first, second] = attributed.filingUnitMagi ?? [];
     expect(first.magiCents).toBeGreaterThan(second.magiCents);
     expect(second.magiCents).toBe(0);
@@ -2470,8 +2139,7 @@ describe('per-owner income attribution', () => {
   });
 
   it('should_attribute_gross_Social_Security_to_its_recipient', () => {
-    // §86 is non-linear per return, so who receives the benefit changes the
-    // taxable portion — not just which return reports it.
+    // §86 is non-linear per return, so who receives the benefit changes the taxable portion, not just which return reports it.
     const attributed = applyTaxYearForFilingPlan(
       input({
         preTaxWithdrawalDollars: 40_000,
@@ -2508,9 +2176,7 @@ describe('per-return IRMAA look-back', () => {
   });
 
   it('should_tier_a_mixed_MFS_and_HoH_couple_on_two_DIFFERENT_schedules', () => {
-    // Same $150k look-back MAGI on each return, but an MFS filer who lived with
-    // their spouse is scored on the steep `byMfs` ladder while an HoH filer is
-    // scored on the individual ladder — so the two surcharges must DIFFER.
+    // The same $150k look-back MAGI scores an MFS filer who lived with their spouse on the steep byMfs ladder and an HoH filer on the individual ladder, so the surcharges must differ.
     const result = applyTaxYearForFilingPlan(
       input({
         mfsLivedWithSpouse: true,
@@ -2535,14 +2201,11 @@ describe('per-return IRMAA look-back', () => {
   });
 
   it('should_tier_a_survivor_on_their_OWN_prior_return_not_the_household_sum', () => {
-    // Death transition: last year the couple filed two separate returns; this
-    // year only the survivor remains. They must be tiered on THEIR OWN prior
-    // MAGI, not on the merged two-return household figure.
+    // Death transition: last year two separate returns, this year only the survivor, who must be tiered on their OWN prior MAGI, not the merged household figure.
     const survivorOnly: ApplyFilingPlanYearInput = input({
       members: [members[0]],
       householdSize: 1,
       taxUnits: [{ memberIds: ['primary'], filingStatus: 'Single', householdSize: 1 }],
-      // The household look-back scalar is the SUM of both prior returns.
       magiTwoYearsPriorDollars: 400_000,
       irmaaLookbackUnits: [
         { memberIds: ['p'], filingStatus: 'MFS', mfsLivedWithSpouse: false, magiCents: dollarsToCents(60_000) },
@@ -2554,8 +2217,7 @@ describe('per-return IRMAA look-back', () => {
       { ...survivorOnly, irmaaLookbackUnits: undefined },
       REAL_BUNDLE,
     );
-    // $60k of their own income is below every IRMAA threshold; the $400k
-    // household sum is deep into the surcharge tiers.
+    // $60k of their own income is below every IRMAA threshold; the $400k household sum is deep into the surcharge tiers.
     expect(withRing.irmaaSurchargeCents).toBe(0);
     expect(householdSumOnly.irmaaSurchargeCents).toBeGreaterThan(0);
   });
@@ -2601,8 +2263,7 @@ describe('ACA SLCSP override across separate returns', () => {
   };
 
   it('should_pass_the_full_override_to_the_PTC_eligible_return', () => {
-    // MFS is statutorily ineligible (§36B(c)(1)(C)), so the HoH return is the
-    // only claimant — it must see the override VERBATIM, not halved.
+    // MFS is statutorily ineligible (§36B(c)(1)(C)), so the HoH return is the only claimant and must see the override verbatim, not halved.
     const separate = applyTaxYearForFilingPlan(separateMfsHoh, REAL_BUNDLE);
     const hohAlone = applyTaxYear(
       {
@@ -2682,9 +2343,7 @@ describe('acaMagiAboveFplCents', () => {
   });
 
   it('reads each return on its own for separate returns, not the summed MAGI', () => {
-    // The primary files HoH (household of two, $21,150) on $22,000 drawn from their
-    // own IRA: $850 above the line. The secondary files MFS on $40,000 and earns
-    // no credit. Summing MAGI and taking the highest percentage would say $2,385.
+    // The primary files HoH (household of two, $21,150) on $22,000 from their own IRA: $850 above the line. The secondary files MFS on $40,000 and earns no credit. Summing MAGI and taking the highest percentage would say $2,385.
     const merged = applyTaxYearForFilingPlan(
       {
         ...baseInput({
@@ -2744,8 +2403,7 @@ describe('memberIdByRole validation', () => {
   });
 
   it('should_fall_back_to_the_single_status_path_when_roles_are_absent', () => {
-    // The old fail-open gave BOTH returns the whole household, so the merge
-    // doubled the RMD floor. The fallback is exact for the household total.
+    // The old fail-open gave BOTH returns the whole household, so the merge doubled the RMD floor; the fallback is exact for the household total.
     const exactFloor = applyTaxYear(withRoles({ primary: 'p', secondary: 's' }), REAL_BUNDLE)
       .rmdFloorCents;
     const failOpen = applyTaxYearForFilingPlan(withRoles(undefined), REAL_BUNDLE);
@@ -2754,7 +2412,6 @@ describe('memberIdByRole validation', () => {
   });
 
   it('should_fall_back_when_the_roles_do_not_partition_the_household', () => {
-    // A partial map (no secondary) cannot separate the two returns.
     const partial = applyTaxYearForFilingPlan(withRoles({ primary: 'p' }), REAL_BUNDLE);
     const exactFloor = applyTaxYear(withRoles({ primary: 'p', secondary: 's' }), REAL_BUNDLE)
       .rmdFloorCents;

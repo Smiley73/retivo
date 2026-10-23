@@ -1,7 +1,3 @@
-/**
- * Tests for `resolveConversionLeg` — the single-home conversion-leg math used
- * by the working-years Roth-conversion runner + burden display.
- */
 import { resolveConversionLeg } from './roth-conversion-utils';
 
 describe('resolveConversionLeg', () => {

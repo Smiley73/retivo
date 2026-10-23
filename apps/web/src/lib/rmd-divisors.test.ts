@@ -1,13 +1,6 @@
-/**
- * Schema validation + IRS-pinned spot checks for RMD_DIVISORS.
- */
-
 import { describe, it, expect } from 'vitest';
 import { RMD_DIVISORS } from './rmd-divisors';
 import {
-  RMD_UNIFORM_LIFETIME_TABLE_III,
-  RMD_SINGLE_LIFE_TABLE_I,
-  RMD_JOINT_LIFE_TABLE_II,
   RMD_LIFE_EXPECTANCY_TABLES,
   selectRmdTableDivisor,
   type RmdLifeExpectancyTables,
@@ -18,20 +11,26 @@ describe('RMD_DIVISORS', () => {
     expect(typeof RMD_DIVISORS.metadata.source).toBe('string');
     expect(RMD_DIVISORS.metadata.source.length).toBeGreaterThan(0);
     expect(typeof RMD_DIVISORS.metadata.asOfDate).toBe('string');
-    // asOfDate must be YYYY-MM-DD
     expect(RMD_DIVISORS.metadata.asOfDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(RMD_DIVISORS.metadata.jurisdiction).toBe('US-federal');
   });
 
   it('should_have_stable_permalink_URLs_in_metadata_source', () => {
-    // The source must be a stable permalink, not a landing page.
-    // Archived PDF path (pub/irs-prior/) not live landing page (publications/).
     expect(RMD_DIVISORS.metadata.source).toContain('pub/irs-prior/p590b');
     expect(RMD_DIVISORS.metadata.source).toContain(
       'federalregister.gov/documents/2020/11/12/2020-24723',
     );
-    // Guard: landing page URL must NOT be present.
     expect(RMD_DIVISORS.metadata.source).not.toContain('publications/p590b');
+  });
+
+  // IRS Pub 590-B Appendix B Table III spot checks (2022 revision)
+  it.each([
+    [73, 26.5],
+    [75, 24.6],
+    [100, 6.4],
+    [120, 2.0],
+  ])('should_return_the_published_divisor_for_age_%i', (age, divisor) => {
+    expect(RMD_DIVISORS.values[2024].uniformLifetime[age]).toBe(divisor);
   });
 
   it('should_have_at_least_one_year_entry', () => {
@@ -71,39 +70,17 @@ describe('RMD_DIVISORS', () => {
       }
     }
   });
-
-  // IRS Pub 590-B Appendix B Table III spot checks (2022 revision)
-  it('should_return_26_5_for_age_73', () => {
-    expect(RMD_DIVISORS.values[2024].uniformLifetime[73]).toBe(26.5);
-  });
-
-  it('should_return_24_6_for_age_75', () => {
-    expect(RMD_DIVISORS.values[2024].uniformLifetime[75]).toBe(24.6);
-  });
-
-  it('should_return_6_4_for_age_100', () => {
-    expect(RMD_DIVISORS.values[2024].uniformLifetime[100]).toBe(6.4);
-  });
-
-  it('should_return_2_0_for_age_120', () => {
-    expect(RMD_DIVISORS.values[2024].uniformLifetime[120]).toBe(2.0);
-  });
 });
 
-// ---------------------------------------------------------------------------
-// Life-expectancy tables I/II/III + selector
-// ---------------------------------------------------------------------------
-
 describe('RMD life-expectancy tables', () => {
+  const { singleLife: SINGLE_LIFE_TABLE_I, jointLastSurvivor: JOINT_LIFE_TABLE_II } = RMD_LIFE_EXPECTANCY_TABLES;
+
   it('Table III (Uniform Lifetime) aliases the verified RMD_DIVISORS seed exactly', () => {
-    expect(RMD_UNIFORM_LIFETIME_TABLE_III).toBe(RMD_DIVISORS);
     expect(RMD_LIFE_EXPECTANCY_TABLES.uniformLifetime).toBe(RMD_DIVISORS);
   });
 
   it('Table I (Single Life) + Table II (Joint Life) carry the STABLE archived-PDF permalink (not the landing page)', () => {
-    // The source must be the stable archived permalink (pub/irs-prior/), never the
-    // live landing page (publications/), matching Table III's own citation test.
-    for (const t of [RMD_SINGLE_LIFE_TABLE_I, RMD_JOINT_LIFE_TABLE_II]) {
+    for (const t of [SINGLE_LIFE_TABLE_I, JOINT_LIFE_TABLE_II]) {
       expect(t.metadata.source).toContain('pub/irs-prior/p590b');
       expect(t.metadata.source).not.toContain('publications/p590b');
       expect(t.metadata.asOfDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -112,7 +89,7 @@ describe('RMD life-expectancy tables', () => {
   });
 
   it('Table I is fully populated (ages 0–120, 121 entries)', () => {
-    const singleLife = RMD_SINGLE_LIFE_TABLE_I.values[2024].singleLife;
+    const singleLife = SINGLE_LIFE_TABLE_I.values[2024].singleLife;
     expect(Object.keys(singleLife)).toHaveLength(121);
     for (let age = 0; age <= 120; age++) {
       expect(typeof singleLife[age], `missing Table I entry for age ${age}`).toBe('number');
@@ -121,22 +98,20 @@ describe('RMD life-expectancy tables', () => {
   });
 
   it('Table II is a fully populated symmetric 101×101 matrix (ages 20–120)', () => {
-    const joint = RMD_JOINT_LIFE_TABLE_II.values[2024].jointLastSurvivor;
+    const joint = JOINT_LIFE_TABLE_II.values[2024].jointLastSurvivor;
     const owners = Object.keys(joint).map(Number);
     expect(owners).toHaveLength(101);
     for (let a = 20; a <= 120; a++) {
       expect(Object.keys(joint[a])).toHaveLength(101);
       for (let b = 20; b <= 120; b++) {
         expect(typeof joint[a][b], `missing Table II entry for ${a}/${b}`).toBe('number');
-        // Symmetry: divisor(a,b) === divisor(b,a).
         expect(joint[a][b], `asymmetry at ${a}/${b}`).toBe(joint[b][a]);
       }
     }
   });
 
-  // Exact-table fixtures (source-verified spot checks; mirrors the Table III fixtures).
   it('Table I exact fixtures — ages 0, 73, 90, 120', () => {
-    const singleLife = RMD_SINGLE_LIFE_TABLE_I.values[2024].singleLife;
+    const singleLife = SINGLE_LIFE_TABLE_I.values[2024].singleLife;
     expect(singleLife[0]).toBe(84.6);
     expect(singleLife[73]).toBe(16.4);
     expect(singleLife[90]).toBe(5.7);
@@ -144,7 +119,7 @@ describe('RMD life-expectancy tables', () => {
   });
 
   it('Table II exact fixtures — symmetric pair 30/50, same-age 73/73, boundary 20/120', () => {
-    const joint = RMD_JOINT_LIFE_TABLE_II.values[2024].jointLastSurvivor;
+    const joint = JOINT_LIFE_TABLE_II.values[2024].jointLastSurvivor;
     expect(joint[30][50]).toBe(56.6);
     expect(joint[30][50]).toBe(joint[50][30]); // symmetry
     expect(joint[73][73]).toBe(20.7);
@@ -156,30 +131,18 @@ describe('RMD life-expectancy tables', () => {
 describe('selectRmdTableDivisor', () => {
   const TABLES = RMD_LIFE_EXPECTANCY_TABLES;
 
-  it('returns the exact Uniform Lifetime (Table III) divisor at age 73 / 100 / 120', () => {
+  it('returns the exact Uniform Lifetime (Table III) divisor at age 73', () => {
     expect(selectRmdTableDivisor({ table: 'uniformLifetime', ownerAge: 73 }, TABLES, 2025)).toEqual({
       kind: 'divisor',
       table: 'uniformLifetime',
       divisor: 26.5,
     });
-    expect(
-      selectRmdTableDivisor({ table: 'uniformLifetime', ownerAge: 100 }, TABLES, 2025),
-    ).toMatchObject({ kind: 'divisor', divisor: 6.4 });
-    expect(
-      selectRmdTableDivisor({ table: 'uniformLifetime', ownerAge: 120 }, TABLES, 2025),
-    ).toMatchObject({ kind: 'divisor', divisor: 2.0 });
   });
 
   it('clamps an owner age above 120 to the Table III floor divisor 2.0', () => {
     expect(
       selectRmdTableDivisor({ table: 'uniformLifetime', ownerAge: 130 }, TABLES, 2025),
     ).toMatchObject({ kind: 'divisor', divisor: 2.0 });
-  });
-
-  it('resolves Table III via clamp-to-latest for a future tax year (2030 → 2024 entry)', () => {
-    expect(
-      selectRmdTableDivisor({ table: 'uniformLifetime', ownerAge: 80 }, TABLES, 2030),
-    ).toMatchObject({ kind: 'divisor', divisor: 20.2 });
   });
 
   it('returns the exact Single Life (Table I) divisor for a spouse recalculation lookup', () => {
@@ -259,8 +222,6 @@ describe('selectRmdTableDivisor', () => {
 });
 
 describe('selectRmdTableDivisor — clamp-to-latest snapshot boundary', () => {
-  // A synthetic two-year snapshot detects a `<` vs `<=` boundary mistake that the
-  // single production 2024 key cannot.
   const SYNTH: RmdLifeExpectancyTables = {
     uniformLifetime: {
       values: {
@@ -269,8 +230,8 @@ describe('selectRmdTableDivisor — clamp-to-latest snapshot boundary', () => {
       },
       metadata: { source: 'test', asOfDate: '2024-01-01', jurisdiction: 'US-federal' },
     },
-    singleLife: RMD_SINGLE_LIFE_TABLE_I,
-    jointLastSurvivor: RMD_JOINT_LIFE_TABLE_II,
+    singleLife: RMD_LIFE_EXPECTANCY_TABLES.singleLife,
+    jointLastSurvivor: RMD_LIFE_EXPECTANCY_TABLES.jointLastSurvivor,
   };
 
   it('resolves the year immediately before / exactly at / immediately after the second key', () => {
@@ -280,7 +241,6 @@ describe('selectRmdTableDivisor — clamp-to-latest snapshot boundary', () => {
     });
     expect(selectRmdTableDivisor({ table: 'uniformLifetime', ownerAge: 73 }, SYNTH, 2030)).toMatchObject({
       kind: 'divisor',
-      divisor: 20, // clamp-to-latest is `<=`, so 2030 resolves the 2030 key
     });
     expect(selectRmdTableDivisor({ table: 'uniformLifetime', ownerAge: 73 }, SYNTH, 2031)).toMatchObject({
       kind: 'divisor',

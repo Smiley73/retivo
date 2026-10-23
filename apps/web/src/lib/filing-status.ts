@@ -52,7 +52,7 @@ export interface FilingPlanTaxUnit {
 }
 
 /** Single-member plan: files `Single`; `statusWindows` overlay eligible HoH (or other) years. */
-export interface IndividualFilingPlan {
+interface IndividualFilingPlan {
   readonly kind: 'individual';
   readonly statusWindows?: readonly FilingStatusWindow[];
 }
@@ -61,7 +61,7 @@ export interface IndividualFilingPlan {
  * Joint plan: MFJ while both spouses are alive, including the death year (the dying member counts as alive), then
  * `Single`; `statusWindows` carry survivor exceptions (QSS, later HoH) that override the post-death default.
  */
-export interface JointFilingPlan {
+interface JointFilingPlan {
   readonly kind: 'joint';
   readonly statusWindows?: readonly FilingStatusWindow[];
 }
@@ -93,7 +93,7 @@ export interface ResolvedTaxUnit {
 }
 
 /** Why a filing-plan year could not be resolved; surfaced in the scenario filing editor rather than guessed, while the engines keep the legacy scalar path. */
-export type FilingPlanUnresolvedReason =
+type FilingPlanUnresolvedReason =
   | 'two-member-scalar-ambiguous'
   | 'one-member-joint-invalid'
   | 'unknown-scalar'
@@ -499,7 +499,7 @@ export interface FilingPlanSummary {
   readonly unresolvedLegacyDetail: string | undefined;
 }
 
-export interface FilingSummaryContext {
+interface FilingSummaryContext {
   readonly taxFilingPlan?: TaxFilingPlan;
   readonly filingStatusOverride?: FilingStatusOverride;
   readonly hasSecondaryMember: boolean;

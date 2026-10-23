@@ -1,10 +1,3 @@
-/**
- * Boundary and edge-case tests for ACA PTC engine — computeAcaPtc().
- *
- * Computation tests → aca-ptc.test.ts
- * Input validation tests → aca-ptc-validation.test.ts
- */
-
 import { describe, it, expect } from 'vitest';
 import {
   computeAcaPtc,
@@ -16,7 +9,6 @@ import type { CalibrationSnapshot } from './calibration';
 
 const snap = ACA_PTC_PARAMETERS;
 
-/** Build a valid default input, overridable per-test. */
 function input(overrides: Partial<AcaPtcInput> = {}): AcaPtcInput {
   return {
     taxYear: 2025,
@@ -28,11 +20,6 @@ function input(overrides: Partial<AcaPtcInput> = {}): AcaPtcInput {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Band boundary regression: lower-inclusive / upper-exclusive semantics
-// Each boundary value must land in the LOWER band (not the upper band).
-// Exception: last band is inclusive on both ends.
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — band boundary semantics (IRA-expanded 2025)', () => {
   // 2025 single FPL = $15,060. Each boundary in cents = boundary% * 15060 * 100.
   const fpl = 15_060;
@@ -40,28 +27,24 @@ describe('computeAcaPtc — band boundary semantics (IRA-expanded 2025)', () => 
   it('exactly 150% FPL: should fall in 100-150 band (floor=0)', () => {
     const magi = Math.round(1.5 * fpl * 100);
     const r = computeAcaPtc(input({ taxYear: 2025, householdSize: 1, magiCents: magi }), snap);
-    // At exactly 150%, upper-exclusive → still in 100-150 band → applicableFigure = 0
     expect(r.applicableFigurePct).toBe(0);
   });
 
   it('exactly 200% FPL: should fall in 150-200 band at ceiling (=0.02)', () => {
     const magi = Math.round(2.0 * fpl * 100);
     const r = computeAcaPtc(input({ taxYear: 2025, householdSize: 1, magiCents: magi }), snap);
-    // Upper-exclusive: 200% → enters 200-250 band at floor=0.02
     expect(r.applicableFigurePct).toBe(0.02);
   });
 
   it('exactly 250% FPL: should fall in 200-250 band at ceiling (=0.04)', () => {
     const magi = Math.round(2.5 * fpl * 100);
     const r = computeAcaPtc(input({ taxYear: 2025, householdSize: 1, magiCents: magi }), snap);
-    // Upper-exclusive: 250% → enters 250-300 band at floor=0.04
     expect(r.applicableFigurePct).toBe(0.04);
   });
 
   it('exactly 300% FPL: should fall in 250-300 band at ceiling (=0.06)', () => {
     const magi = Math.round(3.0 * fpl * 100);
     const r = computeAcaPtc(input({ taxYear: 2025, householdSize: 1, magiCents: magi }), snap);
-    // Upper-exclusive: 300% → enters 300-400 band at floor=0.06
     expect(r.applicableFigurePct).toBe(0.06);
   });
 
@@ -80,36 +63,30 @@ describe('computeAcaPtc — band boundary semantics (pre-ARPA 2026)', () => {
   it('exactly 133% FPL: should fall in 133-150 band (band 1 floor 3.14%)', () => {
     const magi = Math.round(1.33 * fpl * 100);
     const r = computeAcaPtc(input({ taxYear: 2026, householdSize: 1, magiCents: magi }), snap);
-    // Lower-inclusive / upper-exclusive: 133% equals the floor of the 133-150 band,
-    // so it falls in that band at its floor value (0.0314), not the 100-133 flat band.
     expect(r.applicableFigurePct).toBe(0.0314);
   });
 
   it('exactly 150% FPL: should fall in 133-150 band at ceiling (=0.0419)', () => {
     const magi = Math.round(1.5 * fpl * 100);
     const r = computeAcaPtc(input({ taxYear: 2026, householdSize: 1, magiCents: magi }), snap);
-    // Upper-exclusive: 150% → enters 150-200 band at floor=0.0419
     expect(r.applicableFigurePct).toBe(0.0419);
   });
 
   it('exactly 200% FPL: should fall in 150-200 band at ceiling (=0.0660)', () => {
     const magi = Math.round(2.0 * fpl * 100);
     const r = computeAcaPtc(input({ taxYear: 2026, householdSize: 1, magiCents: magi }), snap);
-    // Upper-exclusive: 200% → enters 200-250 band at floor=0.0660
     expect(r.applicableFigurePct).toBe(0.0660);
   });
 
   it('exactly 250% FPL: should fall in 200-250 band at ceiling (=0.0844)', () => {
     const magi = Math.round(2.5 * fpl * 100);
     const r = computeAcaPtc(input({ taxYear: 2026, householdSize: 1, magiCents: magi }), snap);
-    // Upper-exclusive: 250% → enters 250-300 band at floor=0.0844
     expect(r.applicableFigurePct).toBe(0.0844);
   });
 
   it('exactly 300% FPL: should fall in 250-300 band at ceiling (=0.0996)', () => {
     const magi = Math.round(3.0 * fpl * 100);
     const r = computeAcaPtc(input({ taxYear: 2026, householdSize: 1, magiCents: magi }), snap);
-    // Upper-exclusive: 300% → enters 300-400 band at floor=0.0996
     expect(r.applicableFigurePct).toBe(0.0996);
   });
 
@@ -122,14 +99,9 @@ describe('computeAcaPtc — band boundary semantics (pre-ARPA 2026)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Cap-applies short-circuit: synthetic snapshot where band-4 ceiling ≠ cap rate
-// Verifies that cap-applies path uses the open-ended band's rate, NOT band interpolation.
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — cap-applies short-circuit', () => {
   it('uses open-ended band rate directly, not band interpolation', () => {
     // Synthetic snapshot: cap band has 9% flat rate (not 8.5%).
-    // If the engine were finding a band by index it might return 8.5% from the 300-400 band ceiling.
     const syntheticSnap: CalibrationSnapshot<AcaPtcTable> = {
       values: {
         2025: {
@@ -148,7 +120,6 @@ describe('computeAcaPtc — cap-applies short-circuit', () => {
       metadata: { source: 'synthetic', asOfDate: '2025-01-01', jurisdiction: 'US-federal' },
     };
 
-    // 450% FPL → cap-applies → should return 0.09, not 0.075
     const magi = Math.round(4.5 * 15_060 * 100);
     const r = computeAcaPtc(input({ taxYear: 2025, magiCents: magi }), syntheticSnap);
     expect(r.tier).toBe('cap-applies');
@@ -156,9 +127,6 @@ describe('computeAcaPtc — cap-applies short-circuit', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// eligible flag: all tiers
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — eligible flag', () => {
   it('below-fpl → eligible = false', () => {
     const r = computeAcaPtc(input({ magiCents: 1_000_000 }), snap);
@@ -173,23 +141,18 @@ describe('computeAcaPtc — eligible flag', () => {
   });
 
   it('cap-applies → eligible = true', () => {
-    // 500% FPL 2025 single = $75,300 = $7,530,000
     const r = computeAcaPtc(input({ taxYear: 2025, magiCents: 7_530_000 }), snap);
     expect(r.tier).toBe('cap-applies');
     expect(r.eligible).toBe(true);
   });
 
   it('above-400-cliff → eligible = false', () => {
-    // 401% FPL 2026 single
     const r = computeAcaPtc(input({ taxYear: 2026, magiCents: 6_300_000 }), snap);
     expect(r.tier).toBe('above-400-cliff');
     expect(r.eligible).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------------------
-// household size affects FPL threshold and band lookup
-// ---------------------------------------------------------------------------
 describe('computeAcaPtc — household size scaling', () => {
   it('larger household has higher FPL → different band for same MAGI', () => {
     // $40,000 MAGI. Size 1: 40000/15060 ≈ 266% → 250-300 band.

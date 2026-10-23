@@ -1,14 +1,6 @@
-/**
- * Tests for per-account proportional allocation invariants in computeRmd.
- */
-
 import { describe, it, expect } from 'vitest';
 import { computeRmd } from './rmd';
 import { SNAPSHOT, OWNER_1950_2025 } from './rmd.test-helpers';
-
-// ---------------------------------------------------------------------------
-// computeRmd — per-account allocation invariant
-// ---------------------------------------------------------------------------
 
 describe('computeRmd — per-account allocation', () => {
   it('should_ensure_sum_of_perAccountRmdCents_equals_ownerRmdCents_exactly', () => {
@@ -47,9 +39,7 @@ describe('computeRmd — per-account allocation', () => {
 });
 
   it('should_produce_non_negative_shares_for_tiny_total_rmd_across_many_accounts', () => {
-    // Regression: the earlier Math.round-per-share algo produced -1 cent for
-    // the last account when ownerRmdCents=2 and balances=[14,14,14,11].
-    // Largest-remainder method guarantees every share ≥ 0.
+    // Regression: Math.round per share gave the last account -1 cent for balances [14, 14, 14, 11].
     const result = computeRmd(
       {
         isoBirthdate: '1950-01-01',
@@ -63,8 +53,7 @@ describe('computeRmd — per-account allocation', () => {
       },
       SNAPSHOT,
     );
-    // Total qualifying balance = 53 cents; divisor at age 75 = 24.6
-    // ownerRmdCents = Math.round((53/100) / 24.6 * 100) = Math.round(2.154...) = 2
+    // 53 cents / 24.6 (age 75) rounds to a 2-cent total.
     expect(result.ownerRmdCents).toBe(2);
     for (const share of Object.values(result.perAccountRmdCents)) {
       expect(share).toBeGreaterThanOrEqual(0);
@@ -72,10 +61,6 @@ describe('computeRmd — per-account allocation', () => {
     const sum = Object.values(result.perAccountRmdCents).reduce((a, b) => a + b, 0);
     expect(sum).toBe(result.ownerRmdCents);
   });
-
-// ---------------------------------------------------------------------------
-// computeRmd — zero balance
-// ---------------------------------------------------------------------------
 
 describe('computeRmd — zero balance', () => {
   it('should_return_applicable_true_with_zero_rmd_when_all_qualifying_balances_are_zero', () => {

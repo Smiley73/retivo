@@ -50,7 +50,7 @@ function scaleLtcgBracketFloors<B extends LtcgBracket>(
  * `factor` is `thresholdScalingFactor` from `resolveSnapshotYear`; factor 1 still normalizes floors to the
  * rounding step, so HoH's published $201,775 floor becomes $201,750.
  */
-export function buildScaledFederalTaxConfig(
+function buildScaledFederalTaxConfig(
   base: TaxConfig,
   factor: number,
   targetYear?: number,

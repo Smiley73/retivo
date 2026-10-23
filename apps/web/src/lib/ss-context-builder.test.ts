@@ -1,11 +1,3 @@
-/**
- * `resolveSsColaPct` — the single read point deciding whether a
- * scenario's Social Security COLA tracks the general inflation rate
- * (default-on) or uses a fixed `colaPct` (explicit opt-out) — plus
- * `buildSsContext` construction: the statement COLA anchor, the
- * separate survivor claim age, and the monthly earned-income series
- * must survive into the built `SsContext`.
- */
 import { describe, expect, it } from 'vitest';
 import { buildSsContext, resolveSsColaPct } from './ss-context-builder';
 import type {
@@ -17,12 +9,10 @@ import { DEFAULT_COLA_PCT } from '../db/types';
 
 describe('resolveSsColaPct', () => {
   it('should_track_inflation_when_override_is_undefined', () => {
-    // Default-on: a scenario that never set the flag still tracks inflation.
     expect(resolveSsColaPct(undefined, 3)).toBe(3);
   });
 
   it('should_track_inflation_when_flag_is_absent_even_with_a_fixed_colaPct', () => {
-    // colaPct is ignored unless tracking is explicitly disabled.
     expect(resolveSsColaPct({ colaPct: 1.5 }, 2.5)).toBe(2.5);
   });
 
@@ -106,9 +96,7 @@ describe('buildSsContext — statement anchor, survivor age, monthly earnings', 
   });
 
   it('should_leave_statementAnchorYear_absent_when_piaAsOfDate_is_calendar_invalid', () => {
-    // A shape-only `YYYY-MM-DD` match would accept these and turn a
-    // garbage year into the load-bearing COLA anchor. Strict calendar
-    // validation must treat them as absent (age-62 fallback anchor instead).
+    // Strict calendar validation: a shape-only YYYY-MM-DD match would turn a garbage year into the load-bearing COLA anchor.
     const ctx = buildSsContext(
       [memberRow('m1', true), memberRow('m2', false)],
       // Impossible day (Feb 30) + out-of-range month (13).
@@ -153,7 +141,6 @@ describe('buildSsContext — statement anchor, survivor age, monthly earnings', 
     );
     expect(ctx?.primary.earnedIncomeByYear).toEqual({ 2026: 2_000 });
     expect(ctx?.primary.earnedIncomeMonthlyByYear).toEqual({ 2026: monthly2026 });
-    // Unkeyed member gets neither series.
     expect(ctx?.secondary?.earnedIncomeByYear).toBeUndefined();
     expect(ctx?.secondary?.earnedIncomeMonthlyByYear).toBeUndefined();
   });

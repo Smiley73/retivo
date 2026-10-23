@@ -147,7 +147,7 @@ export function rmdTriggerAge(birthYear: number): 73 | 75 {
  * deceased would have reached their RBD): born 1949 or earlier 70 (the 70½ era, by its integer floor), 1950 72 (SECURE Act
  * 2019), 1951–1959 73 and 1960+ 75 (SECURE 2.0 §107). Year granularity: the sub-year July-1949 cutover is not split.
  */
-export function deceasedOwnerApplicableRmdAge(birthYear: number): 70 | 72 | 73 | 75 {
+function deceasedOwnerApplicableRmdAge(birthYear: number): 70 | 72 | 73 | 75 {
   if (birthYear >= 1960) return 75;
   if (birthYear >= 1951) return 73;
   if (birthYear >= 1950) return 72;
@@ -728,7 +728,7 @@ function isEmployerPlanType(type: RmdAccountType): boolean {
  * `false`, since a `!== true` check would grant the favorable deferral on missing plan terms. `stillWorkingExceptionApplies`
  * adds the year test; `resolveRmdFirstYearPlan` needs this one.
  */
-export function stillWorkingExceptionEligible(
+function stillWorkingExceptionEligible(
   facts: RmdAccountProfileFacts,
   accountType: RmdAccountType,
 ): boolean {

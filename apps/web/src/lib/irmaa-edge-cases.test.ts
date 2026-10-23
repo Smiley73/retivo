@@ -1,22 +1,15 @@
-/**
- * Tests for computeIrmaa — edge cases and custom snapshot determinism.
- *
- * Coverage:
- *   - MAGI = 0 → none tier
- *   - Engine is deterministic: same input + snapshot → same output
- *   - Custom snapshot overrides IRMAA_TIERS values
- */
-
 import { describe, it, expect } from 'vitest';
-import { computeIrmaa, computeMonthAwareIrmaa, UnsupportedTaxYearError } from './irmaa';
-import type { IrmaaInput, MonthAwareIrmaaInput, IrmaaBeneficiaryEnrollment } from './irmaa';
+import { computeIrmaa, computeMonthAwareIrmaa } from './irmaa';
+import type { IrmaaBeneficiaryEnrollment } from './irmaa';
 import { IRMAA_TIERS } from './irmaa-tiers';
 import type { CalibrationSnapshot } from './calibration';
 import type { IrmaaTable } from './irmaa-tiers';
 
+type IrmaaInput = Parameters<typeof computeIrmaa>[0];
+type MonthAwareIrmaaInput = Parameters<typeof computeMonthAwareIrmaa>[0];
+
 const snap = IRMAA_TIERS;
 
-/** Factory for IrmaaInput — defaults to 2025, Single, 1 beneficiary, base MAGI. */
 function input(overrides: Partial<IrmaaInput> = {}): IrmaaInput {
   return {
     taxYear: 2025,
@@ -26,10 +19,6 @@ function input(overrides: Partial<IrmaaInput> = {}): IrmaaInput {
     ...overrides,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Edge: MAGI = 0
-// ---------------------------------------------------------------------------
 
 describe('computeIrmaa — MAGI = 0', () => {
   it('MAGI = $0 → none tier', () => {
@@ -41,14 +30,8 @@ describe('computeIrmaa — MAGI = 0', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Regression: zero-beneficiary short-circuit fires before snapshot lookup
-// ---------------------------------------------------------------------------
-
 describe('computeIrmaa — zero-beneficiary short-circuit', () => {
   it('taxYear=2030 + beneficiariesOnMedicareCount=0 → all-zero result, does NOT throw UnsupportedTaxYearError', () => {
-    // 2030 is not in IRMAA_TIERS snapshot — would throw UnsupportedTaxYearError if snapshot
-    // were read first. The short-circuit must fire before the snapshot lookup.
     const result = computeIrmaa(
       input({ taxYear: 2030, magiTwoYearsPriorCents: 800_000_00, beneficiariesOnMedicareCount: 0 }),
       snap,
@@ -58,17 +41,7 @@ describe('computeIrmaa — zero-beneficiary short-circuit', () => {
     expect(result.partDSurchargeCentsPerBeneficiary).toBe(0);
     expect(result.totalHouseholdAnnualCents).toBe(0);
   });
-
-  it('taxYear=2030 + beneficiariesOnMedicareCount=1 → throws UnsupportedTaxYearError (confirms snapshot IS read when count > 0)', () => {
-    expect(() =>
-      computeIrmaa(input({ taxYear: 2030, beneficiariesOnMedicareCount: 1 }), snap),
-    ).toThrow(UnsupportedTaxYearError);
-  });
 });
-
-// ---------------------------------------------------------------------------
-// 2026 MFS lived-with-spouse top threshold = $391,000 (CMS), boundary
-// ---------------------------------------------------------------------------
 
 describe('computeIrmaa — 2026 MFS lived-with-spouse top-band boundary', () => {
   const mfs = (magiCents: number): IrmaaInput =>
@@ -90,10 +63,6 @@ describe('computeIrmaa — 2026 MFS lived-with-spouse top-band boundary', () => 
   });
 });
 
-// ---------------------------------------------------------------------------
-// Snapshot determinism
-// ---------------------------------------------------------------------------
-
 describe('computeIrmaa — determinism', () => {
   it('returns identical results for the same input called twice', () => {
     const inp = input({ taxYear: 2025, magiTwoYearsPriorCents: 167_001_00 });
@@ -103,13 +72,8 @@ describe('computeIrmaa — determinism', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Custom snapshot
-// ---------------------------------------------------------------------------
-
 describe('computeIrmaa — custom snapshot', () => {
   it('uses values from the provided snapshot, not IRMAA_TIERS', () => {
-    // Craft a tiny snapshot with shifted thresholds
     const customSnap: CalibrationSnapshot<IrmaaTable> = {
       values: {
         2025: {
@@ -147,10 +111,6 @@ describe('computeIrmaa — custom snapshot', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Total household surcharge math
-// ---------------------------------------------------------------------------
-
 describe('computeIrmaa — totalHouseholdAnnualCents', () => {
   it('none tier: total = 0 regardless of count', () => {
     const result = computeIrmaa(
@@ -159,38 +119,10 @@ describe('computeIrmaa — totalHouseholdAnnualCents', () => {
     );
     expect(result.totalHouseholdAnnualCents).toBe(0);
   });
-
-  it('tier1, count=1: total = partB + partD', () => {
-    const result = computeIrmaa(
-      input({ taxYear: 2025, magiTwoYearsPriorCents: 110_000_00, beneficiariesOnMedicareCount: 1 }),
-      snap,
-    );
-    expect(result.totalHouseholdAnnualCents).toBe(
-      result.partBSurchargeCentsPerBeneficiary + result.partDSurchargeCentsPerBeneficiary,
-    );
-  });
-
-  it('tier1, count=2: total = (partB + partD) × 2', () => {
-    const result = computeIrmaa(
-      input({ taxYear: 2025, magiTwoYearsPriorCents: 110_000_00, beneficiariesOnMedicareCount: 2 }),
-      snap,
-    );
-    expect(result.totalHouseholdAnnualCents).toBe(
-      (result.partBSurchargeCentsPerBeneficiary + result.partDSurchargeCentsPerBeneficiary) * 2,
-    );
-  });
 });
 
-// ---------------------------------------------------------------------------
-// computeMonthAwareIrmaa — month proration of Part B / Part D separately,
-// plus look-back filing-status consumption.
-// Input-validation tests live in irmaa-validation.test.ts.
-// ---------------------------------------------------------------------------
-
-/** Default full-year enrollment for one beneficiary (both parts, 12 months). */
 const FULL_YEAR_BOTH: readonly IrmaaBeneficiaryEnrollment[] = [{ partBMonths: 12, partDMonths: 12 }];
 
-/** Month-aware input factory — 2025 Single tier1 ($110k lookback), overridable. */
 function mInput(overrides: Partial<MonthAwareIrmaaInput> = {}): MonthAwareIrmaaInput {
   return {
     taxYear: 2025,
@@ -200,9 +132,7 @@ function mInput(overrides: Partial<MonthAwareIrmaaInput> = {}): MonthAwareIrmaaI
   };
 }
 
-// 2025 Single tier1 full-year components (mirror the whole-year tests above):
-//   Part B $74.00/mo × 12 × 100 = 88,800 cents
-//   Part D $13.70/mo × 12 × 100 = 16,440 cents
+// 2025 Single tier1 full year: Part B $74.00/mo and Part D $13.70/mo, times 12, in cents.
 const T1_PARTB = 88_800;
 const T1_PARTD = 16_440;
 

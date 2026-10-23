@@ -1,8 +1,4 @@
-/**
- * The rough ACA benchmark grows from its 2026 base year at the scenario's medical
- * inflation rate; a user-entered benchmark is used as entered. Golden numbers are
- * worked by hand; the medical rates are deliberately not 5% or the general rate.
- */
+// The rough benchmark grows from 2026 at the medical inflation rate; an entered benchmark is used as entered. Golden numbers are hand-worked, with medical rates deliberately not 5% or the general rate.
 import { describe, it, expect } from 'vitest';
 import {
   applyTaxYear,
@@ -61,8 +57,7 @@ describe('applyTaxYear — rough ACA benchmark growth', () => {
     hasAcaCoverage: true,
   };
 
-  /** Case B/C household: single, 12 months, ACA MAGI exactly 200% of the
-   *  deflated 2026 poverty line once the 4% general inflation is removed. */
+  // Case B/C household: single, 12 months, ACA MAGI exactly 200% of the poverty line deflated by the 4% general inflation.
   function caseInput(overrides: Partial<TaxYearInput> = {}): TaxYearInput {
     return {
       taxYear: 2028,
@@ -142,9 +137,7 @@ describe('applyTaxYear — rough ACA benchmark growth', () => {
     });
     const grown = applyTaxYearForFilingPlan(plan(6), BUNDLE).acaPtcSubsidyCents;
     const ungrown = applyTaxYearForFilingPlan(plan(undefined), BUNDLE).acaPtcSubsidyCents;
-    // The HoH unit's benchmark is the covered spouse's age-60 annual premium,
-    // grown 1.06²; its contribution is unchanged, so the credit rises by exactly
-    // the growth of the benchmark.
+    // The HoH unit's benchmark is the covered spouse's age-60 annual premium grown 1.06²; its contribution is unchanged, so the credit rises by exactly the benchmark growth.
     expect(grown - ungrown).toBe(943_824 - 840_000);
     expect(ungrown).toBeGreaterThan(0);
   });

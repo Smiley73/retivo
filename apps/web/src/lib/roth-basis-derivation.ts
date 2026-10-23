@@ -12,7 +12,7 @@ import type { AccountBalancePayload } from '../db/types';
 import type { RothConversionLotCents } from './roth-distribution-tax';
 
 /** What one §408A pool has left after the recorded history is walked. */
-export interface DerivedRothPoolBasisCents {
+interface DerivedRothPoolBasisCents {
   readonly regularContributionBasisCents: number;
   /** One merged lot per tax year, ascending; fully consumed lots are omitted. */
   readonly conversionLots: readonly RothConversionLotCents[];

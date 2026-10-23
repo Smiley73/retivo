@@ -1,18 +1,13 @@
-/**
- * Unit tests for tax-integration pure helpers.
- */
 import { describe, it, expect } from 'vitest';
 import {
   allocateCentsByWeight,
   anyMemberHasAcaCoverage,
   anyMemberOnMedicare,
-  automaticMedicareMonthsInYear,
   defaultHouseholdSlcspByAge,
   householdMarketplaceCoverageMonths,
   irmaaBeneficiaryEnrollments,
   overrideBenchmarkCentsForCoverageMonths,
   readStoredCoverageMonths,
-  resolveCoverageMonths,
   resolveMemberHealthCoverage,
   storedAcaBenchmarkOverrides,
   storedCoverageMonthEntries,
@@ -32,20 +27,15 @@ function member(overrides: Partial<TaxMemberInput> = {}): TaxMemberInput {
   };
 }
 
-/** The per-member per-month benchmark, in whole dollars — the independent
- *  restatement of what `defaultHouseholdSlcspByAge` must now produce. */
+// The per-member per-month benchmark in whole dollars: an independent restatement of what defaultHouseholdSlcspByAge must produce.
 function monthlyDollars(age: number, months: number): number {
   return (roughMonthlyBenchmarkCentsForMember(age) * months) / 100;
 }
 
-// ---------------------------------------------------------------------------
-// Default SLCSP = SUM over covered members of their own
-// age-priced monthly premium × their covered months
-// ---------------------------------------------------------------------------
+// Default SLCSP = sum over covered members of their own age-priced monthly premium × covered months.
 describe('defaultHouseholdSlcspByAge (per-member sum)', () => {
   it('prices only the ACA-covered member (spouse-only-on-ACA household)', () => {
-    // Primary not on ACA; only the older spouse has ACA coverage. The benchmark
-    // must follow the covered (spouse) age, not the primary's.
+    // Only the older spouse has ACA coverage: the benchmark follows the covered (spouse) age, not the primary's.
     const members: TaxMemberInput[] = [
       member({ memberId: 'primary', isoBirthdate: '1970-01-01', hasAcaCoverage: false }),
       member({ memberId: 'spouse', isoBirthdate: '1958-01-01', hasAcaCoverage: true }),
@@ -66,8 +56,7 @@ describe('defaultHouseholdSlcspByAge (per-member sum)', () => {
     const taxYear = 2026;
     const expected = monthlyDollars(2026 - 1962, 12) + monthlyDollars(2026 - 1965, 12);
     expect(defaultHouseholdSlcspByAge(members, taxYear)).toBeCloseTo(expected, 6);
-    // A single-premium approximation would over-price the younger spouse by
-    // anchoring the whole household to the oldest member's premium.
+    // A single-premium approximation would anchor the whole household to the oldest member's premium and over-price the younger spouse.
     expect(defaultHouseholdSlcspByAge(members, taxYear)).toBeLessThan(
       monthlyDollars(2026 - 1962, 12) * 2,
     );
@@ -109,10 +98,16 @@ describe('defaultHouseholdSlcspByAge (per-member sum)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Month resolution + engagement gates
-// ---------------------------------------------------------------------------
-describe('resolveCoverageMonths', () => {
+const automaticMedicareMonthsInYear = (isoBirthdate: string, taxYear: number) =>
+  resolveMemberHealthCoverage({ isoBirthdate, taxYear, retired: true, optedOut: false }).partBEnrollmentMonths;
+
+const resolveCoverageMonths = (m: TaxMemberInput) => ({
+  partBMonths: irmaaBeneficiaryEnrollments([m])[0]?.partBMonths ?? 0,
+  partDMonths: irmaaBeneficiaryEnrollments([m])[0]?.partDMonths ?? 0,
+  marketplaceMonths: householdMarketplaceCoverageMonths([m]),
+});
+
+describe('member coverage months', () => {
   it('falls back to the whole-year flags when no months are stored', () => {
     expect(resolveCoverageMonths(member({ onMedicare: true, hasAcaCoverage: false }))).toEqual({
       partBMonths: 12,
@@ -136,8 +131,7 @@ describe('resolveCoverageMonths', () => {
   });
 
   it('lets an explicit Marketplace month count win over the whole-year flag', () => {
-    // The opt-out precedence is applied upstream (the runner leaves the field
-    // off for an opted-out member with no stated months); a STATED count wins.
+    // Opt-out precedence is applied upstream; a STATED month count wins.
     const m = member({ hasAcaCoverage: false, marketplaceCoverageMonths: 4 });
     expect(resolveCoverageMonths(m).marketplaceMonths).toBe(4);
   });
@@ -155,9 +149,7 @@ describe('resolveCoverageMonths', () => {
     ).toBe(12);
   });
 
-  // §36B(c)(2)(B): a Medicare month is never a PTC coverage
-  // month. Without the clamp, independently-resolved counts could charge more
-  // than 12 covered months in one year and inflate the subsidy.
+  // §36B(c)(2)(B): a Medicare month is never a PTC coverage month; without the clamp, independently resolved counts could exceed 12 covered months and inflate the subsidy.
   it('caps Marketplace months at the months NOT enrolled in Part B or Part D', () => {
     const m = member({
       hasAcaCoverage: true,
@@ -184,13 +176,8 @@ describe('resolveCoverageMonths', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Automatic (birthday-based) Medicare timing
-// ---------------------------------------------------------------------------
-describe('automaticMedicareMonthsInYear', () => {
-  // Medicare.gov: Part A/B entitlement begins in the birthday MONTH, or the
-  // PRECEDING month for a first-of-month birthday. A year-only rule would give 12
-  // months to every January-June birthday and 0 to every July-December one.
+describe('automatic Medicare entitlement months', () => {
+  // Medicare.gov: Part A/B entitlement begins in the birthday month, or the preceding month for a first-of-month birthday; a year-only rule would give 12 months to every Jan–Jun birthday and 0 to every Jul–Dec one.
   it.each([
     [1, 12],
     [2, 11],
@@ -223,17 +210,8 @@ describe('automaticMedicareMonthsInYear', () => {
     expect(automaticMedicareMonthsInYear('1961-10-15', 2025)).toBe(0);
     expect(automaticMedicareMonthsInYear('1961-10-15', 2027)).toBe(12);
   });
-
-  it('returns 0 for an empty or unparseable birthdate', () => {
-    expect(automaticMedicareMonthsInYear('', 2030)).toBe(0);
-    expect(automaticMedicareMonthsInYear(undefined, 2030)).toBe(0);
-    expect(automaticMedicareMonthsInYear('not-a-date', 2030)).toBe(0);
-  });
 });
 
-// ---------------------------------------------------------------------------
-// The ONE shared resolver both engines call
-// ---------------------------------------------------------------------------
 describe('resolveMemberHealthCoverage', () => {
   const facts = (over: Partial<Parameters<typeof resolveMemberHealthCoverage>[0]> = {}) => ({
     isoBirthdate: '1961-06-15',
@@ -310,8 +288,7 @@ describe('resolveMemberHealthCoverage', () => {
   });
 
   it('drops Marketplace months for an unparseable birthdate', () => {
-    // The rough benchmark prices a covered member off their age; with no
-    // parseable age the member must not reach the age curve at all.
+    // The rough benchmark prices a member off their age; with no parseable age the member must not reach the age curve.
     const r = resolveMemberHealthCoverage(
       facts({ isoBirthdate: '', stored: { marketplaceMonths: 12 } }),
     );
@@ -319,11 +296,7 @@ describe('resolveMemberHealthCoverage', () => {
     expect(r.marketplaceCoverageMonths).toBe(0);
   });
 
-  // A MALFORMED calendar date with a numeric year would pass a year-only guard,
-  // get defaulted month/day handling, and bill a full
-  // 12 Medicare months (with real IRMAA surcharges) for a date that cannot
-  // exist. Imported aggregates are validated at the envelope only, so these are
-  // reachable payloads, not hypotheticals.
+  // A malformed calendar date with a numeric year passed a year-only guard, got defaulted month/day handling and billed 12 Medicare months (with real IRMAA surcharges); imported aggregates are validated at the envelope only, so these payloads are reachable.
   it.each([
     ['month 99 / day 99', '1961-99-99'],
     ['month 13', '1961-13-15'],
@@ -337,17 +310,14 @@ describe('resolveMemberHealthCoverage', () => {
     ['an unpadded date', '1961-6-1'],
     ['a timestamp', '1961-06-15T00:00:00Z'],
   ])('charges NO Medicare months for %s', (_label, isoBirthdate) => {
-    // 2030 — five years past this member's nominal 65th birthday, so the buggy
-    // path returned a full 12 months for every one of these.
+    // 2030, five years past the nominal 65th birthday: the old path returned 12 months for each of these.
     const r = resolveMemberHealthCoverage(facts({ isoBirthdate, taxYear: 2030 }));
     expect(r.onMedicare).toBe(false);
     expect(r.partBEnrollmentMonths).toBe(0);
     expect(r.partDEnrollmentMonths).toBe(0);
-    // …and no Marketplace coverage either: the age curve cannot price a member
-    // whose birthdate the app cannot read.
+    // No Marketplace coverage either: the age curve cannot price a member whose birthdate the app cannot read.
     expect(r.hasAcaCoverage).toBe(false);
     expect(r.marketplaceCoverageMonths).toBe(0);
-    expect(automaticMedicareMonthsInYear(isoBirthdate, 2030)).toBe(0);
   });
 
   it('keeps STATED enrolment months for a malformed birthdate (they need no birthday)', () => {
@@ -374,9 +344,6 @@ describe('resolveMemberHealthCoverage', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Imported override shapes are never dereferenced blind
-// ---------------------------------------------------------------------------
 describe('readStoredCoverageMonths', () => {
   it('reads a present member/year entry', () => {
     expect(
@@ -398,9 +365,6 @@ describe('readStoredCoverageMonths', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The ONE map-walking reader the UI / report surfaces share
-// ---------------------------------------------------------------------------
 describe('storedCoverageMonthEntries', () => {
   it('enumerates every stated (member, year) entry, ordered by year then member', () => {
     expect(
@@ -466,13 +430,9 @@ describe('storedCoverageMonthEntries', () => {
   });
 
   it('an inherited `Object.prototype` member is never read as stated coverage', () => {
-    // An imported member can carry the id `"__proto__"` (import validation
-    // rejects it as a KEY, not as an id VALUE). Indexing the stored map with it
-    // resolves to `Object.prototype`, which passes a bare `typeof === 'object'`
-    // check.
+    // An imported member can carry the id "__proto__" (import validation rejects it as a key, not as an id value); indexing the stored map with it resolves to Object.prototype, which passes a bare typeof object check.
     expect(readStoredCoverageMonths({ perMember: {} }, '__proto__', 2030)).toBeUndefined();
     expect(readStoredCoverageMonths({ perMember: {} }, 'constructor', 2030)).toBeUndefined();
-    // An OWN entry for the same member id still reads normally.
     const own = { perMember: Object.create(null) as Record<string, unknown> };
     own.perMember['__proto__'] = { 2030: { partBMonths: 6 } };
     expect(readStoredCoverageMonths(own as never, '__proto__', 2030)).toEqual({
@@ -481,9 +441,6 @@ describe('storedCoverageMonthEntries', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The ONE shape-checked benchmark-override enumerator
-// ---------------------------------------------------------------------------
 describe('storedAcaBenchmarkOverrides', () => {
   it('returns the valid rows ascending by tax year', () => {
     expect(
@@ -535,9 +492,7 @@ describe('storedAcaBenchmarkOverrides', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// A whole-year benchmark override must arrive month-summed
-// ---------------------------------------------------------------------------
+// A whole-year benchmark override must arrive month-summed.
 describe('overrideBenchmarkCentsForCoverageMonths', () => {
   it('is the identity for a full covered year', () => {
     expect(overrideBenchmarkCentsForCoverageMonths(12_000, 12)).toBe(1_200_000);
