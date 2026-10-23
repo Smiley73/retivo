@@ -1479,6 +1479,28 @@ describe('computeRmd — fact-based rule activation', () => {
     ).toBeUndefined();
   });
 
+  it('a verified sole-spouse >10-years-younger designation selects the LARGER Table II divisor', () => {
+    const tableIii = run([account('a', {})]);
+    const tableIi = run([
+      account('a', {
+        soleSpouseBeneficiaryMoreThan10YrsYounger: true,
+        spouseBeneficiaryBirthdate: '1975-06-15',
+      }),
+    ]);
+    expect(tableIi.divisor).toBeGreaterThan(tableIii.divisor!);
+    expect(tableIi.ownerRmdCents).toBeLessThan(tableIii.ownerRmdCents);
+  });
+
+  it('an inherited account with incomplete beneficiary facts is WITHHELD and lists them', () => {
+    const result = run([account('inh', { inheritedAccount: true })]);
+    expect(result.applicable).toBe(true);
+    expect(result.ownerRmdCents).toBe(0);
+    const missing = result.withheldAccounts?.[0]?.missingFacts ?? [];
+    expect(missing).toContain('beneficiaryType');
+    expect(missing).toContain('inheritedOwnerDeathDate');
+    expect(missing).toContain('inheritedOwnerDiedOnOrAfterRbd');
+  });
+
   it('an elected first-year deferral moves the trigger-year amount into the following year', () => {
     const triggerYear = computeRmd(
       {
