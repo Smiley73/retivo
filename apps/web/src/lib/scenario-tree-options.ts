@@ -1,21 +1,6 @@
 /**
- * Build a depth-tagged, DFS-ordered list of scenarios for use in
- * indented `<Select>` option lists.
- *
- * Two-phase algorithm:
- *   Phase 1 — DFS from every "natural root" (parentScenarioId === null
- *             OR parent not in the input set). Roots ordered: isPrimary
- *             roots first (alpha), then other natural roots (alpha).
- *             Children within each parent sorted case-insensitively alpha.
- *             visited-set guard skips already-seen children (cycle guard).
- *   Phase 2 — Any scenario still unvisited after Phase 1 can only be
- *             reached via a cycle with no natural root (self-loop,
- *             rootless pair, longer rootless cycle). Flatten all at depth 0
- *             in case-insensitive alpha order — no DFS, every node gets
- *             depth 0 unambiguously.
- *
- * Guarantees every input scenario emits exactly once.
- * Pure function — no IDB / React deps; callers filter the result themselves.
+ * Depth-tagged, DFS-ordered scenario list for indented `<Select>` options; every input scenario is emitted exactly once.
+ * Natural roots (no parent, or parent outside the set) come first, primary then alpha; scenarios reachable only through a rootless cycle are flattened at depth 0.
  */
 import type { ScenarioAggregate } from './scenario-resolution';
 
@@ -34,10 +19,6 @@ type Alpha = (a: ScenarioAggregate, b: ScenarioAggregate) => number;
 const alpha: Alpha = (a, b) =>
   a.payload.name.localeCompare(b.payload.name, undefined, { sensitivity: 'base' });
 
-/**
- * Build a map from parent-id → sorted children.
- * Only scenarios whose parent is in `idSet` appear as children.
- */
 function buildChildrenIndex(
   scenarios: ScenarioAggregate[],
   idSet: Set<string>,
@@ -56,10 +37,6 @@ function buildChildrenIndex(
   return index;
 }
 
-/**
- * Split natural roots (parent null or outside idSet) into two sorted tiers:
- * isPrimary roots first, then the rest — both tiers sorted alpha.
- */
 function orderNaturalRoots(
   scenarios: ScenarioAggregate[],
   idSet: Set<string>,
@@ -73,10 +50,6 @@ function orderNaturalRoots(
   return [...primary, ...other];
 }
 
-/**
- * DFS walk from `root`, pushing `{ scenario, depth }` entries into `result`.
- * The `visited` set guards against cycles.
- */
 function dfs(
   root: ScenarioAggregate,
   depth: number,
@@ -92,9 +65,6 @@ function dfs(
   }
 }
 
-/**
- * Phase 2: emit every unvisited scenario (rootless cycles) at depth 0, alpha.
- */
 function flattenUnvisited(
   scenarios: ScenarioAggregate[],
   visited: Set<string>,
@@ -108,8 +78,8 @@ function flattenUnvisited(
 }
 
 /**
- * Return `scenarios` in indented-tree order with depth annotations.
- * The returned array length always equals `scenarios.length`.
+ * Return `scenarios` in indented-tree order with a depth per entry; the length always equals the
+ * input's.
  */
 export function buildScenarioTreeOptions(
   scenarios: ScenarioAggregate[],

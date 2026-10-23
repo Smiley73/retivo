@@ -1,18 +1,6 @@
 /**
- * Adapters turning ALREADY display-transformed view-model rows into
- * jspdf-autotable-compatible `{ head, body }` specs.
- *
- * CRITICAL: these adapters NEVER deflate. The view-model
- * (`deriveBalanceProjectionDisplayData`) has already applied `viewDeflator` /
- * `basisDeflator` to every row before it reaches here, so the adapters only
- * format the already-display-basis numbers into table cells. Re-deflating here
- * would double-apply the factor (and, worse, flatten away a high-CPI MC path's
- * own-CPI deflation back onto the flat scenario rate — the exact bug these
- * adapters exist to avoid).
- *
- * Return shape is plain data (`{ head: string[][]; body: string[][] }`) so the
- * autotable call itself stays in `build-pdf.ts` — no jspdf-autotable import
- * here. Framework-free: pure functions, no React / DOM.
+ * Adapters turning already display-transformed view-model rows into jspdf-autotable `{ head, body }` specs.
+ * They never deflate: the view-model has applied `viewDeflator` / `basisDeflator`, and a second pass would double-apply it.
  */
 import type { YearlyTableRow } from '../../pages/balance-projection-page-yearly';
 import type { PortfolioFlowYear } from '../../pages/balance-projection-page-yearly-builders';
@@ -58,8 +46,7 @@ export interface PdfTableSpec {
   readonly foot?: string[][];
 }
 
-/** Format an already-display-basis dollar value (no deflation) as a whole
- *  dollar string. `null` renders as an em dash. */
+/** Whole-dollar string of an already-display-basis value; `null` renders as an em dash. */
 export function formatDollars(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—';
   const rounded = Math.round(value);
@@ -77,11 +64,7 @@ export function formatPercent(value: number | null | undefined): string {
   return `${value.toFixed(1)}%`;
 }
 
-/**
- * Year-by-year detail adapter. Reads the view-model's `YearlyTableRow` cells
- * verbatim (each already in the display basis: the MC-sourced Balance + Gains
- * columns are `basisDeflator`-deflated upstream, NOT re-deflated here).
- */
+/** Year-by-year detail table; cells are read verbatim from the view-model rows. */
 export function buildYearByYearTableSpec(
   rows: ReadonlyArray<YearlyTableRow>,
   activeMethod: 'planned' | 'twr',
@@ -101,11 +84,7 @@ export function buildYearByYearTableSpec(
   return { head, body };
 }
 
-/**
- * Annual portfolio-flow adapter. The flow rows are already deflated upstream
- * (deterministic flows by `viewDeflator`, MC drawdown flows by `basisDeflator`)
- * — pass them through unchanged.
- */
+/** Annual portfolio-flow table; rows are already deflated upstream. */
 export function buildPortfolioFlowsTableSpec(
   rows: ReadonlyArray<PortfolioFlowYear>,
 ): PdfTableSpec {
@@ -132,8 +111,6 @@ export function buildPortfolioFlowsTableSpec(
   return { head, body };
 }
 
-/** Report accounts inventory adapter (current values, today's dollars). */
-/** Human labels for an account's tax treatment. */
 const TAX_TREATMENT_LABELS: Record<string, string> = {
   PRE_TAX: 'Pre-tax',
   POST_TAX: 'Post-tax',
@@ -168,17 +145,10 @@ export function buildReportAccountsTableSpec(
   return { head, body };
 }
 
-/**
- * Roth tax-free amounts adapter. The two row kinds state DIFFERENT
- * things and must be described accordingly (see `report-roth-tax-free.ts`):
- * a person row is what comes out tax-free FIRST from that member's own Roth
- * IRAs (contribution basis plus remaining conversion-lot principal); an
- * employer row is a plan's recorded Roth rollover BASIS, not an amount
- * withdrawable tax-free (a nonqualified designated-Roth distribution is
- * pro-rata between basis and earnings). No header or cell describes the
- * employer figure as tax-free. Generated cells are ASCII, em dash only
- * (jsPDF's standard font has no glyph for other punctuation).
- */
+// An employer row is a recorded Roth rollover basis, not a tax-free amount (a nonqualified
+// designated-Roth distribution is pro-rata basis and earnings), so no cell calls it tax-free.
+// Generated cells in this file are ASCII plus an em dash: jsPDF's standard font has no glyph for
+// other punctuation.
 const ROTH_TAX_FREE_DESCRIPTIONS: Record<ReportRothTaxFreeRow['kind'], string> = {
   person:
     'Contributions and past conversions — what comes out tax-free first.',
@@ -233,19 +203,10 @@ export function buildReportIncomeTableSpec(
   return { head, body };
 }
 
-// ---------------------------------------------------------------------------
-// Per-chart data tables (rendered UNDER each chart in the PDF). Every table is
-// per calendar year and mirrors the SAME display-basis numbers its chart plots
-// — the monthly chart series are aggregated to annual via `aggregateByYear`,
-// the already-annual series (balance line, portfolio flows, burden/RMD/Roth,
-// account stack) are projected column-by-column. NEVER re-deflated.
-// ---------------------------------------------------------------------------
-
-/** Sum the selected numeric `fields` of `rows` per calendar `year`, preserving
- *  first-seen year order. The single annual aggregation helper the monthly
- *  chart tables (cashflow, income breakdown, expenses) share; rows that are
- *  already one-per-year (the yearly-granularity cashflow/breakdown series)
- *  pass through with each year's lone value. */
+/**
+ * Sum `fields` of `rows` per calendar year in first-seen order; rows already one-per-year pass
+ * through.
+ */
 export function aggregateByYear<K extends string>(
   rows: ReadonlyArray<{ year: number } & Record<K, number>>,
   fields: ReadonlyArray<K>,
@@ -267,9 +228,7 @@ export function aggregateByYear<K extends string>(
   >;
 }
 
-/** Coalesce a method's `*Solid` / `*Dashed` channels to a single per-year
- *  value (whichever is non-null; the shared boundary year carries both and the
- *  solid wins). Returns `null` when the method has no value that year. */
+// The shared boundary year carries both channels; solid wins.
 function coalesceChannel(
   solid: number | null | undefined,
   dashed: number | null | undefined,
@@ -280,11 +239,8 @@ function coalesceChannel(
 }
 
 /**
- * Balance-projection line table (mirrors `ProjectionChart`'s `displayRows`).
- * One row per calendar year; each method's Solid/Dashed channels coalesce to a
- * single value. The TWR column is included only when Historical is enabled, and
- * the Monte Carlo column only when an MC basis is active (matches which lines
- * the chart draws). Values are already display-basis.
+ * Balance-projection line table (mirrors `ProjectionChart`); the TWR column only when Historical is
+ * enabled, Monte Carlo only when an MC basis is active.
  */
 export function buildBalanceTableSpec(
   rows: ReadonlyArray<ProjectionChartRow>,
@@ -312,9 +268,7 @@ export function buildBalanceTableSpec(
   return { head, body };
 }
 
-/** One per-year percentile triple the stress-test fan plots. Mirrors the
- *  on-screen stress data table (`p10`/`p25`/`p50` at `firstYear + i`) — the MC
- *  engine exposes only these three percentiles (no P75/P90). */
+/** Per-year percentiles of the stress-test fan; the MC engine exposes only P10, P25 and P50. */
 export interface StressTestYearPercentiles {
   readonly year: number;
   readonly badLuck: number;
@@ -322,13 +276,7 @@ export interface StressTestYearPercentiles {
   readonly typical: number;
 }
 
-/**
- * Stress-test (Monte Carlo fan) table. Columns mirror the chart's plotted
- * percentile bands AND the on-screen stress data table: Year, Bad-luck (P10),
- * Pessimistic (P25), Typical (P50). The caller reads the SAME
- * `percentilesReal`/`percentilesNominal` series the fan draws (display basis) —
- * no statistic is recomputed here.
- */
+/** Stress-test fan table: Year, Bad-luck (P10), Pessimistic (P25), Typical (P50), as plotted. */
 export function buildStressTestTableSpec(
   rows: ReadonlyArray<StressTestYearPercentiles>,
 ): PdfTableSpec {
@@ -342,11 +290,7 @@ export function buildStressTestTableSpec(
   return { head, body };
 }
 
-/**
- * Expected-cashflow table (mirrors `CashflowProjectionChart`). The chart's
- * per-sample rows are aggregated to annual. Columns: Year, Essential,
- * Discretionary, Taxes, Total income, Shortfall (the `shortfallHeight` band).
- */
+/** Expected-cashflow table (mirrors `CashflowProjectionChart`), aggregated to annual. */
 export function buildCashflowTableSpec(
   rows: ReadonlyArray<CashflowMonthlyPoint>,
 ): PdfTableSpec {
@@ -371,9 +315,6 @@ export function buildCashflowTableSpec(
   return { head, body };
 }
 
-/** The income-breakdown stripes, in chart stack order, with their column
- *  labels. A stripe whose annual values are all zero across the horizon is
- *  omitted from the table (matches the chart suppressing an empty stripe). */
 const INCOME_BREAKDOWN_STRIPES: ReadonlyArray<{
   readonly field: keyof Pick<
     IncomeBreakdownPoint,
@@ -390,10 +331,8 @@ const INCOME_BREAKDOWN_STRIPES: ReadonlyArray<{
 ];
 
 /**
- * Income-breakdown table (mirrors `IncomeBreakdownChart`). Per-sample rows
- * aggregate to annual; a column is emitted only for stripes that are non-zero
- * somewhere in the horizon (an all-zero stripe is dropped — the chart hides it
- * too).
+ * Income-breakdown table (mirrors `IncomeBreakdownChart`); all-zero stripes are dropped as the
+ * chart does.
  */
 export function buildIncomeBreakdownTableSpec(
   rows: ReadonlyArray<IncomeBreakdownPoint>,
@@ -412,10 +351,8 @@ export function buildIncomeBreakdownTableSpec(
 }
 
 /**
- * Tax & health-cost burden table (mirrors `TaxBurdenChart`). Columns: Year,
- * Federal tax, IRMAA surcharge, ACA premium tax credit. The chart stores the
- * ACA-PTC as a negative value (below-zero benefit); the table flips its sign so
- * the credit reads as a positive dollar amount.
+ * Tax & health-cost burden table; the chart stores the ACA credit as a negative, so the sign is
+ * flipped to read as a positive amount.
  */
 export function buildTaxBurdenTableSpec(
   rows: ReadonlyArray<TaxBurdenChartRow>,
@@ -432,11 +369,10 @@ export function buildTaxBurdenTableSpec(
   return { head, body };
 }
 
-/** RMD table (mirrors `RmdChart`): Year, RMD met, Shortfall. When any year
- *  retains surplus (`rmdRetained > 0`, same gate as the in-app chart split),
- *  an `of which surplus` sub-column is inserted between RMD met and Shortfall —
- *  the retained portion of the met figure, clamped to the met total so it
- *  never exceeds RMD met. Otherwise the table stays the three-column form. */
+/**
+ * RMD table (mirrors `RmdChart`); an `of which surplus` column appears when any year retains
+ * surplus, clamped to RMD met.
+ */
 export function buildRmdTableSpec(
   rows: ReadonlyArray<RmdChartRow>,
 ): PdfTableSpec {
@@ -472,11 +408,10 @@ export function buildRothConversionsTableSpec(
   return { head, body };
 }
 
-/** QCD table (mirrors `QcdChart`): Year, QCD distributed, Net taxable IRA RMD.
- *  The net-taxable column renders `$0` (not `—`) for a zero value, matching
- *  the on-screen tax-detail table exactly. Each row carries the
- *  already-deflated `qcdDollars` and `netTaxableRmd` values — never re-deflated
- *  here. */
+/**
+ * QCD table (mirrors `QcdChart`); a zero net-taxable value renders `$0`, as the on-screen
+ * tax-detail table does.
+ */
 export function buildQcdTableSpec(rows: ReadonlyArray<QcdPdfRow>): PdfTableSpec {
   const head = [['Year', 'QCD distributed', 'Net taxable IRA RMD']];
   const body = rows.map((r) => [
@@ -487,8 +422,7 @@ export function buildQcdTableSpec(rows: ReadonlyArray<QcdPdfRow>): PdfTableSpec 
   return { head, body };
 }
 
-/** Account metadata the account-stack table groups by (structurally the band's
- *  `AccountMeta`). */
+/** Account metadata the account-stack table groups by. */
 export interface StackTableAccount {
   readonly id: string;
   readonly name: string;
@@ -498,12 +432,8 @@ export interface StackTableAccount {
 }
 
 /**
- * Account-balances-by-type table (mirrors the by-type `AccountBalanceStackBand`
- * grouping). One row per year, one column per non-all-zero type bucket
- * (Tax-deferred / Tax-free (Roth) / Taxable / Tax-free (HSA) / Cash). Uses the
- * SAME `stackTypeBucketsForYear` helper the band's per-type rows use, so the
- * columns tie out to the chart exactly. `bucketFor` is injected to keep this
- * adapter framework-free (no page import). Already display-basis.
+ * Account-balances-by-type table: one column per non-all-zero bucket, bucketed by the injected
+ * `bucketFor`.
  */
 export function buildAccountBalancesByTypeTableSpec(
   rows: ReadonlyArray<StackBandYear>,
@@ -533,11 +463,7 @@ export function buildAccountBalancesByTypeTableSpec(
   return { head, body };
 }
 
-/**
- * Account-balances-by-account table (mirrors the per-account
- * `AccountBalanceStackBand` grouping). One row per year, one column per account
- * (the band's per-account balances). Wide tables wrap in autotable.
- */
+/** Account-balances-by-account table: one column per account. */
 export function buildAccountBalancesByAccountTableSpec(
   rows: ReadonlyArray<StackBandYear>,
   accounts: ReadonlyArray<StackTableAccount>,
@@ -554,13 +480,10 @@ export function buildAccountBalancesByAccountTableSpec(
   return { head, body };
 }
 
-/** Expense-overview table (mirrors `ExpensesProjectionChart`). Reads the
- *  ANNUAL (headline) essential/discretionary totals straight from
- *  `projectExpensesByYear` — the same source-of-truth math the year-by-year
- *  table uses — so the figures tie out in every display basis, including
- *  partial (mid-year / trimmed-death) years where a monthly run-rate rollup
- *  would diverge from the engine. Already display-basis. Columns: Year,
- *  Essential, Discretionary. */
+/**
+ * Expense-overview table (mirrors `ExpensesProjectionChart`); reads the annual totals from
+ * `projectExpensesByYear` so partial years tie out.
+ */
 export function buildExpensesTotalTableSpec(
   annual: ReadonlyArray<ExpenseProjectionPoint>,
 ): PdfTableSpec {
@@ -574,12 +497,7 @@ export function buildExpensesTotalTableSpec(
 }
 
 /**
- * Expenses-by-category table (mirrors `ExpensesCategoryChart`). Reads the
- * ANNUAL per-category totals straight from `projectExpensesByCategoryYear`
- * (the headline math, same as the overview table) so the figures tie out in
- * every display basis. Columns: Year + one per category in `categoryMeta`
- * order. A category that is all-zero across the horizon is omitted (the chart
- * hides an empty band). Already display-basis.
+ * Expenses-by-category table (mirrors `ExpensesCategoryChart`); all-zero categories are omitted.
  */
 export function buildExpensesByCategoryTableSpec(
   annual: ReadonlyArray<ExpenseCategoryYearPoint>,
@@ -596,18 +514,6 @@ export function buildExpensesByCategoryTableSpec(
   return { head, body };
 }
 
-// ---------------------------------------------------------------------------
-// Projected withdrawals table (the PDF's final section). Mirrors the on-screen
-// Projected withdrawals page: per year a summary row, then the binding RMD
-// aggregation-group instruction rows, then indented per-account sub-rows, then
-// trailing clarifying notes. The input rows are ALREADY display-basis (deflated
-// upstream by `deflateGuidanceRows`) — this builder NEVER deflates; it only
-// formats. Every GENERATED label/structure cell is ASCII (em dash `—` only);
-// embedded user account / member names pass through verbatim like every other
-// PDF table. All builders are TOTAL — non-throwing on every input.
-// ---------------------------------------------------------------------------
-
-/** The withdrawal-guidance table's six columns. */
 const WITHDRAWAL_GUIDANCE_HEAD: string[][] = [
   [
     'Year / Account',
@@ -619,15 +525,11 @@ const WITHDRAWAL_GUIDANCE_HEAD: string[][] = [
   ],
 ];
 
-/** The trailing clarifying note rows, appended once after all years. The
- *  note text sits in the first cell; the other five cells are empty. */
 const WITHDRAWAL_GUIDANCE_NOTES: ReadonlyArray<string> = [
   'Required min. shown per account is a display attribution; the binding amount is the "Required minimum" instruction row.',
   'After-tax spendable already nets withheld Medicare/IRMAA, ACA credits, and reinvested required-distribution surplus; it is not Withdrawn minus Tax & Medicare.',
 ];
 
-/** The binding instruction text for one RMD aggregation group. Owner name is
- *  prefixed (possessive) when available in `ownerNameById`. ASCII only. */
 function rmdGroupInstruction(
   group: RmdAggregationGroup,
   ownerNameById: ReadonlyMap<string, string>,
@@ -643,10 +545,7 @@ function rmdGroupInstruction(
   return `Required minimum: projected from ${ownerPrefix}${name} (${typeLabel} — required minimum must come from this account)`;
 }
 
-/** The display-basis parenthetical appended to an account sub-row's name cell
- *  (HSA medical/reserve split, MIXED pre-tax/post split, or the MIXED
- *  split-unavailable note). Derived from the SAME presence gate the data layer
- *  uses — an absent optional field yields no parenthetical (never `$NaN`). */
+// An absent optional field yields no parenthetical rather than `$NaN`.
 function guidanceAccountSplit(account: GuidanceYearRow['accounts'][number]): string {
   if (
     account.hsaMedicalQualifiedDollars !== undefined ||
@@ -664,11 +563,8 @@ function guidanceAccountSplit(account: GuidanceYearRow['accounts'][number]): str
 }
 
 /**
- * Build the withdrawal-guidance table spec from ALREADY-display-basis rows.
- * Per year: a summary row, then one row per RMD aggregation group
- * (the binding instruction), then one indented sub-row per acted-on account,
- * then (once, after all years) the trailing clarifying note rows. Pure +
- * never-deflate + total (non-throwing on every input).
+ * Withdrawal-guidance table from display-basis rows: per year a summary row, RMD group instruction
+ * rows and per-account sub-rows, then the notes once.
  */
 export function buildWithdrawalGuidanceTableSpec(
   displayRows: ReadonlyArray<GuidanceYearRow>,
@@ -676,7 +572,6 @@ export function buildWithdrawalGuidanceTableSpec(
 ): PdfTableSpec {
   const body: string[][] = [];
   for (const row of displayRows) {
-    // Summary row for the year.
     body.push([
       `${row.year}${row.hasRmdShortfall ? ' — RMD shortfall' : ''}`,
       formatDollars(row.totalWithdrawnDollars),
@@ -685,7 +580,6 @@ export function buildWithdrawalGuidanceTableSpec(
       formatDollars(row.taxAndMedicareDollars),
       formatDollars(row.spendableDollars),
     ]);
-    // Binding RMD aggregation-group instruction rows.
     for (const group of row.rmdGroups) {
       body.push([
         `  ${rmdGroupInstruction(group, ownerNameById)}`,
@@ -696,7 +590,6 @@ export function buildWithdrawalGuidanceTableSpec(
         '—',
       ]);
     }
-    // Indented per-account sub-rows.
     for (const account of row.accounts) {
       body.push([
         `    ${account.accountName}${guidanceAccountSplit(account)}`,
@@ -714,15 +607,8 @@ export function buildWithdrawalGuidanceTableSpec(
   return { head: WITHDRAWAL_GUIDANCE_HEAD.map((r) => [...r]), body };
 }
 
-/**
- * A one-row note spec (single header cell + single body cell), reusing the
- * existing autotable `table`-kind path. Used for the MC-basis and
- * no-withdrawal disclaimers in place of the full table.
- */
+/** One-row note spec, used for the MC-basis and no-withdrawal disclaimers. */
 export function buildGuidanceNoteSpec(note: string): PdfTableSpec {
-  // Derive the head title from the section manifest (single source of truth)
-  // rather than a second hardcoded copy, so a future rename can't leave the
-  // note spec's header drifting from the section's own name.
   return {
     head: [[pdfSectionTitle('table-withdrawal-guidance')]],
     body: [[note]],
@@ -738,15 +624,8 @@ export const WITHDRAWAL_GUIDANCE_EMPTY_NOTE =
   'No portfolio withdrawals are projected for this scenario.';
 
 /**
- * The pure section-selection helper. Precedence (total function):
- *   1. an active Monte Carlo basis → the MC note (guidance is deterministic-
- *      only) — checked FIRST, so MC-active-and-zero-rows still yields the MC
- *      note;
- *   2. else the no-withdrawal predicate true → the empty note;
- *   3. else the full table from the (already-display-basis) rows.
- *
- * The no-withdrawal predicate matches the on-screen "no draws" state: no rows,
- * or every row has no withdrawal, no acted-on accounts, and no RMD shortfall.
+ * Choose the section content: the MC note when an MC basis is active (checked first), the empty
+ * note when there are no draws, else the full table.
  */
 export function buildWithdrawalGuidanceSectionSpec(params: {
   readonly isMcBasisActive: boolean;
@@ -767,8 +646,7 @@ export function buildWithdrawalGuidanceSectionSpec(params: {
   return buildWithdrawalGuidanceTableSpec(params.displayRows, params.ownerNameById);
 }
 
-/** Per-account pre-tax / post-tax balance breakdown (current values, today's
- *  dollars). Columns with null balances render as an em dash. */
+/** Per-account pre-tax / post-tax balance breakdown; null balances render as an em dash. */
 export function buildAccountBreakdownTableSpec(
   accounts: ReadonlyArray<ReportAccount>,
 ): PdfTableSpec {
@@ -784,8 +662,6 @@ export function buildAccountBreakdownTableSpec(
   ]];
   const body = sortReportAccounts(accounts).map((a) => [
     a.name,
-    // Full "Balance as of" date (year/month/day) when recorded, falling back to
-    // the bare year, then an em dash when the account has no balance history.
     a.balanceAsOfDate ?? (a.balanceAsOfYear != null ? String(a.balanceAsOfYear) : '—'),
     formatDollars(a.totalContributions),
     formatDollars(a.totalGains),

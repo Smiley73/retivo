@@ -1,45 +1,6 @@
 /**
- * Per-year expense projection for the Balance Projection chart band.
- * Pure functions; no React, no IndexedDB, no Date.now() at the
- * top-level (callers pass `todayYear` explicitly so tests are
- * deterministic).
- *
- * Read-only; this engine never modifies aggregates.
- *
- * Active-month rule:
- *   inclusive on start, exclusive on end
- *   active in month M iff startAnniv ≤ end-of-M AND endAnniv > start-of-M
- *
- * Year proration: month-prorate.
- *   yearTotal = active_months / 12 × amount × frequencyToAnnual(freq)
- * Inflation:
- *   amount × (1 + ratePct/100)^((year*12 + monthIndex − asOfMonth) / 12)
- *   where asOfMonth = ctx.todayYear * 12 + (ctx.todayMonthIndex ?? 0).
- *   Amounts are entered as **today's dollars**; the engine inflates
- *   forward (or deflates back) from today's anchor on a month-precise
- *   schedule. Pre-anchor years yield a factor < 1; post-anchor years
- *   yield factor > 1. Output is nominal — the page applies a view-
- *   model deflator at display when "Today's dollars" mode is on.
- * Discretionary adjustment multiplier (discretionary-only):
- *   if bumpPct ≠ 0 AND year is in window from retirement-start →
- *     multiply discretionary expenses by (1 + bumpPct/100).
- *   bumpPct clamped to [-100, +100] at this layer; stored values
- *   outside that range are silently clamped (no migration needed).
- * Spending glide (any classification):
- *   the per-expense rise/fall multiplier (`glideMultiplierFor`) applies
- *   to essential and discretionary expenses alike; the discretionary
- *   adjustment above stacks on top of it for discretionary expenses only.
- *
- * Additive real ("base") outputs:
- *   `projectExpensesByYear` / `projectExpensesByMonth` also emit
- *   `*Base` fields = the same accumulation with **only** the inflation
- *   factor neutralised. The discretionary adjustment and the per-expense
- *   spending glide are real-terms knobs and stay applied; only
- *   `inflationFactorAt` / `yearMeanFactor` / `monthFactor` are dropped.
- *   The Balance Projection page reads these for "Today's dollars" so a
- *   non-glided constant expense is flat (no sawtooth) and a glided one
- *   follows its real trajectory. The nominal fields and every existing
- *   nominal-field consumer are byte-unchanged.
+ * Per-year and per-month expense projection for the Balance Projection chart band: pure and read-only, with `todayYear` passed in so tests are deterministic.
+ * A month is active inclusive of start and exclusive of end; amounts are today's dollars inflated month-precise from `asOfMonth = todayYear * 12 + (todayMonthIndex ?? 0)`, and output is nominal (the page deflates for "Today's dollars" display).
  */
 import {
   DEFAULT_DISCRETIONARY_DURATION_YEARS,
@@ -61,40 +22,35 @@ import {
 } from './schedule-resolution';
 
 /**
- * Inflation knob for the expense projection context. The general
- * `ratePct` (percent) drives every category by default; the optional
- * `categoryRates` map carries a per-category effective rate (percent)
- * keyed by ExpenseCategory id — a category's effective rate is
- * `categoryRates?.get(catId) ?? ratePct`. The map comes from
- * `resolveInflationForScenario` (already sanitised + with the Medical
- * default materialised). Absent / empty `categoryRates` ⇒ every category
- * inflates at `ratePct`, byte-identical to the pre-feature engine.
+ * Inflation knob: `ratePct` drives every category unless `categoryRates` (from
+ * `resolveInflationForScenario`, already sanitised with the Medical default) carries a per-category
+ * rate; absent or empty means every category uses `ratePct`.
  */
 export interface ProjectionInflation {
   ratePct: number;
   categoryRates?: Map<string, number>;
 }
 
-/** Expense projection context. Extends the schedule resolver context
- *  with expense-specific knobs (inflation, discretionary adjustments). The
- *  resolver fields (retirementYear, primary, secondary, lifeExpectancy,
- *  extendBeyondLifetime, retirementMonth0) live on the base type. */
+/**
+ * Expense projection context: the schedule resolver context plus inflation and
+ * discretionary-adjustment knobs.
+ */
 export interface ProjectionContext extends ScheduleResolveContext {
   todayYear: number;
-  /** 0-11 month index of "today" within `todayYear`. Drives the
-   *  month-precise inflation exponent. Default 0 (January) when
-   *  unspecified — matches the prior all-Jan behaviour for callers
-   *  that haven't been threaded through the new anchor. */
+  /**
+   * 0-11 month of "today" within `todayYear`, anchoring the month-precise inflation exponent;
+   * default 0 (January).
+   */
   todayMonthIndex?: number;
   inflation?: ProjectionInflation;
   discretionarySpending?: DiscretionarySpendingOverride;
 }
 
-/** Inputs to {@link buildExpenseProjectionContext}. `resolved` is the
- *  scenario-resolved overrides view (only the two expense-shaping
- *  sections are read); `primary` / `secondary` carry member birthdates;
- *  `primaryRetirementIso` is the primary member's resolved retirement
- *  date (`YYYY-MM-DD`). */
+/**
+ * Inputs to {@link buildExpenseProjectionContext}: `resolved` supplies the two expense-shaping
+ * sections, `primary` / `secondary` carry birthdates, `primaryRetirementIso` is the primary's
+ * resolved retirement date (`YYYY-MM-DD`).
+ */
 export interface ExpenseProjectionContextInput {
   resolved: Pick<ScenarioOverrides, 'discretionarySpending' | 'lifeExpectancy'>;
   primary: { birthdate?: string | null } | null;
@@ -102,9 +58,6 @@ export interface ExpenseProjectionContextInput {
   primaryRetirementIso: string;
 }
 
-/** 0-indexed month (Jan = 0) parsed from an ISO `YYYY-MM-DD`, or null
- *  when the string is malformed. Mirrors the inline parser the Expenses
- *  page used before this helper centralised the construction. */
 function parseIsoMonth0(iso: string): number | null {
   const match = /^\d{4}-(\d{2})/.exec(iso);
   if (!match) return null;
@@ -114,19 +67,10 @@ function parseIsoMonth0(iso: string): number | null {
 }
 
 /**
- * Build the today's-dollars expense {@link ProjectionContext} the
- * Expenses page and the single-expense form preview both project under.
- *
- * Single source of truth for the canonical-expense projection context:
- * inflation is pinned to 0% (values stay in retirement-start dollars),
- * the retirement year + month come from `primaryRetirementIso`, and the
- * life-expectancy / discretionary-spending knobs come from the resolved
- * scenario so the horizon and the discretionary adjustment window match the
- * household's plan. `todayYear` (local-year anchor) and
- * `extendBeyondLifetime: false` are part of the fixed shape, not inputs,
- * so callers cannot drift them. Pure; no Date.now() side effects beyond
- * the `todayYear` anchor (kept here so the Expenses-page lift stays
- * byte-identical to its previous inline construction).
+ * Build the today's-dollars {@link ProjectionContext} the Expenses page and single-expense form
+ * preview both project under: inflation pinned to 0% (retirement-start dollars), retirement year
+ * and month from `primaryRetirementIso`, life-expectancy and discretionary knobs from the resolved
+ * scenario. `todayYear` and `extendBeyondLifetime: false` are fixed so callers cannot drift them.
  */
 export function buildExpenseProjectionContext(
   input: ExpenseProjectionContextInput,
@@ -149,19 +93,8 @@ export function buildExpenseProjectionContext(
   };
 }
 
-/** A month-precise inflation-factor lookup: `(year, monthIndex) → factor`
- *  relative to the context's `asOfMonth`. */
 type InflationFactorFn = (year: number, monthIndex: number) => number;
 
-/**
- * Build a month-precise inflation-factor lookup anchored at the
- * context's `asOfMonth = todayYear * 12 + (todayMonthIndex ?? 0)`.
- * Returns a closure so the multiplicative base is computed once per
- * projection call.
- *
- * `inflationFactorAt(2030, 5)` reads the factor for June of 2030
- * relative to today's anchor. Returns 1 when `inflationPct` is 0.
- */
 function buildInflationFactorAt(
   ctx: ProjectionContext,
   inflationPct: number,
@@ -173,20 +106,8 @@ function buildInflationFactorAt(
     Math.pow(base, (year * 12 + monthIndex - asOfMonth) / 12);
 }
 
-/**
- * Per-effective-rate inflation-factor memo for one projection call. The
- * general `ratePct` drives every category by default; a category whose
- * effective rate (`ctx.inflation.categoryRates.get(catId)`) differs gets
- * its own memoised factor function. The memo is keyed by the numeric
- * effective rate (1–few distinct rates per scenario), so two categories at
- * the same rate share one factor closure.
- *
- * Call-scoped: rebuilt per `projectExpensesBy*` call, capturing the
- * current `ctx` — never module-level, so a stale `ctx`/`asOfMonth` cannot
- * leak between calls. Absent / empty `categoryRates` ⇒ every category
- * resolves to the single general-rate factor, byte-identical to the
- * pre-feature engine.
- */
+// Call-scoped memo keyed by effective rate, so categories at the same rate share one closure and a
+// stale `ctx` cannot leak between calls.
 function buildEffectiveInflationFactor(ctx: ProjectionContext): {
   generalRate: number;
   factorFor: (categoryId: string) => InflationFactorFn;
@@ -217,19 +138,10 @@ export interface ExpenseProjectionPoint {
   discretionary: number;
   total: number;
   /**
-   * Real (entered, pre-inflation) annual analogues of the nominal
-   * fields above. Identical accumulation with **only** the inflation
-   * factor neutralised (`inflationFactorAt → 1`, `yearMeanFactor → 1`):
-   * the discretionary `adjustmentMultiplier` and the per-expense spending
-   * `glideMultiplier` are kept (they are deliberate real-terms knobs,
-   * not inflation). The Balance Projection page reads these for
-   * "Today's dollars" instead of deflating the month-precise nominal,
-   * so a non-glided constant expense is flat and a glided one follows
-   * its chosen real trajectory. The continuous glided base is the
-   * per-active-month glide sum `annualBase × (1/12) × Σ_{active m}
-   * glideMultiplierFor(m)` — NOT a scalar `nominal ÷
-   * inflationFactor`. Additive: every existing nominal-field consumer
-   * (drawdown engine, category chart, Monte Carlo) is unaffected.
+   * Real (entered, pre-inflation) analogues of the nominal fields: the same accumulation with only
+   * the inflation factor neutralised, keeping the discretionary adjustment and per-expense spending
+   * glide. The page reads them for "Today's dollars". The glided base is the per-active-month glide
+   * sum `annualBase × (1/12) × Σ glide(m)`, not `nominal ÷ inflationFactor`.
    */
   essentialBase: number;
   discretionaryBase: number;
@@ -237,61 +149,30 @@ export interface ExpenseProjectionPoint {
 }
 
 /**
- * One sample point at month granularity for the chart-band visualization.
- * Values are *annualized run-rates* in $/yr (i.e. "what's the spending
- * rate at this moment, projected over a year") so:
- *
- *   annual sum (year y) = mean of the 12 monthly rates in year y
- *
- * `fractionalYear` is the chart X coordinate (`year + month0/12`); the
- * tooltip uses `year` + `month0` for display so users see integer years
- * and "Jun 2055" month labels rather than `2055.42`.
- *
- * Continuous expenses (monthly / yearly / etc.) emit a flat rate while
- * active and zero while inactive — the chart line steps up/down at the
- * actual start/end month rather than at January 1 of the year.
- *
- * One-off lump sums render at their **literal amount** for exactly one
- * month, then drop to zero. A $40k event in November renders as a $40k
- * bar in November — readable directly against the y-axis. This
- * intentionally diverges from the annual-rollup invariant in event
- * years: the chart's integral over the event month is `amount/12`,
- * while `projectExpensesByYear` sums the full `amount` into the annual
- * total. The year-by-year table (which uses the annual fn) is the
- * source of truth for headline math; the chart is a visualisation that
- * shows where one-offs sit in the timeline at honest magnitudes.
- *
- * Spike month comes from `resolveStartMonth`: age-anchored one-offs
- * spike on the resolved birthday month; year- and retirementStart-
- * anchored one-offs spike in January / the resolved retirement month
- * respectively.
+ * One month-granularity sample for the chart band, in annualized run-rates ($/yr), so an annual sum
+ * is the mean of the 12 monthly rates. A one-off renders at its literal amount for one month
+ * (age-anchored on the birthday month, year-anchored in January, retirementStart-anchored in the
+ * retirement month), so the chart integral differs from the annual rollup in event years;
+ * `projectExpensesByYear` stays the source of truth for headline math.
  */
 export interface ExpenseProjectionMonthlyPoint {
   fractionalYear: number;
   year: number;
   month0: number;
-  /** Mixed: recurring run-rate $/yr + literal one-off spike. Existing
-   *  consumers (chart band) read this as a single y-axis value. */
+  /** Recurring run-rate $/yr plus the literal one-off spike, as the chart band reads it. */
   essential: number;
   discretionary: number;
   total: number;
-  /** Literal one-off event amount this month, essential bucket
-   *  (non-zero only at the spike month). Already included in `essential`
-   *  above — exposed separately so callers that need true monthly
-   *  cashflow (e.g. the drawdown engine) can extract run-rate vs spike. */
+  /**
+   * Literal one-off amount this month, essential bucket (included in `essential`); lets callers
+   * split run-rate from spike.
+   */
   oneOffEssential: number;
   /** Literal one-off event amount this month, discretionary bucket. */
   oneOffDiscretionary: number;
   /**
-   * Real (entered, pre-inflation) per-month analogues of the four
-   * nominal fields above. Same contributions with **only** the
-   * inflation `monthFactor` omitted; the discretionary `adjustmentMultiplier`
-   * and the per-month spending `glideMultiplier` are kept. For
-   * any month `base = nominal ÷ monthFactor` exactly (one inflation
-   * factor per month, glide retained), so a non-glided constant expense
-   * is flat across the 12 months and a glided one follows its real
-   * monthly glide ramp. Read by the Balance Projection page in
-   * "Today's dollars"; additive — nominal-field consumers unchanged.
+   * Real per-month analogues of the nominal fields: only `monthFactor` is omitted, glide and
+   * adjustment kept, so `base = nominal ÷ monthFactor`.
    */
   essentialBase: number;
   discretionaryBase: number;
@@ -299,23 +180,8 @@ export interface ExpenseProjectionMonthlyPoint {
   oneOffDiscretionaryBase: number;
 }
 
-// Resolver helpers (resolveStartMonth, resolveEndMonth,
-// monthsActiveInYear, monthIndex, isScheduleAnchorBroken) live in
-// ./schedule-resolution.ts so the income engine can share the same
-// implementation. ProjectionContext extends ScheduleResolveContext so
-// it satisfies their input contract structurally.
-
-/**
- * One expense's pre-classification contribution as a `{ nominal, base }`
- * pair. `nominal` is the engine's existing month-precise-inflated value
- * (byte-identical to the pre-`base` engine); `base` is the **same**
- * accumulation with the inflation factor neutralised (`inflationFactorAt
- * → 1`) and the per-expense spending glide kept. The
- * discretionary `adjustmentMultiplier` is applied identically to both by the
- * caller (it is the same scalar regardless of inflation), so the glide
- * — the only per-month real-terms knob that differs from a flat scalar
- * — is computed exactly once here and folded into both branches.
- */
+// `base` is `nominal` with the inflation factor neutralised and the glide kept; the caller applies
+// the discretionary multiplier to both.
 interface ContributionPair {
   nominal: number;
   base: number;
@@ -323,20 +189,6 @@ interface ContributionPair {
 
 const ZERO_PAIR: ContributionPair = { nominal: 0, base: 0 };
 
-/**
- * Per-expense `{ nominal, base }` annual contribution for one calendar
- * `year`, BEFORE the discretionary `discMultiplier`. The spending glide
- * is folded into both halves here (one-off: the single spike-month
- * factor; continuous-glided: the per-active-month glide sum;
- * non-glided/essential: identity 1) so the caller only has to apply the
- * inflation-independent `discMultiplier`. The sole difference between
- * `nominal` and `base` is the inflation factor — `base` recomputes the
- * accumulation with `inflationFactorAt → 1` (the continuous
- * glided base is `annualBase × (1/12) × Σ_{active m} glide(m)`, NOT a
- * scalar `nominal ÷ inflationFactor`).
- */
-/** Resolved spike month for a one-off in `year`, or null when the
- *  one-off does not fall in this calendar year. */
 function oneOffSpikeMonth0(
   r: ResolvedExpense,
   year: number,
@@ -354,14 +206,9 @@ function oneOffSpikeMonth0(
   return null;
 }
 
-/** Continuous-expense `{ nominal, base }` for one active calendar year.
- *  Glided discretionary → the per-active-month inflation×glide sum / 12;
- * `base` drops only the per-month inflation factor and
- *  keeps the same per-month glide sum — NOT `nominal ÷ scalar
- *  inflationFactor`. Essential / absent-glide / neutral no-op → the
- *  year-mean inflation factor prorated by activeMonths/12, byte-
- *  identical to the pre-glide engine; `base` is the inflation-free
- *  analogue (year-mean factor → 1). */
+// Glided expenses (any classification) use the exact per-active-month inflation×glide sum so the
+// rollup stays exact; the rest use the year-mean inflation factor prorated by activeMonths/12.
+// `base` drops only inflation.
 function continuousContribution(
   r: ResolvedExpense,
   year: number,
@@ -376,11 +223,6 @@ function continuousContribution(
   const months = monthsActiveInYear(sm, em, year);
   if (months === 0) return ZERO_PAIR;
   const annualBase = r.payload.amount * frequencyToAnnual(r.payload.frequency);
-  // Glide-presence + active is the split key: a glided essential
-  // uses the same exact per-active-month inflation×glide sum as a glided
-  // discretionary, so the annual rollup stays exact for both. The
-  // discretionary `discMultiplier` adjustment is applied by the caller and
-  // is classification-gated there — it never enters this glide sum.
   if (
     r.payload.discretionaryGlide &&
     !isNeutralGlide(r.payload.discretionaryGlide)
@@ -409,6 +251,8 @@ function continuousContribution(
   };
 }
 
+// Annual contribution for `year` before the discretionary `discMultiplier`; a one-off uses its
+// spike-month glide factor.
 function yearExpenseContribution(
   r: ResolvedExpense,
   year: number,
@@ -431,30 +275,17 @@ function yearExpenseContribution(
   return continuousContribution(r, year, ctx, inflationFactorAt);
 }
 
-/**
- * Compute year-by-year expense totals (Essential, Discretionary, Total)
- * across the requested year range.
- *
- * Pure: same inputs always produce same outputs. Callers handle pre-
- * retirement clipping for the chart's x-axis (the resolver can run for
- * any range; the chart picks ≥ retirementYear).
- */
+/** Year-by-year essential, discretionary and total expenses across `yearRange`; pure. */
 export function projectExpensesByYear(
   resolved: ResolvedExpense[],
   ctx: ProjectionContext,
   yearRange: { from: number; to: number },
 ): ExpenseProjectionPoint[] {
-  // Per-effective-rate factor memo, call-scoped. `factorFor(catId)`
-  // returns the inflation-factor closure for the category's effective rate
-  // (general rate when the category carries no override).
   const { factorFor } = buildEffectiveInflationFactor(ctx);
-  // Clamp to [-100, +100]: stored values outside this range are silently
-  // bounded so the multiplier never goes negative or above ×2.
+  // Clamp to [-100, +100] so the multiplier never goes negative or above ×2.
   const bumpPct = Math.max(-100, Math.min(100, ctx.discretionarySpending?.bumpPct ?? 0));
-  // `durationYears` semantics: `null` = whole retirement, a positive
-  // integer = first N years. The override stores `null` explicitly when
-  // the user picked "whole retirement", so distinguish missing-key
-  // (`undefined` → default) from set-to-null (`null` → whole-retirement).
+  // `durationYears`: null means the whole retirement, a positive integer the first N years; a
+  // missing key (undefined) takes the default.
   const durationYears =
     ctx.discretionarySpending && 'durationYears' in ctx.discretionarySpending
       ? ctx.discretionarySpending.durationYears
@@ -479,10 +310,6 @@ export function projectExpensesByYear(
 
     for (const r of resolved) {
       if (isScheduleAnchorBroken(r.payload.start, r.payload.end, ctx)) continue;
-      // `{ nominal, base }` differ only by the inflation factor; the
-      // glide is folded into both halves inside the helper (Decision
-      // 14 / 19), so only the inflation-independent `discMultiplier`
-      // is applied here.
       const { nominal, base } = yearExpenseContribution(
         r,
         year,
@@ -517,12 +344,8 @@ function round2(n: number): number {
 }
 
 /**
- * Per-month sample for the **Expenses by Category** chart. Same shape
- * as `ExpenseProjectionMonthlyPoint` but values are bucketed by the
- * expense's `categoryId` instead of by classification. Categories with
- * no active expense at this month carry 0; the caller decides which
- * categories to actually render (typically: every category that has a
- * non-zero value in any month of the chart range).
+ * Per-month sample for the Expenses by Category chart, bucketed by `categoryId`; categories with no
+ * active expense carry 0.
  */
 export interface ExpenseCategoryMonthlyPoint {
   fractionalYear: number;
@@ -531,33 +354,17 @@ export interface ExpenseCategoryMonthlyPoint {
   byCategoryId: Record<string, number>;
   total: number;
   /**
-   * Per-category **recurring** run-rate ($/yr) and literal **one-off**
-   * spike for this month, split out of `byCategoryId` so a band-basis
-   * consumer (the cashflow category band) can apply the same
-   * `monthlyBucket(recurring, spike, f)` math the displayed essential /
-   * discretionary band uses — `(recurring − spike)/12 + spike`. A
-   * continuous category lands entirely in `recurringByCategoryId`; a
-   * one-off category's literal amount lands in BOTH (`recurring` includes
-   * the spike, `oneOff` carries it) exactly like the
-   * essential/discretionary `oneOff*` fields. `byCategoryId[c] ===
-   * recurringByCategoryId[c]` for every category (the run-rate IS the
-   * monthly value); `oneOffByCategoryId[c]` is the spike subset. Additive
-   * — the prior `byCategoryId` consumers (Expenses page) are unchanged.
+   * Per-category recurring run-rate ($/yr) and literal one-off spike, split out of `byCategoryId`
+   * so a band-basis consumer can apply `monthlyBucket(recurring, spike, f)`. A one-off's amount
+   * lands in both maps; `byCategoryId[c] === recurringByCategoryId[c]`.
    */
   recurringByCategoryId: Record<string, number>;
   oneOffByCategoryId: Record<string, number>;
 }
 
 /**
- * Cadence-correct per-year per-category expense rollup for the cashflow
- * category band's Yearly mode. Mirrors `projectExpensesByYear`'s
- * essential/discretionary annual basis (continuous = active-months
- * rollup; one-off = literal full amount), bucketed by `categoryId`
- * instead of by classification. `byCategoryId` sums to the same total as
- * `projectExpensesByYear(...).total` for the same inputs (sub-cent FP),
- * so the per-category bands tie to the displayed essential+discretionary
- * total in Yearly mode. The discretionary adjustment + per-expense glide
- * apply identically to the by-classification function.
+ * Per-year per-category expense rollup for the cashflow category band's Yearly mode, on the same
+ * annual basis as `projectExpensesByYear`; `byCategoryId` sums to its `total` (sub-cent FP).
  */
 export interface ExpenseCategoryYearPoint {
   year: number;
@@ -566,23 +373,15 @@ export interface ExpenseCategoryYearPoint {
 }
 
 /**
- * Category-resolution variant of `projectExpensesByMonth`. Same
- * underlying math (continuous expenses at flat run-rate, one-off
- * lump sums at literal `amount` for one month). Discretionary adjustment
- * applies the same way it does in `projectExpensesByMonth` — multiplies
- * the discretionary-classified expense's contribution before it lands
- * in its category bucket.
+ * Category-resolution variant of `projectExpensesByMonth`; the discretionary adjustment multiplies
+ * a discretionary expense's contribution before it lands in its bucket.
  */
 export function projectExpensesByCategoryMonth(
   resolved: ResolvedExpense[],
   ctx: ProjectionContext,
   yearRange: { from: number; to: number },
 ): ExpenseCategoryMonthlyPoint[] {
-  // Per-effective-rate factor memo, call-scoped — so the per-category
-  // chart matches the band/table (Medical grows at general+2 while other
-  // categories grow at the general rate).
   const { factorFor } = buildEffectiveInflationFactor(ctx);
-  // Clamp to [-100, +100].
   const bumpPct = Math.max(-100, Math.min(100, ctx.discretionarySpending?.bumpPct ?? 0));
   const durationYears =
     ctx.discretionarySpending && 'durationYears' in ctx.discretionarySpending
@@ -610,8 +409,6 @@ export function projectExpensesByCategoryMonth(
         const e = r.payload.end;
         if (isScheduleAnchorBroken(r.payload.start, e, ctx)) continue;
 
-        // Each category inflates at its own effective rate (general rate
-        // when no override / no Medical default applies).
         const monthFactor = factorFor(r.payload.categoryId)(year, month0);
         let rate = 0;
         let isOneOff = false;
@@ -634,17 +431,13 @@ export function projectExpensesByCategoryMonth(
         }
 
         if (rate === 0) continue;
-        // Glide applies to any expense; the discretionary adjustment
-        // (`discMultiplier`) stays discretionary-only.
+        // Glide applies to any expense; the discretionary adjustment stays discretionary-only.
         rate *= glideMultiplierFor(r.payload, monthIndex(year, month0), ctx);
         if (r.payload.classification === 'discretionary') {
           rate *= discMultiplier;
         }
         const cat = r.payload.categoryId;
         byCategoryId[cat] = round2((byCategoryId[cat] ?? 0) + rate);
-        // Track the one-off spike subset so a band-basis consumer can run
-        // `monthlyBucket(recurring, spike, f)` per category. The run-rate
-        // (`byCategoryId`) doubles as `recurring` (it IS the monthly value).
         if (isOneOff) {
           oneOffByCategoryId[cat] = round2((oneOffByCategoryId[cat] ?? 0) + rate);
         }
@@ -657,10 +450,6 @@ export function projectExpensesByCategoryMonth(
         month0,
         byCategoryId,
         total: round2(total),
-        // `recurringByCategoryId` is the full monthly run-rate value
-        // (continuous run-rate + the literal one-off spike), identical to
-        // `byCategoryId`; the spike subset lives in `oneOffByCategoryId`
-        // so `monthlyBucket` can net it out of the ÷12 slice.
         recurringByCategoryId: byCategoryId,
         oneOffByCategoryId,
       });
@@ -670,17 +459,10 @@ export function projectExpensesByCategoryMonth(
 }
 
 /**
- * Cadence-correct per-year per-category rollup for the cashflow category
- * band's Yearly mode. Reuses `yearExpenseContribution` (the SAME helper
- * `projectExpensesByYear` uses for its essential/discretionary annual
- * basis: continuous = active-months rollup, one-off = literal amount) and
- * buckets the `nominal` contribution by `categoryId` instead of by
- * classification. The discretionary `discMultiplier` is applied to a
- * discretionary-classified expense's contribution exactly as in
- * `projectExpensesByYear`, so `Σ byCategoryId` ties to that function's
- * `total` for the same inputs (sub-cent FP). The caller passes the
- * mode-appropriate inflation in `ctx` (0% pinned in Today's-dollars,
- * scenario rate in Future), mirroring the band.
+ * Per-year per-category rollup for the cashflow category band's Yearly mode: buckets
+ * `yearExpenseContribution`'s nominal by `categoryId`, so `Σ byCategoryId` ties to
+ * `projectExpensesByYear`'s `total` (sub-cent FP). The caller passes the mode-appropriate inflation
+ * in `ctx` (0% pinned in Today's dollars).
  */
 export function projectExpensesByCategoryYear(
   resolved: ResolvedExpense[],
@@ -734,12 +516,8 @@ export function projectExpensesByCategoryYear(
 }
 
 /**
- * Earliest active-start month across the resolved expense list, taking
- * broken anchors into account (skipped). Returns null when nothing is
- * resolvable (e.g. every expense's anchored member is missing, or the
- * list is empty). Used to widen the chart's left edge so an expense
- * that starts before retirement is visible from its true start month
- * rather than clipped at retirementYear.
+ * Earliest active-start month across the resolved expenses (broken anchors skipped), or null when
+ * none resolve; widens the chart's left edge so a pre-retirement expense shows from its true start.
  */
 export function findEarliestExpenseStartMonth(
   resolved: ResolvedExpense[],
@@ -760,8 +538,6 @@ export function findEarliestExpenseStartMonth(
   return best;
 }
 
-/** True iff the calendar (year, month0) tuple is within the active
- *  window [startMonth, endMonthExclusive). */
 function isMonthActive(
   startMonth: { year: number; month0: number },
   endMonthExclusive: { year: number; month0: number },
@@ -774,17 +550,8 @@ function isMonthActive(
   return idx >= startIdx && idx < endIdx;
 }
 
-/**
- * One expense's pre-classification per-month rate as a `{ nominal,
- * base }` pair plus the one-off flag. `nominal` is the existing
- * month-precise-inflated rate; `base` is the same rate with the
- * inflation `monthFactor` omitted — exactly `nominal ÷ monthFactor`,
- * one inflation factor per month. The glide is applied by
- * the caller (computed once, multiplied into both halves identically),
- * so the only difference between `nominal` and `base` is inflation.
- * `isOneOff` lets the caller route the value into the one-off spike
- * buckets. `null` ⇒ the expense is inactive this month.
- */
+// Per-month rate with `base` = `nominal` minus the inflation `monthFactor`; the caller applies the
+// glide to both. `isOneOff` routes the value into the spike buckets; `null` means inactive.
 function monthExpenseRate(
   r: ResolvedExpense,
   year: number,
@@ -816,24 +583,16 @@ function monthExpenseRate(
 }
 
 /**
- * Month-resolution variant of `projectExpensesByYear`. Emits 12 points
- * per calendar year covering the requested range. Each point's amounts
- * are *annualized run-rates* in $/yr — see `ExpenseProjectionMonthlyPoint`
- * for the full semantics and the annual-rollup invariant.
- *
- * Pure: same inputs always produce same outputs. Inflation compounds
- * month-precise from `ctx`'s `asOfMonth`; discretionary
- * adjustment window evaluates per-year because the window is defined in
- * whole years from retirement-start.
+ * Month-resolution variant of `projectExpensesByYear`: 12 points per calendar year, in annualized
+ * run-rates ($/yr) (see `ExpenseProjectionMonthlyPoint`). The discretionary window is evaluated per
+ * year because it is defined in whole years from retirement start.
  */
 export function projectExpensesByMonth(
   resolved: ResolvedExpense[],
   ctx: ProjectionContext,
   yearRange: { from: number; to: number },
 ): ExpenseProjectionMonthlyPoint[] {
-  // Per-effective-rate factor memo, call-scoped.
   const { factorFor } = buildEffectiveInflationFactor(ctx);
-  // Clamp to [-100, +100].
   const bumpPct = Math.max(-100, Math.min(100, ctx.discretionarySpending?.bumpPct ?? 0));
   const durationYears =
     ctx.discretionarySpending && 'durationYears' in ctx.discretionarySpending
@@ -855,12 +614,8 @@ export function projectExpensesByMonth(
     for (let month0 = 0; month0 < 12; month0++) {
       let essential = 0;
       let discretionary = 0;
-      // Track literal one-off spikes separately so consumers that need
-      // true monthly cashflow (drawdown engine) can extract run-rate
-      // vs spike. Both buckets stay summed into `essential` /
-      // `discretionary` for the chart band's existing semantics. The
-      // `*Base` accumulators are the inflation-free analogues (per-month
-      // `base = nominal ÷ monthFactor`, glide retained).
+      // One-off spikes are tracked separately so the drawdown engine can split run-rate from spike;
+      // both stay summed into `essential` / `discretionary`.
       let oneOffEssential = 0;
       let oneOffDiscretionary = 0;
       let essentialBase = 0;
@@ -872,16 +627,11 @@ export function projectExpensesByMonth(
         if (isScheduleAnchorBroken(r.payload.start, r.payload.end, ctx))
           continue;
 
-        // Each category inflates at its own effective rate.
         const monthFactor = factorFor(r.payload.categoryId)(year, month0);
         const rate = monthExpenseRate(r, year, month0, ctx, monthFactor);
         if (!rate || (rate.nominal === 0 && rate.base === 0)) continue;
-        // Glide applies to any expense — computed once and multiplied
-        // into both halves so the real-terms scaling is identical; only
-        // the inflation factor differs nominal-vs-base. The
-        // discretionary adjustment (`discMultiplier`) stays
-        // discretionary-only: essential `realScale = glide`, discretionary
-        // `realScale = discMultiplier × glide`.
+        // Glide applies to any expense and multiplies both halves; the discretionary adjustment
+        // stays discretionary-only.
         const glide = glideMultiplierFor(r.payload, monthIndex(year, month0), ctx);
         if (r.payload.classification === 'discretionary') {
           const realScale = discMultiplier * glide;

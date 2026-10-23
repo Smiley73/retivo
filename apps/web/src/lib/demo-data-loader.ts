@@ -1,42 +1,6 @@
 /**
- * Client-side demo data loader.
- *
- * Replaces the legacy server-side `apps/api/src/auth/demo-data-loader.service.ts`.
- * Materializes the single-household demo dataset for a realistic
- * middle-class family of two — primary + secondary members, 14 accounts
- * (eleven active + three inactive, including a taxable joint brokerage, an active
- * cash balance plan, a designated-Roth 401(k), an inherited Roth IRA, and a closed
- * Roth IRA consolidated into its sibling),
- * 10 years of balances, Social Security PIAs,
- * one CBP-payout income stream, and four scenarios (Base, Retire early at
- * 62, Delay — work to 70, Funds Run Out) — but writes everything into
- * IndexedDB and queues each aggregate as a `create` mutation. The
- * SyncProvider's subsequent flush pushes the whole batch in one round-trip.
- *
- * Refuses to run if the household already has any account or any
- * non-primary household-member aggregate (mirrors the server's
- * `DEMO_DATA_EXISTS` precondition).
- *
- * SHAPE-LIMIT EXCEPTION (recorded justification; CODING_STANDARDS ≤ 800 lines):
- * this file is over the 800-line limit. Why it cannot be split:
- * `loadDemoData` is a single transactional orchestration — empty-workspace
- * preconditions → per-aggregate payload builders → a local mutation queue →
- * snapshot/sync-event wiring — whose pieces all share the same id-computation
- * (`computeDemoAggregateIds`), version-lookup (`chooseOp`), and queue context.
- * The pure data the loader materializes (the account roster, the per-year
- * balance generator, the canonical expense set, the CBP-payout income stream,
- * and the return sequences) lives in `demo-data-defs.ts`,
- * which is what `loadDemoData`, `computeDemoAggregateIds`, and
- * `wipeWorkspaceForDemoReload` import. The remaining loader is the
- * orchestration plus its sibling demo-reload teardown flow
- * (`wipeWorkspaceForDemoReload`), which shares the same id
- * sets, queue, and exhaustiveness guards as the loader.
- * Recorded future split path: when this file is next touched,
- * factor the per-aggregate payload builders (members / accounts+balances /
- * social-security / categories+expenses / income / scenarios) into per-aggregate
- * builder modules driven by the defs, landing the loader back under 800. Trigger: a
- * change adding 5 or more lines here must either refactor the file back under the
- * limit or re-justify this exception in this note.
+ * Client-side demo data loader: seeds the single-household demo dataset (two members, 14 accounts, 10 years of balances, Social Security PIAs, one CBP-payout income stream and four scenarios) into IndexedDB as queued mutations.
+ * Refuses to run when the household already has any account or non-primary member outside the demo set.
  */
 import {
   clearMutationQueue,
@@ -53,14 +17,7 @@ import {
 import { BASE_SCENARIO_NAME } from './scenario-bootstrap';
 import { notifyWorkspaceChanged } from './workspace-events';
 import { isPureRothEmployerType } from './balance-calc';
-// The demo scenario copy NAMES the deterministic projection method, so it reads
-// the label from its one canonical owner rather than repeating the string —
-// a future rename must not leave the seeded demo describing a method by a name
-// no surface renders any more.
 import { TWR_METHOD_LABEL } from './projection-method-labels';
-// Pure demo-dataset definitions, extracted to demo-data-defs.ts.
-// Data + pure helpers only — the loader below does all the
-// transactional orchestration over them.
 import {
   DEMO_CATEGORY_BY_NAME,
   DEMO_INCOME_DEFS,
@@ -95,30 +52,14 @@ export class DemoDataExistsError extends Error {
   }
 }
 
-/**
- * RMD profile facts (both engines read them) seeded per demo
- * account slug. Returns
- * an empty object for accounts that use the owner Uniform-Lifetime default.
- *
- * `john-ira` records John's sole spouse beneficiary (Jane) honestly: Jane is born
- * `currentYear-52`, THREE YEARS OLDER than John (`currentYear-49`), so she is NOT
- * more than ten years younger — the Uniform Lifetime Table (III) applies and the
- * `rmdSoleSpouseBeneficiary` >10-years-younger flag is intentionally ABSENT
- * (seeding it would be the legally-impossible, internally-inconsistent household
- * fact). This demo household has no realistic >10-year gap, so every
- * OWNER account resolves to the Uniform Lifetime rule.
- *
- * `jane-inherited-roth-ira` is the household's one genuinely INHERITED account:
- * Jane inherited it from her mother, who died after 2019 (post-SECURE-Act,
- * the only regime this engine models). Its beneficiary rule is seeded COMPLETE —
- * category, death date, died-on/after-RBD and the original owner's birthdate — so
- * `rmdBlockerMessages` returns empty and the account never reads as `blocked`. That
- * matters beyond tidiness: `blocked` SUPPRESSES the account's inherited-Roth
- * required-withdrawal disclosure in `report-data.ts`, and an incomplete seed would
- * silently remove a paragraph from the demo report. A child of the owner is a
- * NON-eligible designated beneficiary, so the ten-year rule applies with no
- * election to record (an eligible designated beneficiary would need one).
- */
+// RMD profile facts (both engines read them) per demo account slug; empty for accounts on the owner
+// Uniform-Lifetime default.
+// `john-ira` records Jane (three years older than John, so not more than ten years younger) as sole
+// spouse beneficiary and leaves `rmdSoleSpouseBeneficiary` absent: Uniform Lifetime applies.
+// `jane-inherited-roth-ira` is the one inherited account (from a mother who died after 2019, the
+// only regime modeled), seeded with a complete beneficiary rule: an incomplete one reads `blocked`,
+// which suppresses the inherited-Roth disclosure in `report-data.ts`. A child of the owner is a
+// non-eligible designated beneficiary, so the ten-year rule applies with no election.
 function rmdFactsForSlug(slug: string, currentYear: number): Partial<AccountPayload> {
   if (slug === 'john-ira') {
     return {
@@ -130,9 +71,8 @@ function rmdFactsForSlug(slug: string, currentYear: number): Partial<AccountPayl
       rmdInheritedAccount: true,
       rmdBeneficiaryType: 'OTHER_DESIGNATED',
       rmdInheritedOwnerDeathDate: `${currentYear - 3}-06-12`,
-      // Jane's mother was 81 at death, well past her required beginning date. On a
-      // Roth account the engine forces the pre-RBD regime anyway (a Roth owner has
-      // no lifetime RBD); the fact is recorded honestly rather than left blank.
+      // Past the required beginning date; on a Roth account the engine forces the pre-RBD regime
+      // anyway.
       rmdInheritedOwnerDiedOnOrAfterRbd: true,
       rmdOriginalOwnerBirthdate: `${currentYear - 84}-02-08`,
     };
@@ -144,15 +84,13 @@ export interface LoadDemoDataInput {
   householdId: string;
   /** The signed-in user's email (used for the primary member's email). */
   email: string;
-  /** The signed-in user's display name. Retained for API compatibility,
-   * but the demo dataset now hard-codes the primary member's first/last
-   * name to "John Doe" so the seeded household always reads the same. */
+  /**
+   * The signed-in user's display name; unused, since the demo hard-codes the primary as "John Doe".
+   */
   displayName: string;
   /**
-   * Override the "current year" the loader uses for dynamic birth dates
-   * and balance-window offsets. Defaults to `new Date().getUTCFullYear()`.
-   * Pass `fixture.anchor.todayYear` in parity tests so the seeded
-   * demographic data stays aligned with the pinned fixture year.
+   * Override the "current year" for birth dates and balance-window offsets (default
+   * `new Date().getUTCFullYear()`); parity tests pass `fixture.anchor.todayYear`.
    */
   todayYear?: number;
 }
@@ -177,19 +115,11 @@ function balanceAggregateId(accountId: string, year: number): string {
   return `bal-${accountId}-${year}`;
 }
 
-/**
- * Credit an INBOUND rollover of `amountDollars` to `balances[arrivalIdx]` and
- * carry it forward: the arrival row takes the money at YEAR END (so that row's
- * recorded gain is unchanged), and every later year both starts from and
- * compounds the raised figure — the account never "loses" the rolled-in money.
- *
- * Both demo rollovers go through here so the two legs of a movement are shaped
- * identically: the designated-Roth in-plan rollover into `john-roth-401k`, and
- * the receiving leg of the Roth-IRA consolidation into `john-roth-ira`. Mutates
- * `balances` in place. Non-MIXED accounts only — the demo records no rollover
- * into a plan with split pre/post-tax balances, where the same event is a
- * within-row bucket shift rather than money arriving.
- */
+// Credit an inbound rollover to `balances[arrivalIdx]` at year end (that row's recorded gain is
+// unchanged) and carry it forward, so later years start from and compound the raised figure. Used
+// for the in-plan rollover into `john-roth-401k` and the Roth-IRA consolidation into
+// `john-roth-ira`; mutates in place, non-MIXED accounts only (on a split plan the same event is a
+// within-row bucket shift).
 function creditInboundRollover(
   balances: BalanceRow[],
   arrivalIdx: number,
@@ -227,12 +157,8 @@ interface DemoAggregateIds {
   readonly incomeStreams: ReadonlySet<string>;
 }
 
-/** Set of every aggregate ID a fresh `loadDemoData(currentYear)` call
- *  will write, given the resolved primary/secondary member IDs and
- *  base-scenario ID. The reload flow uses this twice: the wipe helper
- *  consults it to *skip* IDs that the loader is about to upsert, and
- *  the loader consults it to filter "non-demo extraneous data" out of
- *  its precondition check. */
+// Every aggregate id `loadDemoData` will write: the wipe skips these (they are upserted) and the
+// loader's precondition ignores them.
 function computeDemoAggregateIds(
   currentYear: number,
   primaryId: string,
@@ -276,27 +202,19 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     listAggregates('scenario') as Promise<Aggregate<ScenarioPayload>[]>,
   ]);
 
-  // Reuse the existing primary member if one is on file, else create
-  // the canonical "John Doe" demo primary. The displayName argument is
-  // intentionally ignored here so freshly-seeded demo workspaces always
-  // present the same recognizable sample data, regardless of who's
-  // signed in.
+  // Reuse the existing primary if on file, else the canonical "John Doe"; `displayName` is ignored
+  // so seeded workspaces read the same.
   const existingPrimary = members.find((m) => m.payload.isPrimary);
   const primaryId = existingPrimary?.id ?? PRIMARY_MEMBER_ID;
   const secondaryId = SECONDARY_MEMBER_ID;
 
-  // Reuse the existing base scenario if one is on file (auto-created
-  // on first sign-in by `ensureBaseScenario`); else create a demo base
-  // at the deterministic demo id. The demo loader rewrites the
-  // payload either way to plant the "different ages" warning case.
+  // Reuse the existing base scenario (auto-created at first sign-in by `ensureBaseScenario`), else
+  // the deterministic demo id; the payload is rewritten either way.
   const existingBaseScenario = scenarios.find((s) => s.payload.isPrimary);
   const baseScenarioId = existingBaseScenario?.id ?? DEMO_SCENARIO_BASE_ID;
 
-  // Precondition: existing data is only OK if it's all matching demo
-  // IDs (the upsert path). Non-matching aggregates — user-created
-  // accounts, legacy random-UUID demo data, etc. — must be cleared
-  // first via `wipeWorkspaceForDemoReload`. Otherwise we'd silently
-  // leave them alongside the freshly-seeded demo set.
+  // Existing data is only OK when it matches demo ids (the upsert path); anything else must be
+  // cleared first via `wipeWorkspaceForDemoReload`.
   const demoIds = computeDemoAggregateIds(currentYear, primaryId, secondaryId, baseScenarioId);
   const nonDemoAccounts = accounts.filter((a) => !demoIds.accounts.has(a.id));
   const nonDemoMembers = members.filter(
@@ -306,22 +224,10 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     throw new DemoDataExistsError();
   }
 
-  // Per-(type,id) version lookup so the upsert path can queue
-  // `update @ expectedVersion=current` instead of `create @ 0`. A
-  // create against a version-bumped cloud row would conflict and the
-  // user would see "Refresh needed" right after a successful demo
-  // load — which is exactly the bug this function exists to avoid.
-  //
-  // **Includes tombstones.** When the user previously hit the legacy
-  // wipe-then-create-at-0 collision bug, the server-side
-  // `AggregateVersion` rows for matching demo IDs ended up tombstoned
-  // at v=N+1 (and never get reaped — tombstones are forever in this
-  // schema). Bootstrap wrote those tombstones into local IDB. Reading
-  // only live aggregates would miss them, so we'd queue `create @ 0`
-  // again and hit the same conflict. Reading *with* tombstones lets
-  // us queue `update @ tombstone_version`, which the API accepts and
-  // clears `deletedAt` on (push.service.ts: deletedAt = null on
-  // non-delete operations).
+  // Version lookup so the upsert path queues `update @ expectedVersion=current` rather than
+  // `create @ 0`, which would conflict against a version-bumped cloud row and show "Refresh needed"
+  // after a successful load. It includes tombstones: tombstoned server rows for demo ids are never
+  // reaped, so only an `update @ tombstone_version` (which clears `deletedAt`) succeeds.
   const [
     allAccounts,
     allMembers,
@@ -361,24 +267,14 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
       : { operation: 'create', expectedVersion: 0 };
   }
 
-  // Batch the whole demo seed's per-row fine signals into one per touched
-  // store on scope exit so a mounted page re-reads once per affected type
-  // instead of once per row written (the coarse `notifyWorkspaceChanged()`
-  // tail below is unchanged). `batch` threads through every
-  // `queueLocalMutation` in the loaders below.
+  // One fine signal per touched store on scope exit instead of one per row; `batch` threads through
+  // every `queueLocalMutation` below.
   let accountsCreated = 0;
   let balancesCreated = 0;
   let socialSecurityCreated = 0;
   await withBatchedStoreSignals(async (batch) => {
-  // Primary: always seed/overwrite the demo "John Doe" identity so a
-  // demo reload puts the workspace into a known recognizable state
-  // — including name + birthdate, which the previous reuse-only path
-  // left untouched. Email is preserved when a primary already exists
-  // (the user's own contact email, which the auth flow set on first
-  // signup); fresh creates fall back to `input.email`. The id is
-  // reused so existing `Account.ownerId` and similar references stay
-  // valid. `chooseOp` handles create-at-0 vs update-at-version (and
-  // the tombstone case).
+  // Always seed/overwrite the demo "John Doe" identity (name and birthdate included); email is
+  // preserved when a primary exists, and the id is reused so references stay valid.
   await queueLocalMutation<HouseholdMemberPayload>({
     type: 'householdMember',
     aggregateId: primaryId,
@@ -389,15 +285,12 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
       firstName: 'John',
       lastName: 'Doe',
       email: existingPrimary?.payload.email ?? input.email,
-      // Dynamic birth year so the couple stays ~10 years from early
-      // retirement no matter which calendar year the demo loads in.
-      // John is always ~49.
+      // Dynamic birth year keeps the couple ~10 years from early retirement in any load year (John
+      // is always ~49).
       birthdate: `${currentYear - 49}-06-15`,
     },
   }, batch);
 
-  // Secondary: always part of the demo dataset; upsert if already
-  // present (re-load case).
   await queueLocalMutation<HouseholdMemberPayload>({
     type: 'householdMember',
     aggregateId: secondaryId,
@@ -408,8 +301,7 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
       firstName: 'Jane',
       lastName: 'Doe',
       email: 'jane.doe@example.com',
-      // Jane is always ~52 — slightly older than John, mirroring the
-      // real export's spousal age structure.
+      // Jane is always ~52, slightly older than John.
       birthdate: `${currentYear - 52}-03-15`,
     },
   }, batch);
@@ -419,18 +311,14 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     secondary: secondaryId,
   };
 
-  // For the current-year row, cap `lastUpdated` at today rather than
-  // Dec 31. Otherwise a mid-year demo load plants an "as-of" date in
-  // the future, which the balance form rejects and the user reads as
-  // a bug.
+  // Cap the current-year row's `lastUpdated` at today: a mid-year load would otherwise plant a
+  // future "as-of" date that the balance form rejects.
   const todayIso = new Date().toISOString();
   const currentYearLastUpdated = (year: number): string =>
     year === currentYear ? todayIso : `${year}-12-31T23:59:59Z`;
 
-  // Every account's balance history is generated BEFORE any account is queued:
-  // a consolidation moves money BETWEEN two accounts, so the receiving account's
-  // rows cannot be finalized until the closing account's are, whatever order the
-  // two appear in `accountDefs()`.
+  // Generate every balance history before queueing any account: a consolidation moves money between
+  // two accounts, so the receiving rows are only final once the closing account's are.
   const defs = accountDefs();
   const balancesBySlug = new Map<string, BalanceRow[]>();
   for (const def of defs) {
@@ -445,13 +333,10 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
       def.contributionsStopYear,
     );
 
-    // The demo's one recorded designated-Roth IN-PLAN ROLLOVER
-    // (§402A(c)(4)), and the ONLY thing that gives the plan any designated-Roth
-    // basis now that the recorded principal IS that basis. Modelled as a
-    // separate pure-Roth account the money genuinely ARRIVES, so the dated fact
-    // is seeded together with a matching inbound `rollover` leg on the same row
-    // — which is what makes it reconcilable against the account's own balance
-    // history.
+    // The demo's one recorded designated-Roth in-plan rollover (§402A(c)(4)); its principal is the
+    // plan's only designated-Roth basis. On a separate pure-Roth account the money genuinely
+    // arrives, so a matching inbound `rollover` leg on the same row keeps it reconcilable against
+    // the balance history.
     if (def.inPlanRollover !== undefined && balances.length > def.inPlanRollover.yearOffset) {
       const { yearOffset, taxableDollars } = def.inPlanRollover;
       creditInboundRollover(balances, yearOffset, taxableDollars, def.returnProfile);
@@ -470,14 +355,9 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     balancesBySlug.set(def.slug, balances);
   }
 
-  // The CONSOLIDATION's RECEIVING leg. A closure rollover-OUT on its own
-  // takes the money out of the household, which is only harmless when nothing
-  // downstream still counts it: `john-old-401k` gets away with it because it is
-  // PRE_TAX and no basis is derived from it. A closed ROTH IRA does not — its
-  // recorded contributions stay §408A basis in the owner's pool, justified
-  // in three places by the money having followed a rollover into a sibling the
-  // pool still holds. So the sibling has to receive it: same year, same amount,
-  // opposite sign.
+  // The consolidation's receiving leg: a closed Roth IRA's contributions stay §408A basis in the
+  // owner's pool, so the sibling must receive the rolled-out money (same year, same amount,
+  // opposite sign). `john-old-401k` needs no such leg because it is PRE_TAX and derives no basis.
   for (const def of defs) {
     if (def.consolidatedIntoSlug === undefined) continue;
     const closed = balancesBySlug.get(def.slug);
@@ -495,27 +375,13 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     const accountId = `demo-account-${def.slug}`;
     const balances = balancesBySlug.get(def.slug) ?? [];
 
-    // Roth tax facts — only the two first-year anchors are stored on the
-    // payload (schema v7 dropped both stored basis totals). Neither engine
-    // has read a stored basis total since the §408A basis cutover: a Roth IRA
-    // pool's basis is derived from the recorded contribution/withdrawal history
-    // above, and an employer plan's designated-Roth basis is its recorded
-    // in-plan-rollover principal alone. First-year anchors start at the
-    // demo history's `startYear`.
-    //
-    // The invariant that still binds is pool-wide, because
-    // §408A basis is pool-level: every basis dollar must be backed by a
-    // balance dollar in the OWNER'S POOL, not merely in the account that recorded
-    // it. Per-account reconciliation is no longer sufficient on its own — a
-    // closed Roth IRA keeps contributing basis to the pool after its own balance
-    // is zero. Two consequences above: the in-plan rollover seeds a matching
-    // inbound `rollover` leg on the same row, and the consolidation's closure
-    // rollover-OUT is matched by an inbound leg on the sibling that received it,
-    // so the pool still holds the money its DERIVED basis is claimed against.
-    // Same reason no §408A CONVERSION is seeded anywhere: a conversion with no
-    // matching inflow would be unsupported basis, understating demo earnings.
-    // Seed one alongside its inflow if the demo history ever gains a real
-    // conversion year.
+    // Roth tax facts: only the two first-year anchors are stored (schema v7 dropped the stored
+    // basis totals); basis is derived from recorded history. §408A basis is pool-level, so every
+    // basis dollar must be backed by a balance dollar in the owner's pool, not just its own
+    // account: the in-plan rollover seeds a matching inbound leg on the same row, and the
+    // consolidation's closure rollover-out is matched by an inbound leg on the receiving sibling.
+    // No §408A conversion is seeded, since one without a matching inflow would be unsupported
+    // basis; seed one with its inflow if the history gains a conversion year.
     const rothFacts: Partial<AccountPayload> = {};
     if (def.type === 'RETIREMENT_ROTH_IRA') {
       rothFacts.rothIraFirstContributionTaxYear = startYear;
@@ -523,14 +389,8 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
       rothFacts.designatedRothFirstParticipationTaxYear = startYear;
     }
 
-    // RMD profile facts — illustrative, per-slug facts
-    // that stay internally consistent with the demo household's demographics
-    // without altering any balance/projection semantics for a fact-free account.
-    // `john-ira` records John's sole spouse beneficiary (Jane, older than John →
-    // Uniform Lifetime, not Joint Life); `jane-inherited-roth-ira` records a
-    // complete, resolvable inherited-beneficiary rule. Every other demo account
-    // leaves the facts absent (owner Uniform Lifetime default). See
-    // `rmdFactsForSlug`.
+    // Per-slug RMD facts consistent with the demo demographics (see `rmdFactsForSlug`); other
+    // accounts leave them absent.
     const rmdFacts = rmdFactsForSlug(def.slug, currentYear);
 
     const accountPayload: AccountPayload = {
@@ -586,8 +446,8 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
         endingBalancePostTax: b.endingBalancePostTax ?? null,
         totalContributions: b.totalContributions,
         comment: null,
-        // Sparse-optional: the key is OMITTED on every year that recorded no
-        // in-plan rollover, because absent is a weaker claim than a stored 0.
+        // Sparse-optional: omitted on years with no in-plan rollover, since absent is a weaker
+        // claim than a stored 0.
         ...(b.rothInPlanRolloverTaxableAmount !== undefined
           ? { rothInPlanRolloverTaxableAmount: b.rothInPlanRolloverTaxableAmount }
           : {}),
@@ -604,25 +464,14 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     }
   }
 
-  // Social Security PIAs — illustrative monthly primary-insurance
-  // amounts (today's dollars; the engine inflates them forward). Sized
-  // for a realistic middle-class dual-earner household where both
-  // members worked full careers: $2,900/mo for John, $1,800/mo for Jane
-  // (combined ~$4,700/mo ≈ $56k/yr — the backbone of this plan's
-  // retirement income). The base scenario stays clear of the
-  // inflation-extrapolated MFJ IRMAA tier-1 threshold in its first
-  // Medicare years (no surcharge).
+  // Illustrative monthly PIAs in today's dollars ($2,900 John, $1,800 Jane, ≈ $56k/yr combined) for
+  // a dual-earner household with full careers.
   for (const [memberId, pia] of [
     [primaryId, 2900],
     [secondaryId, 1800],
   ] as const) {
-    // A statement can't be dated in the future (the UI now rejects a
-    // future date on save, and its year is the COLA anchor). Derive
-    // the date from `currentYear` alone — Jan 1 of the loader's current year
-    // is never a future date (today is always on or after Jan 1 of the
-    // running year), so no wall-clock clamp is needed and the seeded value
-    // stays fully deterministic under a caller-pinned `todayYear` (parity
-    // tests). The COLA anchor (the date's year) is unchanged.
+    // Jan 1 of the current year is never a future date, so the PIA date needs no wall-clock clamp
+    // and stays deterministic under a pinned `todayYear`; its year is the COLA anchor.
     const ssPayload: SocialSecurityBenefitPayload = {
       householdMemberId: memberId,
       pia,
@@ -640,14 +489,11 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     socialSecurityCreated += 1;
   }
 
-  // Expense categories — seed the same eight defaults the auto-bootstrap
-  // would create on first sign-in, but with deterministic ids so demo
-  // expenses can reference them. chooseOp handles the upsert path on
-  // demo-reload.
+  // The same eight defaults the auto-bootstrap seeds, with deterministic ids so demo expenses can
+  // reference them.
   for (const [name, catId] of Object.entries(DEMO_CATEGORY_BY_NAME)) {
-    // The demo Medical category carries the generic medical flag so the
-    // `categoryRates` `cat-medical` pin below + the +2pp default follow the
-    // persisted flag, not a hard-coded id.
+    // The Medical category carries the `isMedical` flag, so the `cat-medical` rate pin and the +2pp
+    // default follow the persisted flag.
     const payload: ExpenseCategoryPayload =
       catId === DEMO_CATEGORY_BY_NAME.Medical
         ? { name, isMedical: true }
@@ -661,8 +507,6 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     }, batch);
   }
 
-  // Canonical expenses — representative set covering every timepoint
-  // kind so the projection chart band has something meaningful to draw
   for (const def of demoExpenseDefs(currentYear)) {
     await queueLocalMutation<ExpensePayload>({
       type: 'expense',
@@ -685,30 +529,21 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     }, batch);
   }
 
-  // IRMAA threshold extrapolation. The CMS Rev. Proc. 2025-55
-  // Table 4 MFJ tier-1 threshold is anchored to its source year (2026);
-  // inflating it forward to the household's first Medicare year keeps the
-  // IRMAA / no-IRMAA contrast sharp whichever calendar year the demo
-  // loads in. John always retires at currentYear + 16 (born currentYear −
-  // 49, retires at 65), and his first Medicare year is the same.
+  // Inflate the CMS Rev. Proc. 2025-55 Table 4 MFJ tier-1 IRMAA threshold (source year 2026) to
+  // John's first Medicare year (currentYear + 16: born currentYear − 49, retires at 65), so the
+  // IRMAA contrast holds in any load year.
   const IRMAA_2026_MFJ_TIER1 = 218_000; // CMS Rev. Proc. 2025-55 Table 4, source year 2026
   const firstMedicareYear = currentYear + 16;
   const inflatedThreshold = Math.round(
     IRMAA_2026_MFJ_TIER1 * Math.pow(1.03, firstMedicareYear - 2026),
   );
-  // Seed the IRMAA look-back with a realistic final-working-years MAGI
-  // for this middle-class household (~45% of the inflated tier-1
-  // threshold ≈ the couple's ~$150k working income inflated forward).
-  // Comfortably below the threshold → no surcharge for the base scenario.
+  // ~45% of the inflated threshold (≈ the couple's ~$150k working income) seeds the IRMAA look-back
+  // below the threshold, so the base scenario shows no surcharge.
   const baseMagiBootstrap = Math.round(inflatedThreshold * 0.45);
 
-  // Base scenario — primary retires at 65, both spouses claim Social
-  // Security at their full retirement age of 67. Same-date mode anchored
-  // on primary so a freshly-seeded demo workspace lands on the calm,
-  // supported case (no "different ages" warning shown by default; the
-  // user can flip the toggle off to explore the alternate flow). The
-  // "Delay — work to 70" scenario is the deliberate contrast that claims
-  // at 70 to show the delayed-credit upside.
+  // Base scenario: primary retires at 65 and both claim Social Security at FRA 67, same-date mode
+  // anchored on primary, so a fresh demo lands on the supported case without the "different ages"
+  // warning. "Delay — work to 70" is the deliberate contrast.
   const scenarioPayload: ScenarioPayload = {
     name: BASE_SCENARIO_NAME,
     description: 'Default plan — primary retires at 65, both claim Social Security at full retirement age (67).',
@@ -719,75 +554,48 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     overrides: {
       retirementAge: {
         primary: { ageYears: 65, ageMonths: 0 },
-        // Same-date mode anchored on primary — Jane retires on the same
-        // calendar day as John. Jane's stored age (68y 3m) is
-        // pre-computed from John's retirement date (currentYear + 16,
-        // June 15) minus Jane's birthdate (currentYear − 52, March 15);
-        // Jane is the older spouse. UI's modal recomputes this on every
-        // anchor edit; calculations read both ages directly. Flip to
-        // "Each retires independently" to explore the warning flow.
+        // Jane retires the same day as John: her stored age (68y 3m) is pre-computed from John's
+        // retirement date (currentYear + 16, June 15) and her birthdate (currentYear − 52, March
+        // 15); the modal recomputes it on every anchor edit.
         secondary: { ageYears: 68, ageMonths: 3 },
         sameDateAnchor: 'primary',
       },
       socialSecurity: {
         primary: { ageYears: 67, ageMonths: 0 },
         secondary: { ageYears: 67, ageMonths: 0 },
-        // Survivor claim ages — the SEPARATE age at which each member,
-        // if widowed, would start the survivor benefit. Seeded at each
-        // member's FRA (no widow(er) early-claim reduction) so the demo
-        // exercises the survivor rules instead of the withheld state.
+        // Survivor claim ages, seeded at each member's FRA so the demo exercises the survivor rules
+        // instead of the withheld state.
         survivor: {
           primary: { ageYears: 67, ageMonths: 0 },
           secondary: { ageYears: 67, ageMonths: 0 },
         },
-        // COLA tracks the scenario inflation rate (default-on), so the
-        // benefit holds its value in today's dollars across the projection.
         colaTracksInflation: true,
       },
       withdrawalStrategy: { kind: 'taxEfficient' },
-      // Married-couple filing plan: John and Jane are
-      // spouses, so the base scenario files jointly while both are alive
-      // (death-year joint), then Single afterward. No relationship metadata is
-      // stored on the household members — the joint plan is the couple-level
-      // fact. The engines read it to pick each year's filing status; seeded so the demo
-      // workspace round-trips a real filing plan through push/pull.
+      // Married-couple filing plan: joint while both are alive, Single afterward; no relationship
+      // metadata is stored on members. Seeded so the demo round-trips a real filing plan through
+      // push/pull.
       taxFilingPlan: { kind: 'joint' },
-      // Per-category inflation: 3% general. The seeded Medical category
-      // would default to general + 2pp (5%), but the curated demo dataset
-      // is tuned so the base scenario funds to life expectancy; we keep
-      // that narrative by pinning Medical back to the general rate via an
-      // explicit override (which still round-trips a real `categoryRates`
-      // map through push/pull), and exercise a genuinely different
-      // per-category rate on Housing (a slightly slower-inflating cost) so
-      // the field is demonstrated, not just neutralised.
+      // Medical is pinned to the 3% general rate (the seeded default would be 5%) to keep the base
+      // scenario funded to life expectancy, which also round-trips a real `categoryRates` map;
+      // Housing at 2.5% demonstrates a genuinely different per-category rate.
       inflation: {
         ratePct: 3,
         categoryRates: { 'cat-medical': 3, 'cat-housing': 2.5 },
       },
-      // Default cost-basis fraction for LTCG/QDI proxy: 50% of
-      // taxable withdrawal assumed to be cost basis (gain fraction = 0.5).
+      // 50% of taxable withdrawals assumed cost basis for the LTCG/QDI proxy.
       assumedCostBasisFractionOfTaxableWithdrawal: 0.5,
-      // Seed the IRMAA look-back for projection years 0–1 (the first two
-      // projection years, before the rolling 2-yr MAGI buffer is
-      // populated). 45% of the inflation-extrapolated MFJ IRMAA tier-1
-      // threshold for the household's first Medicare year — comfortably
-      // below it, so the base scenario shows NO IRMAA surcharge in its
-      // first Medicare years.
-      // Two lookback fields (year 0 = MAGI(ret−2), year 1 = MAGI(ret−1)).
-      // The demo seeds both with the same pre-retirement income stand-in.
+      // Seeds the IRMAA look-back for projection years 0–1 (MAGI(ret−2), MAGI(ret−1)) with the same
+      // pre-retirement income stand-in.
       magiBootstrapLookbackMinus2: baseMagiBootstrap,
       magiBootstrapLookbackMinus1: baseMagiBootstrap,
-      // Tax assumptions (IRS/CMS/SSA compliance pass). 90% of EMERGENCY HSA
-      // withdrawals assumed qualified (tax-free) — modeled medical-qualified
-      // draws are always 100% qualified; the remaining 10% of emergency draws
-      // is ordinary income + the 20% additional tax before 65. No accounts
-      // are marked exempt from the early-withdrawal penalty in the demo.
+      // 90% of emergency HSA withdrawals assumed qualified (tax-free), the rest ordinary income
+      // plus the 20% additional tax before 65; modeled medical-qualified draws are always 100%
+      // qualified. No accounts are exempt from the early-withdrawal penalty.
       hsaQualifiedMedicalExpensePct: 90,
       earlyWithdrawalPenaltyExemptAccountIds: [],
-      // Working-years taxable income (post-deduction) for the Roth conversion
-      // comparison page's bracket-headroom math — a realistic MFJ figure for this
-      // dual-income couple at peak earning years. Display-only on that page;
-      // drives no projection math.
+      // Working-years taxable income for the Roth conversion page's bracket-headroom math;
+      // display-only.
       preRetirementTaxableIncomeDollars: 120_000,
     },
   };
@@ -796,26 +604,18 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     aggregateId: baseScenarioId,
     householdId: input.householdId,
     ...chooseOp('scenario', baseScenarioId),
-    // Note: the `name` above seeds the deterministic demo id; the
-    // upsert path (chooseOp = 'update') rewrites name/payload on top
-    // of any existing base, so a previous "Primary"-named demo seed
-    // gets renamed to "Base" on the next demo reload.
+    // Upsert rewrites name and payload over any existing base, renaming a previous "Primary" seed
+    // to "Base".
     payload: scenarioPayload,
   }, batch);
 
-  // Three alternates a DIY planner would actually explore, branching off
-  // the base:
-  //
+  // Alternates branching off the base:
   //   Base (retire 65, SS 67/67)                              ← funds last to life expectancy
   //   ├── Retire early at 62 (SS primary 62 / secondary 67)   ← tighter but workable
   //   │     └── Funds Run Out (early + overspend → depletion) ← the failure case
   //   └── Delay — work to 70 (SS 70/70)                       ← the "fix": more income
-  //
-  // Jane's stored age on each parent is pre-computed from John's
-  // retirement date so calculations downstream read both ages directly
-  // (no birthdate lookup at calc time). For the early-at-62 parent: John
-  // retires at 62 → currentYear + 13, June 15 → Jane (older spouse,
-  // born currentYear − 52, March 15) is 65y 3m on that date.
+  // Jane's stored ages are pre-computed from John's retirement date (early: currentYear + 13, June
+  // 15, when Jane, born currentYear − 52, March 15, is 65y 3m).
   const earlyRetirementPayload: ScenarioPayload = {
     name: 'Retire early at 62',
     description:
@@ -831,17 +631,13 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
         sameDateAnchor: 'primary',
       },
       socialSecurity: {
-        // John claims early at 62; Jane claims at her full retirement age.
         primary: { ageYears: 62, ageMonths: 0 },
         secondary: { ageYears: 67, ageMonths: 0 },
       },
       accountContributions: {
         perAccount: {
-          // Step the primary 401(k) deferral up from the $8k base to
-          // $12k ahead of the early retirement date. Split 75/25
-          // pre/post-tax to match the account's MIXED treatment. Override
-          // the annual-increase rate above the account's 4% baseline —
-          // aggressive raises in the final accumulation years.
+          // Step the primary 401(k) deferral up to $12k (split 75/25 to match its MIXED treatment)
+          // and raise the annual-increase rate above the account's 4% baseline.
           'demo-account-john-401k': {
             plannedContributionPreTax: 9000,
             plannedContributionPostTax: 3000,
@@ -851,24 +647,16 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
       },
       accountReturns: {
         perAccount: {
-          // Conservative planning rate on the primary 401(k) — assume
-          // markets soften over the next decade (vs the 7.0% base).
-          // Affects the Planned method only; TWR remains empirical.
+          // Conservative planning rate (vs the 7.0% base); affects the Planned method only, TWR
+          // stays empirical.
           'demo-account-john-401k': { planningReturnPct: 5.5 },
         },
       },
-      // Tax-efficient drawdown so the MAGI ceiling has a strategy to overlay.
       withdrawalStrategy: { kind: 'taxEfficient' },
-      // MAGI-ceiling LADDER. Two non-overlapping windows
-      // exercise the full schedule:
-      //  - Fill window (retirement → John's 65): retiring early at 62 lands the
-      //    household on ACA marketplace coverage until Medicare at 65, so the
-      //    cheap pre-Medicare years are the textbook window to fill the income
-      //    headroom with Roth conversions. The ceiling targets the IRMAA/federal
-      //    MAGI line at $90k/yr; leftover room below it auto-converts pre-tax
-      //    dollars into John's Roth IRA.
-      //  - Minimize window (John's 65 → 70): once on Medicare, keep income low
-      //    under a tighter $60k ACA/IRMAA-style ceiling, converting nothing.
+      // MAGI-ceiling ladder with two non-overlapping windows: Fill from retirement to John's 65
+      // (the cheap pre-Medicare ACA years; leftover room under a $90k/yr IRMAA/federal MAGI ceiling
+      // converts into John's Roth IRA), then Minimize from 65 to 70 under a tighter $60k ceiling,
+      // converting nothing.
       magiCap: {
         windows: [
           {
@@ -888,22 +676,17 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
           },
         ],
       },
-      // A real ACA→Medicare transition
-      // (the month-aware health engine reads it). Retiring at 62 puts
-      // John on Marketplace coverage for ages 62–64, then he enrolls in Medicare
-      // Part B and Part D at 65 (`firstMedicareYear`, a mid-year split). Seeded
-      // per member id (same ids as `acaMarketplaceOptOutMemberIds`); FPL region
-      // is the 48 contiguous states + DC. Seeded so the demo round-trips real
-      // month-aware coverage data through push/pull AND so the demo projection
-      // shows a genuine part-year IRMAA / part-year Marketplace benchmark.
+      // A real ACA→Medicare transition for the month-aware health engine: retiring at 62 puts John
+      // on Marketplace coverage for 62–64, then Medicare Part B and D at 65 (a mid-year split).
+      // Keyed by member id; the FPL region is the 48 contiguous states + DC. Seeded so the demo
+      // round-trips month-aware coverage data and shows a genuine part-year IRMAA and part-year
+      // Marketplace benchmark.
       acaFplRegion: 'contiguous',
       healthCoverageMonths: {
         perMember: {
           [primaryId]: {
-            // Retirement year: John retires (turns 62) June 15, so he is on
-            // employer coverage Jan–May and only picks up Marketplace coverage
-            // Jun–Dec — 7 months, NOT the full year (Jan–May predates his
-            // Marketplace enrolment). Same Jun boundary as the Medicare split.
+            // Retirement year: John retires June 15, so employer coverage covers Jan–May and
+            // Marketplace only Jun–Dec (7 months); same boundary as the Medicare split.
             [firstMedicareYear - 3]: { marketplaceMonths: 7 },
             [firstMedicareYear - 2]: { marketplaceMonths: 12 },
             [firstMedicareYear - 1]: { marketplaceMonths: 12 },
@@ -922,12 +705,9 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     payload: earlyRetirementPayload,
   }, batch);
 
-  // Delay — work to 70: the "fix" branch off the base. Primary works five
-  // more years (retire 70) and both members delay Social Security to 70
-  // for maximum delayed retirement credits. Jane's stored age is
-  // pre-computed from John's retirement date: John retires at 70 →
-  // currentYear + 21, June 15 → Jane (born currentYear − 52, March 15)
-  // is 73y 3m on that date.
+  // Delay — work to 70: the fix branch off the base. John retires at 70 (currentYear + 21, June
+  // 15), when Jane (born currentYear − 52, March 15) is 73y 3m; both delay Social Security to 70
+  // for maximum delayed credits.
   const delayPayload: ScenarioPayload = {
     name: 'Delay — work to 70',
     description:
@@ -967,15 +747,10 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
     overrides: {
       contributions: { stopContributionsToday: true },
       discretionarySpending: { bumpPct: 100, durationYears: null },
-      // Keep the horizon running past the depletion cliff so the
-      // portfolio-depleted reference line is visible on the chart.
       lifeExpectancy: { primary: 95 },
-      // The three levers above don't deplete the portfolio on their own
-      // (base spending is modest against the ~$515k roster). Patch the
-      // long-term-care line up to a high lifestyle-and-care budget so net
-      // annual withdrawals exceed portfolio growth under both Planned and
-      // TWR, producing the depletion cliff before plan end. Tuned at impl
-      // time against the seeded roster.
+      // Base spending is modest against the ~$515k roster, so the levers above do not deplete the
+      // portfolio alone; patching the long-term-care line to a high lifestyle-and-care budget makes
+      // net withdrawals exceed growth under both Planned and TWR.
       expenses: {
         patches: {
           'aggregate:demo-exp-ltc-care': {
@@ -1001,10 +776,8 @@ export async function loadDemoData(input: LoadDemoDataInput): Promise<LoadDemoDa
 
   const scenariosCreated = 4;
 
-  // Mounted pages (e.g. /dashboard if the demo modal opened over it)
-  // need to re-read aggregates that just landed in IDB. The mutation
-  // queue's optimistic writes have already committed by the time this
-  // returns — the event is purely a render trigger.
+  // Mounted pages (e.g. /dashboard under the demo modal) must re-read aggregates that just landed
+  // in IDB; the event is purely a render trigger.
   notifyWorkspaceChanged();
 
   return {
@@ -1029,22 +802,12 @@ export interface WipeWorkspaceResult {
 }
 
 /**
- * Queues a `delete` mutation for every workspace aggregate that the
- * subsequent `loadDemoData` call will *not* upsert — i.e. legacy
- * random-UUID demo accounts, user-created accounts, anything whose ID
- * doesn't match the new demo ID set. IDs that *do* match are left
- * intact so the loader can update them in place; queueing a delete
- * for those IDs would tombstone the cloud row at v=N+1, after which
- * the loader's `create @ expectedVersion=0` would always conflict
- * (push is rejected → "Refresh needed" badge).
- *
- * Use *before* {@link loadDemoData} when overwriting an existing
- * workspace. A plain `clearAllStores()` only wipes IndexedDB and
- * leaves orphan aggregates in the cloud that the next bootstrap pull
- * would re-deliver alongside the freshly-seeded demo set.
- *
- * Skips the primary member because the demo loader reuses it by
- * design.
+ * Queue a `delete` for every aggregate the following `loadDemoData` will not upsert (legacy
+ * random-UUID demo data, user-created accounts). Matching ids are left intact: deleting them would
+ * tombstone the cloud row at v=N+1, so the loader's `create @ 0` would conflict ("Refresh needed").
+ * Run it before `loadDemoData` when overwriting an existing workspace, since `clearAllStores()`
+ * alone leaves orphans in the cloud that the next pull would re-deliver. The primary member is
+ * skipped because the loader reuses it.
  */
 export async function wipeWorkspaceForDemoReload(
   householdId: string,
@@ -1060,18 +823,11 @@ export async function wipeWorkspaceForDemoReload(
     deletedIncomeStreams: 0,
   };
 
-  // Drop any prior pending or failed-conflict mutations before queueing
-  // the wipe's own. The user's overwrite confirmation makes anything
-  // already in the queue moot, and a leftover `failed-conflict` row
-  // (e.g. from a previous broken demo-reload attempt before this fix
-  // landed) would keep the badge stuck on "Refresh needed" even after
-  // the new flush finishes cleanly.
-  //
-  // Version-truth restoration: recover
-  // each aggregate's server-acknowledged version from the queue BEFORE clearing
-  // it, then de-inflate the local aggregate versions AFTER the clear, so the
-  // wipe's delete mutations target a version the server can reach instead of an
-  // optimistically-inflated one. Runs inside the caller's destructive fence.
+  // Drop pending and failed-conflict mutations before queueing the wipe's own: the overwrite
+  // confirmation makes them moot, and a leftover `failed-conflict` row would keep the badge on
+  // "Refresh needed". Version truth: recover each aggregate's server-acknowledged version from the
+  // queue before clearing it and de-inflate local versions after, so the wipe's deletes target a
+  // version the server can reach.
   const versionTruth = serverAcknowledgedVersions(await listAllMutations());
   await clearMutationQueue();
   await realignAggregateVersions(versionTruth);
@@ -1103,11 +859,8 @@ export async function wipeWorkspaceForDemoReload(
     incomeStream: demoIds.incomeStreams,
   };
 
-  // Order is irrelevant on the cloud (each mutation is its own
-  // transaction) but balances-then-accounts matches the natural
-  // dependency order, which keeps the UI sensible if a flush pauses
-  // mid-batch. Expenses before categories so a paused flush never
-  // leaves an expense pointing at a tombstoned category.
+  // Balances before accounts follows dependency order, and expenses before categories so a paused
+  // flush never leaves an expense pointing at a tombstoned category.
   const types = [
     'accountBalance',
     'account',
@@ -1119,13 +872,8 @@ export async function wipeWorkspaceForDemoReload(
     'incomeStream',
   ] as const satisfies readonly AggregateType[];
 
-  // Compile-time exhaustiveness: every AggregateType (except
-  // `household`, which carries no payload-bearing aggregates today)
-  // must appear in `types`. Adding a new AggregateType without
-  // including it here surfaces a TS error — the conditional resolves
-  // to a non-`never` type and the assignment fails. Prevents a repeat
-  // of the bug where `incomeStream` was missing from the wipe loop
-  // and accumulated across demo reloads.
+  // Compile-time exhaustiveness: every AggregateType except `household` must appear in `types` (a
+  // missing one, like `incomeStream` once, would accumulate across reloads).
   type _WipeOrderCoverage = Exclude<
     AggregateType,
     (typeof types)[number] | 'household'
@@ -1135,21 +883,13 @@ export async function wipeWorkspaceForDemoReload(
     : never = true;
   void _wipeOrderExhaustive;
 
-  // Batch the wipe's per-row fine signals into one per touched store on scope
-  // exit (the coarse `notifyWorkspaceChanged()` tail below is unchanged).
+  // One fine signal per touched store on scope exit.
   await withBatchedStoreSignals(async (batch) => {
     for (const type of types) {
-      // Enumerate WITH local tombstones (`listAggregatesIncludingDeleted`, not
-      // `listAggregates`). A locally soft-deleted aggregate whose delete never
-      // landed on the server — an un-synced / server-ahead local delete, the
-      // exact un-synced-edit class this flow exists to repair — is filtered out
-      // by `listAggregates` (`.filter((a) => !a.deletedAt)`). Skipping it would
-      // (re-)queue no delete for it, so the server's still-live copy survives
-      // the wipe and reappears on the next pull alongside the freshly-seeded
-      // demo set. Including tombstones re-queues its delete (at the version the
-      // version-truth de-inflation above realigned to, so it can actually
-      // land). The demo-ID skip rules below still preserve any id the loader is
-      // about to upsert.
+      // Enumerate with local tombstones: a soft-deleted aggregate whose delete never reached the
+      // server would otherwise be skipped, leaving the server's live copy to reappear on the next
+      // pull. Its delete is re-queued at the version the version-truth de-inflation realigned to;
+      // the demo-id skips below still protect ids the loader will upsert.
       const aggregates = await listAggregatesIncludingDeleted(type);
       for (const aggregate of aggregates) {
         if (type === 'householdMember') {
@@ -1158,8 +898,7 @@ export async function wipeWorkspaceForDemoReload(
           if (isPrimary) continue;
         }
         if (type === 'scenario') {
-          // The base scenario is preserved (the loader updates it in
-          // place). The storage flag is still `isPrimary`.
+          // The base scenario is preserved; the loader updates it in place.
           const isBase = (aggregate.payload as ScenarioPayload).isPrimary === true;
           if (isBase) continue;
         }
