@@ -78,6 +78,7 @@ describe('computeRmd — MIXED account rothPortionCents', () => {
       },
       SNAPSHOT,
     );
+    expect(r.qualifyingBalanceCents).toBe(20_000_000);
     expect(r.ownerRmdCents).toBeGreaterThan(0);
   });
 

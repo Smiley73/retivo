@@ -241,6 +241,7 @@ describe('selectRmdTableDivisor — clamp-to-latest snapshot boundary', () => {
     });
     expect(selectRmdTableDivisor({ table: 'uniformLifetime', ownerAge: 73 }, SYNTH, 2030)).toMatchObject({
       kind: 'divisor',
+      divisor: 20,
     });
     expect(selectRmdTableDivisor({ table: 'uniformLifetime', ownerAge: 73 }, SYNTH, 2031)).toMatchObject({
       kind: 'divisor',

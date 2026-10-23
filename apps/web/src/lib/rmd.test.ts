@@ -9,6 +9,7 @@ import {
   resolveRmdFirstYearPlan,
   resolveRmdRule,
   type RmdAccountProfileFacts,
+  type RmdAccountType,
   type RmdRuleResolution,
 } from './rmd';
 import { RMD_LIFE_EXPECTANCY_TABLES } from './rmd-life-expectancy-tables';
@@ -120,7 +121,7 @@ describe('resolveRmdRule — still-working exception', () => {
   };
   const deferredFor = (
     facts: RmdAccountProfileFacts,
-    accountType: 'RETIREMENT_401K' | 'RETIREMENT_IRA' = 'RETIREMENT_401K',
+    accountType: RmdAccountType = 'RETIREMENT_401K',
     retirementYear: number | null = 2030,
   ): boolean =>
     resolveRmdRule({
@@ -133,8 +134,14 @@ describe('resolveRmdRule — still-working exception', () => {
       ...(retirementYear === null ? {} : { retirementYear }),
     }).kind === 'stillWorkingDeferred';
 
-  it('defers a non-5%-owner still working at the current employer', () => {
-    expect(deferredFor(stillWorking)).toBe(true);
+  it.each([
+    'RETIREMENT_401K',
+    'RETIREMENT_403B',
+    'RETIREMENT_457B',
+    'RETIREMENT_TSP',
+    'RETIREMENT_CASH_BALANCE',
+  ] as const)('defers a non-5%-owner still working at the current employer (%s)', (accountType) => {
+    expect(deferredFor(stillWorking, accountType)).toBe(true);
   });
 
   it.each([
@@ -1117,6 +1124,10 @@ describe('resolveRmdRule — deceased owner’s historical applicable age', () =
     expect(before.kind).toBe('inheritedSpousalDelayed');
     expect(before.kind === 'inheritedSpousalDelayed' && before.firstDistributionYear).toBe(firstYear);
     expect(delayedStart(birthYear, firstYear).kind).toBe('inheritedLifeExpectancy');
+  });
+
+  it('owner born before 1950 (70½ era) has already reached the delay year, so no spousal delay', () => {
+    expect(delayedStart(1949, 2020).kind).toBe('inheritedLifeExpectancy');
   });
 });
 
