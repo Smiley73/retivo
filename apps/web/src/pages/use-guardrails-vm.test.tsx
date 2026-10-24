@@ -387,6 +387,19 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
     expect(result.current.pos.kind).toBe('timed-out');
   });
 
+  it('should_abort_the_pool_signal_after_the_20_second_bound', () => {
+    poolRunNeverSettles = true;
+    const { result } = renderHook(() => useGuardrailsVm());
+    if (result.current.status !== 'ready') throw new Error('expected ready');
+    act(() => {
+      clickCheckNow(result.current);
+    });
+    vi.advanceTimersByTime(19_999);
+    expect(createdPools[0].signal!.aborted).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(createdPools[0].signal!.aborted).toBe(true);
+  });
+
   it('should_surface_error_when_the_pool_resolves_error', async () => {
     nextPoolReply = { kind: 'error', message: 'boom' };
     const { result } = renderHook(() => useGuardrailsVm());

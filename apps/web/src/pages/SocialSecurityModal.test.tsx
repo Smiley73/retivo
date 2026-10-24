@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { SocialSecurityModal } from './SocialSecurityModal';
 import { clearAllStores, listAggregates, listPendingMutations } from '../db/store';
 import { expectNoA11yViolations } from '../test/a11y';
@@ -67,6 +67,22 @@ function makeScenario(seed: {
     deviceId: 'dev-1',
     payload,
   };
+}
+
+// Saves after an edit that leaves the claim ages alone, so the persisted ages are the seeded draft rather than the slider's own clamped value.
+async function saveAfterUnrelatedEdit(onClose: Mock) {
+  await userEvent.click(screen.getByRole('switch', { name: /Track inflation/i }));
+  const saveBtn = screen.getByRole('button', { name: 'Save' });
+  await waitFor(() => expect(saveBtn).not.toBeDisabled());
+  await act(async () => {
+    fireEvent.click(saveBtn);
+  });
+  await waitFor(() => expect(onClose).toHaveBeenCalledWith(true));
+  const pending = await listPendingMutations();
+  const scenarioMut = pending.find(
+    (p) => p.aggregateType === 'scenario' && p.aggregateId === 'sc-base',
+  );
+  return (scenarioMut!.payload as ScenarioPayload).overrides.socialSecurity!;
 }
 
 describe('SocialSecurityModal — Save persists ageMonths: 0', () => {
@@ -144,7 +160,12 @@ describe('SocialSecurityModal — Save persists ageMonths: 0', () => {
 });
 
 describe('SocialSecurityModal — first-paint claim-age collapse', () => {
-  afterEach(() => {
+  beforeEach(async () => {
+    await clearAllStores();
+  });
+
+  afterEach(async () => {
+    await clearAllStores();
     vi.clearAllMocks();
   });
 
@@ -156,8 +177,9 @@ describe('SocialSecurityModal — first-paint claim-age collapse', () => {
     [67, 0, 67],
     [61, 0, 62],
     [90, 6, 70],
-  ])('seeds a stored %iy %im claim age at %i', (ageYears, ageMonths, expected) => {
+  ])('seeds a stored %iy %im claim age at %i', async (ageYears, ageMonths, expected) => {
     const scenario = makeScenario({ ageYears, ageMonths });
+    const onClose = vi.fn();
     render(
       <MemoryRouter>
         <SocialSecurityModal
@@ -168,12 +190,14 @@ describe('SocialSecurityModal — first-paint claim-age collapse', () => {
           secondaryMember={null}
           benefitsByMemberId={{}}
           householdId={HH}
-          onClose={vi.fn()}
+          onClose={onClose}
         />
       </MemoryRouter>,
     );
     const slider = screen.getByRole('slider', { name: /Alex Social Security claim age/i }) as HTMLInputElement;
     expect(slider.value).toBe(String(expected));
+    const ss = await saveAfterUnrelatedEdit(onClose);
+    expect(ss.primary).toEqual({ ageYears: expected, ageMonths: 0 });
   });
 });
 
@@ -644,8 +668,8 @@ describe('SocialSecurityModal — survivor claim age', () => {
     [62, 6, 63],
     [58, 0, 60],
     [72, 0, 70],
-  ])('seeds a stored survivor age of %iy %im at %i', (ageYears, ageMonths, expected) => {
-    renderTwoMember({
+  ])('seeds a stored survivor age of %iy %im at %i', async (ageYears, ageMonths, expected) => {
+    const { onClose } = renderTwoMember({
       socialSecurity: {
         primary: { ageYears: 67, ageMonths: 0 },
         secondary: { ageYears: 67, ageMonths: 0 },
@@ -654,6 +678,8 @@ describe('SocialSecurityModal — survivor claim age', () => {
     });
     const slider = screen.getByRole('slider', { name: 'Alex survivor benefit claim age' }) as HTMLInputElement;
     expect(slider.value).toBe(String(expected));
+    const ss = await saveAfterUnrelatedEdit(onClose);
+    expect(ss.survivor?.primary).toEqual({ ageYears: expected, ageMonths: 0 });
   });
 
   it('shows no survivor control for single-member plans', () => {
