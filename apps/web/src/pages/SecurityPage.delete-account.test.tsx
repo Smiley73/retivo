@@ -1,7 +1,6 @@
 // Security-page Delete account card: the three-step flow (password, export offer, confirm), including the within-delete export that silently reuses the step-1 password via the shared `useProfileExport`. Rendered through SecurityPage, which hosts the card.
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
-import { SecurityPage } from '../pages/SecurityPage';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { renderPage, securityMocks } from './security-page.test-harness';
 import { DELETED_NOTICE_KEY } from '../pages/profile-page-shared';
 import { DEVICE_ID_STORAGE_KEY } from '../auth/AuthContext';
 import { expectNoA11yViolations } from '../test/a11y';
@@ -22,15 +21,9 @@ vi.mock('../lib/server-data-export', () => ({
 vi.mock('../lib/data-import', async () => (await import('./security-page.test-harness')).dataImportMock());
 vi.mock('../auth/key-envelope-client', async () => (await import('./security-page.test-harness')).keyEnvelopeClientMock());
 
-import { useAuth } from '../auth/AuthContext';
-import { securityAuthValue, securityMocks } from './security-page.test-harness';
-
 const { mockNavigate } = securityMocks;
 
-function renderPage(overrides: Record<string, unknown> = {}) {
-  (useAuth as any).mockReturnValue(securityAuthValue({ getHdk: () => null, refreshAccessToken: vi.fn().mockResolvedValue(null) }, overrides));
-  return render(<MemoryRouter><SecurityPage /></MemoryRouter>);
-}
+const authExtra = { getHdk: () => null, refreshAccessToken: vi.fn().mockResolvedValue(null) };
 
 describe('SecurityPage Danger zone — account deletion', () => {
   beforeEach(() => {
@@ -52,7 +45,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
   }
 
   it('says the data is deleted and that security logs and backups expire on their own', async () => {
-    renderPage();
+    renderPage(authExtra);
     const note = screen.getByText(/security logs.*one year/i);
     expect(note).toHaveTextContent(/deleted/i);
     expectDeletionFacts(note.textContent ?? '');
@@ -79,7 +72,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
   });
 
   it('Continue is disabled until a password is typed', async () => {
-    renderPage();
+    renderPage(authExtra);
     await openDeleteModal();
     const continueBtn = screen.getByRole('button', { name: 'Continue' });
     expect(continueBtn).toBeDisabled();
@@ -89,7 +82,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
 
   it('Enter submits the prompt form once a password is typed, and is a no-op while empty', async () => {
     // Native form submission (password-manager fill-and-submit relies on it) shares the Continue button's gate. jsdom doesn't run implicit submission from a keydown, so drive Enter as the submit event a real browser produces.
-    renderPage();
+    renderPage(authExtra);
     await openDeleteModal();
     const input = screen.getByLabelText('Current password');
     const form = input.closest('form');
@@ -108,7 +101,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
   it('happy path: password → confirm → deleteAccount + clearAllLocalData (deviceId + toast preserved) + redirect to /login', async () => {
     const deleteAccount = vi.fn().mockResolvedValue(undefined);
     const { clearAllLocalData } = await import('../lib/local-data');
-    renderPage({ deleteAccount });
+    renderPage(authExtra, { deleteAccount });
     await openDeleteModal();
 
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
@@ -136,7 +129,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     const deleteAccount = vi.fn().mockImplementation(async () => {
       storedAtCallTime = sessionStorage.getItem(DELETED_NOTICE_KEY);
     });
-    renderPage({ deleteAccount });
+    renderPage(authExtra, { deleteAccount });
     await openDeleteModal();
 
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
@@ -158,7 +151,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     Object.setPrototypeOf(FakeApiError.prototype, ApiRequestError.prototype);
     const deleteAccount = vi.fn().mockRejectedValue(new FakeApiError('boom'));
 
-    renderPage({ deleteAccount });
+    renderPage(authExtra, { deleteAccount });
     await openDeleteModal();
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'wrong' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -181,7 +174,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
 
   it('Cancel on the confirm dialog returns to the export-offer modal without deleting', async () => {
     const deleteAccount = vi.fn();
-    renderPage({ deleteAccount });
+    renderPage(authExtra, { deleteAccount });
     await openDeleteModal();
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -197,7 +190,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
   it('export path: enter password → Export my data → verify+export → final confirm (no second password modal)', async () => {
     const verifyPassword = vi.fn().mockResolvedValue(undefined);
     const { exportServerData } = await import('../lib/server-data-export');
-    renderPage({ verifyPassword });
+    renderPage(authExtra, { verifyPassword });
     await openDeleteModal();
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -222,7 +215,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
   it('skip path: Skip, delete anyway opens the final confirm without verifying or exporting', async () => {
     const verifyPassword = vi.fn().mockResolvedValue(undefined);
     const { exportServerData } = await import('../lib/server-data-export');
-    renderPage({ verifyPassword });
+    renderPage(authExtra, { verifyPassword });
     await openDeleteModal();
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -243,7 +236,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     Object.setPrototypeOf(FakeApiError.prototype, ApiRequestError.prototype);
     const verifyPassword = vi.fn().mockRejectedValue(new FakeApiError('boom'));
     const { exportServerData } = await import('../lib/server-data-export');
-    renderPage({ verifyPassword });
+    renderPage(authExtra, { verifyPassword });
     await openDeleteModal();
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -262,7 +255,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
   it('Cancel on the export-offer modal resets the whole delete flow', async () => {
     const verifyPassword = vi.fn();
     const { exportServerData } = await import('../lib/server-data-export');
-    renderPage({ verifyPassword });
+    renderPage(authExtra, { verifyPassword });
     await openDeleteModal();
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -289,7 +282,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
   it('shows the step-up modal on the confirm path when a second factor is required, and carries the proof to deleteAccount', async () => {
     const deleteAccount = vi.fn().mockResolvedValue(undefined);
     const getMfaStatus = vi.fn().mockResolvedValue(enforcedStatus);
-    const { container } = renderPage({ deleteAccount, getMfaStatus });
+    const { container } = renderPage(authExtra, { deleteAccount, getMfaStatus });
     await openDeleteModal();
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
@@ -321,7 +314,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     const { ApiRequestError } = await import('../api/client');
     Object.setPrototypeOf(FakeApiError.prototype, ApiRequestError.prototype);
     const verifyPassword = vi.fn().mockRejectedValue(new FakeApiError('boom'));
-    renderPage({ verifyPassword });
+    renderPage(authExtra, { verifyPassword });
     await openDeleteModal();
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));

@@ -1,8 +1,6 @@
 // Security-page Passkeys card: the per-passkey "Use for encryption" toggle and the just-registered "Use this passkey to unlock your data?" confirmation dialog, rendered through SecurityPage.
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
-import { SecurityPage } from '../pages/SecurityPage';
 vi.mock('react-router', async () => (await import('./security-page.test-harness')).reactRouterMock());
 vi.mock('../db/store', async () => (await import('./security-page.test-harness')).dbStoreMock());
 vi.mock('../lib/local-data', async () => (await import('./security-page.test-harness')).localDataMock());
@@ -16,14 +14,10 @@ vi.mock('../lib/data-export', async () => (await import('./security-page.test-ha
 vi.mock('../lib/data-import', async () => (await import('./security-page.test-harness')).dataImportMock());
 vi.mock('../auth/key-envelope-client', async () => (await import('./security-page.test-harness')).keyEnvelopeClientMock());
 
-import { useAuth } from '../auth/AuthContext';
-import { securityAuthValue } from './security-page.test-harness';
+import { renderPage } from './security-page.test-harness';
 import { expectNoA11yViolations } from '../test/a11y';
 
-function renderPage(overrides: Record<string, unknown> = {}) {
-  (useAuth as any).mockReturnValue(securityAuthValue({ confirmPasskeyRestriction: vi.fn() }, overrides));
-  return render(<MemoryRouter><SecurityPage /></MemoryRouter>);
-}
+const authExtra = { confirmPasskeyRestriction: vi.fn() };
 
 // Click "Add passkey" and submit the password gate (the flag-off floor by default in `mfaAuthDefaults`) so `registerPasskey` runs.
 async function addPasskeyViaGate(): Promise<void> {
@@ -46,7 +40,7 @@ describe('SecurityPage Passkeys — "Use for encryption" toggle', () => {
   };
 
   it('renders a "Use for encryption" switch per passkey when unlocked', async () => {
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([passkey]),
     });
@@ -58,7 +52,7 @@ describe('SecurityPage Passkeys — "Use for encryption" toggle', () => {
   it('enabling the switch opens the password prompt, then calls enrollPasskeyForEncryption with the credentialId + password', async () => {
     const user = userEvent.setup();
     const enrollPasskeyForEncryption = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([passkey]),
       enrollPasskeyForEncryption,
@@ -78,7 +72,7 @@ describe('SecurityPage Passkeys — "Use for encryption" toggle', () => {
   });
 
   it('does not render the switch when the session is locked', async () => {
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: false,
       listPasskeys: vi.fn().mockResolvedValue([passkey]),
     });
@@ -107,7 +101,7 @@ describe('SecurityPage Passkeys — removal step-up', () => {
   it('gates removal behind password + the reusable step-up modal when enforced', async () => {
     const removePasskey = vi.fn().mockResolvedValue({ noticeSent: true });
     const stepUpSendEmailOtp = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       listPasskeys: vi.fn().mockResolvedValue([passkey]),
       removePasskey,
       stepUpSendEmailOtp,
@@ -175,7 +169,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
   it('prompts on registration while unlocked, and confirming enrolls the new credential', async () => {
     const registerPasskey = vi.fn().mockResolvedValue({ ...newPasskey, noticeSent: true });
     const enrollPasskeyForEncryption = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
@@ -206,7 +200,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
       envelopeSetTag: 'tag',
     });
     const registerPasskey = vi.fn().mockResolvedValue({ ...newPasskey, noticeSent: true });
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([
         { ...newPasskey, id: 'pk-existing', credentialId: 'cred-existing' },
@@ -222,7 +216,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
   it('does NOT prompt when the session is locked', async () => {
     const registerPasskey = vi.fn().mockResolvedValue({ ...newPasskey, noticeSent: true });
     const enrollPasskeyForEncryption = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: false,
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
@@ -240,7 +234,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
   it('cancelling the dialog enrolls nothing', async () => {
     const registerPasskey = vi.fn().mockResolvedValue({ ...newPasskey, noticeSent: true });
     const enrollPasskeyForEncryption = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
@@ -260,7 +254,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
     const enrollPasskeyForEncryption = vi
       .fn()
       .mockRejectedValue(new Error('passkey did not return a PRF result (unsupported)'));
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
@@ -297,7 +291,7 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
 
   it('does not call registerPasskey until the password gate resolves', async () => {
     const registerPasskey = vi.fn().mockResolvedValue(newPasskey);
-    renderPage({ listPasskeys: vi.fn().mockResolvedValue([]), registerPasskey });
+    renderPage(authExtra, { listPasskeys: vi.fn().mockResolvedValue([]), registerPasskey });
     fireEvent.click(await screen.findByRole('button', { name: 'Add passkey' }));
     await screen.findByRole('dialog');
     expect(registerPasskey).not.toHaveBeenCalled();
@@ -311,7 +305,7 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
   it('gates adding a passkey behind the reusable step-up modal when enforced, then registers with the proof', async () => {
     const registerPasskey = vi.fn().mockResolvedValue(newPasskey);
     const stepUpSendEmailOtp = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
       stepUpSendEmailOtp,
@@ -349,7 +343,7 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
   });
 
   it('does not offer the emailed code as the add-passkey step-up factor once an authenticator app is enrolled — the server refuses it', async () => {
-    renderPage({
+    renderPage(authExtra, {
       listPasskeys: vi.fn().mockResolvedValue([]),
       getMfaStatus: vi.fn().mockResolvedValue({
         totpEnabled: true,
@@ -378,7 +372,7 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
   it('renders a restricted passkey with a confirm action that lifts it, and passes a11y checks', async () => {
     const restricted = { ...newPasskey, restrictedPostReset: true };
     const confirmPasskeyRestriction = vi.fn().mockResolvedValue(undefined);
-    const { container } = renderPage({
+    const { container } = renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([restricted]),
       confirmPasskeyRestriction,
@@ -409,7 +403,7 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
   it('offers no dead-end confirm modal when nothing predates the reset — points at removal instead', async () => {
     const restricted = { ...newPasskey, restrictedPostReset: true };
     // Default `mfaAuthDefaults()` status has no `methods`, so the card falls back to `['email_otp']`, filtered to no eligible confirm method.
-    renderPage({ listPasskeys: vi.fn().mockResolvedValue([restricted]) });
+    renderPage(authExtra, { listPasskeys: vi.fn().mockResolvedValue([restricted]) });
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm this passkey' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(

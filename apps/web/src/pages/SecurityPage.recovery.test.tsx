@@ -1,8 +1,7 @@
 // Security-page Recovery key & encryption card: the "Start over with this account" encrypted-workspace reset and the prepare-then-commit "Generate a new recovery key" rotation, rendered through SecurityPage.
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
-import { SecurityPage } from '../pages/SecurityPage';
+import { renderPage, securityMocks } from './security-page.test-harness';
 import { DEVICE_ID_STORAGE_KEY } from '../auth/AuthContext';
 import { expectNoA11yViolations } from '../test/a11y';
 vi.mock('react-router', async () => (await import('./security-page.test-harness')).reactRouterMock());
@@ -18,15 +17,8 @@ vi.mock('../lib/data-export', async () => (await import('./security-page.test-ha
 vi.mock('../lib/data-import', async () => (await import('./security-page.test-harness')).dataImportMock());
 vi.mock('../auth/key-envelope-client', async () => (await import('./security-page.test-harness')).keyEnvelopeClientMock());
 
-import { useAuth } from '../auth/AuthContext';
-import { securityAuthValue, securityMocks } from './security-page.test-harness';
-
 const { mockNavigate } = securityMocks;
 
-function renderPage(overrides: Record<string, unknown> = {}) {
-  (useAuth as any).mockReturnValue(securityAuthValue({}, overrides));
-  return render(<MemoryRouter><SecurityPage /></MemoryRouter>);
-}
 describe('SecurityPage Recovery key & encryption — Start over with this account', () => {
   // The "Start over" path is gated on isAuthenticated && unlockResolved && !isUnlocked && !needsKeySetup.
   const lockedNoUnlock = {
@@ -76,7 +68,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
   }
 
   it('does NOT render the Start over action when the workspace is unlocked', async () => {
-    renderPage({ ...lockedNoUnlock, isUnlocked: true });
+    renderPage({}, { ...lockedNoUnlock, isUnlocked: true });
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Recovery key & encryption' })).toBeInTheDocument(),
     );
@@ -86,7 +78,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
   });
 
   it('renders the Start over action when authenticated but locked with no unwrapper', async () => {
-    renderPage(lockedNoUnlock);
+    renderPage({}, lockedNoUnlock);
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Delete unreadable encrypted data' }),
@@ -96,7 +88,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
 
   // The positive "try the key" path sits above the destructive button and navigates to `/login?mode=recovery`.
   it('renders the "Use recovery key to unlock your data" button when locked with no unwrapper', async () => {
-    renderPage(lockedNoUnlock);
+    renderPage({}, lockedNoUnlock);
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Use recovery key to unlock your data' }),
@@ -105,7 +97,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
   });
 
   it('navigates to /login?mode=recovery when the recovery-key button is clicked', async () => {
-    renderPage(lockedNoUnlock);
+    renderPage({}, lockedNoUnlock);
     const button = await screen.findByRole('button', {
       name: 'Use recovery key to unlock your data',
     });
@@ -115,7 +107,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
 
   // Locked with no unwrapper, encryption is already set up and a recovery key exists, so the status must not claim "No recovery key yet" (reserved for pre-setup); it would contradict the "Use recovery key" button.
   it('does NOT show the "No recovery key yet" status when locked with no unwrapper', async () => {
-    renderPage(lockedNoUnlock);
+    renderPage({}, lockedNoUnlock);
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: 'Use recovery key to unlock your data' }),
@@ -125,7 +117,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
   });
 
   it('does NOT render the recovery-key button when the workspace is unlocked', async () => {
-    renderPage({ ...lockedNoUnlock, isUnlocked: true });
+    renderPage({}, { ...lockedNoUnlock, isUnlocked: true });
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Recovery key & encryption' })).toBeInTheDocument(),
     );
@@ -135,7 +127,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
   });
 
   it('does NOT render the recovery-key button when key setup is still pending', async () => {
-    renderPage({ ...lockedNoUnlock, needsKeySetup: true });
+    renderPage({}, { ...lockedNoUnlock, needsKeySetup: true });
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Recovery key & encryption' })).toBeInTheDocument(),
     );
@@ -145,7 +137,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
   });
 
   it('confirm stays disabled until the exact phrase AND the password are provided', async () => {
-    renderPage(lockedNoUnlock);
+    renderPage({}, lockedNoUnlock);
     await openStartOverModal();
     const confirmBtn = screen.getByRole('button', { name: 'Delete and start over' });
     expect(confirmBtn).toBeDisabled();
@@ -162,7 +154,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
 
   // The re-auth surface must follow the password-manager interop rules: a real `<form>` with a `type="submit"` primary button, a `current-password` password field, a hidden username field, and the type-to-confirm phrase opted out of manager fill/save (`autocomplete="off"` + `PM_IGNORE_ATTRS`).
   it('renders the re-auth surface as a password-manager form (real form, submit button, autocomplete, hidden username, phrase opted out)', async () => {
-    const { container } = renderPage(lockedNoUnlock);
+    const { container } = renderPage({}, lockedNoUnlock);
     await openStartOverModal();
 
     const passwordInput = screen.getByLabelText('Current password');
@@ -187,7 +179,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
 
   it('Enter (native form submit) runs the reset once the phrase and password are provided', async () => {
     const { resetEncryptedWorkspace } = await import('../auth/key-envelope-client');
-    renderPage(lockedNoUnlock);
+    renderPage({}, lockedNoUnlock);
     await openStartOverModal();
     const form = screen.getByLabelText('Current password').closest('form');
     expect(form).not.toBeNull();
@@ -217,7 +209,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
     });
     hrefSetter.mockImplementation(() => order.push('nav'));
 
-    renderPage(lockedNoUnlock);
+    renderPage({}, lockedNoUnlock);
     await openStartOverModal();
     fireEvent.change(
       screen.getByLabelText(/Type "DELETE" to confirm/i),
@@ -246,7 +238,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
     (clearAllLocalData as any).mockRejectedValueOnce(new Error('nuke blew up'));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    renderPage(lockedNoUnlock);
+    renderPage({}, lockedNoUnlock);
     await openStartOverModal();
     fireEvent.change(
       screen.getByLabelText(/Type "DELETE" to confirm/i),
@@ -273,7 +265,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
       recoveryMethods: ['email_otp'],
     });
     const { resetEncryptedWorkspace } = await import('../auth/key-envelope-client');
-    const { container } = renderPage({ ...lockedNoUnlock, getMfaStatus });
+    const { container } = renderPage({}, { ...lockedNoUnlock, getMfaStatus });
     await openStartOverModal();
     fireEvent.change(screen.getByLabelText(/Type "DELETE" to confirm/i), {
       target: { value: 'DELETE' },
@@ -306,7 +298,7 @@ describe('SecurityPage Recovery key & encryption — Start over with this accoun
     const { resetEncryptedWorkspace } = await import('../auth/key-envelope-client');
     (resetEncryptedWorkspace as any).mockRejectedValueOnce(new FakeApiError('boom'));
 
-    renderPage(lockedNoUnlock);
+    renderPage({}, lockedNoUnlock);
     await openStartOverModal();
     fireEvent.change(
       screen.getByLabelText(/Type "DELETE" to confirm/i),
@@ -339,7 +331,7 @@ describe('SecurityPage Recovery key & encryption — Generate a new recovery key
   });
 
   it('does NOT offer regeneration while the workspace is locked', async () => {
-    renderPage({
+    renderPage({}, {
       isAuthenticated: true,
       unlockResolved: true,
       isUnlocked: false,
@@ -363,7 +355,7 @@ describe('SecurityPage Recovery key & encryption — Generate a new recovery key
     const regenerateRecoveryKey = vi
       .fn()
       .mockResolvedValue({ recoveryKey: 'NEWK-EY01-2345-6789', activate });
-    renderPage({ ...unlocked, regenerateRecoveryKey });
+    renderPage({}, { ...unlocked, regenerateRecoveryKey });
 
     await waitFor(() =>
       expect(
@@ -402,7 +394,7 @@ describe('SecurityPage Recovery key & encryption — Generate a new recovery key
     const regenerateRecoveryKey = vi
       .fn()
       .mockResolvedValue({ recoveryKey: 'NEWK-EY01-2345-6789', activate });
-    renderPage({ ...unlocked, regenerateRecoveryKey });
+    renderPage({}, { ...unlocked, regenerateRecoveryKey });
 
     await user.click(
       await screen.findByRole('button', { name: 'Generate a new recovery key' }),
@@ -456,7 +448,7 @@ describe('SecurityPage Recovery key & encryption — Generate a new recovery key
     const regenerateRecoveryKey = vi
       .fn()
       .mockRejectedValue(new Error('KeyWrappingError: wrong password'));
-    renderPage({ ...unlocked, regenerateRecoveryKey });
+    renderPage({}, { ...unlocked, regenerateRecoveryKey });
 
     await user.click(
       await screen.findByRole('button', { name: 'Generate a new recovery key' }),

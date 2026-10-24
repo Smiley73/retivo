@@ -1,8 +1,6 @@
 // Security-page change-password modal: the unsaved-changes guard (Esc / Cancel) and password-manager interop (native form and tokens), rendered through SecurityPage.
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
-import { SecurityPage } from '../pages/SecurityPage';
 import { ISSUES_URL } from '../lib/brand';
 
 vi.mock('react-router', async () => (await import('./security-page.test-harness')).reactRouterMock());
@@ -18,13 +16,9 @@ vi.mock('../lib/data-export', async () => (await import('./security-page.test-ha
 vi.mock('../lib/data-import', async () => (await import('./security-page.test-harness')).dataImportMock());
 vi.mock('../auth/key-envelope-client', async () => (await import('./security-page.test-harness')).keyEnvelopeClientMock());
 
-import { useAuth } from '../auth/AuthContext';
-import { securityAuthValue } from './security-page.test-harness';
+import { renderPage } from './security-page.test-harness';
 
-function renderPage(overrides: Record<string, unknown> = {}) {
-  (useAuth as any).mockReturnValue(securityAuthValue({ isUnlocked: true, needsKeySetup: false }, overrides));
-  return render(<MemoryRouter><SecurityPage /></MemoryRouter>);
-}
+const authExtra = { isUnlocked: true, needsKeySetup: false };
 
 async function openPasswordModal() {
   // Open via userEvent so React Aria's modal focus management runs (focus moves into the dialog); the Esc-to-dismiss tests rely on focus being inside the overlay, as for a real user.
@@ -40,7 +34,7 @@ describe('SecurityPage change-password modal — unsaved-changes guard', () => {
   });
 
   it('Cancel button after typing closes immediately (intentional discard)', async () => {
-    renderPage();
+    renderPage(authExtra);
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Security' }),
     ).toBeInTheDocument();
@@ -55,7 +49,7 @@ describe('SecurityPage change-password modal — unsaved-changes guard', () => {
 
   it('Esc while typing surfaces the Stay/Leave prompt', async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage(authExtra);
     await openPasswordModal();
 
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'oldsecret' } });
@@ -71,7 +65,7 @@ describe('SecurityPage change-password modal — unsaved-changes guard', () => {
 
   it('Esc on an unedited modal closes immediately (no prompt)', async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage(authExtra);
     await openPasswordModal();
 
     await user.keyboard('{Escape}');
@@ -86,7 +80,7 @@ describe('SecurityPage change-password modal — password-manager interop', () =
   });
 
   it('is a native form: name/autocomplete tokens + hidden username', async () => {
-    renderPage();
+    renderPage(authExtra);
     await openPasswordModal();
 
     const current = screen.getByLabelText('Current password');
@@ -114,7 +108,7 @@ describe('SecurityPage change-password modal — password-manager interop', () =
       .mockResolvedValueOnce(undefined)
       // A rejected transaction changed nothing and is safe to retry from this form, unlike the lost-response path (covered separately).
       .mockRejectedValueOnce(new ApiRequestError(409, { code: 'PASSWORD_SAME_AS_CURRENT', message: 'boom' }));
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
 
     const fillValid = () => {
@@ -140,7 +134,7 @@ describe('SecurityPage change-password modal — password-manager interop', () =
 
   it('Enter submits the form when valid, and is gated by the same validation as the button', async () => {
     const changePassword = vi.fn().mockResolvedValue(undefined);
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
 
     const form = screen.getByLabelText('Current password').closest('form');
@@ -166,7 +160,7 @@ describe('SecurityPage change-password modal — password policy', () => {
 
   it('shows the 16-character + special-character requirement copy in an info-icon tooltip', async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage(authExtra);
     await openPasswordModal();
     // The requirement copy sits behind an info tooltip trigger, hidden until it is hovered or focused.
     const trigger = screen.getByLabelText('Password requirements');
@@ -180,7 +174,7 @@ describe('SecurityPage change-password modal — password policy', () => {
 
   it('keeps submit disabled for a 15-character new password (below the 16-char minimum)', async () => {
     const changePassword = vi.fn().mockResolvedValue(undefined);
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     const form = screen.getByLabelText('Current password').closest('form')!;
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'OldSecret-123' } });
@@ -193,7 +187,7 @@ describe('SecurityPage change-password modal — password policy', () => {
 
   it('keeps submit disabled for a 16-character new password missing a special character', async () => {
     const changePassword = vi.fn().mockResolvedValue(undefined);
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     const form = screen.getByLabelText('Current password').closest('form')!;
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'OldSecret-123' } });
@@ -206,7 +200,7 @@ describe('SecurityPage change-password modal — password policy', () => {
 
   it('enables submit and changes with a compliant 16+ character special-character new password', async () => {
     const changePassword = vi.fn().mockResolvedValue(undefined);
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     const form = screen.getByLabelText('Current password').closest('form')!;
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'OldSecret-123' } });
@@ -226,7 +220,7 @@ describe('SecurityPage change-password card — offered only on an unlocked work
   });
 
   it('a locked workspace offers no change and states the way forward', async () => {
-    renderPage({ isUnlocked: false, needsKeySetup: false });
+    renderPage(authExtra, { isUnlocked: false, needsKeySetup: false });
     await waitFor(() =>
       expect(
         screen.getByText(/Unlock your data on this device before changing your password/i),
@@ -236,7 +230,7 @@ describe('SecurityPage change-password card — offered only on an unlocked work
   });
 
   it('an account that never completed key setup offers no change and states the way forward', async () => {
-    renderPage({ isUnlocked: false, needsKeySetup: true });
+    renderPage(authExtra, { isUnlocked: false, needsKeySetup: true });
     await waitFor(() =>
       expect(
         screen.getByText(/Finish setting up encryption for this account/i),
@@ -262,7 +256,7 @@ describe('SecurityPage change-password modal — rejected / upgrade-required / l
     const changePassword = vi
       .fn()
       .mockRejectedValue(new ApiRequestError(409, { code: 'UPGRADE_REQUIRED', message: 'Reload the page to continue.' }));
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     fillValid();
     fireEvent.submit(screen.getByLabelText('Current password').closest('form')!);
@@ -277,7 +271,7 @@ describe('SecurityPage change-password modal — rejected / upgrade-required / l
     const changePassword = vi
       .fn()
       .mockRejectedValue(new ApiRequestError(409, { code: 'STALE_ENVELOPE_VERSION', message: 'Envelope-set version is stale or non-monotonic.' }));
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     fillValid();
     fireEvent.submit(screen.getByLabelText('Current password').closest('form')!);
@@ -298,7 +292,7 @@ describe('SecurityPage change-password modal — rejected / upgrade-required / l
           message: 'Any server wording at all.',
         }),
       );
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     fillValid();
     fireEvent.submit(screen.getByLabelText('Current password').closest('form')!);
@@ -324,7 +318,7 @@ describe('SecurityPage change-password modal — rejected / upgrade-required / l
           message: 'Could not save this change right now. Try again.',
         }),
       );
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     fillValid();
     fireEvent.submit(screen.getByLabelText('Current password').closest('form')!);
@@ -340,7 +334,7 @@ describe('SecurityPage change-password modal — rejected / upgrade-required / l
   it('the lost-response path: no automatic retry, no claimed verdict, sign-in-again wording, and no route back to the form', async () => {
     // A non-ApiRequestError (network/timeout) never resolved a verdict, so there is nothing to distinguish rejected from committed.
     const changePassword = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     fillValid();
     fireEvent.submit(screen.getByLabelText('Current password').closest('form')!);
@@ -366,7 +360,7 @@ describe('SecurityPage change-password modal — rejected / upgrade-required / l
       .mockRejectedValue(
         new PasswordChangeNotSentError('Unlock your data before changing your password.'),
       );
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     fillValid();
     fireEvent.submit(screen.getByLabelText('Current password').closest('form')!);
@@ -389,7 +383,7 @@ describe('SecurityPage change-password modal — rejected / upgrade-required / l
           'Your password was changed, but this device could not finish updating. Unlock your data with your new password to continue.',
         ),
       );
-    renderPage({ changePassword });
+    renderPage(authExtra, { changePassword });
     await openPasswordModal();
     fillValid();
     fireEvent.submit(screen.getByLabelText('Current password').closest('form')!);
@@ -415,7 +409,7 @@ describe('SecurityPage change-password modal — step-up', () => {
   it('requires a fresh factor when step-up is enforced, then changes with the proof', async () => {
     const changePassword = vi.fn().mockResolvedValue(undefined);
     const stepUpSendEmailOtp = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       changePassword,
       stepUpSendEmailOtp,
       // With AUTH_MFA_ENFORCED on, GET /auth/mfa/status reports step-up required with the Email-OTP no-lockout floor as the only factor.
