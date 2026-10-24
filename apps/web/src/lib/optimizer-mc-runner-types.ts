@@ -10,11 +10,8 @@ export interface OptimizerMcWinner {
 }
 
 /**
- * Per-scenario outcome, mirroring the deterministic worker's variants so the page
- * consumes one row shape. `result` with `winner: null` is past-window; `empty`
- * surfaces the same EmptyReasonRow copy as the deterministic path; `cancelled`
- * (aborted, not computed) is omitted from the page's row map rather than shown
- * as past-window.
+ * Per-scenario outcome, mirroring the deterministic worker's variants so the page consumes one row shape. `result` with `winner: null` is past-window;
+ * `empty` surfaces the same EmptyReasonRow copy as the deterministic path; `cancelled` (aborted, not computed) is omitted from the page's row map.
  */
 export type OptimizerMcOutcome =
   | {

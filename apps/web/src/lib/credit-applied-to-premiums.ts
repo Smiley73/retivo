@@ -10,10 +10,7 @@ interface CreditAppliedToPremiumsArgs {
   readonly povertyLineLimitCents?: number;
 }
 
-/**
- * `min(max(0, credit − offset), medical, remainingNeed, povertyLineLimit)`, floored
- * at zero. The model has no surplus deposit, so the rest of the credit is dropped.
- */
+/** `min(max(0, credit − offset), medical, remainingNeed, povertyLineLimit)`, floored at zero; the model has no surplus deposit, so the rest of the credit is dropped. */
 export function creditAppliedToPremiumsCents(args: CreditAppliedToPremiumsArgs): number {
   const excessCents = Math.max(0, args.creditCents - args.offsetCents);
   const limitCents = Math.min(

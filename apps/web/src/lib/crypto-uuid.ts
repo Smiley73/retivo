@@ -1,8 +1,4 @@
-/**
- * Random UUID for client-generated aggregate, mutation and device ids, from
- * `crypto.randomUUID()` or else a v4 built from `crypto.getRandomValues()`. It
- * throws when neither exists: degrading to a weak id is worse than failing loudly.
- */
+/** Random UUID for client-generated ids from `crypto.randomUUID()`, else a v4 from `crypto.getRandomValues()`; throws when neither exists, since a weak id is worse than failing loudly. */
 export function cryptoUuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();

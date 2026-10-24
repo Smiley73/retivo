@@ -22,13 +22,10 @@ function shouldPrefillDevCredentials(): boolean {
   return isPrivateIpv4(host);
 }
 
-// Two guards keep this off production. The host check is the runtime guarantee:
-// a real deploy is never served from localhost or a private IP. The
-// `import.meta.env.DEV &&` gate must sit on this expression, ahead of the
-// literal-bearing ternaries, so a `NODE_ENV=production` build folds the
-// credentials out of the bundle; a bare `vite build` keeps them, inert behind
-// the host check. The credentials are committed and non-secret, and the seeded
-// user exists in no production database.
+// Two guards keep this off production. The host check is the runtime guarantee: a real deploy is never served from localhost
+// or a private IP. The `import.meta.env.DEV &&` gate must sit on this expression, ahead of the literal-bearing ternaries, so a
+// `NODE_ENV=production` build folds the credentials out of the bundle; a bare `vite build` keeps them, inert behind the host
+// check. The credentials are committed and non-secret, and the seeded user exists in no production database.
 const prefill = import.meta.env.DEV && shouldPrefillDevCredentials();
 
 export const DEV_DEFAULT_EMAIL = prefill ? 'dev@local.test' : '';

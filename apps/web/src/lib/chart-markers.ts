@@ -11,14 +11,12 @@ export function labelAnchorForX(
 }
 
 /**
- * Y-axis floor ($) for the projection charts' log-scale mode, shared so the stacked
- * charts clip identically. A domain starting at 1 wastes the chart height on the
- * empty $1-$10k band; `allowDataOverflow` stays on so a lower point clips to the floor.
+ * Y-axis floor ($) for the projection charts' log-scale mode, shared so the stacked charts clip identically. A domain starting at 1
+ * wastes the chart height on the empty $1-$10k band; `allowDataOverflow` stays on so a lower point clips to the floor.
  */
 export const LOG_SCALE_FLOOR = 10000;
 
-// Marker-label vertical staggering for every chart that floats `<ReferenceLine>` labels in the top margin.
-// Markers closer than `MIN_DELTA_YEARS` take alternating slots stepping further up; slot 0 is nearest the plot edge.
+// Marker-label staggering for charts that float `<ReferenceLine>` labels in the top margin; slot 0 is nearest the plot edge.
 const SLOT_COUNT = 3;
 const SLOT_BASE_DY = -16;
 const SLOT_STEP_DY = -14;
@@ -29,11 +27,7 @@ export function markerSlotDy(slot: number): number {
   return SLOT_BASE_DY + slot * SLOT_STEP_DY;
 }
 
-/**
- * Year ticks whose step (1, 2, 5 or 10 years) adapts to the visible span, so a
- * zoomed window still gets labels (2031–2034 holds no multiple of 5). The full
- * horizon lands on the 5-year grid.
- */
+/** Year ticks whose step (1, 2, 5 or 10 years) adapts to the visible span, so a zoomed window still gets labels (2031–2034 holds no multiple of 5). */
 export function adaptiveYearTicks(min: number, max: number): number[] {
   const span = Math.max(0, max - min);
   const step = span <= 6 ? 1 : span <= 14 ? 2 : span <= 50 ? 5 : 10;
@@ -43,11 +37,7 @@ export function adaptiveYearTicks(min: number, max: number): number[] {
   return ticks;
 }
 
-/**
- * Fixed 5-year ticks for the safe-withdrawal-rate and composition charts. A
- * window as short as two years may straddle no multiple of 5, so it falls back
- * to the first and last year rather than an axis with no year label.
- */
+/** Fixed 5-year ticks; a window that straddles no multiple of 5 falls back to its first and last year rather than an axis with no year label. */
 export function fiveYearTicks(min: number, max: number): number[] {
   const start = Math.ceil(min / 5) * 5;
   const ticks: number[] = [];
@@ -57,10 +47,8 @@ export function fiveYearTicks(min: number, max: number): number[] {
 }
 
 /**
- * Assigns each marker a vertical `slot` so labels for markers closer than
- * `MIN_DELTA_YEARS` stagger: sorted by `fractionalYear`, a close marker takes the
- * predecessor's next slot (wrapping at `SLOT_COUNT`), otherwise slot 0.
- * Caller fields are preserved. Pure.
+ * Assigns each marker a vertical `slot` so labels for markers closer than `MIN_DELTA_YEARS` stagger: sorted by `fractionalYear`,
+ * a close marker takes the predecessor's next slot (wrapping at `SLOT_COUNT`), otherwise slot 0. Caller fields are preserved.
  */
 export function assignMarkerLabelSlots<T extends { fractionalYear: number }>(
   markers: ReadonlyArray<T>,

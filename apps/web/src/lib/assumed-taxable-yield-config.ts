@@ -4,11 +4,8 @@
 import type { CalibrationSnapshot } from './calibration';
 
 /**
- * Per-year assumed taxable yield: `totalYieldPct` is a fraction of the balance
- * (0.02 = 2%); `qualifiedDividendFraction` is taxed at LTCG/QDI rates;
- * `taxExemptMunicipalFraction` pays no federal tax but is added back to the
- * §36B / IRMAA MAGI. The remainder (floored at 0) is ordinary interest, taxed at
- * ordinary rates and part of the NIIT base.
+ * Per-year assumed taxable yield: `totalYieldPct` is a fraction of the balance (0.02 = 2%); `qualifiedDividendFraction` is taxed at LTCG/QDI rates;
+ * `taxExemptMunicipalFraction` pays no federal tax but is added back to the §36B / IRMAA MAGI. The remainder (floored at 0) is ordinary interest, in the NIIT base.
  */
 export interface AssumedTaxableYieldConfig {
   readonly totalYieldPct: number;

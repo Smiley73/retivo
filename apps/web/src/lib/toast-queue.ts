@@ -25,19 +25,14 @@ export const appToastQueue = new ToastQueue<AppToastContent>();
 let currentWaitKey: string | null = null;
 let currentWaitDeadlineAt: number | null = null;
 
-// A further deadline within this tolerance counts as the live notice's own. Concurrent requests served the same
-// `Retry-After` differ by a few ms, and replacing the toast each time would re-announce its `role="alert"`
-// and move focus off a keyboard user's Close button.
+// A further deadline within this tolerance counts as the live notice's own. Concurrent requests served the same `Retry-After`
+// differ by a few ms, and replacing the toast each time would re-announce its `role="alert"` and move focus off a keyboard user's Close button.
 const WAIT_EXTEND_TOLERANCE_MS = 1_000;
 
 /**
- * Raises the "please wait" notice for a `Retry-After` the caller is about to honor.
- * The sync loop and `POST /auth/refresh` exclude themselves at their call sites.
- * A non-finite or non-positive wait raises nothing. There is no upper ceiling: the
- * hour-window MFA and step-up throttles really serve waits in the thousands of
- * seconds on a required sign-in path, and whether to retry is the caller's call.
- * While a notice is live, a further observation extends it to the later deadline
- * instead of stacking a second toast; an earlier or tolerance-close one is a no-op.
+ * Raises the "please wait" notice for a `Retry-After` the caller is about to honor; the sync loop and `POST /auth/refresh` exclude themselves at their call sites.
+ * A non-finite or non-positive wait raises nothing. No upper ceiling: the hour-window MFA and step-up throttles serve waits in the thousands of seconds on a required sign-in path.
+ * A live notice is extended to a later deadline instead of stacking a second toast; an earlier or tolerance-close one is a no-op.
  */
 export function raiseWaitNotice(waitMs: number): void {
   if (!Number.isFinite(waitMs) || waitMs <= 0) return;
