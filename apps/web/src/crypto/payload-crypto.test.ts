@@ -35,10 +35,13 @@ describe('payload-crypto', () => {
     expect(typeof envelope.ciphertext).toBe('string');
   });
 
-  it('fails closed when the AAD aggregateId differs', async () => {
+  it.each([
+    { field: 'aggregateId', value: 'agg-2' },
+    { field: 'householdId', value: 'hh-2' },
+  ])('fails closed when the AAD $field differs', async ({ field, value }) => {
     const hdk = await generateHdk();
     const envelope = await encryptPayload(payload, meta, hdk, 'key-1');
-    const wrongMeta: AadMetadata = { ...meta, aggregateId: 'agg-2' };
+    const wrongMeta: AadMetadata = { ...meta, [field]: value };
     await expect(decryptPayload(envelope, wrongMeta, hdk)).rejects.toBeInstanceOf(
       PayloadCryptoError,
     );

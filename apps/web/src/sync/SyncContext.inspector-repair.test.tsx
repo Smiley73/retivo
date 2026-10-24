@@ -7,6 +7,7 @@ import {
   listFailedConflicts,
   putAggregate,
   listPendingMutations,
+  removeMutation,
   updateMutationStatus,
 } from '../db/store';
 import { type PendingMutation } from '../db/types';
@@ -75,7 +76,25 @@ describe('SyncProvider — inspector mutation lists + rejection summary', () => 
     expect(capturedConflicts).toBe(first);
   });
 
-  it('publishes a new conflict list when a rendered field of the same row changes', async () => {
+  it.each([
+    {
+      change: 'the reason of the same row changes',
+      mutate: async (m: PendingMutation) => {
+        await updateMutationStatus(m.id, 'failed-conflict', 'NOT_FOUND');
+        return { id: m.id, reason: 'NOT_FOUND' };
+      },
+    },
+    {
+      // Same length, status, expectedVersion and reason: only the id differs, so a stale array would show the old row.
+      change: 'a different mutation replaces the row',
+      mutate: async (m: PendingMutation) => {
+        await removeMutation(m.id);
+        const other = await seedMutation({ operation: 'update', expectedVersion: 3, status: 'failed-conflict' });
+        await updateMutationStatus(other.id, 'failed-conflict', 'CONFLICT');
+        return { id: other.id, reason: 'CONFLICT' };
+      },
+    },
+  ])('publishes a new conflict list when $change', async ({ mutate }) => {
     const m = await seedMutation({ operation: 'update', expectedVersion: 3 });
     await renderSettled(renderInspectorProvider);
     fake.pushImpl = async () => ({
@@ -97,10 +116,11 @@ describe('SyncProvider — inspector mutation lists + rejection summary', () => 
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
     const first = capturedConflicts;
 
-    await updateMutationStatus(m.id, 'failed-conflict', 'NOT_FOUND');
+    const expected = await mutate(m);
     fireEvent.click(screen.getByText('retryNow'));
     await waitFor(() => expect(capturedConflicts).not.toBe(first));
-    expect(capturedConflicts.find((c) => c.id === m.id)?.reason).toBe('NOT_FOUND');
+    expect(capturedConflicts).toHaveLength(1);
+    expect(capturedConflicts[0]).toMatchObject(expected);
   });
 
   it('degrades the rejection summary for a short / non-hex aggregateId — no id fragment, never throws', async () => {
