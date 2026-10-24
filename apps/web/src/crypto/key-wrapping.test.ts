@@ -1,19 +1,11 @@
-/**
- * Unit tests for HDK wrapping + envelope-set integrity.
- */
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import {
   computeEnvelopeSetTag,
-  deriveArgon2idWrapKey,
-  derivePasswordWrapKey,
-  EnvelopeSetPinAbortedError,
   exportHdk,
-  generateArgon2idPasswordSlot,
   generateHdk,
   generatePasskeyPrfSlot,
   generatePasswordSlot,
-  generatePbkdf2PasswordSlot,
   generateRecoverySlot,
   isEnvelopeSetRollback,
   isStrictEncryptedEnvelope,
@@ -22,12 +14,11 @@ import {
   readEnvelopeSetPin,
   unwrapPrfSlot,
   unwrapSlot,
-  validateKdfParams,
   verifyEnvelopeSetTag,
   writeEnvelopeSetPin,
 } from './key-wrapping';
 import { derivePrfWrapKey } from './passkey-prf';
-import { bytesToBase64Url, canonicalJsonBytes } from './payload-crypto';
+import { bytesToBase64Url, canonicalJsonBytes, utf8Bytes } from './payload-crypto';
 import {
   dropLocalDatabase,
   readDeviceMetadata,
@@ -42,7 +33,6 @@ import type {
   Pbkdf2KdfParams,
 } from './encryption-types';
 
-/** A well-formed encrypted aggregate payload envelope. */
 function validEnvelope(overrides: Partial<EncryptedPayloadEnvelope> = {}): EncryptedPayloadEnvelope {
   return {
     encryptionVersion: 1,
@@ -61,6 +51,34 @@ async function sameKey(a: CryptoKey, b: CryptoKey): Promise<boolean> {
   if (va.length !== vb.length) return false;
   return va.every((byte, i) => byte === vb[i]);
 }
+
+// Wraps the HDK the way the producer does, so the tests assert the public unwrap contract end to end.
+async function wrapHdkUnder(
+  hdk: CryptoKey,
+  wrapKey: CryptoKey,
+  aad: Uint8Array<ArrayBuffer>,
+): Promise<string> {
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const wrapped = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: nonce, additionalData: aad },
+    wrapKey,
+    await exportHdk(hdk),
+  );
+  const combined = new Uint8Array(nonce.length + wrapped.byteLength);
+  combined.set(nonce, 0);
+  combined.set(new Uint8Array(wrapped), nonce.length);
+  return bytesToBase64Url(combined);
+}
+
+const SLOT_STUB: KeyEnvelopeSlot = {
+  householdId: 'hh-1',
+  slotId: 'slot-pw',
+  slotType: 'password',
+  wrappedKey: 'AAAA',
+  encryptionVersion: 1,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+};
 
 describe('key-wrapping — password slot (Argon2id default)', () => {
   it('round-trips the HDK with the correct password', async () => {
@@ -90,7 +108,7 @@ describe('key-wrapping — password slot (Argon2id default)', () => {
 
   it('throws when Argon2id slot kdf metadata is tampered (lowered m → AAD mismatch)', async () => {
     const hdk = await generateHdk();
-    const slot = await generateArgon2idPasswordSlot('hh-1', 'slot-pw', 'correct horse', hdk);
+    const slot = await generatePasswordSlot('hh-1', 'slot-pw', 'correct horse', hdk);
     const tampered: KeyEnvelopeSlot = {
       ...slot,
       kdf: { ...(slot.kdf as Argon2idKdfParams), m: 1024 },
@@ -99,94 +117,78 @@ describe('key-wrapping — password slot (Argon2id default)', () => {
   });
 });
 
-describe('key-wrapping — legacy PBKDF2 password slot (backward-compat read path)', () => {
+describe('key-wrapping — legacy PBKDF2 password slot (unwrap only)', () => {
+  const kdf: Pbkdf2KdfParams = {
+    algorithm: 'PBKDF2-HMAC-SHA-256',
+    iterations: 1_000,
+    salt: 'c2FsdHNhbHQ',
+  };
+
+  async function buildPbkdf2Slot(hdk: CryptoKey, password: string): Promise<KeyEnvelopeSlot> {
+    const baseKey = await crypto.subtle.importKey('raw', utf8Bytes(password), 'PBKDF2', false, [
+      'deriveKey',
+    ]);
+    const wrapKey = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', hash: 'SHA-256', iterations: kdf.iterations, salt: utf8Bytes('saltsalt') },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt'],
+    );
+    const aad = canonicalJsonBytes({ encryptionVersion: 1, kdf, slotType: 'password' });
+    return { ...SLOT_STUB, kdf, wrappedKey: await wrapHdkUnder(hdk, wrapKey, aad) };
+  }
+
   it('still unwraps a PBKDF2-wrapped slot (no migration needed)', async () => {
     const hdk = await generateHdk();
-    const slot = await generatePbkdf2PasswordSlot('hh-1', 'slot-pw', 'correct horse', hdk);
-    expect(slot.kdf?.algorithm).toBe('PBKDF2-HMAC-SHA-256');
+    const slot = await buildPbkdf2Slot(hdk, 'correct horse');
     const recovered = await unwrapSlot(slot, 'correct horse');
     expect(await sameKey(recovered, hdk)).toBe(true);
   });
 
   it('throws on the wrong password for a legacy PBKDF2 slot', async () => {
     const hdk = await generateHdk();
-    const slot = await generatePbkdf2PasswordSlot('hh-1', 'slot-pw', 'correct horse', hdk);
+    const slot = await buildPbkdf2Slot(hdk, 'correct horse');
     await expect(unwrapSlot(slot, 'wrong password')).rejects.toBeInstanceOf(KeyWrappingError);
   });
 });
 
-describe('key-wrapping — Argon2id KDF param validation', () => {
-  const validKdf: Argon2idKdfParams = {
+// The message pins the validation itself: a hostile param that reached derivation would still fail, but as a generic unwrap failure.
+describe('key-wrapping — server-stored KDF params fail closed before any derivation', () => {
+  const argon: Argon2idKdfParams = {
     algorithm: 'Argon2id',
     m: 65_536,
     t: 3,
     p: 4,
     salt: 'c2FsdHNhbHQ',
   };
-
-  it('accepts in-bounds Argon2id params', () => {
-    expect(() => validateKdfParams(validKdf)).not.toThrow();
-  });
-
-  it('rejects an out-of-bounds memory cost (m > 65536)', () => {
-    expect(() => validateKdfParams({ ...validKdf, m: 65_537 })).toThrow(KeyWrappingError);
-  });
-
-  it('rejects an out-of-bounds time cost (t > 10)', () => {
-    expect(() => validateKdfParams({ ...validKdf, t: 11 })).toThrow(KeyWrappingError);
-  });
-
-  it('rejects an out-of-bounds parallelism (p > 16)', () => {
-    expect(() => validateKdfParams({ ...validKdf, p: 17 })).toThrow(KeyWrappingError);
-  });
-
-  it('rejects non-positive / non-integer m/t/p', () => {
-    expect(() => validateKdfParams({ ...validKdf, m: 0 })).toThrow(KeyWrappingError);
-    expect(() => validateKdfParams({ ...validKdf, t: 0 })).toThrow(KeyWrappingError);
-    expect(() => validateKdfParams({ ...validKdf, p: 1.5 })).toThrow(KeyWrappingError);
-  });
-
-  it('rejects a missing/empty salt', () => {
-    expect(() => validateKdfParams({ ...validKdf, salt: '' })).toThrow(KeyWrappingError);
-  });
-
-  it('deriveArgon2idWrapKey fails closed on a malformed (non-base64url) salt', async () => {
-    await expect(
-      deriveArgon2idWrapKey('pw', { ...validKdf, salt: 'not valid base64url !!!' }),
-    ).rejects.toBeInstanceOf(KeyWrappingError);
-  });
-});
-
-describe('key-wrapping — legacy PBKDF2 kdf param validation', () => {
-  const validKdf: Pbkdf2KdfParams = {
+  const pbkdf2: Pbkdf2KdfParams = {
     algorithm: 'PBKDF2-HMAC-SHA-256',
     iterations: 600_000,
     salt: 'c2FsdHNhbHQ',
   };
 
-  it('throws on an out-of-range (excessive) iteration count', async () => {
-    const kdf: KdfParams = { ...validKdf, iterations: 2_000_001 };
-    await expect(derivePasswordWrapKey('pw', kdf)).rejects.toBeInstanceOf(KeyWrappingError);
-  });
-
-  it('throws on a non-positive iteration count', async () => {
-    const kdf: KdfParams = { ...validKdf, iterations: 0 };
-    await expect(derivePasswordWrapKey('pw', kdf)).rejects.toBeInstanceOf(KeyWrappingError);
-  });
-
-  it('throws on a non-integer iteration count', async () => {
-    const kdf: KdfParams = { ...validKdf, iterations: 1.5 };
-    await expect(derivePasswordWrapKey('pw', kdf)).rejects.toBeInstanceOf(KeyWrappingError);
-  });
-
-  it('throws on an unsupported kdf algorithm', async () => {
-    const kdf = { ...validKdf, algorithm: 'scrypt' } as unknown as KdfParams;
-    await expect(derivePasswordWrapKey('pw', kdf)).rejects.toBeInstanceOf(KeyWrappingError);
-  });
-
-  it('throws on a missing/empty salt', async () => {
-    const kdf: KdfParams = { ...validKdf, salt: '' };
-    await expect(derivePasswordWrapKey('pw', kdf)).rejects.toBeInstanceOf(KeyWrappingError);
+  it.each<[string, KdfParams, RegExp]>([
+    ['Argon2id memory above the cap', { ...argon, m: 65_537 }, /memory cost out of range/],
+    ['Argon2id time above the cap', { ...argon, t: 11 }, /time cost out of range/],
+    ['Argon2id parallelism above the cap', { ...argon, p: 17 }, /parallelism out of range/],
+    ['Argon2id zero memory', { ...argon, m: 0 }, /memory cost out of range/],
+    ['Argon2id zero time', { ...argon, t: 0 }, /time cost out of range/],
+    ['Argon2id fractional parallelism', { ...argon, p: 1.5 }, /parallelism out of range/],
+    ['Argon2id empty salt', { ...argon, salt: '' }, /salt missing or empty/],
+    ['Argon2id non-base64url salt', { ...argon, salt: 'not valid base64url !!!' }, /malformed kdf salt/],
+    ['PBKDF2 iterations above the cap', { ...pbkdf2, iterations: 2_000_001 }, /iterations out of range/],
+    ['PBKDF2 zero iterations', { ...pbkdf2, iterations: 0 }, /iterations out of range/],
+    ['PBKDF2 fractional iterations', { ...pbkdf2, iterations: 1.5 }, /iterations out of range/],
+    ['PBKDF2 empty salt', { ...pbkdf2, salt: '' }, /salt missing or empty/],
+    ['PBKDF2 non-base64url salt', { ...pbkdf2, salt: 'not valid base64url !!!' }, /malformed kdf salt/],
+    [
+      'an unsupported algorithm',
+      { ...pbkdf2, algorithm: 'scrypt' } as unknown as KdfParams,
+      /unsupported kdf algorithm/,
+    ],
+  ])('rejects %s', async (_name, kdf, message) => {
+    await expect(unwrapSlot({ ...SLOT_STUB, kdf }, 'pw')).rejects.toThrow(message);
   });
 });
 
@@ -210,7 +212,6 @@ describe('key-wrapping — recovery slot', () => {
     const hdk = await generateHdk();
     const { slot, recoveryKey } = await generateRecoverySlot('hh-1', 'slot-rec', hdk);
     expect(JSON.stringify(slot)).not.toContain(recoveryKey);
-    // Display encoding is grouped hex, not raw base64url key bytes.
     expect(recoveryKey).toMatch(/^[0-9A-F]{4}(-[0-9A-F]{4})+$/);
   });
 });
@@ -277,7 +278,6 @@ describe('key-wrapping — envelope-set integrity', () => {
   it('rejects a lower envelopeSetVersion (rollback on a device holding the newer counter)', async () => {
     const { hdk, slots } = await buildSet();
     const tag = await computeEnvelopeSetTag(slots, 5, hdk);
-    // Same slots, but the served version is older than the tag was computed for.
     await expect(
       verifyEnvelopeSetTag(slots, { envelopeSetVersion: 4, envelopeSetTag: tag }, hdk),
     ).rejects.toBeInstanceOf(KeyWrappingError);
@@ -309,12 +309,10 @@ describe('key-wrapping — envelope-set version rollback', () => {
     const pw = await generatePasswordSlot('hh-1', 'slot-a', 'pw', hdk);
     const { slot: rec } = await generateRecoverySlot('hh-1', 'slot-b', hdk);
     const slots = [pw, rec];
-    // The replayed set carries a self-consistent tag for its own version=4.
     const tag = await computeEnvelopeSetTag(slots, 4, hdk);
     await expect(
       verifyEnvelopeSetTag(slots, { envelopeSetVersion: 4, envelopeSetTag: tag }, hdk),
     ).resolves.toBeUndefined();
-    // The MAC alone cannot see the rollback — the pinned-version check does.
     expect(isEnvelopeSetRollback(4, 5)).toBe(true);
   });
 });
@@ -335,7 +333,6 @@ describe('key-wrapping — strict encrypted-envelope guard', () => {
   });
 
   it('rejects a domain payload that merely carries encryptionVersion (false-decrypt guard)', () => {
-    // The old loose check (encryptionVersion !== undefined) misfired here.
     expect(isStrictEncryptedEnvelope({ encryptionVersion: 1, name: 'Account' })).toBe(false);
   });
 
@@ -365,11 +362,7 @@ describe('key-wrapping — strict encrypted-envelope guard', () => {
     ).toBe(false);
   });
 
-  // Mirrors
-  // apps/api/src/common/encrypted-envelope.spec.ts's identical case on the
-  // identical fixture — the two guards can't share one test (separate
-  // packages), so agreement is pinned by asserting the SAME shape yields the
-  // SAME outcome in both specs.
+  // Mirrors apps/api/src/common/encrypted-envelope.spec.ts on the same fixture: the two guards live in separate packages, so agreement is pinned by the same shape giving the same outcome in both.
   it('rejects an otherwise-valid envelope carrying one extra key', () => {
     const withExtra: Record<string, unknown> = { ...validEnvelope(), name: 'plaintext-leak' };
     expect(isStrictEncryptedEnvelope(withExtra)).toBe(false);
@@ -414,7 +407,6 @@ describe('key-wrapping — envelope-set pin round-trip', () => {
     await seedMetadata(3);
     await writeEnvelopeSetPin(5);
     expect(await readEnvelopeSetPin('hh-1')).toBe(5);
-    // A lower served version never lowers the pin.
     await writeEnvelopeSetPin(2);
     expect(await readEnvelopeSetPin('hh-1')).toBe(5);
   });
@@ -426,10 +418,7 @@ describe('key-wrapping — envelope-set pin round-trip', () => {
   });
 
   it('seeds a minimal metadata row with the pin when no row exists but deviceId is given', async () => {
-    // Setup/rotation can run before the first sync writes deviceMetadata. Without
-    // persisting the pin here, a later replay of an old valid set passes the
-    // rollback check (isEnvelopeSetRollback(N, 0) === false). The seeded row
-    // carries the pin so the rollback guard works on the first activation.
+    // Setup and rotation can run before the first sync writes deviceMetadata; without a seeded pin a replay of an old valid set passes the rollback check.
     await writeEnvelopeSetPin(4, 'dev-seed');
     expect(await readEnvelopeSetPin('hh-1')).toBe(4);
     const meta = await readDeviceMetadata();
@@ -439,8 +428,6 @@ describe('key-wrapping — envelope-set pin round-trip', () => {
   });
 
   it('does not seed a row for a non-positive served version even with a deviceId', async () => {
-    // Version 0 is the TOFU baseline — there is nothing to pin yet, so seeding a
-    // row would be premature noise; readEnvelopeSetPin already returns 0.
     await writeEnvelopeSetPin(0, 'dev-seed');
     expect(await readDeviceMetadata()).toBeNull();
     expect(await readEnvelopeSetPin('hh-1')).toBe(0);
@@ -448,7 +435,6 @@ describe('key-wrapping — envelope-set pin round-trip', () => {
 
   it('advances the pin on an existing row regardless of the deviceId argument', async () => {
     await seedMetadata(3);
-    // deviceId is ignored when a row already exists — the existing row is updated.
     await writeEnvelopeSetPin(7, 'other-dev');
     expect(await readEnvelopeSetPin('hh-1')).toBe(7);
     const meta = await readDeviceMetadata();
@@ -456,21 +442,14 @@ describe('key-wrapping — envelope-set pin round-trip', () => {
   });
 
   it('raiseEnvelopeSetPinFloor durably rejects a replay even when the deviceMetadata pin write never lands', async () => {
-    // No deviceMetadata row exists (mirrors a persistent IndexedDB write
-    // failure that never seeds/advances the row) — before the fix,
-    // readEnvelopeSetPin had no other durable signal and would return 0,
-    // letting a replay of any served version pass isEnvelopeSetRollback.
+    // With no deviceMetadata row (a persistent IDB write failure) the localStorage floor is the only durable signal that makes a replay read as a rollback.
     expect(await readEnvelopeSetPin('hh-1')).toBe(0);
 
     raiseEnvelopeSetPinFloor(3, 'hh-1');
 
-    // The independent localStorage floor now governs the pin even though the
-    // deviceMetadata row is still absent — a replay of the retired version 3
-    // (or lower) reads as a rollback.
     expect(await readEnvelopeSetPin('hh-1')).toBe(3);
     expect(await readDeviceMetadata()).toBeNull();
 
-    // Monotonic: a lower raise never lowers the floor.
     raiseEnvelopeSetPinFloor(1, 'hh-1');
     expect(await readEnvelopeSetPin('hh-1')).toBe(3);
   });
@@ -480,14 +459,8 @@ describe('key-wrapping — envelope-set pin round-trip', () => {
   });
 
   it('reports the raise as FAILED when localStorage silently accepts the write without persisting it', () => {
-    // Regression guard for the exact gap an earlier fallback missed: a
-    // browser can return from `setItem` without throwing yet not actually
-    // store the value (pre-2017 Safari private-mode; a write landing on a
-    // quota boundary in some engines). Simulate that by making `setItem` a
-    // silent no-op — the write "succeeds" from the caller's point of view,
-    // but nothing durable records the floor.
+    // A browser can return from `setItem` without storing the value (old Safari private mode, a write on a quota boundary); that silent no-op must report failure.
     const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      // no-op: accepted without throwing, but never actually stored.
     });
     try {
       expect(raiseEnvelopeSetPinFloor(3, 'hh-1')).toBe(false);
@@ -497,28 +470,17 @@ describe('key-wrapping — envelope-set pin round-trip', () => {
   });
 
   it('scopes the localStorage floor per household so switching accounts on the same device cannot cross-contaminate', async () => {
-    // Household A's deviceMetadata pin write fails and falls back to the
-    // localStorage floor, raising it to a high version.
     expect(raiseEnvelopeSetPinFloor(10, 'household-a')).toBe(true);
     expect(await readEnvelopeSetPin('household-a')).toBe(10);
 
-    // The device now signs in to a DIFFERENT household whose deviceMetadata
-    // row (and hence the whole IndexedDB working store) was dropped on the
-    // switch, but localStorage was never touched. Before this fix, both
-    // households shared one unscoped key, so household B's genuinely lower
-    // version would have been wrongly rejected as a rollback against
-    // household A's floor. Scoped by householdId, household B sees no floor
-    // at all.
+    // The floor is scoped by householdId: a different household signing in on the same device must not be rejected as a rollback against household A's floor.
     expect(await readEnvelopeSetPin('household-b')).toBe(0);
 
-    // And household A's floor is untouched by household B's activity.
     expect(await readEnvelopeSetPin('household-a')).toBe(10);
   });
 
   it('does not revert a concurrent sync-metadata write (lost-update regression)', async () => {
-    // The unlock/rotation flows call writeEnvelopeSetPin OUTSIDE the
-    // SyncContext mutex, so it must merge atomically instead of spreading
-    // a stale full-row read over a concurrently-persisted syncCursor.
+    // Unlock and rotation call writeEnvelopeSetPin outside the SyncContext mutex, so it must merge atomically rather than spread a stale full-row read over a concurrent syncCursor.
     await seedMetadata(3);
     await Promise.all([
       writeEnvelopeSetPin(8, 'dev-1'),
@@ -545,29 +507,23 @@ describe('key-wrapping — envelope-set pin round-trip', () => {
 
   it('a session already stale right after the existence probe aborts the write BEFORE it commits, instead of only being noticed after', async () => {
     await seedMetadata(3);
-    // Mirrors a cross-household session switch that completed strictly
-    // inside writeEnvelopeSetPin's own probe await, before this line's check
-    // runs — the write must never reach `updateDeviceMetadata` at all.
-    await expect(writeEnvelopeSetPin(6, 'dev-1', () => true)).rejects.toBeInstanceOf(
-      EnvelopeSetPinAbortedError,
-    );
-    // The write never landed — the pin is untouched at its pre-abort value.
+    await expect(writeEnvelopeSetPin(6, 'dev-1', () => true)).rejects.toMatchObject({
+      name: 'EnvelopeSetPinAbortedError',
+    });
     expect(await readEnvelopeSetPin('hh-1')).toBe(3);
   });
 
   it('a household switch landing inside updateDeviceMetadata\'s own read aborts before the put, never touching the row', async () => {
     await seedMetadata(3);
-    // isStale reports false for the pre-call check (letting the existence
-    // probe pass) but true by the time the updater itself runs — mirroring a
-    // switch landing strictly inside `updateDeviceMetadata`'s internal read.
+    // isStale is false for the pre-call check but true by the time the updater runs, like a household switch landing inside updateDeviceMetadata's read.
     let calls = 0;
     const isStale = vi.fn(() => {
       calls += 1;
       return calls > 1;
     });
-    await expect(writeEnvelopeSetPin(6, 'dev-1', isStale)).rejects.toBeInstanceOf(
-      EnvelopeSetPinAbortedError,
-    );
+    await expect(writeEnvelopeSetPin(6, 'dev-1', isStale)).rejects.toMatchObject({
+      name: 'EnvelopeSetPinAbortedError',
+    });
     expect(await readEnvelopeSetPin('hh-1')).toBe(3);
   });
 });
@@ -578,15 +534,6 @@ describe('key-wrapping — malformed server-stored fields fail closed (KeyWrappi
     const slot = await generatePasswordSlot('hh-1', 'slot-pw', 'pw', hdk);
     const tampered: KeyEnvelopeSlot = { ...slot, wrappedKey: 'not valid base64url !!!' };
     await expect(unwrapSlot(tampered, 'pw')).rejects.toBeInstanceOf(KeyWrappingError);
-  });
-
-  it('throws KeyWrappingError on a malformed (non-base64url) kdf salt', async () => {
-    const kdf: KdfParams = {
-      algorithm: 'PBKDF2-HMAC-SHA-256',
-      iterations: 600_000,
-      salt: 'not valid base64url !!!',
-    };
-    await expect(derivePasswordWrapKey('pw', kdf)).rejects.toBeInstanceOf(KeyWrappingError);
   });
 
   it('throws KeyWrappingError on a malformed (non-base64url) envelopeSetTag', async () => {
@@ -605,46 +552,19 @@ describe('key-wrapping — malformed server-stored fields fail closed (KeyWrappi
 });
 
 describe('key-wrapping — passkey_prf slot (unwrapPrfSlot)', () => {
-  const GCM_NONCE_BYTES = 12;
-
-  /**
-   * Build a `passkey_prf` slot the way the producer does: wrap
-   * the HDK under the PRF-derived AES-GCM key with the slot-metadata AAD that
-   * `unwrapPrfSlot` reconstructs. PRF slots carry no `kdf`, so the AAD binds only
-   * `slotType` + `encryptionVersion` (`kdf: null`) — mirrors the recovery slot.
-   * Reconstructing the wrap here (rather than calling an internal helper) keeps
-   * the test asserting the public unwrap contract end-to-end.
-   */
   async function buildPrfSlot(
     hdk: CryptoKey,
     prfWrapKey: CryptoKey,
     encryptionVersion = 1,
   ): Promise<KeyEnvelopeSlot> {
-    const aad = canonicalJsonBytes({
-      encryptionVersion,
-      kdf: null,
-      slotType: 'passkey_prf',
-    });
-    const hdkBytes = await exportHdk(hdk);
-    const nonce = crypto.getRandomValues(new Uint8Array(GCM_NONCE_BYTES));
-    const wrapped = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: nonce, additionalData: aad },
-      prfWrapKey,
-      hdkBytes,
-    );
-    const combined = new Uint8Array(nonce.length + wrapped.byteLength);
-    combined.set(nonce, 0);
-    combined.set(new Uint8Array(wrapped), nonce.length);
-    const now = new Date().toISOString();
+    const aad = canonicalJsonBytes({ encryptionVersion, kdf: null, slotType: 'passkey_prf' });
     return {
-      householdId: 'hh-1',
+      ...SLOT_STUB,
       slotId: 'slot-prf',
       slotType: 'passkey_prf',
       prfSalt: 'cHJmLXNhbHQ',
-      wrappedKey: bytesToBase64Url(combined),
+      wrappedKey: await wrapHdkUnder(hdk, prfWrapKey, aad),
       encryptionVersion,
-      createdAt: now,
-      updatedAt: now,
     };
   }
 
@@ -672,7 +592,6 @@ describe('key-wrapping — passkey_prf slot (unwrapPrfSlot)', () => {
     const pwSlot = await generatePasswordSlot('hh-1', 'slot-pw', 'pw', hdk);
     const prfOutput = crypto.getRandomValues(new Uint8Array(32)) as Uint8Array<ArrayBuffer>;
     const wrapKey = await derivePrfWrapKey(prfOutput);
-    // The slot-type guard rejects before any async work (synchronous throw).
     expect(() => unwrapPrfSlot(pwSlot, wrapKey)).toThrow(KeyWrappingError);
   });
 });
@@ -734,8 +653,6 @@ describe('key-wrapping — passkey_prf slot (generatePasskeyPrfSlot)', () => {
     );
     const slots = [pw, prf];
     const tag = await computeEnvelopeSetTag(slots, 2, hdk);
-    // A server silently rebinding the PRF slot to another credential id changes
-    // the canonical set form (credentialBinding is MACed) → tag mismatch.
     const rebound = [pw, { ...prf, credentialBinding: 'cred-evil' }];
     await expect(
       verifyEnvelopeSetTag(rebound, { envelopeSetVersion: 2, envelopeSetTag: tag }, hdk),

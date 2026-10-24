@@ -34,8 +34,8 @@ export async function readQuarantinedLocalCopies(
   return copies;
 }
 
-/** Bound on the persisted list; oldest entries are evicted first. */
-export const MAX_QUARANTINED_ROWS = 200;
+// Bound on the persisted list; oldest entries are evicted first.
+const MAX_QUARANTINED_ROWS = 200;
 
 function sameAggregate(
   a: { aggregateId: string; aggregateType: string },
@@ -46,7 +46,7 @@ function sameAggregate(
 
 /**
  * Pure merge of a decrypt outcome into the bounded list: `resolved` entries are removed, new `quarantined` ones added
- * (skipping duplicates), then capped at {@link MAX_QUARANTINED_ROWS} by dropping the oldest `firstSeenAt`.
+ * (skipping duplicates), then capped at `MAX_QUARANTINED_ROWS` by dropping the oldest `firstSeenAt`.
  */
 export function applyQuarantineOutcome(
   existing: readonly QuarantinedSyncRow[] | undefined,

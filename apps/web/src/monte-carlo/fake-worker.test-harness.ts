@@ -1,12 +1,5 @@
-/**
- * Shared fixtures for the `MonteCarloProvider.*.test.tsx` suites and the
- * `createMcPool` consumers' hook tests. TEST-ONLY.
- *
- * `vi.mock` is hoisted, so each suite keeps its own `vi.mock(...)` calls and
- * its own `vi.hoisted` state. What lives here is what those suites only ever
- * copied: the tiny run input, a canned summary, the core-count stub, the act
- * settle helper, and the "never replies" fake worker module.
- */
+// Shared fixtures for the `MonteCarloProvider.*.test.tsx` suites and the `createMcPool` consumers' hook tests. Each
+// suite keeps its own hoisted `vi.mock` calls and `vi.hoisted` state.
 import { act } from '@testing-library/react';
 import { ENGINE_VERSION, type MonteCarloInput, type MonteCarloSummary } from '../lib/monte-carlo';
 import type { MinimalMcWorker } from './mc-worker-pool';
@@ -76,32 +69,92 @@ export async function settle(): Promise<void> {
   });
 }
 
+export interface SpawnedWorker {
+  terminated: boolean;
+  /** Seed of the `run` message this worker was posted, once posted. */
+  seed?: number;
+  /** Posts the canned result for `seed` through `onmessage`; a terminated worker, like a real one, delivers nothing. */
+  deliver(): void;
+}
+
 /**
- * The `?worker` module for a fake worker that supports BOTH worker protocols
- * (single-worker `onmessage`, pool `addEventListener`) and never replies, so a
- * run settles only through the provider's own teardown paths. Every
- * construction is pushed onto `sink.workers`; when `sink.posted` is given, the
- * `kind` of each posted message is recorded there.
+ * The `?worker` module for a fake worker that supports both worker protocols (single-worker `onmessage`, pool
+ * `addEventListener`) and replies only when a test calls `deliver()`. Every construction is pushed onto `sink.workers`;
+ * when `sink.posted` is given, the `kind` of each posted message is recorded there.
  */
-export function neverRepliesWorkerModule(sink: { workers: Array<{ terminated: boolean }>; posted?: string[] }) {
-  class FakeMcWorker {
+export function neverRepliesWorkerModule(sink: { workers: SpawnedWorker[]; posted?: string[] }) {
+  class FakeMcWorker implements SpawnedWorker {
     onmessage: ((ev: MessageEvent) => void) | null = null;
     onerror: ((ev: { message?: string }) => void) | null = null;
     terminated = false;
+    seed?: number;
     constructor() {
       sink.workers.push(this);
     }
     addEventListener(): void {}
     removeEventListener(): void {}
     postMessage(msg: unknown): void {
-      sink.posted?.push((msg as { kind?: string })?.kind ?? 'unknown');
+      const m = msg as { kind?: string; input?: { seed: number } };
+      sink.posted?.push(m?.kind ?? 'unknown');
+      if (m?.kind === 'run') this.seed = m.input?.seed;
     }
     terminate(): void {
       this.terminated = true;
     }
+    deliver(): void {
+      if (this.terminated || this.seed === undefined) return;
+      this.onmessage?.(
+        new MessageEvent('message', { data: { kind: 'result', summary: fakeSummary(this.seed) } }),
+      );
+    }
   }
   return { default: FakeMcWorker };
 }
+
+export interface Gate {
+  resolve: () => void;
+  reject: (e: unknown) => void;
+}
+
+export interface PreflightGates {
+  /** seed → gate for that request's pending cache-key hash. */
+  keyGates: Map<number, Gate>;
+  /** cache key → gate for that request's pending cache read. */
+  readGates: Map<string, Gate>;
+  /** Summaries a cache read resolves with, keyed like the mocked key. */
+  cached: Map<string, unknown>;
+}
+
+/** The `../db/monte-carlo-cache` module with every key hash and cache read held open until the test settles its gate. */
+export function gatedCacheModule(gates: PreflightGates) {
+  return {
+    mcCacheKey: (input: MonteCarloInput) =>
+      new Promise<string>((resolve, reject) => {
+        gates.keyGates.set(input.seed, { resolve: () => resolve(`key-${input.seed}`), reject });
+      }),
+    getCached: (key: string) =>
+      new Promise<unknown>((resolve, reject) => {
+        gates.readGates.set(key, { resolve: () => resolve(gates.cached.get(key) ?? null), reject });
+      }),
+    putCached: async () => undefined,
+  };
+}
+
+// Bounded so a preflight that never starts fails fast instead of hanging the suite.
+async function waitForGate<K>(gates: Map<K, Gate>, key: K): Promise<Gate> {
+  for (let i = 0; i < 200 && !gates.has(key); i += 1) {
+    await new Promise<void>((r) => setTimeout(r, 0));
+  }
+  const gate = gates.get(key);
+  if (!gate) throw new Error(`no preflight gate for ${String(key)}`);
+  return gate;
+}
+
+export const waitForKeyGate = (gates: PreflightGates, seed: number): Promise<Gate> =>
+  waitForGate(gates.keyGates, seed);
+
+export const waitForReadGate = (gates: PreflightGates, seed: number): Promise<Gate> =>
+  waitForGate(gates.readGates, `key-${seed}`);
 
 /** A fake `MinimalMcWorker` for `createMcPool` consumers: `posted` records every
  *  run input, and the `emit*` / `resolveResult` methods deliver replies by hand. */

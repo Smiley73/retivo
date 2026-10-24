@@ -1,12 +1,4 @@
-/**
- * SyncBadge render-state tests.
- *
- * Each badge state must render with the correct icon,
- * label, and `aria-live` so a screen-reader user can hear the state
- * transition. Clicking the badge in any state now opens the unified
- * details popover (`SyncDetailsPopover`) — the per-state action handlers
- * live inside it and are covered by `SyncDetailsPopover.test.tsx`.
- */
+// Each badge state renders the right icon, label and `aria-live`; the action handlers live in SyncDetailsPopover.test.tsx.
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { SyncBadge } from './SyncBadge';
 import { expectNoA11yViolations } from '../test/a11y';
@@ -55,13 +47,8 @@ describe('SyncBadge', () => {
     render(<SyncBadge />);
     const button = screen.getByRole('button');
     expect(button).toHaveTextContent(/Synced/);
-    // The synced state renders an inline SVG cloud (vs a unicode glyph
-    // for the other states). Assert the element exists rather than
-    // text-matching a non-textual icon.
     expect(button.querySelector('svg')).not.toBeNull();
-    // The polite live region rides the inert wrapper span, not the
-    // focusable button (AT announce live changes on a focused control
-    // unreliably).
+    // The polite live region rides the inert wrapper span: assistive tech announces live changes on a focused control unreliably.
     expect(button.parentElement).toHaveAttribute('aria-live', 'polite');
     expect(button).toHaveAttribute('data-sync-state', 'synced');
   });
@@ -115,7 +102,6 @@ describe('SyncBadge', () => {
   it('clicking the error badge opens the details popover', () => {
     setState({ kind: 'error', message: 'oops' });
     render(<SyncBadge />);
-    // The popover is collapsed by default to keep the badge unobtrusive.
     expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Sync failed|oops/ }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -167,12 +153,8 @@ describe('SyncBadge', () => {
     const button = screen.getByRole('button');
     expect(button).toHaveTextContent('Update available');
     expect(button).toHaveAttribute('data-sync-state', 'update-available');
-    // Calm `info` tone — never the `negative` (red) tone used by `error`
-    // and `rollback-detected`.
     expect(button.className).toContain('text-info');
     expect(button.className).not.toContain('text-negative');
-    // Reuses the syncing circular-arrow glyph, rendered static — the spin
-    // class is scoped to `syncing-push`/`syncing-pull` only.
     const iconWrapper = button.querySelector('svg')?.parentElement;
     expect(iconWrapper?.className).not.toContain('animate-spin');
   });
@@ -186,10 +168,7 @@ describe('SyncBadge', () => {
   });
 });
 
-// The badge's live "Retrying in Ns"
-// countdown while the sync loop waits out an error-state backoff, and the
-// accessibility guard that keeps announced content (the aria-live wrapper +
-// title tooltip) changing on state transitions only, never once a second.
+// The live "Retrying in Ns" countdown must not change announced content (the aria-live wrapper and title) every second.
 describe('SyncBadge — Retrying in Ns countdown', () => {
   beforeEach(() => {
     forceRefresh.mockClear();
@@ -240,8 +219,6 @@ describe('SyncBadge — Retrying in Ns countdown', () => {
     expect(clearIntervalSpy).toHaveBeenCalled();
     expect(screen.getByRole('button')).toHaveTextContent(/Synced/);
 
-    // No further ticking now that the interval is torn down — advancing
-    // time must not resurrect a countdown or throw.
     act(() => {
       vi.advanceTimersByTime(5_000);
     });
@@ -268,8 +245,6 @@ describe('SyncBadge — Retrying in Ns countdown', () => {
     expect(wrapper).toHaveAttribute('aria-live', 'polite');
 
     const titleBeforeTick = wrapper.getAttribute('title');
-    // The countdown digits render inside an aria-hidden span so a per-tick
-    // text mutation is excluded from what a screen reader announces.
     const digitsSpan = Array.from(button.querySelectorAll('span[aria-hidden="true"]')).find((el) =>
       /^\d+$/.test(el.textContent ?? ''),
     );
@@ -279,7 +254,6 @@ describe('SyncBadge — Retrying in Ns countdown', () => {
     act(() => {
       vi.advanceTimersByTime(2_000);
     });
-    // The title (state-derived only) is unchanged by the tick.
     expect(wrapper.getAttribute('title')).toBe(titleBeforeTick);
   });
 
@@ -290,11 +264,7 @@ describe('SyncBadge — Retrying in Ns countdown', () => {
     await expectNoA11yViolations(container);
   });
 
-  // The whole visible "Retrying in Ns" string is
-  // decorative — the countdown must never become the button's accessible
-  // name (an AT would announce the ungrammatical "Retrying in s" once only
-  // the digits were hidden, and lose "Sync failed" entirely). The name
-  // must instead stay the state-derived label, unaffected by the tick.
+  // The countdown is decorative: it must never become the accessible name, which stays the state-derived label.
   it('keeps the accessible name "Sync failed" while counting down — never the ungrammatical "Retrying in s"', () => {
     vi.useFakeTimers();
     const now = Date.now();
@@ -306,7 +276,6 @@ describe('SyncBadge — Retrying in Ns countdown', () => {
     act(() => {
       vi.advanceTimersByTime(2_000);
     });
-    // The accessible name is unaffected by the per-second tick.
     expect(screen.getByRole('button', { name: 'Sync failed' })).toBe(button);
   });
 });

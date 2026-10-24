@@ -1,9 +1,7 @@
-/**
- * Unit tests for the CSRF cookie injection in the API client.
- */
+// Unit tests for the CSRF cookie injection in the API client.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Set up a minimal document.cookie mock before importing the module
+// Mock document.cookie before importing the module.
 const cookies: Record<string, string> = {};
 Object.defineProperty(document, 'cookie', {
   get() {
@@ -14,17 +12,14 @@ Object.defineProperty(document, 'cookie', {
   configurable: true,
 });
 
-// Re-import after cookie mock is in place
 const { apiRequest, configureApi, ApiRequestError } = await import('./client.js');
 
 beforeEach(() => {
-  // Clear cookies
   for (const key of Object.keys(cookies)) delete cookies[key];
   vi.restoreAllMocks();
 });
 
 function mockFetch(status: number, body: unknown) {
-  // Status 204 forbids any body per the Response spec; pass null in that case.
   const init: ResponseInit =
     status === 204
       ? { status }
@@ -82,7 +77,6 @@ describe('CSRF header injection', () => {
   });
 
   it('omits X-CSRF-Token when no csrf-token cookie exists', async () => {
-    // cookies object is empty
     const spy = mockFetch(200, { data: [] });
 
     await apiRequest('/api/v1/plans', { method: 'POST', body: {} });
@@ -94,9 +88,7 @@ describe('CSRF header injection', () => {
 
 describe('401 refresh-and-retry', () => {
   it('does NOT refresh+retry on a 401 INVALID_CREDENTIALS (verify-password)', async () => {
-    // A deliberate credential-validation failure must NOT be retried: retrying
-    // re-runs verify-password, double-recording its audit event and consuming a
-    // second throttle slot. Exactly one fetch, zero refresh calls.
+    // A deliberate credential-validation failure must not be retried: that would re-run verify-password, double-recording its audit event and consuming a second throttle slot.
     const refresh = vi.fn(async () => 'new-token');
     configureApi({
       getAccessToken: () => 'test-access-token',
@@ -121,8 +113,7 @@ describe('401 refresh-and-retry', () => {
   });
 
   it('DOES refresh+retry on a 401 without INVALID_CREDENTIALS (expired token)', async () => {
-    // An expired access token surfaces a generic 401; the client refreshes once
-    // and retries, so the call succeeds with two fetches and one refresh.
+    // An expired access token is refreshed once and retried.
     const refresh = vi.fn(async () => 'new-token');
     configureApi({
       getAccessToken: () => 'stale-token',

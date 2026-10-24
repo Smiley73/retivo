@@ -1,18 +1,5 @@
-/**
- * Tests for `rotatePasswordSlot`'s post-commit pin bookkeeping: the post-PUT `isStale()` re-check, the
- * `writeEnvelopeSetPin` retry-once, the `raiseEnvelopeSetPinFloor` fallback,
- * and the lock-on-failure path. None of these branches ran in any test
- * before this round — `AuthContext.unlock.test.tsx` stubs `writeEnvelopeSetPin`
- * to never fail, and `useDerivedRewrap.test.ts` mocks `rotatePasswordSlot`
- * itself rather than exercising the real implementation.
- *
- * `useZeroKnowledgeKey` is exercised directly via `renderHook` (rather than
- * through `AuthContext`) so each test can flip `claimsRef.current` at the
- * exact moment a given await is in flight — the precise race window each
- * finding names. The API, the key-envelope client, the HDK cache, and the
- * key-wrapping primitives are mocked at the module boundary, matching the
- * pattern in `AuthContext.unlock.test.tsx` / `AuthContext.changePassword.test.tsx`.
- */
+// `rotatePasswordSlot`'s post-commit pin bookkeeping: the post-PUT `isStale()` re-check, the `writeEnvelopeSetPin` retry-once,
+// the `raiseEnvelopeSetPinFloor` fallback and the lock-on-failure path, driven through `renderHook` so each test flips `claimsRef` mid-await.
 import { renderHook, act } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -45,8 +32,7 @@ const computeEnvelopeSetTag = vi.fn();
 const writeEnvelopeSetPin = vi.fn();
 const raiseEnvelopeSetPinFloor = vi.fn();
 vi.mock('../crypto/key-wrapping', () => {
-  // Defined inside the factory so it isn't in the TDZ when the hoisted mock
-  // runs (a top-level `class` reference here throws "before initialization").
+  // Defined inside the factory so it is not in the TDZ when the hoisted mock runs.
   class KeyWrappingError extends Error {
     constructor(message: string) {
       super(message);
@@ -93,13 +79,9 @@ type Claims = { userId: string; householdId: string; deviceId?: string };
 const HOUSEHOLD_A: Claims = { userId: 'u1', householdId: 'hh-a', deviceId: 'dev-1' };
 const HOUSEHOLD_B: Claims = { userId: 'u1', householdId: 'hh-b', deviceId: 'dev-1' };
 
-/** The version rotatePasswordSlot commits to in every test below: the
- * fetched envelope-set version (5) + 1. */
 const NEXT_VERSION = 6;
 
-/** Render the hook already unlocked for `HOUSEHOLD_A`, with an HDK in
- * memory, so `rotatePasswordSlot` has something to rotate. Returns the live
- * `claimsRef` so a test can flip households mid-flight. */
+// Renders the hook unlocked for HOUSEHOLD_A and returns the live `claimsRef` so a test can flip households mid-flight.
 async function renderUnlocked() {
   const claimsRef: { current: Claims | null } = { current: HOUSEHOLD_A };
   unwrapSlot.mockResolvedValue(fakeHdk);
@@ -122,8 +104,6 @@ async function renderUnlocked() {
   return { result, claimsRef };
 }
 
-/** Wire the fresh-fetch + rewrap plumbing rotatePasswordSlot needs after
- * `renderUnlocked` (a fresh, distinct call from the unlock's own fetch). */
 function wireRotate(): void {
   getKeyEnvelopes.mockResolvedValueOnce({
     slots: [{ slotType: 'password', slotId: 'password' }],
@@ -145,8 +125,6 @@ describe('rotatePasswordSlot post-commit pin bookkeeping', () => {
     const { result, claimsRef } = await renderUnlocked();
     wireRotate();
     upsertKeyEnvelopeSlot.mockImplementation(async () => {
-      // A household switch lands exactly between the PUT resolving and the
-      // isStale() re-check.
       claimsRef.current = HOUSEHOLD_B;
     });
     raiseEnvelopeSetPinFloor.mockReturnValue(true);
@@ -156,8 +134,6 @@ describe('rotatePasswordSlot post-commit pin bookkeeping', () => {
     });
 
     expect(raiseEnvelopeSetPinFloor).toHaveBeenCalledWith(NEXT_VERSION, 'hh-a');
-    // Never even attempts the durable pin write for the version the PUT
-    // committed — the household-scoped floor is the only fallback used.
     expect(writeEnvelopeSetPin.mock.calls.filter((c) => c[0] === NEXT_VERSION)).toHaveLength(0);
   });
 
@@ -169,11 +145,7 @@ describe('rotatePasswordSlot post-commit pin bookkeeping', () => {
     });
     raiseEnvelopeSetPinFloor.mockReturnValue(false);
 
-    // This is a known-committed outcome (the PUT
-    // above already landed server-side), so it must throw the SAME error
-    // class useDerivedRewrap's classifier recognizes as "committed, not
-    // refused" — not the unexported EnvelopeSetPinFloorPersistenceError,
-    // which fell through to a permanent-refusal classification.
+    // A known-committed outcome must throw the error class useDerivedRewrap classifies as "committed, not refused"; the unexported floor error would read as a permanent refusal.
     let caught: unknown;
     try {
       await result.current.rotatePasswordSlot('NewPassw0rd!');
@@ -240,8 +212,6 @@ describe('rotatePasswordSlot post-commit pin bookkeeping', () => {
     });
 
     expect(clearCachedHdk).toHaveBeenCalled();
-    // The in-memory HDK and isUnlocked are cleared too
-    // — not only the on-disk cache.
     expect(result.current.getHdk()).toBeNull();
     expect(result.current.isUnlocked).toBe(false);
   });
@@ -254,7 +224,6 @@ describe('rotatePasswordSlot post-commit pin bookkeeping', () => {
       if (version !== NEXT_VERSION) return;
       call += 1;
       if (call === 1) throw new Error('first attempt fails');
-      // The switch lands strictly inside the RETRY's own await.
       claimsRef.current = HOUSEHOLD_B;
       throw new Error('retry fails too');
     });
@@ -265,9 +234,7 @@ describe('rotatePasswordSlot post-commit pin bookkeeping', () => {
     });
 
     expect(raiseEnvelopeSetPinFloor).toHaveBeenCalledWith(NEXT_VERSION, 'hh-a');
-    // The household-UNSCOPED clearCachedHdk() must never run here — that
-    // would wipe household B's freshly-cached key over a failure that
-    // belongs entirely to the retiring household A.
+    // The household-unscoped clearCachedHdk() must never run here: it would wipe household B's freshly cached key.
     expect(clearCachedHdk).not.toHaveBeenCalled();
   });
 
@@ -276,8 +243,6 @@ describe('rotatePasswordSlot post-commit pin bookkeeping', () => {
     wireRotate();
     writeEnvelopeSetPin.mockImplementation(async (version: number) => {
       if (version !== NEXT_VERSION) return;
-      // The write "succeeds" (no throw) but the switch landed inside its
-      // own internal awaits before it resolved.
       claimsRef.current = HOUSEHOLD_B;
     });
     raiseEnvelopeSetPinFloor.mockReturnValue(true);

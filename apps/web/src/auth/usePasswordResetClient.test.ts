@@ -1,13 +1,4 @@
-/**
- * Tests for usePasswordResetClient — the password-reset client surface
- * extracted from AuthContext: the bare request + consume API calls.
- * The hook keeps no post-reset marker: owed-ness is derived from
- * server-authored revisions rather than remembered client-side — see
- * useDerivedRewrap.ts.
- *
- * The api client is mocked at the module boundary so the test exercises only
- * the hook's call shapes, not the transport.
- */
+// The hook's call shapes with the api client mocked at the module boundary; owed-ness is derived from server revisions, not remembered here (see useDerivedRewrap.ts).
 import { renderHook, act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

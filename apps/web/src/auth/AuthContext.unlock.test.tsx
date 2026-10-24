@@ -1,20 +1,9 @@
-/**
- * Tests for the zero-knowledge unlock lifecycle in AuthContext:
- * `initializeUnlockState` after login, `unlockWithPassword`, `clearUnlockState`
- * on logout, the `unlockResolved` gate, and the staleness guard that stops a
- * stale household's HDK from overwriting a newer session. The API, the
- * key-envelope client, the HDK cache, and the key-wrapping unwrap are mocked at
- * the module boundary so the test exercises only the context's orchestration.
- */
-import React from 'react';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+// Zero-knowledge unlock lifecycle in AuthContext: `initializeUnlockState` after login, `unlockWithPassword`, `clearUnlockState`
+// on logout, the `unlockResolved` gate and the staleness guard that keeps a stale household's HDK from overwriting a newer session.
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Live access-token getter AuthContext configures, so a test can observe which token is active.
-let liveAccessToken: () => string | null = () => null;
-vi.mock('../api/client', async () => (await import('./auth-context.test-harness')).apiClientMock((opts) => {
-  liveAccessToken = opts.getAccessToken;
-}));
+vi.mock('../api/client', async () => (await import('./auth-context.test-harness')).apiClientMock());
 vi.mock('./key-envelope-client', async () => (await import('./auth-context.test-harness')).keyEnvelopeClientMock());
 vi.mock('../crypto/key-cache', async () => (await import('./auth-context.test-harness')).keyCacheMock());
 vi.mock('../crypto/key-wrapping', async () => (await import('./auth-context.test-harness')).keyWrappingMock());
@@ -22,9 +11,18 @@ vi.mock('./user-transition', async () => (await import('./auth-context.test-harn
 vi.mock('@simplewebauthn/browser', async () => (await import('./auth-context.test-harness')).webauthnBrowserMock());
 vi.mock('../crypto/passkey-prf', async () => (await import('./auth-context.test-harness')).passkeyPrfMock());
 
-import { AuthProvider, useAuth } from './AuthContext';
-import { authMocks, jwt, fakeHdk } from './auth-context.test-harness';
-// Pull the mocked KeyWrappingError so assertions use the same class the SUT throws.
+import {
+  authMocks,
+  captured,
+  fakeHdk,
+  flag,
+  jwt,
+  liveAccessToken,
+  mountAuth,
+  renderAuth,
+  resetLiveAccessToken,
+} from './auth-context.test-harness';
+// The mocked KeyWrappingError, so assertions use the class the SUT throws.
 import { KeyWrappingError } from '../crypto/key-wrapping';
 
 const {
@@ -50,81 +48,8 @@ const {
   extractPrfResult,
 } = authMocks;
 
-// --- Helpers ----------------------------------------------------------------
 
-/** Snapshot of the reactive unlock flags, exposed for assertions. */
-let captured: {
-  login: (e: string, p: string) => Promise<void>;
-  loginWithPasskey: () => Promise<void>;
-  refreshAccessToken: () => Promise<string | null>;
-  fetchAccountRecord: (opts?: { raiseWaitNotice?: boolean }) => Promise<unknown>;
-  resetPassword: (token: string, p: string) => Promise<void>;
-  unlockWithPassword: (p: string) => Promise<void>;
-  unlockWithRecovery: (k: string) => Promise<void>;
-  setupEncryption: (p: string) => Promise<string>;
-  logout: () => Promise<void>;
-  isUnlocked: boolean;
-  needsKeySetup: boolean;
-  unlockResolved: boolean;
-  isAuthenticated: boolean;
-  lockedEnvelopeSetEmpty: boolean;
-  getHdk: () => CryptoKey | null;
-};
-
-function Probe(): React.ReactElement {
-  const auth = useAuth();
-  captured = {
-    login: auth.login,
-    loginWithPasskey: auth.loginWithPasskey,
-    refreshAccessToken: auth.refreshAccessToken,
-    fetchAccountRecord: auth.fetchAccountRecord,
-    resetPassword: auth.resetPassword,
-    unlockWithPassword: auth.unlockWithPassword,
-    unlockWithRecovery: auth.unlockWithRecovery,
-    setupEncryption: auth.setupEncryption,
-    logout: auth.logout,
-    isUnlocked: auth.isUnlocked,
-    needsKeySetup: auth.needsKeySetup,
-    unlockResolved: auth.unlockResolved,
-    isAuthenticated: auth.isAuthenticated,
-    lockedEnvelopeSetEmpty: auth.lockedEnvelopeSetEmpty,
-    getHdk: auth.getHdk,
-  };
-  return (
-    <div>
-      <span data-testid="isUnlocked">{String(auth.isUnlocked)}</span>
-      <span data-testid="needsKeySetup">{String(auth.needsKeySetup)}</span>
-      <span data-testid="unlockResolved">{String(auth.unlockResolved)}</span>
-      <span data-testid="isAuthenticated">{String(auth.isAuthenticated)}</span>
-      <span data-testid="lockedEnvelopeSetEmpty">{String(auth.lockedEnvelopeSetEmpty)}</span>
-    </div>
-  );
-}
-
-function flag(id: string): string {
-  return screen.getByTestId(id).textContent ?? '';
-}
-
-/** Render the provider with the boot refresh resolving to "signed out". */
-async function renderAuth(): Promise<void> {
-  // Boot effect calls /auth/refresh first; fail it so boot settles unauthenticated.
-  apiRequest.mockImplementation(async (path: string) => {
-    if (path === '/api/v1/auth/refresh') throw new Error('no session');
-    throw new Error(`unexpected api call ${path}`);
-  });
-  render(
-    <AuthProvider>
-      <Probe />
-    </AuthProvider>,
-  );
-  await waitFor(() => expect(flag('isAuthenticated')).toBe('false'));
-}
-
-/**
- * Route api calls: refresh fails (boot), login returns the given token.
- * `verify-password` resolves (success) by default — setupEncryption gates on it
- * a wrong-password test overrides this route to reject.
- */
+// Refresh fails (boot) and login returns the token; verify-password succeeds by default, and a wrong-password test overrides it to reject.
 function wireLogin(token: string): void {
   apiRequest.mockImplementation(async (path: string) => {
     if (path === '/api/v1/auth/refresh') throw new Error('no session');
@@ -135,12 +60,7 @@ function wireLogin(token: string): void {
   });
 }
 
-/**
- * Route api calls for the discoverable passkey flow: boot refresh fails, the
- * authenticate/start returns request options (optionally carrying a PRF salt),
- * authenticate/finish returns the access token. `refresh` (used by a re-auth /
- * idle "stay signed in") returns the same token for same-session-refresh tests.
- */
+// The discoverable passkey flow: boot refresh fails, authenticate/start returns options (optionally with a PRF salt) and finish returns the token; `refresh` returns the same token for same-session tests.
 function wirePasskeyLogin(token: string, startOptions: Record<string, unknown> = {}): void {
   apiRequest.mockImplementation(async (path: string) => {
     if (path === '/api/v1/auth/refresh') return { accessToken: token, expiresIn: 3600 };
@@ -153,7 +73,6 @@ function wirePasskeyLogin(token: string, startOptions: Record<string, unknown> =
   });
 }
 
-/** A PRF `passkey_prf` slot set with a verifiable tag. */
 const prfEnvelopes = {
   slots: [{ slotType: 'passkey_prf', slotId: 's-prf' }],
   envelopeSetVersion: 1,
@@ -175,8 +94,7 @@ describe('AuthContext — unlock lifecycle', () => {
     generatePasswordSlot.mockReset();
     generateRecoverySlot.mockReset();
     computeEnvelopeSetTag.mockReset();
-    // Default: no rollback pin (TOFU). The empty-set tests
-    // override this to simulate a device that already carries one.
+    // Default: no rollback pin (TOFU).
     readEnvelopeSetPin.mockReset();
     readEnvelopeSetPin.mockResolvedValue(0);
     startAuthentication.mockReset();
@@ -184,11 +102,10 @@ describe('AuthContext — unlock lifecycle', () => {
     addPrfEvalToOptions.mockReset();
     derivePrfWrapKey.mockReset();
     extractPrfResult.mockReset();
-    // Default: the cross-user drop succeeds (no-op). The blocked-drop test
-    // overrides this to reject.
+    // Default: the cross-user drop succeeds.
     maybeResetForNewUser.mockReset();
     maybeResetForNewUser.mockResolvedValue(undefined);
-    liveAccessToken = () => null;
+    resetLiveAccessToken();
     localStorage.clear();
     sessionStorage.clear();
   });
@@ -211,20 +128,15 @@ describe('AuthContext — unlock lifecycle', () => {
     expect(flag('needsKeySetup')).toBe('true');
     expect(flag('isUnlocked')).toBe('false');
     expect(captured.getHdk()).toBeNull();
-    // A genuinely unkeyed household (no cache, no pin)
-    // reaches ordinary first-time setup — the locked-empty-set flag never
-    // fires here (unchanged TOFU).
     expect(flag('lockedEnvelopeSetEmpty')).toBe('false');
   });
 
   it('blocked cross-user drop revokes the new session (logout AS B) before surfacing the modal — never adopts B', async () => {
     await renderAuth();
     const bToken = jwt({ userId: 'u-b', householdId: 'hh-b' });
-    // The new user B authenticates, but B's IDB drop fails closed (another tab
-    // holds the previous user A's working store open).
+    // User B authenticates but B's IDB drop fails closed because another tab holds A's working store open.
     maybeResetForNewUser.mockRejectedValue(new Error('DatabaseDropBlockedError'));
-    // Record the access token that was live at the moment logout fired — the fix
-    // swaps the ref to B's token so the revoke targets B's just-issued session.
+    // The revoke must target B's just-issued session, so record the token live when logout fires.
     let tokenLiveAtLogout: string | null = 'unset';
     apiRequest.mockImplementation(async (path: string) => {
       if (path === '/api/v1/auth/refresh') throw new Error('no session');
@@ -240,20 +152,12 @@ describe('AuthContext — unlock lifecycle', () => {
       await captured.login('b@test.com', 'pw');
     });
 
-    // Logout fired during the blocked drop, carrying B's token (so B's refresh
-    // cookie + access token are revoked → a reload falls back to signed-out).
     expect(tokenLiveAtLogout).toBe(bToken);
-    // B's claims were never adopted — the session is not authenticated and the
-    // new household is never exposed over A's stale rows.
     expect(flag('isAuthenticated')).toBe('false');
   });
 
-  // --- Cross-reload blocked-reset marker ------------------------------
-  // A blocked drop persists B's userId in a localStorage marker BEFORE the
-  // best-effort revoke (so it survives even when the revoke fails). On the next
-  // boot refresh a matching userId forces a retry of the IDB drop before B's
-  // claims are adopted — the household never renders over A's stale rows until
-  // the drop actually succeeds.
+  // A blocked drop persists B's userId in a localStorage marker before the best-effort revoke; on the next boot refresh a
+  // matching userId forces a retry of the drop before B's claims are adopted, so the household never renders over A's stale rows.
 
   const BLOCKED_RESET_KEY = 'retivo:blocked-reset:pending';
 
@@ -276,12 +180,8 @@ describe('AuthContext — unlock lifecycle', () => {
   });
 
   it('reload with a pending marker + matching refresh: drop succeeds → marker cleared, claims adopted', async () => {
-    // Simulate the state left behind by a blocked drop: the marker is set for B,
-    // and B's refresh cookie survived (the revoke failed), so the boot refresh
-    // returns B's token.
     const bToken = jwt({ userId: 'u-b', householdId: 'hh-b' });
     localStorage.setItem(BLOCKED_RESET_KEY, 'u-b');
-    // The retry drop now succeeds (the other tab released its IDB handle).
     maybeResetForNewUser.mockResolvedValue(undefined);
     loadCachedHdk.mockResolvedValue(null);
     getKeyEnvelopes.mockResolvedValue({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
@@ -290,13 +190,8 @@ describe('AuthContext — unlock lifecycle', () => {
       throw new Error(`unexpected api call ${path}`);
     });
 
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
+    await mountAuth();
 
-    // The retry drop succeeded → marker cleared and B's claims are adopted.
     await waitFor(() => expect(flag('isAuthenticated')).toBe('true'));
     expect(localStorage.getItem(BLOCKED_RESET_KEY)).toBeNull();
     expect(maybeResetForNewUser).toHaveBeenCalled();
@@ -305,34 +200,24 @@ describe('AuthContext — unlock lifecycle', () => {
   it('reload with a pending marker + matching refresh: drop still blocked → claims withheld, modal shown, marker persists', async () => {
     const bToken = jwt({ userId: 'u-b', householdId: 'hh-b' });
     localStorage.setItem(BLOCKED_RESET_KEY, 'u-b');
-    // The retry drop is STILL blocked (the other tab has not released the IDB).
     maybeResetForNewUser.mockRejectedValue(new Error('DatabaseDropBlockedError'));
     apiRequest.mockImplementation(async (path: string) => {
       if (path === '/api/v1/auth/refresh') return { accessToken: bToken, expiresIn: 3600 };
       throw new Error(`unexpected api call ${path}`);
     });
 
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
+    await mountAuth();
 
-    // updateFromToken was never reached → B's claims are NOT adopted.
     await waitFor(() =>
       expect(screen.getByText('Close all other tabs to continue')).toBeInTheDocument(),
     );
     expect(flag('isAuthenticated')).toBe('false');
-    // The marker persists so a subsequent reload re-guards until the drop works.
     expect(localStorage.getItem(BLOCKED_RESET_KEY)).toBe('u-b');
-    // The envelope fetch (post-claim unlock init) never ran — claims withheld.
     expect(getKeyEnvelopes).not.toHaveBeenCalled();
   });
 
   it('reload with a pending marker but a DIFFERENT refreshed user clears the stale marker and adopts normally', async () => {
-    // The marker is for B, but the surviving refresh cookie is actually C's
-    // (e.g. B's revoke succeeded; an unrelated session signed in). The stale
-    // marker must not block C — clear it and adopt C's claims normally.
+    // The marker is for B but the surviving refresh cookie is C's; a stale marker must not block C.
     const cToken = jwt({ userId: 'u-c', householdId: 'hh-c' });
     localStorage.setItem(BLOCKED_RESET_KEY, 'u-b');
     loadCachedHdk.mockResolvedValue(null);
@@ -342,15 +227,10 @@ describe('AuthContext — unlock lifecycle', () => {
       throw new Error(`unexpected api call ${path}`);
     });
 
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
+    await mountAuth();
 
     await waitFor(() => expect(flag('isAuthenticated')).toBe('true'));
     expect(localStorage.getItem(BLOCKED_RESET_KEY)).toBeNull();
-    // No drop retry — the marker was for a different user.
     expect(maybeResetForNewUser).not.toHaveBeenCalled();
   });
 
@@ -449,7 +329,6 @@ describe('AuthContext — unlock lifecycle', () => {
     expect(flag('isUnlocked')).toBe('true');
     expect(captured.getHdk()).toBe(fakeHdk);
     expect(cacheHdk).toHaveBeenCalledWith('hh-1', fakeHdk);
-    // Unwrapped the recovery slot (not the password slot) with the entered key.
     expect(unwrapSlot).toHaveBeenCalledWith({ slotType: 'recovery' }, 'ABCD-EF12-3456-7890');
   });
 
@@ -478,21 +357,20 @@ describe('AuthContext — unlock lifecycle', () => {
   it('cached HDK is trusted only after the envelope-set tag verifies', async () => {
     await renderAuth();
     wireLogin(jwt({ userId: 'u1', householdId: 'hh-1' }));
-    loadCachedHdk.mockResolvedValue(fakeHdk); // device already has the key cached
+    loadCachedHdk.mockResolvedValue(fakeHdk);
     const envelopes = {
       slots: [{ slotType: 'password' }],
       envelopeSetVersion: 1,
       envelopeSetTag: 'tag',
     };
     getKeyEnvelopes.mockResolvedValue(envelopes);
-    verifyEnvelopeSetTag.mockResolvedValue(undefined); // tag verifies
+    verifyEnvelopeSetTag.mockResolvedValue(undefined);
 
     await act(async () => {
       await captured.login('u@test.com', 'pw');
     });
 
     await waitFor(() => expect(flag('isUnlocked')).toBe('true'));
-    // Verified against the live slot set BEFORE the unlock was trusted.
     expect(verifyEnvelopeSetTag).toHaveBeenCalledWith(envelopes.slots, envelopes, fakeHdk);
     expect(captured.getHdk()).toBe(fakeHdk);
     expect(flag('unlockResolved')).toBe('true');
@@ -501,13 +379,12 @@ describe('AuthContext — unlock lifecycle', () => {
   it('cached HDK is REJECTED (stays locked, cache cleared) when the envelope-set tag fails (slot tamper)', async () => {
     await renderAuth();
     wireLogin(jwt({ userId: 'u1', householdId: 'hh-1' }));
-    loadCachedHdk.mockResolvedValue(fakeHdk); // device has a cached key
+    loadCachedHdk.mockResolvedValue(fakeHdk);
     getKeyEnvelopes.mockResolvedValue({
       slots: [{ slotType: 'password' }],
       envelopeSetVersion: 1,
       envelopeSetTag: 'tampered',
     });
-    // Server stripped/reordered/injected a slot → HDK-keyed tag mismatch.
     verifyEnvelopeSetTag.mockRejectedValue(new KeyWrappingError('tamper or rollback'));
     clearCachedHdk.mockResolvedValue(undefined);
 
@@ -516,28 +393,23 @@ describe('AuthContext — unlock lifecycle', () => {
     });
 
     await waitFor(() => expect(flag('unlockResolved')).toBe('true'));
-    // Never trusted the unverified cached key.
     expect(flag('isUnlocked')).toBe('false');
     expect(captured.getHdk()).toBeNull();
-    // The stale/untrustworthy cached key was dropped; the user must re-unlock
-    // with a password (needsKeySetup stays false — there IS a slot set).
     expect(clearCachedHdk).toHaveBeenCalled();
     expect(flag('needsKeySetup')).toBe('false');
-    // The non-empty failed-tag branch is unchanged — the
-    // empty-set flag never fires for a genuine tamper on a non-empty set.
     expect(flag('lockedEnvelopeSetEmpty')).toBe('false');
   });
 
-  // A served EMPTY slot set on a device that already holds
-  // a cached HDK is doubted, not trusted as "this household needs setup" —
-  // the cached key survives on disk and the device stops at the locked
-  // screen with the new flag set, rather than being walked into minting a
-  // brand-new household key over an existing one.
-  it('cached HDK with an empty slot set → locked (not needsKeySetup), flag set, cached key NOT cleared', async () => {
+  // A served empty slot set is doubted, not trusted as "needs setup", when the device has evidence of a real key (a cached HDK or a non-zero rollback pin): it stops at the locked screen instead of minting a new household key.
+  it.each([
+    ['a cached HDK', fakeHdk, 0],
+    ['a non-zero rollback pin and no cached HDK', null, 3],
+  ])('an empty slot set with %s → locked (not needsKeySetup), flag set, cached key NOT cleared', async (_name, cached, pin) => {
     await renderAuth();
     wireLogin(jwt({ userId: 'u1', householdId: 'hh-1' }));
-    loadCachedHdk.mockResolvedValue(fakeHdk); // device already has a real cached key
+    loadCachedHdk.mockResolvedValue(cached);
     getKeyEnvelopes.mockResolvedValue({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
+    readEnvelopeSetPin.mockResolvedValue(pin);
 
     await act(async () => {
       await captured.login('u@test.com', 'pw');
@@ -546,40 +418,13 @@ describe('AuthContext — unlock lifecycle', () => {
     await waitFor(() => expect(flag('unlockResolved')).toBe('true'));
     expect(flag('isUnlocked')).toBe('false');
     expect(captured.getHdk()).toBeNull();
-    // Not routed into first-time setup — this device has evidence of a real
-    // key, so the server's empty response is doubted rather than trusted.
     expect(flag('needsKeySetup')).toBe('false');
     expect(flag('lockedEnvelopeSetEmpty')).toBe('true');
-    // The cached key is left on disk — the server's claim is what is in
-    // doubt, and a transient empty response must not cost the offline key.
     expect(clearCachedHdk).not.toHaveBeenCalled();
-    // The tag is never verified against an empty set.
     expect(verifyEnvelopeSetTag).not.toHaveBeenCalled();
   });
 
-  // Same empty-set doubt, but via the rollback-pin evidence rather than a
-  // cached key (a device that unlocked before but cleared its IDB cache).
-  it('no cached HDK + empty slot set + a non-zero rollback pin → locked, flag set (not needsKeySetup)', async () => {
-    await renderAuth();
-    wireLogin(jwt({ userId: 'u1', householdId: 'hh-1' }));
-    loadCachedHdk.mockResolvedValue(null);
-    getKeyEnvelopes.mockResolvedValue({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
-    readEnvelopeSetPin.mockResolvedValue(3);
-
-    await act(async () => {
-      await captured.login('u@test.com', 'pw');
-    });
-
-    await waitFor(() => expect(flag('unlockResolved')).toBe('true'));
-    expect(flag('isUnlocked')).toBe('false');
-    expect(flag('needsKeySetup')).toBe('false');
-    expect(flag('lockedEnvelopeSetEmpty')).toBe('true');
-    expect(clearCachedHdk).not.toHaveBeenCalled();
-  });
-
-  // A missing/non-array `slots` field reads as empty rather than throwing —
-  // never a false needsKeySetup detour off a malformed response when this
-  // device already has evidence of a real key.
+  // A missing or non-array `slots` field reads as empty rather than throwing, so a malformed response cannot detour a keyed device into setup.
   it('a malformed slots field (missing) on a device with a cached key reads as empty, not a throw', async () => {
     await renderAuth();
     wireLogin(jwt({ userId: 'u1', householdId: 'hh-1' }));
@@ -620,13 +465,13 @@ describe('AuthContext — unlock lifecycle', () => {
   it('logout clears the unlock state: isUnlocked false, unlockResolved false, HDK null', async () => {
     await renderAuth();
     wireLogin(jwt({ userId: 'u1', householdId: 'hh-1' }));
-    loadCachedHdk.mockResolvedValue(fakeHdk); // device already has the key cached
+    loadCachedHdk.mockResolvedValue(fakeHdk);
     getKeyEnvelopes.mockResolvedValue({
       slots: [{ slotType: 'password' }],
       envelopeSetVersion: 1,
       envelopeSetTag: 'tag',
     });
-    verifyEnvelopeSetTag.mockResolvedValue(undefined); // cached key verifies, unlocking
+    verifyEnvelopeSetTag.mockResolvedValue(undefined);
 
     await act(async () => {
       await captured.login('u@test.com', 'pw');
@@ -641,7 +486,6 @@ describe('AuthContext — unlock lifecycle', () => {
     expect(flag('isUnlocked')).toBe('false');
     expect(flag('unlockResolved')).toBe('false');
     expect(captured.getHdk()).toBeNull();
-    // A bare same-user logout must NOT clear the IDB key cache.
     expect(clearCachedHdk).not.toHaveBeenCalled();
   });
 
@@ -649,8 +493,7 @@ describe('AuthContext — unlock lifecycle', () => {
     await renderAuth();
     wireLogin(jwt({ userId: 'u1', householdId: 'hh-1' }));
     loadCachedHdk.mockResolvedValue(null);
-    // Hold the envelope fetch open so initializeUnlockState is in-flight while
-    // we log out underneath it.
+    // Hold the envelope fetch open so initializeUnlockState is in flight while we log out underneath it.
     let releaseEnvelopes!: (v: unknown) => void;
     getKeyEnvelopes.mockReturnValue(
       new Promise((resolve) => {
@@ -662,15 +505,12 @@ describe('AuthContext — unlock lifecycle', () => {
       await captured.login('u@test.com', 'pw');
     });
 
-    // Logout while the envelope fetch is still pending.
     await act(async () => {
       await captured.logout();
     });
     expect(flag('isUnlocked')).toBe('false');
     expect(flag('unlockResolved')).toBe('false');
 
-    // Now let the stale fetch resolve with a populated (empty) set: the
-    // staleness guard must drop it without flipping needsKeySetup/unlockResolved.
     await act(async () => {
       releaseEnvelopes({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
       await Promise.resolve();
@@ -681,7 +521,6 @@ describe('AuthContext — unlock lifecycle', () => {
     expect(flag('isUnlocked')).toBe('false');
   });
 
-  // --- /auth/refresh opts out of the shared wait notice ----------------
 
   it('refreshAccessToken calls apiRequest with raiseWaitNotice: false (the shared client seam must not touch /auth/refresh)', async () => {
     await renderAuth();
@@ -703,7 +542,6 @@ describe('AuthContext — unlock lifecycle', () => {
     });
   });
 
-  // --- fetchAccountRecord forwards the wait-notice opt-out -------------
 
   it('fetchAccountRecord forwards the wait-notice opt-out to apiRequest when given one', async () => {
     await renderAuth();
@@ -730,11 +568,9 @@ describe('AuthContext — unlock lifecycle', () => {
     expect(apiRequest.mock.calls[0]).toEqual(['/api/v1/auth/me']);
   });
 
-  // --- Same-session token refresh preserves unlock state --------------
 
   it('same-session token refresh does NOT clear or re-derive unlock state (HDK preserved)', async () => {
     await renderAuth();
-    // Login + cached-HDK unlock for u1/hh-1 so we have a live in-memory HDK.
     wireLogin(jwt({ userId: 'u1', householdId: 'hh-1' }));
     loadCachedHdk.mockResolvedValue(fakeHdk);
     getKeyEnvelopes.mockResolvedValue({
@@ -750,9 +586,6 @@ describe('AuthContext — unlock lifecycle', () => {
     await waitFor(() => expect(flag('isUnlocked')).toBe('true'));
     expect(captured.getHdk()).toBe(fakeHdk);
 
-    // A silent refresh for the SAME user+household (different email claim, same
-    // identity). The refresh endpoint returns a fresh token; the re-init path
-    // must be skipped so the cached HDK + unlock flags survive untouched.
     loadCachedHdk.mockClear();
     getKeyEnvelopes.mockClear();
     verifyEnvelopeSetTag.mockClear();
@@ -770,7 +603,6 @@ describe('AuthContext — unlock lifecycle', () => {
       await captured.refreshAccessToken();
     });
 
-    // unlock state untouched: HDK preserved, still unlocked, no re-init work.
     expect(captured.getHdk()).toBe(fakeHdk);
     expect(flag('isUnlocked')).toBe('true');
     expect(flag('unlockResolved')).toBe('true');
@@ -794,8 +626,6 @@ describe('AuthContext — unlock lifecycle', () => {
     });
     await waitFor(() => expect(flag('isUnlocked')).toBe('true'));
 
-    // Refresh resolves to a DIFFERENT household → the prior HDK must be dropped
-    // and unlock re-derived (here: empty set for the new household).
     loadCachedHdk.mockResolvedValue(null);
     getKeyEnvelopes.mockResolvedValue({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
     apiRequest.mockImplementation(async (path: string) => {
@@ -815,17 +645,13 @@ describe('AuthContext — unlock lifecycle', () => {
     expect(loadCachedHdk).toHaveBeenCalledWith('hh-2');
   });
 
-  // --- loginWithPasskey → tryUnlockWithPrf orchestration --------------
 
   it('passkey login with a PRF result + passkey_prf slot → unlocked, HDK cached', async () => {
     await renderAuth();
     wirePasskeyLogin(jwt({ userId: 'u1', householdId: 'hh-1' }), {
-      // Server start options carry a PRF salt → addPrfEvalToOptions is invoked.
       extensions: { prf: { eval: { first: 'c2FsdA' } } },
     });
     loadCachedHdk.mockResolvedValue(null);
-    // initializeUnlockState fetches the envelopes (no cached key) AND
-    // tryUnlockWithPrf fetches them again; both see the PRF slot set.
     getKeyEnvelopes.mockResolvedValue(prfEnvelopes);
     addPrfEvalToOptions.mockReturnValue({ withPrf: true });
     const assertion = { id: 'cred', clientExtensionResults: { prf: { results: { first: 'x' } } } };
@@ -843,18 +669,16 @@ describe('AuthContext — unlock lifecycle', () => {
     await waitFor(() => expect(flag('isUnlocked')).toBe('true'));
     expect(captured.getHdk()).toBe(fakeHdk);
     expect(cacheHdk).toHaveBeenCalledWith('hh-1', fakeHdk);
-    // The PRF eval was forwarded to the authenticator because the start options
-    // carried a salt.
     expect(addPrfEvalToOptions).toHaveBeenCalled();
   });
 
   it('passkey login with NO PRF result → login succeeds, stays locked (password fallback)', async () => {
     await renderAuth();
-    wirePasskeyLogin(jwt({ userId: 'u1', householdId: 'hh-1' }), {}); // no PRF salt
+    wirePasskeyLogin(jwt({ userId: 'u1', householdId: 'hh-1' }), {});
     loadCachedHdk.mockResolvedValue(null);
     getKeyEnvelopes.mockResolvedValue(prfEnvelopes);
     startAuthentication.mockResolvedValue({ id: 'cred', clientExtensionResults: {} });
-    extractPrfResult.mockReturnValue(null); // authenticator returned no PRF result
+    extractPrfResult.mockReturnValue(null);
 
     await act(async () => {
       await captured.loginWithPasskey();
@@ -863,7 +687,6 @@ describe('AuthContext — unlock lifecycle', () => {
     await waitFor(() => expect(flag('isAuthenticated')).toBe('true'));
     expect(flag('isUnlocked')).toBe('false');
     expect(captured.getHdk()).toBeNull();
-    // No salt in the start options → the PRF eval is never forwarded.
     expect(addPrfEvalToOptions).not.toHaveBeenCalled();
     expect(unwrapPrfSlot).not.toHaveBeenCalled();
   });
@@ -893,7 +716,6 @@ describe('AuthContext — unlock lifecycle', () => {
       }
     });
 
-    // The fire-and-forget PRF failure must not propagate out of login.
     expect(threw).toBe(false);
     await waitFor(() => expect(flag('isAuthenticated')).toBe('true'));
     expect(flag('isUnlocked')).toBe('false');
@@ -916,8 +738,7 @@ describe('AuthContext — unlock lifecycle', () => {
     derivePrfWrapKey.mockResolvedValue({} as CryptoKey);
     verifyEnvelopeSetTag.mockResolvedValue(undefined);
 
-    // Hold the PRF path's unwrap open (it is unique to tryUnlockWithPrf, so it
-    // can't be raced by initializeUnlockState) so we can log out underneath it.
+    // Hold the PRF unwrap open (unique to tryUnlockWithPrf, so initializeUnlockState cannot race it) to log out underneath it.
     let releaseUnwrap!: (v: CryptoKey) => void;
     unwrapPrfSlot.mockReturnValue(
       new Promise<CryptoKey>((resolve) => {
@@ -929,15 +750,11 @@ describe('AuthContext — unlock lifecycle', () => {
       await captured.loginWithPasskey();
     });
 
-    // Log out while the PRF unlock is still mid-flight (blocked on unwrap).
     await act(async () => {
       await captured.logout();
     });
     expect(flag('isUnlocked')).toBe('false');
 
-    // Now let the stale PRF unwrap resolve: the staleness guard (checked after
-    // unwrap + tag verify) must drop the result without flipping isUnlocked /
-    // caching the HDK.
     await act(async () => {
       releaseUnwrap(fakeHdk);
       await Promise.resolve();
@@ -949,20 +766,9 @@ describe('AuthContext — unlock lifecycle', () => {
     expect(cacheHdk).not.toHaveBeenCalled();
   });
 
-  // --- Derived post-reset re-wrap ------
-  // Whether the `password` slot needs re-wrapping is DERIVED from two
-  // server-authored fields on every `GET /auth/key-envelopes` read: the
-  // slot's own `credentialRevision` and the response's
-  // `currentCredentialRevision`. Not equal (including a slot carrying no
-  // revision at all) means owed. There is no marker anywhere — reset only
-  // drops the password; a login retains the plaintext it was given for the
-  // unlock window, and the derive runs on every unlock-state transition
-  // (the `isUnlocked` rising-edge effect in AuthContext.tsx).
-  // See "Password change, password reset" in docs/security.md.
+  // Whether the `password` slot needs re-wrapping is derived from the slot's `credentialRevision` against the response's
+  // `currentCredentialRevision` on every key-envelopes read; there is no marker (see "Password change, password reset" in docs/security.md).
 
-  /** A locked, OWED session: no cached key, a password slot whose recorded
-   * revision does not match the credential's current one (recovery slot
-   * present so `unlockWithRecovery` can open it). */
   function wireLockedSlotSetOwed(): void {
     loadCachedHdk.mockResolvedValue(null);
     getKeyEnvelopes.mockResolvedValue({
@@ -977,14 +783,11 @@ describe('AuthContext — unlock lifecycle', () => {
     unwrapSlot.mockResolvedValue(fakeHdk);
     verifyEnvelopeSetTag.mockResolvedValue(undefined);
     cacheHdk.mockResolvedValue(undefined);
-    // rotatePasswordSlot path: re-fetch slots, re-wrap, recompute tag, PUT.
     generatePasswordSlot.mockResolvedValue({ slotType: 'password', slotId: 'password' });
     computeEnvelopeSetTag.mockResolvedValue('new-tag');
     upsertKeyEnvelopeSlot.mockResolvedValue(undefined);
   }
 
-  /** A locked, NOT-owed session: the password slot's recorded revision
-   * already matches the credential's current one. */
   function wireLockedSlotSetNotOwed(): void {
     loadCachedHdk.mockResolvedValue(null);
     getKeyEnvelopes.mockResolvedValue({
@@ -1016,7 +819,6 @@ describe('AuthContext — unlock lifecycle', () => {
       await captured.unlockWithRecovery('ABCD-EF12-3456-7890');
     });
 
-    // The re-wrap fired under the RETAINED sign-in password — silently, no prompt.
     expect(flag('isUnlocked')).toBe('true');
     await waitFor(() =>
       expect(generatePasswordSlot).toHaveBeenCalledWith('hh-1', 'password', 'NewPassw0rd!Reset', fakeHdk),
@@ -1072,21 +874,14 @@ describe('AuthContext — unlock lifecycle', () => {
     });
     await waitFor(() => expect(flag('isUnlocked')).toBe('true'));
 
-    // No plaintext was ever retained (a primary passkey login carries none) —
-    // the derive prompts rather than rotating.
     await waitFor(() => expect(screen.getByText(/re-enter your password/i)).toBeInTheDocument());
     expect(generatePasswordSlot).not.toHaveBeenCalled();
   });
 
-  // --- The two isUnlocked-rising-edge trigger paths against an owed slot
-  // set — the cached-key auto-unlock (no explicit unlock call at all) and the
-  // explicit unlockWithPassword branch.
 
   it('a password sign-in that auto-unlocks from its cached key on this device re-wraps the owed password slot silently, with no unwrap failure', async () => {
     await renderAuth();
     wireLogin(jwt({ userId: 'u1', householdId: 'hh-1' }));
-    // Returning device: the HDK is already cached, so initializeUnlockState's
-    // cached-key path (not an explicit unlock call) is what flips isUnlocked.
     loadCachedHdk.mockResolvedValue(fakeHdk);
     getKeyEnvelopes.mockResolvedValue({
       slots: [{ slotType: 'password', slotId: 'password', credentialRevision: 'rev-old' }],
@@ -1104,13 +899,8 @@ describe('AuthContext — unlock lifecycle', () => {
       await captured.login('u@test.com', 'NewPassw0rd!Reset');
     });
 
-    // The rising edge fired from the CACHED-KEY auto-unlock path
-    // (initializeUnlockState) — no unwrap ever ran for this household, and no
-    // explicit unlock method was called.
     await waitFor(() => expect(flag('isUnlocked')).toBe('true'));
     expect(unwrapSlot).not.toHaveBeenCalled();
-    // The re-wrap completed on the derived compare alone, silently, under the
-    // plaintext this sign-in retained.
     await waitFor(() =>
       expect(generatePasswordSlot).toHaveBeenCalledWith('hh-1', 'password', 'NewPassw0rd!Reset', fakeHdk),
     );
@@ -1118,9 +908,7 @@ describe('AuthContext — unlock lifecycle', () => {
   });
 
   it('unlockWithPassword on an owed household prompts instead of silently re-wrapping — the unlock-form password is never used as a wrap source', async () => {
-    // Session established via a boot refresh, NOT `login()` — no plaintext is
-    // ever retained by useDerivedRewrap, so a silent rewrap below could only
-    // come from (incorrectly) forwarding the unlockWithPassword argument.
+    // The session is established by a boot refresh, not `login()`, so no plaintext is retained and a silent rewrap could only come from forwarding the unlockWithPassword argument.
     const token = jwt({ userId: 'u1', householdId: 'hh-1' });
     loadCachedHdk.mockResolvedValue(null);
     getKeyEnvelopes.mockResolvedValue({
@@ -1133,11 +921,7 @@ describe('AuthContext — unlock lifecycle', () => {
       if (path === '/api/v1/auth/refresh') return { accessToken: token, expiresIn: 3600 };
       throw new Error(`unexpected api call ${path}`);
     });
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
+    await mountAuth();
     await waitFor(() => expect(flag('unlockResolved')).toBe('true'));
     expect(flag('isUnlocked')).toBe('false');
 
@@ -1150,16 +934,11 @@ describe('AuthContext — unlock lifecycle', () => {
     });
 
     expect(flag('isUnlocked')).toBe('true');
-    // No plaintext was ever retained by this session — the derive prompts
-    // rather than silently rotating under the unlock-form's password.
     await waitFor(() => expect(screen.getByText(/re-enter your password/i)).toBeInTheDocument());
     expect(generatePasswordSlot).not.toHaveBeenCalled();
   });
 
-  // --- Two claims about the re-wrap: most tests mock
-  // rotatePasswordSlot/unwrapSlot's OUTCOME rather than its overwrite-in-
-  // place SEMANTICS, so "the old password no longer opens the slot" would
-  // otherwise be true only by inspection of generatePasswordSlot, never by a test.
+  // Most tests mock the re-wrap's outcome, so "the old password no longer opens the slot" would otherwise hold only by inspection.
 
   it('after a silent re-wrap, the OLD password no longer opens the password slot — only the NEW one does', async () => {
     await renderAuth();
@@ -1167,16 +946,9 @@ describe('AuthContext — unlock lifecycle', () => {
     wireLogin(token);
     wireLockedSlotSetOwed();
 
-    // Stateful unwrap standing in for generatePasswordSlot's real
-    // overwrite-in-place semantics: the slot only unwraps under whichever
-    // plaintext most recently wrapped it. The OLD password is the wrap
-    // secret pre-reset. A recovery-slot unwrap is unaffected (it has its own
-    // secret, the recovery key, never touched by a password re-wrap).
+    // A stateful unwrap standing in for overwrite-in-place: the slot only unwraps under the plaintext that most recently wrapped it; the recovery slot has its own secret.
     let currentWrapSecret = 'OldPassw0rd!';
-    // The candidate secret is only STAGED here: this
-    // mock must not be able to satisfy the test below on its own (if
-    // `upsertKeyEnvelopeSlot` were never called, its PUT deleted, or the
-    // write failed, nothing here may change what actually unwraps the slot).
+    // The candidate secret is only staged: if `upsertKeyEnvelopeSlot` were never called or failed, nothing here may change what unwraps the slot.
     let pendingSlotPassword: string | null = null;
     unwrapSlot.mockImplementation(async (slot: { slotType: string }, password: string) => {
       if (slot.slotType === 'recovery') return fakeHdk;
@@ -1189,9 +961,6 @@ describe('AuthContext — unlock lifecycle', () => {
         return { slotType: 'password', slotId };
       },
     );
-    // The wrap secret only advances once a write actually COMMITS through
-    // `upsertKeyEnvelopeSlot` — the one call production code makes to
-    // durably persist the re-wrapped slot.
     upsertKeyEnvelopeSlot.mockImplementation(async () => {
       if (pendingSlotPassword === null) {
         throw new Error('upsertKeyEnvelopeSlot called with no prepared slot');
@@ -1199,8 +968,6 @@ describe('AuthContext — unlock lifecycle', () => {
       currentWrapSecret = pendingSlotPassword;
       pendingSlotPassword = null;
     });
-    // Subsequent reads (including the remount below, simulating a reload)
-    // reflect the persisted state above rather than a fixed snapshot.
     getKeyEnvelopes.mockImplementation(async () => ({
       slots: [
         {
@@ -1225,14 +992,10 @@ describe('AuthContext — unlock lifecycle', () => {
       await captured.unlockWithRecovery('ABCD-EF12-3456-7890');
     });
 
-    // The silent re-wrap actually PUT the new slot, and that write is what
-    // committed the new wrap secret.
     await waitFor(() => expect(upsertKeyEnvelopeSlot).toHaveBeenCalled());
     await waitFor(() => expect(currentWrapSecret).toBe('NewPassw0rd!Reset'));
 
-    // Remount (simulates a reload) so the durability check below exercises a
-    // FRESH component instance re-fetching from the mocked backend, not any
-    // in-memory state left over from the instance that ran the re-wrap.
+    // Remount to simulate a reload, so durability is checked on a fresh instance re-fetching from the mocked backend.
     cleanup();
     apiRequest.mockImplementation(async (path: string) => {
       if (path === '/api/v1/auth/refresh') return { accessToken: token, expiresIn: 3600 };
@@ -1241,21 +1004,14 @@ describe('AuthContext — unlock lifecycle', () => {
       throw new Error(`unexpected api call ${path}`);
     });
     loadCachedHdk.mockResolvedValue(null);
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
+    await mountAuth();
     await waitFor(() => expect(flag('unlockResolved')).toBe('true'));
     expect(flag('isUnlocked')).toBe('false');
 
-    // The OLD password, which opened the slot before the re-wrap, no
-    // longer does.
     await expect(captured.unlockWithPassword('OldPassw0rd!')).rejects.toBeInstanceOf(
       KeyWrappingError,
     );
 
-    // The NEW password does.
     await act(async () => {
       await captured.unlockWithPassword('NewPassw0rd!Reset');
     });
@@ -1263,45 +1019,14 @@ describe('AuthContext — unlock lifecycle', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Moved from AuthContext.signup.test.tsx
-// ---------------------------------------------------------------------------
-
-/**
- * Tests that AuthContext.signup() posts exactly the fields the signup endpoint
- * accepts. The server rejects unknown fields, so a leftover acknowledgement key
- * would turn every signup into a 400.
- *
- * The API and the crypto/key-envelope/user-transition/WebAuthn shims are mocked
- * at the module boundary so only the context's signup orchestration is
- * exercised.
- */
-
-type SignupFn = ReturnType<typeof useAuth>['signup'];
-let signupCaptured: { signup: SignupFn };
-
-function SignupProbe(): React.ReactElement {
-  const auth = useAuth();
-  signupCaptured = { signup: auth.signup };
-  return <span data-testid="isAuthenticated">{String(auth.isAuthenticated)}</span>;
-}
-
 async function signupRenderAuth(): Promise<void> {
+  await renderAuth();
   apiRequest.mockImplementation(async (path: string) => {
-    if (path === '/api/v1/auth/refresh') throw new Error('no session');
     if (path === '/api/v1/auth/signup') {
       return { userId: 'u-new', email: 'jane@example.test', verificationRequired: true };
     }
     throw new Error(`unexpected api call ${path}`);
   });
-  render(
-    <AuthProvider>
-      <SignupProbe />
-    </AuthProvider>,
-  );
-  await waitFor(() =>
-    expect(screen.getByTestId('isAuthenticated').textContent).toBe('false'),
-  );
 }
 
 describe('AuthContext.signup — request body', () => {
@@ -1324,7 +1049,7 @@ describe('AuthContext.signup — request body', () => {
 
   it('posts exactly email, password and the supplied profile fields', async () => {
     await signupRenderAuth();
-    await signupCaptured.signup('jane@example.test', 'TestPassw0rd!Test', 'Jane', 'Smith', '1980-04-15');
+    await captured.signup('jane@example.test', 'TestPassw0rd!Test', 'Jane', 'Smith', '1980-04-15');
 
     expect(signupBody()).toEqual({
       email: 'jane@example.test',
@@ -1337,51 +1062,12 @@ describe('AuthContext.signup — request body', () => {
 
   it('posts only email and password when no profile fields are supplied', async () => {
     await signupRenderAuth();
-    await signupCaptured.signup('jane@example.test', 'TestPassw0rd!Test');
+    await captured.signup('jane@example.test', 'TestPassw0rd!Test');
 
     expect(Object.keys(signupBody()).sort()).toEqual(['email', 'password']);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Sign-in keeps personal data out of browser storage
-// ---------------------------------------------------------------------------
-
-/**
- * The API still returns `{ firstName, lastName, birthdate }` on sign-in (until
- * it is trimmed), so a login response carrying them must leave no trace of the
- * name or birthdate in `localStorage` or `sessionStorage`.
- *
- * The API, key-envelope client, HDK cache, key-wrapping, user-transition guard,
- * and WebAuthn shims are mocked at the module boundary so only the context's
- * login orchestration is exercised.
- */
-
-let profileCaptured: { login: (e: string, p: string) => Promise<void> };
-
-function ProfileProbe(): React.ReactElement {
-  const auth = useAuth();
-  profileCaptured = { login: auth.login };
-  return <span data-testid="isAuthenticated">{String(auth.isAuthenticated)}</span>;
-}
-
-/** Render the provider with the boot refresh resolving to "signed out". */
-async function profileRenderAuth(): Promise<void> {
-  apiRequest.mockImplementation(async (path: string) => {
-    if (path === '/api/v1/auth/refresh') throw new Error('no session');
-    throw new Error(`unexpected api call ${path}`);
-  });
-  render(
-    <AuthProvider>
-      <ProfileProbe />
-    </AuthProvider>,
-  );
-  await waitFor(() =>
-    expect(screen.getByTestId('isAuthenticated').textContent).toBe('false'),
-  );
-}
-
-/** Route boot refresh (fail) + login returning the given response fields. */
 function profileWireLogin(loginResponse: Record<string, unknown>): void {
   apiRequest.mockImplementation(async (path: string) => {
     if (path === '/api/v1/auth/refresh') throw new Error('no session');
@@ -1414,7 +1100,7 @@ describe('AuthContext — sign-in writes nothing personal to browser storage', (
   });
 
   it('a login response carrying name and birthdate signs in and stores neither', async () => {
-    await profileRenderAuth();
+    await renderAuth();
     const token = jwt({ userId: 'u-new', householdId: 'hh-new' });
     profileWireLogin({
       accessToken: token,
@@ -1427,7 +1113,7 @@ describe('AuthContext — sign-in writes nothing personal to browser storage', (
     getKeyEnvelopes.mockResolvedValue({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
 
     await act(async () => {
-      await profileCaptured.login('jane@test.com', 'pw');
+      await captured.login('jane@test.com', 'pw');
     });
 
     await waitFor(() =>

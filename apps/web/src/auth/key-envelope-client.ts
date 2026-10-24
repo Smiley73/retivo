@@ -1,4 +1,4 @@
-// HTTP client for the key-envelope endpoints (`/auth/key-envelopes`: list, activate, upsert, delete).
+// HTTP client for the key-envelope endpoints (`/auth/key-envelopes`: list, activate, upsert).
 // The CSRF echo on state-changing calls comes from `apiRequest` (AGENTS.md "Project-specific security").
 import type { AuthenticationResponseJSON } from '@simplewebauthn/browser';
 import { apiRequest } from '../api/client';
@@ -23,13 +23,11 @@ export function getKeyEnvelopes(): Promise<KeyEnvelopesResponse> {
   return apiRequest<KeyEnvelopesResponse>('/api/v1/auth/key-envelopes');
 }
 
-/**
- * Body for a slot upsert: the slot plus the recomputed envelope-set version and tag. `method`/`code`/`response` are the
- * `stepUpProofFields(proof)` wire fields, required only when the server says the write needs a proof (the household
- * already holds a slot, unless it is an owed post-reset re-wrap) and `AUTH_MFA_ENFORCED` is on. `currentPassword` is
- * the password floor on a proof-required `passkey_prf` enrollment write, in either enforcement state; never logged.
- */
-export interface UpsertKeyEnvelopeSlotBody extends EnvelopeSetIntegrity {
+// The slot plus the recomputed envelope-set version and tag. `method`/`code`/`response` are the `stepUpProofFields(proof)`
+// wire fields, required only when the server says the write needs a proof (the household already holds a slot, unless it
+// is an owed post-reset re-wrap) and `AUTH_MFA_ENFORCED` is on. `currentPassword` is the password floor on a
+// proof-required `passkey_prf` enrollment write, in either enforcement state; never logged.
+interface UpsertKeyEnvelopeSlotBody extends EnvelopeSetIntegrity {
   slot: KeyEnvelopeSlot;
   method?: string;
   code?: string;
@@ -56,11 +54,8 @@ export function upsertKeyEnvelopeSlot(
   });
 }
 
-/**
- * Body for `POST /auth/key-envelopes/activate`: the household's whole initial slot set, always proofless (the server
- * refuses a non-empty set outright, so there is nothing to prove against).
- */
-export interface ActivateKeyEnvelopesBody extends EnvelopeSetIntegrity {
+// The household's whole initial slot set, always proofless: the server refuses a non-empty set outright.
+interface ActivateKeyEnvelopesBody extends EnvelopeSetIntegrity {
   slots: KeyEnvelopeSlot[];
 }
 
@@ -80,32 +75,13 @@ export function activateKeyEnvelopes(body: ActivateKeyEnvelopesBody): Promise<vo
 }
 
 /**
- * Removes one slot. `proof` is `stepUpProofFields(proof)`'s result: a DELETE is never exempt from the step-up gate when
- * `AUTH_MFA_ENFORCED` is on. No production caller today.
- */
-export function deleteKeyEnvelopeSlot(
-  slotId: string,
-  integrity: EnvelopeSetIntegrity,
-  proof?: { method?: string; code?: string; response?: AuthenticationResponseJSON },
-): Promise<void> {
-  return apiRequest(`/api/v1/auth/key-envelopes/${encodeURIComponent(slotId)}`, {
-    method: 'DELETE',
-    body: {
-      ...integrity,
-      expectedEnvelopeSetVersion: integrity.envelopeSetVersion - 1,
-      ...(proof ?? {}),
-    },
-  });
-}
-
-/**
  * Confirmation phrase for the encrypted-workspace reset; must match the server's `ENCRYPTED_WORKSPACE_RESET_PHRASE`
  * (`apps/api/src/auth/dto/auth.dto.ts`), which rejects anything else with a 400.
  */
 export const ENCRYPTED_WORKSPACE_RESET_PHRASE = 'DELETE';
 
-/** A verified step-up factor proof; structurally matches `StepUpProof` from `components/useStepUp`. */
-export interface EncryptedWorkspaceResetProof {
+// Structurally matches `StepUpProof` from `components/useStepUp`.
+interface EncryptedWorkspaceResetProof {
   method: string;
   code?: string;
   response?: AuthenticationResponseJSON;

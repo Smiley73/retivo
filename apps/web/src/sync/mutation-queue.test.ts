@@ -1,9 +1,4 @@
-/**
- * queueLocalMutation tests. Focus: the strictly-monotonic logical clock
- * that stamps each queued mutation's `timestamp`, so same-millisecond
- * edits to one aggregate keep a strict flush order (an update can't
- * be pushed before its create).
- */
+// queueLocalMutation stamps a strictly monotonic `timestamp`, so same-millisecond edits to one aggregate keep a strict flush order.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -35,9 +30,7 @@ describe('queueLocalMutation', () => {
   });
 
   it('stamps strictly-monotonic timestamps so same-ms create+update keep flush order', async () => {
-    // A burst of edits to one aggregate (create then update) issued in the
-    // same millisecond must not tie on `timestamp` — listPendingMutations
-    // sorts by it, and a tie would let the random UUID decide order.
+    // Same-millisecond edits must not tie on `timestamp`, or the random UUID would decide the flush order.
     await queueLocalMutation({
       type: 'account',
       aggregateId: 'agg-1',
@@ -57,7 +50,6 @@ describe('queueLocalMutation', () => {
 
     const pending = await listPendingMutations();
     expect(pending.map((m) => m.operation)).toEqual(['create', 'update']);
-    // Strictly increasing — no tie even within one millisecond.
     expect(pending[1].timestamp).toBeGreaterThan(pending[0].timestamp);
   });
 });
@@ -141,18 +133,11 @@ describe('collapseAndReQueue', () => {
       payload: { name: 'gone' },
       removeMutationIds: ['old-1'],
     });
-    // getAggregate filters tombstones, so a null read confirms the deletedAt.
     expect(await getAggregate('scenario', 'agg-1')).toBeNull();
   });
 
   it('aborts rather than stomping a concurrent queueLocalMutation that landed after the caller read the stack', async () => {
-    // The check-and-mutate TOCTOU: the caller read the stack as [old-1] and
-    // computed removeMutationIds from it, THEN a user edit (queueLocalMutation)
-    // for the SAME aggregate landed — un-fenced by the sync mutex. The collapse
-    // re-reads the live stack INSIDE its transaction, sees the extra row, and
-    // aborts — leaving the concurrent edit intact rather than silently losing it
-    // (the corrected-aggregate write would otherwise stomp it). The repair pass
-    // then re-routes the aggregate on the next round with the fresh stack.
+    // A concurrent edit landing after the caller read the stack must survive: the collapse re-reads the live stack inside its transaction and aborts rather than stomping it.
     await queueMutation(stackRow('old-1'));
     const concurrent = await queueLocalMutation({
       type: 'scenario',
@@ -174,9 +159,6 @@ describe('collapseAndReQueue', () => {
         removeMutationIds: ['old-1'], // stale snapshot — excludes `concurrent`
       }),
     ).rejects.toBeInstanceOf(ConcurrentQueueMutationError);
-    // Nothing lost: the concurrent edit survives as a pending row, old-1 is
-    // untouched (the abort rolled the delete back), and NO fresh re-based row
-    // was minted.
     const all = await listAllMutations();
     expect(all.map((m) => m.id).sort()).toEqual(['old-1', concurrent.id].sort());
     expect(all.find((m) => m.id === concurrent.id)?.status).toBe('pending');
@@ -184,9 +166,7 @@ describe('collapseAndReQueue', () => {
 
   it('is atomic — a fault mid-collapse leaves the old mutation in place (nothing lost)', async () => {
     await queueMutation(stackRow('old-1'));
-    // A non-cloneable payload (a function) makes the aggregate `put` throw
-    // inside the single readwrite transaction, aborting it — so the preceding
-    // delete of `old-1` rolls back and the un-synced edit is never dropped.
+    // A non-cloneable payload makes the aggregate `put` throw inside the transaction, rolling back the delete so the un-synced edit is not dropped.
     const badPayload = { boom: () => 0 } as unknown as Record<string, unknown>;
     await expect(
       collapseAndReQueue({

@@ -1,9 +1,4 @@
-/**
- * Unit tests for the shared sync badge formatters. These live in their
- * own leaf module (`badge-format.ts`) so `SyncBadge` and
- * `SyncDetailsPopover` can both depend on them without importing each
- * other.
- */
+// Unit tests for the shared badge formatters, a leaf module so SyncBadge and SyncDetailsPopover can both depend on them.
 import { describe as describeState, relativeTime, relativeTimeFromMs } from './badge-format.js';
 
 describe('badge-format describe', () => {
@@ -21,8 +16,6 @@ describe('badge-format describe', () => {
     expect(describeState({ kind: 'rollback-detected' })).toMatch(
       /Sync is blocked to protect your data/,
     );
-    // The added cause sentence ships alongside the
-    // existing tamper wording, never in place of it.
     expect(describeState({ kind: 'rollback-detected' })).toMatch(
       /wasn.t sealed with your encryption key/,
     );

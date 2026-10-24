@@ -1,9 +1,4 @@
-/**
- * A fake `MinimalMcWorker` factory whose workers actually COMPUTE (`runPathRange`, `assembleAccumulationFromTyped`
- * and `assembleMonteCarloSummary` in-process), so a single- or multi-shard coordinator run produces a real summary
- * that must equal a plain `runMonteCarlo`. TEST-ONLY. Shared by the sharding coordinator's tests and the AI
- * assistant stress-test tool's.
- */
+// A fake `MinimalMcWorker` factory whose workers compute in-process, so a sharded run produces a real summary that must equal a plain `runMonteCarlo`. Shared by the coordinator's tests and the AI assistant stress-test tool's.
 import {
   buildRunContext,
   type MonteCarloInput,
@@ -19,14 +14,11 @@ export interface FakeWorker extends MinimalMcWorker {
 }
 
 export interface FakeOpts {
-  /** Reply to `runShard` with an error instead of a result. */
   shardError?: string;
-  /** Reply to `assemble` with an error instead of a result. */
   assembleError?: string;
-  /** Called synchronously when an `assemble` message is posted, BEFORE any
-   *  reply — lets a test abort the signal exactly at the assemble dispatch. */
+  // Called synchronously when `assemble` is posted, before any reply, so a test can abort exactly there.
   onAssemblePost?: () => void;
-  /** Never reply (used to test abort). */
+  // Never reply (for abort tests).
   manual?: boolean;
 }
 

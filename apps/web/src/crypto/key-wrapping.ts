@@ -21,9 +21,7 @@ const AES_GCM_KEY_BITS = 256;
 const GCM_NONCE_BYTES = 12;
 const SALT_BYTES = 16;
 const RECOVERY_ENTROPY_BYTES = 16; // 128 bits — the high-entropy unlocker.
-// OWASP 2023 PBKDF2-HMAC-SHA-256 baseline.
-const DEFAULT_PBKDF2_ITERATIONS = 600_000;
-// Caps a hostile server-stored `kdf.iterations` (10x baseline) that would hang unlock.
+// Caps a hostile server-stored `kdf.iterations` that would hang unlock.
 const MAX_PBKDF2_ITERATIONS = 2_000_000;
 // OWASP 2024 interactive Argon2id baseline: 64 MiB, 3 passes, 4 lanes.
 const DEFAULT_ARGON2ID_M = 65_536;
@@ -90,11 +88,8 @@ function canonicalSlotAad(input: {
   });
 }
 
-/**
- * Validates server-stored KDF params before they drive a derivation; a hostile algorithm, salt or out-of-range work
- * factor throws {@link KeyWrappingError}.
- */
-export function validateKdfParams(kdf: KdfParams): void {
+// Server-stored KDF params are untrusted: reject a hostile algorithm, salt or work factor before deriving.
+function validateKdfParams(kdf: KdfParams): void {
   if (typeof kdf.salt !== 'string' || kdf.salt.length === 0) {
     throw new KeyWrappingError('kdf salt missing or empty');
   }
@@ -123,11 +118,7 @@ export function validateKdfParams(kdf: KdfParams): void {
   throw new KeyWrappingError(`unsupported kdf algorithm ${String((kdf as KdfParams).algorithm)}`);
 }
 
-/**
- * Derives an AES-GCM wrap key from a password, dispatching on the slot's KDF; validates params first so a hostile work
- * factor fails closed.
- */
-export async function derivePasswordWrapKey(
+async function derivePasswordWrapKey(
   password: string,
   kdf: KdfParams,
 ): Promise<CryptoKey> {
@@ -160,11 +151,7 @@ export async function derivePasswordWrapKey(
   }
 }
 
-/**
- * Derives the AES-GCM wrap key from a password via Argon2id (`hash-wasm`, bundled WASM) using the slot's m/t/p and
- * salt.
- */
-export async function deriveArgon2idWrapKey(
+async function deriveArgon2idWrapKey(
   password: string,
   kdf: Argon2idKdfParams,
 ): Promise<CryptoKey> {
@@ -255,14 +242,6 @@ async function unwrapHdk(
   return importHdk(rawHdk);
 }
 
-function newPbkdf2Kdf(): KdfParams {
-  return {
-    algorithm: 'PBKDF2-HMAC-SHA-256',
-    iterations: DEFAULT_PBKDF2_ITERATIONS,
-    salt: bytesToBase64Url(randomBytes(SALT_BYTES)),
-  };
-}
-
 function newArgon2idKdf(): Argon2idKdfParams {
   return {
     algorithm: 'Argon2id',
@@ -317,24 +296,13 @@ async function buildPasswordSlot(
   };
 }
 
-/** Password slot with an Argon2id wrap key: fresh salt and the m=65536/t=3/p=4 baseline. */
-export function generateArgon2idPasswordSlot(
+function generateArgon2idPasswordSlot(
   householdId: string,
   slotId: string,
   password: string,
   hdk: CryptoKey,
 ): Promise<KeyEnvelopeSlot> {
   return buildPasswordSlot(householdId, slotId, password, hdk, newArgon2idKdf());
-}
-
-/** Password slot with a legacy PBKDF2 wrap key; unused for new slots, kept so the PBKDF2 wrap path stays testable. */
-export function generatePbkdf2PasswordSlot(
-  householdId: string,
-  slotId: string,
-  password: string,
-  hdk: CryptoKey,
-): Promise<KeyEnvelopeSlot> {
-  return buildPasswordSlot(householdId, slotId, password, hdk, newPbkdf2Kdf());
 }
 
 /** Default password slot: Argon2id. */
@@ -597,12 +565,9 @@ export async function readEnvelopeSetPin(householdId: string | undefined): Promi
   return Math.max(meta?.envelopeSetVersion ?? 0, readEnvelopeSetPinFloor(householdId));
 }
 
-/**
- * Thrown by {@link writeEnvelopeSetPin} when `isStale` reports a session switch before the pin write commits:
- * `deviceMetadata` is one unscoped `'self'` row per IDB, so a cross-household logout recreating the database mid-write
- * would otherwise land the pin on the new household's row and corrupt its rollback pin.
- */
-export class EnvelopeSetPinAbortedError extends KeyWrappingError {
+// Thrown when `isStale` reports a session switch before the pin write commits: `deviceMetadata` is one unscoped `'self'`
+// row per IDB, so a cross-household logout recreating the database mid-write would land the pin on the new household's row.
+class EnvelopeSetPinAbortedError extends KeyWrappingError {
   constructor(public readonly servedVersion: number) {
     super(
       `Envelope-set pin write at version ${servedVersion} aborted: the session changed before the write could commit`,

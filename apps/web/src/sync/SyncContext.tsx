@@ -67,12 +67,10 @@ import {
 import { readQuarantinedLocalCopies, recordDecryptOutcome } from './quarantine.js';
 import { resolveRetryDelayMs } from '../lib/retry-backoff.js';
 
-/**
- * Content-equality gate for the mutation lists on the context value: `refreshCounts` returns fresh arrays every poll,
- * so comparing the rendered fields (id, status, expectedVersion, reason) keeps the prior reference and avoids
- * re-rendering every `useSync()` consumer and re-resolving labels.
- */
-export function sameMutationList(
+// Content-equality gate for the mutation lists on the context value: `refreshCounts` returns fresh arrays every poll,
+// so comparing the rendered fields (id, status, expectedVersion, reason) keeps the prior reference and avoids
+// re-rendering every `useSync()` consumer and re-resolving labels.
+function sameMutationList(
   a: readonly PendingMutation[],
   b: readonly PendingMutation[],
 ): boolean {

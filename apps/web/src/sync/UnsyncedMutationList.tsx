@@ -49,12 +49,9 @@ const REASON_EXPLANATION: Record<NonNullable<PendingMutation['reason']>, string>
   SCHEMA_MISMATCH: 'Reload the app to keep syncing',
 };
 
-/**
- * Plain-English descriptor of an un-synced edit per rejection reason, shared by the per-item discard dialog and the
- * global "Reload from server" confirm so both phrase the loss identically. A plain `pending` row has no reason and
- * reads "not yet synced" at the call site.
- */
-export const REASON_LABEL: Record<NonNullable<PendingMutation['reason']>, string> = {
+// Plain-English descriptor of an un-synced edit per rejection reason, shared by the per-item discard dialog and the
+// global "Reload from server" confirm so both phrase the loss identically.
+const REASON_LABEL: Record<NonNullable<PendingMutation['reason']>, string> = {
   CONFLICT: 'changed on another device',
   NOT_FOUND: 'deleted on another device',
   SCHEMA_MISMATCH: 'waiting for an app update',

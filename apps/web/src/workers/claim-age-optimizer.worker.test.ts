@@ -1,16 +1,4 @@
-/**
- * Worker tests (updated for the brand-check refactor).
- * Instead of relying on the worker file's import-time
- * `self.addEventListener` (which the brand check makes a no-op in
- * jsdom), the test imports the explicitly exported
- * `registerOptimizerWorkerListener` and drives it against a fake
- * `self`: an `addEventListener` that captures the registered handler
- * and a `postMessage` spy. Tests then invoke the captured handler
- * with a fake `MessageEvent` and assert against the spy.
- *
- * No actual `Worker` constructor is invoked (Vitest's jsdom env has no
- * real Web Worker).
- */
+// Drives `registerOptimizerWorkerListener` against a fake `self` (a capturing `addEventListener` and a `postMessage` spy), since the brand check makes the import-time listener a no-op in jsdom.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AccountBalancePayload,
@@ -209,12 +197,7 @@ function makeInput(): OptimizerWorkerInput {
   };
 }
 
-/**
- * A scenario that sets BOTH a per-account withdrawal strategy AND a
- * retirementAllocation override. The mutual-exclusion gate is RETIRED —
- * allocation now routes through the per-account path with every strategy — so
- * this is a valid scenario the optimizer runs (no error row).
- */
+// A per-account withdrawal strategy together with a retirementAllocation override is valid: the optimizer runs it (no error row).
 function strategyPlusAllocationInput(): OptimizerWorkerInput {
   const base = scenarioWithAge('s', 67, 67);
   const conflictScenario: ScenarioAggregate = {
@@ -248,9 +231,6 @@ describe('claim-age-optimizer.worker', () => {
   });
 
   it('should_register_message_listener_via_explicit_register', () => {
-    // capturedHandler is set during setupFakeSelf; the beforeEach
-    // throws if registerOptimizerWorkerListener fails to call
-    // addEventListener.
     expect(typeof handler).toBe('function');
   });
 
@@ -258,8 +238,7 @@ describe('claim-age-optimizer.worker', () => {
     handler({
       data: { kind: 'run', runId: 'r-1', input: makeInput() },
     } as MessageEvent<OptimizerWorkerInbound>);
-    // Await the worker's microtask chain so the postMessage spy
-    // records the result.
+    // Await the worker's microtask chain so the postMessage spy records the result.
     await new Promise((r) => setTimeout(r, 50));
     expect(postMessage).toHaveBeenCalled();
     const out = postMessage.mock.calls[0][0] as OptimizerWorkerOutbound;
@@ -311,8 +290,6 @@ describe('claim-age-optimizer.worker', () => {
   });
 
   it('should_run_a_named_strategy_plus_allocation_scenario_without_error', async () => {
-    // The mutual-exclusion gate is retired: a named strategy + allocation override is valid,
-    // so the optimizer produces a result instead of an error row.
     handler({
       data: { kind: 'run', runId: 'r-strat-alloc', input: strategyPlusAllocationInput() },
     } as MessageEvent<OptimizerWorkerInbound>);

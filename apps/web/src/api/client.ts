@@ -25,8 +25,8 @@ export class ApiRequestError extends Error {
   }
 }
 
-export type TokenGetter = () => string | null;
-export type TokenRefresher = () => Promise<string | null>;
+type TokenGetter = () => string | null;
+type TokenRefresher = () => Promise<string | null>;
 
 let getAccessToken: TokenGetter = () => null;
 let refreshAccessToken: TokenRefresher = async () => null;

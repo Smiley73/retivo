@@ -1,28 +1,5 @@
-/**
- * Aggregate sync round-trip harness.
- *
- * Proves a changed aggregate shape survives the full local-first loop:
- *
- *   serialize → push (encrypt) → pull (decrypt) → fresh IndexedDB store
- *   rehydration → read back
- *
- * without losing fields OR inventing a stored default when a sparse-optional
- * field is ABSENT. The push side encrypts through the real
- * `encryptPayload`/`decryptPayload` path so the JSON
- * serialize/deserialize boundary the wire crosses is exercised, and the pulled
- * payload is written into a freshly-cleared store to model a fresh tab picking
- * the row up from bootstrap.
- *
- * It covers the scenario `taxFilingPlan` filing plan (including the `separate`
- * plan's §86(c)(1)(C)(ii) `livedTogether` flag — pinned both explicitly `true`
- * and ABSENT, since absent is the meaningful sparse default (lived apart)),
- * the per-member survivor claim-age override
- * (`overrides.socialSecurity.survivor`), the per-account Roth
- * distribution-tax facts and RMD profile facts on `AccountPayload`, and the
- * scenario per-member/year health coverage months
- * (`overrides.healthCoverageMonths`) + FPL region (`overrides.acaFplRegion`).
- * A new field extends `roundTripAggregate` with its own case.
- */
+// Round trip of a changed aggregate shape: serialize, push (encrypt), pull (decrypt), fresh IndexedDB rehydration, read back
+// without losing a field or inventing a default for an absent sparse-optional one. A new field adds a `roundTripAggregate` case.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -43,12 +20,7 @@ import type {
 
 const HH = 'hh-roundtrip';
 
-/**
- * Run one serialize → push (encrypt) → pull (decrypt) → fresh-store → read-back
- * cycle for an aggregate and return the rehydrated row. The store is cleared
- * before the pulled row is applied, so the read comes from a store that never
- * saw the original in-memory object — a fresh-tab rehydration.
- */
+// The store is cleared before the pulled row is applied, so the read models a fresh tab rehydrating from bootstrap.
 async function roundTripAggregate<T extends Record<string, unknown>>(
   type: AggregateType,
   aggregate: Aggregate<T>,
@@ -61,13 +33,10 @@ async function roundTripAggregate<T extends Record<string, unknown>>(
     encryptionVersion: 1,
   };
 
-  // Push side: encrypt the payload (JSON-serializes it under the hood).
   const envelope = await encryptPayload(aggregate.payload, meta, hdk, 'key-roundtrip');
 
-  // Pull side: decrypt the envelope a fresh device would receive.
   const pulledPayload = (await decryptPayload(envelope, meta, hdk)) as T;
 
-  // Fresh-store rehydration: clear the store, then apply the pulled row.
   await clearAllStores();
   await putAggregate(type, { ...aggregate, payload: pulledPayload });
 
@@ -116,10 +85,7 @@ describe('aggregate sync round trip — scenario taxFilingPlan', () => {
   });
 
   it('preserves a separate filing plan with per-unit status, household size, and lived-together', async () => {
-    // `livedTogether: true` is the §86(c)(1)(C)(ii) fact that removes an
-    // MFS unit's Social Security base amounts and moves IRMAA to the steeper
-    // separate-filer table, so losing it in transit is a silent tax CUT. Pinned
-    // explicitly set to true here; the sibling case below pins its ABSENCE.
+    // `livedTogether: true` removes an MFS unit's Social Security base amounts and moves IRMAA to the separate-filer table, so losing it in transit is a silent tax cut.
     const row = scenarioRow('sc-separate', {
       taxFilingPlan: {
         kind: 'separate',
@@ -142,9 +108,7 @@ describe('aggregate sync round trip — scenario taxFilingPlan', () => {
   });
 
   it('does not invent livedTogether when the stored plan omits it', async () => {
-    // Sparse-optional contract: ABSENT means the spouses lived apart, the
-    // lower-tax reading. A round trip must not materialize it as `false` (a dead
-    // key on every synced device) nor as `true`.
+    // Absent means the spouses lived apart: a round trip must not materialize it as `false` or `true`.
     const row = scenarioRow('sc-separate-apart', {
       taxFilingPlan: {
         kind: 'separate',
@@ -247,8 +211,6 @@ describe('aggregate sync round trip — scenario health coverage months + FPL re
   });
 
   it('preserves per-member/year Part B/D + Marketplace months and the FPL region', async () => {
-    // ACA→Medicare transition year (2032): 6 Marketplace months, then 6 months
-    // of Part B/D once enrolled at 65. Typed against the real shapes.
     const transitionYear: MemberCoverageMonths = { marketplaceMonths: 6, partBMonths: 6, partDMonths: 6 };
     const healthCoverageMonths: HealthCoverageMonthsOverride = {
       perMember: {
@@ -275,7 +237,6 @@ describe('aggregate sync round trip — scenario health coverage months + FPL re
         },
       },
     });
-    // Precedence companion field survives alongside the new months.
     expect(out.payload.overrides.acaMarketplaceOptOutMemberIds).toEqual(['demo-member-secondary']);
   });
 
@@ -297,9 +258,7 @@ function accountRow(
     id,
     householdId: HH,
     aggregateType: 'account',
-    // Write at the current account schema version so the fresh-store rehydration
-    // read does NOT run a migration — this test pins the WIRE + store boundary,
-    // not the migration (migrations.test.ts covers that).
+    // Written at the current account schema version so the rehydration read runs no migration; this test pins the wire and store boundary.
     schemaVersion: currentSchemaVersion('account'),
     version: 1,
     updatedAt: '2026-07-18T00:00:00Z',
@@ -331,11 +290,7 @@ describe('aggregate sync round trip — account Roth distribution-tax facts', ()
     await clearAllStores();
   });
 
-  // Conversion lots are deliberately absent here: they are no longer account facts
-  // and are recorded per year on `accountBalance`. Asserting a retired key here
-  // would pass vacuously anyway — encrypt/decrypt preserves any JSON key. The keys
-  // were dropped with no schema bump, so there is no migration step to cover;
-  // `data-import.test.ts` pins that a stored lot survives import as an inert key.
+  // Conversion lots are not account facts any more, and asserting a retired key would pass vacuously (encrypt/decrypt preserves any JSON key).
   it('preserves a Roth IRA\'s first-contribution year', async () => {
     const row = accountRow('acc-roth-facts', {
       rothIraFirstContributionTaxYear: 2015,
@@ -423,7 +378,6 @@ describe('aggregate sync round trip — account RMD profile facts', () => {
   });
 });
 
-/** One annual `accountBalance` row at the current schema version. */
 function balanceRow(
   id: string,
   extra: Partial<AccountBalancePayload> = {},
@@ -460,10 +414,7 @@ function balanceRow(
   };
 }
 
-// The demo loader writes the dated in-plan-rollover pair for the first time, so
-// the drill has to prove those sparse-optional keys survive the wire and that
-// ABSENT still means absent after a fresh-tab rehydration. The payload SHAPE did
-// not change in this phase; what changed is that the keys are now produced.
+// The demo loader now produces the dated in-plan-rollover pair, so those sparse-optional keys must survive the wire and absent must stay absent.
 describe('aggregate sync round trip — accountBalance in-plan-rollover pair', () => {
   beforeEach(async () => {
     await clearAllStores();
@@ -482,9 +433,7 @@ describe('aggregate sync round trip — accountBalance in-plan-rollover pair', (
     });
     const out = await roundTripAggregate('accountBalance', row);
     expect(out.payload.rothInPlanRolloverTaxableAmount).toBe(20_000);
-    // Dollars WITH CENTS survive intact — these are not whole-dollar fields.
     expect(out.payload.rothInPlanRolloverNontaxableAmount).toBe(1_250.5);
-    // The balance leg that makes the fact reconcilable comes back with it.
     expect(out.payload.rollover).toBe(20_000);
   });
 

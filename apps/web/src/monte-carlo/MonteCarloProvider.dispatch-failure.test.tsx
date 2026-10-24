@@ -1,33 +1,13 @@
-/**
- * MonteCarloProvider — the worker cannot be CREATED, or cannot be dispatched
- * to.
- *
- * Both entry points move `status` to 'running' and clear `error` BEFORE they
- * touch the Worker constructor. If `new MCWorker()` throws (blocked by CSP,
- * out of memory, a worker chunk that will not load) or `postMessage` throws (an
- * input that fails structured clone), the throw escapes with `status` frozen at
- * 'running' and nothing computing behind it — the mirror image of the preflight
- * wedge `failPreflight` exists to prevent. `runToCompletion` additionally
- * leaves its worker un-terminated and `workerRef` / `pendingCancelRef` still
- * pointing at it, because a throw inside a Promise executor rejects without
- * running any of the settle paths.
- *
- * The rule: publish the failure through `error` / `status`, clear progress,
- * terminate anything that was created, and settle the caller the same way a
- * worker error does — `run` resolves (it is resultless), `runToCompletion`
- * rejects.
- */
+// A worker that cannot be created or dispatched to must publish the failure through `error`/`status`, clear progress and
+// terminate what was created; `run` resolves (it is resultless) and `runToCompletion` rejects.
 import React from 'react';
 import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MonteCarloInput } from '../lib/monte-carlo';
 
 const h = vi.hoisted(() => ({
-  /** Set by a test to make the Worker CONSTRUCTOR throw. */
   constructorThrows: false,
-  /** Set by a test to make `postMessage` throw on dispatch. */
   postMessageThrows: false,
-  /** Every worker that was successfully constructed this test. */
   workers: [] as Array<{ terminated: boolean }>,
 }));
 
@@ -160,7 +140,6 @@ describe('MonteCarloProvider — postMessage throws on dispatch', () => {
     expect(hook!.status).toBe('error');
     expect(hook!.error).toBe('could not be cloned');
     expect(hook!.progressTotal).toBe(0);
-    // The worker that was created before the dispatch failed is not left alive.
     expect(h.workers).toHaveLength(1);
     expect(h.workers[0].terminated).toBe(true);
   });

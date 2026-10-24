@@ -18,7 +18,6 @@ describe('sweepLegacySignupProfileKeys', () => {
       'retivo:primary-member-seeded:hh-1': '1',
       'retivo.auth.email': 'me@example.test',
       'retivo.auth.deviceId': 'dev-1',
-      // Near misses: not under the exact prefix.
       'retivo:signup-profile': 'no-colon-suffix',
       'x-retivo:signup-profile:u-9': 'prefixed-elsewhere',
     };
@@ -45,8 +44,7 @@ describe('sweepLegacySignupProfileKeys', () => {
     localStorage.setItem(`${PREFIX}u-1`, 'secret-1');
     localStorage.setItem(`${PREFIX}u-2`, 'secret-2');
     localStorage.setItem('retivo.auth.email', 'me@example.test');
-    // Wrap the real storage: spying on the instance would add own properties
-    // that some Storage implementations report as keys.
+    // Wrap the real storage: spying on the instance adds own properties that some Storage implementations report as keys.
     const real = localStorage;
     const getItem = vi.fn((key: string) => real.getItem(key));
     vi.stubGlobal('localStorage', {

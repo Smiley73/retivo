@@ -1,10 +1,4 @@
-/**
- * Unit tests for the pure sync-inspector label resolver.
- *
- * `getAggregate` is mocked over a test-controlled map so the cases are
- * deterministic and cover the parent-lookup + throw-safety paths without a
- * real IndexedDB.
- */
+// Pure sync-inspector label resolver; `getAggregate` is mocked over a map so parent lookup and throw-safety run without IndexedDB.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Aggregate, AggregateType } from '../db/types';
 import { AGGREGATE_TYPE_LABEL, resolveMutationLabel } from './mutation-label';
@@ -37,11 +31,7 @@ beforeEach(() => {
   throwFor = null;
 });
 
-/**
- * One happy-path case per `AggregateType`: seed local state, then assert the
- * resolved type label + name (+ detail for the balance). Keyed by the exact
- * `AggregateType` so the exhaustiveness assertion below proves all 9 are here.
- */
+// One happy-path case per `AggregateType`, keyed so the exhaustiveness assertion below proves all are covered.
 const cases: Record<
   AggregateType,
   { seed: () => void; id: string; typeLabel: string; name: string; detail?: string }

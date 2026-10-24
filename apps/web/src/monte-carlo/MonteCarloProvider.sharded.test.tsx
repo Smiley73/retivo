@@ -1,17 +1,5 @@
-/**
- * MonteCarloProvider — sharded routing + cancel/abort wiring.
- *
- * The `?worker` mock is a MANUAL fake (never auto-replies) that records the
- * `kind` of every posted message and supports BOTH the single-worker protocol
- * (property `onmessage`) and the pool protocol (`addEventListener` +
- * `postMessage(msg, transfer)`). Manual delivery keeps the tests fast (no
- * 2000-path compute) and deterministic: routing is asserted by WHICH message
- * kind the worker received, and cancellation by the terminate flag — the run
- * only ever settles via the Provider's cancel/supersede path.
- *
- * `mcPoolSize` reads `navigator.hardwareConcurrency`, stubbed per test to pin
- * the routing decision.
- */
+// Sharded routing and cancel/abort wiring. The `?worker` mock never auto-replies, records the `kind` of every posted message
+// and supports both worker protocols, so a run settles only through the provider's cancel or supersede path.
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { act, render } from '@testing-library/react';
@@ -41,7 +29,6 @@ vi.mock('../workers/monte-carlo.worker?worker', () => {
     }
     postMessage(msg: unknown): void {
       h.posted.push({ kind: (msg as { kind?: string })?.kind ?? 'unknown' });
-      // Manual: never reply. The run settles only via cancel/supersede.
     }
     terminate(): void {
       this.terminated = true;

@@ -1,9 +1,4 @@
-/**
- * Tests for the per-aggregate forward-migration engine. This suite
- * exercises the public engine contract (`currentSchemaVersion` /
- * `migrate`) — no private REGISTRY introspection — so it stays valid as
- * steps are added.
- */
+// Tests the per-aggregate forward-migration engine through its public contract (`currentSchemaVersion`, `migrate`).
 import { describe, it, expect } from 'vitest';
 import { currentSchemaVersion, migrate } from './migrations';
 import type { AggregateType } from './types';
@@ -14,19 +9,6 @@ describe('migration engine contract', () => {
     'household', 'householdMember', 'incomeStream', 'scenario', 'socialSecurityBenefit',
   ];
 
-  // Every aggregate is at schemaVersion 1 except `account`, which bumped to
-  // v2 for the HSA tax-treatment migration (v1→v2), v3 for the Roth
-  // tax-treatment migration (v2→v3), v4 for the additive
-  // `contributionGrowthPct` field (v3→v4), v5 for the additive Roth
-  // distribution-tax facts (v4→v5), v6 for the additive RMD profile
-  // facts (v5→v6), and v7 for the removal of the two Roth-basis dollar
-  // totals (v6→v7); `scenario` (v9 — v1→v2 PatchWithClears identity
-  // widening, v2→v3 MAGI-bootstrap split, v3→v4 MAGI-ceiling field rename +
-  // Fill/Minimize defaults, v4→v5 MAGI-cap window schedule, v5→v6
-  // per-category inflation `categoryRates` add, v6→v7 per-account
-  // `contributionGrowthPct` override add, v7→v8 additive `accountFloors`
-  // minimum-balance-floor section, v8→v9 withdrawal-strategy coercion);
-  // and `expenseCategory` (v2 — additive `isMedical` flag, v1→v2).
   const V1_TYPES = ALL_TYPES.filter(
     (t) =>
       t !== 'account' &&
@@ -48,11 +30,10 @@ describe('migration engine contract', () => {
   it('migrate is a no-op when payload is already at current version', () => {
     for (const type of V1_TYPES) {
       const payload = { schemaVersion: 1 };
-      expect(migrate(type, payload, 1)).toBe(payload); // same reference
+      expect(migrate(type, payload, 1)).toBe(payload);
     }
     const accountPayload = { schemaVersion: 7, type: 'HSA', taxTreatment: 'HSA' };
     expect(migrate('account', accountPayload, 7)).toBe(accountPayload);
-    // A v9 scenario already carrying a named strategy is identity (same ref).
     const scenarioPayload = {
       schemaVersion: 9,
       overrides: { withdrawalStrategy: { kind: 'taxEfficient' } },
@@ -61,7 +42,6 @@ describe('migration engine contract', () => {
   });
 
   it('migrate passes through a payload that is already ahead (gap-warn path)', () => {
-    // Synthetic ahead-of-current — exercises the gap-warn passthrough in the engine
     const payload = { schemaVersion: 0 };
     for (const type of V1_TYPES) {
       const result = migrate(type, payload, 0);
@@ -70,18 +50,13 @@ describe('migration engine contract', () => {
   });
 
   it('passes a scenario magiCap disable sentinel payload through the v1→v2 identity step unchanged', () => {
-    // The explicit-disable sentinel ({ disabled: true }) is an additive
-    // union member on `overrides.magiCap`. The scenario v1→v2 step is identity — it returns its input reference — so the payload,
-    // including the sentinel, survives byte-identical (same reference).
-    // Forward-compat coverage for a synced payload shape.
-    // Carries a named withdrawal strategy so the v8→v9 step is also identity
-    // (the active transform only rewrites absent / retired strategies).
+    // The explicit-disable sentinel ({ disabled: true }) is an additive union member, so the scenario v1→v2 step is identity and the payload survives by reference.
     const payload: Record<string, unknown> = {
       schemaVersion: 1,
       overrides: { magiCap: { disabled: true }, withdrawalStrategy: { kind: 'taxEfficient' } },
     };
     const result = migrate('scenario', payload, 1);
-    expect(result).toBe(payload); // same reference (identity step)
+    expect(result).toBe(payload);
     expect((result as { overrides: { magiCap: unknown } }).overrides.magiCap).toEqual({
       disabled: true,
     });
@@ -90,8 +65,6 @@ describe('migration engine contract', () => {
 
 describe('scenario v1 → v2 PatchWithClears widening migration', () => {
   it('advances a v1 scenario to v2 as an identity (payload content unchanged)', () => {
-    // The widening adds a per-key `null` clear-marker as a legal value, not
-    // a reshape, so the step is identity — it returns the input reference.
     const payload: Record<string, unknown> = {
       name: 'Aggressive',
       description: '',
@@ -100,12 +73,11 @@ describe('scenario v1 → v2 PatchWithClears widening migration', () => {
       notes: '',
       overrides: {
         income: { patches: { 'aggregate:i1': { linkedCbpAccountId: null } } },
-        // Named strategy so v8→v9 is also identity (same-ref preserved).
         withdrawalStrategy: { kind: 'taxEfficient' },
       },
     };
     const result = migrate('scenario', payload, 1);
-    expect(result).toBe(payload); // same reference — pure identity
+    expect(result).toBe(payload);
     expect(result).toEqual(payload);
   });
 
@@ -114,7 +86,6 @@ describe('scenario v1 → v2 PatchWithClears widening migration', () => {
       name: 'Base',
       overrides: {
         income: { patches: { 'aggregate:i1': { monthlyBenefit: 2000 } } },
-        // Named strategy so the v8→v9 active transform does not rewrite it.
         withdrawalStrategy: { kind: 'taxEfficient' },
       },
     };
@@ -136,9 +107,7 @@ describe('scenario v2 → v3 MAGI-bootstrap split migration', () => {
     ) as unknown as { overrides: Record<string, unknown> };
     expect(result.overrides.magiBootstrapLookbackMinus2).toBe(123_456);
     expect(result.overrides.magiBootstrapLookbackMinus1).toBe(123_456);
-    // Old key removed from the v3 shape.
     expect(Object.prototype.hasOwnProperty.call(result.overrides, 'magiBootstrapForFirstTwoYears')).toBe(false);
-    // Unrelated override keys survive.
     expect(result.overrides.magiCap).toEqual({ disabled: true });
   });
 
@@ -190,14 +159,10 @@ describe('scenario v3 → v4 → v5 MAGI-cap window schedule', () => {
     const windows = result.overrides.magiCap.windows;
     expect(windows).toHaveLength(1);
     const w = windows[0];
-    // Old value carried into the renamed ceiling field, unit unchanged (dollars).
     expect(w.magiCeilingAnnualDollars).toBe(75_000);
-    // Backward-compatible behavior defaults (no behavior change for existing scenarios).
     expect(w.capMode).toBe('minimize');
     expect(w.capMagiLine).toBe('irmaa');
     expect(Object.prototype.hasOwnProperty.call(w, 'targetRothAccountId')).toBe(false);
-    // The legacy gate (endAgeMemberRole/endAge) became the window's start
-    // (retirement) + age-end anchor.
     expect(w.start).toEqual({ kind: 'retirementStart' });
     expect(w.end).toEqual({ kind: 'age', memberId: 'primary', years: 65, months: 0 });
   });
@@ -309,7 +274,7 @@ describe('scenario v5 → v6 per-category inflation categoryRates', () => {
       overrides: { magiCap: { disabled: true }, withdrawalStrategy: { kind: 'taxEfficient' } },
     };
     const result = migrate('scenario', payload, 5);
-    expect(result).toBe(payload); // same reference — additive-only
+    expect(result).toBe(payload);
   });
 
   it('passes through a clean inflation override (general rate, no categoryRates)', () => {
@@ -360,7 +325,6 @@ describe('scenario v5 → v6 per-category inflation categoryRates', () => {
     const cleaned = result.overrides.inflation.categoryRates;
     expect(cleaned).toEqual({ 'cat-ok': 6 });
     expect(Object.prototype.hasOwnProperty.call(cleaned, '__proto__')).toBe(false);
-    // No prototype pollution.
     expect((Object.prototype as Record<string, unknown>)['9']).toBeUndefined();
   });
 
@@ -377,7 +341,6 @@ describe('scenario v5 → v6 per-category inflation categoryRates', () => {
     expect(
       Object.prototype.hasOwnProperty.call(result.overrides.inflation, 'categoryRates'),
     ).toBe(false);
-    // The general rate survives.
     expect(result.overrides.inflation.ratePct).toBe(3);
   });
 
@@ -393,13 +356,8 @@ describe('scenario v5 → v6 per-category inflation categoryRates', () => {
   });
 
   it('schema-ahead guard: an ahead scenario is rejected by an older client (currentSchemaVersion gate)', () => {
-    // An older client has currentSchemaVersion('scenario') < an ahead
-    // payload's schemaVersion. We assert the current code is at v9 (the
-    // guard fires when a stored schemaVersion exceeds the client's current).
+    // An older client's `currentSchemaVersion` is below an ahead payload's schemaVersion; `migrate` never downgrades.
     expect(currentSchemaVersion('scenario')).toBe(9);
-    // The migrate engine never downgrades: asked to migrate from a version
-    // ahead of current, it passes through (the schema-ahead VersionBanner
-    // gate lives in the read path, not the migrate fn).
     const ahead = { schemaVersion: 10, overrides: {} };
     expect(migrate('scenario', ahead, 10)).toBe(ahead);
   });
@@ -407,9 +365,7 @@ describe('scenario v5 → v6 per-category inflation categoryRates', () => {
 
 describe('scenario v7 → v8 accountFloors minimum-balance-floor add', () => {
   it('migrates a v7 scenario WITHOUT accountFloors to v8 as an identity (no floor)', () => {
-    // Additive sparse-optional section: a v7 payload that never carried
-    // `accountFloors` is a valid v8 payload as-is (absent ⇒ no floor for any
-    // account, the correct default). The step returns its input reference.
+    // A v7 payload without `accountFloors` is already a valid v8 payload: the step is identity.
     const payload: Record<string, unknown> = {
       schemaVersion: 7,
       name: 'Baseline',
@@ -418,7 +374,6 @@ describe('scenario v7 → v8 accountFloors minimum-balance-floor add', () => {
     const result = migrate('scenario', payload, 7) as unknown as {
       overrides: Record<string, unknown>;
     };
-    // Identity: the absent `accountFloors` key stays absent (no floor).
     expect('accountFloors' in result.overrides).toBe(false);
     expect(result.overrides.inflation).toEqual({ ratePct: 3 });
   });
@@ -439,9 +394,6 @@ describe('scenario v7 → v8 accountFloors minimum-balance-floor add', () => {
   });
 
   it('AGGREGATE_VERSION_UNSUPPORTED still triggers for a schemaVersion above current', () => {
-    // A floored scenario stored at a version ABOVE the client's current (v9)
-    // is schema-ahead — the migrate engine passes it through unchanged (the
-    // VersionBanner read-path gate rejects it).
     expect(currentSchemaVersion('scenario')).toBe(9);
     const ahead = { schemaVersion: 10, overrides: { accountFloors: { perAccount: {} } } };
     expect(migrate('scenario', ahead, 10)).toBe(ahead);
@@ -456,7 +408,6 @@ describe('scenario v8 → v9 remove-combined-pot withdrawal-strategy migration',
   it('(a) rewrites an absent withdrawalStrategy to taxEfficient', () => {
     const result = migrateV8({ schemaVersion: 8, overrides: { inflation: { ratePct: 3 } } });
     expect(result.overrides?.withdrawalStrategy).toEqual({ kind: 'taxEfficient' });
-    // Other overrides are preserved.
     expect((result.overrides as Record<string, unknown>).inflation).toEqual({ ratePct: 3 });
   });
 
@@ -472,7 +423,6 @@ describe('scenario v8 → v9 remove-combined-pot withdrawal-strategy migration',
     for (const kind of ['taxEfficient', 'proportional', 'rothFirst', 'customOrder'] as const) {
       const payload = { schemaVersion: 8, overrides: { withdrawalStrategy: { kind } } };
       const result = migrate('scenario', payload, 8);
-      // Identity (same reference) for an already-named strategy.
       expect(result).toBe(payload);
     }
   });
@@ -487,7 +437,6 @@ describe('scenario v8 → v9 remove-combined-pot withdrawal-strategy migration',
 
   it('(e) is idempotent: a migrated v9 payload re-run stays stable', () => {
     const once = migrateV8({ schemaVersion: 8, overrides: { inflation: { ratePct: 3 } } });
-    // Re-running the v8→v9 step on the already-migrated payload is identity.
     const twice = migrate('scenario', once as unknown as Record<string, unknown>, 8) as unknown as StrategyOverrides;
     expect(twice.overrides?.withdrawalStrategy).toEqual({ kind: 'taxEfficient' });
     expect(twice).toBe(once);
@@ -499,7 +448,6 @@ describe('scenario v8 → v9 remove-combined-pot withdrawal-strategy migration',
       overrides: { withdrawalStrategy: { kind: 'bogusKind' } },
     });
     expect(result.overrides?.withdrawalStrategy).toEqual({ kind: 'taxEfficient' });
-    // A non-object strategy value also coerces.
     const result2 = migrateV8({
       schemaVersion: 8,
       overrides: { withdrawalStrategy: 'combinedPot' as unknown as { kind: string } },
@@ -523,7 +471,6 @@ describe('account v1 → v2 HSA tax-treatment migration', () => {
     );
     expect(result.taxTreatment).toBe('HSA');
     expect(result.type).toBe('HSA');
-    // HSA contributions live on the pre-tax side; already-pre-tax amount survives.
     expect(result.plannedContributionPreTax).toBe(4150);
     expect(result.plannedContributionPostTax).toBe(0);
   });
@@ -540,8 +487,6 @@ describe('account v1 → v2 HSA tax-treatment migration', () => {
       1,
     );
     expect(result.taxTreatment).toBe('HSA');
-    // HSA contributions are pre-tax: a legacy post-tax-stored amount is
-    // consolidated onto the pre-tax field (pre + post) so it is not dropped.
     expect(result.plannedContributionPreTax).toBe(4150);
     expect(result.plannedContributionPostTax).toBe(0);
   });
@@ -550,7 +495,7 @@ describe('account v1 → v2 HSA tax-treatment migration', () => {
     const payload = { type: 'RETIREMENT_IRA', taxTreatment: 'PRE_TAX' };
     const result = migrate('account', payload, 1);
     expect(result.taxTreatment).toBe('PRE_TAX');
-    expect(result).toBe(payload); // same reference — migration returns input untouched
+    expect(result).toBe(payload);
   });
 });
 
@@ -570,8 +515,6 @@ describe('account v2 → v3 Roth tax-treatment migration', () => {
     );
     expect(result.taxTreatment).toBe('ROTH');
     expect(result.type).toBe('RETIREMENT_ROTH_IRA');
-    // Roth is post-tax funded — contribution fields are NOT consolidated
-    // (unlike the HSA migration); the post-tax amount survives untouched.
     expect(result.plannedContributionPreTax).toBe(0);
     expect(result.plannedContributionPostTax).toBe(7000);
   });
@@ -580,18 +523,17 @@ describe('account v2 → v3 Roth tax-treatment migration', () => {
     const payload = { type: 'BROKERAGE', taxTreatment: 'POST_TAX' };
     const result = migrate('account', payload, 2);
     expect(result.taxTreatment).toBe('POST_TAX');
-    expect(result).toBe(payload); // same reference — v2→v3 leaves it untouched
+    expect(result).toBe(payload);
   });
 
   it('leaves an HSA-treatment account unchanged at v2→v3', () => {
     const payload = { type: 'HSA', taxTreatment: 'HSA' };
     const result = migrate('account', payload, 2);
     expect(result.taxTreatment).toBe('HSA');
-    expect(result).toBe(payload); // same reference — v2→v3 leaves it untouched
+    expect(result).toBe(payload);
   });
 
   it('chains a v1 Roth IRA all the way to v3 with taxTreatment ROTH', () => {
-    // v1→v2 (HSA migration, no-op for a Roth IRA) then v2→v3 (Roth migration).
     const result = migrate(
       'account',
       {
@@ -617,7 +559,7 @@ describe('account v3 → v4 contributionGrowthPct add', () => {
     };
     const result = migrate('account', payload, 3);
     expect('contributionGrowthPct' in result).toBe(false);
-    expect(result).toBe(payload); // same reference — clean payload untouched
+    expect(result).toBe(payload);
   });
 
   it('explicit 0 persists (NOT collapsed to absent)', () => {
@@ -672,7 +614,7 @@ describe('account v4 → v5 Roth distribution-tax facts', () => {
       plannedContributionPostTax: 3000,
     };
     const result = migrate('account', payload, 4);
-    expect(result).toBe(payload); // same ref — no invented stored default
+    expect(result).toBe(payload);
     expect('rothIraRegularContributionBasis' in result).toBe(false);
     expect('rothIraConversionLots' in result).toBe(false);
   });
@@ -685,8 +627,7 @@ describe('account v4 → v5 Roth distribution-tax facts', () => {
       rothIraFirstContributionTaxYear: 2015,
     };
     const result = migrate('account', payload, 4) as Record<string, unknown>;
-    // v6→v7 maps the key to undefined rather than deleting it (policy: never
-    // delete keys older snapshots might still carry).
+    // v6→v7 maps the key to undefined rather than deleting it: older snapshots may still carry it.
     expect('rothIraRegularContributionBasis' in result).toBe(true);
     expect(result.rothIraRegularContributionBasis).toBeUndefined();
     expect(result.rothIraFirstContributionTaxYear).toBe(2015);
@@ -738,7 +679,7 @@ describe('account v4 → v5 Roth distribution-tax facts', () => {
       {
         schemaVersion: 1,
         type: 'RETIREMENT_ROTH_IRA',
-        taxTreatment: 'POST_TAX', // v2→v3 rewrites this to ROTH
+        taxTreatment: 'POST_TAX',
         plannedContributionPreTax: 0,
         plannedContributionPostTax: 3000,
         rothIraRegularContributionBasis: 21000,
@@ -756,8 +697,7 @@ describe('account v4 → v5 Roth distribution-tax facts', () => {
     ['NaN designated basis', Number.NaN],
     ['negative designated basis', -100],
     ['Infinity designated basis', Number.POSITIVE_INFINITY],
-    // An extreme-but-finite value whose ×100 cents would overflow the safe-
-    // integer range must NOT survive migration.
+    // A finite value whose ×100 cents overflows the safe-integer range must not survive migration.
     ['out-of-magnitude designated basis', 1e308],
   ])('sanitises a corrupt %s by dropping the field', (_label, basis) => {
     const payload = {
@@ -797,20 +737,14 @@ describe('account v4 → v5 Roth distribution-tax facts', () => {
   });
 
   it('leaves the retired lot arrays alone, whatever shape they are in', () => {
-    // This step used to sanitise both per-transfer lot arrays, dropping a
-    // non-array outright. Both dated Roth facts moved to the annual balance rows
-    // and nothing reads these keys, so the sanitiser was cleaning
-    // data no consumer can see. A stored value now rides along inert — the same
-    // disposition the registry's intentional-omission note records for the
-    // removal — and re-saving the account drops it, because the editor rebuilds
-    // the payload from scratch.
+    // A stored lot array rides along inert: both dated Roth facts moved to the annual balance rows and nothing reads these keys.
     const payload = {
       type: 'RETIREMENT_ROTH_401K',
       taxTreatment: 'ROTH',
       designatedRothInPlanRolloverLots: 'not-an-array',
     };
     const result = migrate('account', payload, 4);
-    expect(result).toBe(payload); // untouched, same reference
+    expect(result).toBe(payload);
     expect(result.designatedRothInPlanRolloverLots).toBe('not-an-array');
   });
 });
@@ -822,7 +756,7 @@ describe('account v5 → v6 RMD profile facts (RMD engine)', () => {
       taxTreatment: 'PRE_TAX',
     };
     const result = migrate('account', payload, 5);
-    expect(result).toBe(payload); // same ref — no invented stored default
+    expect(result).toBe(payload);
     expect('rmdInheritedAccount' in result).toBe(false);
     expect('rmdBeneficiaryType' in result).toBe(false);
   });
@@ -867,8 +801,6 @@ describe('account v5 → v6 RMD profile facts (RMD engine)', () => {
   });
 
   it('does NOT invent inherited beneficiary state — a partial inherited payload keeps its gaps', () => {
-    // Only the inherited flag is set; the migration must NOT synthesise a
-    // beneficiary type / death date / RBD flag (the engine withholds later).
     const payload = {
       type: 'RETIREMENT_IRA',
       taxTreatment: 'PRE_TAX',
@@ -958,9 +890,7 @@ describe('account v5 → v6 RMD profile facts (RMD engine)', () => {
     expect('rmdBeneficiaryElection' in result).toBe(false);
   });
 
-  // Implausible in-range-but-out-of-bounds dates are dropped, never
-  // invented. Bounds [1900, 2200]; test one year before/after each and a
-  // wildly-out-of-range year.
+  // Out-of-bounds dates (bounds 1900 to 2200) are dropped, never invented.
   it.each([
     ['one year before the lower bound (1899)', '1899-06-15', false],
     ['exactly the lower bound (1900)', '1900-06-15', true],
@@ -1017,7 +947,6 @@ describe('account v6 → v7 Roth-basis dollar-total removal', () => {
     expect(result.rothIraRegularContributionBasis).toBeUndefined();
     expect('designatedRothBasis' in result).toBe(true);
     expect(result.designatedRothBasis).toBeUndefined();
-    // Every other field survives untouched.
     expect(result.rothIraFirstContributionTaxYear).toBe(2015);
     expect(result.designatedRothFirstParticipationTaxYear).toBe(2012);
     expect(result.rmdInheritedAccount).toBe(true);
@@ -1045,8 +974,6 @@ describe('account v6 → v7 Roth-basis dollar-total removal', () => {
       rothIraFirstContributionTaxYear: 2015,
     };
     const once = migrate('account', payload, 6) as Record<string, unknown>;
-    // Re-run the SAME v6→v7 step on its own output (fromVersion 6 again — the
-    // step is the only one between v6 and current).
     const twice = migrate('account', once, 6) as Record<string, unknown>;
     expect(twice).toEqual(once);
   });
@@ -1060,10 +987,9 @@ describe('account v6 → v7 Roth-basis dollar-total removal', () => {
 
 describe('scenario v6 → v7 per-account contributionGrowthPct override', () => {
   it('passes a scenario with no accountContributions through unchanged', () => {
-    // Named strategy so the v8→v9 active transform leaves the payload identity.
     const payload = { schemaVersion: 6, overrides: { withdrawalStrategy: { kind: 'taxEfficient' } } };
     const result = migrate('scenario', payload, 6);
-    expect(result).toBe(payload); // identity reference
+    expect(result).toBe(payload);
   });
 
   it('preserves a valid per-account growth override distinct from the baseline', () => {
@@ -1147,10 +1073,7 @@ describe('scenario v6 → v7 per-account contributionGrowthPct override', () => 
       'rothConversionNontaxableAmount',
     ] as const;
 
-    // A v1 row predates both keys, so the step is an identity pass on every
-    // record it can actually meet. It sanitises only because an import or a
-    // hand-edited bundle can carry the keys with values the engine must never
-    // read as money.
+    // A v1 row predates both keys; the step sanitises only because an import or hand-edited bundle can carry values the engine must never read as money.
     it('returns a clean v1 payload by reference (no copy)', () => {
       const payload = { schemaVersion: 1, accountId: 'a1', year: 2024 };
       expect(migrate('accountBalance', payload, 1)).toBe(payload);

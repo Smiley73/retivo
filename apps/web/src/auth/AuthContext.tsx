@@ -73,8 +73,6 @@ import { PasswordChangeCommittedError, PasswordChangeNotSentError } from './type
 
 export type {
   Role,
-  MfaChallengeState,
-  VerifyMfaResult,
   AccountRecord,
   PasskeyInfo,
   DeviceClearAttempt,

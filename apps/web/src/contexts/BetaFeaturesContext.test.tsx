@@ -72,8 +72,7 @@ describe('BetaFeaturesContext', () => {
 
   it('re-reads the preference for the new user on the SAME render the userId changes (no stale frame)', () => {
     localStorage.setItem('retivo.betaFeatures.u-9', 'on');
-    // Mount anonymous (off) — the pre-login state — then flip to the opted-in
-    // user. Every committed render under u-9 must already read "on".
+    // Mount anonymous (off), then flip to the opted-in user: every committed render under u-9 must already read "on".
     const seen: string[] = [];
     const Spy: React.FC = () => {
       seen.push(String(useBetaFeatures().showBetaFeatures));

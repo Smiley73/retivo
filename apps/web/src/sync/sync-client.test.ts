@@ -1,14 +1,7 @@
-/**
- * HttpSyncClient unit tests — covers the 401 refresh-and-retry path
- * added to align sync transport behavior with api/client.ts.
- */
+// HttpSyncClient unit tests, including the 401 refresh-and-retry path shared with api/client.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// HttpSyncClient is shared with the sync
-// loop, so it must NEVER raise the shared wait notice itself (the exclusion
-// is by call site — server-data-export.ts raises over this same transport,
-// this module deliberately does not). Mocked so a future regression that
-// adds a raise call here fails loudly instead of silently.
+// This transport is shared with the sync loop and must never raise the shared wait notice itself; mocked so a regression fails loudly.
 const raiseWaitNotice = vi.fn();
 vi.mock('../lib/toast-queue', () => ({
   raiseWaitNotice: (...args: unknown[]) => raiseWaitNotice(...args),
@@ -27,7 +20,6 @@ import { generateHdk } from '../crypto/key-wrapping';
 import type { PendingMutation } from '../db/types';
 import type { EncryptedPayloadEnvelope } from '../crypto/encryption-types';
 
-// Minimal mock for global fetch
 const fetchMock = vi.fn<typeof fetch>();
 vi.stubGlobal('fetch', fetchMock);
 
@@ -64,7 +56,6 @@ describe('HttpSyncClient', () => {
     const refreshed = 'fresh-token';
     (deps.refreshAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(refreshed);
 
-    // First call returns 401, second succeeds
     fetchMock
       .mockResolvedValueOnce(makeResponse(401, { error: { code: 'UNAUTHENTICATED', message: 'expired' } }))
       .mockResolvedValueOnce(makeResponse(200, { changes: [], newCursor: '1', hasMore: false }));
@@ -73,7 +64,6 @@ describe('HttpSyncClient', () => {
 
     expect(deps.refreshAccessToken).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    // Second call should carry the refreshed token
     const secondCallHeaders = (fetchMock.mock.calls[1]![1] as RequestInit).headers as Record<string, string>;
     expect(secondCallHeaders['Authorization']).toBe(`Bearer ${refreshed}`);
     expect(result).toEqual({ changes: [], newCursor: '1', hasMore: false });
@@ -93,8 +83,6 @@ describe('HttpSyncClient', () => {
     expect(err.traceId).toBe('tr-1');
   });
 
-  // SyncApiError carries the parsed
-  // Retry-After from the failing response.
   it('carries a parsed Retry-After on SyncApiError', async () => {
     fetchMock.mockResolvedValueOnce(
       makeResponse(
@@ -107,9 +95,6 @@ describe('HttpSyncClient', () => {
     const err = await client.pull({ since: '0' }).catch((e) => e);
     expect(err).toBeInstanceOf(SyncApiError);
     expect(err.retryAfterMs).toBe(30_000);
-    // This transport is shared with the sync loop (badge-only) — it
-    // must never raise the shared notice itself, regardless of what the
-    // response carried.
     expect(raiseWaitNotice).not.toHaveBeenCalled();
   });
 
@@ -123,11 +108,8 @@ describe('HttpSyncClient', () => {
     expect(err.retryAfterMs ?? null).toBeNull();
   });
 
-  // API Gateway's own stage-throttle 429 (infrastructure `apiThrottleRatePerSec`
-  // / `apiThrottleBurst`) never reaches the Lambda: the body is the gateway's
-  // `{"message":"Too Many Requests"}` — no `error` envelope, no Retry-After,
-  // no X-Build-Id. It must surface as a retryable UPSTREAM_ERROR 429, never be
-  // mistaken for a session problem, and never trigger the refresh path.
+  // API Gateway's own stage-throttle 429 never reaches the Lambda: its body has no `error` envelope, Retry-After or X-Build-Id.
+  // It must surface as a retryable UPSTREAM_ERROR 429, never as a session problem or a refresh.
   it('maps an API-Gateway-shaped 429 (no error envelope, no Retry-After) to a retryable UPSTREAM_ERROR', async () => {
     fetchMock.mockResolvedValueOnce(
       makeResponse(429, { message: 'Too Many Requests' }),
@@ -220,8 +202,6 @@ describe('HttpSyncClient — clearWorkspace', () => {
     const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
     expect(url).toBe('http://localhost:3001/api/v1/sync/workspace/clear');
     expect(init.method).toBe('POST');
-    // Positive CSRF assertion (AGENTS.md: verify the header is actually sent on
-    // a new state-changing endpoint — not just the server-side missing→403).
     expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-tok');
     expect(JSON.parse(init.body as string)).toEqual({
       currentPassword: 'pw',
@@ -252,8 +232,6 @@ describe('HttpSyncClient — clearWorkspace', () => {
         error: { code: 'INVALID_CREDENTIALS', message: 'Current password is incorrect.' },
       }),
     );
-    // No refresh path: a session-valid wrong-password 401 still surfaces as a
-    // SyncApiError once refresh returns null (session not the failure axis).
     (deps.refreshAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
     const err = await client
@@ -265,11 +243,8 @@ describe('HttpSyncClient — clearWorkspace', () => {
   });
 
   it('does NOT refresh + retry on a 401 INVALID_CREDENTIALS (business-logic 401, not token expiry)', async () => {
-    // A wrong-password 401 from POST /sync/workspace/clear is the endpoint's own
-    // business rejection, NOT an expired access token. Replaying it would fire
-    // the destructive clear TWICE, double-counting the server's per-account
-    // backoff + audit trail. The client must NOT call refreshAccessToken and
-    // must send exactly one request.
+    // A wrong-password 401 from POST /sync/workspace/clear is the endpoint's own rejection, not an expired token; replaying it
+    // would fire the destructive clear twice, so there is no refresh and exactly one request.
     fetchMock.mockResolvedValueOnce(
       makeResponse(401, {
         error: { code: 'INVALID_CREDENTIALS', message: 'Current password is incorrect.' },
@@ -334,7 +309,6 @@ describe('HttpSyncClient — zero-knowledge freshness', () => {
     await expect(
       client.push({ householdId: 'hh-1', deviceId: 'dev-1', mutations: [makePending()] }),
     ).rejects.toThrow(/HDK is null/);
-    // No HTTP request should be made when the HDK is unavailable.
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -354,10 +328,7 @@ describe('HttpSyncClient — zero-knowledge freshness', () => {
   it('does NOT internally retry a push rejected 400 FRESHNESS_HEAD_INVALID (server head validation)', async () => {
     const key = await genKey();
     const refreshAccessToken = vi.fn();
-    // The server strictly validates the freshness head and returns a
-    // distinguishable 400 code. The HTTP wrapper retries ONLY an
-    // access-token-expiry 401 — a 400 is terminal and surfaces as a SyncApiError
-    // the SyncContext push-catch keys on to park the batch `failed-error`.
+    // The server's 400 for a bad freshness head is terminal (only an expiry 401 is retried); it surfaces as a SyncApiError the push-catch parks as `failed-error`.
     fetchMock.mockResolvedValueOnce(
       makeResponse(400, {
         error: { code: 'FRESHNESS_HEAD_INVALID', message: 'freshnessHead invalid', traceId: 'tr-fh' },
@@ -382,8 +353,6 @@ describe('HttpSyncClient — zero-knowledge freshness', () => {
 
   it('computes and sends an encrypted freshnessHead when getHdk returns a key', async () => {
     const key = await genKey();
-    // The server echoes a head carrying a valid tag for the proposed
-    // counter (bumpCounter(0) === 1); push now verifies the echoed head.
     fetchMock.mockResolvedValueOnce(
       makeResponse(201, {
         applied: [],
@@ -405,9 +374,7 @@ describe('HttpSyncClient — zero-knowledge freshness', () => {
     expect(head.freshnessCounter).toBe(1);
     expect(typeof head.cursorTag).toBe('string');
     expect(head.cursorTag.length).toBeGreaterThan(0);
-    // The MAC is the canonical tag over the proposed counter.
     expect(head.cursorTag).toBe(await computeCursorTag(1, key));
-    // Payload is now an encrypted envelope, not the plaintext record.
     const payload = (body.mutations as Array<{ payload: Record<string, unknown> }>)[0]!.payload;
     expect(payload.encryptionVersion).toBe(1);
     expect(payload.alg).toBe('AES-256-GCM');
@@ -468,7 +435,6 @@ describe('HttpSyncClient — zero-knowledge freshness', () => {
         changes: [],
         newCursor: '1',
         hasMore: false,
-        // Counter not below the pin, but the tag is garbage → MAC fails.
         freshnessHead: { freshnessCounter: 2, cursorTag: 'not-a-valid-tag' },
       }),
     );
@@ -515,11 +481,7 @@ describe('HttpSyncClient — zero-knowledge freshness', () => {
   });
 
   it('push RESOLVES (no rollback) when the response omits freshnessHead with an existing pin', async () => {
-    // The push head echo is best-effort and non-atomic with mutation
-    // acceptance. A successful commit whose head echo
-    // failed (absent) must NOT present as a rollback — push keeps the pin and
-    // returns normally. (Contrast: pull/bootstrap still REJECT a missing head
-    // with a pin — the dedicated tests above cover that strict path.)
+    // The push head echo is best-effort and non-atomic with acceptance: a committed push with an absent echo must not read as a rollback (pull/bootstrap still reject a missing head).
     const key = await genKey();
     const pinned = 3;
     fetchMock.mockResolvedValueOnce(
@@ -538,7 +500,6 @@ describe('HttpSyncClient — zero-knowledge freshness', () => {
       mutations: [makePending()],
     });
     expect(result.syncCursor).toBe('1');
-    // The client never mutates the pin — it stays whatever the caller holds.
     expect(pinned).toBe(3);
   });
 
@@ -615,7 +576,6 @@ describe('HttpSyncClient — payload guard', () => {
     });
   }
 
-  // --- pull -------------------------------------------------------------
 
   it('pull rejects the WHOLE response when HDK is held and a row is plain (not-envelope)', async () => {
     const key = await genKey();
@@ -680,8 +640,6 @@ describe('HttpSyncClient — payload guard', () => {
       reportDecryptOutcome: report,
     });
     const result = await client.pull({ since: '0' });
-    // The bad row is dropped — never applied — and the response otherwise
-    // resolves normally (a single bad row must not wedge the pull).
     expect(result.changes).toEqual([]);
     expect(report).toHaveBeenCalledWith({
       quarantined: [{ aggregateId: 'agg-1', aggregateType: 'account', version: 1 }],
@@ -719,7 +677,6 @@ describe('HttpSyncClient — payload guard', () => {
     expect(result.changes[0]!.payload).toEqual({ name: 'Checking', balance: 100 });
   });
 
-  // --- bootstrap ----------------------------------------------------------
 
   it('bootstrap rejects the WHOLE response when a SNAPSHOT aggregate is plain (not-envelope)', async () => {
     const key = await genKey();
@@ -831,11 +788,7 @@ describe('HttpSyncClient — payload guard', () => {
 
   it('bootstrap decrypts a genuine snapshot aggregate and a genuine post-snapshot mutation (regression)', async () => {
     const key = await genKey();
-    // Deliberately distinct household ids so this test actually exercises
-    // which source each half of bootstrap() binds into the AAD: the
-    // snapshot half must bind `workspaceSnapshot.householdId`, the
-    // post-snapshot half must bind the client's own `deps.getHouseholdId()`
-    // — a swap between the two would fail to decrypt below.
+    // Distinct household ids exercise which source each half of bootstrap() binds into the AAD; swapping them would fail to decrypt.
     const snapshotHouseholdId = 'hh-snapshot';
     const clientHouseholdId = 'hh-client';
     const snapshotEnvelope = await encryptPayload(
@@ -911,7 +864,6 @@ describe('HttpSyncClient — pull/bootstrap wire-schema validation (@retirement/
 
   beforeEach(() => {
     fetchMock.mockReset();
-    // The boundary parse warns-and-degrades; assert on it explicitly.
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
@@ -921,8 +873,7 @@ describe('HttpSyncClient — pull/bootstrap wire-schema validation (@retirement/
     vi.restoreAllMocks();
   });
 
-  // No getHdk → dark path: no decrypt / freshness, so pull/bootstrap return the
-  // parsed body straight from the boundary. Isolates the schema-validation step.
+  // With no getHdk there is no decrypt or freshness step, which isolates the schema-validation boundary.
   function darkClient(): HttpSyncClient {
     return new HttpSyncClient({
       apiBaseUrl: 'http://localhost:3001',
@@ -942,7 +893,6 @@ describe('HttpSyncClient — pull/bootstrap wire-schema validation (@retirement/
     deviceId: 'dev-1',
   };
 
-  // (a) positive — a current valid pull envelope parses cleanly (no warning).
   it('applies a valid pull envelope unchanged and does not warn', async () => {
     const body = { changes: [validChange], newCursor: '5', hasMore: false };
     fetchMock.mockResolvedValueOnce(makeResponse(200, body));
@@ -953,7 +903,6 @@ describe('HttpSyncClient — pull/bootstrap wire-schema validation (@retirement/
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  // (a) positive — a current valid bootstrap envelope parses cleanly.
   it('applies a valid bootstrap envelope unchanged and does not warn', async () => {
     const body = {
       snapshotId: null,
@@ -984,10 +933,7 @@ describe('HttpSyncClient — pull/bootstrap wire-schema validation (@retirement/
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  // (b) negative — an unknown `aggregateType` must NOT hard-fail the pull; the
-  // existing warn-and-skip in SyncContext (a separate, working code path) owns
-  // it. The schema keeps `aggregateType` a plain string, so the row passes the
-  // boundary untouched and the sync cycle is never aborted here.
+  // An unknown `aggregateType` must not fail the pull: it passes the boundary untouched and SyncContext's warn-and-skip owns it.
   it('does not hard-fail a pull carrying an unknown aggregateType', async () => {
     const body = {
       changes: [{ ...validChange, aggregateType: 'retiredMysteryType' }],
@@ -1002,9 +948,6 @@ describe('HttpSyncClient — pull/bootstrap wire-schema validation (@retirement/
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  // (c) a known-type envelope with an unexpected EXTRA field still applies. The
-  // extra field doesn't fail validation, and the original body is returned so
-  // the field survives for any downstream consumer.
   it('applies a known-type envelope carrying an unexpected extra field', async () => {
     const body = {
       changes: [{ ...validChange, surpriseFutureField: 'keep-me' }],
@@ -1020,11 +963,9 @@ describe('HttpSyncClient — pull/bootstrap wire-schema validation (@retirement/
     ).toBe('keep-me');
   });
 
-  // (c) a known-type field DRIFT (a required field retyped) fails safeParse but
-  // must DEGRADE — warn and still apply — never throw-and-abort the sync cycle.
+  // A retyped known field fails safeParse but must degrade (warn, still apply), never abort the sync cycle.
   it('degrades (warns, still applies, never throws) on a known-type field drift', async () => {
     const body = {
-      // `version` retyped string→ genuine known-type drift that safeParse rejects.
       changes: [{ ...validChange, version: 'not-a-number' }],
       newCursor: '5',
       hasMore: false,
@@ -1033,18 +974,14 @@ describe('HttpSyncClient — pull/bootstrap wire-schema validation (@retirement/
 
     const result = await darkClient().pull({ since: '0' });
 
-    // A diagnostic warning was emitted (drift is observable)...
     expect(warnSpy).toHaveBeenCalledOnce();
     expect(String(warnSpy.mock.calls[0]![0])).toContain('field-permissive degrade');
-    // ...but the pull was NOT aborted — the change is still applied as-is.
     expect(result.changes[0]!.aggregateId).toBe('agg-1');
     expect((result.changes[0] as unknown as Record<string, unknown>).version).toBe(
       'not-a-number',
     );
   });
 
-  // (c) a MISSING OPTIONAL field (freshnessHead absent) is not drift — it parses
-  // cleanly and applies with no warning.
   it('applies a bootstrap envelope missing the optional freshnessHead without warning', async () => {
     const body = {
       snapshotId: null,
@@ -1097,8 +1034,6 @@ describe('createExportSyncTransport', () => {
     const pull = await transport.pull({ since: boot.syncCursor });
 
     expect(pull.hasMore).toBe(false);
-    // Both legs are GETs that include credentials (the export-authorization
-    // cookie), and no POST /sync/push is ever issued.
     for (const call of fetchMock.mock.calls) {
       const init = call[1] as RequestInit;
       expect(init.method).toBe('GET');
@@ -1108,11 +1043,7 @@ describe('createExportSyncTransport', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // The export-bundle path deliberately
-  // never retries (server-data-export.ts's bootstrap/pull loop must fail
-  // visibly rather than continue from a partial baseline), but a served
-  // Retry-After must still survive on the SyncApiError this transport
-  // throws — the wait-notice countdown is raised from exactly this value.
+  // The export path never retries, but a served Retry-After must survive on the thrown SyncApiError: the wait-notice countdown is raised from it.
   it('carries a parsed Retry-After on a SyncApiError thrown out of the export transport', async () => {
     const { createExportSyncTransport } = await import('./sync-client');
     const transport = createExportSyncTransport({
@@ -1159,9 +1090,6 @@ describe('HttpSyncClient decrypt quarantine', () => {
       householdId,
     )) as EncryptedPayloadEnvelope;
     if (overrides.corrupt) {
-      // Flip the last base64url char of the ciphertext — GCM auth-tag
-      // verification fails, throwing PayloadCryptoError (never a silent
-      // wrong-plaintext decrypt).
       const flipped = envelope.ciphertext.slice(0, -1) + (envelope.ciphertext.endsWith('A') ? 'B' : 'A');
       envelope.ciphertext = flipped;
     }
@@ -1244,10 +1172,7 @@ describe('HttpSyncClient decrypt quarantine', () => {
         quarantined: [{ aggregateId: 'agg-bad', aggregateType: 'account', version: 3 }],
       }),
     );
-    // The quarantined rows' identities
-    // are also returned directly on the result, not only through the
-    // fire-and-forget `reportDecryptOutcome` side channel, so a `clearFirst`
-    // applier can carry each one's last readable local copy across its wipe.
+    // Quarantined identities are also returned on the result so a `clearFirst` applier can carry each one's last readable local copy across its wipe.
     expect(result.quarantined).toEqual([
       { aggregateId: 'agg-bad', aggregateType: 'account', version: 3 },
     ]);

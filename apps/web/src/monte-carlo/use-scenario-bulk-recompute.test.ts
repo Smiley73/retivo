@@ -1,14 +1,5 @@
-/**
- * Tests for the Scenarios "Recalculate all" concurrent worker-pool hook.
- *
- * Drives the hook through a fake `MinimalMcWorker` whose reply timing the
- * test controls (same harness shape as `mc-worker-pool.test.ts`), so we can
- * assert: forced N runs each patch + write-cache; numeric parity vs a direct
- * reference summary; seed parity (the hook runs the input the page built);
- * order-independence; per-scenario error tolerance; per-card progress map
- * update + clear on terminal reply; cancel/dispose; unmount disposal; and the
- * concurrency cap. The IDB cache is the real `fake-indexeddb` store.
- */
+// The Scenarios "Recalculate all" worker-pool hook, driven through a fake `MinimalMcWorker` whose reply timing the test
+// controls (same shape as `mc-worker-pool.test.ts`), with the real `fake-indexeddb` cache.
 import 'fake-indexeddb/auto';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,12 +17,7 @@ import { MC_PATH_COUNT } from '../lib/monte-carlo-scenario-input';
 
 const DEFAULT_SEED = 42;
 
-/** Bumped before every test and folded into `portfolioToday`, so no two tests
- *  share a cache key. The hook's cache write is a fire-and-forget async chain;
- *  a write left over from one test can land after the next test's cache clear,
- *  and with a shared key it would show up as a hit in that test's "was never
- *  cached" assertion. The seed cannot do this job: `mcCacheKey` drops it, so
- *  the key has to differ in a field it does include. */
+// Folded into `portfolioToday` so no two tests share a cache key: the hook's fire-and-forget cache write can land after the next test's clear, and `mcCacheKey` drops the seed.
 let testRun = 0;
 beforeEach(() => {
   testRun += 1;
@@ -110,8 +96,7 @@ function harness(seedById: Record<string, number> = {}): Harness {
 }
 
 afterEach(async () => {
-  // Flush all pending microtasks (e.g., void cache-write chains in the hook)
-  // before clearing so they cannot write after the clear and pollute later tests.
+  // Flush pending microtasks (the hook's cache-write chains) before clearing so they cannot write after the clear.
   await new Promise<void>((r) => {
     setTimeout(r, 0);
   });
@@ -135,7 +120,6 @@ describe('useScenarioBulkRecompute', () => {
       result.current.recalcAll(['a', 'b']);
       await Promise.resolve();
     });
-    // Two workers (concurrency 2, 2 items) each got one input.
     expect(h.built.length).toBe(2);
     const s = summaryFor(0.9);
     await act(async () => {
@@ -144,10 +128,8 @@ describe('useScenarioBulkRecompute', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    // Each scenario patched once from the in-hand summary.
     expect(h.onResult).toHaveBeenCalledTimes(2);
     expect(h.onResult.mock.calls.map((c) => c[0]).sort()).toEqual(['a', 'b']);
-    // … and write-cached under the shared key.
     const keyA = await mcCacheKey(inputFor('a'));
     const keyB = await mcCacheKey(inputFor('b'));
     expect(await getCached(keyA)).not.toBeNull();
@@ -174,8 +156,7 @@ describe('useScenarioBulkRecompute', () => {
       await Promise.resolve();
     });
     const patched = h.onResult.mock.calls[0][1] as MonteCarloSummary;
-    // Math-bearing fields equal the reference (computedAt excluded — it is
-    // wall-clock and not math-bearing).
+    // `computedAt` is wall-clock, not math-bearing, so it is excluded.
     expect(patched.successProbability).toBe(reference.successProbability);
     expect(patched.percentilesReal.p50).toEqual(reference.percentilesReal.p50);
     expect(patched.medianDepletionYear).toBe(reference.medianDepletionYear);
@@ -197,8 +178,7 @@ describe('useScenarioBulkRecompute', () => {
       result.current.recalcAll(['a']);
       await Promise.resolve();
     });
-    // The pool posted exactly the input the page's buildMcInput produced —
-    // including its seed (seed parity is the basis for "no math change").
+    // Seed parity is the basis for "no math change".
     expect(h.built[0].posted[0]).toEqual(inputFor('a', 7));
     expect((h.built[0].posted[0] as { seed: number }).seed).toBe(7);
   });
@@ -217,7 +197,6 @@ describe('useScenarioBulkRecompute', () => {
       result.current.recalcAll(['a', 'b']);
       await Promise.resolve();
     });
-    // Resolve worker 1 (scenario 'b') BEFORE worker 0 ('a').
     await act(async () => {
       h.built[1].resolveResult(summaryFor(0.6));
       h.built[0].resolveResult(summaryFor(0.4));
@@ -249,12 +228,10 @@ describe('useScenarioBulkRecompute', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    // Only the successful sibling patched + wrote; the errored card untouched.
     expect(h.onResult).toHaveBeenCalledTimes(1);
     expect(h.onResult.mock.calls[0][0]).toBe('b');
     expect(await getCached(await mcCacheKey(inputFor('a')))).toBeNull();
     expect(await getCached(await mcCacheKey(inputFor('b')))).not.toBeNull();
-    // The coarse counter still accounted both → batch completed (coarse null).
     expect(result.current.coarse).toBeNull();
   });
 
@@ -277,7 +254,6 @@ describe('useScenarioBulkRecompute', () => {
       await Promise.resolve();
     });
     expect(result.current.progressById.get('a')).toEqual({ done: 250, total: 1000 });
-    // Terminal reply clears that scenario's fine bar.
     await act(async () => {
       h.built[0].resolveResult(summaryFor(0.9));
       await Promise.resolve();
@@ -299,7 +275,6 @@ describe('useScenarioBulkRecompute', () => {
       result.current.recalcAll(['a', 'b', 'c']); // 'c' queued behind the pool
       await Promise.resolve();
     });
-    // Complete 'a', then cancel mid-flight.
     await act(async () => {
       h.built[0].resolveResult(summaryFor(0.9));
       await Promise.resolve();
@@ -308,11 +283,9 @@ describe('useScenarioBulkRecompute', () => {
       result.current.cancel();
       await Promise.resolve();
     });
-    // Both built workers terminated; coarse + progress cleared.
     expect(h.built.every((w) => w.terminated)).toBe(true);
     expect(result.current.coarse).toBeNull();
     expect(result.current.progressById.size).toBe(0);
-    // The completed card ('a') kept its fresh value; aborted/queued didn't fire.
     expect(h.onResult.mock.calls.map((c) => c[0])).toEqual(['a']);
   });
 
@@ -332,7 +305,6 @@ describe('useScenarioBulkRecompute', () => {
     });
     expect(h.built.some((w) => !w.terminated)).toBe(true);
     unmount();
-    // Every worker terminated → no leaked worker.
     expect(h.built.every((w) => w.terminated)).toBe(true);
   });
 
@@ -350,11 +322,9 @@ describe('useScenarioBulkRecompute', () => {
       result.current.recalcAll(['a', 'b', 'c', 'd']); // 4 items, cap 2
       await Promise.resolve();
     });
-    // Exactly two workers built; two inputs posted; 'c'/'d' wait in the queue.
     expect(h.built.length).toBe(2);
     const postedNow = h.built.reduce((n, w) => n + w.posted.length, 0);
     expect(postedNow).toBe(2);
-    // Free both slots → the queued pair dispatches (still ≤ 2 in flight).
     await act(async () => {
       h.built[0].resolveResult(summaryFor(0.9));
       h.built[1].resolveResult(summaryFor(0.9));
@@ -382,7 +352,6 @@ describe('useScenarioBulkRecompute', () => {
     expect(h.built.length).toBe(2);
     const firstBatch = h.built.slice();
     const postedBefore = h.built.reduce((n, w) => n + w.posted.length, 0);
-    // A second call while a run is active is a no-op: no new pool/workers.
     await act(async () => {
       result.current.recalcAll(['c', 'd', 'e']);
       result.current.recalcAll(['a', 'b']);
@@ -392,7 +361,6 @@ describe('useScenarioBulkRecompute', () => {
     expect(h.built).toEqual(firstBatch); // same instances, untouched
     expect(h.built.every((w) => !w.terminated)).toBe(true);
     expect(h.built.reduce((n, w) => n + w.posted.length, 0)).toBe(postedBefore);
-    // Resolve to drain the in-flight batch (clean up).
     await act(async () => {
       h.built[0].resolveResult(summaryFor(0.9));
       h.built[1].resolveResult(summaryFor(0.9));
@@ -417,7 +385,6 @@ describe('useScenarioBulkRecompute', () => {
     });
     const inFlight = h.built.slice();
     expect(inFlight.length).toBe(2);
-    // Cancel mid-flight, THEN a now-aborted worker delivers a late result.
     await act(async () => {
       result.current.cancel();
       await Promise.resolve();
@@ -427,7 +394,6 @@ describe('useScenarioBulkRecompute', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    // The late reply is dropped: no patch, coarse stays null, no cache write.
     expect(h.onResult).not.toHaveBeenCalled();
     expect(result.current.coarse).toBeNull();
     expect(await getCached(await mcCacheKey(inputFor('a')))).toBeNull();
@@ -444,7 +410,6 @@ describe('useScenarioBulkRecompute', () => {
         concurrency: 2,
       }),
     );
-    // Empty list → nothing runs.
     await act(async () => {
       result.current.recalcAll([]);
       await Promise.resolve();
@@ -452,7 +417,6 @@ describe('useScenarioBulkRecompute', () => {
     expect(h.built.length).toBe(0);
     expect(result.current.coarse).toBeNull();
     expect(result.current.isRunning).toBe(false);
-    // All inputs build to null → still nothing runs.
     await act(async () => {
       result.current.recalcAll(['a', 'b']);
       await Promise.resolve();

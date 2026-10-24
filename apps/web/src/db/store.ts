@@ -36,12 +36,9 @@ export class DatabaseDropBlockedError extends Error {
   }
 }
 
-/**
- * The v9 `openDB` upgrade stayed blocked past {@link IDB_BLOCKED_TIMEOUT_MS} (an older tab with no `blocking()` handler
- * still holds the IDB). Typed so callers see an honest failure, and `dbPromise` is reset so a retry works once that tab
- * closes.
- */
-export class DatabaseUpgradeBlockedError extends Error {
+// The v9 `openDB` upgrade stayed blocked past IDB_BLOCKED_TIMEOUT_MS (an older tab with no `blocking()` handler still
+// holds the IDB); `dbPromise` is reset so a retry works once that tab closes.
+class DatabaseUpgradeBlockedError extends Error {
   constructor() {
     super('IndexedDB upgrade was blocked by another connection and did not complete');
     this.name = 'DatabaseUpgradeBlockedError';
@@ -318,10 +315,9 @@ interface ArmableOpen {
 }
 
 // Wraps a pending `openDB` promise with a bounded blocked-timeout: once armed (from the `blocked()` callback) and
-// unresolved within {@link IDB_BLOCKED_TIMEOUT_MS} it rejects with {@link DatabaseUpgradeBlockedError} instead of
-// hanging. A late real resolution is closed and discarded, never returned as a half-state. Factored out of {@link db}
-// so the wait is unit-testable without a real `onblocked`, which `fake-indexeddb` cannot trigger.
-export function wrapOpenWithBlockedTimeout(
+// unresolved within IDB_BLOCKED_TIMEOUT_MS it rejects with DatabaseUpgradeBlockedError instead of hanging. A late real
+// resolution is closed and discarded, never returned as a half-state.
+function wrapOpenWithBlockedTimeout(
   openPromise: Promise<IDBPDatabase<Schema>>,
   capMs: number = IDB_BLOCKED_TIMEOUT_MS,
 ): ArmableOpen {
