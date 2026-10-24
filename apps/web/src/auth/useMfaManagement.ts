@@ -1,22 +1,5 @@
-/**
- * Authenticated MFA-management API surface (enforced MFA), split
- * out of AuthContext.tsx so that file does not grow past its recorded
- * shape-limit exception. These are thin `apiRequest` wrappers
- * over the guarded `/auth/mfa/*` management endpoints; they carry
- * no auth state of their own (the access token + CSRF cookie travel through the
- * shared `apiRequest` client), so a plain hook returning stable callbacks is
- * the whole surface. AuthContext re-exports the hook's methods through context;
- * the Security 2FA card consumes them via `useAuth()`.
- *
- * The endpoint paths + request/response shapes mirror the API controller
- * (apps/api/src/auth/auth.controller.ts) exactly:
- *   - GET    /auth/mfa/status                  → { totpEnabled, ... }
- *   - POST   /auth/mfa/totp/enroll/start       → { secret, otpauthUrl }
- *   - POST   /auth/mfa/totp/enroll/confirm     { code }            → { totpEnabled, noticeSent }
- *   - POST   /auth/mfa/totp/disable            { currentPassword } → { totpEnabled, noticeSent }
- *   - GET    /auth/mfa/trusted-devices         → { devices: [...] }
- *   - POST   /auth/mfa/trusted-devices/forget  { deviceIds? }      → 204
- */
+// Authenticated MFA-management API surface: thin `apiRequest` wrappers over the guarded `/auth/mfa/*` endpoints.
+// No auth state of its own; AuthContext re-exports the methods through context for the Security 2FA card.
 import { useCallback, useMemo } from 'react';
 import { apiRequest } from '../api/client';
 import { stepUpProofFields, type StepUpProof } from '../components/useStepUp';
@@ -28,18 +11,16 @@ export interface MfaStatus {
   enrolledAt?: string;
   /** ISO timestamp of the last successful TOTP verify, when present. */
   lastVerifiedAt?: string;
-  /**
-   * True when a fresh second-factor step-up is required before a sensitive
-   * operation (= `AUTH_MFA_ENFORCED`). The destructive-op cards read this to
-   * decide whether to open the reusable step-up modal.
-   */
+  /** True when a fresh second-factor step-up is required before a sensitive operation (`AUTH_MFA_ENFORCED`). */
   stepUpRequired?: boolean;
   /** Eligible routine step-up factors (strongest first), when `stepUpRequired`. */
   methods?: string[];
   /** Eligible recovery step-up factors, when `stepUpRequired`. */
   recoveryMethods?: string[];
-  /** True while the TOTP factor is restricted post-reset — needs a confirm-restriction lift (or removal) before it can be
-   * used to sign in or approve changes. */
+  /**
+   * True while restricted post-reset: needs a confirm-restriction lift (or removal) before it can sign in or approve
+   * changes.
+   */
   totpRestrictedPostReset?: boolean;
 }
 
@@ -61,42 +42,38 @@ export interface TrustedDevice {
 
 /** The management methods AuthContext threads through context. */
 export interface MfaManagement {
-  /** Read the current authenticator status for the management card. */
   getMfaStatus(): Promise<MfaStatus>;
   /** Begin TOTP enrollment: returns the base32 secret + the otpauth URL. */
   enrollTotpStart(): Promise<{ secret: string; otpauthUrl: string }>;
-  /** Confirm enrollment with a live code; promotes the pending secret. The
-   * write is gated: the account password is
-   * always re-verified, and a fresh second factor `proof` is required on top
-   * when `AUTH_MFA_ENFORCED` is on. `noticeSent`:
-   * whether the server's factor-change notice mail actually went out — the
-   * card only claims "we emailed you" when it did. */
+  /**
+   * Confirms enrollment with a live code. The account password is always re-verified, plus a fresh `proof` when
+   * `AUTH_MFA_ENFORCED` is on. `noticeSent`: whether the factor-change notice mail went out (the card claims "we
+   * emailed you" only then).
+   */
   enrollTotpConfirm(
     code: string,
     currentPassword: string,
     proof?: StepUpProof,
   ): Promise<{ totpEnabled: boolean; noticeSent: boolean }>;
-  /** Disable TOTP behind a password re-verify (+ a fresh step-up factor when
-   * `AUTH_MFA_ENFORCED` is on). Resolves `noticeSent` — see `enrollTotpConfirm`. */
+  /**
+   * Disables TOTP behind a password re-verify (+ fresh `proof` when `AUTH_MFA_ENFORCED` is on); `noticeSent` as in
+   * `enrollTotpConfirm`.
+   */
   disableTotp(
     currentPassword: string,
     proof?: StepUpProof,
   ): Promise<{ totpEnabled: boolean; noticeSent: boolean }>;
-  /** Lift the TOTP factor's post-reset restriction — the proof must come from a different, already-enrolled,
-   * non-restricted factor that predates the reset (`totp` or `passkey` only;
-   * Email-OTP has no enrollment timestamp to vouch with). */
+  /**
+   * Lifts the post-reset restriction; the proof must come from a different, already-enrolled, non-restricted factor
+   * that predates the reset (`totp` or `passkey`; Email-OTP has no enrollment timestamp).
+   */
   confirmTotpRestriction(proof: StepUpProof): Promise<void>;
-  /** List the caller's trusted devices. */
   listTrustedDevices(): Promise<TrustedDevice[]>;
   /** Forget devices by id, or every device when `deviceIds` is omitted. */
   forgetDevices(deviceIds?: string[]): Promise<void>;
 }
 
-/**
- * Returns the stable MFA-management callbacks. No internal state: every call is
- * a one-shot authenticated request, so the methods only depend on the shared
- * `apiRequest` client (which reads the in-memory access token + CSRF cookie).
- */
+/** Stable MFA-management callbacks; stateless, each call is a one-shot authenticated request. */
 export function useMfaManagement(): MfaManagement {
   const getMfaStatus = useCallback(
     (): Promise<MfaStatus> => apiRequest<MfaStatus>('/api/v1/auth/mfa/status'),
@@ -153,9 +130,7 @@ export function useMfaManagement(): MfaManagement {
   const forgetDevices = useCallback(async (deviceIds?: string[]): Promise<void> => {
     await apiRequest('/api/v1/auth/mfa/trusted-devices/forget', {
       method: 'POST',
-      // Omit the body entirely when forgetting all so the server's
-      // `deviceIds === undefined` branch (forget-all + drop the trust cookie)
-      // fires; an explicit list forgets just those.
+      // Omit the body to forget all: the server's `deviceIds === undefined` branch also drops the trust cookie.
       ...(deviceIds ? { body: { deviceIds } } : {}),
     });
   }, []);

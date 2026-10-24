@@ -1,48 +1,5 @@
-/**
- * Zero-knowledge household-key management hook, extracted from
- * AuthContext to keep that file under the shape limit. Owns the in-memory
- * household data key (HDK) plus the reactive unlock flags, and exposes the
- * key lifecycle operations the AuthContext threads through its context value:
- *
- *   - `initializeUnlockState` — post-login cached-HDK + envelope-set resolution
- *   - `unlockWithPassword`    — recover the HDK from the password slot
- *   - `unlockWithRecovery`    — recover the HDK from the recovery slot
- *   - `setupEncryption`       — first-time activation (idempotent on retry)
- *   - `rotatePasswordSlot`    — re-wrap the password slot under a new password
- *   - `enrollPasskeyForEncryption` — add a passkey as a PRF unlock method
- *   - `tryUnlockWithPrf`      — best-effort passkey-PRF unlock
- *   - `clearUnlockState`      — drop the in-memory HDK + flags (logout/switch)
- *
- * The HDK is held only in a ref (never React state — a CryptoKey isn't
- * serializable and must not leak into devtools-inspectable state); `isUnlocked`
- * is the reactive mirror the UI subscribes to. See "Unlocking" in
- * docs/security.md.
- *
- * SHAPE-LIMIT EXCEPTION (recorded justification; CODING_STANDARDS ≤ 800 lines):
- * this file is over the 800-line limit. Why it cannot be split: the
- * rollback-pin wiring must thread the served version + device id through all
- * 9 verification/unlock/rotate paths AND the post-PUT pin advance for
- * setup/rotate/enroll/recovery-regen, all of which already live in this hook;
- * the wrap/unwrap + pin primitives are in `key-wrapping.ts`, so moving the
- * orchestration out would create an import cycle (the hook re-exports
- * `EnvelopeSetRollbackError extends KeyWrappingError`). The unlock/rotate
- * paths are tightly coupled to the in-memory `hdkRef` + the reactive unlock
- * flags + the per-session staleness predicate; a separate `useEnvelopeSetPin`
- * hook would have to re-export that internal state, trading one over-cap file
- * for two coupled ones with a worse boundary. The same holds for the pieces
- * that look separable: `regenerateRecoveryKey` is the recovery-slot sibling of
- * `rotatePasswordSlot`, sharing the same primitives, staleness predicate, and
- * `verifyEnvelopeSetAndAdvancePin` chokepoint; the empty-served-slot-set
- * handling ("trust needs-setup only with no cached key AND no pin") reuses the
- * same staleness predicate, `readEnvelopeSetPin`, and reactive-flag chokepoint
- * `initializeUnlockState` already threads through; and the optional step-up
- * proof threaded into `regenerateRecoveryKey`'s `activate`,
- * `completeFromExistingPasswordSlot` and `enrollPasskeyForEncryption` is a
- * parameter on write paths that already exist, not a new subsystem.
- * Extracting any of them alone would recreate that coupling across a new
- * file. Trigger: a change adding 5 or more lines here must either refactor
- * the file back under the limit or re-justify this exception in this note.
- */
+// Zero-knowledge household-key hook: owns the in-memory HDK and the reactive unlock flags, and exposes the key
+// lifecycle operations AuthContext threads through its context value. See docs/security.md "Unlocking".
 import { useCallback, useRef, useState, type MutableRefObject } from 'react';
 import {
   startAuthentication,
@@ -80,16 +37,9 @@ import {
 import type { KeyEnvelopeSlot } from '../crypto/encryption-types';
 import { stepUpProofFields, type StepUpProof } from '../components/useStepUp';
 
-/**
- * Best-effort rollback-pin write after FIRST activation. The server has already committed both setup slots by the
- * time this runs, so a pin-write failure must never reject setup (see
- * `setupEncryption`). Retry once; if the durable pin still cannot be written,
- * raise the household-scoped fallback floor instead (mirrors
- * `rotatePasswordSlot`'s post-commit handling); if even that cannot be
- * confirmed, continue anyway — this is first activation, so no earlier
- * slot-bearing set exists for a replay to restore, and the next verified
- * unlock re-pins.
- */
+// Best-effort pin write after first activation: the server already committed both slots, so a pin failure must never
+// reject setup. Retries once, then raises the household-scoped fallback floor; if even that is unconfirmed it
+// continues, since no earlier slot-bearing set exists to replay and the next verified unlock re-pins.
 async function pinActivatedVersionBestEffort(
   version: number,
   deviceId: string | undefined,
@@ -110,19 +60,11 @@ async function pinActivatedVersionBestEffort(
   }
 }
 
-/** Server-issued slot id for the single per-household passkey-PRF slot. */
 const PASSKEY_PRF_SLOT_ID = 'passkey_prf';
 
-/**
- * Thrown when a served key-envelope set's version is strictly below this
- * device's locally pinned version. A genuine rollback: the
- * server/operator/stale backend replayed an older valid slot set (which carries
- * its own valid `envelopeSetTag`, so the MAC alone cannot catch it). Surfaced
- * so the unlock path refuses the cached/unwrapped HDK rather than adopting a
- * rolled-back set. Subclass of {@link KeyWrappingError} so the existing
- * best-effort catches (e.g. `rotatePasswordSlot`) treat it as a verification
- * failure and never bless a rolled-back set.
- */
+// A served envelope-set version below the locally pinned one is a genuine rollback: the replayed older set carries its
+// own valid tag, so the MAC cannot catch it. Subclasses KeyWrappingError so best-effort catches treat it as a
+// verification failure.
 class EnvelopeSetRollbackError extends KeyWrappingError {
   constructor(
     public readonly servedVersion: number,
@@ -135,16 +77,9 @@ class EnvelopeSetRollbackError extends KeyWrappingError {
   }
 }
 
-/**
- * Thrown by `confirmRewrap` when BOTH the durable
- * `deviceMetadata` pin write and the localStorage-floor fallback failed to
- * persist the version a just-committed password change advanced to. Unlike
- * an ordinary pin-write failure — where the localStorage floor still lands
- * and durably blocks a replay of the retired version — this device now holds
- * NO record anywhere that the version advanced. The caller must treat this
- * at least as strictly as the ordinary failure (lock / clear the cached HDK)
- * and never resolve as though the floor were raised.
- */
+// Both the `deviceMetadata` pin write and the localStorage floor failed for a just-committed password change, so this
+// device holds no record that the version advanced. Callers must lock or clear the cached HDK and never resolve as
+// though the floor were raised.
 class EnvelopeSetPinFloorPersistenceError extends KeyWrappingError {
   constructor(
     public readonly version: number,
@@ -156,22 +91,11 @@ class EnvelopeSetPinFloorPersistenceError extends KeyWrappingError {
 }
 
 /**
- * Thrown by `rotatePasswordSlot`'s post-commit pin bookkeeping
- * when the server already committed the re-wrapped `password` slot but this
- * device's local rollback-pin bookkeeping needed a fallback afterwards. This
- * is a KNOWN-COMMITTED outcome, never an ordinary refusal: the new password DID take effect server-side, so
- * `useDerivedRewrap` must classify it as a completed re-wrap, not a refusal
- * to be retried.
- *
- * `locked` is `true` only when NEITHER the durable `deviceMetadata` pin
- * write NOR the localStorage fallback floor could be confirmed anywhere on
- * this device — in that case `rotatePasswordSlot` has already cleared the
- * in-memory HDK and flipped `isUnlocked` false, same
- * as clearing the IDB cache: this device can no longer prove it is pinned
- * above the retired set, so the whole live workspace locks, not only the
- * on-disk cache. `locked` is `false` when the fallback floor DID land: the
- * commit is fully protected against replay and the workspace stays live —
- * only the caller-facing copy needs to note that a fallback was used.
+ * Thrown by `rotatePasswordSlot` when the server committed the re-wrapped `password` slot but this device's
+ * rollback-pin bookkeeping needed a fallback: a known-committed outcome, never a refusal. `locked` is true only when
+ * neither the durable pin nor the localStorage floor could be confirmed; the in-memory HDK is then already cleared,
+ * since the device can no longer prove it is pinned above the retired set. When false the floor landed and the
+ * workspace stays live.
  */
 export class RewrapCommittedPinDegradedError extends Error {
   constructor(
@@ -189,16 +113,10 @@ export class RewrapCommittedPinDegradedError extends Error {
 }
 
 /**
- * Thrown by `setupEncryption`'s repair branch (`completeFromExistingPasswordSlot`)
- * when the server refuses the missing-
- * `recovery`-slot PUT with `STEP_UP_PROOF_MISSING` and the caller supplied no
- * proof. The repair write is `key_envelope_replace` like every other
- * post-first-activation write, so a stranded household (a `password` slot,
- * no `recovery` slot — an interrupted pre-cutover activation) now needs a
- * fresh factor when `AUTH_MFA_ENFORCED` is on, where the old two-PUT
- * activation shape never did. `LoginPage` catches this, shows the reusable
- * `StepUpModal`, and retries `setupEncryption(password, proof)` with the
- * collected proof — no new step-up purpose, no persisted setup record.
+ * Thrown by `setupEncryption`'s repair branch when the server refuses the missing-`recovery`-slot PUT with
+ * `STEP_UP_PROOF_MISSING` and no proof was supplied: the repair is a `key_envelope_replace` write, so a stranded
+ * household needs a fresh factor when `AUTH_MFA_ENFORCED` is on. `LoginPage` shows `StepUpModal` and retries with the
+ * proof.
  */
 export class SetupStepUpRequiredError extends Error {
   constructor() {
@@ -208,16 +126,10 @@ export class SetupStepUpRequiredError extends Error {
 }
 
 /**
- * Thrown by `enrollPasskeyForEncryption` when the factor-carrying
- * `passkey_prf` PUT failed WITHOUT a server reply — a dropped connection or
- * the client timeout, the only failures `apiRequest` leaves unwrapped. The
- * server may already have consumed the proof, so the caller must treat this
- * as AMBIGUOUS, never as a clean local
- * failure. Every failure BEFORE that request — no PRF result, a locked or
- * ended session, a cancelled WebAuthn prompt, a tag/rollback mismatch —
- * propagates untouched: no proof was sent, so the caller can name the real
- * cause. The original message is kept so existing
- * message-based handling reads the same text; `originalError` is the cause.
+ * Thrown by `enrollPasskeyForEncryption` when the `passkey_prf` PUT failed without a server reply (dropped connection
+ * or timeout): the server may have consumed the proof, so treat the outcome as ambiguous. Failures before that request
+ * (no PRF result, locked session, cancelled prompt, tag/rollback mismatch) propagate untouched. `originalError` is the
+ * cause.
  */
 export class EnrollmentCommitAmbiguousError extends Error {
   constructor(public readonly originalError: unknown) {
@@ -230,12 +142,8 @@ export class EnrollmentCommitAmbiguousError extends Error {
   }
 }
 
-/**
- * Send the factor-carrying `passkey_prf` PUT for `enrollPasskeyForEncryption`,
- * typing a transport failure as {@link EnrollmentCommitAmbiguousError}. A
- * server reply (`ApiRequestError`) passes through unchanged — a clean 4xx is
- * a definite rejection the caller may retry with a fresh factor.
- */
+// Types a transport failure as EnrollmentCommitAmbiguousError; a server reply (ApiRequestError) passes through, a clean
+// 4xx being a definite rejection.
 async function commitPasskeyPrfSlot(
   body: Parameters<typeof upsertKeyEnvelopeSlot>[1],
 ): Promise<void> {
@@ -247,21 +155,9 @@ async function commitPasskeyPrfSlot(
   }
 }
 
-/**
- * Verify a served key-envelope set against BOTH the rollback pin and the
- * HDK-keyed set tag, then advance the pin. Single chokepoint
- * for every unlock/verification path (cached-HDK adoption, password/recovery/
- * PRF unlock, password-change + PRF-enrollment re-tag, setup/recovery
- * completion) so the rollback guard cannot be forgotten on one path:
- *
- *  1. reject when `servedVersion < pinnedVersion` (replay of an older set);
- *  2. verify the envelope-set tag (slot stripping/reorder/injection);
- *  3. advance the device pin to `max(pin, servedVersion)` so a later replay of
- *     this-or-older is refused.
- *
- * Throws {@link EnvelopeSetRollbackError} on (1) and {@link KeyWrappingError}
- * on (2), both before the caller adopts the HDK — fail closed.
- */
+// Single chokepoint for every unlock and verification path, so the rollback guard cannot be forgotten on one: reject a
+// served version below the pin (EnvelopeSetRollbackError), verify the set tag (KeyWrappingError), then advance the pin
+// to max(pin, served). Both throws precede HDK adoption: fail closed.
 async function verifyEnvelopeSetAndAdvancePin(
   envelopes: { slots: KeyEnvelopeSlot[]; envelopeSetVersion: number; envelopeSetTag: string },
   hdk: CryptoKey,
@@ -273,22 +169,15 @@ async function verifyEnvelopeSetAndAdvancePin(
     throw new EnvelopeSetRollbackError(envelopes.envelopeSetVersion, pinned);
   }
   await verifyEnvelopeSetTag(envelopes.slots, envelopes, hdk);
-  // Pass `deviceId` so the pin still persists when this is the first write
-  // before any sync created the `deviceMetadata` row.
+  // `deviceId` lets the pin persist when this is the first write, before any sync created the `deviceMetadata` row.
   await writeEnvelopeSetPin(envelopes.envelopeSetVersion, deviceId);
 }
 
-/** JWT claims subset the key hook needs to scope unlock state to a session. */
 interface ZeroKnowledgeClaims {
   userId: string;
   householdId: string;
-  /**
-   * This session's device id. Threaded into the rollback-pin
-   * writes so a setup/rotation that happens before the first sync write of
-   * `deviceMetadata` can still seed the pin row — without it a later replay of
-   * an old valid set passes the rollback check. Optional so legacy callers that
-   * only carry user/household still type-check.
-   */
+  // Seeds the pin row when setup or rotation precedes the first `deviceMetadata` sync write; without it a replay of an
+  // old valid set passes the rollback check.
   deviceId?: string;
 }
 
@@ -297,9 +186,8 @@ export interface ZeroKnowledgeKeyDeps {
   /** Live JWT claims, so a mid-flight logout / user switch can be detected. */
   claimsRef: MutableRefObject<ZeroKnowledgeClaims | null>;
   /**
-   * Verify the entered password against the account credential server-side
-   * (POST /auth/verify-password). Throws ApiRequestError(INVALID_CREDENTIALS)
-   * on a wrong password. Injected so this hook stays free of API-client wiring.
+   * Verifies the entered password server-side (POST /auth/verify-password); throws ApiRequestError(INVALID_CREDENTIALS)
+   * on a mismatch. Injected to keep API wiring out of this hook.
    */
   verifyPassword(password: string): Promise<void>;
 }
@@ -310,20 +198,14 @@ export interface ZeroKnowledgeKey {
   needsKeySetup: boolean;
   unlockResolved: boolean;
   /**
-   * `true` once {@link initializeUnlockState} has fetched a slot set that
-   * contains a `passkey_prf` slot (one per household). Drives the LoginPage
-   * "Unlock with passkey" button: only shown when the household actually has an
-   * enrolled PRF slot to target. Reset on every logout / new sign-in.
+   * True once {@link initializeUnlockState} saw a `passkey_prf` slot; shows the LoginPage "Unlock with passkey" button.
+   * Reset on logout and new sign-in.
    */
   hasPasskeyPrfSlot: boolean;
   /**
-   * `true` when {@link initializeUnlockState} was served an EMPTY key-envelope
-   * slot set on a device that already has evidence of a real key here — a
-   * cached HDK, or a non-zero rollback pin. A genuinely
-   * unkeyed household never sets this (TOFU first contact still resolves to
-   * {@link needsKeySetup}); this flag is read-only context for WHY the device
-   * stopped at the locked screen rather than starting fresh setup on its own.
-   * Reset on every logout / new sign-in.
+   * True when {@link initializeUnlockState} was served an empty slot set on a device with evidence of a real key
+   * (cached HDK or non-zero pin): why the device stops at the locked screen instead of starting fresh setup. An unkeyed
+   * household resolves to {@link needsKeySetup}. Reset on logout and new sign-in.
    */
   lockedEnvelopeSetEmpty: boolean;
   getHdk(): CryptoKey | null;
@@ -332,60 +214,30 @@ export interface ZeroKnowledgeKey {
   unlockWithPassword(password: string): Promise<void>;
   unlockWithRecovery(recoveryKey: string): Promise<void>;
   /**
-   * User-initiated passkey-PRF unlock from the post-login unlock prompt.
-   * Unlike the best-effort discoverable-login PRF attempt
-   * ({@link tryUnlockWithPrf}), this runs a *targeted* second assertion against
-   * the enrolled `passkey_prf` slot's bound credential + `prfSalt` — the
-   * discoverable login assertion can't carry the PRF salt before the user is
-   * identified, so this explicit path supersedes that limitation. Throws on no
-   * PRF slot, an authenticator that returns no PRF result, or an unwrap/tag
-   * failure, so the button can surface the error (it never silently swallows).
+   * User-initiated passkey-PRF unlock: a targeted second assertion against the `passkey_prf` slot's credential and
+   * `prfSalt`, since the discoverable login assertion cannot carry the salt before the user is identified. Throws on no
+   * PRF slot, no PRF result, or an unwrap/tag failure, so the button can surface it.
    */
   unlockWithPasskey(): Promise<void>;
   /**
-   * First-time encryption setup, or — on a retry — the repair completion of a
-   * household stranded with a `password` slot and no `recovery` slot.
-   * `proof`, when supplied, rides along on
-   * the repair branch's `recovery`-slot write only (fresh activation is
-   * always proofless). Throws {@link SetupStepUpRequiredError} when the repair
-   * branch needs a fresh factor and `proof` was omitted — the caller collects
-   * one (`StepUpModal`/`useStepUp`) and retries with it.
+   * First-time encryption setup, or on retry the repair of a household stranded with a `password` slot and no
+   * `recovery` slot. `proof` rides on the repair write only (fresh activation is proofless); throws {@link
+   * SetupStepUpRequiredError} when the repair needs a fresh factor and `proof` is omitted.
    */
   setupEncryption(password: string, proof?: StepUpProof): Promise<string>;
   /**
-   * Re-wrap the `password` slot under `newPassword` (sole caller:
-   * `useDerivedRewrap.ts`). No-ops silently ONLY when
-   * there is nothing to rotate: a locked session (`getHdk()` null) or a
-   * household with no `password` slot at all. Every other failure — a tag/
-   * rollback mismatch on the freshly-fetched slot set, a stale/refused write
-   * (`ApiRequestError`), a network fault — now PROPAGATES rather than being
-   * swallowed, so the caller can distinguish "written" from "refused" from
-   * "refused for a non-credential reason" and act on it (retry, prompt, or
-   * record a diagnostic) instead of the change silently never landing.
-   * The ordinary change-password flow
-   * uses {@link prepareRewrappedPasswordSlot} instead, which already threw on
-   * every failure. A post-commit pin-bookkeeping failure — the server-side
-   * write already succeeded, only this device's local rollback record needs
-   * attention — throws {@link RewrapCommittedPinDegradedError} distinctly
-   * from an ordinary refusal, so the caller
-   * never tells the person their password was refused when it was not.
+   * Re-wraps the `password` slot under `newPassword` (sole caller: `useDerivedRewrap.ts`). Returns silently only when
+   * there is nothing to rotate (locked session, or no `password` slot); every other failure propagates (tag/rollback
+   * mismatch, refused write, network fault) so the caller can tell "written" from "refused". A post-commit
+   * pin-bookkeeping failure throws {@link RewrapCommittedPinDegradedError}, so the person is never told their password
+   * was refused when it was not. The ordinary change-password flow uses {@link prepareRewrappedPasswordSlot}.
    */
   rotatePasswordSlot(newPassword: string, envelopesHint?: KeyEnvelopesResponse): Promise<void>;
   /**
-   * Prepare the re-wrapped `password` slot for the ATOMIC change-password
-   * commit — the re-wrap travels IN the
-   * change-password request body rather than as a separate best-effort PUT.
-   * Throws when the session is locked (no HDK) or before sign-in: the change
-   * is offered only on an unlocked workspace. Fetches the live slot set and,
-   * before generating anything, runs the same fail-closed
-   * `verifyEnvelopeSetAndAdvancePin` check every unlock/rotate path runs
-   * — a stripped or injected slot set is refused rather than blessed.
-   * Returns `null` when the household holds no `password` slot at all (a
-   * recovery-only household) — the caller commits the credential alone. On a
-   * non-null return, `confirmRewrap()` must be called ONLY after the server
-   * confirms the commit — it advances the device rollback pin to the version
-   * this prepared, never on a rejection and never off a bare server-served
-   * version: the pre-flight verify above only pins the OLD version.
+   * Prepares the re-wrapped `password` slot for the atomic change-password commit (the re-wrap travels in the request
+   * body). Throws when locked or signed out; first runs the fail-closed `verifyEnvelopeSetAndAdvancePin` on the live
+   * slot set. Returns `null` for a recovery-only household. Call `confirmRewrap()` only after the server confirms the
+   * commit: it advances the rollback pin to the prepared version, and never on a rejection.
    */
   prepareRewrappedPasswordSlot(newPassword: string): Promise<{
     slot: KeyEnvelopeSlot;
@@ -395,56 +247,31 @@ export interface ZeroKnowledgeKey {
     confirmRewrap: () => Promise<void>;
   } | null>;
   /**
-   * Prepare a recovery-key regeneration, two-phase so the
-   * rotation isn't visible server-side until the user confirms they saved the new
-   * key. Re-authenticates by unwrapping the `password` slot with the entered
-   * account password (a wrong password throws before anything is minted), mints a
-   * FRESH `recovery` slot wrapping the same HDK but does NOT persist it, and
-   * returns the new grouped recovery-key display string plus an `activate` thunk.
-   * Until `activate()` is called nothing changes — the existing recovery key keeps
-   * working; only `activate()` PUTs the prepared slot and advances the rollback
-   * pin, at which point the old key stops working. The raw recovery bytes are
-   * never persisted, so re-displaying the original is impossible — rotating
-   * is the only way back from a lost key. Prepare throws on a wrong password /
-   * missing password slot / tampered set; `activate()` throws on a tampered set,
-   * stale session, or write failure. See "The three unlock slots" in docs/security.md.
-   *
-   * `activate(proof)`: replacing an existing
-   * `recovery` slot is a write the server's step-up gate never exempts, so
-   * `activate` carries an OPTIONAL fresh factor proof — required only when
-   * `AUTH_MFA_ENFORCED` is on (the caller collects it via `StepUpModal` /
-   * `useStepUp`, mirroring every other gated op).
+   * Prepares a recovery-key regeneration in two phases, so the rotation is invisible server-side until the user
+   * confirms they saved the key. Unwrapping the `password` slot re-authenticates (a wrong password throws before
+   * anything is minted); a fresh `recovery` slot over the same HDK is minted but not persisted, and the new display
+   * string comes back with an `activate` thunk. Until `activate()` the old key keeps working; `activate()` PUTs the
+   * slot and advances the pin, after which the old key stops. The raw bytes are never persisted. Prepare throws on a
+   * wrong password, missing password slot or tampered set; `activate` throws on a tampered set, stale session or write
+   * failure. `activate(proof)` takes a fresh factor proof, required only when `AUTH_MFA_ENFORCED` is on (replacing a
+   * `recovery` slot is never step-up exempt). See docs/security.md "The three unlock slots".
    */
   regenerateRecoveryKey(
     password: string,
   ): Promise<{ recoveryKey: string; activate: (proof?: StepUpProof) => Promise<void> }>;
   /**
-   * Re-cache the in-memory HDK in the device `keyCache` store after an operation
-   * that wipes the cache but leaves the unlocked session intact — snapshot
-   * restore and Settings → Workspace → Reload from server both run `clearAllStores()`, which
-   * drops `keyCache` while the in-memory HDK survives, so a subsequent page
-   * refresh would otherwise miss the cache and show the unlock prompt.
-   * Best-effort:
-   * no-ops silently when the session is locked (no HDK in memory) or when the
-   * IDB write fails, so it never gates the restore success path.
+   * Re-caches the in-memory HDK in `keyCache` after an operation that wipes the cache but keeps the session (snapshot
+   * restore, "Reload from server"), so a page refresh does not show the unlock prompt. Best-effort: no-ops when locked
+   * or on an IDB write failure.
    */
   recacheHdk(): Promise<void>;
   /**
-   * Enroll a passkey as a zero-knowledge unlock method:
-   * obtain a PRF secret from the named credential via a targeted WebAuthn
-   * assertion, wrap the HDK into a `passkey_prf` slot bound to that
-   * credential, and PUT it — replacing any existing PRF slot (one per
-   * household). Requires an unlocked session (HDK in memory); throws on a
-   * locked session, an authenticator that does not return a PRF result, or a
-   * server rejection (e.g. the credential is not enrolled for this account).
-   *
-   * `currentPassword` is the password floor
-   * this write ALWAYS carries — the first-ever enrollment as much as a
-   * replace — in EITHER `AUTH_MFA_ENFORCED` state; the server refuses the
-   * write without a correct password. `proof` is the OPTIONAL fresh factor,
-   * required only when `AUTH_MFA_ENFORCED` is on (every write into a
-   * household that already holds a slot now requires one — the old
-   * first-ever/brand-new-slot-id exemption is gone).
+   * Enrolls a passkey as a PRF unlock method: a targeted WebAuthn assertion yields the PRF secret, the HDK is wrapped
+   * into a `passkey_prf` slot bound to that credential, and the slot is PUT, replacing any existing one (one per
+   * household). Needs an unlocked session; throws when locked, when no PRF result comes back, or on server rejection.
+   * `currentPassword` is the password floor every enrollment carries in either `AUTH_MFA_ENFORCED` state. `proof` is a
+   * fresh factor, required only when `AUTH_MFA_ENFORCED` is on (every write into a household that already holds a slot
+   * needs one).
    */
   enrollPasskeyForEncryption(
     credentialId: string,
@@ -452,9 +279,8 @@ export interface ZeroKnowledgeKey {
     proof?: StepUpProof,
   ): Promise<void>;
   /**
-   * Best-effort passkey-PRF unlock. When `credentialId` is provided, selects the
-   * `passkey_prf` slot whose `credentialBinding` matches it; otherwise falls back
-   * to the first `passkey_prf` slot (backwards-compatible).
+   * Best-effort passkey-PRF unlock. With `credentialId`, selects the `passkey_prf` slot bound to it; otherwise the
+   * first one.
    */
   tryUnlockWithPrf(
     claims: ZeroKnowledgeClaims,
@@ -462,14 +288,9 @@ export interface ZeroKnowledgeKey {
     credentialId?: string,
   ): Promise<void>;
   /**
-   * Consume (and clear) the envelope-set response fetched + verified during
-   * the unlock that just flipped `isUnlocked`, if it still matches the live
-   * session — lets `useDerivedRewrap`'s rising-edge `runDerive()` reuse it
-   * instead of spending a second `GET /auth/key-envelopes` on the same 20/min
-   * budget the unlock itself may still need. Returns null
-   * when none is available (a stale/mismatched session, or a later on-demand
-   * `runDerive()` call after the unlock has already settled), in which case
-   * the caller falls back to its own fresh fetch.
+   * Consumes (one-shot) the envelope-set response fetched during the unlock that just flipped `isUnlocked`, if it still
+   * matches the live session, so `useDerivedRewrap` can skip a second `GET /auth/key-envelopes` against the 20/min
+   * budget. Null when none is available; the caller then fetches fresh.
    */
   takeLastUnlockEnvelopes(): KeyEnvelopesResponse | null;
 }
@@ -477,9 +298,8 @@ export interface ZeroKnowledgeKey {
 export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKey {
   const { claimsRef, verifyPassword } = deps;
 
-  // The HDK is held only in memory (never in React state — a CryptoKey isn't
-  // serializable and must not leak into devtools-inspectable state);
-  // `isUnlocked` is the reactive mirror the UI subscribes to.
+  // The HDK lives only in a ref: a CryptoKey is not serializable and must not leak into devtools-inspectable state.
+  // `isUnlocked` is the reactive mirror.
   const hdkRef = useRef<CryptoKey | null>(null);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [needsKeySetup, setNeedsKeySetup] = useState(false);
@@ -488,18 +308,9 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
   const [lockedEnvelopeSetEmpty, setLockedEnvelopeSetEmpty] = useState(false);
   const getHdk = useCallback((): CryptoKey | null => hdkRef.current, []);
 
-  /**
-   * The verified envelope-set response from the unlock that just flipped
-   * `isUnlocked`, kept only long enough for `useDerivedRewrap`'s rising-edge
-   * `runDerive()` to reuse it — every unlock branch already
-   * spends one of the shared 20/min `GET /auth/key-envelopes` reads verifying
-   * the envelope-set tag; re-fetching immediately after, for the SAME unlock,
-   * would burn a second read off the same budget the unlock itself may still
-   * need. Tagged with the claims it was fetched for so a consumer can never
-   * reuse a stale household's response after a session switch;
-   * `takeLastUnlockEnvelopes` both checks that match and clears the ref
-   * (one-shot — any LATER on-demand `runDerive()` call always fetches fresh).
-   */
+  // The verified response from the unlock that just flipped `isUnlocked`, kept for `useDerivedRewrap`'s rising-edge
+  // `runDerive()` to reuse instead of spending a second read of the shared 20/min budget. Tagged with its claims so a
+  // session switch never reuses a stale household's response; `takeLastUnlockEnvelopes` checks that and clears it.
   const lastUnlockEnvelopesRef = useRef<{
     userId: string;
     householdId: string;
@@ -517,7 +328,9 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     return entry.envelopes;
   }, [claimsRef]);
 
-  /** Build a session-staleness predicate from a captured claims snapshot. */
+  // Session-staleness predicate over a captured claims snapshot. A logout, idle timeout or user switch can land
+  // mid-flight, so every state write is guarded against the live claims. Fire-and-forget runs abandon silently;
+  // user-initiated ones throw "Session ended" so the caller can surface it.
   const makeIsStale = useCallback(
     (claims: ZeroKnowledgeClaims): (() => boolean) => {
       const capturedUserId = claims.userId;
@@ -529,7 +342,6 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [claimsRef],
   );
 
-  /** Drop the in-memory HDK + reactive unlock flags (not the IDB cache). */
   const clearUnlockState = useCallback(() => {
     hdkRef.current = null;
     setIsUnlocked(false);
@@ -537,31 +349,19 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     setUnlockResolved(false);
     setHasPasskeyPrfSlot(false);
     setLockedEnvelopeSetEmpty(false);
-    // A session drop must never let the next session's
-    // runDerive() reuse an envelope response fetched under the OLD session
-    // (takeLastUnlockEnvelopes already guards on claims match, but dropping it
-    // here too is the belt-and-suspenders version — nothing to lose by it).
+    // A session drop must never let the next session reuse a response fetched under the old one
+    // (takeLastUnlockEnvelopes also checks claims).
     lastUnlockEnvelopesRef.current = null;
   }, []);
 
-  /**
-   * Verify a cached HDK against the live slot set before trusting it.
-   * Returns the cached key on a passing tag, or null (and drops the cached
-   * key) when the tag fails (slot stripping/reorder/injection). Callers only
-   * reach this with a NON-EMPTY slot set — an empty set is handled centrally
-   * in {@link initializeUnlockState} before this runs, so
-   * the cached key is never blindly dropped just because the server claims no
-   * envelopes exist. Extracted from {@link initializeUnlockState} to keep that
-   * function's nesting ≤ 3.
-   */
+  // Verifies a cached HDK against a non-empty live slot set (an empty set is handled in initializeUnlockState, so the
+  // cached key is never dropped just because the server claims no envelopes). Returns the key on a passing tag, else
+  // drops it and returns null.
   const verifyAndAdoptCachedHdk = useCallback(
     async (cached: CryptoKey, envelopes: KeyEnvelopesResponse): Promise<CryptoKey | null> => {
       try {
-        // Rollback guard + tag verification + pin advance. A served set
-        // below this device's pin (replay of an older valid set) throws
-        // EnvelopeSetRollbackError; a tampered set throws KeyWrappingError —
-        // either way drop the cached key rather than ride a rolled-back/tampered
-        // set.
+        // A served set below the pin throws EnvelopeSetRollbackError, a tampered one KeyWrappingError; either way drop
+        // the cached key rather than ride it.
         await verifyEnvelopeSetAndAdvancePin(
           envelopes,
           cached,
@@ -570,8 +370,7 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         );
         return cached;
       } catch {
-        // Tag mismatch or rollback: drop the cached key; the user falls back to
-        // a fresh password unlock (which re-runs the same guard).
+        // The user falls back to a fresh password unlock, which re-runs the same guard.
         await clearCachedHdk();
         return null;
       }
@@ -579,62 +378,36 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [claimsRef],
   );
 
-  /**
-   * After authentication settles, bring the household data key into memory if
-   * the device already has it cached, and learn whether the household has any
-   * key envelopes. Best-effort + fire-and-forget: a failure here must never
-   * break login — the LoginPage shows the password unlock prompt instead.
-   *
-   * For a household with no envelope yet, the cached-HDK lookup
-   * misses and the envelope fetch returns an empty set → `needsKeySetup` true
-   * and `isUnlocked` false.
-   */
+  // After authentication settles: bring a cached HDK into memory and learn whether the household has key envelopes.
+  // Best-effort and fire-and-forget: a failure never breaks login, the LoginPage shows the unlock prompt instead.
   const initializeUnlockState = useCallback(
     async (claims: ZeroKnowledgeClaims): Promise<void> => {
-      // Capture the session this run is for. A logout or user switch can land
-      // mid-flight (this is fire-and-forget); guard every state write against the
-      // live claims so a stale household's result never overwrites a newer
-      // session. Once stale, abandon the run entirely.
       const isStale = makeIsStale(claims);
       try {
-        // Load the cached HDK (if any) but do NOT trust it yet: the
-        // envelope-set tag must be verified after every unlock —
-        // including the cached-key path — to detect slot stripping/reorder/
-        // injection. We therefore fetch the envelopes first and only mark
-        // `isUnlocked` once the cached key has verified the live slot set.
+        // Load the cached HDK but do not trust it: the envelope-set tag must be verified after every unlock, the
+        // cached-key path included, so fetch the envelopes first and mark `isUnlocked` only once the cached key
+        // verifies the live set.
         const cached = await loadCachedHdk(claims.householdId);
         if (isStale()) return;
         let envelopes: KeyEnvelopesResponse;
         try {
           envelopes = await getKeyEnvelopes();
         } catch {
-          // Network/endpoint failure — we cannot verify the cached key against
-          // the slot set, so we must NOT trust it (no `isUnlocked`). The unlock
-          // prompt (or a later retry) handles recovery. Still mark the lifecycle
-          // resolved (the prompt gate keys off this), but only if this run owns
-          // the session.
+          // The cached key cannot be verified, so do not trust it; still mark the lifecycle resolved (the prompt gate
+          // keys off it) if this run owns the session.
           if (!isStale()) setUnlockResolved(true);
           return;
         }
         if (isStale()) return;
-        // Treat a missing / non-array `slots` field as empty rather than
-        // throwing — a malformed server response reads as
-        // "no envelopes", the same posture a network omission would produce.
+        // A missing or non-array `slots` reads as no envelopes, as a network omission would.
         const slots = Array.isArray(envelopes.slots) ? envelopes.slots : [];
-        // Surface whether the household has an enrolled passkey_prf slot (one per
-        // household) so the LoginPage can show the "Unlock with passkey"
-        // button only when there is actually a slot to target.
+        // Lets the LoginPage show "Unlock with passkey" only when there is a slot to target.
         setHasPasskeyPrfSlot(slots.some((slot: KeyEnvelopeSlot) => slot.slotType === 'passkey_prf'));
         if (slots.length === 0) {
-          // Empty served slot set: ambiguous between a
-          // genuinely unkeyed household (TOFU first contact — needs setup)
-          // and a device that has already keyed this household, now served
-          // an empty set by a misbehaving/compromised server. Trust "needs
-          // setup" ONLY when this device carries NO evidence of a real key
-          // here — no cached HDK and no rollback pin. Otherwise the cached
-          // key is doubted, never dropped: stop at the locked screen instead
-          // of walking the user into minting a brand-new household key over
-          // one that may still be real.
+          // Empty served set: either a genuinely unkeyed household (TOFU, needs setup) or a keyed device served an
+          // empty set by a misbehaving server. Trust "needs setup" only when the device has no evidence of a real key
+          // (no cached HDK, no rollback pin); otherwise stop at the locked screen rather than mint a new household key
+          // over one that may still be real.
           const pin = await readEnvelopeSetPin(claims.householdId);
           if (isStale()) return;
           if (cached || pin > 0) {
@@ -647,20 +420,15 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
           return;
         }
         if (cached) {
-          // Cached key path: verify it against the live slot set before
-          // trusting it. The helper returns the key only on a passing tag,
-          // and drops the cached key on a tag mismatch. Never silently ride a
-          // key past a failed tag. (A non-empty set that fails the tag leaves
-          // isUnlocked=false and needsKeySetup=false so the LoginPage prompts
-          // for the password — unchanged.)
+          // Verify the cached key against the live set first; the helper drops it on a tag mismatch, and a failure
+          // leaves isUnlocked and needsKeySetup false so the LoginPage prompts for the password.
           const trusted = await verifyAndAdoptCachedHdk(cached, envelopes);
           if (isStale()) return;
           if (trusted) {
             hdkRef.current = trusted;
             setIsUnlocked(true);
-            // This is the exact response useDerivedRewrap's
-            // rising-edge runDerive() needs for its owed-ness compare — hand
-            // it over instead of forcing a second GET.
+            // The response useDerivedRewrap's rising-edge runDerive() needs; hand it over instead of forcing a second
+            // GET.
             lastUnlockEnvelopesRef.current = {
               userId: claims.userId,
               householdId: claims.householdId,
@@ -668,8 +436,6 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
             };
           }
         }
-        // A non-empty set with no cached key leaves `isUnlocked` false so the
-        // LoginPage surfaces the password unlock prompt.
         if (isStale()) return;
         setUnlockResolved(true);
       } catch {
@@ -680,37 +446,22 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [makeIsStale, verifyAndAdoptCachedHdk],
   );
 
-  /**
-   * Try to recover the HDK from a `passkey_prf` slot using a PRF result the
-   * authenticator returned during the assertion. Best-effort:
-   * any failure (no PRF slot, derivation/unwrap/tag failure) silently leaves
-   * `isUnlocked` false so the LoginPage falls back to the password prompt — PRF
-   * must never block login.
-   * The PRF wrap-key derivation lives in passkey-prf.ts so this hook delegates
-   * the WebCrypto step rather than reimplementing it.
-   */
+  // Recovers the HDK from a `passkey_prf` slot using the assertion's PRF result. Best-effort: any failure leaves
+  // isUnlocked false so the LoginPage falls back to the password prompt; PRF never blocks login.
   const tryUnlockWithPrf = useCallback(
     async (
       claims: ZeroKnowledgeClaims,
       prfResult: Uint8Array<ArrayBuffer>,
       credentialId?: string,
     ): Promise<void> => {
-      // Capture the session this run is for. A logout or user switch can land
-      // mid-flight (this is fire-and-forget after a passkey assertion); guard
-      // every state write against the live claims so a stale household's PRF
-      // result never overwrites a newer session. Background
-      // unlock → a stale run abandons silently.
       const isStale = makeIsStale(claims);
       try {
         const envelopes = await getKeyEnvelopes();
         const prfSlots = envelopes.slots.filter(
           (slot: KeyEnvelopeSlot) => slot.slotType === 'passkey_prf',
         );
-        // When the assertion credential is known, prefer the slot bound to it so
-        // the right PRF secret is matched to the right slot. Fall back to a
-        // PRF slot with no binding (a slot enrolled before credentialBinding
-        // shipped) and finally to the first PRF slot — both keep the legacy
-        // single-slot path unlocking. Absent a credentialId, use the first slot.
+        // Prefer the slot bound to the assertion credential, then an unbound legacy slot, then the first; the fallbacks
+        // keep the single-slot path unlocking.
         const prfSlot =
           (credentialId &&
             prfSlots.find((slot) => slot.credentialBinding === credentialId)) ||
@@ -723,8 +474,6 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         if (isStale()) return;
         hdkRef.current = hdk;
         setIsUnlocked(true);
-        // Hand the just-verified response to useDerivedRewrap
-        // instead of forcing a second GET for the same unlock.
         lastUnlockEnvelopesRef.current = {
           userId: claims.userId,
           householdId: claims.householdId,
@@ -743,32 +492,21 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     async (password: string): Promise<void> => {
       const claims = claimsRef.current;
       if (!claims) throw new Error('Cannot unlock before signing in');
-      // Capture the session this unlock is for. The user types the password
-      // while the session is live, but a logout / idle-timeout / user switch can
-      // land between the async awaits below; guard every state write against the
-      // live claims so a stale household's HDK never overwrites a newer session.
-      // This is user-initiated, so a stale run throws so the
-      // caller's unlock handler surfaces a clear "session ended" outcome rather
-      // than silently writing into the wrong session.
       const isStale = makeIsStale(claims);
       const envelopes = await getKeyEnvelopes();
       const passwordSlot = envelopes.slots.find(
         (slot: KeyEnvelopeSlot) => slot.slotType === 'password',
       );
       if (!passwordSlot) throw new Error('No password unlock slot for this account');
-      // unwrapSlot throws KeyWrappingError on a wrong password or tampered slot
-      // metadata (the wrap AAD binds the KDF params, so a downgrade fails closed).
+      // Throws KeyWrappingError on a wrong password or tampered slot metadata (the wrap AAD binds the KDF params, so a
+      // downgrade fails closed).
       const hdk = await unwrapSlot(passwordSlot, password);
-      // Reject a rolled-back set, verify the whole slot set against the
-      // HDK-keyed tag (slot stripping/reorder/injection), then advance the pin.
-      // Throws EnvelopeSetRollbackError / KeyWrappingError before adoption.
+      // Rollback guard, tag verification and pin advance; throws before the HDK is adopted.
       await verifyEnvelopeSetAndAdvancePin(envelopes, hdk, claims.householdId, claims.deviceId);
       if (isStale()) throw new Error('Session ended. Please sign in again.');
       hdkRef.current = hdk;
       setIsUnlocked(true);
       setNeedsKeySetup(false);
-      // Hand the just-verified response to useDerivedRewrap
-      // instead of forcing a second GET for the same unlock.
       lastUnlockEnvelopesRef.current = {
         userId: claims.userId,
         householdId: claims.householdId,
@@ -780,15 +518,8 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [claimsRef, makeIsStale],
   );
 
-  /**
-   * Recovery-key unlock path: recover the HDK from the `recovery` slot using the
-   * grouped recovery-key display string the user saved at setup. Mirrors
-   * {@link unlockWithPassword} (same staleness guard, same envelope-set-tag
-   * verification before trusting the key, same device caching) but unwraps the
-   * recovery slot instead of the password slot. `unwrapSlot` throws
-   * KeyWrappingError on a wrong/malformed recovery key. User-initiated, so a
-   * stale run throws so the caller surfaces a clear "session ended" outcome.
-   */
+  // Recovery-key unlock: mirrors unlockWithPassword (staleness guard, envelope-set-tag verification before trusting the
+  // key, device caching) against the `recovery` slot.
   const unlockWithRecovery = useCallback(
     async (recoveryKey: string): Promise<void> => {
       const claims = claimsRef.current;
@@ -799,19 +530,13 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         (slot: KeyEnvelopeSlot) => slot.slotType === 'recovery',
       );
       if (!recoverySlot) throw new Error('No recovery unlock slot for this account');
-      // unwrapSlot throws KeyWrappingError on a wrong recovery key or tampered
-      // slot metadata (the wrap AAD binds the slot fields, so a downgrade fails
-      // closed).
+      // Throws KeyWrappingError on a wrong recovery key or tampered slot metadata.
       const hdk = await unwrapSlot(recoverySlot, recoveryKey);
-      // Reject a rolled-back set, verify the HDK-keyed tag (slot stripping/
-      // reorder/injection), then advance the pin. Throws before adoption.
       await verifyEnvelopeSetAndAdvancePin(envelopes, hdk, claims.householdId, claims.deviceId);
       if (isStale()) throw new Error('Session ended. Please sign in again.');
       hdkRef.current = hdk;
       setIsUnlocked(true);
       setNeedsKeySetup(false);
-      // Hand the just-verified response to useDerivedRewrap
-      // instead of forcing a second GET for the same unlock.
       lastUnlockEnvelopesRef.current = {
         userId: claims.userId,
         householdId: claims.householdId,
@@ -823,32 +548,12 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [claimsRef, makeIsStale],
   );
 
-  /**
-   * Recovery-completion path: a password
-   * slot already exists but NO recovery slot does — a household stranded by
-   * an interrupted PRE-CUTOVER two-PUT activation (this repair proof-carrying
-   * PUT, not a first-time activation, is what finishes it now; a genuinely
-   * fresh household never reaches this branch — see {@link activateFreshSlots}).
-   * Recover the ORIGINAL HDK by unwrapping the password slot so the recovery
-   * slot wraps the same key, then PUT only the recovery slot at the next
-   * monotonic version. This write is `key_envelope_replace` like every other
-   * write into a household that already holds a slot, so it now REQUIRES a
-   * fresh factor when `AUTH_MFA_ENFORCED` is on — `proof`, when supplied,
-   * rides along; when the server refuses `STEP_UP_PROOF_MISSING` with no
-   * proof supplied, this throws {@link SetupStepUpRequiredError} so
-   * `LoginPage` can show the reusable `StepUpModal` and retry with a proof.
-   *
-   * A household that already holds BOTH slots is fully set up, and this path
-   * REFUSES it: re-minting the `recovery` slot would
-   * replace live key material, silently invalidating a recovery key another
-   * tab or device already showed and had saved. The "completed setup whose
-   * final local step failed" retry this branch used to serve no longer
-   * arises: {@link setupEncryption} treats every post-commit local step as
-   * best-effort and always returns the key. Reaching this state anyway
-   * (another tab finished setup first) surfaces as a setup error; a reload
-   * takes the unlock path, since the slots exist.
-   * Extracted to keep {@link setupEncryption} ≤ 60 lines.
-   */
+  // Repair for a household stranded with a `password` slot and no `recovery` slot (an interrupted two-PUT activation):
+  // unwrap the password slot to recover the original HDK, then PUT only the recovery slot at the next version. The
+  // write is `key_envelope_replace`, so it needs a fresh factor when `AUTH_MFA_ENFORCED` is on; without `proof`, a
+  // `STEP_UP_PROOF_MISSING` refusal throws SetupStepUpRequiredError. A household holding both slots is refused:
+  // re-minting `recovery` would silently invalidate a key another tab or device already showed (a reload takes the
+  // unlock path).
   const completeFromExistingPasswordSlot = useCallback(
     async (
       householdId: string,
@@ -871,10 +576,8 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         nextVersion,
         hdk,
       );
-      // A logout / user switch can land after getKeyEnvelopes / unwrapSlot
-      // returned. The PUT uses the live bearer token, so writing now would land
-      // this setup material in a different session's envelope set. Bail
-      // before the write if the session is no longer ours.
+      // A logout or user switch can land after the awaits above; the PUT uses the live bearer token and would write
+      // into another session's envelope set.
       if (isStale()) throw new Error('Session ended. Please sign in again.');
       try {
         await upsertKeyEnvelopeSlot('recovery', {
@@ -898,23 +601,10 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [],
   );
 
-  /**
-   * Fresh-activation path: no slot exists
-   * yet. One atomic call writes the WHOLE initial slot set (password +
-   * recovery) at a single version bump — replacing the old two-PUT sequence
-   * whose intermediate "password committed, recovery not yet" state the
-   * retired step-up exemption used to serve. Proofless: the server's
-   * `activate` route refuses outright when the set is not genuinely empty, so
-   * there is nothing to prove a factor against here.
-   *
-   * `baseVersion` is the already-committed envelope-set version (0 for a
-   * truly clean household). This handles the "meta-only residue" case:
-   * a prior attempt can leave `{ slots: [], envelopeSetVersion: N }`
-   * with `N > 0`; starting from `baseVersion` (not a hard-coded 0) keeps the
-   * activation monotonic past the already-committed version instead of
-   * conflicting → `409 STALE_ENVELOPE_VERSION`. Extracted to keep
-   * {@link setupEncryption} ≤ 60 lines.
-   */
+  // Fresh activation: one atomic call writes the whole initial slot set (password + recovery) at a single version bump,
+  // so no half-committed state is observable. Proofless: the server refuses `activate` on a non-empty set.
+  // `baseVersion` is the already-committed version (0 when clean); a meta-only residue from an earlier attempt would
+  // otherwise 409 STALE_ENVELOPE_VERSION.
   const activateFreshSlots = useCallback(
     async (
       householdId: string,
@@ -931,9 +621,6 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         finalVersion,
         hdk,
       );
-      // A logout / user switch can land after getKeyEnvelopes returned. The
-      // write uses the live bearer token, so writing now would land this setup
-      // material in a different session's envelope set.
       if (isStale()) throw new Error('Session ended. Please sign in again.');
       await activateKeyEnvelopes({
         slots: [passwordSlot, generated.slot],
@@ -949,28 +636,16 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     async (password: string, proof?: StepUpProof): Promise<string> => {
       const claims = claimsRef.current;
       if (!claims) throw new Error('Cannot set up encryption before signing in');
-      // Same staleness guard as unlockWithPassword: the user types the password
-      // while the session is live, but a logout / idle-timeout / user switch can
-      // land between awaits. Guard every state write so a stale household's HDK
-      // never overwrites a newer session. User-initiated → a
-      // stale run throws so LoginPage surfaces a clear "session ended" outcome.
       const isStale = makeIsStale(claims);
       const householdId = claims.householdId;
 
-      // Verify the entered password is the current account password BEFORE we
-      // wrap the HDK with it. Without this, a typo or a different
-      // password would mint a `password` slot the account password can never
-      // unwrap — silently locking the user out of their own data. A wrong
-      // password throws ApiRequestError(INVALID_CREDENTIALS) here, so no
-      // envelope slot is ever created against an unverified password.
+      // Verify the entered password first: a typo would mint a `password` slot the account password can never unwrap,
+      // silently locking the user out. A wrong one throws ApiRequestError(INVALID_CREDENTIALS) before any slot exists.
       await verifyPassword(password);
 
-      // Fetch the current slot set so setup is idempotent across a partial
-      // failure. An existing password slot means a prior call persisted
-      // it; recover the ORIGINAL HDK and PUT only the missing recovery slot. An
-      // empty slot set takes the fresh-activation path, starting from the
-      // already-committed envelope-set version so a meta-only residue (meta
-      // bumped, slot PUT failed) doesn't conflict with the stored version.
+      // Fetch the current slot set so setup is idempotent across a partial failure: an existing password slot means a
+      // prior call persisted it, so recover the original HDK and PUT only the missing recovery slot. An empty set takes
+      // fresh activation from the committed version, so meta-only residue does not conflict.
       const existing = await getKeyEnvelopes();
       const existingPasswordSlot = existing.slots.find(
         (slot: KeyEnvelopeSlot) => slot.slotType === 'password',
@@ -986,21 +661,13 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
           )
         : await activateFreshSlots(householdId, password, existing.envelopeSetVersion, isStale);
 
-      // Everything from here on is a LOCAL step after the server commit: both slots are live, so a failure here must NOT
-      // reject setup — the caller would never receive the recovery key (which
-      // can never be shown again), `needsKeySetup` would stay true, and the
-      // only retry would be a proofless replace of the live `recovery` slot
-      // that the step-up gate refuses. Best-effort, like `recacheHdk`.
-      //
-      // Pin the version this device just activated so a later replay of an
-      // older set is refused. Setup writes the authoritative set, so there is no
-      // tag to verify here — advance the pin directly to the written version.
-      // Pass deviceId so the pin persists even when setup runs before the first
-      // sync wrote `deviceMetadata`.
+      // Everything from here is a local step after the server commit: a failure must not reject setup, or the caller
+      // would never get the one-time recovery key and the only retry would be a proofless replace of the live
+      // `recovery` slot that the step-up gate refuses. Best-effort, like `recacheHdk`. Setup writes the authoritative
+      // set, so the pin advances directly to the written version (no tag to verify); `deviceId` lets it persist before
+      // the first sync.
       await pinActivatedVersionBestEffort(finalVersion, claims.deviceId, householdId);
 
-      // Hold + cache the HDK and flip the reactive unlock flags. Guard against a
-      // session that ended mid-setup before writing any in-memory state.
       if (isStale()) throw new Error('Session ended. Please sign in again.');
       hdkRef.current = hdk;
       setIsUnlocked(true);
@@ -1018,37 +685,14 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [claimsRef, makeIsStale, verifyPassword, completeFromExistingPasswordSlot, activateFreshSlots],
   );
 
-  /**
-   * Re-wrap the `password` slot under `newPassword`.
-   * Fetches the current slot set fresh so the new version is
-   * monotonically correct, replaces ONLY the password slot at
-   * `envelopeSetVersion + 1`, and preserves the recovery + PRF slots unchanged
-   * in the tag computation.
-   *
-   * No-ops silently ONLY when there is nothing to rotate — a locked session
-   * (`getHdk()` null, `claimsRef` empty) or a household with no `password`
-   * slot at all. Every other failure PROPAGATES (no swallow): a tag/rollback
-   * mismatch on the freshly-fetched set (`KeyWrappingError` /
-   * `EnvelopeSetRollbackError` — never overwrite a slot that fails to verify),
-   * a refused write (`ApiRequestError`, e.g. `409 UPGRADE_REQUIRED` when the
-   * writing session's recorded credential revision has gone stale, or a
-   * network fault). The caller (`useDerivedRewrap.ts`) is responsible for
-   * classifying the throw and deciding whether to retry, prompt, or record a
-   * diagnostic — this hook only owns the crypto + the write.
-   *
-   * `envelopesHint`, when supplied, is used instead of a fresh
-   * `getKeyEnvelopes()` read: the caller already holds a
-   * verified-fresh response from the same unlock-state transition (the
-   * unlock's own read, or the derive's), and re-fetching here would spend a
-   * SECOND rate-limited round trip on the same silent repair. Still verified
-   * against the in-memory HDK below before anything is trusted, so a
-   * stale/tampered hint can never be blessed. Omitted (fresh fetch) for the
-   * prompted path, where real time has passed since any prior read.
-   */
+  // Fetches the slot set fresh so the version is monotonic, replaces only the password slot at `envelopeSetVersion +
+  // 1`, and carries the recovery and PRF slots through the tag unchanged. The caller (`useDerivedRewrap.ts`) classifies
+  // every propagated failure. `envelopesHint` is a verified-fresh response from the same transition, sparing the silent
+  // repair a second rate-limited read; it is still verified against the in-memory HDK below. The prompted path omits
+  // it: real time has passed.
   const rotatePasswordSlot = useCallback(
     async (newPassword: string, envelopesHint?: KeyEnvelopesResponse): Promise<void> => {
       const hdk = hdkRef.current;
-      // Locked session: no HDK in memory to re-wrap.
       if (!hdk) return;
       const claims = claimsRef.current;
       if (!claims) return;
@@ -1057,16 +701,10 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
       const existingPasswordSlot = envelopes.slots.find(
         (slot: KeyEnvelopeSlot) => slot.slotType === 'password',
       );
-      // No password slot to rotate (e.g. a recovery-only household): nothing to
-      // do — the new password has no slot to re-wrap, and nothing is owed.
+      // A recovery-only household has no password slot to rotate, and nothing is owed.
       if (!existingPasswordSlot) return;
-      // Verify the freshly-fetched slot set against the in-memory HDK before
-      // re-wrapping anything, matching unlockWithPassword /
-      // unlockWithRecovery. Without this a stripped/injected slot set could be
-      // blessed — the new tag would be computed over a tampered set and
-      // persisted as authoritative. Throws on mismatch/rollback; the slot is
-      // never overwritten for this reason (never attributable to a wrong
-      // password).
+      // Verify the fetched set against the in-memory HDK before re-wrapping: a stripped or injected set must not get a
+      // new tag persisted as authoritative. Never attributable to a wrong password.
       await verifyEnvelopeSetAndAdvancePin(envelopes, hdk, claims.householdId, claims.deviceId);
       const newSlot = await generatePasswordSlot(
         claims.householdId,
@@ -1075,96 +713,45 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         hdk,
       );
       const nextVersion = envelopes.envelopeSetVersion + 1;
-      // Tag over the full slot set with the new password slot in place of the
-      // old one — recovery + PRF slots are carried through unchanged so the set
-      // tag still verifies after the rotation.
       const nextSlots = envelopes.slots.map((slot: KeyEnvelopeSlot) =>
         slot.slotType === 'password' ? newSlot : slot,
       );
       const tag = await computeEnvelopeSetTag(nextSlots, nextVersion, hdk);
       if (isStale()) throw new Error('Session ended. Please sign in again.');
-      // The server stamps the slot with the WRITING SESSION's recorded
-      // credential revision and conditions the write on it still matching the
-      // credential's current revision — refused with
-      // `409 UPGRADE_REQUIRED` when the session's recorded authority is stale
-      // or absent. That refusal propagates here; the caller re-authenticates
-      // the plaintext and retries.
+      // The server stamps the slot with the writing session's credential revision and refuses with `409
+      // UPGRADE_REQUIRED` when that is stale or absent; the refusal propagates and the caller re-authenticates and
+      // retries.
       await upsertKeyEnvelopeSlot(newSlot.slotId, {
         slot: newSlot,
         envelopeSetVersion: nextVersion,
         envelopeSetTag: tag,
       });
-      // Re-check ownership AFTER the PUT resolves: the
-      // pre-PUT `isStale()` check above only guards the request itself. A
-      // logout from THIS household into a different one while the PUT is in
-      // flight can drop and recreate IndexedDB in between, so an unconditional
-      // pin write below would land in the NEW household's live (unscoped)
-      // `deviceMetadata` — corrupting its rollback pin if its real version is
-      // lower. The write already committed server-side for the CAPTURED
-      // household, so preserve a floor for it through the household-scoped
-      // fallback (never the live IndexedDB pin) and stop without touching IDB.
-      //
-      // `raiseEnvelopeSetPinFloor`'s return is checked:
-      // a silent `false` (storage
-      // unavailable / a write landing on a quota boundary, per its own
-      // docstring) would otherwise leave this device with NO durable record
-      // anywhere that the version advanced, behind a "Session ended" message
-      // that reads like an ordinary, harmless staleness case. Every stale-
-      // session branch below escalates identically on `false`.
+      // Re-check ownership after the PUT: a logout into a different household while it is in flight can drop and
+      // recreate IndexedDB, so an unconditional pin write would land in the new household's unscoped `deviceMetadata`
+      // and corrupt its rollback pin. The write is already committed for the captured household, so preserve a floor
+      // for it via the household-scoped fallback and stop. A `false` from `raiseEnvelopeSetPinFloor` (storage
+      // unavailable, quota boundary) means no durable record exists anywhere, so every stale-session branch escalates
+      // identically.
       const escalateStaleFloor = (originalError?: unknown): never => {
         const persisted = raiseEnvelopeSetPinFloor(nextVersion, claims.householdId);
         if (!persisted) {
-          // Every call site of `escalateStaleFloor` runs strictly after
-          // `upsertKeyEnvelopeSlot` has already committed `nextVersion`
-          // server-side — this is a known-committed outcome, semantically
-          // identical to the post-commit pin-write failure below, never a
-          // plain refusal. Throwing the
-          // KeyWrappingError-derived `EnvelopeSetPinFloorPersistenceError`
-          // here left it indistinguishable from an ordinary integrity
-          // refusal to `useDerivedRewrap`'s classifier, which only
-          // recognizes `RewrapCommittedPinDegradedError` as "committed, not
-          // refused" — so it read as a permanent wrong-password-adjacent
-          // rejection even though the password WAS accepted and re-wrapped.
-          // `locked` is `false`: unlike the retry-exhausted branch below,
-          // this path never clears `hdkRef`/`isUnlocked` (the session is
-          // simply stale here, not locked), matching the class's own
-          // `locked` contract.
+          // Runs after the PUT committed `nextVersion`, so this is a known-committed outcome, not a refusal: throw
+          // RewrapCommittedPinDegradedError, which `useDerivedRewrap` classifies as committed (a
+          // KeyWrappingError-derived error would read as a refusal although the password was accepted). `locked` is
+          // false: the session is stale here, not locked.
           throw new RewrapCommittedPinDegradedError(nextVersion, false, originalError);
         }
         throw new Error('Session ended. Please sign in again.');
       };
       if (isStale()) escalateStaleFloor();
-      // Advance the device rollback pin to the just-written set version. The
-      // verify above only pinned the OLD version (N); leaving the pin at N
-      // while the server set is N+1 lets an adversarial server replay the old
-      // N set (valid tag, isEnvelopeSetRollback(N, N) === false) and silently
-      // undo the rotation. Matches setupEncryption.
-      //
-      // This is a POST-COMMIT step (mirrors
-      // `prepareRewrappedPasswordSlot.confirmRewrap` + `AuthContext.changePassword`):
-      // the server has already committed `nextVersion`, so a pin-write failure
-      // here is a known-committed outcome, never an ordinary transient
-      // refusal. Retry once; if the pin still cannot be durably written,
-      // durably raise the household-scoped fallback floor so a replay of the
-      // old (still individually-valid) set is still rejected; if that floor
-      // cannot be confirmed either, lock this LIVE workspace (not only the
-      // IDB cache) so the next unlock re-verifies from
-      // scratch rather than riding a key this device can no longer prove is
-      // pinned above the retired set. Neither failure branch below is an
-      // ordinary refusal: `nextVersion` is
-      // already committed server-side by the time either one runs, so
-      // `RewrapCommittedPinDegradedError` signals that distinctly rather
-      // than folding it into a plain "session ended" / raw retry error that
-      // reads exactly like a write that never landed.
-      // `isStale` is threaded into the write itself:
-      // `writeEnvelopeSetPin` internally awaits its own existence probe and
-      // `updateDeviceMetadata`'s read before committing, and a cross-
-      // household session switch landing inside either await would otherwise
-      // let this write land on the NEW household's freshly-recreated
-      // `deviceMetadata` row. Passing `isStale` makes the write abort BEFORE
-      // it commits when that happens, instead of only being noticed after
-      // (the checks below remain as belt-and-suspenders for a switch landing
-      // strictly outside `writeEnvelopeSetPin`'s own awaits).
+      // Advance the pin to the written version: the verify above pinned only the old version N, and a pin left at N
+      // lets an adversarial server replay the old N set (valid tag, isEnvelopeSetRollback(N, N) is false) and undo the
+      // rotation. This is a post-commit step (like `confirmRewrap`), so a pin-write failure is a known-committed
+      // outcome: retry once, then raise the household-scoped floor, and if that is unconfirmed lock the live workspace
+      // so the next unlock re-verifies from scratch. Both failure branches throw RewrapCommittedPinDegradedError rather
+      // than an error that reads like a write that never landed. `isStale` goes into the write itself so a household
+      // switch inside its internal awaits aborts before committing to the new household's recreated `deviceMetadata`
+      // row; the checks below cover a switch outside those awaits.
       try {
         await writeEnvelopeSetPin(nextVersion, claims.deviceId, isStale);
       } catch (firstErr) {
@@ -1172,20 +759,13 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         try {
           await writeEnvelopeSetPin(nextVersion, claims.deviceId, isStale);
         } catch (retryErr) {
-          // The RETRY is itself an await the session can go stale during:
-          // a household switch landing here
-          // must never fall through to the unconditional, household-
-          // unscoped `clearCachedHdk()` below — that would wipe the NEWLY
-          // active household's freshly-cached key over a failure that
-          // belongs entirely to the CAPTURED (retiring) household.
+          // The retry is itself an await: a household switch here must not reach the unscoped `clearCachedHdk()` below
+          // and wipe the new household's freshly cached key.
           if (isStale()) escalateStaleFloor(retryErr);
           const persisted = raiseEnvelopeSetPinFloor(nextVersion, claims.householdId);
           if (!persisted) {
-            // Neither the durable pin nor the fallback floor could be
-            // confirmed anywhere on this device: lock
-            // the LIVE workspace, not only the IndexedDB cache — the
-            // in-memory HDK and `isUnlocked` must not keep riding a key this
-            // device can no longer prove is pinned above the retired set.
+            // Neither the durable pin nor the floor is confirmed: lock the live workspace (not only the IDB cache),
+            // since the in-memory HDK can no longer be proven pinned above the retired set.
             hdkRef.current = null;
             setIsUnlocked(false);
             await clearCachedHdk();
@@ -1194,23 +774,14 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
           throw new RewrapCommittedPinDegradedError(nextVersion, false, retryErr);
         }
       }
-      // A "successful" write above is not proof it landed in the CAPTURED
-      // household's row: `writeEnvelopeSetPin`
-      // performs its own separate `readDeviceMetadata` / `updateDeviceMetadata`
-      // awaits internally, and a household switch landing strictly inside
-      // either one can let it resolve without throwing against the NEW
-      // household's freshly-recreated `deviceMetadata`. Never trust a
-      // success once the session has moved on; fall back to the same
-      // household-scoped floor the failure branches use instead of
-      // resolving quietly.
+      // A write that resolves is not proof it landed in the captured household's row: a switch inside its internal
+      // awaits can land it on the new household's recreated `deviceMetadata`. Fall back to the scoped floor rather than
+      // resolve quietly.
       if (isStale()) escalateStaleFloor();
     },
     [claimsRef, makeIsStale],
   );
 
-  /**
-   * See {@link ZeroKnowledgeKey.prepareRewrappedPasswordSlot}.
-   */
   const prepareRewrappedPasswordSlot = useCallback(
     async (
       newPassword: string,
@@ -1230,14 +801,10 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
       const existingPasswordSlot = envelopes.slots.find(
         (slot: KeyEnvelopeSlot) => slot.slotType === 'password',
       );
-      // No password slot to rotate (a recovery-only household): the caller
-      // commits the credential alone — the server-confirmed no-slot exception.
+      // A recovery-only household has no password slot: the caller commits the credential alone.
       if (!existingPasswordSlot) return null;
-      // Verify the freshly-fetched slot set against the in-memory HDK BEFORE
-      // generating the new slot and tag — the fail-closed step
-      // `rotatePasswordSlot` performs today, which must survive moving the
-      // write server-side: a stripped or injected slot set must never be
-      // blessed during a change and persisted under a valid tag.
+      // Verify the fetched set before generating the new slot and tag, so a stripped or injected set is never blessed
+      // during a change.
       await verifyEnvelopeSetAndAdvancePin(envelopes, hdk, claims.householdId, claims.deviceId);
       const newSlot = await generatePasswordSlot(
         claims.householdId,
@@ -1246,12 +813,8 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         hdk,
       );
       const nextVersion = envelopes.envelopeSetVersion + 1;
-      // Replace exactly the canonical password slot the change targeted — by
-      // id, not by `slotType`:
-      // a stray second password-typed row at a non-canonical id must
-      // stay wrapped under the old set and computed into the tag unchanged,
-      // never silently substituted, so the server's own noncanonical-slot
-      // rejection stays the only way that state resolves.
+      // Replace exactly the canonical password slot by id, not `slotType`: a stray second password-typed row stays
+      // unchanged in the tag, so the server's noncanonical-slot rejection remains the only way that state resolves.
       const nextSlots = envelopes.slots.map((slot: KeyEnvelopeSlot) =>
         slot.slotId === existingPasswordSlot.slotId ? newSlot : slot,
       );
@@ -1263,31 +826,16 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         expectedEnvelopeSetVersion: envelopes.envelopeSetVersion,
         envelopeSetTag: tag,
         confirmRewrap: async () => {
-          // Advance the pin to the version this commit just wrote — ONLY
-          // after the server confirms the commit: the pre-flight verify
-          // above pinned the OLD version, and advancing off a bare
-          // server-served version (rather than a confirmed commit) would let
-          // a replayed old set silently undo the change.
+          // Advance the pin only after the server confirms the commit: the pre-flight verify pinned the old version,
+          // and advancing off a bare served version would let a replayed old set undo the change.
           try {
             await writeEnvelopeSetPin(nextVersion, claims.deviceId);
           } catch (err) {
-            // The durable `deviceMetadata` pin write itself failed:
-            // the server already committed this version, so a pin
-            // left at the predecessor would accept a later replay of the
-            // still-valid old envelope set. Durably raise the independent
-            // localStorage floor — scoped to THIS household (an
-            // unscoped key would let a floor raised here
-            // survive an account switch and incorrectly block a different
-            // household with a genuinely lower version) — so
-            // `readEnvelopeSetPin` rejects that replay regardless of the IDB
-            // failure. `raiseEnvelopeSetPinFloor` re-reads what it wrote to
-            // confirm the value actually landed
-            // (`setItem` can return without throwing yet not persist); a
-            // `false` return means NOTHING durable recorded the new floor —
-            // surface that as its own error rather than an ordinary
-            // pin-write failure, so it is never mistaken for "the floor is
-            // durably in place". Either branch still throws so the caller's
-            // own lock/retry handling runs.
+            // The durable pin write failed after the server committed: a pin left at the predecessor would accept a
+            // replay of the old set, so raise the household-scoped localStorage floor (an unscoped key would survive an
+            // account switch and block a different household). A `false` return means nothing durable recorded it:
+            // surface EnvelopeSetPinFloorPersistenceError. Either branch throws so the caller's lock/retry handling
+            // runs.
             const persisted = raiseEnvelopeSetPinFloor(nextVersion, claims.householdId);
             if (!persisted) {
               throw new EnvelopeSetPinFloorPersistenceError(nextVersion, err);
@@ -1300,32 +848,6 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [claimsRef, makeIsStale],
   );
 
-  /**
-   * Prepare a recovery-key regeneration after the user proves the current
-   * account password. Re-authenticates by unwrapping the
-   * `password` slot with the entered password: a wrong password throws
-   * KeyWrappingError before any new slot is minted, and a correct one yields the
-   * canonical HDK to re-wrap — no server round-trip and no reliance on the
-   * in-memory session (the password is the proof). Mints a FRESH `recovery` slot
-   * wrapping that same HDK but does **not** persist it; instead it returns the
-   * new grouped recovery-key display string plus an {@link activate} thunk.
-   *
-   * This is a two-phase **prepare → commit** so the rotation is never visible
-   * server-side until the user confirms they saved the new key: nothing is
-   * written here, so the previous recovery key keeps working. Only `activate()`
-   * PUTs the prepared slot at the next monotonic version and advances the
-   * rollback pin; the OLD key stops working the instant that lands. If the user
-   * abandons the flow (cancel / navigate away), no `activate()` call happens and
-   * the existing key is untouched. Re-displaying the original key is impossible
-   * (raw recovery bytes are never persisted), so rotating is the only path
-   * back from a lost key.
-   *
-   * Throws synchronously (during prepare) on a wrong password, a missing password
-   * slot, or a tampered/rolled-back set — so a key is never even shown for an
-   * unverifiable set. `activate()` re-fetches + re-verifies before the PUT and
-   * throws on a tampered/rolled-back set, a stale session, or a write failure, so
-   * the UI can surface it and the user never believes a stale key is valid.
-   */
   const regenerateRecoveryKey = useCallback(
     async (
       password: string,
@@ -1342,38 +864,24 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
           'No password is set up for this account, so a recovery key cannot be regenerated.',
         );
       }
-      // Re-authenticate by unwrapping the password slot with the entered password.
-      // unwrapSlot throws KeyWrappingError on a wrong password or tampered slot
-      // metadata (the wrap AAD binds the KDF params), so no recovery slot is ever
-      // minted against an unverified password — and the unwrap yields the canonical
-      // HDK to re-wrap into the fresh recovery slot.
+      // Unwrapping the password slot re-authenticates (a wrong password throws KeyWrappingError before any slot is
+      // minted) and yields the canonical HDK.
       const hdk = await unwrapSlot(passwordSlot, password);
-      // Reject a rolled-back set, verify the HDK-keyed tag (slot stripping/
-      // reorder/injection), then advance the pin — all before minting anything, so
-      // we never even show a key for a tampered or replayed set.
+      // Rollback and tag checks first, so a key is never shown for a tampered or replayed set.
       await verifyEnvelopeSetAndAdvancePin(envelopes, hdk, claims.householdId, claims.deviceId);
-      // Reuse the existing recovery slot's id so the eventual PUT replaces it in
-      // place; fall back to 'recovery' for the (rare) no-recovery-slot-yet case.
+      // Reuse the existing recovery slot's id so the PUT replaces it in place.
       const existingRecovery = envelopes.slots.find(
         (slot: KeyEnvelopeSlot) => slot.slotType === 'recovery',
       );
       const recoverySlotId = existingRecovery?.slotId ?? 'recovery';
-      // Mint the fresh recovery slot + key, but DO NOT PUT yet. The HDK is
-      // immutable, so this wrapped slot stays valid to persist later in
-      // `activate()`; until then nothing has changed server-side.
+      // Mint the slot and key but do not PUT yet; the HDK is immutable, so the slot stays valid for `activate()`.
       const generated = await generateRecoverySlot(claims.householdId, recoverySlotId, hdk);
 
       const activate = async (proof?: StepUpProof): Promise<void> => {
-        // Commit the prepared recovery slot. Re-fetch the set so the version is
-        // monotonically correct even if another device changed it since prepare,
-        // and re-verify the (immutable) HDK against the fresh set + rollback pin
-        // before re-tagging — fail closed on tamper/rollback, exactly like the
-        // other write paths.
+        // Re-fetch so the version is monotonic even if another device changed the set, and re-verify against the fresh
+        // set and pin: fail closed.
         const current = await getKeyEnvelopes();
         await verifyEnvelopeSetAndAdvancePin(current, hdk, claims.householdId, claims.deviceId);
-        // Replace any existing recovery slot with the prepared one; every other
-        // slot (password + any passkey_prf) carries through unchanged so the set
-        // tag still verifies after the rotation.
         const others = current.slots.filter(
           (slot: KeyEnvelopeSlot) => slot.slotType !== 'recovery',
         );
@@ -1381,21 +889,16 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         const nextVersion = current.envelopeSetVersion + 1;
         const tag = await computeEnvelopeSetTag(nextSlots, nextVersion, hdk);
         if (isStale()) throw new Error('Session ended. Please sign in again.');
-        // This PUT replaces an existing `recovery` slot — the server's
-        // exemption matrix never exempts it, so
-        // the caller's fresh factor proof (when `AUTH_MFA_ENFORCED` is on)
-        // rides along as the wire fields `stepUpProofFields` builds.
+        // Replacing a `recovery` slot is never step-up exempt, so the fresh factor proof rides along when
+        // `AUTH_MFA_ENFORCED` is on.
         await upsertKeyEnvelopeSlot(recoverySlotId, {
           slot: generated.slot,
           envelopeSetVersion: nextVersion,
           envelopeSetTag: tag,
           ...stepUpProofFields(proof),
         });
-        // Advance the device rollback pin to the just-written version. The verify
-        // above only pinned the OLD version (N); leaving the pin at N while the
-        // server set is N+1 lets an adversarial server replay the old N set (valid
-        // tag, isEnvelopeSetRollback(N, N) === false) and silently restore the
-        // previous recovery key. Matches rotatePasswordSlot.
+        // Advance the pin to the written version (see rotatePasswordSlot); otherwise a replay of the old set restores
+        // the previous recovery key.
         await writeEnvelopeSetPin(nextVersion, claims.deviceId);
       };
 
@@ -1404,48 +907,23 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [claimsRef, makeIsStale],
   );
 
-  /**
-   * Re-cache the in-memory HDK after an operation that wiped the device
-   * `keyCache` but left the session unlocked (a snapshot restore runs
-   * `clearAllStores()`, which drops `keyCache` while the in-memory `hdkRef`
-   * survives — so without this a refresh misses the cache and prompts for the
-   * password). Best-effort: no-ops when the session is locked (no HDK or no
-   * household) and swallows an IDB write failure, so it never gates the
-   * reseed success path.
-   *
-   * Unlike the other `cacheHdk` call sites, this deliberately skips the
-   * `makeIsStale(claims)` mid-flight-switch guard: the write is household-keyed
-   * (`cacheHdk(householdId, hdk)`) and `loadCachedHdk` rejects an entry whose
-   * `householdId` doesn't match the live session on read, so a stale-session
-   * write is self-correcting — the next session never trusts another
-   * household's cached key. Reading `claimsRef.current?.householdId` here pairs
-   * the household with the HDK that is actually in memory at call time.
-   */
+  // Deliberately skips the makeIsStale guard: the write is household-keyed and `loadCachedHdk` rejects another
+  // household's entry, so a stale write self-corrects.
   const recacheHdk = useCallback(async (): Promise<void> => {
     const hdk = hdkRef.current;
     const householdId = claimsRef.current?.householdId;
-    // Locked session (no HDK) or no live household: nothing to cache.
     if (!hdk || !householdId) return;
     try {
       await cacheHdk(householdId, hdk);
     } catch {
-      // Best-effort: an IDB write failure leaves the device locked on the
-      // next refresh (recoverable via the password prompt) rather than turning
-      // a successful restore into a hard error.
+      // Best-effort: a failed write only costs a password prompt on refresh.
     }
   }, [claimsRef]);
 
-  /**
-   * Obtain a PRF secret from a specific passkey via a targeted WebAuthn
-   * assertion. Fetches a server-issued challenge from
-   * `POST /auth/passkey/authenticate/start` (discoverable: `allowCredentials:
-   * []`), then OVERRIDES `allowCredentials` client-side to the chosen credential
-   * and adds the PRF eval for `prfSalt`. The assertion is NOT finished — the
-   * user is already authenticated; the server challenge expires via its TTL.
-   * Returns the raw PRF output, or throws if the authenticator returns none
-   * (PRF unsupported). Extracted to keep {@link enrollPasskeyForEncryption}
-   * ≤ 60 lines and free of WebAuthn-extension wiring.
-   */
+  // Targeted WebAuthn assertion for a chosen passkey's PRF secret: take a server challenge from `POST
+  // /auth/passkey/authenticate/start`, override `allowCredentials` to the credential and add the PRF eval for
+  // `prfSalt`. The assertion is not finished (the user is already authenticated; the challenge expires by TTL). Throws
+  // if the authenticator returns no PRF output.
   const obtainPrfSecretForCredential = useCallback(
     async (credentialId: string, prfSalt: string): Promise<Uint8Array<ArrayBuffer>> => {
       const options = await apiRequest<PublicKeyCredentialRequestOptionsJSON>(
@@ -1467,16 +945,6 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
     [],
   );
 
-  /**
-   * User-initiated passkey-PRF unlock from the post-login unlock prompt.
-   * The discoverable login assertion can't carry the PRF salt
-   * before the user is identified, so the explicit unlock runs a *targeted*
-   * second assertion against the enrolled slot's bound credential + `prfSalt`
-   * (the same mechanism as {@link obtainPrfSecretForCredential}), then unwraps
-   * the slot and verifies the envelope-set tag before trusting the HDK. Guards
-   * every state write with the staleness predicate like {@link unlockWithPassword}.
-   * User-initiated → throws on any failure so the button surfaces the error.
-   */
   const unlockWithPasskey = useCallback(
     async (): Promise<void> => {
       const claims = claimsRef.current;
@@ -1489,24 +957,18 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
       if (!prfSlot || !prfSlot.credentialBinding || !prfSlot.prfSalt) {
         throw new Error('No passkey is set up to unlock your data on this device.');
       }
-      // Targeted assertion against the slot's bound credential + salt,
-      // reusing obtainPrfSecretForCredential (throws KeyWrappingError when the
-      // authenticator returns no PRF result, so the UI shows the right message).
+      // Throws KeyWrappingError when the authenticator returns no PRF result, so the UI shows the right message.
       const prfResult = await obtainPrfSecretForCredential(
         prfSlot.credentialBinding,
         prfSlot.prfSalt,
       );
       const wrapKey = await derivePrfWrapKey(prfResult);
       const hdk = await unwrapPrfSlot(prfSlot, wrapKey);
-      // Reject a rolled-back set, verify the HDK-keyed tag (slot stripping/
-      // reorder/injection), then advance the pin. Throws before adoption.
       await verifyEnvelopeSetAndAdvancePin(envelopes, hdk, claims.householdId, claims.deviceId);
       if (isStale()) throw new Error('Session ended. Please sign in again.');
       hdkRef.current = hdk;
       setIsUnlocked(true);
       setNeedsKeySetup(false);
-      // Hand the just-verified response to useDerivedRewrap
-      // instead of forcing a second GET for the same unlock.
       lastUnlockEnvelopesRef.current = {
         userId: claims.userId,
         householdId: claims.householdId,
@@ -1536,17 +998,10 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         prfSalt,
         credentialId,
       );
-      // Replace any existing passkey_prf slot (one per household); other
-      // slots carry through unchanged in the tag computation.
+      // One per household: replace any existing passkey_prf slot.
       const envelopes = await getKeyEnvelopes();
-      // Verify the freshly-fetched slot set against the in-memory HDK before
-      // re-tagging anything, matching unlockWithPassword /
-      // rotatePasswordSlot. Without this a stripped/injected slot set could be
-      // blessed during enrollment — the new tag would be computed over a
-      // tampered/rolled-back set and persisted as authoritative. Throws on
-      // mismatch or rollback; unlike the best-effort rotatePasswordSlot
-      // this is a user-initiated enrollment, so the error propagates:
-      // enrollment fails and no PUT is issued.
+      // Verify the fetched set before re-tagging, as unlockWithPassword does. A user-initiated enrollment propagates
+      // the error: no PUT is issued.
       await verifyEnvelopeSetAndAdvancePin(envelopes, hdk, claims.householdId, claims.deviceId);
       const others = envelopes.slots.filter(
         (s: KeyEnvelopeSlot) => s.slotType !== 'passkey_prf',
@@ -1555,14 +1010,9 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
       const nextVersion = envelopes.envelopeSetVersion + 1;
       const tag = await computeEnvelopeSetTag(nextSlots, nextVersion, hdk);
       if (isStale()) throw new Error('Session ended. Please sign in again.');
-      // A passkey_prf write is never exempt on a household that already
-      // holds a slot — the first-ever
-      // enrollment (`others.length === envelopes.slots.length`, no prior PRF
-      // slot) requires a proof exactly like a replace does now, plus the
-      // password floor below, in EITHER `AUTH_MFA_ENFORCED` state. This is
-      // the ONE request that carries the proof: a transport failure here is
-      // typed {@link EnrollmentCommitAmbiguousError} so the caller can tell
-      // "outcome unknown" apart from every local failure above.
+      // A passkey_prf write is never step-up exempt, first enrollment included, and carries the password floor in
+      // either `AUTH_MFA_ENFORCED` state. This is the one request carrying the proof; a transport failure is typed
+      // EnrollmentCommitAmbiguousError so the caller can tell "outcome unknown" from the local failures above.
       await commitPasskeyPrfSlot({
         slot,
         envelopeSetVersion: nextVersion,
@@ -1570,11 +1020,7 @@ export function useZeroKnowledgeKey(deps: ZeroKnowledgeKeyDeps): ZeroKnowledgeKe
         currentPassword,
         ...stepUpProofFields(proof),
       });
-      // Advance the device rollback pin to the just-written set version. The
-      // verify above only pinned the OLD version (N); leaving the pin at N while
-      // the server set is N+1 lets an adversarial server replay the old N set
-      // (valid tag, isEnvelopeSetRollback(N, N) === false) and silently undo the
-      // enrollment. Matches setupEncryption.
+      // Advance the pin to the written version (see rotatePasswordSlot).
       await writeEnvelopeSetPin(nextVersion, claims.deviceId);
     },
     [claimsRef, makeIsStale, obtainPrfSecretForCredential],

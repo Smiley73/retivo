@@ -1,29 +1,5 @@
-/**
- * Deterministic claim-age optimizer Web Worker. Receives the raw
- * aggregates + a target scenario id; runs `optimiseClaimAgesForScenario`
- * (which delegates each candidate to `runBalanceProjection` for the
- * BPP-equivalent at-horizon balance) and posts the winner back.
- *
- * The SS-dependent slice is rebuilt per candidate inside the
- * runner — the worker forwards raw aggregates so the candidate overlay
- * can apply on top of the resolved chain.
- *
- * Protocol:
- *   main → worker: { kind: 'run', runId, input: OptimizerWorkerInput }
- *   worker → main: { kind: 'result', runId, scenarioId, winner, partial,
- *                    missingPiaMembers }
- *                | { kind: 'empty',  runId, scenarioId, reason }
- *                | { kind: 'unsupported', runId, scenarioId, reason }
- *                | { kind: 'error',  runId, scenarioId, message }
- *
- * Test pattern: tests install a fake `self` (with
- * `addEventListener` capturing the worker's listener and a `postMessage`
- * spy) BEFORE importing this module. The import runs the
- * `self.addEventListener('message', handler)` registration against the
- * fake `self`, leaving a captured `handler` reference. Tests then
- * invoke `handler({ data: <input> } as MessageEvent)` and assert
- * against the spy.
- */
+// Deterministic claim-age optimizer Web Worker: runs `optimiseClaimAgesForScenario` over raw aggregates and posts the winner.
+// Tests drive `registerOptimizerWorkerListener` against a fake `self` (see the brand-check guard at the bottom).
 import {
   optimiseClaimAgesForScenario,
   type OptimizerResult,
@@ -46,6 +22,8 @@ import type {
   SocialSecurityBenefitPayload,
 } from '../db/types';
 
+// Raw aggregates are forwarded, not a prebuilt SS slice: the SS-dependent slice is rebuilt per candidate and the
+// overlay applies on top of the resolved chain.
 export interface OptimizerWorkerInput {
   readonly scenarioId: string;
   readonly scenarios: ReadonlyArray<ScenarioAggregate>;
@@ -55,25 +33,24 @@ export interface OptimizerWorkerInput {
   readonly ssBenefits: ReadonlyArray<Aggregate<SocialSecurityBenefitPayload>>;
   readonly expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
   readonly incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
-  /** Flag-derived medical category ids. Threaded into the optimizer's
-   *  projections so the +2pp medical-inflation default follows the
-   *  `isMedical` flag (a recreated/second medical category must not diverge
-   *  from the legacy default). Structured-clone-safe Array. */
+  /**
+   * Flag-derived medical category ids, so the +2pp medical-inflation default follows the `isMedical` flag (a recreated
+   * medical category must not diverge from the legacy default); a structured-clone-safe array.
+   */
   readonly medicalCategoryIds?: ReadonlyArray<string>;
   /** Serialised today timestamp; the worker reconstructs `new Date(iso)`. */
   readonly todayIso: string;
-  /** Defaults to `'planned'`. The deterministic page posts two messages
-   *  per scenario — one per method — and groups the two replies under
-   *  one parent row. */
+  /**
+   * Defaults to `'planned'`; the deterministic page posts one message per method per scenario and groups the two
+   * replies under one row.
+   */
   readonly projectionMethod?: ProjectionMethod;
 }
 
 /**
- * `runId` correlates a single dispatch round-trip. The page effect can
- * re-run mid-flight (aggregates change via WORKSPACE_CHANGED_EVENT or
- * cross-tab sync) and register a second listener that would otherwise
- * match the previous run's reply purely by `scenarioId`. Filtering on
- * both keys prevents the new dispatch from resolving to the old reply.
+ * `runId` correlates one dispatch round-trip: the page effect can re-run mid-flight (aggregates change via
+ * WORKSPACE_CHANGED_EVENT or cross-tab sync) and a second listener would otherwise match the previous run's reply by
+ * `scenarioId` alone.
  */
 export type OptimizerWorkerInbound = {
   kind: 'run';
@@ -89,9 +66,10 @@ export type OptimizerWorkerOutbound =
       winner: OptimizerResult['winner'];
       partial: boolean;
       missingPiaMembers: ReadonlyArray<string>;
-      /** Metric value at the scenario's current claim ages — drives the
-       *  "current → recommended" metric cell. `undefined` when the
-       *  current pair isn't a whole-year grid candidate. */
+      /**
+       * Metric value at the scenario's current claim ages (the "current -> recommended" cell); `undefined` when that
+       * pair isn't a whole-year grid candidate.
+       */
       baselineMetricValue?: number;
       /** Disclosure only: assumed fixed primary death age. */
       assumedDeathAge?: number;
@@ -109,11 +87,10 @@ export type OptimizerWorkerOutbound =
       reason: UnsupportedScenarioReason;
     }
   | {
-      /** Requested `projectionMethod: 'twr'` but at least one active
-       *  non-CBP account has < 2 yr of balance history. Separate kind
-       *  (not `unsupported`) — only the TWR child row renders the
-       *  "Insufficient history" message; the Planned child row still
-       *  resolves. */
+      /**
+       * `projectionMethod: 'twr'` but an active non-CBP account has < 2 yr of balance history. A separate kind so only
+       * the TWR child row shows "Insufficient history" while the Planned row still resolves.
+       */
       kind: 'twr-insufficient';
       runId: string;
       scenarioId: string;
@@ -134,10 +111,8 @@ export async function runOptimizerForScenario(
       message: `Unknown scenario id: ${input.scenarioId}`,
     };
   }
-  // Defence-in-depth pre-check: if the scenario's CBP election is
-  // unresolved, surface the Unsupported callout immediately so the page
-  // doesn't spend a full BPP run on it. The runner also throws on
-  // unconfigured CBP — this pre-check just skips the heavier path.
+  // Defence in depth: an unresolved CBP election surfaces the Unsupported callout at once instead of spending a full
+  // BPP run (the runner also throws on unconfigured CBP).
   const unsupported = detectUnsupportedScenarioFeatures({
     scenario,
     scenarios: input.scenarios,
@@ -152,8 +127,7 @@ export async function runOptimizerForScenario(
       reason: unsupported,
     };
   }
-  // Empty-state pre-check: no primary or no resolvable primary
-  // retirement date.
+  // Empty state: no primary, or no resolvable primary retirement date.
   const primary = input.members.find((m) => m.payload.isPrimary);
   if (!primary) {
     return {
@@ -171,10 +145,8 @@ export async function runOptimizerForScenario(
       reason: 'no-retirement-date',
     };
   }
-  // Birthdate shape check above is necessary but not sufficient —
-  // a scenario with no `retirementAge` override (and no inherited one)
-  // resolves to no retirement date too. Probe the resolved chain so
-  // the empty surface fires for that case as well.
+  // The birthdate shape check isn't sufficient: a scenario with no `retirementAge` override anywhere in the chain also
+  // has no retirement date.
   if (!hasResolvedRetirementDate(scenario, input)) {
     return {
       kind: 'empty',
@@ -235,17 +207,9 @@ function hasResolvableRetirementDate(
   );
 }
 
-/**
- * Tighten the empty-state precheck. Birthdate validity isn't
- * sufficient — a scenario with no `retirementAge` override (and no
- * inherited override up the parent chain) still has no resolvable
- * primary retirement date. `resolveMemberRetirementDates` returns
- * `null` for the primary in that case; surface it as the same
- * `no-retirement-date` empty variant so the page renders the user-
- * facing "Set a primary retirement age…" copy instead of letting the
- * runner throw `NoPrimaryRetirementError` and bubble through as an
- * ErrorRow.
- */
+// A valid birthdate isn't enough: a scenario with no `retirementAge` override (own or inherited) has no resolvable
+// primary retirement date. Surface it as the same `no-retirement-date` empty variant, for the page's "Set a primary
+// retirement age…" copy, instead of the runner throwing `NoPrimaryRetirementError` into an ErrorRow.
 function hasResolvedRetirementDate(
   scenario: ScenarioAggregate,
   input: OptimizerWorkerInput,
@@ -264,11 +228,7 @@ function hasResolvedRetirementDate(
   return (dates.get(primary.id) ?? null) !== null;
 }
 
-/**
- * Register the worker's message listener on a target global. Exported
- * so tests can drive the side effect against a mocked `self` without
- * relying on import-time machinery.
- */
+/** Registers the worker's message listener on a target global; exported so tests can drive it against a fake `self`. */
 export function registerOptimizerWorkerListener(
   target: { addEventListener: typeof self.addEventListener; postMessage: typeof self.postMessage },
 ): void {
@@ -293,17 +253,10 @@ export function registerOptimizerWorkerListener(
   });
 }
 
-/**
- * Brand-check guard. `SsOptimizerPage.tsx` spawns this file as a real Worker
- * through Vite's `?worker` import, and the listener is registered there. The
- * `instanceof WorkerGlobalScope` brand check makes the registration a no-op
- * anywhere else the module is loaded (the main thread, jsdom), where
- * `WorkerGlobalScope` is undefined, so importing the module does not pollute
- * `window` with a stray `message` listener.
- *
- * Tests bypass this guard by calling `registerOptimizerWorkerListener`
- * directly against a fake `self`.
- */
+// Brand-check guard: `SsOptimizerPage.tsx` spawns this file as a real Worker via Vite's `?worker`. The `instanceof
+// WorkerGlobalScope` check makes registration a no-op on the main thread and in jsdom (`WorkerGlobalScope` is
+// undefined), so importing it adds no stray `message` listener to `window`. Tests call
+// `registerOptimizerWorkerListener` directly.
 const WORKER_GLOBAL_SCOPE_CTOR =
   typeof (globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope === 'function'
     ? ((globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope as new (...args: unknown[]) => unknown)

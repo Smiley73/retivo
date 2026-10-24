@@ -1,13 +1,5 @@
-/**
- * Pure formatting helpers shared by the sync badge pill
- * (`SyncBadge.tsx`), the details popover (`SyncDetailsPopover.tsx`), and
- * the unsynced-items row list (`UnsyncedMutationList.tsx`).
- *
- * Lives in its own leaf module so those components don't import each
- * other: `SyncBadge` renders `SyncDetailsPopover` (via `DialogTrigger`)
- * and all three depend on these formatters, which avoids a bidirectional
- * module cycle.
- */
+// Pure formatting helpers shared by SyncBadge, SyncDetailsPopover and UnsyncedMutationList.
+// A leaf module so those components don't import each other (SyncBadge renders the popover): no module cycle.
 import type { SyncBadgeState } from './types.js';
 
 /** Short human label describing what each badge state means. */
@@ -38,9 +30,8 @@ export function describe(state: SyncBadgeState): string {
 }
 
 /**
- * Relative-time string (e.g. "just now", "5m ago", "2h ago") from an
- * epoch-ms timestamp. A non-positive diff (a monotonic-clock or future
- * timestamp) reads as "just now" rather than a negative duration.
+ * "just now", "5m ago", "2h ago" from epoch ms; a non-positive diff (monotonic-clock or future timestamp) reads "just
+ * now".
  */
 export function relativeTimeFromMs(ms: number, now = Date.now()): string {
   const diffMs = now - ms;
@@ -51,18 +42,12 @@ export function relativeTimeFromMs(ms: number, now = Date.now()): string {
   return `${hours}h ago`;
 }
 
-/** Relative-time string (e.g. "just now", "5m ago", "2h ago"). */
+/** As {@link relativeTimeFromMs}, from an ISO string. */
 export function relativeTime(isoString: string): string {
   return relativeTimeFromMs(new Date(isoString).getTime());
 }
 
-/**
- * Seconds remaining until `deadlineMs`, floored at 0 (never negative — a
- * deadline that already passed reads as "0s" for the instant before the
- * next tick clears it). Shared by the badge's live "Retrying in Ns"
- * countdown so both badge components
- * would compute it identically if a second one ever needed it.
- */
+/** Whole seconds until `deadlineMs`, floored at 0 so a passed deadline reads "0s" until the next tick clears it. */
 export function secondsUntil(deadlineMs: number, now = Date.now()): number {
   return Math.max(0, Math.ceil((deadlineMs - now) / 1000));
 }

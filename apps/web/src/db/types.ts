@@ -1,18 +1,5 @@
-/**
- * Per-aggregate domain types stored in IndexedDB. Mirrors the server
- * aggregate inventory in `packages/contracts`. Each aggregate type
- * carries its own payload shape; `Aggregate<T>` is the wrapper.
- *
- * Schema versions live alongside the per-type type definitions and the
- * migration registry — see `migrations.ts`.
- *
- * This module is a barrel over the per-aggregate files in `db/types/`, so
- * every existing `db/types` import site is unchanged. Add a new aggregate's
- * types in its own `db/types/<aggregate>.ts` file, re-export it below, and add
- * its payload to `PayloadByType`. The cross-aggregate shared vocabulary
- * (`AggregateType`, `Aggregate`, `PatchWithClears`, the schedule/anchor unions,
- * the local-only store shapes) lives in `db/types/aggregate-base.ts`.
- */
+// Barrel over `db/types/`: add a new aggregate's types in their own file, re-export here and add to `PayloadByType`.
+// Shared vocabulary lives in `aggregate-base.ts`; see AGENTS.md "Aggregate schema evolution — required companion edits".
 
 import type { HouseholdPayload, HouseholdMemberPayload } from './types/household';
 import type { AccountPayload, AccountBalancePayload } from './types/account';
@@ -30,7 +17,6 @@ export * from './types/scenario';
 export * from './types/expense';
 export * from './types/income';
 
-// Map an aggregate type to its payload shape.
 export interface PayloadByType {
   household: HouseholdPayload;
   householdMember: HouseholdMemberPayload;

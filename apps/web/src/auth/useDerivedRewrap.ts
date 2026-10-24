@@ -1,73 +1,19 @@
-/**
- * Derived post-reset password-slot re-wrap, extracted from AuthContext so
- * that file stays under the shape limit.
- *
- * The problem it solves: a password reset rotates only the *login*
- * credential — it cannot unwrap the pre-existing `password` key-envelope slot
- * (the server holds no key material). Whether THIS device's slot is
- * still wrapped under a superseded credential is now DERIVED, at every
- * unlock-state transition, from two server-authored fields on the same
- * `GET /auth/key-envelopes` read the unlock path already makes: the
- * `password` slot's own `credentialRevision` and the response's
- * `currentCredentialRevision`. Not equal — including a slot carrying
- * no revision at all (a slot written before revisions were recorded) — means a
- * re-wrap is owed. This is a pure compare: no clock, no stored marker, no
- * unwrap failure is ever the trigger (a reset never touches the slot, so the
- * pre-reset password still opens it).
- *
- * Where it is owed:
- *   - a plaintext this session's own sign-in accepted is retained in memory
- *     (never persisted) for the unlock window; when present, the re-wrap
- *     fires silently under it;
- *   - otherwise the person is prompted once, with a plain-English reason, and
- *     asked again at every later unlock-state transition until an accepted
- *     envelope write lands. The prompt answer is verified through the
- *     existing `POST /auth/verify-password` route (shares the per-account
- *     login backoff) and, on success, becomes the wrap plaintext.
- *
- * A write refused because the session's recorded write authority is stale or
- * absent (a session that predates recorded write authority carries none) is answered
- * by a FRESH verification of the plaintext — silently when a plaintext is in
- * hand, by the prompt otherwise — rather than by reusing the session's own
- * (already-stale) authority; `verify-password` updates that authority in
- * place, so the retry that follows lands. A failure for any other reason
- * (a tag/rollback mismatch, a network fault) never overwrites the slot and is
- * never presented as a wrong password; it is recorded as a diagnostic and
- * left owed for the next unlock-state transition rather than retried
- * invisibly forever.
- *
- * Nothing here is wired to any specific unlock method — AuthContext calls
- * {@link DerivedRewrap.runDerive} once on every rising edge of `isUnlocked`,
- * which already covers the cached-key auto-unlock, the PRF unlock, and all
- * three explicit unlock branches (password / recovery / passkey) uniformly,
- * so no branch can be forgotten and none is asked more than the derive says
- * it should be.
- *
- * A session-generation token bounds every retained plaintext, the prompt, and any
- * derive/answer async continuation to the unlock window it started in:
- * `clearRetainedPassword` — called by AuthContext on every session-drop path
- * (logout / refresh failure / account deletion) and on unmount — bumps it, so
- * a run still in flight when the session ends bails out instead of showing a
- * prompt after logout or acting against the NEXT session's HDK/claims.
- *
- * See "Unlocking" and "Password change, password reset" in docs/security.md.
- */
+// Derived post-reset password-slot re-wrap: owed iff the `password` slot's `credentialRevision` differs from
+// `currentCredentialRevision`, re-derived at every unlock (docs/security.md "Password change, password reset").
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiRequestError } from '../api/client';
 import { getKeyEnvelopes, type KeyEnvelopesResponse } from './key-envelope-client';
 import { KeyWrappingError } from '../crypto/key-wrapping';
 import { RewrapCommittedPinDegradedError } from './useZeroKnowledgeKey';
 
-/** Bound on wrong-password attempts inside one prompt. */
 const MAX_PROMPT_ATTEMPTS = 3;
 
 /** Reactive prompt state AuthContext renders via a Modal-based component. */
 export interface RewrapPromptState {
-  /** Wrong-password attempts left before the prompt closes for this unlock
-   * (still owed — the next unlock-state transition asks again). `0` also
-   * marks a TERMINAL state (attempts exhausted, a login-backoff wait, or a
-   * post-verify write refusal) — the person must dismiss rather than retry;
-   * see `error` for why. */
+  /**
+   * Wrong-password attempts left before the prompt closes for this unlock (still owed; the next transition asks again).
+   * `0` also marks a terminal state (exhausted, login-backoff wait, post-verify write refusal): dismiss, see `error`.
+   */
   attemptsRemaining: number;
   /** Inline error from the last submit, or null. */
   error: string | null;
@@ -76,78 +22,59 @@ export interface RewrapPromptState {
 }
 
 export interface DerivedRewrap {
-  /** Stash the plaintext THIS session's sign-in just accepted (never a value
-   * typed into an unlock prompt — those unwrap under whatever secret already
-   * opens the slot, which post-reset is the OLD password). Overwrites any
-   * prior retained value. */
+  /**
+   * Stashes the plaintext this session's sign-in accepted (never an unlock-prompt value: post-reset those open under
+   * the old password). Overwrites any prior value.
+   */
   retainPassword(password: string): void;
   /**
-   * Ends the unlock window for good: drops any retained plaintext, closes
-   * an open prompt (its typed value goes with it — `PasswordRewrapPrompt` is
-   * a thin view over `prompt` and clears its own field once `prompt` goes
-   * null), and bumps the session generation so a derive/answer already in
-   * flight for the ending session bails out instead of acting on the NEXT
-   * session (its own prompt, its own HDK, its own claims). Idempotent.
-   * Called by AuthContext on every session-drop path (logout / refresh
-   * failure / account deletion) and on unmount — none of the plaintext, the
-   * prompt, or an in-flight derive/answer may outlive the unlock window they
-   * were entered in.
+   * Ends the unlock window: drops the retained plaintext, closes the prompt, and bumps the session generation so an
+   * in-flight derive/answer bails instead of acting on the next session's prompt, HDK or claims. Idempotent;
+   * AuthContext calls it on every session-drop path (logout, refresh failure, account deletion) and on unmount.
    */
   clearRetainedPassword(): void;
   /**
-   * Run the derive-and-complete step. Safe to call on every unlock-state
-   * transition (cached-key auto-unlock, PRF, or any explicit unlock
-   * success) — it is a pure re-derivation from a fresh server read each
-   * time, so calling it when nothing is owed, or when a prior call already
-   * completed the re-wrap, is a harmless no-op (one extra read). Internally
-   * guarded against concurrent overlapping runs. No-ops when the session is
-   * locked (nothing to verify a tag against yet).
+   * Derive-and-complete step; safe on every unlock transition (a fresh server read each time, a no-op when nothing is
+   * owed), guarded against overlapping runs, and a no-op while locked.
    */
   runDerive(): void;
   /** Non-null while the re-wrap prompt should be shown. */
   prompt: RewrapPromptState | null;
-  /** Submit the prompt's password. Verifies it via `verify-password`
-   * (`purpose: 'password_slot_rewrap'`), which also repairs this session's
-   * recorded write authority in place, then re-wraps under it. */
+  /**
+   * Verifies the password via `verify-password` (`purpose: 'password_slot_rewrap'`, which also repairs the session's
+   * write authority), then re-wraps under it.
+   */
   answerPrompt(password: string): Promise<void>;
-  /** Dismiss the prompt without answering. Writes nothing; the next
-   * unlock-state transition asks again. */
+  /** Dismisses without answering; writes nothing, the next transition asks again. */
   dismissPrompt(): void;
 }
 
 export interface DerivedRewrapDeps {
-  /** The in-memory HDK accessor (useZeroKnowledgeKey.getHdk) — null when
-   * locked, in which case the derive has nothing to verify a tag against yet
-   * and no-ops. */
+  /** The in-memory HDK accessor (useZeroKnowledgeKey.getHdk); null while locked, so the derive no-ops. */
   getHdk(): CryptoKey | null;
-  /** Re-wrap the `password` slot under a plaintext already authenticated
-   * (useZeroKnowledgeKey.rotatePasswordSlot). Propagates every failure — this hook classifies the throw. Accepts an optional
-   * already-fetched envelope-set response so the silent (retained-password)
-   * path does not spend a second rate-limited read on the same unlock. */
+  /**
+   * Re-wraps the `password` slot under an authenticated plaintext (useZeroKnowledgeKey.rotatePasswordSlot); propagates
+   * every failure for this hook to classify. `envelopesHint` spares the silent path a second rate-limited read.
+   */
   rotatePasswordSlot(newPassword: string, envelopesHint?: KeyEnvelopesResponse): Promise<void>;
-  /** Verify a password against the account credential
-   * (AuthContext.verifyPassword). Throws `ApiRequestError('INVALID_CREDENTIALS')`
-   * on a mismatch, or a `429 LOGIN_BACKOFF` under the shared login backoff. */
+  /**
+   * Verifies against the account credential (AuthContext.verifyPassword); throws
+   * `ApiRequestError('INVALID_CREDENTIALS')`, or `429 LOGIN_BACKOFF` under the shared login backoff.
+   */
   verifyPassword(
     password: string,
     opts?: { purpose?: 'password_slot_rewrap' },
   ): Promise<void>;
   /**
-   * Consume (and clear) the envelope-set response already fetched + verified
-   * during the unlock that just flipped `isUnlocked`, if it still matches
-   * the live session (useZeroKnowledgeKey.takeLastUnlockEnvelopes) — avoids
-   * spending a second rate-limited `GET /auth/key-envelopes` on the same
-   * unlock. Optional: omitted by tests and any future
-   * caller that has no such response to offer, in which case the derive
-   * always fetches fresh. Returns null when none is available.
+   * Consumes the envelope-set response the unlock already fetched and verified
+   * (useZeroKnowledgeKey.takeLastUnlockEnvelopes) if it still matches the live session, sparing a second rate-limited
+   * read. Optional; null or omitted means the derive fetches fresh.
    */
   takeLastUnlockEnvelopes?(): KeyEnvelopesResponse | null;
 }
 
-/** `true` when `err` is the server's "this session's recorded write authority
- * is stale or absent" refusal (`409 UPGRADE_REQUIRED` on the
- * key-envelope write path) — the one refusal class this hook answers by
- * re-authenticating the plaintext rather than surfacing it. */
+// The one refusal answered by re-authenticating the plaintext: `409 UPGRADE_REQUIRED`, the session's recorded write
+// authority is stale or absent.
 function isStaleWriteAuthorityError(err: unknown): boolean {
   return err instanceof ApiRequestError && err.error.code === 'UPGRADE_REQUIRED';
 }
@@ -160,20 +87,10 @@ function isInvalidCredentialsError(err: unknown): boolean {
   return err instanceof ApiRequestError && err.error.code === 'INVALID_CREDENTIALS';
 }
 
-/** The rewrap-write outcome, classified for the caller:
- * `refused-integrity` is a tag/rollback mismatch on the freshly-fetched slot
- * set — permanent for this plaintext/device pair, retrying will not help;
- * `refused-transient` is everything else (network fault, unexpected server
- * error) — expected to resolve itself on a later unlock-state transition.
- * `written-degraded` and `locked` are BOTH known-committed outcomes, never refusals: the server
- * already accepted the new password slot, and only this device's local
- * rollback-pin bookkeeping needed a fallback. `written-degraded` means the
- * fallback floor landed — the workspace stays live. `locked` means neither
- * the durable pin nor the fallback floor could be confirmed anywhere on
- * this device, so `rotatePasswordSlot` has already cleared the in-memory
- * HDK and `isUnlocked` as a precaution — the caller must say so rather than
- * let the next unlock prompt read as an ordinary, unexplained session
- * expiry. */
+// `refused-integrity`: tag/rollback mismatch on the fresh slot set, permanent for this plaintext/device pair.
+// `refused-transient`: anything else, may resolve at a later transition. `written-degraded` and `locked` are committed
+// outcomes, never refusals: only this device's rollback-pin bookkeeping needed a fallback. `locked` means neither the
+// durable pin nor the fallback floor could be confirmed, so the HDK was cleared and the caller must say so.
 type RewrapOutcome =
   | 'written'
   | 'written-degraded'
@@ -185,12 +102,8 @@ function classifyRefusal(err: unknown): 'refused-integrity' | 'refused-transient
   return err instanceof KeyWrappingError ? 'refused-integrity' : 'refused-transient';
 }
 
-/** Classify + log a `rotatePasswordSlot` failure: a {@link RewrapCommittedPinDegradedError} means
- * the write already committed server-side — it is never described as
- * "refused" or "left owed", which would tell the person nothing happened
- * when their password WAS re-wrapped. Every other failure is left owed and
- * logged as a diagnostic. `when` is a
- * short phrase describing which attempt failed, folded into the log line. */
+// A RewrapCommittedPinDegradedError means the write committed server-side, so it is never described as refused or left
+// owed. Any other failure stays owed and is logged. `when` names the failed attempt in the log line.
 function reportRewrapFailure(err: unknown, when: string): RewrapOutcome {
   if (err instanceof RewrapCommittedPinDegradedError) {
     console.warn(
@@ -209,29 +122,15 @@ function reportRewrapFailure(err: unknown, when: string): RewrapOutcome {
 export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
   const { getHdk, rotatePasswordSlot, verifyPassword, takeLastUnlockEnvelopes } = deps;
 
-  // Plaintext lives only in a ref (never React state — must not leak into
-  // devtools-inspectable state, same posture as the in-memory HDK). Cleared
-  // by an explicit session-drop / unmount, or the instant a derive run
-  // settles (owed or not) — the sign-in plaintext is scoped to the unlock
-  // WINDOW, not to any single unlock attempt inside it (a failed unlock
-  // attempt — e.g. the ordinary post-reset case of trying the new password
-  // before the old one — never calls this hook at all, since {@link
-  // runDerive} only runs on an unlock SUCCESS).
+  // Plaintext lives in a ref, never React state (devtools-inspectable), like the in-memory HDK. Cleared on session
+  // drop, unmount, or as soon as a derive run settles: it is scoped to the unlock window, not to one attempt.
   const retainedRef = useRef<string | null>(null);
   const [prompt, setPrompt] = useState<RewrapPromptState | null>(null);
-  // Bumped by `clearRetainedPassword` on every session-drop path / unmount.
-  // A derive/answer run captures the
-  // generation it started under; if it moves on while an await is pending,
-  // the continuation bails without touching `retainedRef`/`prompt` — a dead
-  // session's outcome must never surface over the next screen or act against
-  // the next user's session.
+  // Bumped by `clearRetainedPassword`. A run captures its generation and bails after an await if it moved, so a dead
+  // session's outcome never surfaces over the next screen or acts on the next user's session.
   const generationRef = useRef(0);
-  // The generation the CURRENTLY in-flight derive belongs to (null when none
-  // is running). Scoped to generation rather than a bare boolean so a stale
-  // run from a session that has since dropped never blocks the NEXT
-  // session's own runDerive() call — only an
-  // in-flight run for the CURRENT generation guards against a concurrent
-  // duplicate for the SAME unlock-state transition.
+  // Generation of the in-flight derive (null if none): a stale run from a dropped session must not block the next
+  // session's runDerive().
   const inFlightGenerationRef = useRef<number | null>(null);
 
   const retainPassword = useCallback((password: string): void => {
@@ -245,23 +144,11 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
   }, []);
 
   /**
-   * Attempt the re-wrap under an already-authenticated plaintext. On a
-   * `409 UPGRADE_REQUIRED` refusal (this session's recorded write authority
-   * is stale/absent) and `retryOnStaleAuthority`, re-verify the plaintext
-   * (which repairs the authority in place) and retry exactly once.
-   * Every other failure is left owed and logged as a diagnostic — never
-   * retried invisibly, never presented as a wrong password. Never throws.
-   *
-   * `generation` is the session generation this run started under: checked before EVERY await that reaches the network, not just
-   * before this function is entered — a session-drop (logout) or a new
-   * sign-in landing between two of this function's own awaits (e.g. after a
-   * `rotatePasswordSlot` that returns `UPGRADE_REQUIRED`) must not let the
-   * retry's `verifyPassword` / `rotatePasswordSlot` calls run against the
-   * NEXT session's live claims/HDK using A's retained plaintext. A stale
-   * generation bails with `'refused-transient'` (nothing was written; left
-   * owed, exactly as any other transient refusal) without touching the API
-   * again. `envelopesHint`, when supplied, is threaded straight through to
-   * `rotatePasswordSlot` for every attempt.
+   * Re-wraps under an already-authenticated plaintext. On `409 UPGRADE_REQUIRED` with `retryOnStaleAuthority`,
+   * re-verifies (repairing the authority) and retries once; any other failure is left owed, never retried invisibly nor
+   * shown as a wrong password. Never throws. `generation` is checked before every network await: a logout or new
+   * sign-in between awaits must not let the retry run against the next session's claims/HDK with this plaintext, so a
+   * stale generation returns `'refused-transient'` without touching the API.
    */
   const attemptRewrap = useCallback(
     async (
@@ -303,9 +190,7 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
     inFlightGenerationRef.current = generation;
     void (async () => {
       try {
-        // Reuse the envelope-set response the unlock itself
-        // already fetched + verified for THIS transition, rather than
-        // spending a second rate-limited read on the same unlock.
+        // Reuse the response the unlock already fetched and verified for this transition.
         const reused = takeLastUnlockEnvelopes ? takeLastUnlockEnvelopes() : null;
         let envelopes: KeyEnvelopesResponse;
         if (reused) {
@@ -314,52 +199,38 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
           try {
             envelopes = await getKeyEnvelopes();
           } catch {
-            // Transient read failure: try again at the next unlock-state
-            // transition rather than guessing at owed-ness. This unlock's
-            // window still ends here — a re-derive on the
-            // NEXT transition re-fetches and re-decides from scratch.
+            // Transient read failure: retry at the next transition rather than guess at owed-ness; this unlock's window
+            // ends here.
             if (generation === generationRef.current) retainedRef.current = null;
             return;
           }
         }
-        // The session may have dropped or
-        // switched while the read above was in flight. Bail before acting on
-        // the result — never show a prompt post-logout, never rotate against
-        // the NEXT session's live HDK/claims under this stale derive's plan.
+        // The session may have dropped or switched during the read: bail before prompting or rotating against the next
+        // session.
         if (generation !== generationRef.current) return;
         const passwordSlot = envelopes.slots.find((slot) => slot.slotType === 'password');
-        // No password slot at all (e.g. recovery-only household): owes
-        // nothing by rule, never prompted. This unlock's window ends here.
+        // No password slot (e.g. recovery-only): nothing owed, never prompted; the window ends here.
         if (!passwordSlot) {
           retainedRef.current = null;
           return;
         }
-        // Owed means NOT EQUAL — including a slot with no recorded revision
-        // at all (a slot written before revisions were recorded).
+        // Owed means not equal, including a slot with no recorded revision.
         const owed = passwordSlot.credentialRevision !== envelopes.currentCredentialRevision;
         if (!owed) {
-          // Not owed: this unlock's window ends here too —
-          // the plaintext must not survive past a settled derive.
+          // Not owed: the plaintext must not survive a settled derive.
           retainedRef.current = null;
           return;
         }
         const retained = retainedRef.current;
         if (retained !== null) {
-          // The unlock window ends here regardless of the write's outcome —
-          // a non-credential failure is left owed for the NEXT unlock-state
-          // transition (which, with no plaintext retained, prompts) rather
-          // than retried against a stale plaintext.
+          // The window ends regardless of outcome: a non-credential failure stays owed for the next transition (which
+          // prompts) rather than retrying a stale plaintext.
           retainedRef.current = null;
           const outcome = await attemptRewrap(retained, true, generation, envelopes);
           if (generation !== generationRef.current) return;
           if (outcome === 'locked') {
-            // The silent path must not discard this
-            // outcome — the on-disk cached key (and
-            // the in-memory HDK / isUnlocked) are already gone by
-            // the time this runs, but nothing told the person why. Surface
-            // it through the same terminal prompt state the asking path
-            // uses, so the next unlock doesn't read as an ordinary,
-            // unexplained session expiry.
+            // The silent path must surface this: the cached key and in-memory HDK are already gone, so show the
+            // terminal prompt rather than an unexplained session expiry.
             setPrompt({
               attemptsRemaining: 0,
               error:
@@ -377,8 +248,6 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
   }, [getHdk, prompt, attemptRewrap, takeLastUnlockEnvelopes]);
 
   const dismissPrompt = useCallback((): void => {
-    // Writes nothing; the next unlock-state transition derives owed again
-    // and asks again.
     setPrompt(null);
   }, []);
 
@@ -389,15 +258,11 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
       try {
         await verifyPassword(password, { purpose: 'password_slot_rewrap' });
       } catch (err) {
-        // The session ended while this verify was in
-        // flight — leave the (already-cleared) state alone.
+        // The session ended during the verify: leave the cleared state alone.
         if (generation !== generationRef.current) return;
         if (isBackoffError(err)) {
-          // A 429 reads as a wait, not a wrong-password attempt: it does not
-          // count against `attemptsRemaining`. Surface why the
-          // dialog is ending instead of vanishing — the person dismisses it
-          // themselves; the next unlock-state transition re-derives and asks
-          // again.
+          // A 429 reads as a wait, not a wrong guess, so it does not count against `attemptsRemaining`. The person
+          // dismisses; the next transition asks again.
           setPrompt((prev) =>
             prev
               ? {
@@ -414,9 +279,7 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
             if (!prev) return prev;
             const attemptsRemaining = prev.attemptsRemaining - 1;
             if (attemptsRemaining <= 0) {
-              // The LAST wrong guess must still say so, not
-              // just vanish. The bound ends the asking for THIS unlock —
-              // still owed; the next unlock-state transition asks again.
+              // The last wrong guess must still say so; the bound ends the asking for this unlock, still owed.
               return {
                 attemptsRemaining: 0,
                 error: 'Incorrect password. This will be asked again at your next sign-in.',
@@ -431,23 +294,15 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
           });
           return;
         }
-        // Any other failure (network, server fault): leave the prompt open
-        // with a generic error so the person can retry without losing the
-        // attempt bound above (this branch is not a wrong-password guess).
+        // Network or server fault, not a wrong guess: keep the prompt open and the attempt bound intact.
         setPrompt((prev) =>
           prev ? { ...prev, submitting: false, error: 'Something went wrong. Please try again.' } : prev,
         );
         return;
       }
       if (generation !== generationRef.current) return;
-      // This prompt can sit open for real time — long
-      // enough for another tab/device to complete the re-wrap (or for the
-      // password slot to vanish) before this submit lands. Re-fetch and
-      // repeat the SAME owed-ness compare `runDerive` used to open it,
-      // right before writing anything, rather than trusting the snapshot
-      // that opened it. A fetch failure here falls back to letting
-      // `rotatePasswordSlot`'s own fresh fetch decide (unchanged behaviour)
-      // rather than surfacing a second failure mode.
+      // The prompt may sit open long enough for another tab or device to finish the re-wrap: re-fetch and repeat
+      // runDerive's owed-ness compare before writing. A fetch failure falls back to `rotatePasswordSlot`'s own fetch.
       let freshEnvelopes: KeyEnvelopesResponse | undefined;
       try {
         freshEnvelopes = await getKeyEnvelopes();
@@ -461,17 +316,12 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
           !freshPasswordSlot ||
           freshPasswordSlot.credentialRevision === freshEnvelopes.currentCredentialRevision
         ) {
-          // Another device already completed the re-wrap (or the slot is
-          // gone) while this prompt was open — nothing is owed anymore.
-          // Close without writing, exactly as `runDerive` would decide had
-          // it re-run this instant.
+          // Another device already completed the re-wrap (or the slot is gone): close without writing.
           setPrompt(null);
           return;
         }
       }
-      // The password just verified — no further re-authentication needed on
-      // a stale-authority refusal (verify-password already repaired it in
-      // place); one attempt is all that is needed.
+      // Just verified, which also repaired a stale write authority in place, so one attempt suffices.
       const outcome = await attemptRewrap(password, false, generation, freshEnvelopes);
       if (generation !== generationRef.current) return;
       if (outcome === 'written') {
@@ -479,19 +329,13 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
         return;
       }
       if (outcome === 'written-degraded') {
-        // Committed server-side,
-        // and this device's fallback floor confirmed it — never presented
-        // as a refusal. `reportRewrapFailure` already logged the fallback
-        // as a diagnostic; nothing more is owed here.
+        // Committed server-side and the fallback floor confirmed it: not a refusal, and already logged as a diagnostic.
         setPrompt(null);
         return;
       }
       if (outcome === 'locked') {
-        // Committed server-side, but neither the durable pin nor the
-        // fallback floor could be confirmed — `rotatePasswordSlot` has
-        // already locked this device (cleared the in-memory HDK /
-        // isUnlocked) as a precaution. Say so, rather than the refusal
-        // copy below, which would describe a refusal that never happened.
+        // Committed, but neither the durable pin nor the fallback floor was confirmed and the device is already
+        // locked: say so, not the refusal copy.
         setPrompt((prev) =>
           prev
             ? {
@@ -504,12 +348,8 @@ export function useDerivedRewrap(deps: DerivedRewrapDeps): DerivedRewrap {
         );
         return;
       }
-      // A correct-password refusal must not read as
-      // success — distinguish a permanent integrity problem (retrying will
-      // not help) from a transient one (expected to resolve on its own),
-      // and surface it rather than silently closing. Either way the slot is
-      // left untouched and still owed; the next unlock-state transition
-      // tries again.
+      // A correct-password refusal must not read as success: distinguish a permanent integrity problem from a
+      // transient one. The slot stays untouched and owed.
       setPrompt((prev) =>
         prev
           ? {

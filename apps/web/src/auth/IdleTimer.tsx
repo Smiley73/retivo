@@ -1,11 +1,5 @@
-/**
- * Client-side idle-session timeout. Server-side enforcement is the source
- * of truth (the refresh-token row's `expiresAt` is checked on every rotate);
- * this component is the UX layer — warns the user before logout and
- * proactively triggers logout so the SPA doesn't sit on stale state.
- *
- * See "Sessions" in docs/security.md for the full policy.
- */
+// Client-side idle-session timeout (the UX layer); the server's refresh-row `expiresAt` is the source of truth.
+// See docs/security.md "Sessions".
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '../components/Modal';
 import { btnPrimaryClass, btnSecondaryClass } from '../components/dialog-chrome';
@@ -17,7 +11,6 @@ export const SIGNOUT_REASON_DEVICE_MISMATCH = 'device-mismatch';
 
 const ACTIVITY_EVENTS = ['mousedown', 'keydown', 'touchstart'] as const;
 
-/** Window event the programmatic-activity function dispatches; the timer handles it like an input event. */
 const PROGRAMMATIC_ACTIVITY_EVENT = 'retivo:programmatic-activity';
 
 interface IdleTimerProps {
@@ -32,11 +25,8 @@ interface IdleTimerHandle {
   recordActivity: () => void;
 }
 
-/**
- * Read activity timestamp shared across tabs. The `storage` event lets a
- * tab observe writes from sibling tabs, so any tab with input keeps every
- * other tab's countdown alive.
- */
+// Activity timestamp shared across tabs: the `storage` event lets any tab with input keep every other tab's countdown
+// alive.
 function readLastActivityAt(): number {
   if (typeof localStorage === 'undefined') return Date.now();
   const raw = localStorage.getItem(ACTIVITY_KEY);
@@ -50,22 +40,15 @@ export function writeLastActivityAt(now: number): void {
 }
 
 /**
- * Counts as user activity without an input event: writes the shared activity
- * clock and reschedules this tab's timers, exactly as a click does. This is the
- * one way code outside this file moves the idle clock (the AI assistant
- * connector calls it for a completed call, only when the person chose that);
- * never write the activity key directly. A bare write would reach other tabs
- * through the `storage` event but never reschedule the tab that wrote it.
+ * Counts as user activity without an input event: the only way outside code moves the idle clock; never write the
+ * activity key directly (AGENTS.md "Project-specific security").
  */
 export function recordProgrammaticActivity(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(PROGRAMMATIC_ACTIVITY_EVENT));
 }
 
-/**
- * Imperative idle tracker. Hosted by AuthContext; consumes refresh and
- * logout via the props so it stays decoupled from auth internals.
- */
+/** Idle tracker hosted by AuthContext; refresh and logout arrive as props, keeping it decoupled from auth internals. */
 export const IdleTimer = React.forwardRef<IdleTimerHandle, IdleTimerProps>(
   function IdleTimer({ enabled, idleMs, warnLeadMs, onWarn, onTimeout }, ref) {
     const [warnVisible, setWarnVisible] = useState(false);
@@ -96,7 +79,6 @@ export const IdleTimer = React.forwardRef<IdleTimerHandle, IdleTimerProps>(
       const elapsed = Date.now() - last;
       const remaining = idleMs - elapsed;
       if (remaining <= 0) {
-        // Already past the window — fire immediately.
         timeoutTimerRef.current = setTimeout(() => {
           void onTimeoutRef.current();
         }, 0);
@@ -120,8 +102,7 @@ export const IdleTimer = React.forwardRef<IdleTimerHandle, IdleTimerProps>(
       scheduleFromActivity();
     }, [enabled, scheduleFromActivity]);
 
-    // Expose recordActivity to AuthContext so a successful refresh from
-    // the warn modal can bump the clock without faking an input event.
+    // Lets AuthContext bump the clock after a successful refresh from the warn modal without faking an input event.
     React.useImperativeHandle(ref, () => ({ recordActivity }), [recordActivity]);
 
     useEffect(() => {
@@ -131,13 +112,10 @@ export const IdleTimer = React.forwardRef<IdleTimerHandle, IdleTimerProps>(
         return;
       }
 
-      // Seed activity on mount so the first window starts now (unless a
-      // sibling tab already wrote a fresher value).
       const last = readLastActivityAt();
       if (Date.now() - last > idleMs) {
-        // Boot-after-idle: fire timeout immediately. AuthContext's boot
-        // guard usually catches this first, but defending here keeps the
-        // semantics correct if the timer starts late.
+        // Boot-after-idle: AuthContext's boot guard usually catches this first; this keeps the timer correct if it
+        // starts late.
         void onTimeoutRef.current();
         return;
       }
@@ -207,8 +185,6 @@ export const IdleTimer = React.forwardRef<IdleTimerHandle, IdleTimerProps>(
           You&rsquo;ll be signed out in about {minutesLeftLabel} due to
           inactivity.
         </p>
-        {/* Modal action row — left-aligned, primary action first
-            ("Modals" in docs/ui-conventions.md). */}
         <div className="mt-4 flex flex-wrap items-center justify-start gap-2">
           <button
             type="button"
@@ -239,10 +215,7 @@ export const IdleTimer = React.forwardRef<IdleTimerHandle, IdleTimerProps>(
 
 export type { IdleTimerHandle };
 
-/**
- * Read + clear the one-shot signout reason set by the idle path. The
- * login page consumes this to render the inactivity toast exactly once.
- */
+/** Reads and clears the one-shot signout reason, so the login page shows its notice once. */
 export function consumeSignoutReason(): string | null {
   if (typeof sessionStorage === 'undefined') return null;
   const reason = sessionStorage.getItem(SIGNOUT_REASON_KEY);
@@ -256,9 +229,8 @@ export function setSignoutReason(reason: string): void {
 }
 
 /**
- * Resolve idle-timer config from Vite env. Inputs are minutes (matching
- * the server-side AUTH_*_TTL_MIN knobs); converted to ms here for the
- * timer math. Defaults: 30 min idle, 2 min warn lead. `0` disables.
+ * Idle config from Vite env, in minutes (matching the server's AUTH_*_TTL_MIN); defaults 30 min idle, 2 min warn lead,
+ * `0` disables.
  */
 export function resolveIdleConfig(): { enabled: boolean; idleMs: number; warnLeadMs: number } {
   const idleMin = parseEnvInt(import.meta.env.VITE_IDLE_TIMEOUT_MIN, 30);

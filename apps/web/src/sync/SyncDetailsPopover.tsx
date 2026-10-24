@@ -1,25 +1,5 @@
-/**
- * Unified badge-anchored sync details popover (replaces the error-only
- * `SyncErrorPopover.tsx`). Opens on a badge click in all 9 sync states
- * and surfaces: status sentence, last-synced time (relative + exact;
- * "Not synced yet" when never synced), pending count, conflict count,
- * connection (Online/Offline), and an adaptive per-state action button.
- * The `error` state additionally renders the structured error
- * envelope (`phase`/`code`/`status`/`traceId`/`message`) + "Copy details".
- *
- * Built on React Aria's `Popover`/`Dialog`. The
- * `DialogTrigger` lives on `SyncBadge` (the badge pill is the trigger);
- * this component is rendered as the trigger's popover child and reads
- * `useSync()` directly (it lives inside `SyncProvider`) rather than
- * threading props. React Aria owns anchored positioning, outside-press +
- * Esc-to-close, and focus management.
- *
- * The action button keeps the user in context: the popover stays
- * open while the action runs (button shows a "Working…" spinner), and
- * `syncRoundTrip`'s `{ok:false, reason}` renders an inline error line.
- * `retryNow`/`forceRefresh` surface their result via the resulting badge
- * state (the popover re-renders from `useSync()`).
- */
+// Badge-anchored sync details popover (status, counts, connection, an adaptive action, and for `error` a copyable envelope).
+// Reads `useSync()` directly; React Aria owns positioning, dismissal and focus; it stays open while an action runs.
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Dialog, Popover } from 'react-aria-components';
 import { useSync } from './SyncContext.js';
@@ -47,7 +27,6 @@ const ROW_VALUE_CLASS = 'm-0 min-w-0 break-words text-ink';
 const ACTION_BUTTON_CLASS =
   'inline-flex items-center gap-1.5 self-start rounded-md border border-line-strong px-2.5 py-1 text-xs font-medium text-ink outline-none transition-colors hover:bg-surface-sunken data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
 
-// Small inline spinner reused by in-flight + pending-action buttons.
 function Spinner(): React.ReactElement {
   return (
     <svg
@@ -90,9 +69,8 @@ export function SyncDetailsPopover(): React.ReactElement {
     'idle',
   );
 
-  // Auto-reset handle for the "Copied"/"Copy failed" label. Stored in a
-  // ref so a popover close (unmount) before the 2s timeout fires cancels
-  // it instead of calling setState on an unmounted component.
+  // Auto-reset handle for the "Copied" label; a ref so closing the popover cancels it instead of setting state on an
+  // unmounted component.
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     return () => {
@@ -121,8 +99,7 @@ export function SyncDetailsPopover(): React.ReactElement {
     setActionState('pending');
     setActionError('');
     await retryNow();
-    // `retryNow` surfaces its result via the resulting badge state, not a
-    // return value — clear the pending spinner once it settles.
+    // `retryNow` reports through the badge state, not a return value.
     setActionState('idle');
   };
 
@@ -145,8 +122,6 @@ export function SyncDetailsPopover(): React.ReactElement {
     copyResetRef.current = setTimeout(() => setCopyState('idle'), 2000);
   };
 
-  // Adaptive action button per state. `rollback-detected` renders no
-  // button (a security explanation paragraph instead).
   function renderAction(): React.ReactNode {
     if (kind === 'rollback-detected') {
       return (
@@ -214,8 +189,7 @@ export function SyncDetailsPopover(): React.ReactElement {
     }
 
     if (kind === 'update-available') {
-      // A pulled row is at a schemaVersion this bundle can't read — only
-      // a reload (not a retry) fixes it. Mirrors the VersionBanner reload.
+      // A pulled row is at a schemaVersion this bundle can't read: only a reload fixes it.
       return (
         <Button
           className={ACTION_BUTTON_CLASS}
@@ -226,7 +200,6 @@ export function SyncDetailsPopover(): React.ReactElement {
       );
     }
 
-    // synced / pending → "Sync now".
     return (
       <Button
         className={ACTION_BUTTON_CLASS}
@@ -275,11 +248,9 @@ export function SyncDetailsPopover(): React.ReactElement {
           </div>
         </div>
 
-        {/* Inspector naming each un-synced / stuck item, with a per-row
-            keep/discard Resolve control on each conflict (the callback is
-            injected here, not reached via useSync() inside the shared list).
-            Renders nothing when there are none. Defensive `?? []` reads so a
-            partial mock / mid-mount context can't crash the render. */}
+        {/* Inspector for un-synced and stuck items; the Resolve callback is injected here, not reached via useSync()
+            inside the shared list. Defensive `?? []` reads so a partial mock or mid-mount context can't crash the
+            render. */}
         <UnsyncedMutationList
           pending={pendingMutations ?? []}
           conflicts={conflictMutations ?? []}
@@ -294,9 +265,7 @@ export function SyncDetailsPopover(): React.ReactElement {
 
         {state.kind === 'error' ? (
           <>
-            {/* Flex rows with a fixed label column (no arbitrary grid
-                template). A single <div> grouping dt/dd pairs is valid
-                inside <dl> (HTML5). */}
+            {/* Flex rows with a fixed label column; a <div> grouping dt/dd pairs is valid inside <dl>. */}
             <dl className="m-0 flex flex-col gap-y-0.5 border-t border-line pt-2 text-xs">
               {state.phase ? (
                 <div className="flex gap-2.5">

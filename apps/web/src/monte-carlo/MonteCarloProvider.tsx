@@ -1,47 +1,17 @@
-/**
- * Owns the Monte Carlo run lifecycle. A run below `SHARD_MIN_PATHS` (or on a
- * single-worker pool) computes in ONE fresh Web Worker spawned per run and
- * terminated on completion (one-at-a-time via `workerRef`). A larger run on a
- * multi-worker machine shards across the pool via `runMonteCarloSharded`,
- * whose lifecycle is tracked by `poolAbortRef`. On result, the summary
- * is written to the IndexedDB LRU cache via `putCached`. Provides progress +
- * result + error state to any descendant via the `useMonteCarlo()` hook.
- *
- * Cancel = terminate the single worker OR abort the pool (whichever is active),
- * discard in-flight state, AND invalidate the current generation so a request
- * still inside its preflight cannot spawn a worker afterwards; the next run
- * starts fresh. Unmount does the same.
- *
- * Newest request wins. Both entry points (`run` and `runToCompletion`; only
- * `runToCompletion` has a production caller) do preflight work (cache key, cache
- * read) before they pre-empt the previous run, so two rapid requests can finish
- * that preflight out of call order. Each therefore claims a generation
- * synchronously at invocation, and only the newest generation may pre-empt a
- * run or write the shared result/status/error/progress; a superseded request
- * bows out and reports `null`. A preflight that REJECTS obeys the same rule:
- * silent when superseded, and when current it tears the older run down before
- * publishing the failure (`failPreflight`), so a failed preflight can never
- * leave a suppressed run computing behind a frozen `running` status. A worker
- * that cannot be CREATED or dispatched to follows the same rule
- * (`failDispatch`), so neither end of the run's lifecycle can strand `running`.
- */
+// Owns the Monte Carlo run lifecycle (progress, result, error via `useMonteCarlo()`): one fresh Web Worker per run below
+// `SHARD_MIN_PATHS` (or on a single-worker pool), else a sharded pool (`runMonteCarloSharded`); results are cached via `putCached`.
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { MonteCarloInput, MonteCarloSummary } from '../lib/monte-carlo';
 import { getCached, mcCacheKey, putCached } from '../db/monte-carlo-cache';
-// Worker imported via Vite's `?worker` ESM transform — produces a
-// separate JS chunk lazy-loaded on first run.
 import MCWorker from '../workers/monte-carlo.worker?worker';
 import type { WorkerOutbound } from '../workers/monte-carlo.worker';
 import { runMonteCarloSharded, SHARD_MIN_PATHS } from './run-monte-carlo-sharded';
 import { mcPoolSize, type MinimalMcWorker } from './mc-worker-pool';
 
-/** A run shards across the pool only when it is large enough AND the machine
- *  offers more than one pool worker; otherwise the single-worker path runs. */
 function shouldShard(input: MonteCarloInput): boolean {
   return input.pathCount >= SHARD_MIN_PATHS && mcPoolSize(input.pathCount) > 1;
 }
 
-/** Normalize an unknown throw into an `Error` without losing its message. */
 function toError(e: unknown): Error {
   return e instanceof Error ? e : new Error(String(e));
 }
@@ -54,55 +24,33 @@ export interface MonteCarloContextValue {
   progressTotal: number;
   result: MonteCarloSummary | null;
   error: string | null;
-  /** Kick a run. RESULTLESS: it resolves with `void`, and the outcome reaches
-   *  callers only through `result` / `status` / `error`, never through the
-   *  returned promise. Cache is consulted first; on a hit the worker is not
-   *  spawned.
-   *
-   *  Its settlement POINT is not uniform and must not be relied on: the
-   *  single-worker branch resolves once the worker has been dispatched, while
-   *  the sharded branch awaits `runMonteCarloSharded` through its terminal
-   *  reply. Awaiting `run` therefore tells you nothing consistent about
-   *  whether a run finished — use `runToCompletion` when that matters.
-   *
-   *  Pass `{ force: true }` to bypass the cache short-circuit and always
-   *  spawn the worker even on a cache hit — the fresh result overwrites
-   *  the cached entry. Callers that want a genuinely new sample on a
-   *  forced run must vary the input `seed` themselves (the cache key
-   *  excludes the seed, so the overwrite lands on the same key).
-   *
-   *  NOTE: this entry point has NO production caller — every consumer awaits
-   *  `runToCompletion` instead; only tests call `run`. It is kept as the
-   *  provider's resultless shape (and stays under the same newest-request-wins
-   *  generation guard), not because a live path uses it. */
+  /**
+   * Kicks a run; resultless: it resolves with `void` and the outcome reaches callers only through
+   * `result`/`status`/`error`. The cache is consulted first (a hit spawns no worker). Its settlement point is not
+   * uniform (the single-worker branch resolves once dispatched, the sharded branch after its terminal reply), so use
+   * `runToCompletion` when finishing matters. `{ force: true }` bypasses the cache and overwrites the entry; callers
+   * wanting a new sample must vary `seed` themselves, since the key excludes it. No production caller (every consumer
+   * uses `runToCompletion`); it stays as the resultless shape under the same newest-request-wins guard, for tests.
+   */
   run(input: MonteCarloInput, opts?: { force?: boolean }): Promise<void>;
-  /** Run a SINGLE MC sweep and resolve only when it COMPLETES (the worker
-   *  posts its result), unlike `run`, which resolves with nothing at a point
-   *  that depends on which branch it took. Used by the Scenarios list to
-   *  recompute scenarios sequentially (await one before kicking the next) and
-   *  by the per-card "Recalculate" affordance.
-   *
-   *  Cache-first like `run`; `{ force: true }` bypasses the short-circuit
-   *  and overwrites the canonical entry (seed excluded from the key). The
-   *  result is also threaded into `result` / `status` / progress so a
-   *  caller can render the shared `McProgressBar`. Resolves with the
-   *  summary, or `null` if the run was cancelled mid-flight OR superseded
-   *  by a later request (only the newest request publishes; see
-   *  `runGenerationRef`). Rejects on a worker error — or on a worker that
-   *  could not be created or dispatched to at all — unless the request was
-   *  already superseded, then it resolves `null` like any other outcome
-   *  that reached nobody. */
+  /**
+   * Runs one MC sweep and resolves only when it completes, for the Scenarios list's sequential recompute and the
+   * per-card "Recalculate". Cache-first like `run`; `{ force: true }` bypasses it and overwrites the canonical entry.
+   * The result is also threaded into `result`/`status`/progress for `McProgressBar`. Resolves with the summary, or
+   * `null` if cancelled or superseded by a later request (only the newest publishes; see `runGenerationRef`). Rejects
+   * on a worker error, or on a worker that could not be created or dispatched to, unless already superseded, in which
+   * case it resolves `null`.
+   */
   runToCompletion(
     input: MonteCarloInput,
     opts?: { force?: boolean },
   ): Promise<MonteCarloSummary | null>;
-  /** Terminate the worker and reset transient state. Also retires the current
-   *  request generation, so a request still inside its preflight cannot wake
-   *  up afterwards and spawn the worker the user just asked to stop. The
-   *  previously-cached result stays in IDB (only in-memory state is cleared). */
+  /**
+   * Terminates the worker and resets transient state; also retires the current generation so a request still in its
+   * preflight cannot spawn the worker the user just stopped. The cached result stays in IDB.
+   */
   cancel(): void;
-  /** Replace the current `result` (used to render a cached entry on
-   *  page mount). */
+  /** Replaces the current `result` (renders a cached entry on page mount). */
   setResult(summary: MonteCarloSummary | null): void;
 }
 
@@ -123,46 +71,26 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
   const [result, setResult] = useState<MonteCarloSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  // The AbortController for an in-flight SHARDED run (mutually exclusive
-  // with `workerRef` — a run uses exactly one path). `cancel()`/supersede/
-  // unmount abort it, which the pool turns into `{kind:'aborted'}` + dispose.
+  // AbortController of an in-flight sharded run (exclusive with `workerRef`); cancel, supersede and unmount abort it,
+  // which the pool turns into `aborted` plus dispose.
   const poolAbortRef = useRef<AbortController | null>(null);
-  // Resolver for an in-flight `runToCompletion` promise so `cancel()` can
-  // settle it with `null` (the worker is terminated / pool aborted → no
-  // result arrives).
+  // Resolver of an in-flight `runToCompletion` so `cancel()` can settle it with `null` (no result arrives once the
+  // worker is terminated or the pool aborted).
   const pendingCancelRef = useRef<(() => void) | null>(null);
-  // Monotonic generation of run REQUESTS, shared by `run` and
-  // `runToCompletion` and taken SYNCHRONOUSLY at invocation — before either
-  // entry point awaits anything.
-  //
-  // Both do preflight work (hash the cache key, then read IndexedDB) BEFORE
-  // they pre-empt the previous run, and nothing stops a caller kicking a second
-  // request while the first is still in that preflight. Two preflights can
-  // finish out of call order, and without a generation the OLDER one then wins:
-  // it tears down the NEWER run's worker, spawns its own, and publishes its
-  // summary into the shared `result` / `status` that every consumer reads. A
-  // caller carrying its own request identity rejects that completion, so the UI
-  // is left holding a result nobody currently wants with no run in flight to
-  // replace it — a permanent wedge, not a transient flicker. Same for a late
-  // preflight that ends in a cache HIT: it would publish a cached summary over
-  // a newer run that is already computing.
-  //
-  // The rule this enforces: ONLY the newest generation may touch shared state.
-  // A superseded request bows out — it never pre-empts, never mutates
-  // `result` / `status` / `error` / progress, and resolves `null` so its caller
-  // treats it exactly like a cancelled run. Its cache write still happens: the
-  // summary is valid for its own key, and the entry is what makes a later
-  // identical run a hit.
-  //
-  // `cancel()` and unmount RETIRE the generation for the same reason — see
-  // `retireGeneration`. A newer request is not the only thing that can make an
-  // in-flight request obsolete.
+  // Monotonic generation of run requests, shared by `run` and `runToCompletion` and taken synchronously at invocation.
+  // Both do preflight (hash the cache key, read IndexedDB) before pre-empting the previous run, and two preflights can
+  // finish out of call order. Without a generation the older one would tear down the newer run's worker, spawn its own
+  // and publish into the shared `result`/`status`, leaving the UI holding a result nobody wants with no run in flight
+  // to replace it (a permanent wedge), or publish a late cache hit over a newer computing run. So only the newest
+  // generation may touch shared state; a superseded request never pre-empts or mutates
+  // `result`/`status`/`error`/progress and resolves `null` like a cancelled run. Its cache write still happens: the
+  // summary is valid for its own key and makes a later identical run a hit. `cancel()` and unmount retire the
+  // generation too (see `retireGeneration`).
   const runGenerationRef = useRef(0);
 
-  // Tear down whatever is in flight: terminate the single worker OR abort the
-  // sharded pool (mutually exclusive), null both refs, and settle any awaiting
-  // `runToCompletion` with `null` so a sequential driver unblocks. Callers set
-  // their own status/state separately. Every op is idempotent / null-safe.
+  // Tears down whatever is in flight (terminate the worker or abort the pool, null both refs, settle any awaiting
+  // `runToCompletion` with `null` so a sequential driver unblocks); callers set status separately. Idempotent and
+  // null-safe.
   const resetInFlight = useCallback(() => {
     workerRef.current?.terminate();
     workerRef.current = null;
@@ -172,41 +100,27 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
     pendingCancelRef.current = null;
   }, []);
 
-  // Retire the current generation, which makes EVERY request in flight —
-  // including ones still parked in a preflight await — read as superseded.
-  //
-  // `resetInFlight` alone only reaches work that already EXISTS: a worker, a
-  // pool, an awaiter. A request still hashing its cache key or reading
-  // IndexedDB owns none of those, so tearing down is a no-op for it and it
-  // wakes up still holding the newest generation — then pre-empts, spawns a
-  // worker, and publishes. After a Cancel that silently undoes the Cancel;
-  // after unmount it leaks a run (and a React state write) past teardown.
-  // Bumping the generation is what makes those requests bow out: they take the
-  // same path a newer request would have given them — publish nothing, spawn
-  // nothing, report `null`.
+  // Retires the current generation so every request in flight, including ones parked in a preflight await, reads as
+  // superseded. `resetInFlight` reaches only work that exists (a worker, a pool, an awaiter); a request still hashing
+  // or reading IndexedDB would wake holding the newest generation, pre-empt, spawn and publish, silently undoing a
+  // Cancel or leaking a run past unmount.
   const retireGeneration = useCallback(() => {
     runGenerationRef.current += 1;
   }, []);
 
   useEffect(() => {
     return () => {
-      // Retire FIRST: teardown cannot reach a request that has not created
-      // anything yet, so the generation bump is the only thing stopping it.
+      // Retire first: teardown cannot reach a request that has created nothing yet, so the bump is the only thing
+      // stopping it.
       retireGeneration();
       resetInFlight();
     };
   }, [retireGeneration, resetInFlight]);
 
-  // A preflight (cache key hash, cache read) rejected on the request that
-  // currently owns the shared state. That request never reached its pre-empt
-  // sweep, so an OLDER run may still be in flight — and its terminal result is
-  // already suppressed as superseded, because this request claimed the newer
-  // generation before the first await. Left alone that is a wedge: a worker
-  // computing into nothing, nothing in flight that may publish, and `status`
-  // frozen wherever the older run left it. So tear the older run down (which
-  // also settles its `runToCompletion` awaiter with `null`), clear progress,
-  // and publish the failure. Callers MUST check `superseded()` first — a
-  // superseded preflight failure reached nobody and stays silent.
+  // A preflight rejected on the request that owns the shared state. It never reached its pre-empt sweep, so an older
+  // run may still be computing with its result suppressed as superseded: a worker computing into nothing and `status`
+  // frozen. Tear it down (settling its awaiter with `null`), clear progress and publish the failure. Callers must check
+  // `superseded()` first; a superseded failure reached nobody.
   const failPreflight = useCallback(
     (e: unknown): void => {
       resetInFlight();
@@ -218,13 +132,10 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
     [resetInFlight],
   );
 
-  // A dispatch stage FAILED for the request that currently owns the shared
-  // state: the Worker constructor threw (blocked by CSP, out of memory, a
-  // worker chunk that will not load) or `postMessage` threw (an input that
-  // fails structured clone). `status` is already 'running' by then with nothing
-  // computing behind it — the same wedge `failPreflight` exists to prevent — so
-  // publish the failure and clear progress. Callers MUST check `superseded()`
-  // first; a superseded dispatch failure reached nobody and stays silent.
+  // A dispatch stage failed for the owning request: the Worker constructor threw (CSP, out of memory, a chunk that
+  // won't load) or `postMessage` threw (input failing structured clone). `status` is already 'running' with nothing
+  // computing, the wedge `failPreflight` prevents, so publish the failure and clear progress. Callers must check
+  // `superseded()` first.
   const failDispatch = useCallback((err: Error): void => {
     setError(err.message);
     setStatus('error');
@@ -233,12 +144,10 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const cancel = useCallback(() => {
-    // Retire the generation BEFORE tearing down: a request still in its
-    // preflight owns no worker for `resetInFlight` to terminate and would
-    // otherwise spawn one after the user asked to stop.
+    // Retire the generation before tearing down: a request in its preflight owns no worker to terminate and would
+    // otherwise spawn one after Cancel. otherwise spawn one after the user asked to stop.
     retireGeneration();
-    // Terminate/abort the in-flight run and settle any awaiting
-    // `runToCompletion` so a sequential driver unblocks.
+    // `resetInFlight` also settles any awaiting `runToCompletion`, unblocking a sequential driver.
     resetInFlight();
     setStatus('cancelled');
     setProgressDone(0);
@@ -246,19 +155,15 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
   }, [retireGeneration, resetInFlight]);
 
   const run = useCallback(async (input: MonteCarloInput, opts?: { force?: boolean }) => {
-    // Claim this request's generation BEFORE the first await, so a request that
-    // loses the preflight race can tell it has been superseded.
+    // Claim the generation before the first await, so a request that loses the preflight race can tell it was
+    // superseded.
     const generation = runGenerationRef.current + 1;
     runGenerationRef.current = generation;
     const superseded = (): boolean => runGenerationRef.current !== generation;
 
-    // Cache-first. Key derivation (full input, seed + progress callback
-    // excluded) is the shared `mcCacheKey` helper so it can't drift from the
-    // metrics read key. Either preflight stage can REJECT (no `crypto.subtle`,
-    // an IndexedDB failure) — see `failPreflight` for why a rejection here
-    // cannot simply propagate. `run` is resultless, so it publishes the
-    // failure through `error` / `status` and resolves, exactly as it does for
-    // a worker error.
+    // Cache-first, with the shared `mcCacheKey` so the key can't drift from the metrics read key. Either preflight
+    // stage can reject (no `crypto.subtle`, an IndexedDB failure); `run` is resultless, so it publishes through
+    // `error`/`status` and resolves (see `failPreflight`).
     let key: string;
     try {
       key = await mcCacheKey(input);
@@ -267,10 +172,8 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
       return;
     }
     if (superseded()) return;
-    // Forced run (manual "Recalculate"): skip the cache short-circuit so
-    // a genuinely new sample is computed even when the content signature
-    // is unchanged. The result still writes through `putCached(key, …)`
-    // below, overwriting the canonical entry.
+    // A forced run (manual "Recalculate") skips the cache hit so a new sample is computed; the result still overwrites
+    // the canonical entry via `putCached(key, …)`.
     if (!opts?.force) {
       let cached: MonteCarloSummary | null;
       try {
@@ -289,11 +192,8 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
       }
     }
 
-    // Kill any previous worker / abort any previous sharded pool before
-    // starting a fresh one. Settle any pending `runToCompletion` awaiter first
-    // so its promise resolves `null` instead of hanging forever (the
-    // terminated worker / aborted pool never posts a result). Mirrors
-    // `cancel()` / the unmount cleanup.
+    // Kill any previous worker or sharded pool first, settling a pending `runToCompletion` awaiter with `null` (a
+    // terminated worker never posts a result); mirrors `cancel()` and unmount.
     resetInFlight();
     setStatus('running');
     setError(null);
@@ -340,14 +240,10 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
       return;
     }
 
-    // Construction, handler installation and dispatch all sit under a guard:
-    // any of the three can throw, and `status` is already 'running' by now, so
-    // an escaping throw strands every consumer of this context on a run that
-    // does not exist. `run` is resultless, so it publishes the failure through
-    // `error` / `status` and resolves, exactly as it does for a worker error.
-    // (Nothing awaits between the pre-empt sweep above and `postMessage` below,
-    // so `superseded()` cannot be true here today; the check keeps the
-    // publish-only-if-current rule intact if an await is ever introduced.)
+    // Construction, handler installation and dispatch sit under one guard: any can throw, and `status` is already
+    // 'running', so an escaping throw would strand every consumer on a run that does not exist. `run` is resultless, so
+    // it publishes through `error`/`status` and resolves. (Nothing awaits before `postMessage`, so `superseded()` can't
+    // be true today; the check keeps publish-only-if-current if an await is added.)
     let worker: Worker;
     try {
       worker = new MCWorker();
@@ -373,8 +269,7 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
           console.warn('[monte-carlo] cache write failed', e);
         });
         worker.terminate();
-        // Only clear the ref while it still points at THIS worker — a newer
-        // request may already have swapped its own in.
+        // Clear the ref only while it still points at this worker; a newer request may have swapped in its own.
         if (workerRef.current === worker) workerRef.current = null;
       } else if (msg.kind === 'error') {
         if (!superseded()) {
@@ -410,17 +305,14 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
       input: MonteCarloInput,
       opts?: { force?: boolean },
     ): Promise<MonteCarloSummary | null> => {
-      // Claim this request's generation BEFORE the first await (see
-      // `runGenerationRef`). A superseded request resolves `null`, which every
-      // caller already handles as "this request produced nothing".
+      // Claim the generation before the first await (see `runGenerationRef`); a superseded request resolves `null`,
+      // which every caller reads as "produced nothing".
       const generation = runGenerationRef.current + 1;
       runGenerationRef.current = generation;
       const superseded = (): boolean => runGenerationRef.current !== generation;
 
-      // Either preflight stage can reject; a superseded failure reached nobody
-      // and resolves `null` like every other outcome that did, while a current
-      // failure resets the older run and publishes `error` before rejecting —
-      // the same shape as this entry point's worker-error path.
+      // Either preflight stage can reject: a superseded failure resolves `null`; a current one resets the older run and
+      // publishes `error` before rejecting, like this entry point's worker-error path.
       let key: string;
       try {
         key = await mcCacheKey(input);
@@ -449,19 +341,14 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
         }
       }
 
-      // Kill any previous worker / abort any previous sharded pool before
-      // starting a fresh one. Settle any pending `runToCompletion` awaiter
-      // first so its promise resolves `null` instead of hanging forever — a
-      // second run here would otherwise overwrite `pendingCancelRef.current`
-      // below before the prior `onCancel` could fire. Mirrors `cancel()` /
-      // unmount cleanup.
+      // Kill any previous worker or sharded pool first, settling a pending `runToCompletion` awaiter with `null` before
+      // `pendingCancelRef.current` is overwritten below; mirrors `cancel()` and unmount.
       resetInFlight();
       setStatus('running');
       setError(null);
       setProgressDone(0);
       setProgressTotal(input.pathCount);
 
-      // Large runs on a multi-worker machine shard across the pool.
       if (shouldShard(input)) {
         const controller = new AbortController();
         poolAbortRef.current = controller;
@@ -470,8 +357,8 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
           const clearCancel = (): void => {
             if (pendingCancelRef.current === onCancel) pendingCancelRef.current = null;
           };
-          // `cancel()` aborts the pool → runMonteCarloSharded resolves
-          // 'aborted'; this resolver settles the awaiter with `null` first.
+          // `cancel()` aborts the pool, so runMonteCarloSharded resolves 'aborted'; this settles the awaiter with
+          // `null` first.
           const onCancel = (): void => {
             if (settled) return;
             settled = true;
@@ -536,12 +423,9 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
         });
       }
 
-      // Construction is guarded for the same reason as in `run`: a Worker the
-      // browser refuses to spawn would otherwise reject this promise with
-      // `status` frozen at 'running' and no `error` for the page to retry from.
-      // This entry point REPORTS the failure, so it publishes and then rejects
-      // — the same shape as its worker-error path — unless it was superseded,
-      // in which case the failure reached nobody and it resolves `null`.
+      // Guarded like `run`: a Worker the browser refuses to spawn would reject with `status` frozen at 'running' and no
+      // `error` to retry from. This entry point reports the failure, so it publishes then rejects, unless superseded
+      // (then it resolves `null`).
       let worker: Worker;
       try {
         worker = new MCWorker();
@@ -584,8 +468,7 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
               setStatus('done');
             }
             worker.terminate();
-            // Only clear the ref if it still points at THIS worker — a
-            // cancel() may have already swapped it out.
+            // Clear the ref only while it still points at this worker; a cancel() may have swapped it out.
             if (workerRef.current === worker) workerRef.current = null;
             // Await the cache write so a subsequent sequential read sees it.
             void putCached(key, msg.summary)
@@ -617,11 +500,9 @@ export function MonteCarloProvider({ children }: { children: React.ReactNode }) 
           else fail(new Error(e.message ?? 'Worker crashed'));
         };
 
-        // Handler installation + dispatch under the same guard as construction.
-        // A `postMessage` that throws inside this executor rejects the promise
-        // on its own, but it does so WITHOUT terminating the worker it just
-        // created, clearing `workerRef` / `pendingCancelRef`, or moving `status`
-        // off 'running' — so the failure must be settled explicitly here.
+        // Same guard as construction: a throwing `postMessage` in this executor rejects the promise without terminating
+        // the worker, clearing `workerRef`/`pendingCancelRef` or moving `status` off 'running', so settle it
+        // explicitly.
         try {
           worker.onmessage = onWorkerMessage;
           worker.onerror = onWorkerError;

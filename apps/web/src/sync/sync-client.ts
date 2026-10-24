@@ -1,10 +1,5 @@
-/**
- * Thin HTTP client for the sync API. Talks JSON, attaches CSRF header
- * + bearer token, throws structured errors on non-2xx responses.
- *
- * The mock-sync provider satisfies the same interface so Scenario 1
- * (browser-only) can develop without a backend (see mock-sync.ts).
- */
+// HTTP client for the sync API: JSON, bearer token and CSRF header (AGENTS.md "Project-specific security"), typed errors.
+// mock-sync.ts satisfies the same interface for browser-only mode.
 import type {
   BootstrapResponseBody,
   PullResponseBody,
@@ -31,42 +26,21 @@ import type { EncryptedPayloadEnvelope } from '../crypto/encryption-types.js';
 import { UnauthenticatedPayloadError } from './pull-apply.js';
 import { retryAfterMs } from '../lib/retry-backoff.js';
 
-/**
- * Per-call fetch timeout for `POST /sync/workspace/clear`. The clear runs SYNCHRONOUSLY inside one API-Gateway request —
- * password re-verify + 5-repo household sweep + empty-snapshot write + repoint +
- * optional S3 purge — whose worst case sits just under the ~29s API-Gateway
- * integration ceiling. Give the client a slightly higher budget so a normal
- * (even slow) clear is never false-aborted, while a truly hung request still
- * fails instead of hanging forever. Deliberately far above api/client.ts
- * `REQUEST_TIMEOUT_MS` (10s), which would abort mid-clear and surface a false
- * failure while the server actually clears. Other sync calls keep the file's
- * existing no-explicit-timeout behavior.
- */
+// Fetch timeout for `POST /sync/workspace/clear`: the clear runs synchronously in one API-Gateway request (worst case
+// just under its ~29s ceiling), so give it a little more. The 10s api/client.ts default would abort mid-clear and show
+// a false failure.
 const CLEAR_WORKSPACE_TIMEOUT_MS = 35_000;
 
-/**
- * 401 error codes that signal an expired/invalid ACCESS TOKEN — the only 401s
- * worth a token refresh + one retry. These are the `JwtAuthGuard`'s codes
- * (apps/api/src/auth/jwt-auth.guard.ts): `UNAUTHENTICATED` (missing / malformed
- * / invalid / expired bearer, or a non-session token) and `ACCESS_TOKEN_REVOKED`
- * (logout denylist hit). A business-logic 401 an endpoint raises for its OWN
- * reasons — e.g. `INVALID_CREDENTIALS` from the `POST /sync/workspace/clear`
- * password re-verify (a wrong password, not an expired token) — is NOT a
- * token-expiry signal and must never be replayed: refreshing + re-sending would
- * fire the destructive clear TWICE, double-counting the server's per-account
- * backoff + audit trail.
- */
+// The only 401s worth a refresh and one retry: the `JwtAuthGuard` codes (apps/api/src/auth/jwt-auth.guard.ts) for an
+// expired or invalid access token. A business-logic 401 such as `INVALID_CREDENTIALS` on `POST /sync/workspace/clear`
+// must never be replayed: it would fire the destructive clear twice and double-count the server's backoff and audit
+// trail.
 const ACCESS_TOKEN_EXPIRY_CODES: ReadonlySet<string> = new Set([
   'UNAUTHENTICATED',
   'ACCESS_TOKEN_REVOKED',
 ]);
 
-/**
- * True when a 401 response body carries an access-token-expiry error code (see
- * {@link ACCESS_TOKEN_EXPIRY_CODES}). A non-JSON or code-less body returns
- * `false` — the safe default, since replaying a request on an unrecognised 401
- * risks firing a destructive endpoint twice.
- */
+// False on a non-JSON or code-less body: replaying an unrecognised 401 risks firing a destructive endpoint twice.
 function isAccessTokenExpiry(bodyText: string): boolean {
   let code: unknown;
   try {
@@ -78,25 +52,11 @@ function isAccessTokenExpiry(bodyText: string): boolean {
   return typeof code === 'string' && ACCESS_TOKEN_EXPIRY_CODES.has(code);
 }
 
-/**
- * Validate a served pull / bootstrap body against its shared wire schema and
- * DEGRADE — never throw. This is the one genuine behavior change of the
- * contracts package: the boundary now parses the envelope, but with
- * warn-and-apply semantics, not throw-and-abort. The client is offline-first,
- * so a known-type field drift (a missing / extra / retyped field) or an
- * unrecognised `aggregateType` (SyncContext already warn-and-skips those) must
- * NOT abort a pull / bootstrap cycle. `safeParse` gates only a diagnostic
- * warning; the ORIGINAL body is always returned, so the applied data is
- * byte-identical to the pre-schema `JSON.parse` behaviour on every valid
- * response and a drifted response still applies. See "The wire contract and
- * drift" in docs/architecture.md.
- *
- * This degrade is scoped to known-type field DRIFT only. Payload *shape and
- * authentication* — whether a row is the strict encrypted envelope an HDK
- * requires — is a different question, enforced separately (and strictly) by
- * `decryptServedPayload` below; this function never
- * degrades that.
- */
+// Validates a served pull/bootstrap body against its shared wire schema but degrades, never throws: the client is
+// offline-first, so known-type field drift or an unknown `aggregateType` (SyncContext warn-and-skips those) must not
+// abort a cycle. `safeParse` only gates a warning and the original body is always returned. Payload shape and
+// authentication are enforced separately and strictly by `decryptServedPayload`. See "The wire contract and drift" in
+// docs/architecture.md.
 function validateServedBody(
   schema: ZodType,
   raw: unknown,
@@ -114,9 +74,8 @@ function validateServedBody(
 }
 
 /**
- * Identity of one row a `bootstrap()` call quarantined, surfaced on the result itself — not only through the fire-and-forget
- * `reportDecryptOutcome` side channel — so a `clearFirst` applier can carry
- * that aggregate's last readable local copy across its wipe. Never the ciphertext.
+ * Identity of a row a `bootstrap()` call quarantined, returned on the result so a `clearFirst` applier can carry that
+ * aggregate's last readable local copy across its wipe. Never the ciphertext.
  */
 export interface BootstrapQuarantinedRow {
   aggregateId: string;
@@ -134,11 +93,9 @@ export interface SyncTransport {
   /** Restore the household's server sync state to a chosen snapshot. */
   restore(snapshotId: string): Promise<{ ok: boolean }>;
   /**
-   * Server-authoritative "Delete workspace data" clear. Re-verifies `currentPassword` server-side then sweeps the household
-   * workspace to empty. `eraseHistory` opts into purging the S3 backup history
-   * after the clear; `purgeHistoryOnly` is the erase-history RETRY (purge-only,
-   * no sweep — the "Try erasing backups again" affordance). Returns the server's
-   * `{ ok, historyErased }` outcome; throws `SyncApiError` on any non-2xx.
+   * Server-authoritative "Delete workspace data": re-verifies `currentPassword`, then sweeps the household to empty.
+   * `eraseHistory` also purges the S3 backup history; `purgeHistoryOnly` is the purge-only retry. Throws `SyncApiError`
+   * on non-2xx.
    */
   clearWorkspace(args: {
     currentPassword: string;
@@ -147,10 +104,6 @@ export interface SyncTransport {
   }): Promise<{ ok: boolean; historyErased: boolean }>;
 }
 
-/** One row a pull/bootstrap decrypt loop failed to decrypt. Never
- *  carries the ciphertext — only aggregate identity + the row's version. Not
- *  exported past this module — `SyncClientDeps.reportDecryptOutcome` callers
- *  get the shape structurally. */
 interface SyncDecryptQuarantineEntry {
   aggregateId: string;
   aggregateType: string;
@@ -159,26 +112,18 @@ interface SyncDecryptQuarantineEntry {
 
 export interface SyncClientDeps {
   apiBaseUrl: string;
-  /** Returns the current access token (or null when logged out). */
   getAccessToken: () => string | null;
-  /** Returns the current CSRF token from cookie storage. */
   getCsrfToken: () => string | null;
   /** Attempt to refresh the access token. Returns the new token or null if session expired. */
   refreshAccessToken?: () => Promise<string | null>;
-  /** Returns the active household data key, or null when not yet unlocked. */
   getHdk?: () => CryptoKey | null;
   /** Returns the locally pinned freshness counter (0 = no pin / TOFU). Absent = no freshness enforced. */
   getPinnedFreshnessCounter?: () => number;
-  /** Returns the authenticated household ID for binding into decrypt AAD. */
   getHouseholdId?: () => string;
   /**
-   * Reports a pull/bootstrap decrypt outcome:
-   * `quarantined` rows failed to decrypt (`PayloadCryptoError`) and were
-   * dropped from the returned result, never applied; `resolved` rows
-   * decrypted fine for an aggregate a caller may have previously
-   * quarantined. Called at most once per `pull`/`bootstrap` call, only when
-   * either list is non-empty. Optional — omitted for `mock-sync.ts` and the
-   * export transport, which track no quarantine state.
+   * Reports a pull/bootstrap decrypt outcome, at most once per call and only when non-empty: `quarantined` rows failed
+   * to decrypt and were dropped, `resolved` rows decrypted for an aggregate a caller may have quarantined earlier.
+   * Omitted for mock-sync and the export transport.
    */
   reportDecryptOutcome?: (outcome: {
     quarantined: SyncDecryptQuarantineEntry[];
@@ -187,12 +132,8 @@ export interface SyncClientDeps {
 }
 
 /**
- * Thrown when a sync response is rejected on the zero-knowledge freshness
- * check: either the served counter is below this device's
- * pin (a genuine rollback), or the cursor tag failed MAC verification (a
- * tampered head). Callers catch this single type to surface
- * `rollback-detected`; the throw happens before any local write, giving
- * the reject-before-write guarantee.
+ * Thrown when a sync response fails the freshness check: the served counter is below this device's pin (a rollback) or
+ * the cursor tag failed MAC verification. Callers surface it as `rollback-detected`; it throws before any local write.
  */
 export class FreshnessRollbackError extends Error {
   constructor(
@@ -211,11 +152,8 @@ export class HttpSyncClient implements SyncTransport {
 
   async push(args: { householdId: string; deviceId: string; mutations: PendingMutation[] }): Promise<PushResponseBody> {
     const hdk = this.deps.getHdk?.() ?? null;
-    // Push requires an unlocked HDK. The server unconditionally rejects
-    // plaintext payloads — there is no server-side
-    // plaintext push path. Callers must ensure the household encryption key is
-    // available before flushing mutations; the LoginPage setup gate (needsSetup
-    // hold) prevents in-app pushes from reaching this branch.
+    // Push requires an unlocked HDK: the server rejects plaintext payloads, and the LoginPage setup gate keeps in-app
+    // pushes from reaching the throw.
     if (!hdk) {
       throw new Error(
         'HttpSyncClient.push: HDK is null — push requires an unlocked household encryption key. ' +
@@ -263,12 +201,9 @@ export class HttpSyncClient implements SyncTransport {
     };
     const response = await this.request<PushResponseBody>('POST', '/api/v1/sync/push', body);
     if (hdk) {
-      // Push-path verification: the head echo is best-effort and
-      // non-atomic with mutation acceptance. A
-      // successful commit whose head echo failed (absent/null) must NOT
-      // present as a rollback — keep the existing pin and return normally.
-      // Pull/bootstrap (the paths that serve state) keep the strict
-      // missing-head-with-pin rejection.
+      // The head echo is best-effort and non-atomic with mutation acceptance, so a missing echo after a successful
+      // commit is not a rollback ('push' mode keeps the pin); pull/bootstrap keep the strict missing-head-with-pin
+      // rejection.
       await this.verifyFreshness(response.freshnessHead, hdk, 'push');
     }
     return response;
@@ -277,9 +212,7 @@ export class HttpSyncClient implements SyncTransport {
   async pull(args: { since: string }): Promise<PullResponseBody> {
     const url = `/api/v1/sync/pull?since=${encodeURIComponent(args.since)}`;
     const raw = await this.request<unknown>('GET', url);
-    // Validate the envelope against the shared wire schema, but DEGRADE — never
-    // throw (see validateServedBody). The original body is returned so a valid
-    // response applies byte-identically and a drifted one still applies.
+    // Degrade, never throw (see validateServedBody).
     const result = validateServedBody(
       pullResponseSchema,
       raw,
@@ -288,21 +221,15 @@ export class HttpSyncClient implements SyncTransport {
     const hdk = this.deps.getHdk?.() ?? null;
     if (!hdk) return result;
     await this.verifyFreshness(result.freshnessHead, hdk);
-    // Quarantine: the server holds no household
-    // key, so it can only check envelope SHAPE — a garbage `wrappedKey`/
-    // ciphertext an attacker pushed is caught only here, at decrypt. A single
-    // undecryptable row must cost that device that row, never the whole pull.
+    // Quarantine: the server holds no household key and checks only envelope shape, so garbage ciphertext an attacker
+    // pushed is caught only here at decrypt. A single undecryptable row must cost that row, never the whole pull.
     const quarantined: SyncDecryptQuarantineEntry[] = [];
     const resolved: { aggregateId: string; aggregateType: string }[] = [];
     const kept: typeof result.changes = [];
     for (const change of result.changes) {
-      // Every row must be a strict envelope — the pull
-      // response carries no householdId; bind the authenticated household
-      // from deps into the AAD so the GCM tag verifies (the encrypt-side AAD
-      // binds the real householdId). A non-envelope row is a protocol
-      // violation, not "one bad row" (see decryptServedPayload); a well-formed
-      // envelope that fails to decrypt is quarantined below instead of
-      // rejecting the whole pull.
+      // The pull response carries no householdId: bind the authenticated one into the AAD so the GCM tag verifies. A
+      // non-envelope row is a protocol violation (see decryptServedPayload); a well-formed envelope that fails to
+      // decrypt is quarantined instead.
       try {
         change.payload = await this.decryptServedPayload(
           change.payload,
@@ -347,18 +274,13 @@ export class HttpSyncClient implements SyncTransport {
     if (!hdk) return result;
     await this.verifyFreshness(result.freshnessHead, hdk);
     const householdId = result.workspaceSnapshot.householdId;
-    // Quarantine, combined across both loops
-    // below (the snapshot aggregates and the post-snapshot mutations) into
-    // ONE report — a poisoned snapshot row is otherwise the unrecoverable
-    // case: today a single `PayloadCryptoError` rejects the WHOLE bootstrap,
-    // which is exactly the wedge described above.
+    // Quarantine across both loops below (snapshot aggregates and post-snapshot mutations) in one report; otherwise a
+    // single poisoned snapshot row would reject the whole bootstrap, an unrecoverable wedge.
     const quarantined: SyncDecryptQuarantineEntry[] = [];
     const resolved: { aggregateId: string; aggregateType: string }[] = [];
     const keptAggregates: typeof result.workspaceSnapshot.aggregates = [];
     for (const a of result.workspaceSnapshot.aggregates) {
-      // Every snapshot aggregate must be a strict envelope;
-      // a decrypt failure on a well-formed envelope is quarantined
-      // rather than rejecting the whole snapshot.
+      // Every snapshot aggregate must be a strict envelope; a decrypt failure on a well-formed one is quarantined.
       try {
         a.payload = await this.decryptServedPayload(
           a.payload,
@@ -377,11 +299,8 @@ export class HttpSyncClient implements SyncTransport {
     result.workspaceSnapshot.aggregates = keptAggregates;
     const keptMutations: typeof result.postSnapshotMutations = [];
     for (const m of result.postSnapshotMutations) {
-      // The pull-shaped change carries no householdId of its own; bind the
-      // authenticated household (falling back to the snapshot's) into the
-      // AAD so the GCM tag verifies. Same strict-envelope requirement as the
-      // snapshot half above, and the same quarantine-on-decrypt-failure
-      // behavior.
+      // The pull-shaped change carries no householdId: bind the authenticated one (else the snapshot's) into the AAD.
+      // Same strict-envelope and quarantine rules as the snapshot half.
       try {
         m.payload = await this.decryptServedPayload(
           m.payload,
@@ -409,32 +328,17 @@ export class HttpSyncClient implements SyncTransport {
     if (quarantined.length > 0 || resolved.length > 0) {
       this.deps.reportDecryptOutcome?.({ quarantined, resolved });
     }
-    // Surfaced to the caller directly
-    // — not only through the fire-and-forget `reportDecryptOutcome` side
-    // channel — so a `clearFirst` bootstrap applier can carry each dropped
-    // row's last readable local copy across its `clearAllStores()` instead of
-    // silently refilling without it (or refusing the whole refresh).
+    // Returned directly, not only via the fire-and-forget `reportDecryptOutcome`, so a `clearFirst` applier can carry
+    // each dropped row's last readable local copy across `clearAllStores()`.
     return { ...result, quarantined };
   }
 
   /**
-   * Once an HDK is held, every served pull/bootstrap payload must be a
-   * strict encrypted envelope. The server never accepts
-   * plaintext for a keyed household on any push (`push.service.ts`
-   * `enforceEncryptionForMutation`), so once this client holds
-   * a key a non-envelope row is a bug or a compromised server — that case
-   * still throws `UnauthenticatedPayloadError(phase, 'not-envelope')` and
-   * rejects the WHOLE response before a single row reaches IndexedDB,
-   * rather than handing back a partially-decrypted body the caller could
-   * half-apply.
-   *
-   * A well-formed envelope that fails to decrypt is a DIFFERENT case:
-   * it is left to throw the raw
-   * `PayloadCryptoError` from `decryptPayload` uncaught, so `pull()` /
-   * `bootstrap()` can catch it specifically and quarantine just that row
-   * (drop it, report it) instead of rejecting the whole response — a single
-   * bad/tampered row must not wedge the entire sync cycle. Any other error
-   * from `decryptPayload` propagates unchanged.
+   * Once an HDK is held, every served payload must be a strict encrypted envelope: the server never accepts plaintext
+   * for a keyed household, so a non-envelope row is a bug or a compromised server and throws
+   * `UnauthenticatedPayloadError(phase, 'not-envelope')`, rejecting the whole response before any row reaches
+   * IndexedDB. A well-formed envelope that fails to decrypt is different: the raw `PayloadCryptoError` propagates so
+   * `pull()`/`bootstrap()` quarantine just that row instead of wedging the cycle.
    */
   private async decryptServedPayload(
     payload: Record<string, unknown> | EncryptedPayloadEnvelope,
@@ -467,10 +371,7 @@ export class HttpSyncClient implements SyncTransport {
     eraseHistory: boolean;
     purgeHistoryOnly?: boolean;
   }): Promise<{ ok: boolean; historyErased: boolean }> {
-    // Own timeout ABOVE the server's synchronous worst case: the sweep +
-    // snapshot + optional purge can run several seconds, past the 10s
-    // api/client.ts default that would false-abort it. `request()` echoes the
-    // CSRF header + bearer like every other sync POST.
+    // Own timeout above the server's synchronous worst case; the 10s api/client.ts default would false-abort it.
     return this.request<{ ok: boolean; historyErased: boolean }>(
       'POST',
       '/api/v1/sync/workspace/clear',
@@ -480,21 +381,11 @@ export class HttpSyncClient implements SyncTransport {
   }
 
   /**
-   * Verify a server-echoed freshness head: reject a
-   * counter below this device's pin (genuine rollback) and verify the
-   * cursor-tag MAC. A failed MAC (FreshnessError) is normalized into a
-   * FreshnessRollbackError so callers handle one error type. A missing
-   * head (first sync) is accepted. Throws before any local write.
-   *
-   * `mode` distinguishes the push path from the state-serving paths:
-   * - `'serve'` (pull/bootstrap): a missing head WITH a non-zero pin is a
-   *   rollback — these paths hand back state, so an absent head bypasses
-   *   protection and must reject.
-   * - `'push'`: the head echo is best-effort and non-atomic with mutation
-   *   acceptance. A missing head after a successful commit is a
-   *   transient echo failure, NOT a rollback — keep the pin, return
-   *   normally. This does NOT weaken rollback detection: pull/bootstrap
-   *   still reject the missing-head-with-pin case.
+   * Verifies a server-echoed freshness head: rejects a counter below this device's pin and a bad cursor-tag MAC
+   * (normalised into FreshnessRollbackError, so callers catch one type). A missing head (first sync) is accepted.
+   * Throws before any local write. `'serve'` (pull/bootstrap): a missing head with a non-zero pin is a rollback, since
+   * an absent head would bypass protection on state-serving paths. `'push'`: a missing echo after a successful commit
+   * is a transient failure; keep the pin.
    */
   private async verifyFreshness(
     freshnessHead: { freshnessCounter: number; cursorTag: string } | null | undefined,
@@ -503,11 +394,8 @@ export class HttpSyncClient implements SyncTransport {
   ): Promise<void> {
     const pinned = this.deps.getPinnedFreshnessCounter?.() ?? 0;
     if (!freshnessHead) {
-      // Push path: a transient missing echo after a successful commit keeps
-      // the existing pin. Only the state-serving paths reject.
       if (mode === 'push') return;
-      // Only accept a missing head when pinned === 0 (TOFU first contact).
-      // Once a pin exists, an absent head bypasses rollback protection.
+      // Accept a missing head only at pinned === 0 (TOFU first contact).
       if (pinned > 0) {
         throw new FreshnessRollbackError(-1, pinned);
       }
@@ -520,9 +408,7 @@ export class HttpSyncClient implements SyncTransport {
       await verifyCursorTag(freshnessHead, hdk);
     } catch (err) {
       if (err instanceof FreshnessError) {
-        // A tampered/mismatched tag is treated as a rollback so callers
-        // only need to catch one error type. servedCounter carries the
-        // suspect counter; pinnedCounter the local pin.
+        // A tampered tag is treated as a rollback so callers catch one error type.
         throw new FreshnessRollbackError(freshnessHead.freshnessCounter, pinned);
       }
       throw err;
@@ -533,11 +419,8 @@ export class HttpSyncClient implements SyncTransport {
     method: string,
     path: string,
     body?: unknown,
-    // Optional per-call abort timeout (ms). Omitted for the polling calls
-    // (push/pull/bootstrap/restore) which keep the file's existing
-    // no-explicit-timeout behavior; `clearWorkspace` passes one above the
-    // server's worst-case budget so a hung request eventually fails
-    // instead of leaving the promise pending forever.
+    // Per-call abort timeout (ms); only `clearWorkspace` sets one, above the server's worst case, so a hung request
+    // fails instead of pending forever.
     timeoutMs?: number,
   ): Promise<T> {
     const controller = timeoutMs !== undefined ? new AbortController() : null;
@@ -561,15 +444,9 @@ export class HttpSyncClient implements SyncTransport {
       let res = await doFetch(this.deps.getAccessToken());
       let text = await res.text();
 
-      // Retry once — but ONLY on a genuine expired/invalid ACCESS-TOKEN 401
-      // (`isAccessTokenExpiry`). The access token may have expired between
-      // polls; refresh + replay recovers that, mirroring api/client.ts so sync
-      // 401s trigger the same logout side-effect when the session is truly
-      // gone. A 401 an endpoint raises for its OWN business logic — e.g.
-      // `INVALID_CREDENTIALS` on `POST /sync/workspace/clear` (a wrong password)
-      // — must NOT be replayed: firing the destructive clear twice
-      // double-counts the server-side backoff / audit trail. Peek the error
-      // code first (reading the body now is safe — it is consumed either way).
+      // Retry once, and only on a genuine expired-access-token 401 (`isAccessTokenExpiry`), mirroring api/client.ts so
+      // a truly gone session triggers the same logout side effect. A business-logic 401 (e.g. `INVALID_CREDENTIALS` on
+      // workspace clear) must not be replayed.
       if (
         res.status === 401 &&
         this.deps.refreshAccessToken &&
@@ -582,7 +459,7 @@ export class HttpSyncClient implements SyncTransport {
         }
       }
 
-      // Sync polls fire often → cheapest place to detect a deploy.
+      // Sync polls fire often, so this is the cheapest place to detect a deploy.
       recordServerBuildId(res.headers.get('X-Build-Id'));
       let parsed: unknown = null;
       try {
@@ -616,9 +493,7 @@ export class SyncApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly traceId?: string,
-    /** Parsed `Retry-After` from the response, in ms — `null`/undefined
-     *  when the header was absent or unparseable, distinct from a real
-     *  zero-length wait (see `retryAfterMs` in `lib/retry-backoff.ts`). */
+    /** Parsed `Retry-After` in ms; null/undefined when absent or unparseable, distinct from a zero-length wait. */
     public readonly retryAfterMs?: number | null,
   ) {
     super(message);
@@ -627,15 +502,10 @@ export class SyncApiError extends Error {
 }
 
 /**
- * Construct a one-shot {@link HttpSyncClient} for the server-authoritative data
- * export. The export runs a forced
- * bootstrap + pull under the five-minute export-authorization cookie, so it
- * does NOT share the running provider's freshness pin. It decrypts served rows with the household key
- * (`getHdk`) exactly like the live client, but pins the freshness counter at 0:
- * the served head's MAC is still verified against the key (tamper detection
- * preserved), while the monotonic-counter check is treated as a first-contact
- * TOFU so a legitimate head is never false-rejected. Nothing is persisted — the
- * export path writes only the download.
+ * One-shot HttpSyncClient for the server-authoritative data export: a forced bootstrap and pull under the five-minute
+ * export-authorization cookie. It does not share the live freshness pin: it pins the counter at 0 (first-contact TOFU,
+ * so a legitimate head is never false-rejected) while still verifying the head's MAC against the key. Nothing is
+ * persisted.
  */
 export function createExportSyncTransport(deps: {
   apiBaseUrl: string;
@@ -653,13 +523,9 @@ export function createExportSyncTransport(deps: {
     getHdk: deps.getHdk ?? (() => null),
     getPinnedFreshnessCounter: () => 0,
     getHouseholdId: () => deps.householdId,
-    // Fail closed: the export is a portability/
-    // compliance artifact, not the live sync path the quarantine-and-
-    // continue behaviour was built for. `pull`/`bootstrap` call this
-    // SYNCHRONOUSLY, before returning — throwing here propagates straight
-    // out of the transport call (no try/catch wraps it there), so the whole
-    // export rejects instead of silently downloading a bundle that is
-    // quietly missing the rows that failed to decrypt.
+    // Fail closed: the export is a compliance artifact, not the live path built for quarantine-and-continue.
+    // `pull`/`bootstrap` call this synchronously and nothing wraps it, so the export rejects instead of downloading a
+    // bundle silently missing the rows that failed to decrypt.
     reportDecryptOutcome: (outcome) => {
       if (outcome.quarantined.length > 0) {
         throw new Error(

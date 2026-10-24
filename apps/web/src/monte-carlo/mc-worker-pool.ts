@@ -1,54 +1,11 @@
-/**
- * Generic Monte Carlo worker pool. Owns N stateless
- * `monte-carlo.worker.ts` instances and schedules messages across them
- * with bounded concurrency. There are two usage shapes, deliberately
- * described by category rather than by count — an exact tally goes stale
- * every time a surface adds an on-demand run:
- *
- *  - **Whole-run callers** (`pool.run`), each dispatching independent
- *    `{ kind: 'run' }` runs: batch sweeps over a candidate grid or a
- *    scenario list (`optimizer-mc-runner.ts`,
- *    `use-scenario-bulk-recompute.ts`) on a multi-worker pool, and
- *    single-counterfactual surfaces on a size-1 pool — the Plan Stress
- *    Test's guardrail-sibling run (`PlanStressTestSection.tsx`), the
- *    Balance Projection page's market-stress comparison walking the
- *    named stress cases sequentially (`plan-market-stress-comparison.ts`),
- *    and the Guardrails page's bounded "Check now" run
- *    (`pages/use-guardrails-vm.ts`).
- *  - **Dispatch-shaped caller** (`pool.dispatch`):
- *    `run-monte-carlo-sharded.ts` fans `{ kind: 'runShard' }` /
- *    `{ kind: 'assemble' }` messages over the pool to spread ONE run's
- *    paths across cores.
- *
- * `MonteCarloProvider` uses neither directly below the shard threshold:
- * it spawns a fresh single worker per run (not a persistent instance)
- * and routes larger runs through the sharded coordinator.
- *
- * The pool knows nothing about scenarios or triples — it is a plain
- * message→reply scheduler. Each worker is stateless per message, so
- * spreading messages across N fresh instances does not change any
- * result; with a constant seed the outcome is identical regardless of
- * how work is partitioned across workers. It forwards the whole
- * `MonteCarloInput` unmodified, so the market-stress levers
- * (`annualInvestmentCostPct`, `returnShock`, `inflationShockPct`) and a
- * longevity-extended horizon ride through to the worker as-is — a base and its
- * same-seed stress run schedule independently yet reuse identical paths.
- *
- * Reply correlation: each worker handles at most one message at a time,
- * so a reply is matched to its request by *which worker* fired the
- * event — no request id. One persistent `message` listener AND one
- * `error` listener are installed per worker at construction. The `error`
- * listener settles a hard worker crash (which fires no structured
- * `{ kind: 'error' }` reply) as an error instead of stalling the slot
- * forever.
- */
+// Generic Monte Carlo worker pool: N stateless `monte-carlo.worker.ts` instances scheduled with bounded concurrency.
+// A plain message-to-reply scheduler: `pool.run` for whole-run callers, `pool.dispatch` for the sharded coordinator.
 import type { MonteCarloInput, MonteCarloSummary } from '../lib/monte-carlo';
 
-/** Subset of `Worker` the pool uses. Lets tests substitute a fake
- *  without implementing the entire `Worker` interface. `postMessage`'s
- *  optional `transfer` param and the `'error'` event type are additive —
- *  a 1-arg-`postMessage` / message-only fake stays structurally
- *  assignable. */
+/**
+ * Subset of `Worker` the pool uses, so tests can substitute a fake; the optional `transfer` and the `'error'` event
+ * type are additive, so a one-arg-`postMessage`, message-only fake stays assignable.
+ */
 export interface MinimalMcWorker {
   postMessage(msg: unknown, transfer?: Transferable[]): void;
   addEventListener(type: 'message' | 'error', fn: (ev: MessageEvent) => void): void;
@@ -61,23 +18,27 @@ export type McPoolReply =
   | { readonly kind: 'error'; readonly message: string }
   | { readonly kind: 'aborted' };
 
+// Whole-run callers use `pool.run`: batch sweeps on a multi-worker pool, single-counterfactual surfaces on a size-1
+// pool. `run-monte-carlo-sharded.ts` uses `pool.dispatch` to spread ONE run's paths across cores; `MonteCarloProvider`
+// uses neither below the shard threshold. Workers are stateless per message, so with a constant seed the result is the
+// same however work is partitioned, and the whole `MonteCarloInput` is forwarded unmodified. Replies are matched by
+// which worker fired the event (one message at a time, no request id); a hard crash fires no structured reply, so the
+// `error` listener settles it as an error.
 export interface McPool {
-  /** Queue one `{ kind: 'run' }` input; resolves with the worker's reply.
-   *  A thin wrapper over {@link dispatch}. The optional `onProgress`
-   *  forwards that input's path-level `{ kind: 'progress' }` messages so a
-   *  caller can drive a smooth bar. Never rejects — failures surface as
-   *  `{ kind: 'error' }`, abort as `{ kind: 'aborted' }`. */
+  /**
+   * Queues one `{ kind: 'run' }` input and resolves with the worker's reply; a thin wrapper over {@link dispatch}.
+   * `onProgress` forwards path-level progress. Never rejects: failures are `{ kind: 'error' }`, abort is `{ kind:
+   * 'aborted' }`.
+   */
   run(
     input: MonteCarloInput,
     onProgress?: (done: number, total: number) => void,
   ): Promise<McPoolReply>;
-  /** Queue an arbitrary pre-built worker `message` (with an optional
-   *  `transfer` list for zero-copy `ArrayBuffer` hand-off); resolves with
-   *  the RAW terminal reply (any `kind !== 'progress'` message) so callers
-   *  reading `{ kind: 'shardResult' }` / `{ kind: 'result' }` settle
-   *  correctly. `onProgress` forwards `{ kind: 'progress' }` messages.
-   *  Never rejects — abort / crash surface as `{ kind: 'aborted' }` /
-   *  `{ kind: 'error' }`. */
+  /**
+   * Queues a pre-built worker message (optional `transfer` list for zero-copy hand-off) and resolves with the raw
+   * terminal reply (any `kind !== 'progress'`), so `shardResult` and `result` replies settle correctly. Never rejects:
+   * abort or crash surface as `aborted` / `error`.
+   */
   dispatch(
     message: unknown,
     opts?: {
@@ -85,20 +46,16 @@ export interface McPool {
       onProgress?: (done: number, total: number) => void;
     },
   ): Promise<unknown>;
-  /** Terminate every worker, drop listeners, and settle every pending +
-   *  queued task as `aborted`. Idempotent. */
+  /** Terminates every worker, drops listeners and settles pending and queued tasks as `aborted`. Idempotent. */
   dispose(): void;
   readonly size: number;
 }
 
 /**
- * Pool size = the available logical cores minus one (per product
- * decision), leaving a single core for the UI thread, other tabs, and
- * the OS. Floored at 1 (single-core / jsdom) and never larger than the
- * number of work items — a 9-triple single-member sweep must not spin
- * up 8 workers. `requested` (the optimizer's `concurrency` knob)
- * overrides the auto value when positive; tests pass it to pin a
- * deterministic size.
+ * Pool size: logical cores minus one (a product decision, leaving one for the UI thread, other tabs and the OS), at
+ * least 1 (single core, jsdom) and no more than the work items (a 9-triple single-member sweep must not spin up 8
+ * workers). A positive `requested` (the optimizer's `concurrency` knob) overrides the auto value; tests pin a size with
+ * it.
  */
 export function mcPoolSize(
   workItems: number,
@@ -122,10 +79,7 @@ interface Slot {
 }
 
 interface Task {
-  /** The fully-formed worker message (`{ kind: 'run', input }`,
-   *  `{ kind: 'runShard', … }`, `{ kind: 'assemble', … }`, …). */
   readonly message: unknown;
-  /** Optional zero-copy `ArrayBuffer` transfer list for `postMessage`. */
   readonly transfer?: Transferable[];
   readonly onProgress?: (done: number, total: number) => void;
   readonly resolve: (r: unknown) => void;
@@ -154,9 +108,8 @@ export function createMcPool(opts: {
     }
   };
 
-  // Shared terminal-settle path for both a structured non-progress reply
-  // and a hard `error` event: free the slot, resolve the pending
-  // promise with the raw reply (kind-agnostic), pull the next task.
+  // Shared terminal settle for a structured non-progress reply and a hard `error` event: free the slot, resolve with
+  // the raw reply, pull the next task.
   const settleTerminal = (slot: Slot, reply: unknown): void => {
     const resolve = slot.resolve;
     slot.resolve = null;
@@ -180,18 +133,16 @@ export function createMcPool(opts: {
     slot.listener = (ev: MessageEvent): void => {
       const data = ev.data as { kind?: string; done?: number; total?: number };
       if (data && data.kind === 'progress') {
-        // Non-terminal: forward to the in-flight run's progress sink.
         slot.onProgress?.(data.done ?? 0, data.total ?? 0);
         return;
       }
-      // Any non-progress message is terminal — resolve with it unchanged so
-      // `result` / `shardResult` / `error` / the `assemble` reply all settle.
+      // Any non-progress message is terminal and resolved unchanged, so `result`, `shardResult`, `error` and the
+      // `assemble` reply all settle.
       settleTerminal(slot, data);
     };
     slot.errorListener = (ev: MessageEvent): void => {
-      // A hard worker crash fires the `error` event (an `ErrorEvent` with a
-      // `message`, typed loosely here) with no structured `{ kind: 'error' }`
-      // reply — settle it as one instead of stalling the slot forever.
+      // A hard crash fires an `error` event (an `ErrorEvent`, loosely typed) with no structured reply: settle it as one
+      // rather than stall the slot.
       const message = (ev as unknown as { message?: string }).message ?? 'Worker crashed';
       settleTerminal(slot, { kind: 'error', message });
     };
@@ -251,7 +202,6 @@ export function createMcPool(opts: {
   return {
     size,
     run(input, onProgress) {
-      // Thin wrapper — byte-identical behavior for every existing caller.
       return dispatch({ kind: 'run', input }, { onProgress }) as Promise<McPoolReply>;
     },
     dispatch,

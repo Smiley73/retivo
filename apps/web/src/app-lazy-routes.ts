@@ -1,10 +1,4 @@
-/**
- * Lazy-loaded route component declarations (extracted from App.tsx to
- * keep that file under the shape limit). Each page lands
- * in its own chunk so the initial bundle stays shell + current route;
- * ChunkLoadError handling lives in ErrorBoundary and the Suspense
- * fallback in App.tsx covers the in-flight gap.
- */
+// Lazy route components, one chunk per page; ChunkLoadError handling lives in ErrorBoundary.
 import { lazy } from 'react';
 
 export const LoginPage = lazy(() =>

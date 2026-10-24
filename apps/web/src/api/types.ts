@@ -1,7 +1,4 @@
-/**
- * Shared account-type and tax-treatment enums, display labels, and ownership
- * rules used across multiple pages.
- */
+// Account-type and tax-treatment enums, display labels and ownership rules.
 
 export type AccountType =
   | 'RETIREMENT_401K'
@@ -57,10 +54,7 @@ export const TAX_TREATMENT_LABELS: Record<AccountTaxTreatment, string> = {
   ROTH: 'Tax-free (Roth)',
 };
 
-/**
- * Maps each account type to its allowed tax treatments.
- * Single-element arrays mean the tax treatment is locked.
- */
+/** Allowed tax treatments per account type; a single element means locked. */
 export const TAX_TREATMENT_RULES: Record<AccountType, AccountTaxTreatment[]> = {
   RETIREMENT_401K: ['PRE_TAX', 'MIXED'],
   RETIREMENT_IRA: ['PRE_TAX'],
@@ -81,11 +75,7 @@ export const TAX_TREATMENT_RULES: Record<AccountType, AccountTaxTreatment[]> = {
   OTHER: ['PRE_TAX', 'POST_TAX', 'MIXED'],
 };
 
-/**
- * Account types that cannot be jointly owned. All retirement accounts are
- * inherently individual (IRS/legal definition). Only savings/investment
- * accounts and the catch-all OTHER type support joint ownership.
- */
+/** Types that cannot be jointly owned: every retirement account is individual. */
 export const INDIVIDUAL_ONLY_TYPES: AccountType[] = [
   'RETIREMENT_401K',
   'RETIREMENT_IRA',
