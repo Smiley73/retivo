@@ -1,14 +1,9 @@
-/**
- * UnsyncedMutationList tests. Label resolution is mocked so rows are
- * deterministic; the reason→"why" mapping, status pills, and the race guard
- * are asserted directly.
- */
+// Label resolution is mocked so rows are deterministic; the reason-to-"why" mapping, status pills and the race guard are asserted directly.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { PendingMutation } from '../db/types';
 import {
-  REASON_LABEL,
   UnsyncedEditsWarningList,
   UnsyncedMutationList,
 } from './UnsyncedMutationList';
@@ -74,15 +69,11 @@ describe('UnsyncedMutationList', () => {
       const pill = screen.getByText(pillLabel);
       expect(pill).toBeInTheDocument();
       if (reason !== 'CONFLICT') {
-        // NOT_FOUND / SCHEMA_MISMATCH still keep the amber `modified` Badge
-        // tone (`text-warning` is unique to that tone in TONE_CLASS).
         expect(pill.className).toContain('text-warning');
       }
       expect(screen.getByText(why)).toBeInTheDocument();
-      // The raw operation + expectedVersion tokens no longer render.
       expect(screen.queryByText('update')).toBeNull();
       expect(screen.queryByText(/^v\d+$/)).toBeNull();
-      // Name resolves asynchronously.
       expect(await screen.findByText('Base scenario')).toBeInTheDocument();
     },
   );
@@ -137,7 +128,6 @@ describe('UnsyncedMutationList', () => {
       />,
     );
     expect(screen.getByText('Conflict')).toBeInTheDocument();
-    // Name still resolves; no explanation line renders for a reasonless conflict.
     expect(await screen.findByText('Base scenario')).toBeInTheDocument();
     expect(
       screen.queryByText('Someone changed this elsewhere — refresh to get the latest'),
@@ -162,18 +152,13 @@ describe('UnsyncedMutationList', () => {
     expect(await screen.findByText('John 401(k)')).toBeInTheDocument();
     const detail = screen.getByText('2026');
     expect(detail.textContent).toBe('2026');
-    // The middot separator is decorative-only (aria-hidden), matching the
-    // row-2 "why" separator — a screen reader announces "2026", not "· 2026".
     const separator = detail.previousElementSibling;
     expect(separator).toHaveAttribute('aria-hidden', 'true');
     expect(separator?.textContent).toBe('·');
   });
 
   it('paints the native :focus-visible ring on the keyboard-focusable region', async () => {
-    // Regression: the region used the React-Aria-only `data-[focus-visible]`
-    // variant, which a plain focusable <div> never receives — so keyboard
-    // focus had NO visible indicator (WCAG 2.2 AA). The native
-    // `focus-visible:` variant DOES apply to a focusable div.
+    // The region must use the native `focus-visible:` variant: the React-Aria-only `data-[focus-visible]` never applies to a plain focusable div (WCAG 2.2 AA).
     render(
       <UnsyncedMutationList
         pending={[]}
@@ -186,7 +171,6 @@ describe('UnsyncedMutationList', () => {
     expect(region.className).toContain('focus-visible:ring-2');
     expect(region.className).toContain('focus-visible:ring-ring');
     expect(region.className).not.toContain('data-[focus-visible]');
-    // Flush the async label resolution so its setState lands inside act().
     await screen.findByText('Base scenario');
   });
 
@@ -222,12 +206,11 @@ describe('UnsyncedMutationList', () => {
       <UnsyncedMutationList pending={[mutation()]} conflicts={[]} failedErrors={[]} />,
     );
     unmount();
-    // Settle after unmount — the cancellation flag must gate the setState.
+    // A post-unmount setState would log React's unmounted-update warning.
     await act(async () => {
       settle({ typeLabel: 'Scenario', name: 'Late name' });
       await Promise.resolve();
     });
-    // A post-unmount state write would log React's act/unmounted-update warning.
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
@@ -262,7 +245,6 @@ describe('UnsyncedMutationList', () => {
     await expectNoA11yViolations(container);
   });
 
-  // ── Resolve control (injected callback) ──────────────────────────
 
   it('renders no Resolve control when no resolveConflict callback is injected', async () => {
     render(
@@ -304,17 +286,13 @@ describe('UnsyncedMutationList', () => {
         resolveConflict={vi.fn()}
       />,
     );
-    // Wait for the async label to resolve so the accessible name carries the
-    // resolved type + name, not the raw-id fallback.
     await screen.findByText('Base scenario');
-    // The accessible NAME disambiguates the row (verb + resolved type + name)…
     expect(
       screen.getByRole('button', { name: 'Keep mine — Scenario Base scenario' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Discard — Scenario Base scenario' }),
     ).toBeInTheDocument();
-    // …while the visible button TEXT stays the short generic verb.
     expect(screen.getByText('Keep mine')).toBeInTheDocument();
     expect(screen.getByText('Discard')).toBeInTheDocument();
   });
@@ -331,8 +309,6 @@ describe('UnsyncedMutationList', () => {
     await screen.findByText('Base scenario');
     expect(screen.getByRole('button', { name: /^Keep mine/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: /^Discard —/ })).toBeDisabled();
-    // Host-agnostic: names where Check & repair lives (correct on the badge
-    // popover, which has no Check & repair button of its own).
     expect(
       screen.getByText('Use Check & repair (Settings → Workspace) to enable'),
     ).toBeInTheDocument();
@@ -352,11 +328,9 @@ describe('UnsyncedMutationList', () => {
     );
     await screen.findByText('Base scenario');
     await user.click(screen.getByRole('button', { name: /^Discard —/ }));
-    // Warn-before-discard names the item (resolved label) + the REASON_LABEL phrase.
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('Scenario Base scenario');
-    expect(dialog).toHaveTextContent(REASON_LABEL.CONFLICT);
-    // The discard has NOT run until the user confirms.
+    expect(dialog).toHaveTextContent('changed on another device');
     expect(resolveConflict).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Discard my change' }));
     await waitFor(() => expect(resolveConflict).toHaveBeenCalledWith(conflict, 'discard'));
@@ -364,8 +338,6 @@ describe('UnsyncedMutationList', () => {
 
   it('surfaces a recovery hint when a discard leaves the conflict unresolved (the wedge)', async () => {
     const user = userEvent.setup();
-    // resolveConflict resolves void without removing the row (wedge / did not
-    // converge), so the conflict persists and the row surfaces the hint.
     const resolveConflict = vi.fn().mockResolvedValue(undefined);
     const conflict = mutation({ reason: 'CONFLICT', currentVersion: 14 });
     render(
@@ -463,10 +435,8 @@ describe('UnsyncedEditsWarningList', () => {
         ]}
       />,
     );
-    // Two rows, both resolving to the mocked name.
     await waitFor(() => expect(screen.getAllByText('Base scenario')).toHaveLength(2));
-    // A conflict names its reason; a plain pending edit reads "not yet synced".
-    expect(screen.getByText(new RegExp(REASON_LABEL.CONFLICT))).toBeInTheDocument();
+    expect(screen.getByText(/changed on another device/)).toBeInTheDocument();
     expect(screen.getByText(/not yet synced/)).toBeInTheDocument();
   });
 
@@ -476,8 +446,7 @@ describe('UnsyncedEditsWarningList', () => {
     );
     const { container } = render(<UnsyncedEditsWarningList mutations={many} />);
     await waitFor(() => expect(screen.getAllByText('Base scenario')).toHaveLength(12));
-    // The height-capped scroll region is a named landmark and keyboard-focusable
-    // (WCAG 2.1.1 keyboard + 4.1.2 name/role), with the native focus-visible ring.
+    // The height-capped scroll region is a named, keyboard-focusable landmark (WCAG 2.1.1, 4.1.2).
     const region = screen.getByRole('region', {
       name: 'Unsynced edits that will be discarded',
     });

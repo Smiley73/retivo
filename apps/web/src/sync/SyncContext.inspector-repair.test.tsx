@@ -1,80 +1,26 @@
-/**
- * SyncProvider sync-inspector mutation lists, rejection summary and the auto-repair reject loop.
- *
- * Split out of the former single SyncContext.test.tsx; shared setup lives in
- * `sync-context.test-harness.tsx`.
- */
+// SyncProvider sync-inspector mutation lists, rejection summary and the auto-repair reject loop.
 import 'fake-indexeddb/auto';
 import { screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { getAggregate, listFailedConflicts, putAggregate, listPendingMutations } from '../db/store';
+import {
+  getAggregate,
+  listFailedConflicts,
+  putAggregate,
+  listPendingMutations,
+  updateMutationStatus,
+} from '../db/store';
 import { type PendingMutation } from '../db/types';
 import { redactArgs } from '../lib/diagnostics/redact';
 import { type PushedMutationRejected, type PushResponseBody } from './types';
 import { type SyncTransport } from './sync-client';
 import { clear as clearDiagnostics, getEntries } from '../lib/diagnostics/logger';
-import { useSync, sameMutationList } from './SyncContext';
+import { useSync } from './SyncContext';
 import { fake, renderProvider, seedMutation, renderSettled, useSyncTestHooks } from './sync-context.test-harness';
 
 vi.mock('./mock-sync', async () => (await import('./sync-context.test-fake')).mockSyncModule);
 
 
-// The content-equality gate that keeps `refreshCounts` from churning the
-// exposed mutation lists (and every `useSync()` consumer / label lookup) on an
-// unchanged poll. Compares only the fields the inspector renders.
-describe('sameMutationList (content-equality gate)', () => {
-  function row(over: Partial<PendingMutation> = {}): PendingMutation {
-    return {
-      id: over.id ?? 'm-1',
-      aggregateId: over.aggregateId ?? 'agg-1',
-      aggregateType: over.aggregateType ?? 'account',
-      operation: over.operation ?? 'update',
-      expectedVersion: over.expectedVersion ?? 4,
-      schemaVersion: over.schemaVersion ?? 1,
-      payload: over.payload ?? { name: 'A' },
-      timestamp: over.timestamp ?? 1,
-      deviceId: over.deviceId ?? 'dev-1',
-      status: over.status ?? 'failed-conflict',
-      reason: over.reason,
-    };
-  }
-
-  it('returns true for the same array reference (short-circuit)', () => {
-    const a = [row()];
-    expect(sameMutationList(a, a)).toBe(true);
-  });
-
-  it('returns false when the lengths differ', () => {
-    expect(sameMutationList([row()], [row(), row({ id: 'm-2' })])).toBe(false);
-  });
-
-  const differingFieldCases: ReadonlyArray<[string, Partial<PendingMutation>]> = [
-    ['id', { id: 'm-2' }],
-    ['status', { status: 'pending' }],
-    ['expectedVersion', { expectedVersion: 99 }],
-    ['reason', { reason: 'NOT_FOUND' }],
-  ];
-  it.each(differingFieldCases)(
-    'returns false when %s differs on an equal-length list',
-    (_field, over) => {
-      expect(sameMutationList([row()], [row(over)])).toBe(false);
-    },
-  );
-
-  it('returns true for equal rendered content in a distinct array reference', () => {
-    // Different array + different UNRENDERED fields (payload / timestamp /
-    // deviceId), identical rendered fields → equal, so the gate keeps the prior
-    // ref (a no-op setState — no consumer churn).
-    const a = [row({ payload: { name: 'A' }, timestamp: 1, deviceId: 'dev-1' })];
-    const b = [row({ payload: { name: 'B' }, timestamp: 2, deviceId: 'dev-2' })];
-    expect(a).not.toBe(b);
-    expect(sameMutationList(a, b)).toBe(true);
-  });
-});
-
-
-// The mutation lists exposed on the context value for the read-only inspector,
-// plus the redaction-surviving `idFragment` on the rejection summary.
+// The mutation lists on the context value for the read-only inspector, plus the redaction-surviving `idFragment` on the rejection summary.
 describe('SyncProvider — inspector mutation lists + rejection summary', () => {
   useSyncTestHooks('hh-1');
 
@@ -115,13 +61,11 @@ describe('SyncProvider — inspector mutation lists + rejection summary', () => 
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('stale'));
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
 
-    // The failed row is exposed on the context contract the inspector renders.
     const first = capturedConflicts;
     expect(first.map((c) => c.id)).toContain(m.id);
     expect(first.find((c) => c.id === m.id)?.reason).toBe('CONFLICT');
 
-    // A subsequent no-change refresh (retryNow flushes → refreshCounts sees the
-    // same conflict content) must NOT churn the array reference (content-equality gate).
+    // A no-change refresh must not churn the array reference (content-equality gate).
     fake.pullImpl = async () => ({ changes: [], newCursor: 'seed-cursor', hasMore: false });
     await act(async () => {
       fireEvent.click(screen.getByText('retryNow'));
@@ -131,9 +75,36 @@ describe('SyncProvider — inspector mutation lists + rejection summary', () => 
     expect(capturedConflicts).toBe(first);
   });
 
+  it('publishes a new conflict list when a rendered field of the same row changes', async () => {
+    const m = await seedMutation({ operation: 'update', expectedVersion: 3 });
+    await renderSettled(renderInspectorProvider);
+    fake.pushImpl = async () => ({
+      applied: [],
+      rejected: [
+        {
+          status: 'rejected' as const,
+          mutationId: m.id,
+          aggregateId: m.aggregateId,
+          reason: 'CONFLICT' as const,
+          currentVersion: 7,
+          currentUpdatedAt: new Date().toISOString(),
+          currentDeletedAt: null,
+        },
+      ],
+      syncCursor: '0',
+    });
+    fireEvent.click(screen.getByText('notifyPending'));
+    await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
+    const first = capturedConflicts;
+
+    await updateMutationStatus(m.id, 'failed-conflict', 'NOT_FOUND');
+    fireEvent.click(screen.getByText('retryNow'));
+    await waitFor(() => expect(capturedConflicts).not.toBe(first));
+    expect(capturedConflicts.find((c) => c.id === m.id)?.reason).toBe('NOT_FOUND');
+  });
+
   it('degrades the rejection summary for a short / non-hex aggregateId — no id fragment, never throws', async () => {
-    // A non-hex aggregateId yields an empty hex prefix, so idFragment returns
-    // '' and the summary carries the type/op/versions but NO correlator.
+    // A non-hex aggregateId yields an empty fragment: the summary carries type/op/versions but no correlator.
     const m = await seedMutation({ operation: 'update', expectedVersion: 3, aggregateId: 'zz' });
     await renderSettled(renderInspectorProvider);
     clearDiagnostics();
@@ -161,16 +132,13 @@ describe('SyncProvider — inspector mutation lists + rejection summary', () => 
     expect(why).toBeDefined();
     expect(why?.detail).toContain('CONFLICT');
     expect(why?.detail).toContain('server v7');
-    // No fragment: the op is immediately followed by the versions clause.
     expect(why?.detail).toMatch(/account\/update \(local v3/);
     clearDiagnostics();
   });
 
   it('keeps the id fragment redaction-surviving for a short all-digit hex prefix (hardening)', async () => {
-    // A short aggregateId whose hex prefix is a 7-digit run ('1234567') would,
-    // if returned raw, match the diagnostics redactor's DIGIT_RUN_RE (7+
-    // digits) and be masked to [redacted] — defeating the correlator.
-    // idFragment must dash-split it ('1234-567') so it clears the redactor.
+    // A 7-digit hex prefix ('1234567') returned raw would match the redactor's DIGIT_RUN_RE and be masked, defeating the
+    // correlator; idFragment dash-splits it ('1234-567').
     const m = await seedMutation({
       operation: 'update',
       expectedVersion: 3,
@@ -200,13 +168,9 @@ describe('SyncProvider — inspector mutation lists + rejection summary', () => 
       .filter((e) => e.source === 'sync')
       .find((e) => e.message.includes('push rejected'));
     expect(why).toBeDefined();
-    // (i) The fragment is present + non-empty, and (ii) survives redaction —
-    // `why.detail` IS the already-redacted output, so its presence proves the
-    // fragment cleared the redactor (the raw 7-digit prefix would be masked).
+    // `why.detail` is already redacted output, so the fragment's presence proves it cleared the redactor.
     expect(why?.detail).toContain('1234-567');
     expect(why?.detail).not.toContain('[redacted]');
-    // Direct redactor assertions: the dash-split fragment survives; the raw
-    // 7-digit prefix it derives from would have been masked to [redacted].
     expect(redactArgs(['1234-567'])).toContain('1234-567');
     expect(redactArgs(['1234-567'])).not.toContain('[redacted]');
     expect(redactArgs(['1234567'])).toContain('[redacted]');
@@ -214,10 +178,7 @@ describe('SyncProvider — inspector mutation lists + rejection summary', () => 
   });
 
   it('degrades the rejection summary when the rejected mutationId is absent from the pushed chunk (local undefined) — no fragment, never throws', async () => {
-    // The seeded mutation is applied (queue drains cleanly); the server also
-    // rejects an id that was never in the chunk, so `local` is undefined and
-    // idFragment(undefined) → ''. The summary must fall back to '?' and not
-    // throw.
+    // The server also rejects an id never in the chunk, so `local` is undefined and idFragment(undefined) is ''; the summary must fall back to '?' and not throw.
     await seedMutation({ operation: 'update', expectedVersion: 3 });
     await renderSettled(renderInspectorProvider);
     clearDiagnostics();
@@ -243,13 +204,8 @@ describe('SyncProvider — inspector mutation lists + rejection summary', () => 
       syncCursor: '0',
     });
     fireEvent.click(screen.getByText('notifyPending'));
-    // Wait for the diagnostics entry ITSELF, not the shared mount-settled
-    // 'synced' badge: this test's queue drains cleanly (the real mutation
-    // applies), so the badge returns to 'synced' — the very state already
-    // present from mount, so a `synced` wait resolves immediately and races the
-    // reject loop's async repair work (the extra listMutationsByAggregate +
-    // parkFailedConflict IDB awaits before `recordSyncWarn` lands the line).
-    // The 'push rejected' entry is the real completion barrier for this assertion.
+    // Wait for the diagnostics entry, not the 'synced' badge: the queue drains cleanly, so 'synced' is already true from mount
+    // and would race the repair loop's async IDB work before `recordSyncWarn` lands the line.
     const why = await waitFor(() => {
       const e = getEntries()
         .filter((entry) => entry.source === 'sync')
@@ -257,11 +213,9 @@ describe('SyncProvider — inspector mutation lists + rejection summary', () => 
       expect(e).toBeDefined();
       return e;
     });
-    // The real mutation applied, so the queue drains and the badge lands synced.
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('synced'));
     expect(await listPendingMutations()).toHaveLength(0);
     expect(why?.detail).toContain('CONFLICT');
-    // Local undefined → '?' fallbacks for type/op/version, and no id fragment.
     expect(why?.detail).toContain('?/?');
     expect(why?.detail).toContain('local v?');
     expect(why?.detail).toContain('server v7');
@@ -356,13 +310,8 @@ describe('SyncProvider — auto-repair reject loop', () => {
   });
 
   it('drops the WHOLE stack for a create-over-tombstone whose local edits end in a delete', async () => {
-    // A created-then-updated-then-deleted local draft: the server already
-    // tombstoned this aggregate, so the create is rejected CONFLICT over a
-    // tombstone (currentDeletedAt set). The final local intent is "deleted" and
-    // the server agrees, so EVERY queued row must clear in one pass. A single-row
-    // drop would strand the sibling `update`, which the next flush would push
-    // stale against the tombstoned version and escalate to failed-conflict —
-    // breaking the silent-auto-resolve guarantee for a created-then-deleted draft.
+    // A created-then-updated-then-deleted draft the server already tombstoned must clear every queued row in one pass; a
+    // single-row drop would strand the `update`, which the next flush would escalate to failed-conflict.
     const create = await seedMutation({
       id: 'c-1',
       operation: 'create',
@@ -409,10 +358,7 @@ describe('SyncProvider — auto-repair reject loop', () => {
     await waitFor(async () => {
       expect(await listPendingMutations()).toHaveLength(0);
     });
-    // All THREE rows are gone — nothing stranded, nothing escalated.
     expect(await listFailedConflicts()).toHaveLength(0);
-    // Only the create was sent in the first batch, and nothing resurrected the
-    // aggregate: no push after the create carried a live `update`/rebase.
     expect(pushed.flat().find((p) => p.id !== create.id)).toBeUndefined();
     expect(pushed.flat().some((p) => p.operation === 'update')).toBe(false);
   });
@@ -430,8 +376,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
     });
     const m = await seedMutation({ operation: 'update', expectedVersion: 12, aggregateId: 'agg-1' });
     await renderSettled(renderRepairProvider);
-    // Reject the inflated push (server at v10 < expected v12); apply anything
-    // re-based to v10.
     fake.pushImpl = async (args) => {
       pushed.push(args.mutations);
       const head = args.mutations[0];
@@ -449,7 +393,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
       expect(await listPendingMutations()).toHaveLength(0);
     });
     expect(await listFailedConflicts()).toHaveLength(0);
-    // The re-based push carried a FRESH id (≠ the rejected one) at v10.
     const rebased = pushed.flat().find((p) => p.expectedVersion === 10);
     expect(rebased).toBeDefined();
     expect(rebased?.id).not.toBe(m.id);
@@ -481,7 +424,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
       currentVersion: 13,
       currentUpdatedAt: '2026-07-02T09:09:09.000Z',
     });
-    // A later flush does not push the failed-conflict, and the facts survive.
     fireEvent.click(screen.getByText('retryNow'));
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('stale'));
     const [still] = await listFailedConflicts();
@@ -494,7 +436,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
     await renderSettled(renderRepairProvider);
     fake.pushImpl = async (args) => {
       pushed.push(args.mutations);
-      // Reject whatever earliest sibling is sent (server ahead).
       const head = args.mutations[0];
       return {
         applied: [],
@@ -504,10 +445,7 @@ describe('SyncProvider — auto-repair reject loop', () => {
     };
     fireEvent.click(screen.getByText('notifyPending'));
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('stale'));
-    // The first batch carried at most one mutation for the aggregate.
     expect(pushed[0]).toHaveLength(1);
-    // Both siblings collapsed to a single parked representative — the later
-    // sibling never applied (no silent overwrite).
     expect(await listFailedConflicts()).toHaveLength(1);
     expect(await listPendingMutations()).toHaveLength(0);
   });
@@ -516,7 +454,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
     await seedMutation({ id: 'c-1', operation: 'create', expectedVersion: 0, aggregateId: 'agg-1', timestamp: 1000 });
     await seedMutation({ id: 'u-1', operation: 'update', expectedVersion: 1, aggregateId: 'agg-1', timestamp: 1001 });
     await renderSettled(renderRepairProvider);
-    // Default pushImpl applies everything (server not ahead).
     fake.pushImpl = async (args) => {
       pushed.push(args.mutations);
       return applyAll(args);
@@ -525,8 +462,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
     await waitFor(async () => {
       expect(await listPendingMutations()).toHaveLength(0);
     });
-    // Each batch carried at most one mutation for the aggregate, and the
-    // create was pushed before its update (order preserved across rounds).
     expect(pushed[0]).toHaveLength(1);
     expect(pushed[0][0].id).toBe('c-1');
     expect(pushed.flat().map((m) => m.id)).toEqual(['c-1', 'u-1']);
@@ -539,7 +474,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
       pushed.push(args.mutations);
       const head = args.mutations[0];
       if (head.id === m.id) {
-        // create over a LIVE row → escalate.
         return {
           applied: [],
           rejected: [rejectWith({ mutationId: m.id, aggregateId: 'agg-live', currentVersion: 2, currentDeletedAt: null })],
@@ -552,7 +486,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
     fireEvent.click(screen.getByText('keep'));
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('synced'));
-    // The kept push converted the create → update @ currentVersion (2).
     const kept = pushed.flat().find((p) => p.aggregateId === 'agg-live' && p.id !== m.id);
     expect(kept).toMatchObject({ operation: 'update', expectedVersion: 2 });
     expect(await listPendingMutations()).toHaveLength(0);
@@ -565,7 +498,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
       pushed.push(args.mutations);
       const head = args.mutations[0];
       if (head.id === m.id) {
-        // Server counter ran ahead to v13 (the wedge) → escalate.
         return {
           applied: [],
           rejected: [rejectWith({ mutationId: m.id, aggregateId: 'agg-wedge', currentVersion: 13 })],
@@ -580,18 +512,13 @@ describe('SyncProvider — auto-repair reject loop', () => {
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('synced'));
     const kept = pushed.flat().find((p) => p.aggregateId === 'agg-wedge' && p.id !== m.id);
     expect(kept).toMatchObject({ operation: 'update', expectedVersion: 13 });
-    // Content advanced one version past the wedge counter (13 → 14).
     expect((await getAggregate('account', 'agg-wedge'))?.version).toBe(14);
     expect(await listFailedConflicts()).toHaveLength(0);
   });
 
   it('keep re-queues the NEWEST local intent when a later edit landed while the conflict sat parked (never drops it)', async () => {
-    // A conflict parks (payload A). The user then makes a LATER local edit to the
-    // SAME aggregate (payload B, newer timestamp) while the conflict stays parked.
-    // "Keep mine" must carry the NEWEST intent (B) forward: the collapse removes
-    // EVERY queue row for the aggregate (A + the newer pending sibling B), so
-    // re-queuing A's stale payload would silently delete B — violating "never
-    // silently lose an un-synced edit". latestEdit(stack) picks B.
+    // "Keep mine" must carry the newest local intent: the collapse removes every queue row for the aggregate, so re-queuing
+    // the parked payload A would silently delete a later edit B.
     const a = await seedMutation({
       id: 'keep-latest-a',
       operation: 'update',
@@ -601,7 +528,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
       timestamp: 1000,
     });
     await renderSettled(renderRepairProvider);
-    // Drive A to a parked failed-conflict (server ran ahead to v13 → escalate).
     fake.pushImpl = async (args) => {
       pushed.push(args.mutations);
       const head = args.mutations[0];
@@ -616,8 +542,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
     };
     fireEvent.click(screen.getByText('notifyPending'));
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
-    // A LATER local edit lands on the same aggregate while the conflict is parked
-    // (a newer `pending` sibling, strictly higher timestamp) — the newest intent.
     await seedMutation({
       id: 'keep-latest-b',
       operation: 'update',
@@ -628,13 +552,11 @@ describe('SyncProvider — auto-repair reject loop', () => {
     });
     fireEvent.click(screen.getByText('keep'));
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('synced'));
-    // The kept push carries the NEWEST intent (payload B), not the stale parked A.
     const kept = pushed
       .flat()
       .find((p) => p.aggregateId === 'agg-keep-latest' && p.id !== a.id && p.id !== 'keep-latest-b');
     expect(kept?.payload).toEqual({ name: 'B-newer' });
     expect(kept?.payload).not.toEqual({ name: 'A-older' });
-    // Re-based forward onto the server's true counter; queue drained, none parked.
     expect(kept).toMatchObject({ operation: 'update', expectedVersion: 13 });
     expect(await listPendingMutations()).toHaveLength(0);
     expect(await listFailedConflicts()).toHaveLength(0);
@@ -653,7 +575,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
     };
     fireEvent.click(screen.getByText('notifyPending'));
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
-    // The discard's pull delivers the server copy at v13 (converged).
     fake.pullImpl = async () => ({
       changes: [
         {
@@ -677,15 +598,8 @@ describe('SyncProvider — auto-repair reject loop', () => {
   });
 
   it('discard adopts a remote delete (the pull delivers a tombstone) and clears the parked conflict', async () => {
-    // The server row was DELETED on another device, so the update is rejected
-    // CONFLICT carrying a tombstone (currentDeletedAt set) — NOT NOT_FOUND — so
-    // the dedicated update+NOT_FOUND discard branch does not fire and control
-    // reaches the generic discard convergence check. The discard's pull adopts
-    // the server deletion (the local row becomes a tombstone). The convergence
-    // check must read the tombstone (getAggregateIncludingDeleted), not
-    // getAggregate — which filters tombstones and would read the adopted
-    // deletion as absent, leaving the conflict parked forever behind a false
-    // "try again".
+    // A CONFLICT carrying a tombstone reaches the generic discard convergence check, which must read the tombstone
+    // (getAggregateIncludingDeleted); getAggregate filters tombstones and would leave the conflict parked behind a false "try again".
     const m = await seedMutation({ operation: 'update', expectedVersion: 10, aggregateId: 'agg-remote-del' });
     await renderSettled(renderRepairProvider);
     fake.pushImpl = async (args) => {
@@ -706,8 +620,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
     };
     fireEvent.click(screen.getByText('notifyPending'));
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
-    // The discard's pull delivers the server DELETE: a tombstone at v13 whose
-    // updatedAt matches the rejection's currentUpdatedAt (converged).
     fake.pullImpl = async () => ({
       changes: [
         {
@@ -725,12 +637,8 @@ describe('SyncProvider — auto-repair reject loop', () => {
       hasMore: false,
     });
     fireEvent.click(screen.getByText('discard'));
-    // The badge's conflict indicator clears (parked conflict resolved). With the
-    // pre-fix getAggregate read this never reaches 0 — the pulled tombstone reads
-    // as absent, convergence fails, and the row stays parked (false "try again").
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('0'));
     expect(await listFailedConflicts()).toHaveLength(0);
-    // The adopted server deletion left the local row a tombstone (filtered out).
     expect(await getAggregate('account', 'agg-remote-del')).toBeNull();
   });
 
@@ -747,37 +655,25 @@ describe('SyncProvider — auto-repair reject loop', () => {
     };
     fireEvent.click(screen.getByText('notifyPending'));
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
-    // The discard's pull delivers nothing (empty log) → cannot converge to v13.
     fake.pullImpl = async () => ({ changes: [], newCursor: 'seed-cursor', hasMore: false });
     fireEvent.click(screen.getByText('discard'));
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('stale'));
-    // Left parked (re-escalated) — the un-synced content was not silently dropped.
     expect(await listFailedConflicts()).toHaveLength(1);
   });
 
   it('discard re-escalates a wedge whose LOCAL version is already inflated past the server counter', async () => {
-    // Regression: optimistic version inflation can leave the LOCAL
-    // aggregate version already >= the server counter off the poisoned edit
-    // alone. A bare `version >= currentVersion` convergence check would then
-    // falsely clear the conflict even though the empty-log pull delivered
-    // NOTHING and the local content is still the user's stale draft. Convergence
-    // must additionally require the pull to have written the server's true row
-    // (updatedAt === currentUpdatedAt), so this wedge re-escalates.
+    // Optimistic version inflation can leave the local version >= the server counter, so convergence must also require the
+    // pull to have written the server's true row (updatedAt === currentUpdatedAt); this wedge must re-escalate.
     await putAggregate('account', {
       id: 'agg-inflated',
       householdId: 'hh-1',
       aggregateType: 'account',
       schemaVersion: 1,
-      // Local version inflated to 15, PAST the server's true counter (13).
       version: 15,
-      // The user's stale local-draft timestamp — NOT the server row's updatedAt.
       updatedAt: '2026-07-01T00:00:00.000Z',
       deviceId: 'dev-1',
       payload: { name: 'Stale draft' },
     });
-    // Queued at v10; the server counter is ahead (13) so the rejection escalates
-    // to a parked failed-conflict — while the aggregate row itself is inflated to
-    // v15, past the counter (the exact shape that fools a bare `>=` check).
     const m = await seedMutation({ operation: 'update', expectedVersion: 10, aggregateId: 'agg-inflated' });
     await renderSettled(renderRepairProvider);
     fake.pushImpl = async (args) => {
@@ -797,26 +693,17 @@ describe('SyncProvider — auto-repair reject loop', () => {
     };
     fireEvent.click(screen.getByText('notifyPending'));
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
-    // Empty log — the pull delivers nothing, so the local row is never
-    // overwritten to the server's true content.
     fake.pullImpl = async () => ({ changes: [], newCursor: 'seed-cursor', hasMore: false });
     fireEvent.click(screen.getByText('discard'));
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('stale'));
-    // Re-escalated, NOT silently cleared — the un-synced edit survives.
     expect(await listFailedConflicts()).toHaveLength(1);
-    // The inflated local draft is untouched (never adopted a phantom server copy).
     const still = await getAggregate('account', 'agg-inflated');
     expect(still?.updatedAt).toBe('2026-07-01T00:00:00.000Z');
   });
 
   it('keep on a NOT_FOUND-on-update re-queues as create @ 0 carrying the latest payload, and the recreate lands', async () => {
-    // The server row was DELETED on another device, so the update is rejected
-    // NOT_FOUND — decide() escalates it to a parked failed-conflict carrying
-    // reason NOT_FOUND. "Keep mine" then converts the update → create @ 0 (the
-    // server row is gone), carrying the latest local payload, and the recreate
-    // lands. create @ 0 is unique to this NOT_FOUND-keep branch (a create-over-
-    // live or plain keep re-bases to update @ currentVersion), so it proves the
-    // real branch fired.
+    // NOT_FOUND on update parks a failed-conflict; "Keep mine" converts the update to a create @ 0, which is unique to this
+    // branch and so proves it fired.
     const m = await seedMutation({
       operation: 'update',
       expectedVersion: 10,
@@ -838,27 +725,20 @@ describe('SyncProvider — auto-repair reject loop', () => {
     };
     fireEvent.click(screen.getByText('notifyPending'));
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
-    // The parked conflict genuinely carries the NOT_FOUND-on-update shape.
     const [parked] = await listFailedConflicts();
     expect(parked).toMatchObject({ operation: 'update', reason: 'NOT_FOUND' });
     fireEvent.click(screen.getByText('keep'));
     await waitFor(() => expect(screen.getByTestId('state')).toHaveTextContent('synced'));
-    // The kept push recreated the aggregate: create @ 0 with the latest payload.
     const kept = pushed.flat().find((p) => p.aggregateId === 'agg-gone-keep' && p.id !== m.id);
     expect(kept).toMatchObject({ operation: 'create', expectedVersion: 0 });
     expect(kept?.payload).toEqual({ name: 'Recreate me' });
-    // It landed — nothing left pending or parked.
     expect(await listPendingMutations()).toHaveLength(0);
     expect(await listFailedConflicts()).toHaveLength(0);
   });
 
   it('discard on a NOT_FOUND-on-update drops the mutation and deletes the local row', async () => {
-    // A live local aggregate holds the user's un-synced draft; the server row was
-    // deleted on another device → NOT_FOUND on the update parks a failed-conflict.
-    // "Discard" accepts the server deletion: it removes the mutation AND hard-
-    // deletes the local row (deleteAggregateLocally) — NOT the generic pull-adopt
-    // discard path (which, on this empty log, would re-escalate and leave the row
-    // intact), so the row-gone + conflict-cleared outcome proves the real branch.
+    // "Discard" on a NOT_FOUND-on-update conflict accepts the server deletion by removing the mutation and hard-deleting the
+    // local row; the generic pull-adopt path would re-escalate on this empty log and leave the row.
     await putAggregate('account', {
       id: 'agg-gone-discard',
       householdId: 'hh-1',
@@ -881,13 +761,10 @@ describe('SyncProvider — auto-repair reject loop', () => {
     };
     fireEvent.click(screen.getByText('notifyPending'));
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('1'));
-    // The parked conflict carries the NOT_FOUND-on-update shape, and the local row
-    // is still present before the discard.
     const [parked] = await listFailedConflicts();
     expect(parked).toMatchObject({ operation: 'update', reason: 'NOT_FOUND' });
     expect(await getAggregate('account', 'agg-gone-discard')).not.toBeNull();
     fireEvent.click(screen.getByText('discard'));
-    // Conflict clears, the mutation is removed, and the local row is deleted.
     await waitFor(() => expect(screen.getByTestId('conflicts')).toHaveTextContent('0'));
     expect(await listFailedConflicts()).toHaveLength(0);
     expect(await listPendingMutations()).toHaveLength(0);
@@ -917,7 +794,6 @@ describe('SyncProvider — auto-repair reject loop', () => {
       .filter((e) => e.source === 'sync')
       .find((e) => e.message.includes('push rejected'));
     expect(rejectionLine).toBeUndefined();
-    // The accepted push left the local aggregate untouched.
     expect((await getAggregate('account', 'agg-ok'))?.version).toBe(1);
     clearDiagnostics();
   });
@@ -961,7 +837,7 @@ describe('SyncProvider — auto-repair reject loop', () => {
       .filter((e) => e.source === 'sync')
       .find((e) => e.message.includes('push rejected'));
     expect(line).toBeDefined();
-    // Enums + version ints + id fragment only — never the resolved name / PII.
+    // Enums, version ints and the id fragment only, never the resolved name or other PII.
     expect(line?.detail).toContain('rebase-inflation');
     expect(line?.detail).toContain('d3f0-8686');
     expect(line?.detail).not.toContain('SecretHouseholdName');

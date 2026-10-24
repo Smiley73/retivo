@@ -1,10 +1,4 @@
-/**
- * Unit tests for the pure auto-repair classifier. One per routing case (both
- * `update` and `delete` for the `<`/`>` branches), the poison-train
- * collapse (incl. the trailing-delete case), and the
- * bounded-via-version-monotonicity guarantee (a re-based mutation that
- * conflicts again escalates).
- */
+// Unit tests for the pure auto-repair classifier: every routing case, the poison-train collapse and the re-base-conflicts-again escalation.
 import { describe, expect, it } from 'vitest';
 
 import type { PendingMutation } from '../db/types';
@@ -42,19 +36,15 @@ describe('auto-repair decide', () => {
   it('drops a delete rejected NOT_FOUND (intent already holds)', () => {
     const m = mut({ operation: 'delete' });
     const d = decide(rej({ reason: 'NOT_FOUND', currentVersion: 0 }), [m]);
-    // A simple delete-vs-deleted drop scopes to just the rejected row.
     expect(d).toEqual({ kind: 'drop', code: 'delete-not-found', removeMutationIds: ['mut-1'] });
   });
 
   it('drops a delete over an existing tombstone regardless of version', () => {
     const m = mut({ operation: 'delete', expectedVersion: 4 });
-    // currentVersion > expectedVersion but the row is already a tombstone, so
-    // the tombstone rule wins over the `>` version rule.
     const d = decide(
       rej({ reason: 'CONFLICT', currentVersion: 9, currentDeletedAt: '2026-07-01T00:00:00.000Z' }),
       [m],
     );
-    // A standalone delete over a tombstone scopes to just the rejected row.
     expect(d).toEqual({ kind: 'drop', code: 'delete-over-tombstone', removeMutationIds: ['mut-1'] });
   });
 
@@ -141,8 +131,6 @@ describe('auto-repair decide', () => {
 
 describe('auto-repair poison-train collapse', () => {
   it('collapses N stacked inflation edits to one re-based mutation at the latest payload', () => {
-    // Head queued at v10, then two more optimistic edits. The batch rejects the
-    // head (the push sends the earliest per aggregate); the stack carries all three.
     const stack: PendingMutation[] = [
       mut({ id: 'a', operation: 'update', expectedVersion: 10, payload: { name: 'v1' }, timestamp: 1000 }),
       mut({ id: 'b', operation: 'update', expectedVersion: 11, payload: { name: 'v2' }, timestamp: 1001 }),
@@ -168,11 +156,7 @@ describe('auto-repair poison-train collapse', () => {
   });
 
   it('drops (never resurrects) a create-over-tombstone whose stack ends in a delete', () => {
-    // The user created a local draft then deleted it before the create's
-    // rejection was processed. The create is rejected over the server tombstone
-    // (currentDeletedAt set). A trailing delete means the intent is now "stay
-    // deleted" — the decision must DROP, never re-queue an `update` that would
-    // silently resurrect the locally-deleted aggregate as a live server row.
+    // A trailing delete means the intent is "stay deleted": the decision must drop, never re-queue an `update` that resurrects the aggregate.
     const stack: PendingMutation[] = [
       mut({ id: 'a', operation: 'create', expectedVersion: 0, payload: { name: 'draft' }, timestamp: 1000 }),
       mut({ id: 'b', operation: 'delete', expectedVersion: 1, payload: { name: 'draft' }, timestamp: 1001 }),
@@ -181,21 +165,16 @@ describe('auto-repair poison-train collapse', () => {
       rej({ mutationId: 'a', reason: 'CONFLICT', currentVersion: 3, currentDeletedAt: '2026-07-01T00:00:00.000Z' }),
       stack,
     );
-    // The poison train clears in one pass: EVERY stack row is removed, not
-    // just the rejected create — a stranded sibling `update` would otherwise push
-    // stale against the tombstoned version and escalate to failed-conflict.
+    // A stranded sibling `update` would push stale against the tombstoned version and escalate, so every stack row is removed.
     expect(d).toEqual({
       kind: 'drop',
       code: 'delete-over-tombstone',
       removeMutationIds: ['a', 'b'],
     });
-    // Explicitly guard the regression: no rebase-to-update resurrection.
     expect(d.kind).not.toBe('rebase');
   });
 
   it('still rebases a create-over-tombstone to update when the latest edit is not a delete', () => {
-    // created → deleted → recreated: the latest edit is a create, so the intent
-    // is "exist with this payload" → update over the tombstone, not a drop.
     const stack: PendingMutation[] = [
       mut({ id: 'a', operation: 'create', expectedVersion: 0, payload: { name: 'v1' }, timestamp: 1000 }),
       mut({ id: 'b', operation: 'delete', expectedVersion: 1, payload: { name: 'v1' }, timestamp: 1001 }),
@@ -226,14 +205,9 @@ describe('auto-repair poison-train collapse', () => {
 
 describe('auto-repair bounded via version monotonicity', () => {
   it('a re-based mutation that conflicts AGAIN escalates rather than re-basing twice', () => {
-    // First conflict re-based to currentVersion=10 → mutation now at
-    // expectedVersion 10. If the server has since advanced to 11, the fresh
-    // rejection is currentVersion > expectedVersion → escalate, not re-base.
     const rebased = mut({ operation: 'update', expectedVersion: 10 });
     const d = decide(rej({ currentVersion: 11 }), [rebased]);
     expect(d.kind).toBe('escalate');
-    // And if the server is UNCHANGED at 10, it is the unreachable-equal case —
-    // still never a second re-base.
     const d2 = decide(rej({ currentVersion: 10 }), [mut({ operation: 'update', expectedVersion: 10 })]);
     expect(d2).toEqual({ kind: 'passthrough', code: 'unreachable-equal' });
   });

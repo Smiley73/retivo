@@ -1,17 +1,4 @@
-/**
- * Tests for useDerivedRewrap — the derived post-reset password-slot re-wrap.
- *
- * Assertions that differ from the retired one-shot-marker hook:
- *  - the sign-in plaintext survives a FAILED unlock attempt inside the window
- *    (this hook is never wired to an unlock attempt at all — only to a
- *    SUCCESS, via `runDerive` — so there is nothing here to invert; the
- *    "clears the retained password on unlock failure" test has no analogue);
- *  - a rewrap failure is no longer swallowed-and-forgotten: it stays owed
- *    (nothing written) and is recorded as a diagnostic, but the derive itself
- *    never throws;
- *  - "does NOT rewrap when no password was retained" inverts to: the person
- *    is prompted.
- */
+// Tests for useDerivedRewrap, the derived post-reset password-slot re-wrap: a failure stays owed and is recorded as a diagnostic without the derive throwing, and a missing retained password prompts.
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiRequestError } from '../api/client';
@@ -22,9 +9,7 @@ vi.mock('./key-envelope-client', () => ({
 }));
 
 import { useDerivedRewrap } from './useDerivedRewrap';
-// The real class — the hook classifies
-// a `rotatePasswordSlot` failure by `instanceof` against this
-// export, so an equivalent-shaped fake would not exercise the same check.
+// The real class: the hook classifies a `rotatePasswordSlot` failure by `instanceof`, which an equivalent-shaped fake would not exercise.
 import { RewrapCommittedPinDegradedError } from './useZeroKnowledgeKey';
 
 const OWED_SLOT = { slotType: 'password', slotId: 'password', credentialRevision: 'rev-old' };
@@ -103,9 +88,7 @@ describe('useDerivedRewrap', () => {
 
     act(() => result.current.retainPassword('NewPassw0rd!'));
     act(() => result.current.runDerive());
-    // The derive's own fetched envelope response is threaded straight into
-    // the silent write rather than spending a second
-    // rate-limited read on the same unlock.
+    // The derive's fetched envelope response is threaded into the silent write instead of spending a second rate-limited read.
     await waitFor(() =>
       expect(deps.rotatePasswordSlot).toHaveBeenCalledWith('NewPassw0rd!', owedEnvelopes),
     );
@@ -172,8 +155,6 @@ describe('useDerivedRewrap', () => {
       await Promise.resolve();
     });
 
-    // Refused for a non-credential reason: no verify-password retry attempted,
-    // and never surfaced as the prompt (which is the wrong-password UI).
     expect(deps.verifyPassword).not.toHaveBeenCalled();
     expect(result.current.prompt).toBeNull();
   });
@@ -195,8 +176,6 @@ describe('useDerivedRewrap', () => {
       await Promise.resolve();
     });
 
-    // The server-side write already committed — the workspace stays live
-    // and nothing reads as a refusal.
     expect(result.current.prompt).toBeNull();
   });
 
@@ -217,8 +196,6 @@ describe('useDerivedRewrap', () => {
       await Promise.resolve();
     });
 
-    // The silent path must not discard this outcome, which would leave the
-    // person to hit an unexplained unlock prompt later. It must surface here.
     expect(result.current.prompt).not.toBeNull();
     expect(result.current.prompt?.error).toMatch(/locked again/i);
   });
@@ -256,10 +233,7 @@ describe('useDerivedRewrap', () => {
       expect(deps.verifyPassword).toHaveBeenCalledWith('CorrectPassw0rd!', {
         purpose: 'password_slot_rewrap',
       });
-      // answerPrompt re-fetches + re-compares the
-      // owed-ness after password verification (a stale prompt must not
-      // blindly re-wrap a slot another device already settled), and threads
-      // that fresh response through — no longer `undefined`.
+      // answerPrompt re-fetches and re-compares owed-ness after verification, so a stale prompt does not re-wrap a slot another device already settled.
       expect(getKeyEnvelopes).toHaveBeenCalledTimes(2); // runDerive's own + answerPrompt's re-check
       expect(deps.rotatePasswordSlot).toHaveBeenCalledWith('CorrectPassw0rd!', owedEnvelopes);
       expect(result.current.prompt).toBeNull();
@@ -279,9 +253,6 @@ describe('useDerivedRewrap', () => {
         await result.current.answerPrompt('CorrectPassw0rd!');
       });
 
-      // The re-check (second getKeyEnvelopes call) found the revisions now
-      // match — another device already completed the re-wrap. The prompt
-      // closes WITHOUT ever calling rotatePasswordSlot.
       expect(getKeyEnvelopes).toHaveBeenCalledTimes(2);
       expect(deps.rotatePasswordSlot).not.toHaveBeenCalled();
       expect(result.current.prompt).toBeNull();
@@ -309,15 +280,11 @@ describe('useDerivedRewrap', () => {
           await result.current.answerPrompt('wrong');
         });
       }
-      // The bound ends the asking for THIS unlock — still owed — but the
-      // person is told why rather than watching the dialog silently vanish
-      // on the last guess.
       expect(result.current.prompt).not.toBeNull();
       expect(result.current.prompt?.attemptsRemaining).toBe(0);
       expect(result.current.prompt?.error).toMatch(/incorrect/i);
       expect(deps.rotatePasswordSlot).not.toHaveBeenCalled();
 
-      // Dismissing the terminal message is how this unlock's asking ends.
       act(() => result.current.dismissPrompt());
       expect(result.current.prompt).toBeNull();
     });
@@ -334,9 +301,6 @@ describe('useDerivedRewrap', () => {
         await result.current.answerPrompt('anything');
       });
 
-      // The backoff does not count against the attempt bound, and the person
-      // is told to wait rather than watching the dialog vanish with no
-      // explanation.
       expect(result.current.prompt).not.toBeNull();
       expect(result.current.prompt?.attemptsRemaining).toBe(0);
       expect(result.current.prompt?.error).toMatch(/too many attempts/i);
@@ -374,13 +338,8 @@ describe('useDerivedRewrap', () => {
         await result.current.answerPrompt('CorrectPassw0rd!');
       });
 
-      // One attempt only — the retry-with-verify loop is the SILENT path's
-      // job, not the prompt-answer path's ("one attempt per unlock").
       expect(deps.rotatePasswordSlot).toHaveBeenCalledTimes(1);
-      // The write failed after a CORRECT password — this must never read as
-      // success: the prompt stays up with a message
-      // distinguishing a transient refusal (expected to resolve on its own)
-      // from a permanent integrity one, rather than closing silently.
+      // A write that fails after a correct password must never read as success: the prompt stays up and distinguishes a transient refusal from a permanent integrity one.
       expect(result.current.prompt).not.toBeNull();
       expect(result.current.prompt?.error).toMatch(/couldn.t finish updating/i);
     });

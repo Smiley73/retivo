@@ -1,17 +1,5 @@
-/**
- * AppShell — first-login bootstrap-timing tests.
- *
- * Guards the regression where the first-run demo prompt only appeared after a
- * manual refresh: on first login the sync badge reaches `kind: 'synced'` while
- * `lastSyncedAt` transitions null→timestamp (the first real server round-trip)
- * WITHOUT a `kind` change. The effects must re-run on that transition, so the
- * empty-database demo prompt fires without a reload. The companion guard
- * is that neither effect runs while `lastSyncedAt` is still null —
- * firing early would re-create demo aggregates under fresh UUIDs (duplicates).
- *
- * The heavy shell children (sidebar, drawer, Monte Carlo provider, the lazy
- * route table) are stubbed so the test exercises only the bootstrap effects.
- */
+// AppShell first-login bootstrap timing: on first login the sync badge stays `synced` while `lastSyncedAt` goes null to timestamp, so
+// the demo-prompt effects must re-run on that transition and must not run while it is null (duplicate demo aggregates). Heavy children are stubbed.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
@@ -40,7 +28,7 @@ vi.mock('./monte-carlo/MonteCarloProvider', () => ({
 }));
 vi.mock('./monte-carlo/MonteCarloProgressChip', () => ({ MonteCarloProgressChip: () => null }));
 vi.mock('./components/VersionBanner', () => ({ VersionBanner: () => null }));
-// The assistant session the shell's indicator and status region read; `null` is a build without the provider.
+// The assistant session the shell reads; `null` is a build without the provider.
 const assistantMock = vi.hoisted(() => ({ value: null as unknown }));
 vi.mock('./assistant/AssistantContext', () => ({
   useOptionalAssistant: () => assistantMock.value,
@@ -88,7 +76,6 @@ const shouldShowReadyBannerMock = shouldShowReadyBanner as unknown as ReturnType
 const fetchAccountRecordMock = vi.fn();
 const SEEDED_FLAG_KEY = 'retivo:primary-member-seeded:hh-1';
 const PENDING_BANNER_KEY = 'retivo:household-ready-banner-pending:hh-1';
-// An account without a profile (old account / API-direct signup).
 const EMAIL_ONLY_RECORD = { email: 'me@example.test' };
 const FULL_RECORD = {
   email: 'me@example.test',
@@ -97,7 +84,7 @@ const FULL_RECORD = {
   birthdate: '1985-12-10',
 };
 
-/** The `useAuth` value the shell reads; `me` is a fresh object on every call, like a token refresh. */
+// `me` is a fresh object on every call, like a token refresh.
 function authValue(overrides: Record<string, unknown> = {}) {
   return {
     logout: vi.fn(),
@@ -109,10 +96,7 @@ function authValue(overrides: Record<string, unknown> = {}) {
 }
 
 function setSync(state: SyncState, notifyPending = vi.fn()) {
-  // runDestructive fences the post-reload re-seed (scenario + expense
-  // categories) against the background poll; the real impl runs the callback
-  // inside the sync mutex. The mock just invokes it so the bootstrap effect
-  // proceeds.
+  // The real runDestructive runs the callback inside the sync mutex; the mock just invokes it so the bootstrap effect proceeds.
   syncMock.mockReturnValue({
     state,
     notifyPending,
@@ -143,7 +127,6 @@ describe('AppShell first-run demo prompt', () => {
     authMock.mockReturnValue(authValue());
     fetchAccountRecordMock.mockReset();
     fetchAccountRecordMock.mockResolvedValue(EMAIL_ONLY_RECORD);
-    // Empty local workspace — no household members, no scenarios.
     listAggregatesMock.mockResolvedValue([]);
   });
 
@@ -154,31 +137,21 @@ describe('AppShell first-run demo prompt', () => {
   });
 
   it('opens the demo prompt when lastSyncedAt flips null→timestamp with kind unchanged', async () => {
-    // First render: synced but the initial round-trip has not completed.
     setSync({ kind: 'synced', lastSyncedAt: null });
     const { rerender } = renderShell();
 
-    // Guard: nothing fires while lastSyncedAt is null, so the modal
-    // stays closed and we never read the local store.
     await waitFor(() => expect(listAggregatesMock).not.toHaveBeenCalled());
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
 
-    // The first real server round-trip lands: lastSyncedAt becomes non-null
-    // while kind stays 'synced'. The effect must re-run on this transition.
     setSync({ kind: 'synced', lastSyncedAt: '2026-06-04T00:00:00.000Z' });
     rerender(shellTree());
 
-    // Regression assertion: with the old `[…, syncState.kind]` deps this never
-    // fired (kind never changed); the modal now opens on the empty database.
     expect(await screen.findByTestId('first-run-modal')).toBeInTheDocument();
     expect(listAggregatesMock).toHaveBeenCalledWith('householdMember');
   });
 
   it('skips the demo prompt and clears the flag when suppressDemoModal is set', async () => {
-    // Post-reset state: zero members (the prompt's normal trigger) but the
-    // user deliberately emptied the workspace via "Delete workspace data".
-    // The reset handler set sessionStorage.suppressDemoModal before its
-    // reload; the first-run effect must consume it (clear + skip).
+    // After "Delete workspace data" the reset handler sets sessionStorage.suppressDemoModal before reloading; the first-run effect must consume it (clear and skip).
     sessionStorage.setItem('suppressDemoModal', '1');
     setSync({ kind: 'synced', lastSyncedAt: '2026-06-04T00:00:00.000Z' });
     renderShell();
@@ -186,14 +159,10 @@ describe('AppShell first-run demo prompt', () => {
     await waitFor(() =>
       expect(listAggregatesMock).toHaveBeenCalledWith('householdMember'),
     );
-    // Modal stays closed despite the empty workspace, and the one-shot flag
-    // is consumed so a later reload doesn't keep suppressing.
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
     await waitFor(() =>
       expect(sessionStorage.getItem('suppressDemoModal')).toBeNull(),
     );
-    // A consumed flag proves a deliberate wipe: the per-browser seeded flag is
-    // written so the wipe sticks, and the server is never asked.
     expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
     expect(fetchAccountRecordMock).not.toHaveBeenCalled();
   });
@@ -272,11 +241,9 @@ describe('AppShell first-login household seeding', () => {
     );
     expect(await screen.findByTestId('ready-banner')).toBeInTheDocument();
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
-    // Reload-banner key armed; seeded flag set.
     expect(localStorage.getItem(PENDING_BANNER_KEY)).toBe('1');
     expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
-    // Silent background check (no wait toast on a 429), and exactly one request
-    // even though StrictMode mounted the effect twice.
+    // A silent background check raises no wait toast on a 429, and issues exactly one request though StrictMode mounted the effect twice.
     expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1);
     expect(fetchAccountRecordMock).toHaveBeenCalledWith({ raiseWaitNotice: false });
     expect(queueLocalMutationMock).toHaveBeenCalledTimes(1);
@@ -324,8 +291,7 @@ describe('AppShell first-login household seeding', () => {
     const { rerender } = renderShell();
     await waitFor(() => expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1));
 
-    // A token refresh while the request is pending: a fresh `me` object re-runs
-    // the effect, which must join the request in flight, not start another.
+    // A token refresh while the request is pending re-runs the effect, which must join the request in flight, not start another.
     const readsBefore = memberReads();
     authMock.mockReturnValue(authValue());
     rerender(shellTree());
@@ -340,14 +306,12 @@ describe('AppShell first-login household seeding', () => {
         expect.any(Error),
       ),
     );
-    // Nothing visible, nothing written.
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
     expect(screen.queryByTestId('ready-banner')).toBeNull();
     expect(queueLocalMutationMock).not.toHaveBeenCalled();
     expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBeNull();
     expect(localStorage.getItem(PENDING_BANNER_KEY)).toBeNull();
 
-    // Not latched: the next natural re-run (another token refresh) retries once.
     fetchAccountRecordMock.mockResolvedValue(FULL_RECORD);
     authMock.mockReturnValue(authValue());
     rerender(shellTree());
@@ -367,7 +331,6 @@ describe('AppShell first-login household seeding', () => {
     renderShell();
     await waitFor(() => expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1));
 
-    // The other tab seeds the primary member and writes the shared flag.
     localStorage.setItem(SEEDED_FLAG_KEY, '1');
     listAggregatesMock.mockResolvedValue([{ id: 'm-1', aggregateType: 'householdMember' }]);
     const memberReads = () =>
@@ -375,7 +338,6 @@ describe('AppShell first-login household seeding', () => {
     const readsBefore = memberReads();
     resolveFetch(FULL_RECORD);
 
-    // The seed helper re-reads the store before creating anything.
     await waitFor(() => expect(memberReads()).toBeGreaterThan(readsBefore));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(queueLocalMutationMock).not.toHaveBeenCalled();
@@ -422,7 +384,6 @@ describe('AppShell first-login household seeding', () => {
     expect(await screen.findByTestId('ready-banner')).toBeInTheDocument();
     first.unmount();
 
-    // Members are still empty in IDB (the mutation is mocked), as after a wipe.
     renderShell();
     expect(await screen.findByTestId('first-run-modal')).toBeInTheDocument();
     expect(fetchAccountRecordMock).toHaveBeenCalledTimes(1);
@@ -437,12 +398,8 @@ describe('AppShell first-login household seeding', () => {
     expect(await screen.findByTestId('ready-banner')).toBeInTheDocument();
     expect(queueLocalMutationMock).not.toHaveBeenCalled();
     expect(fetchAccountRecordMock).not.toHaveBeenCalled();
-    // The reload path returns before the zero-members check, so the
-    // householdMember store is never read (the scenarios bootstrap effect
-    // still reads 'scenario' — unrelated).
     expect(listAggregatesMock).not.toHaveBeenCalledWith('householdMember');
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
-    // The pending key exists only after a seed, so reaching it proves one.
     expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1');
   });
 
@@ -454,9 +411,7 @@ describe('AppShell first-login household seeding', () => {
     renderShell();
 
     await waitFor(() => expect(listAggregatesMock).toHaveBeenCalledWith('householdMember'));
-    // The browser is marked as having seen the workspace populated…
     await waitFor(() => expect(localStorage.getItem(SEEDED_FLAG_KEY)).toBe('1'));
-    // …and no re-seeding for the existing-members path.
     expect(queueLocalMutationMock).not.toHaveBeenCalled();
     expect(fetchAccountRecordMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId('first-run-modal')).toBeNull();
@@ -465,12 +420,7 @@ describe('AppShell first-login household seeding', () => {
 });
 
 describe('retired legal addresses are unknown addresses', () => {
-  // The old acceptance page and the public Terms / Privacy pages are gone:
-  // signed in each is the shell's not-found screen, signed out each goes to
-  // /login like any unknown address — no redirect or special route. The shell
-  // also never asks the network layer about legal status. Asserted at the
-  // fetch boundary, so a leftover probe would fail this even if no component
-  // rendered it.
+  // The acceptance and public Terms/Privacy pages are gone: signed in each is the not-found screen, signed out each goes to /login, and the shell never asks the network layer about legal status (asserted at the fetch boundary).
   const RETIRED_PATHS = ['/disclaimer', '/terms', '/privacy'];
   let fetchSpy: ReturnType<typeof vi.fn>;
 
@@ -505,7 +455,6 @@ describe('retired legal addresses are unknown addresses', () => {
       me: { id: 'u-1', email: 'me@example.test', displayName: 'Me' },
       fetchAccountRecord: fetchAccountRecordMock,
     });
-    // A returning user with data: the first-run effects settle without a modal.
     listAggregatesMock.mockResolvedValue([{ id: 'm-1', aggregateType: 'householdMember' }]);
     setSync({ kind: 'synced', lastSyncedAt: '2026-06-04T00:00:00.000Z' });
 
@@ -516,8 +465,6 @@ describe('retired legal addresses are unknown addresses', () => {
     );
 
     expect(await screen.findByRole('heading', { name: '404: Not found' })).toBeInTheDocument();
-    // The shell ran its normal startup (scenario bootstrap) and still made no
-    // legal request.
     await waitFor(() => expect(ensureBaseScenarioMock).toHaveBeenCalledWith('hh-1'));
     expect(requestedUrls().filter((u) => u.includes('/auth/legal-'))).toEqual([]);
   });
@@ -540,11 +487,7 @@ describe('retired legal addresses are unknown addresses', () => {
   });
 });
 
-// The first-run check is a background request the person never made: a
-// throttled `GET /auth/me` must not raise the shared "Please wait" toast, show
-// the demo prompt or the banner. `fetchAccountRecord` is the real `apiRequest`
-// forwarding whatever options the shell passed, so a forgotten opt-out fails
-// here (the mocked-wrapper tests above only prove the shell passes it).
+// The first-run check is a background request: a throttled `GET /auth/me` must not raise the shared "Please wait" toast. `fetchAccountRecord` is the real `apiRequest`, so a forgotten opt-out fails here.
 describe('first-run account fetch throttled with a Retry-After', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -597,17 +540,7 @@ describe('first-run account fetch throttled with a Retry-After', () => {
   });
 });
 
-// Today's toast surface (VersionBanner, mounted inside AppShell) is unreachable from the
-// signed-out auth routes, since AppShell only renders behind RequireAuth. The
-// shared region (`AppToastRegion`) is mounted in `App`, above the routed
-// subtree, specifically so a throttled request on one of these routes still
-// shows the wait notice. Asserted at the ROUTE level (rendering the real
-// `<App>` tree and driving a real page's submit), not by rendering
-// `AppToastRegion` directly — mounting the region in the wrong place (e.g.
-// back inside AppShell) is exactly the regression this guards against.
-// `apiRequest` is the real, unmocked module (this file mocks `AuthContext`,
-// not `api/client`), so the assertion exercises the real header-read +
-// raise seam in `api/client.ts`, not a stand-in.
+// AppToastRegion is mounted in `App`, above the routed subtree, so a throttled request on a signed-out auth route still shows the wait notice; asserted at the route level with the real `apiRequest`, since mounting the region inside AppShell is the regression.
 describe('wait notice reaches a signed-out auth route', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -651,8 +584,7 @@ describe('wait notice reaches a signed-out auth route', () => {
     expect(notice.textContent).toContain('5');
     expect(notice.textContent).toContain('seconds before trying again.');
 
-    // Blocks nothing: the form's submit control is left enabled (not
-    // stuck disabled/"Sending…"), and focus never moved onto the toast.
+    // The form's submit control stays enabled and focus never moves onto the toast.
     const submit = screen.getByRole('button', { name: 'Send reset link' });
     expect(submit).toBeEnabled();
     expect(document.activeElement).not.toBe(notice);
@@ -667,7 +599,7 @@ describe('AppShell assistant indicator', () => {
     fetchAccountRecordMock.mockResolvedValue(EMAIL_ONLY_RECORD);
     listAggregatesMock.mockResolvedValue([]);
     setSync({ kind: 'synced', lastSyncedAt: null });
-    // The first-run prompt is not under test here; keep the household "seeded" so nothing else opens.
+    // Keep the household "seeded" so the first-run prompt stays out of this test.
     localStorage.setItem(SEEDED_FLAG_KEY, 'true');
   });
 

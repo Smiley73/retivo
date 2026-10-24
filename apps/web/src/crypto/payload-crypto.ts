@@ -66,8 +66,8 @@ function canonicalStringify(value: unknown): string {
   return `{${entries.join(',')}}`;
 }
 
-/** AES-GCM AAD bytes for a payload: stable identity fields only, canonicalised. */
-export function canonicalAad(meta: AadMetadata): Uint8Array<ArrayBuffer> {
+// AES-GCM AAD bytes for a payload: stable identity fields only, canonicalised.
+function canonicalAad(meta: AadMetadata): Uint8Array<ArrayBuffer> {
   return canonicalJsonBytes({
     aggregateId: meta.aggregateId,
     aggregateType: meta.aggregateType,

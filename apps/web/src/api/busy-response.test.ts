@@ -1,8 +1,5 @@
-/**
- * Tests for the shared "service is busy" predicate. Both branches true, each guard false in isolation,
- * a non-error value, and — the seam a per-screen test cannot cover — that
- * `client.ts`'s classifier actually produces a value this predicate accepts.
- */
+// The shared "service is busy" predicate: both branches, each guard alone, a non-error value, and that `client.ts`'s
+// classifier produces a value the predicate accepts.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiRequest, ApiRequestError } from './client';
 import { BUSY_MESSAGE, isBusyResponse } from './busy-response';

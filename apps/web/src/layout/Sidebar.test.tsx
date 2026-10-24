@@ -1,15 +1,4 @@
-/**
- * Sidebar — React Aria `Disclosure` navigation behaviour + a11y smoke.
- *
- * The sidebar's React Aria `Disclosure` swap is behavioral, not visual
- * parity, so it is asserted here. Asserts: collapsible sections render as
- * expand/collapse-able disclosure groups (chevron rotates via the
- * `data-[expanded]` state), the active route carries
- * `aria-current="page"`, route state is preserved across a section
- * toggle, and the shared-component axe rule. Interaction goes through
- * `@testing-library/user-event` — React Aria's disclosure
- * press/key model cannot be driven by `fireEvent`.
- */
+// React Aria `Disclosure` navigation: collapsible sections, `aria-current="page"` on the active route, state preserved across a toggle and an axe smoke. Uses user-event, which the disclosure's press model needs.
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
@@ -22,8 +11,7 @@ import { expectNoA11yViolations } from '../test/a11y';
 
 vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
 vi.mock('../sync/SyncContext', () => ({ useSync: vi.fn() }));
-// Beta features default to VISIBLE here so the existing nav assertions cover
-// the beta items too; the hidden state has its own tests below.
+// Beta features default to visible so the nav assertions cover the beta items; the hidden state has its own tests.
 let mockBetaVisible = true;
 vi.mock('../contexts/BetaFeaturesContext', () => ({
   useBetaFeatures: () => ({
@@ -101,8 +89,6 @@ describe('Sidebar', () => {
   });
 
   it('renders the open-source line in the mobile drawer too', () => {
-    // App.tsx mounts a separate Sidebar instance with `drawer` inside the mobile
-    // nav drawer; the line must render there as well, not just desktop.
     renderSidebar('/dashboard', { drawer: true });
     expect(
       screen.getByRole('link', { name: 'RETIVO is open source' }),
@@ -111,8 +97,6 @@ describe('Sidebar', () => {
 
   it('renders the collapsible sections as expandable disclosure groups', () => {
     renderSidebar();
-    // Each section header is the disclosure trigger button. Only Planning
-    // opens by default; the rest start collapsed (and so hide their items).
     const planning = screen.getByRole('button', { name: 'Planning' });
     expect(planning).toHaveAttribute('aria-expanded', 'true');
     expect(
@@ -134,15 +118,12 @@ describe('Sidebar', () => {
     expect(
       screen.getByRole('button', { name: 'Help & Info' }),
     ).toHaveAttribute('aria-expanded', 'false');
-    // A collapsed section hides its items.
     expect(
       screen.queryByRole('button', { name: 'Accounts' }),
     ).not.toBeInTheDocument();
   });
 
   it('auto-expands the section that holds the active route on load', () => {
-    // Deep-link into a default-collapsed section: Settings opens so the
-    // user can see where they are, while the other collapsed sections stay shut.
     renderSidebar('/security');
     expect(
       screen.getByRole('button', { name: 'Settings' }),
@@ -180,7 +161,6 @@ describe('Sidebar', () => {
     renderSidebar('/accounts');
     const accounts = screen.getByRole('button', { name: 'Accounts' });
     expect(accounts).toHaveAttribute('aria-current', 'page');
-    // A non-active item must not carry it.
     expect(
       screen.getByRole('button', { name: 'Projections' }),
     ).not.toHaveAttribute('aria-current');
@@ -192,8 +172,6 @@ describe('Sidebar', () => {
     expect(
       screen.getByRole('button', { name: 'Accounts' }),
     ).toHaveAttribute('aria-current', 'page');
-    // Collapse + re-expand Settings; the Your Data active state (Accounts)
-    // survives.
     const settings = screen.getByRole('button', { name: 'Settings' });
     await user.click(settings);
     await user.click(settings);
@@ -214,14 +192,11 @@ describe('Sidebar', () => {
   });
 
   it('renders the Guardrails nav item and marks it active at /guardrails (exact match, no matchWhen)', () => {
-    // Planning is open by default, so the Guardrails entry renders without a
-    // deep-link. It is a flat route → exact-match active state, no matchWhen.
     // The accessible name carries the "Beta" pill ("Guardrails (beta)").
     renderSidebar('/guardrails');
     const guardrails = screen.getByRole('button', { name: 'Guardrails today (beta)' });
     expect(guardrails).toBeInTheDocument();
     expect(guardrails).toHaveAttribute('aria-current', 'page');
-    // A sibling Planning item must not be co-selected.
     expect(
       screen.getByRole('button', { name: 'Report' }),
     ).not.toHaveAttribute('aria-current');
@@ -240,15 +215,12 @@ describe('Sidebar', () => {
       screen.getByRole('button', { name: 'Projected withdrawals (beta)' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Guardrails today (beta)' })).toBeInTheDocument();
-    // Non-beta items carry no pill.
     expect(screen.getByRole('button', { name: 'Report' })).toBeInTheDocument();
   });
 
   it('sorts every beta item to the bottom of its section, below all stable items', () => {
     renderSidebar('/dashboard');
-    // Beta buttons carry a trailing visible "Beta" pill in their textContent
-    // (in addition to the sr-only "(beta)" accessible-name suffix), so match
-    // by prefix rather than the exact accessible name used elsewhere.
+    // Beta buttons carry a visible "Beta" pill in their textContent besides the sr-only suffix, so match by prefix.
     const planningItemLabels = [
       'Projections',
       'Scenarios',
@@ -282,7 +254,6 @@ describe('Sidebar', () => {
     expect(
       screen.queryByRole('button', { name: /Projected withdrawals/ }),
     ).not.toBeInTheDocument();
-    // The rest of the Planning section is untouched.
     expect(screen.getByRole('button', { name: 'Report' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Projections' })).toBeInTheDocument();
   });
@@ -330,8 +301,6 @@ describe('Sidebar', () => {
   });
 
   it('marks the Scenarios nav item as active at /scenarios/:id/floors (Account limits)', () => {
-    // The dedicated floor editor rolls up under the
-    // single Scenarios nav entry via its matchWhen pattern.
     renderSidebar('/scenarios/scn-1/floors');
     expect(
       screen.getByRole('button', { name: 'Scenarios' }),
@@ -339,14 +308,10 @@ describe('Sidebar', () => {
   });
 
   it('does NOT mark the Scenarios nav item active on a non-scenario route', () => {
-    // Guard the floors matchWhen regex equivalent — only an exact
-    // /scenarios/:id/floors (or another listed sub-screen) selects Scenarios.
     renderSidebar('/dashboard');
     expect(
       screen.getByRole('button', { name: 'Dashboard' }),
     ).toHaveAttribute('aria-current', 'page');
-    // Scenarios lives in the collapsed Planning? No — Planning is open by
-    // default, so the Scenarios button is present and must NOT be current.
     expect(
       screen.getByRole('button', { name: 'Scenarios' }),
     ).not.toHaveAttribute('aria-current');
@@ -368,7 +333,6 @@ describe('Sidebar', () => {
   });
 
   it("Help & Info contains only What's New", () => {
-    // Help & Info is collapsed by default — deep-link into it so its items render.
     renderSidebar('/whats-new');
     const group = screen.getByRole('group', { name: 'Help & Info' });
     expect(
@@ -379,16 +343,13 @@ describe('Sidebar', () => {
   });
 
   it('renders the Settings section items (Preferences / Security / Workspace) and no Developer entry', () => {
-    // Settings is collapsed by default — deep-link into it so its items render.
     renderSidebar('/security');
     expect(screen.getByRole('button', { name: 'Preferences' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Security' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Workspace' })).toBeInTheDocument();
-    // The dev-only Developer entry was removed entirely.
     expect(
       screen.queryByRole('button', { name: 'Developer' }),
     ).not.toBeInTheDocument();
-    // The old "Profile" label is gone — it reads "Preferences" now.
     expect(
       screen.queryByRole('button', { name: 'Profile' }),
     ).not.toBeInTheDocument();

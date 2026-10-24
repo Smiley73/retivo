@@ -1,14 +1,4 @@
-/**
- * SyncDetailsPopover tests.
- *
- * The popover opens on a SyncBadge click in every sync state and shows
- * status / last-synced / pending / conflicts / connection plus an
- * adaptive per-state action button. The `error` state additionally
- * renders the structured error envelope + "Copy details". Each state is
- * driven by mocking `useSync()`; the popover is rendered open via a
- * `DialogTrigger defaultOpen` wrapper (mirroring how `SyncBadge` mounts
- * it).
- */
+// The popover opens on a SyncBadge click in every state; each state is driven by mocking `useSync()`.
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Button, DialogTrigger } from 'react-aria-components';
@@ -25,8 +15,7 @@ vi.mock('./SyncContext.js', () => ({
   useSync: vi.fn(),
 }));
 
-// Resolve inspector labels synchronously so the mounted list shows a known
-// human name (deep row behaviour is covered in UnsyncedMutationList.test.tsx).
+// Labels resolve synchronously; row behaviour is covered in UnsyncedMutationList.test.tsx.
 vi.mock('./mutation-label', async () => {
   const actual = await vi.importActual<typeof import('./mutation-label')>('./mutation-label');
   return {
@@ -96,7 +85,6 @@ describe('SyncDetailsPopover', () => {
     retryNow.mockResolvedValue(undefined);
   });
 
-  // ── per-state content ────────────────────────────────────────────
 
   it('shows status + last-synced + pending + conflicts + connection for synced state', () => {
     renderPopover({
@@ -156,7 +144,6 @@ describe('SyncDetailsPopover', () => {
     expect(dialog).not.toHaveTextContent('Connection\nOffline');
   });
 
-  // ── per-state action buttons ─────────────────────────────────────
 
   it('"Sync now" button appears for synced state', () => {
     renderPopover({ state: { kind: 'synced', lastSyncedAt: null } });
@@ -206,8 +193,6 @@ describe('SyncDetailsPopover', () => {
   it('rollback-detected state shows no action button, shows security explanation', () => {
     renderPopover({ state: { kind: 'rollback-detected' } });
     const dialog = screen.getByRole('dialog');
-    // No adaptive action button is rendered — a security explanation
-    // paragraph takes its place.
     expect(
       screen.queryByRole('button', { name: 'Sync now' }),
     ).toBeNull();
@@ -220,12 +205,9 @@ describe('SyncDetailsPopover', () => {
     expect(dialog).toHaveTextContent(
       /Sync is blocked to protect your data/,
     );
-    // The added cause sentence ships alongside the
-    // existing tamper wording, never in place of it.
     expect(dialog).toHaveTextContent(/wasn.t sealed with your encryption key/);
   });
 
-  // ── action handlers ──────────────────────────────────────────────
 
   it('"Sync now" calls syncRoundTrip', async () => {
     renderPopover({ state: { kind: 'synced', lastSyncedAt: null } });
@@ -271,8 +253,7 @@ describe('SyncDetailsPopover', () => {
   });
 
   it('shows a disabled "Working…" button while the action is in flight', async () => {
-    // Never-settling promise keeps the handler in its `pending` state so
-    // the running spinner branch stays rendered.
+    // A never-settling promise keeps the handler pending so the running spinner stays rendered.
     syncRoundTrip.mockReturnValue(new Promise<never>(() => {}));
     renderPopover({ state: { kind: 'synced', lastSyncedAt: null } });
     fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
@@ -280,7 +261,6 @@ describe('SyncDetailsPopover', () => {
     expect(working).toBeDisabled();
   });
 
-  // ── error state ──────────────────────────────────────────────────
 
   it('shows error envelope (phase/code/status/traceId/message) in error state', () => {
     renderPopover({
@@ -351,13 +331,9 @@ describe('SyncDetailsPopover', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent('Message');
     expect(dialog).toHaveTextContent('Fetch failed');
-    // No phase/code/status/traceId on this envelope → those rows are
-    // absent (only Message renders in the error detail section).
     expect(dialog).not.toHaveTextContent('Phase');
     expect(dialog).not.toHaveTextContent('Code');
-    // "Status" appears as a status-row label up top; the error-section
-    // Status row (the HTTP status code) must not render. Scope the
-    // assertion to the error <dl>.
+    // Scope to the error <dl>: "Status" also appears as a status-row label up top.
     const errorList = dialog.querySelector('dl');
     expect(errorList).not.toBeNull();
     expect(errorList).not.toHaveTextContent('Status');
@@ -371,22 +347,18 @@ describe('SyncDetailsPopover', () => {
     ).toBeNull();
   });
 
-  // ── Esc close ────────────────────────────────────────────────────
 
   it('Esc closes the popover', async () => {
     const user = userEvent.setup();
     renderPopover({ state: { kind: 'synced', lastSyncedAt: null } });
     const dialog = screen.getByRole('dialog');
-    // React Aria handles Escape on the popover element, so the key must land
-    // inside it. The dialog takes focus itself on open, but once an earlier
-    // test's `fireEvent.click` has put React Aria in "virtual" mode that move
-    // is deferred a frame, so a keypress straight after render hits `body`.
+    // React Aria handles Escape on the popover element; after an earlier click puts it in "virtual" mode the dialog takes
+    // focus a frame late, so a keypress straight after render would hit `body`.
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
-  // ── unsynced inspector ───────────────────────────────────────────
 
   it('renders the unsynced-items inspector with the resolved name for a conflict', async () => {
     renderPopover({
@@ -403,7 +375,6 @@ describe('SyncDetailsPopover', () => {
     expect(screen.queryByRole('region', { name: 'Unsynced items' })).toBeNull();
   });
 
-  // ── a11y ─────────────────────────────────────────────────────────
 
   it('passes jest-axe accessibility check', async () => {
     renderPopover({

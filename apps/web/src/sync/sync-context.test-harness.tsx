@@ -1,12 +1,5 @@
-/**
- * Shared harness for the SyncContext test files (test-only; not shipped).
- *
- * Re-exports the controllable fake transport and provides the probe, the
- * single `renderProvider`, the per-describe reset hooks and the seeding /
- * settle helpers. Each SyncContext test file still declares its own
- * `vi.mock('./mock-sync', ...)` (it must be hoisted in the test file itself)
- * pointing at `mockSyncModule` from `./sync-context.test-fake`.
- */
+// Shared harness for the SyncContext tests: the fake transport, the probe, `renderProvider`, the reset hooks and the seeding
+// helpers. Each test file declares its own hoisted `vi.mock('./mock-sync')` pointing at `mockSyncModule`.
 import 'fake-indexeddb/auto';
 import type { ReactNode } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -20,9 +13,7 @@ export { fake };
 
 export function Probe() {
   const sync = useSync();
-  // Surface the structured error envelope so tests can assert that
-  // SyncApiError fields (code/traceId/status/phase) flow into the
-  // badge state — the SyncBadge popover relies on this end-to-end.
+  // Surfaces the structured error envelope so tests can assert SyncApiError fields flow into the badge state.
   const errorJson = sync.state.kind === 'error' ? JSON.stringify(sync.state) : '';
   return (
     <div>
@@ -42,7 +33,6 @@ export function Probe() {
 
 export interface RenderProviderOptions {
   householdId?: string | null;
-  /** Probe component tree to mount; defaults to the shared `Probe`. */
   probe?: ReactNode;
   onDeviceMismatch?: () => void | Promise<void>;
 }
@@ -64,16 +54,8 @@ export function renderProvider(opts: RenderProviderOptions = {}) {
   );
 }
 
-/**
- * The shared per-describe reset. Call once at the top of a `describe`.
- *
- * `dropLocalDatabase` (not `clearAllStores`) so deviceMetadata is also reset
- * between tests. `clearAllStores` deliberately preserves deviceMetadata for
- * production force-bootstrap semantics; here we need a true clean slate so
- * that one test writing syncCursor=42 (e.g. the bootstrap-success case) does
- * not bleed into the next test's initialSync — which would skip bootstrap,
- * run pull, and race against the test's own click-driven forceRefresh.
- */
+// `dropLocalDatabase`, not `clearAllStores`, so deviceMetadata resets too: a leftover syncCursor from one test would make the
+// next initialSync pull instead of bootstrap and race the test's own forceRefresh.
 export function useSyncTestHooks(bootstrapHouseholdId = 'mock') {
   beforeEach(async () => {
     await dropLocalDatabase();
@@ -121,24 +103,8 @@ export async function seedMutation(over: Partial<PendingMutation> = {}): Promise
   return m;
 }
 
-/**
- * Deterministic-settle render harness for mount-then-act tests.
- *
- * A bare `renderProvider()` + `await screen.findByTestId('state')` only
- * proves the probe MOUNTED — not that the mount-time `initialSync`
- * (bootstrap/pull) SETTLED. The click-driven action then races the
- * still-in-flight mount sync (shared `fake.*Impl`, store state, one-shot
- * spies) under microtask pressure → intermittent failures.
- *
- * This helper removes the race: it pre-seeds a non-zero
- * `deviceMetadata.syncCursor` (deviceId matching every `render*Provider`
- * here, all `deviceId="dev-test"`) and a cursor-preserving no-op
- * `fake.pullImpl`, so the mount-time `initialSync` deterministically
- * takes the `pull()` branch (cursor present and ≠ '0' in
- * `SyncContext.initialSync`) and FULLY settles to `synced` BEFORE any
- * test action. The caller then installs its per-case bootstrap/pull
- * behaviour and clicks. Pass the block's own `render*Provider`.
- */
+// Pre-seeds a non-zero cursor and a no-op pull so the mount-time `initialSync` takes the `pull()` branch and settles to
+// `synced` before any test action; a bare render only proves the probe mounted, and the click then races the mount sync.
 export async function renderSettled(renderFn: () => unknown): Promise<void> {
   await writeDeviceMetadata({
     deviceId: 'dev-test',

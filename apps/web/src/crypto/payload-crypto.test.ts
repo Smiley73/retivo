@@ -1,10 +1,7 @@
-/**
- * Unit tests for AES-256-GCM payload encryption + canonical AAD.
- */
+// Unit tests for AES-256-GCM payload encryption and canonical AAD.
 import { describe, it, expect } from 'vitest';
 import { generateHdk } from './key-wrapping';
 import {
-  canonicalAad,
   decryptPayload,
   encryptPayload,
   PayloadCryptoError,
@@ -104,21 +101,15 @@ describe('payload-crypto', () => {
     expect(serialized).not.toMatch(/12345/);
   });
 
-  it('canonicalAad is deterministic and field-order independent', () => {
-    const a = canonicalAad(meta);
+  it('decrypts with the AAD fields in any order', async () => {
+    const hdk = await generateHdk();
+    const envelope = await encryptPayload(payload, meta, hdk, 'key-1');
     const reordered: AadMetadata = {
       aggregateType: 'account',
       encryptionVersion: 1,
       aggregateId: 'agg-1',
       householdId: 'hh-1',
     };
-    const b = canonicalAad(reordered);
-    expect(Array.from(a)).toEqual(Array.from(b));
-  });
-
-  it('canonicalAad differs when a stable-identity field differs', () => {
-    const a = canonicalAad(meta);
-    const c = canonicalAad({ ...meta, householdId: 'hh-2' });
-    expect(Array.from(a)).not.toEqual(Array.from(c));
+    expect(await decryptPayload(envelope, reordered, hdk)).toEqual(payload);
   });
 });

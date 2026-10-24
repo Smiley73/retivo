@@ -8,45 +8,26 @@ import {
   type MonteCarloSummary,
 } from '../lib/monte-carlo.js';
 
-/**
- * Which LRU budget a written entry is charged to. A cap alone reserves nothing: with one shared budget and one global
- * LRU walk, whichever class wrote least recently loses its entries (a second stress comparison would evict four primary
- * entries). So the class is stored on the entry and eviction only deletes within the class that went over. `'primary'`
- * covers every ordinary run (page auto-run/Recalculate, Scenarios bulk recompute and card metrics, the guardrail
- * forced-off sibling).
- */
-export type McCacheEntryClass = 'primary' | 'marketStress';
+// Which LRU budget a written entry is charged to. A cap alone reserves nothing: with one shared budget and one global
+// LRU walk, whichever class wrote least recently loses its entries, so the class is stored on the entry and eviction
+// only deletes within the class that went over.
+type McCacheEntryClass = 'primary' | 'marketStress';
 
-/** Primary budget, sized so the Scenarios "recalculate all" keeps more than a handful of scenarios warm. */
-export const MC_PRIMARY_MAX_ENTRIES = 20;
+// Sized so the Scenarios "recalculate all" keeps more than a handful of scenarios warm.
+const MC_PRIMARY_MAX_ENTRIES = 20;
 
-/**
- * Whole comparisons the stress budget keeps. The comparison starts by itself, so a cap of one would evict all of
- * scenario A's entries when moving to B and re-run 40,000 paths on every move back and forth; holding a handful makes
- * the cache-first premise true across normal use.
- */
-export const MC_STRESS_MAX_COMPARISONS = 4;
+// Whole comparisons the stress budget keeps: with a cap of one, moving from scenario A to B would evict A's results and
+// re-run 40,000 paths on every move back.
+const MC_STRESS_MAX_COMPARISONS = 4;
 
-/**
- * Market-stress budget: one slot per named stress case for each of the last few comparisons
- * (`MC_STRESS_MAX_COMPARISONS`). A comparison writes seed-inclusive entries pinned to one displayed sample, unreachable
- * after any edit or Recalculate; charging them to the primary budget let one comparison evict a fifth of it, including
- * the entries the Scenarios page's cached metrics read. They keep their own budget because they make a return visit on
- * an unchanged plan instant, and eviction stays confined to it.
- */
-export const MC_STRESS_MAX_ENTRIES =
-  STRESS_CASE_IDS.length * MC_STRESS_MAX_COMPARISONS;
+// One slot per stress case for each kept comparison. Charged to the primary budget, one comparison would evict a fifth
+// of it, including the entries the Scenarios page's cached metrics read.
+const MC_STRESS_MAX_ENTRIES = STRESS_CASE_IDS.length * MC_STRESS_MAX_COMPARISONS;
 
 const MAX_ENTRIES_BY_CLASS: Readonly<Record<McCacheEntryClass, number>> = {
   primary: MC_PRIMARY_MAX_ENTRIES,
   marketStress: MC_STRESS_MAX_ENTRIES,
 };
-
-/**
- * Combined ceiling across both budgets, for tests to assert against; eviction does not enforce it (each class is capped
- * on its own).
- */
-export const MC_CACHE_MAX_ENTRIES = MC_PRIMARY_MAX_ENTRIES + MC_STRESS_MAX_ENTRIES;
 
 /**
  * SHA-256 of the whole `JSON.stringify(input)`, truncated to 16 hex chars (64 bits; collisions are negligible at ~24

@@ -1,28 +1,6 @@
-/**
- * Integration test for the SyncProvider <- AuthContext wiring.
- *
- * Regression guard: an earlier fix exposed a `getTokenRefresher()` from
- * api/client and passed its return value as a prop to SyncProvider.
- * Because `getTokenRefresher` returned the *current value* of the
- * module-level `refreshAccessToken` binding, and `configureApi` runs
- * inside an AuthProvider useEffect (post-commit), the prop was a
- * snapshot of the initial stub `async () => null`. The HttpSyncClient
- * captured that stub permanently — so a sync 401 never triggered the
- * real AuthContext refresh, defeating the fix.
- *
- * This test mounts the real AuthProvider + AuthAwareProviders tree,
- * stubs SyncProvider to capture its props, and asserts that invoking
- * the captured `refreshAccessToken` actually fires a fetch to
- * `/api/v1/auth/refresh`. If the snapshot bug ever returns, the
- * captured function will be the no-op stub and the assertion fails.
- */
-// The unlock-gate path (initializeUnlockState's empty-slot branch) reads a
-// rollback pin via `readEnvelopeSetPin` -> `readDeviceMetadata`, which opens
-// a real IndexedDB through the `idb` package. jsdom has no IndexedDB of its
-// own, so without this polyfill that read throws and initializeUnlockState's
-// outer catch silently leaves `needsKeySetup`/`householdId` unresolved —
-// not a momentary race, a permanent stall. Match the pattern other test
-// files use for the same dependency (e.g. key-cache.test.ts, user-transition.test.ts).
+// The SyncProvider <- AuthContext wiring: the real AuthProvider + AuthAwareProviders tree with SyncProvider stubbed to capture props.
+// `getTokenRefresher()` once returned a snapshot of the initial stub (`configureApi` runs post-commit), so a sync 401 never reached the real refresh.
+// jsdom has no IndexedDB; without this polyfill `readEnvelopeSetPin` throws and initializeUnlockState silently leaves `needsKeySetup`/`householdId` unresolved forever.
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { render, act, cleanup, waitFor } from '@testing-library/react';
@@ -35,9 +13,7 @@ interface CapturedProps {
 }
 
 const capturedSyncProps: CapturedProps = {};
-// Every distinct householdId value SyncProvider was rendered with, in order.
-// The unlock-gate test asserts `null` precedes the real id (sync never starts
-// against an unresolved unlock state).
+// Every householdId SyncProvider was rendered with, in order: sync must never start against an unresolved unlock state.
 const householdIdRenders: Array<string | null> = [];
 
 vi.mock('./sync/SyncContext', () => ({
@@ -65,11 +41,7 @@ vi.mock('./contexts/ThemeContext', () => ({
   ThemeProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-// Unlock-gate collaborators. Mocked at the module boundary so the
-// unlock-gate test can drive `initializeUnlockState` to a deterministic
-// resolved state without a real IndexedDB / WebCrypto round-trip. The real
-// refresh-prop wiring (the original regression guard) is untouched — the boot
-// refresh still flows through the real api/client + fetch.
+// Unlock-gate collaborators are mocked so `initializeUnlockState` resolves deterministically without a real IndexedDB or WebCrypto.
 const loadCachedHdk = vi.fn();
 const cacheHdk = vi.fn();
 const clearCachedHdk = vi.fn();
@@ -84,8 +56,7 @@ vi.mock('./auth/key-envelope-client', () => ({
   getKeyEnvelopes: () => getKeyEnvelopes(),
 }));
 
-// The user-transition guard touches IndexedDB on boot refresh; stub to a no-op
-// so the valid-token boot path doesn't require a real IDB.
+// The user-transition guard touches IndexedDB on boot refresh; stub it so the valid-token boot path needs no real IDB.
 vi.mock('./auth/user-transition', () => ({
   clearLastUserId: vi.fn(),
   maybeResetForNewUser: vi.fn(async () => undefined),
@@ -117,7 +88,7 @@ function b64url(obj: unknown): string {
     .replace(/=+$/, '');
 }
 
-/** A structurally valid JWT (decodeJwt only reads the body, no verification). */
+// decodeJwt only reads the body.
 function jwt(claims: { userId: string; householdId: string }): string {
   return `${b64url({ alg: 'none' })}.${b64url({ deviceId: 'dev-1', email: 'u@test.com', ...claims })}.sig`;
 }
@@ -134,7 +105,7 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
     cacheHdk.mockReset();
     clearCachedHdk.mockReset();
     getKeyEnvelopes.mockReset();
-    consumeSignoutReason(); // clear any leaked one-shot reason
+    consumeSignoutReason();
     fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -146,8 +117,7 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
   });
 
   it('passes a live refreshAccessToken to SyncProvider that hits /auth/refresh', async () => {
-    // The bootstrap effect in AuthProvider calls refreshAccessToken once
-    // on mount. Let it fail cleanly so we don't leave dangling promises.
+    // The boot effect calls refreshAccessToken once on mount; let it fail cleanly.
     fetchMock.mockResolvedValue(
       jsonResponse(401, { error: { code: 'UNAUTHENTICATED', message: 'no cookie' } }),
     );
@@ -164,8 +134,6 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
 
     expect(capturedSyncProps.refreshAccessToken).toBeTypeOf('function');
 
-    // Drain fetches from boot, then call the captured prop and verify
-    // it actually round-trips through apiRequest -> /auth/refresh.
     fetchMock.mockClear();
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, { accessToken: 'new-tok', expiresIn: 3600 }),
@@ -206,13 +174,7 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
     expect(result).toBeNull();
   });
 
-  /**
-   * Boot an authenticated, unlock-resolved session so `householdId` is
-   * released to SyncProvider (mirrors the happy path: empty envelope
-   * set → needsKeySetup → unlockResolved). Returns once `householdId` is the
-   * real id, with the boot fetches drained so the next `fetchMock` mock drives
-   * the refresh under test.
-   */
+  // Boots an authenticated, unlock-resolved session so `householdId` reaches SyncProvider, with the boot fetches drained.
   async function bootAuthenticated(): Promise<void> {
     loadCachedHdk.mockResolvedValue(null);
     getKeyEnvelopes.mockResolvedValue({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
@@ -228,12 +190,7 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
       </AuthProvider>,
     );
 
-    // The boot chain (refreshAccessToken -> updateFromToken ->
-    // initializeUnlockState -> loadCachedHdk -> getKeyEnvelopes ->
-    // readEnvelopeSetPin -> setNeedsKeySetup/setUnlockResolved) is several
-    // awaits deep; wait for the settled state rather than counting
-    // microtask ticks (async-assertion race — see AuthAwareProviders.test.tsx
-    // history / project memory on this suite).
+    // The boot chain is several awaits deep, so wait for the settled state rather than counting microtask ticks.
     await waitFor(() => {
       expect(capturedSyncProps.householdId).toBe('hh-1');
     });
@@ -242,7 +199,7 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
 
   it('preserves the session (householdId stays set) and returns null on a network error during refresh', async () => {
     await bootAuthenticated();
-    // A raw (non-ApiRequestError) rejection models a network/abort failure.
+    // A raw (non-ApiRequestError) rejection models a network or abort failure.
     fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
     let result: string | null = 'unset';
@@ -251,8 +208,8 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
     });
 
     expect(result).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry
-    expect(capturedSyncProps.householdId).toBe('hh-1'); // session survives
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(capturedSyncProps.householdId).toBe('hh-1');
   });
 
   it('preserves the session and returns null on a 5xx during refresh', async () => {
@@ -299,7 +256,7 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
     });
 
     expect(result).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(capturedSyncProps.householdId).toBe('hh-1');
   });
 
@@ -316,12 +273,11 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
     });
 
     expect(result).toBeNull();
-    expect(capturedSyncProps.householdId).toBeNull(); // definitive sign-out
+    expect(capturedSyncProps.householdId).toBeNull();
   });
 
   it('collapses concurrent refresh callers into a single /auth/refresh round-trip (inflight dedup)', async () => {
     await bootAuthenticated();
-    // One slow refresh; both callers must share the single in-flight promise.
     let release!: (r: Response) => void;
     fetchMock.mockReturnValueOnce(
       new Promise<Response>((resolve) => {
@@ -338,18 +294,16 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
       [r1, r2] = await Promise.all([p1, p2]);
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1); // dedup
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(r1).not.toBeNull();
     expect(r1).toBe(r2);
   });
 
   it('does not re-POST /auth/refresh on a second call within the transient cooldown window', async () => {
-    // Boot with real timers — bootAuthenticated's waitFor polls via the real
-    // clock and never advances under vi.useFakeTimers().
+    // Real timers for the boot: bootAuthenticated's waitFor polls the real clock and never advances under fake timers.
     await bootAuthenticated();
     vi.useFakeTimers();
     try {
-      // First call: transient failure (5xx) arms the cooldown.
       fetchMock.mockResolvedValueOnce(
         jsonResponse(503, { error: { code: 'UNAVAILABLE', message: 'down' } }),
       );
@@ -358,23 +312,21 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
       });
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
-      // Second call within the window: short-circuits without POSTing.
       fetchMock.mockResolvedValueOnce(
         jsonResponse(200, { accessToken: jwt({ userId: 'u1', householdId: 'hh-1' }), expiresIn: 3600 }),
       );
       let result: string | null = 'unset';
       await act(async () => {
-        vi.advanceTimersByTime(1_000); // < cooldown window
+        vi.advanceTimersByTime(1_000);
         result = await capturedSyncProps.refreshAccessToken!();
       });
       expect(result).toBeNull();
-      expect(fetchMock).toHaveBeenCalledTimes(1); // still 1 — no second POST
-      expect(capturedSyncProps.householdId).toBe('hh-1'); // session preserved
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(capturedSyncProps.householdId).toBe('hh-1');
 
-      // After the window elapses, a fresh refresh DOES POST again.
       let recovered: string | null = 'unset';
       await act(async () => {
-        vi.advanceTimersByTime(5_000); // past the cooldown
+        vi.advanceTimersByTime(5_000);
         recovered = await capturedSyncProps.refreshAccessToken!();
       });
       expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -385,49 +337,41 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
   });
 
   it('fires /auth/refresh at most once across both sync legs within the cooldown after a transient failure', async () => {
-    // Boot with real timers — bootAuthenticated's waitFor polls via the real
-    // clock and never advances under vi.useFakeTimers().
+    // Real timers for the boot: bootAuthenticated's waitFor polls the real clock and never advances under fake timers.
     await bootAuthenticated();
     vi.useFakeTimers();
     try {
-      // Leg 1 (syncRoundTrip flush): transient 5xx arms the cooldown.
       fetchMock.mockResolvedValueOnce(
         jsonResponse(503, { error: { code: 'UNAVAILABLE', message: 'down' } }),
       );
-      // The remaining legs would each retry the still-expired token if the
-      // cooldown didn't short-circuit them.
+      // Without the cooldown each remaining leg would retry the still-expired token.
       await act(async () => {
-        // flush → pull (one syncRoundTrip), then pull → flush (one poll tick):
-        // four sequential refresh attempts, all inside the cooldown window.
-        await capturedSyncProps.refreshAccessToken!(); // syncRoundTrip flush leg
+        // flush then pull (one syncRoundTrip), then pull then flush (one poll tick): four refresh attempts inside the cooldown window.
+        await capturedSyncProps.refreshAccessToken!();
         vi.advanceTimersByTime(200);
-        await capturedSyncProps.refreshAccessToken!(); // syncRoundTrip pull leg
+        await capturedSyncProps.refreshAccessToken!();
         vi.advanceTimersByTime(200);
-        await capturedSyncProps.refreshAccessToken!(); // poll-tick pull leg
+        await capturedSyncProps.refreshAccessToken!();
         vi.advanceTimersByTime(200);
-        await capturedSyncProps.refreshAccessToken!(); // poll-tick flush leg
+        await capturedSyncProps.refreshAccessToken!();
       });
 
-      // Exactly one /auth/refresh POST fired — the cooldown collapsed the
-      // other three legs (no cookie replay across the two-leg sequencing).
+      // One /auth/refresh POST: the cooldown collapsed the other three legs.
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(capturedSyncProps.householdId).toBe('hh-1'); // session preserved
+      expect(capturedSyncProps.householdId).toBe('hh-1');
     } finally {
       vi.useRealTimers();
     }
   });
 
   it('treats an ApiRequestError construction with status 401 as definitive', () => {
-    // Guard the classifier's reliance on the real ApiRequestError class/status.
     const err = new ApiRequestError(401, { code: 'INVALID_REFRESH_TOKEN', message: 'x' });
     expect(err instanceof ApiRequestError).toBe(true);
     expect(err.status).toBe(401);
   });
 
   it('gates householdId on the unlock check: null until resolved, then released for an unencrypted household', async () => {
-    // Boot refresh returns a valid session, so AuthContext sets householdId and
-    // kicks off initializeUnlockState. Hold the envelope fetch open so we can
-    // observe the unresolved window: SyncProvider must NOT yet see the real id.
+    // Hold the envelope fetch open to observe the unresolved window: SyncProvider must not yet see the real id.
     let releaseEnvelopes!: (v: { slots: unknown[]; envelopeSetVersion: number; envelopeSetTag: string }) => void;
     loadCachedHdk.mockResolvedValue(null);
     getKeyEnvelopes.mockReturnValue(
@@ -449,15 +393,9 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
       );
     });
 
-    // unlockResolved is still false (envelope fetch pending) → gate closed even
-    // though AuthContext already holds the real householdId.
     expect(capturedSyncProps.householdId).toBeNull();
 
-    // Resolve with an empty slot set → needsKeySetup=true, unlockResolved=true →
-    // gate opens and the real householdId flows to SyncProvider. Resolving the
-    // envelope fetch still leaves a `readEnvelopeSetPin` (IndexedDB) await
-    // before the gate opens, so wait for the settled state rather than a
-    // single microtask flush.
+    // Resolving the envelope fetch still leaves a `readEnvelopeSetPin` IndexedDB await before the gate opens, so wait for the settled state.
     act(() => {
       releaseEnvelopes({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
     });
@@ -465,21 +403,15 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
     await waitFor(() => {
       expect(capturedSyncProps.householdId).toBe('hh-1');
     });
-    // The pre-resolution render(s) passed null, before the real id — sync never
-    // started against an unresolved unlock state.
     expect(householdIdRenders[0]).toBeNull();
     expect(householdIdRenders[householdIdRenders.length - 1]).toBe('hh-1');
-    // Nothing else holds the release: no legal round trip stands between sign-in
-    // and sync.
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes('/auth/legal-')),
     ).toBe(false);
   });
 
   it('keeps householdId null for a resolved-but-locked encrypted household', async () => {
-    // Envelopes exist but no cached HDK → isUnlocked=false, needsKeySetup=false,
-    // unlockResolved=true. The gate must stay closed (null) so encrypted pull
-    // responses are never written as-if-plaintext with getHdk()===null.
+    // Envelopes without a cached HDK leave the gate closed, so encrypted pull responses are never written as plaintext with getHdk() null.
     loadCachedHdk.mockResolvedValue(null);
     getKeyEnvelopes.mockResolvedValue({
       slots: [{ slotType: 'password' }],
@@ -502,7 +434,6 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
     });
 
     expect(capturedSyncProps.householdId).toBeNull();
-    // Never released the real id at any render.
     expect(householdIdRenders.every((id) => id === null)).toBe(true);
   });
 
@@ -523,8 +454,6 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
 
     expect(capturedSyncProps.onDeviceMismatch).toBeTypeOf('function');
 
-    // Drain boot fetches, then invoke the captured recovery callback and
-    // verify it sets the device-mismatch signout reason + fires logout.
     fetchMock.mockClear();
     fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
 
@@ -532,8 +461,6 @@ describe('AuthAwareProviders <- AuthContext wiring', () => {
       await capturedSyncProps.onDeviceMismatch!();
     });
 
-    // The host set the one-shot signout reason (LoginPage consumes it)
-    // and fired logout.
     expect(consumeSignoutReason()).toBe(SIGNOUT_REASON_DEVICE_MISMATCH);
     expect(fetchMock).toHaveBeenCalled();
     const calledLogout = fetchMock.mock.calls.some(([url]) =>

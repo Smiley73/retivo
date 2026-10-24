@@ -1,13 +1,9 @@
-/**
- * Unit tests for the pure quarantine merge.
- * `recordDecryptOutcome`'s IDB + diagnostics side effects are exercised via
- * `SyncContext`/`sync-client.test.ts`'s injected-dep coverage; this file
- * covers the merge logic directly.
- */
+// Pure quarantine merge; `recordDecryptOutcome`'s IDB and diagnostics side effects are covered via SyncContext and sync-client tests.
 import { describe, expect, it } from 'vitest';
-import { applyQuarantineOutcome, MAX_QUARANTINED_ROWS } from './quarantine';
+import { applyQuarantineOutcome } from './quarantine';
 
 const NOW = 1_700_000_000_000;
+const MAX_QUARANTINED_ROWS = 200;
 
 describe('applyQuarantineOutcome', () => {
   it('adds a new quarantine entry with the given timestamp', () => {
@@ -29,8 +25,6 @@ describe('applyQuarantineOutcome', () => {
       NOW,
     );
     expect(result).toHaveLength(1);
-    // The FIRST-seen stamp and version are not clobbered by a later duplicate
-    // report of the same still-quarantined aggregate.
     expect(result[0]).toEqual(existing[0]);
   });
 
@@ -57,7 +51,6 @@ describe('applyQuarantineOutcome', () => {
       NOW,
     );
     expect(result).toHaveLength(MAX_QUARANTINED_ROWS);
-    // The single oldest entry (a0) was evicted to make room for the new one.
     expect(result.some((r) => r.aggregateId === 'a0')).toBe(false);
     expect(result.some((r) => r.aggregateId === 'a-new')).toBe(true);
   });

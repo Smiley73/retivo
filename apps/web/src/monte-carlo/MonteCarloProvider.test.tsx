@@ -1,13 +1,4 @@
-/**
- * MonteCarloProvider — cache-first run, the forced-run (`{ force: true }`)
- * cache bypass + overwrite, and progress threading.
- *
- * The `?worker` import is mocked with a fake Worker-like class that, on
- * each `{ kind: 'run' }` message, posts a deterministic `result` back via
- * the provider's `onmessage` handler. A module-level run counter records
- * every worker spawn so the tests can assert the cache short-circuit
- * (no spawn on a hit) vs. the forced bypass (spawn even on a hit).
- */
+// Cache-first run, the forced-run (`{ force: true }`) cache bypass and overwrite, and progress threading, against a fake Worker that posts a deterministic result per run.
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react';
@@ -16,36 +7,17 @@ import type { MonteCarloInput, MonteCarloSummary } from '../lib/monte-carlo';
 import { clearMonteCarloCache, monteCarloCacheCount } from '../db/monte-carlo-cache';
 import { fakeSummary } from './fake-worker.test-harness';
 
-// Records every worker spawn + the seed of each run so tests can assert
-// the cache short-circuit vs. the forced bypass.
 let workerRuns: Array<{ seed: number }> = [];
-// Delivery mode for the fake worker. In the default (auto) mode each worker
-// posts its result back on a microtask right after `run`, so the existing
-// cache/progress tests need not orchestrate delivery. The pre-empt tests flip
-// to MANUAL mode: a worker records its run but posts nothing until the test
-// explicitly drives it via `flushWorkerDelivery`. Manual mode is what makes
-// the pre-empt tests deterministic under parallel load — the first worker is
-// simply never told to deliver, so the only way its `runToCompletion`
-// settles is the provider's cancel-to-null path, with zero scheduling race.
+// Auto mode posts each result on a microtask; manual mode records the run and stays silent until `flushWorkerDelivery`, so the pre-empt tests have no scheduling race.
 let manualWorkerDelivery = false;
-// Every fake worker spawned this test, keyed by the run's seed, with a bound
-// deliver() closure so a manual-mode test can release a specific run's result.
-// Keying by seed (not spawn index) is deliberate: two concurrent runs each
-// `await` a genuinely-async cache-key hash before spawning, and those hashes
-// can complete out of call order under load — so spawn order is NOT a reliable
-// identifier, but the seed is.
+// Keyed by seed, not spawn index: concurrent runs await an async cache-key hash first and can spawn out of call order.
 let liveWorkers: Array<{ seed: number; deliver: () => void }> = [];
 
-/** Manually post the recorded result for the run with the given seed. No-op
- *  if that worker was terminated (mirrors real `Worker.terminate()`). */
 function flushWorkerDelivery(seed: number): void {
   liveWorkers.find((w) => w.seed === seed)?.deliver();
 }
 
-/** Resolve once the run with the given seed has spawned its worker. A run
- *  `await`s a genuinely-async cache-key hash before spawning, so we yield to
- *  the full event loop (macrotask) each iteration; bounded so a missed spawn
- *  fails fast rather than hanging the suite. */
+// Yields a macrotask per iteration because the cache-key hash is genuinely async; bounded so a missed spawn fails fast.
 async function waitForWorker(seed: number): Promise<void> {
   for (let i = 0; i < 1000 && !liveWorkers.some((w) => w.seed === seed); i++) {
     await new Promise<void>((r) => setTimeout(r, 0));
@@ -56,10 +28,7 @@ vi.mock('../workers/monte-carlo.worker?worker', () => {
   class FakeMcWorker {
     onmessage: ((ev: MessageEvent) => void) | null = null;
     onerror: ((ev: { message?: string }) => void) | null = null;
-    // Models real `Worker.terminate()` semantics: a terminated worker delivers
-    // NO further messages. A pre-empted worker is terminated by the provider,
-    // so even a queued/auto delivery is suppressed and nothing escapes the
-    // test's act/cleanup boundary into a neighbour file under parallel runs.
+    // A terminated worker delivers nothing, like a real `Worker.terminate()`.
     private terminated = false;
     postMessage(msg: unknown): void {
       const m = msg as { kind: string; input: MonteCarloInput };
@@ -81,9 +50,6 @@ vi.mock('../workers/monte-carlo.worker?worker', () => {
         );
       };
       liveWorkers.push({ seed, deliver });
-      // Auto mode: post the result on a microtask (synchronously-ish), as
-      // before. Manual mode: stay silent until the test calls
-      // `flushWorkerDelivery`.
       if (!manualWorkerDelivery) {
         queueMicrotask(deliver);
       }
@@ -113,7 +79,6 @@ const INPUT: MonteCarloInput = {
   events: [],
 };
 
-// Test harness: exposes the hook value to the enclosing test via a ref.
 let hook: ReturnType<typeof useMonteCarlo> | null = null;
 function Probe() {
   hook = useMonteCarlo();
@@ -141,7 +106,6 @@ afterEach(async () => {
 describe('MonteCarloProvider — cache-first run', () => {
   it('spawns the worker on a cache miss, then serves the cached result without re-spawning', async () => {
     renderProvider();
-    // First run: cache miss → worker spawns once.
     await act(async () => {
       await hook!.run(INPUT);
     });
@@ -150,7 +114,6 @@ describe('MonteCarloProvider — cache-first run', () => {
     expect(hook!.result?.seed).toBe(111);
     await waitFor(async () => expect(await monteCarloCacheCount()).toBe(1));
 
-    // Second identical run: cache hit → NO new worker spawn.
     await act(async () => {
       await hook!.run(INPUT);
     });
@@ -172,7 +135,6 @@ describe('MonteCarloProvider — cache-first run', () => {
 describe('MonteCarloProvider — forced run bypasses the cache', () => {
   it('force: true spawns the worker even on a cache hit and overwrites the entry with the fresh sample', async () => {
     renderProvider();
-    // Seed the cache with the deterministic auto-run.
     await act(async () => {
       await hook!.run(INPUT);
     });
@@ -180,16 +142,13 @@ describe('MonteCarloProvider — forced run bypasses the cache', () => {
     expect(workerRuns).toHaveLength(1);
     await waitFor(async () => expect(await monteCarloCacheCount()).toBe(1));
 
-    // Forced run with a DIFFERENT seed: must spawn the worker again
-    // (cache bypassed) and overwrite the canonical entry — the cache key
-    // excludes the seed, so the count stays at 1.
+    // The cache key excludes the seed, so the forced run overwrites the single canonical entry.
     await act(async () => {
       await hook!.run({ ...INPUT, seed: 222 }, { force: true });
     });
     await waitFor(() => expect(hook!.result?.seed).toBe(222));
     expect(workerRuns).toHaveLength(2);
     expect(workerRuns[1].seed).toBe(222);
-    // Overwrite (same key, seed excluded) → still a single cache entry.
     await waitFor(async () => expect(await monteCarloCacheCount()).toBe(1));
   });
 
@@ -200,12 +159,9 @@ describe('MonteCarloProvider — forced run bypasses the cache', () => {
       const summary = await hook!.runToCompletion(INPUT, { force: true });
       resolved = summary;
     });
-    // The promise resolves with the worker's summary (not before).
     expect(resolved).not.toBeNull();
     expect(resolved!.seed).toBe(INPUT.seed);
     expect(workerRuns).toHaveLength(1);
-    // The summary was written through to the cache (a later non-forced run
-    // serves it without a new spawn).
     await waitFor(async () => expect(await monteCarloCacheCount()).toBe(1));
     await act(async () => {
       await hook!.run(INPUT);
@@ -215,12 +171,10 @@ describe('MonteCarloProvider — forced run bypasses the cache', () => {
 
   it('runToCompletion serves a cached hit without spawning a worker', async () => {
     renderProvider();
-    // Seed the cache via a completed run.
     await act(async () => {
       await hook!.runToCompletion(INPUT, { force: true });
     });
     expect(workerRuns).toHaveLength(1);
-    // A non-forced runToCompletion now hits the cache → no new spawn.
     let hit: { seed: number } | null = null;
     await act(async () => {
       hit = await hook!.runToCompletion(INPUT);
@@ -229,21 +183,10 @@ describe('MonteCarloProvider — forced run bypasses the cache', () => {
     expect(workerRuns).toHaveLength(1);
   });
 
-  // The two pre-empt tests below run the fake worker in MANUAL-delivery mode
-  // (set via `manualWorkerDelivery`): the pre-empted (first) worker is never
-  // told to deliver, so the ONLY way its `runToCompletion` promise settles is
-  // the provider's cancel-to-null path. This removes every scheduling race —
-  // there is no auto-delivery to out-run, so the result is deterministic under
-  // parallel load (a microtask/timer delivery could otherwise complete the
-  // first run with a summary before the pre-empt sweep fired). We still assert
-  // the FIRST promise resolves `null`; that behaviour comes from the provider
-  // `pendingCancelRef` fix, independent of worker delivery.
+  // The pre-empt tests run in manual delivery mode: the first worker never delivers, so its `runToCompletion` can only settle through the provider's cancel-to-null path.
   it('settles a pending runToCompletion to null when a new run() pre-empts it', async () => {
     manualWorkerDelivery = true;
     renderProvider();
-    // Kick a forced runToCompletion (cache bypassed → worker spawns) but do
-    // NOT await it; capture its promise so we can assert it settles. Its
-    // worker is never released, so it can only settle via pre-emption.
     let pending: Promise<MonteCarloSummary | null> | null = null;
     let settled: MonteCarloSummary | null | 'pending' = 'pending';
     await act(async () => {
@@ -251,18 +194,10 @@ describe('MonteCarloProvider — forced run bypasses the cache', () => {
       void pending.then((v) => {
         settled = v;
       });
-      // Wait until the first run is genuinely in-flight (its worker spawned →
-      // its cancel-resolver installed) before pre-empting. This mirrors real
-      // pre-emption (a new run arrives while one is running) and removes the
-      // artifact where the two runs' async cache-key hashes complete out of
-      // order, letting the pre-empt sweep run before the first resolver exists.
+      // Wait until the first run's worker has spawned so the pre-empt sweep finds its cancel-resolver; the cache-key hashes can otherwise complete out of order.
       await waitForWorker(INPUT.seed);
-      // Pre-empt with a fresh run before the first worker posts its result.
-      // The first awaiter must resolve `null` rather than hang forever.
       await hook!.run({ ...INPUT, seed: 222 }, { force: true });
     });
-    // The pre-empted runToCompletion resolved `null` (did not hang, did not
-    // resolve the first worker's summary).
     await expect(pending!).resolves.toBeNull();
     expect(settled).toBeNull();
   });
@@ -278,17 +213,7 @@ describe('MonteCarloProvider — forced run bypasses the cache', () => {
       void first.then((v) => {
         firstSettled = v;
       });
-      // Wait until the first run is genuinely in-flight (worker spawned →
-      // cancel-resolver installed) before pre-empting, so the second call's
-      // pre-empt sweep is guaranteed to find the first resolver (avoids the
-      // out-of-order cache-key-hash artifact).
       await waitForWorker(INPUT.seed);
-      // A second runToCompletion pre-empts the first before its worker posts a
-      // result; the first awaiter must resolve `null`. Kick it without awaiting
-      // (manual mode → it would otherwise hang), wait until its worker spawns
-      // (by which point the pre-empt sweep has already settled the first
-      // promise to null), then release the second run BY SEED so it completes
-      // and act() settles. The first run's worker (seed 111) is never released.
       second = hook!.runToCompletion({ ...INPUT, seed: 333 }, { force: true });
       const completed = second;
       await waitForWorker(333);
@@ -310,8 +235,6 @@ describe('MonteCarloProvider — forced run bypasses the cache', () => {
       await hook!.run({ ...INPUT, seed: 999 }, { force: true });
     });
     await waitFor(() => expect(hook!.result?.seed).toBe(999));
-    // A subsequent non-forced identical run now serves the OVERWRITTEN
-    // (seed 999) result from cache — proving the forced run persisted.
     await act(async () => {
       await hook!.run(INPUT);
     });
