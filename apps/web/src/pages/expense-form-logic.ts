@@ -1,14 +1,4 @@
-/**
- * Pure (non-React) logic for `ExpenseFormPage`: the scenario-patch delta
- * algebra and the glide save-time fact resolver. Extracted from the page
- * so the page file holds JSX/state only.
- *
- * NOTE: `IncomeFormPage` has structurally parallel `*ScenarioPatchDelta` /
- * `compute*ScenarioPatchSave` helpers in `income-form-logic.ts`. They are
- * NOT unified here — they operate on different override fields
- * (expense-only glide/hsaQualified vs income-only rollover/windfall keys)
- * and a forced shared abstraction would be premature.
- */
+/** Pure logic for ExpenseFormPage: the scenario-patch delta algebra and the glide save-time fact resolver. Kept parallel to, not unified with, the income helpers (different override fields). */
 import { jsonEq } from '../lib/json-eq';
 import { buildScenarioExpensePatchWrite } from '../lib/scenario-expense-patch';
 import { resolveScenario } from '../lib/scenario-resolution';
@@ -24,23 +14,7 @@ import type {
   ScenarioPayload,
 } from '../db/types';
 
-/**
- * Per-key delta between the form's built payload and the resolved
- * payload the form opened with. Only top-level keys whose value
- * changed are emitted. `description` clears to `''` (an empty string is
- * the field's real value, not a key removal), matching income's `notes`.
- *
- * Uniform `null` clear-rule: any optional present in
- * `opened` but absent in the rebuilt payload emits `null`, the
- * clear-marker the resolver strips after the chain merge (rather than
- * value-equivalent-neutral special-cases):
- *   - `discretionaryGlide` cleared (the editor now emits `undefined` in
- *     scenario-patch mode when off) → `null`, not the neutral no-op
- *     object;
- *   - a dropped `end` (a recurring→oneOff flip, or a cleared end) →
- *     `null`, so the scenario resolves with no end window rather than
- *     re-inheriting the canonical one.
- */
+// Per-key delta against the resolved payload the form opened with. Any optional present in opened but absent in the rebuild emits null (the clear-marker the resolver strips): a cleared discretionaryGlide, or a dropped end (a recurring → oneOff flip or cleared end). `description` clears to '' (its real value).
 function scenarioPatchDelta(
   built: ExpensePayload,
   opened: ExpensePayload,
@@ -58,10 +32,7 @@ function scenarioPatchDelta(
   if (!jsonEq(built.start, opened.start)) delta.start = built.start;
   const desc = descriptionInput.trim();
   if (desc !== (opened.description ?? '')) delta.description = desc;
-  // `end` lives on built only for recurring frequencies. When it changed
-  // from what the scenario opened with: emit the new value if present,
-  // else `null` to clear the inherited end. A one-off has no `end`,
-  // so a recurring→oneOff flip that opened with an `end` clears it.
+  // `end` exists on built only for recurring frequencies: emit the new value, else null to clear the inherited end (a recurring → oneOff flip).
   const builtEnd = built.frequency !== 'oneOff' ? built.end : undefined;
   if (!jsonEq(builtEnd, opened.end)) {
     delta.end = builtEnd ?? (opened.end !== undefined ? null : undefined);
@@ -72,10 +43,7 @@ function scenarioPatchDelta(
       glide ?? (opened.discretionaryGlide !== undefined ? null : undefined);
     if (delta.discretionaryGlide === undefined) delete delta.discretionaryGlide;
   }
-  // Emit hsaQualified in the patch only when changed. True is stored
-  // explicitly; false (same as absent) uses null to clear an inherited
-  // true (the clear-marker), or is omitted if the opened value was also
-  // absent/false.
+  // False (same as absent) emits null to clear an inherited true, and is omitted if the opened value was also absent or false.
   const builtHsa = built.hsaQualified === true ? true : undefined;
   const openedHsa = opened.hsaQualified === true ? true : undefined;
   if (builtHsa !== openedHsa) {
@@ -85,14 +53,7 @@ function scenarioPatchDelta(
   return delta;
 }
 
-/**
- * Scenario-patch Save: compute the next `ScenarioPayload` for this
- * scenario after merging the per-key delta into THIS expense's existing
- * patch (never replace; pre-existing patch keys on this expense
- * are preserved). Pre-prefix snapshots could store the patch under the
- * raw canonical id, so the merge reads either key and the shared write
- * helper drops both. Pure — the caller persists via `saveScenario`.
- */
+/** Merges the per-key delta into this expense's existing patch, never replacing it; pre-prefix snapshots could store the patch under the raw canonical id, so either key is read and both are dropped. */
 export function computeScenarioPatchSave(
   scenarioPayload: ScenarioPayload,
   builtPayload: ExpensePayload,
@@ -126,24 +87,10 @@ export function computeScenarioPatchSave(
 }
 
 /**
- * Resolve the scenario-derived facts a save-time glide validation needs:
- * the primary member's retirement year/month and the scenario's resolved
- * life expectancy. `scId` null selects the primary scenario (canonical
- * Save), matching `buildGlideCtx`'s prior primary-vs-scId selection.
- *
- * `lifeExpectancy` carries the scenario's resolved value so a `lifetime`
- * glide-end anchor resolves to the SAME month the preview/engine context
- * (buildExpenseProjectionContext) resolves it to — without it,
- * resolveEndMonth's `lifetime` branch falls back to
- * DEFAULT_LIFE_EXPECTANCY_AGE on the Save path while the preview uses the
- * override, breaking preview↔Save parity (A-r3-1). Pure.
- *
- * Defaults to the unresolved posture (year NaN, month0 0) and assigns
- * each field as it resolves, so a throw after `resolveScenario` succeeds
- * keeps the already-resolved `lifeExpectancy` (exact prior semantics).
- * glideProblem treats unresolved anchors as errors; month0 0 is only the
- * can't-resolve fallback.
- */
+* Scenario-derived facts the save-time glide validation needs (primary retirement year/month and resolved life expectancy); `scId` null selects the primary scenario.
+* lifeExpectancy keeps the preview and Save paths resolving a `lifetime` glide-end identically (otherwise resolveEndMonth falls back to DEFAULT_LIFE_EXPECTANCY_AGE on Save).
+* Defaults to the unresolved posture (year NaN, month0 0), assigning each field as it resolves, so glideProblem treats unresolved anchors as errors.
+*/
 export type GlideScenarioFacts = {
   retirementYear: number;
   retirementMonth0: number;
@@ -181,9 +128,6 @@ export function resolveGlideScenarioFacts(
       }
     }
   } catch {
-    // leave year NaN / month0 0 / lifeExpectancy as-resolved —
-    // glideProblem treats unresolved anchors as errors; month0 0 is
-    // only the can't-resolve fallback (matches the prior posture).
   }
   return { retirementYear, retirementMonth0, lifeExpectancy };
 }

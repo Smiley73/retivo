@@ -1,18 +1,4 @@
-/**
- * Scenario detail page subsection: Asset allocation (post-retirement
- * growth vs income bucket model). Mirrors the Inflation /
- * Discretionary / Life Expectancy pattern — summary card on the page
- * + Configure button that opens a small modal owning its own draft
- * state. Save calls `saveScenario` directly and closes; Cancel
- * discards.
- *
- * Storage shape lives at `overrides.retirementAllocation`; the glide it drives
- * is described under "The Asset allocation glide" in
- * docs/math-income-expenses-and-returns.md. The
- * override stores `endYear` (calendar year) for engine purity; the
- * modal converts the user-entered "End age (primary)" to
- * `endYear = primaryBirthYear + endAge` on save.
- */
+/** Scenario detail Asset allocation card (post-retirement growth vs income bucket model) with a Configure modal. Stored at overrides.retirementAllocation (glide: "The Asset allocation glide" in docs/math-income-expenses-and-returns.md); the override stores endYear and the modal converts the entered end age as primaryBirthYear + endAge on save. */
 import React, { useMemo, useState } from 'react';
 import { Modal } from '../components/Modal';
 import { formatPercent } from '../components/PercentInput';
@@ -74,12 +60,7 @@ function memberFirstName(
   return name && name.length > 0 ? name : 'the primary member';
 }
 
-/**
- * Resolves the primary member's retirement age (in whole years) from
- * the scenario chain. Returns `null` when no override anywhere defines
- * one — in that case the glide-start offset can't be anchored to a
- * calendar year and the modal disables that field.
- */
+// The primary member's retirement age from the scenario chain; null when no override defines one, so the glide-start offset can't anchor to a year and the modal disables that field.
 function primaryRetirementAgeOf(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -250,8 +231,6 @@ export const AssetAllocationModal: React.FC<ModalProps> = ({
     try {
       let nextPayload: ScenarioPayload;
       if (!enabled) {
-        // Toggle off → drop the override entirely (resolver falls back
-        // to the parent chain or no override at all).
         nextPayload = resetField(scenario.payload, 'retirementAllocation');
       } else {
         if (glideOn && birthYear === null) {
@@ -259,9 +238,7 @@ export const AssetAllocationModal: React.FC<ModalProps> = ({
             `${primaryName}'s birthdate is required to set a glide end age.`,
           );
         }
-        // End age must be strictly greater than the glide-start age
-        // (retirement + offset). Skipped when retirement age can't be
-        // resolved — the inline warning already nudges the user there.
+        // End age must exceed the glide-start age (retirement + offset); skipped when retirement age can't resolve, since the inline warning already covers it.
         if (glideOn && primaryRetirementAge !== null) {
           const startAge = primaryRetirementAge + glideStartOffset;
           if (endAge <= startAge) {
@@ -344,10 +321,6 @@ export const AssetAllocationModal: React.FC<ModalProps> = ({
 
         {enabled && (
           <div className="flex flex-col gap-4">
-            {/* Growth rate / Income rate / Initial growth allocation as
-                sliders. Each is a horizontal row — label on the left, the
-                slider filling the rest — so the section stays compact.
-                Initial growth shows the derived `% income` under its label. */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-3">
                 <label
@@ -429,9 +402,6 @@ export const AssetAllocationModal: React.FC<ModalProps> = ({
                 aria-label="Glide path window"
                 className="flex flex-col gap-2"
               >
-                {/* Same horizontal-row layout as the rate sliders above:
-                    label (with any derived readout) on the left, slider
-                    filling the rest. */}
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center gap-3">
                     <label
@@ -570,7 +540,6 @@ export const AssetAllocationModal: React.FC<ModalProps> = ({
         )}
 
         {error && <Alert tone="error">{error}</Alert>}
-        {/* Left-aligned, primary action first — AGENTS modal rule. */}
         <div className="flex justify-start gap-2">
           <button type="button" className={btnPrimaryClass} onClick={onSave} disabled={submitting}>
             {submitting ? 'Saving…' : 'Save'}

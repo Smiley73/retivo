@@ -1,24 +1,4 @@
-/**
- * Withdrawal strategy configure editor — sub-components + editor component.
- *
- * Extracted from ScenarioWithdrawalStrategyCards to keep each file under
- * the 400-line cap.
- *
- * Layout: React Aria Tabs (4 tabs:
- * "strategy", "custom" disabled when kind !== 'customOrder', "cap",
- * "advanced"). Each tab panel holds its section's controls.
- * Tax assumptions are a SEPARATE modal
- * (scenario-tax-assumptions-modal.tsx), not a tab here.
- *
- * This is a non-modal page editor hosted by ScenarioWithdrawalStrategyPage at
- * /scenarios/:id/withdrawal-strategy: it owns the draft + tabs + validation +
- * Save and the page-level unsaved-changes guard (no Modal wrapper, no `open`).
- *
- * Draft hook lives in scenario-withdrawal-strategy-draft-hook.ts.
- * Imports shared sub-components from:
- *   - scenario-withdrawal-strategy-tier-editor.tsx  (TierEditor)
- *   - scenario-withdrawal-strategy-magi-cap.tsx     (MagiCapSection)
- */
+/** Withdrawal strategy editor page body: tabs (strategy, custom order, MAGI cap, advanced), validation, Save and the page-level unsaved-changes guard. Tax assumptions are a separate modal. */
 import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -73,13 +53,8 @@ import {
   buildNextMagiCap,
 } from './scenario-withdrawal-strategy-save-helpers';
 
-// ——— Tailwind class constants ————————————————————————————
-// Tab styling is shared with the tax-assumptions modal (see components/tab-chrome)
-// so both tab strips stay visually identical.
 const TAB_CLASS = SHARED_TAB_CLASS;
 const TAB_PANEL_CLASS = SHARED_TAB_PANEL_CLASS;
-
-// ——— editor sub-components ————————————————————————————————
 
 interface StrategyKindPickerProps {
   value: StrategyKind;
@@ -167,8 +142,6 @@ const MagiBootstrapField: React.FC<MagiBootstrapFieldProps> = ({
   </div>
 );
 
-// ——— editor ———————————————————————————————————————————————
-
 export interface WithdrawalStrategyEditorProps {
   scenario: ScenarioAggregate;
   scenarios: ScenarioAggregate[];
@@ -212,7 +185,6 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
     isDirty,
   } = useWithdrawalStrategyDraft(scenario, scenarios, accounts);
 
-  // Active Roth accounts eligible as a Fill-mode conversion target.
   const rothAccounts = useMemo(
     () =>
       rothConversionTargets(accounts).map((a) => ({
@@ -222,9 +194,7 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
     [accounts],
   );
 
-  // The scenario's real primary retirement year/month, so a ladder
-  // mixing `retirementStart` + absolute `year`/`age` windows resolves overlap
-  // against the SAME calendar baseline the engine uses (not a synthetic year).
+  // The scenario's real primary retirement year/month, so a ladder mixing retirementStart and absolute windows resolves overlap against the engine's baseline.
   const retirementAnchor = useMemo(
     () => resolveScenarioRetirementAnchor(scenario, scenarios, members),
     [scenario, scenarios, members],
@@ -233,20 +203,15 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // CBP accounts are never orderable; resolve their info-row labels once.
   const cbpInfoRows = useMemo(
     () => buildCbpInfoRows(scenario, scenarios, accounts, incomeStreams),
     [scenario, scenarios, accounts, incomeStreams],
   );
 
-  // Page-level dirty guard hosted here (where `isDirty` lives). Its global
-  // pushState/replaceState patch also intercepts the page's breadcrumb <Link>.
+  // The global pushState/replaceState patch also intercepts the page's breadcrumb <Link>.
   const { pendingNavModal, navigateUnguarded } = useUnsavedChangesGuard(isDirty);
 
-  // Electing a payout / reviewing pensions navigates away, unmounting this
-  // editor. While dirty the guard's pushState patch intercepts the pathname
-  // change and surfaces the same Stay/Leave prompt; while clean the
-  // navigation runs straight through.
+  // Navigating away while dirty is intercepted by the guard's pushState patch and surfaces the Stay/Leave prompt.
   const navigate = useNavigate();
   const handleElectPayout = useCallback(
     (account: Aggregate<AccountPayload>) => {
@@ -254,20 +219,12 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
     },
     [navigate],
   );
-  // Conflict (duplicate-stream) remediation reviews existing pensions on the
-  // Income page — mirrors CbpRemediationBanner's duplicate remediation target
-  // ("/income"). Adding another stream would deepen the duplication, so the
-  // conflict row never uses the elect-a-payout (incomeAddPath) deep-link.
+  // Duplicate-stream remediation reviews existing pensions on the Income page; adding another stream would deepen the duplication.
   const handleReviewPensions = useCallback(() => {
     navigate('/income');
   }, [navigate]);
 
-  /** Validate all placeable accounts placed when customOrder is active.
-   *  Two account sets: `allActiveAccounts` gates the "no accounts at all"
-   *  guard; `placeableAccounts` (active, non-CBP) gates the "place every
-   *  account" check — CBP accounts are never orderable, so an all-CBP
-   *  household passes the guard, has nothing unplaced, and falls through to
-   *  the empty-tier message. */
+  // CBP accounts are never orderable: an all-CBP household has nothing unplaced and falls through to the empty-tier message.
   const validationError = useMemo((): string | null => {
     if (strategyKind !== 'customOrder') return null;
     const allActiveAccounts = accounts.filter((a) => a.payload.active);
@@ -284,12 +241,9 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
     if (unplaced.length > 0) {
       return 'Place every account into a tier or the Excluded section before saving.';
     }
-    // At least one non-empty drainable tier required (all-in-Excluded
-    // is invalid; excluded accounts are never drawn from).
     if (tiers.every((t) => t.length === 0)) {
       return 'Place at least one account in a drawdown tier. Accounts in Excluded are never drawn from.';
     }
-    // Duplicate ID across tiers.
     const tierFlat = tiers.flat();
     const seen = new Set<string>();
     for (const id of tierFlat) {
@@ -302,8 +256,6 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
     return null;
   }, [strategyKind, accounts, tiers, excludedAccountIds]);
 
-  /** Required ceiling per window + non-overlap
-   *  when the cap is enabled. */
   const magiCapDollarsError = useMemo((): string | null => {
     if (!magiCapEnabled) return null;
     return magiCapWindowsSaveError(magiCapWindows, members, retirementAnchor);
@@ -319,14 +271,10 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
     }
     setSubmitting(true);
     setError(null);
-    // Orchestrate save + notify + reload in one try/catch with
-    // `submitting` held across the whole sequence. A reload-only failure
-    // (save already durable) surfaces a distinct message and never re-routes
-    // into the save-failed path.
+    // Save, notify and reload under one `submitting`; a reload-only failure (save already durable) gets a distinct message and never re-routes into the save-failed path.
     let savedOk = false;
     try {
-      // Strip BOTH split lookback keys before re-applying the fragment so
-      // a "Use engine default" save reliably deletes them (omitted fragment).
+      // Strip both split lookback keys first so a "Use engine default" save deletes them.
       const {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure-to-omit: binding exists only to strip the key from restOverrides
         magiBootstrapLookbackMinus2: _omitMagi2,
@@ -360,8 +308,6 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
         householdId,
       });
       savedOk = true;
-      // On full success onSaved's reload remounts this editor with a fresh
-      // baseline so isDirty returns to false and Save re-disables.
       await onSaved();
     } catch (e) {
       setError(
@@ -449,7 +395,6 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
       {(validationError || magiCapDollarsError || error) && (
         <Alert tone="error">{validationError ?? magiCapDollarsError ?? error}</Alert>
       )}
-      {/* Left-aligned, primary action first — AGENTS action-order rule. */}
       <div className="flex justify-start gap-2">
         <button
           type="button"
@@ -459,7 +404,6 @@ export const WithdrawalStrategyEditor: React.FC<WithdrawalStrategyEditorProps> =
         >
           {submitting ? 'Saving…' : 'Save'}
         </button>
-        {/* Cancel is an intentional discard — navigate back unguarded. */}
         <button
           type="button"
           className={btnSecondaryClass}

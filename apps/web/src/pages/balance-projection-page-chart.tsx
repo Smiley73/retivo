@@ -1,9 +1,4 @@
-/**
- * Balance Projection page — per-year balance line chart sibling. Hosts
- * the section card, the log-scale toggle, the `<ProjectionChart>`, and
- * the disclaimer caption. Extracted from BalanceProjectionPage.tsx to
- * keep the page itself under the file shape cap.
- */
+/** Per-year balance line chart section: card, log-scale toggle, ProjectionChart and disclaimer caption. */
 import React, { useCallback, useMemo } from 'react';
 import { ChartInfoPopover } from '../components/ChartInfoPopover';
 import { SegmentedRadioGroup } from '../components/SegmentedRadioGroup';
@@ -36,21 +31,11 @@ export interface BalanceProjectionChartProps {
   readonly tooltipMembers: ReadonlyArray<TooltipMember>;
   readonly yScale: 'linear' | 'log';
   readonly onYScaleChange: (next: 'linear' | 'log') => void;
-  /** Active Monte Carlo basis (`null` for a deterministic basis). Drives the
-   *  representative-run line's tier color + legend label, and gates the
-   *  inline recalculation status + the one-example banner. */
+  /** Drives the representative-run line's tier color and legend label, and gates the inline recalculation status and one-example banner. */
   readonly activeMcBasis?: McBasis | null;
-  /** Plan stress-test view model — drives the inline running / error status
-   *  near the chart. The Recalculate control itself lives in the page
-   *  toolbar; this is the same `usePlanStressTestVm` the Stress-test outcomes
-   *  card consumes. */
+  /** Drives the inline running / error status near the chart; the Recalculate control lives in the page toolbar. */
   readonly stressVm: PlanStressTestVm;
-  /** Active deterministic method (Planned / TWR). Gates the Historical
-   *  planned-rate fallback disclosure note (shown only under `'twr'`). */
   readonly activeMethod: ProjectionMethod;
-  /** Non-CBP accounts projecting on their planned rate
-   *  under the Historical view. The disclosure note renders beneath the
-   *  chart when `activeMethod === 'twr'` AND this list is non-empty. */
   readonly fallbackAccounts: ReadonlyArray<{ id: string; name: string }>;
 }
 
@@ -68,8 +53,6 @@ export const BalanceProjectionChartSection: React.FC<BalanceProjectionChartProps
   fallbackAccounts,
 }) => {
   const chartColors = useChartColors();
-  // Resolve the representative-run line's tier color (from CHART_COLORS) +
-  // legend label when a Monte Carlo basis is active.
   const mcLine = useMemo(() => {
     if (!activeMcBasis) return null;
     const color =
@@ -81,8 +64,7 @@ export const BalanceProjectionChartSection: React.FC<BalanceProjectionChartProps
     return { color, label: MC_BASIS_LABELS[activeMcBasis] };
   }, [activeMcBasis, chartColors]);
 
-  // Hook lives here (section), not in the lazy Inner, so Reset button
-  // can read isZoomed during the Inner's Suspense fallback.
+  // Hook lives in the section, not the lazy Inner, so the Reset button can read isZoomed during the Inner's Suspense fallback.
   const xDomainFull = useMemo((): [number, number] => {
     if (rows.length === 0) return [0, 0];
     return [rows[0].x, rows[rows.length - 1].x];
@@ -93,7 +75,6 @@ export const BalanceProjectionChartSection: React.FC<BalanceProjectionChartProps
     [rows],
   );
 
-  // Y-range for visible projection values so the y-axis auto-fits on zoom.
   const computeY = useCallback(
     (visibleRows: readonly { x: number }[]): [number, number] | null => {
       const xs = new Set(visibleRows.map((r) => r.x));
@@ -133,10 +114,7 @@ export const BalanceProjectionChartSection: React.FC<BalanceProjectionChartProps
         <div className="report-print-hide flex flex-wrap items-center gap-2">
           {activeMcBasis && (
             <>
-              {/* Lightweight inline feedback near the chart for a
-                  recalculation — polite while running, assertive on error.
-                  The Recalculate control lives in the page toolbar; the full
-                  progress bar + Cancel stay in the outcomes-card status row. */}
+              {/* Lightweight inline feedback: polite while running, assertive on error; the full progress bar and Cancel stay in the outcomes-card status row. */}
               {stressVm.isRunning && (
                 <span
                   className="text-sm text-muted"

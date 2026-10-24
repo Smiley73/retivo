@@ -1,9 +1,4 @@
-/**
- * `RowView` discriminated union + the `useRowView` / `deriveRowView`
- * derivation. Extracted from `ss-optimizer-page-chrome.tsx` to keep that
- * file under the ≤400-ln shape limit. Pure data — no JSX — so a `.ts`
- * file is enough.
- */
+/** RowView discriminated union and the useRowView / deriveRowView derivation (pure data, no JSX). */
 import { useMemo } from 'react';
 import type { OptimizerWorkerOutbound } from '../workers/claim-age-optimizer.worker';
 import type { UnsupportedScenarioReason } from '../lib/optimizer-unsupported';
@@ -17,16 +12,13 @@ import type {
 export type EmptyReason = 'no-primary-member' | 'no-retirement-date';
 export type UnsupportedReason = UnsupportedScenarioReason;
 
-/** A scenario's current (resolved) Social Security claim age per member —
- *  the baseline the optimizer's recommendation is compared against. `null`
- *  when no claim age is set on the scenario or any ancestor. */
+/** The scenario's resolved claim age per member, the baseline the recommendation is compared against; null when none is set on the scenario or any ancestor. */
 export interface CurrentClaimAges {
   readonly primary: RetirementAgePerMember | null;
   readonly secondary: RetirementAgePerMember | null;
 }
 
-/** Resolve the scenario's current claim ages by walking the override
- *  chain (first-wins inheritance from ancestors, same as the projection). */
+/** Walks the override chain (first-wins from ancestors, as the projection does). */
 export function resolveCurrentClaimAges(
   scenarioId: string,
   scenarios: ReadonlyArray<ScenarioAggregate>,
@@ -35,12 +27,7 @@ export function resolveCurrentClaimAges(
   return { primary: ss?.primary ?? null, secondary: ss?.secondary ?? null };
 }
 
-/**
- * Does the current claim age already equal the recommendation, years and
- * months both? Single source of truth for the "show just the age" display
- * rule and the already-applied button state; callers skip a `null`
- * recommendation (a member Save keeps as stored).
- */
+/** Whether the current claim age equals the recommendation (years and months); callers skip a null recommendation. */
 export function claimAgeMatches(
   current: RetirementAgePerMember | null,
   recommendedYears: number | null,
@@ -70,19 +57,13 @@ export type RowView =
       secondaryPastWindow: boolean;
       hasSecondary: boolean;
       missingPiaMembers: ReadonlyArray<string>;
-      /** Live current claim ages — drives the "current → recommended"
-       *  cell display. Resolved from `aggregates` so it tracks an Apply
-       *  immediately, even on the MC tab (which doesn't re-run). */
+      /** Live current claim ages, resolved from `aggregates` so the cell tracks an Apply immediately, even on the MC tab (which doesn't re-run). */
       current: CurrentClaimAges;
       alreadyAtOptimum: boolean;
-      /** Metric value at the scenario's current claim ages — drives the
-       *  "current → recommended" metric cell. `undefined` when the current
-       *  pair isn't a candidate (the 1-D primary-only fallback). */
+      /** Metric value at the current claim ages; undefined when the current pair isn't a candidate (the 1-D primary-only fallback). */
       baselineMetricValue: number | undefined;
       parentName: string | null;
       resolvedFromAncestor: boolean;
-      /** The fixed death age the optimizer assumed for this scenario;
-       *  retained for the MC result (the former per-row disclosure was removed). */
       assumedDeathAge: number;
     };
 
@@ -107,10 +88,7 @@ function deriveRowView(
     return { kind: 'unsupported', reason: row.result.reason };
   }
   if (row.result.kind === 'twr-insufficient') {
-    // MC tab doesn't emit this kind, but the discriminated union now
-    // includes it — collapse to a loading-row equivalent so the type
-    // narrowing below is exhaustive without bleeding TWR-specific copy
-    // onto the MC tab.
+    // The MC tab doesn't emit this kind: collapse it to a loading row so the narrowing stays exhaustive without TWR-specific copy.
     return { kind: 'loading' };
   }
   const winner = row.result.winner;
@@ -123,9 +101,7 @@ function deriveRowView(
   if (!primaryHasPia && (secondary === undefined || !secondaryHasPia)) {
     return { kind: 'both-missing-pia' };
   }
-  // `winner: null` on a `'result'` reply = empty candidate grid on
-  // every eligible member (everyone past the claim-age window). Falls
-  // through to LoadingRow without this branch.
+  // winner: null on a 'result' reply means an empty candidate grid on every eligible member (all past the claim-age window).
   if (!winner) return { kind: 'past-window' };
   const secondaryPastWindow =
     secondary !== undefined &&
@@ -135,12 +111,7 @@ function deriveRowView(
     row.scenario.payload.overrides.socialSecurity === undefined &&
     row.scenario.payload.parentScenarioId !== null;
   const current = resolveCurrentClaimAges(row.scenario.id, aggregates.scenarios);
-  // Derive "already at optimum" live from the current claim age vs the
-  // recommendation rather than trusting the engine's baked-in flag. The
-  // MC tab doesn't re-run after Apply, so its baked flag goes stale; a
-  // live comparison flips the row to "Applied" the moment the override
-  // lands. Equivalent to the engine flag on the deterministic tab (which
-  // re-runs), keeping both tabs consistent.
+  // Derived live from current vs recommended, not the engine's baked flag: the MC tab doesn't re-run after Apply, so the baked flag goes stale.
   const alreadyAtOptimum =
     claimAgeMatches(current.primary, winner.primaryAgeYears, winner.primaryAgeMonths) &&
     (secondary === undefined ||
@@ -150,9 +121,7 @@ function deriveRowView(
         winner.secondaryAgeYears,
         winner.secondaryAgeMonths,
       ));
-  // Assumed death age. Prefer the value the runner forwarded onto the
-  // result; otherwise resolve it from the scenario chain (deterministic
-  // tab / older payloads).
+  // Prefer the runner-forwarded value; else resolve from the scenario chain.
   const assumedDeathAge =
     row.result.assumedDeathAge ??
     resolveAssumedDeathAge(row.scenario.id, aggregates.scenarios);
@@ -173,8 +142,6 @@ function deriveRowView(
   };
 }
 
-/** Resolve the assumed primary death age from the scenario chain
- *  (fallback when the result payload omits it). */
 function resolveAssumedDeathAge(
   scenarioId: string,
   scenarios: ReadonlyArray<ScenarioAggregate>,

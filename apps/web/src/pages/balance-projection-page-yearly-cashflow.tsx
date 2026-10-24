@@ -1,9 +1,4 @@
-/**
- * Balance Projection page — "Expected cashflow" band (cashflow chart +
- * granularity toggle + disclaimer). Extracted from
- * `balance-projection-page-yearly.tsx` to keep the yearly section
- * file under the 400-ln file shape cap.
- */
+/** "Expected cashflow" band: cashflow chart, granularity toggle and disclaimer. */
 import React, { useCallback, useMemo, useState } from 'react';
 import { CashflowProjectionChart } from '../components/CashflowProjectionChart';
 import type {
@@ -26,21 +21,13 @@ export interface YearlyCashflowBandProps {
   readonly cashflowGranularity: CashflowGranularity;
   readonly onGranularityChange: (g: CashflowGranularity) => void;
   readonly cashflowChartRows: ReadonlyArray<CashflowMonthlyPoint>;
-  /** Retirement + life-expectancy markers (the canonical teal
-   *  `Retires <Mon YYYY>` retirement line plus the death lines). */
   readonly chartMarkers: ReadonlyArray<CashflowChartMarker>;
   readonly tooltipMembers: ReadonlyArray<TooltipMember>;
   readonly depletionYear: number | null;
-  /** Active deterministic method label (Planned / TWR) suffixed onto the
-   *  card title so the user can tell which basis this chart reflects. */
   readonly methodLabel: string;
-  /** Active expense categories for the "by category" expense-mode toggle.
-   *  Empty ⇒ the expense-mode group is disabled (Total-only). */
   readonly categoryMeta: ReadonlyArray<CategoryMeta>;
 }
 
-/** Cashflow expense-stack mode: total (essential/discretionary) vs the
- *  per-category breakdown. Ephemeral, like the granularity toggle. */
 type ExpenseMode = 'total' | 'category';
 
 export const YearlyCashflowBand: React.FC<YearlyCashflowBandProps> = ({
@@ -53,19 +40,13 @@ export const YearlyCashflowBand: React.FC<YearlyCashflowBandProps> = ({
   methodLabel,
   categoryMeta,
 }) => {
-  // Expense-mode toggle is ephemeral `useState` (not persisted),
-  // default Total. When no category carries a non-zero expense in
-  // range (`categoryMeta` empty) the WHOLE group is disabled — the
-  // component supports only a whole-group `disabled`, so a forced "Total"
-  // is the degrade path.
+  // Ephemeral, default Total; when no category carries a non-zero expense the whole group is disabled (it supports only whole-group disabled), so Total is forced.
   const [expenseMode, setExpenseMode] = useState<ExpenseMode>('total');
   const categoryAvailable = categoryMeta.length > 0;
-  // Guard against a stale 'category' selection if categories disappear
-  // (e.g. scenario / dollars flip leaves the set empty).
+  // Guard against a stale 'category' selection if the set empties (scenario or dollars flip).
   const effectiveExpenseMode: ExpenseMode = categoryAvailable
     ? expenseMode
     : 'total';
-  // Hook lives here (section), not in the lazy Inner.
   const xDomainFull = useMemo((): [number, number] => {
     if (cashflowChartRows.length === 0) return [0, 0];
     return [
@@ -74,13 +55,11 @@ export const YearlyCashflowBand: React.FC<YearlyCashflowBandProps> = ({
     ];
   }, [cashflowChartRows]);
 
-  // Normalise fractionalYear → x for the hook.
   const rowsForY = useMemo(
     () => cashflowChartRows.map((r) => ({ x: r.fractionalYear })),
     [cashflowChartRows],
   );
 
-  // Y-range for visible cashflow values so the y-axis auto-fits on zoom.
   const computeY = useCallback(
     (visibleRows: readonly { x: number }[]): [number, number] | null => {
       const xs = new Set(visibleRows.map((r) => r.x));
@@ -117,10 +96,7 @@ export const YearlyCashflowBand: React.FC<YearlyCashflowBandProps> = ({
         </div>
         <div className="report-print-hide flex items-center gap-2">
           <ChartZoomReset isZoomed={zoom.isZoomed} onReset={zoom.reset} />
-          {/* Expense-mode toggle: Total vs By category. Distinct
-              `ariaLabel` from the granularity group so the name-scoped
-              `balance-projection-radiogroup` e2e is unaffected. Disabled
-              (whole group → forced Total) when no category is active. */}
+          {/* A distinct ariaLabel from the granularity group so the name-scoped balance-projection-radiogroup e2e is unaffected. */}
           <SegmentedRadioGroup<ExpenseMode>
             size="sm"
             ariaLabel="Cashflow expense breakdown"
@@ -141,8 +117,6 @@ export const YearlyCashflowBand: React.FC<YearlyCashflowBandProps> = ({
               },
             ]}
           />
-          {/* The cashflow card owns its own granularity toggle; the
-              income-breakdown card carries an independent one. */}
           <SegmentedRadioGroup<CashflowGranularity>
             size="sm"
             ariaLabel="Cashflow chart granularity"

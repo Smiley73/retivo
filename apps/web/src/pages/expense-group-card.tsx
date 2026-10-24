@@ -1,9 +1,4 @@
-/**
- * One category's expense-list card for the /expenses page, plus the
- * shared row/group shapes it consumes. Extracted from `ExpensesPage`
- * so that already-oversized page stays small; visual style is the
- * Tailwind-defaults vocabulary (every fg/bg pair AA-safe per contrast.ts).
- */
+/** One category's expense-list card for /expenses, plus the shared row and group shapes it consumes. */
 import React from 'react';
 import { Badge } from '../components/Badge';
 import { Muted } from '../components/Muted';
@@ -68,8 +63,6 @@ export const ExpenseGroupCard: React.FC<ExpenseGroupCardProps> = ({
           data-expense-id={r.id}
           className="group/row relative flex items-center justify-between gap-3 border-t border-line py-2 pl-3 first:border-t-0"
         >
-          {/* Left bucket-bar marker matching the Accounts table:
-              essential → taxable (cyan), discretionary → roth (violet). */}
           <BucketBar
             bucket={
               r.payload.classification === 'essential' ? 'taxable' : 'roth'
@@ -104,14 +97,9 @@ export const ExpenseGroupCard: React.FC<ExpenseGroupCardProps> = ({
               {describeExpenseEnd(r.payload.end, r.payload.frequency, members)}
             </Muted>
           </div>
-          {/* Tabular numbers: amounts compared down the column render in
-              JetBrains Mono with tabular widths (see "Typography" in docs/ui-conventions.md). */}
           <div className="min-w-32 text-right font-mono tabular-nums">
             {formatExpenseAmount(r.payload.amount, r.payload.frequency)}
           </div>
-          {/* Icon row-actions matching Accounts / Account Balances —
-              the `row-actions` cluster reveals on hover / focus-within
-              (pointer) and stays visible on touch. */}
           <div className="row-actions items-center">
             <button
               type="button"

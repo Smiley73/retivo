@@ -1,10 +1,4 @@
-/**
- * Balance Projection page — year-by-year table sub-section: the MAGI-cap
- * breach banner, the show/hide disclosure button, and the collapsible
- * `<TableScroll>` year-by-year projection table. Extracted from
- * `balance-projection-page-yearly.tsx` to keep the yearly
- * section file under the file shape cap.
- */
+/** Year-by-year table sub-section: the MAGI-cap breach banner, the show/hide disclosure and the collapsible TableScroll projection table. */
 import React from 'react';
 import {
   Cell,
@@ -54,11 +48,8 @@ export const BalanceProjectionYearlyTable: React.FC<
   magiCapBreachYears,
   isMagiCapActive = false,
 }) => {
-  // The Roth-converted column shows only when at least one year has a
-  // conversion (Fill mode ran) — hidden entirely otherwise so a Minimize /
-  // no-cap scenario never renders an always-empty column.
+  // Hidden entirely unless some year has a conversion (Fill mode ran), so a Minimize or no-cap scenario never renders an always-empty column.
   const showRothConverted = yearTableRows.some((r) => (r.rothConverted ?? 0) > 0);
-  // Compute breach banner summary.
   const breachCount = magiCapBreachYears?.length ?? 0;
   const breachBanner =
     breachCount > 0 && magiCapBreachYears ? (
@@ -88,9 +79,7 @@ export const BalanceProjectionYearlyTable: React.FC<
       >
         {yearTableOpen ? 'Hide year-by-year table' : 'Show year-by-year table'}
       </button>
-      {/* Always mounted but `display:none`/out of the a11y tree when collapsed
-         : print reveals only `.bp-print-expand[hidden]` so the table
-          force-expands on paper without un-hiding unrelated DOM. */}
+      {/* Always mounted but hidden when collapsed; print reveals only .bp-print-expand[hidden]. */}
       <div hidden={!yearTableOpen} className="bp-print-expand">
         <TableScroll label="Year-by-year projection table">
           <Table className={tableClass} aria-label="Year-by-year projection">

@@ -1,17 +1,4 @@
-/**
- * Signup page. Collects email + password, calls `/auth/signup`, then
- * shows a "check your inbox" confirmation. In dev (no SES), the API
- * returns the verification token in the response so the developer can
- * click through immediately — we surface that link inline.
- *
- * After verification the user is redirected to /login.
- *
- * Layout mirrors LoginPage: centered card outside the app shell so the
- * unauthenticated surface stays visually consistent. The password field
- * has a Show/Hide toggle placed in the label row (outside the input) so
- * it doesn't collide with password-manager icons that overlay the
- * input's right edge.
- */
+/** Signup page: collects email and password, calls /auth/signup, then shows a "check your inbox" confirmation. In dev (no SES) the API returns the verification token and the link is shown inline. */
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Checkbox } from 'react-aria-components';
@@ -41,13 +28,7 @@ import {
   authDevLinkClass,
 } from './auth-page-chrome';
 
-/**
- * Signup-specific card width. Wider than the shared `AUTH_CARD_WIDTH`
- * (430px, pinned to the Graphite Spectrum `.signin` mock and shared by
- * Login/VerifyEmail/ApproveSignup/DeclineSignup) because signup alone packs
- * name + birthdate and email + password into two-column rows below 430px is
- * too cramped for that. Login etc. keep the narrower shared width.
- */
+// Wider than the shared AUTH_CARD_WIDTH: signup packs name + birthdate and email + password into two-column rows that are too cramped at 430px.
 const SIGNUP_CARD_WIDTH =
   // eslint-disable-next-line no-restricted-syntax -- signup-only widened card to fit paired-field rows
   'w-full max-w-[680px] shadow-lg rounded-[20px]';
@@ -60,9 +41,7 @@ export const SignupPage: React.FC = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [birthdate, setBirthdate] = useState('');
-  // The not-financial-advice acknowledgement. Starts `false`; Create account
-  // stays focusable but submit is blocked with an accessible error until it is
-  // checked. Held in the form only — nothing about it is sent to the server.
+  // The not-financial-advice acknowledgement: held in the form only, nothing about it is sent to the server; submit is blocked with an accessible error until checked.
   const [agreed, setAgreed] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -79,10 +58,7 @@ export const SignupPage: React.FC = () => {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // The form is `noValidate`, so browser constraint validation does not
-    // fire — guard the three required profile fields here before calling
-    // signup(). First/last name must be non-blank; birthdate must be a
-    // `YYYY-MM-DD` string.
+    // The form is noValidate, so guard the required profile fields here: names non-blank, birthdate a YYYY-MM-DD string.
     if (!firstName.trim()) {
       setFieldError('Enter your first name.');
       return;
@@ -96,9 +72,6 @@ export const SignupPage: React.FC = () => {
       setFieldError(birthdateError);
       return;
     }
-    // The account cannot be created until the user ticks the acknowledgement.
-    // Announced through the same `role="alert"` field error the profile checks
-    // use.
     if (!agreed) {
       setFieldError('Tick the box to confirm you understand this is not financial advice.');
       return;
@@ -117,8 +90,7 @@ export const SignupPage: React.FC = () => {
       setDone({ email: res.email, devToken: res.verificationToken });
     } catch (err) {
       if (err instanceof ApiRequestError) {
-        // A gateway-level throttle/timeout with no error envelope reads
-        // the shared busy copy instead of the raw upstream status text.
+        // A gateway-level throttle or timeout with no error envelope reads the shared busy copy.
         setError(isBusyResponse(err) ? BUSY_MESSAGE : err.error.message);
       } else {
         setError('Sign up failed. Try again in a moment.');
@@ -134,8 +106,7 @@ export const SignupPage: React.FC = () => {
     setResendStatus(null);
     try {
       const res = await resendVerification(done.email);
-      // Server is intentionally opaque about whether anything was sent
-      // (no enumeration); the SPA confirms the request was accepted.
+      // The server is opaque about whether anything was sent (no enumeration).
       setResendStatus({
         tone: 'success',
         text: res.verificationToken
@@ -229,9 +200,6 @@ export const SignupPage: React.FC = () => {
           <h1 id="signup-heading" className={authHeadingClass}>
             Create your account
           </h1>
-          {/* Two adjacent error surfaces: the page-level one (server and
-              page-level failures) and the field one below it. They render
-              identically, so each carries its own test hook. */}
           {error ? (
             <Alert tone="error" data-testid="signup-error">
               {error}
@@ -297,9 +265,7 @@ export const SignupPage: React.FC = () => {
                   <label htmlFor="signup-email" className={`${authLabelClass} mb-0`}>
                     Email
                   </label>
-                  {/* Invisible same-sized twin of the Password column's Show/Hide
-                      button, so both label rows compute to the same height and
-                      the Email/Password inputs align on the same top edge. */}
+                  {/* Invisible same-sized twin of the Password column's Show/Hide button, so both label rows have the same height and the inputs align. */}
                   <span
                     aria-hidden="true"
                     className={`${authShowHideButtonClass} invisible`}
@@ -307,10 +273,7 @@ export const SignupPage: React.FC = () => {
                     Show
                   </span>
                 </div>
-                {/* autocomplete="username" (not "email"): this is the
-                    credential identifier, so password managers capture it
-                    with the new-password save prompt (web.dev sign-up form
-                    best practices). type="email" keeps the right keyboard. */}
+                {/* autocomplete="username", not "email": this is the credential identifier, so password managers capture it with the new-password save prompt; type="email" keeps the right keyboard. */}
                 <TextInput
                   id="signup-email"
                   name="email"

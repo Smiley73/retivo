@@ -1,20 +1,4 @@
-/**
- * Scenario-level per-account contribution overrides at
- * /scenarios/:id/contributions. Mirrors the Expense / Income / CBP
- * overrides sub-screens.
- *
- * One row per active account in the household. Each row carries
- * editable pre-tax and post-tax planned-contribution amounts. The
- * "Baseline" cells show the resolved-from-parent values (the parent
- * chain's effective value, falling through to the account's own
- * planned-contribution fields when no ancestor overrides). The
- * "Scenario" cells are editable and default to the baseline value so
- * the user only types what they want to change.
- *
- * Trim on save: any row whose draft equals the baseline on both sides
- * is dropped from the override map — keeps the "overridden accounts"
- * count honest. Per-row Reset wipes only that account's entry.
- */
+/** /scenarios/:id/contributions: per-account planned-contribution overrides. Rows whose draft equals the baseline on both sides are trimmed on save, keeping the "overridden accounts" count honest; per-row Reset wipes only that account's entry. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import {
@@ -83,13 +67,7 @@ import {
 } from './scenario-contributions-helpers';
 import { formatCurrency } from '../lib/format-currency';
 
-/**
- * Placeholder copy for an account whose scenario growth is INHERITED (no
- * local override). This page has scenario context, so the copy carries the
- * resolved percent: a tracks-inflation account reads "Match inflation (X%)"
- * (X = the scenario's resolved general inflation rate); an account inheriting
- * an explicit ancestor/baseline rate reads "Inherited (Y%)".
- */
+// Placeholder for an inherited growth: a tracks-inflation account reads "Match inflation (X%)" (the resolved general rate), an explicit inherited rate reads "Inherited (Y%)".
 function growthPlaceholder(
   inherited: ResolvedContributionGrowth | undefined,
 ): string {
@@ -112,9 +90,7 @@ export const ScenarioContributionsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const baselineRef = useRef<Map<string, DraftRow>>(new Map());
-  // Inherited annual-increase growth per account (mode + resolved %),
-  // independent of THIS scenario's own override. Drives the "Match
-  // inflation (X%)" placeholder + the inherited fall-back on reset.
+  // Independent of this scenario's own override; drives the placeholder and the reset fallback.
   const inheritedGrowthRef = useRef<Map<string, ResolvedContributionGrowth>>(
     new Map(),
   );
@@ -167,12 +143,8 @@ export const ScenarioContributionsPage: React.FC = () => {
       const o = own[a.id];
       const inh = baselineRef.current.get(a.id);
       if (!d || !inh) continue;
-      // Effective stored value for each side (override → fall through
-      // to inherited). Compare to draft.
       const storedPre = o?.plannedContributionPreTax ?? inh.preTax;
       const storedPost = o?.plannedContributionPostTax ?? inh.postTax;
-      // The growth draft is THIS scenario's own override (undefined =
-      // inherit); compare it against the sanitised stored own override.
       const storedGrowth = isValidContributionGrowthPct(o?.contributionGrowthPct)
         ? o?.contributionGrowthPct
         : undefined;
@@ -202,8 +174,6 @@ export const ScenarioContributionsPage: React.FC = () => {
     [],
   );
 
-  // Set an explicit annual-increase override (incl. `0` = flat-nominal).
-  // `undefined` drops back to the inherited baseline / match-inflation value.
   const updateGrowth = useCallback(
     (accountId: string, value: number | undefined) => {
       setDrafts((prev) => {
@@ -222,7 +192,6 @@ export const ScenarioContributionsPage: React.FC = () => {
       if (!inh) return;
       updateDraft(accountId, 'preTax', inh.preTax);
       updateDraft(accountId, 'postTax', inh.postTax);
-      // Drop the growth override too → back to the inherited value.
       updateGrowth(accountId, undefined);
     },
     [updateDraft, updateGrowth],
@@ -233,13 +202,7 @@ export const ScenarioContributionsPage: React.FC = () => {
     setSaving(true);
     setError(null);
     try {
-      // Rebuild perAccount: an amount that differs from the inherited
-      // baseline OR an explicit growth override (incl. `0` = flat-nominal)
-      // becomes an entry. The growth value is the DRAFT's own override
-      // (`d.growthPct`, undefined = inherit) — this page now edits growth
-      // directly, so the draft is the source of truth (not the prior
-      // amounts-only "preserve existing growth" path). A growth-only entry
-      // (no amount diff) is still kept.
+      // An amount differing from the inherited baseline or an explicit growth override (incl. 0 = flat-nominal) becomes an entry; the draft's own growthPct is the source of truth.
       const perAccount: Record<
         string,
         {
@@ -255,7 +218,6 @@ export const ScenarioContributionsPage: React.FC = () => {
         const preDiffers = d.preTax !== inh.preTax;
         const postDiffers = d.postTax !== inh.postTax;
         const hasGrowthOverride = isValidContributionGrowthPct(d.growthPct);
-        // No amount change AND no growth override → drop the entry.
         if (!preDiffers && !postDiffers && !hasGrowthOverride) continue;
         const entry: {
           plannedContributionPreTax?: number;
@@ -337,8 +299,6 @@ export const ScenarioContributionsPage: React.FC = () => {
   const overriddenCount = Object.keys(own).length;
   const resetAllLabel = 'Reset all';
 
-  // Centered header variant for the contribution-amount + annual-increase
-  // columns (thStickyClass carries no text-align, so text-center wins cleanly).
   const headCentered = `${thStickyClass} text-center`;
   return (
     <section aria-labelledby="scenario-contributions-heading">
@@ -367,8 +327,6 @@ export const ScenarioContributionsPage: React.FC = () => {
                 {
                   label: 'Cancel',
                   icon: <XIcon />,
-                  // Revert edits: reload re-reads the saved overrides and
-                  // resets the drafts, flipping isDirty back off.
                   onClick: () => {
                     setError(null);
                     void reload();
@@ -419,8 +377,6 @@ export const ScenarioContributionsPage: React.FC = () => {
           </Muted>
         </Card>
       ) : (
-        // Canonical scrollable card + sticky headers, matching the sibling
-        // Scenario Asset Mix override table.
         <TableScroll label="Per-account contribution overrides">
         <Table className={tableClass} aria-label="Per-account contribution overrides">
             <TableHeader>
@@ -441,15 +397,11 @@ export const ScenarioContributionsPage: React.FC = () => {
                 const d = drafts.get(a.id);
                 if (!inh || !d) return null;
                 const owner = memberDisplay(memberById.get(a.payload.ownerId));
-                // HSA shows both fields (same as MIXED).
                 const editablePre = isTreatmentEditablePreTax(a.payload.taxTreatment);
                 const editablePost = isTreatmentEditablePostTax(a.payload.taxTreatment);
                 const isLocallyOverridden = own[a.id] !== undefined;
                 return (
                   <Row key={a.id} id={a.id}>
-                    {/* The name cell hosts the absolutely-positioned bucket
-                        bar, so it must be `relative` (same approach as
-                        AccountsPage). */}
                     <Cell className={`${tdClass} relative`}>
                       <BucketBar bucket={accountBucket(a.payload.type)} />
                       {a.payload.name}
@@ -491,11 +443,7 @@ export const ScenarioContributionsPage: React.FC = () => {
                         </span>
                       )}
                     </Cell>
-                    {/* Annual-increase override. `undefined` = inherit → the
-                        "Match inflation (X%)" / inherited-rate placeholder
-                        (X = the scenario's resolved general inflation rate);
-                        an explicit number (incl. 0 = flat-nominal) overrides
-                        and shows the editable PercentInput. */}
+                    {/* undefined inherits (the placeholder); an explicit number, including 0 = flat-nominal, overrides and shows the editable PercentInput. */}
                     <Cell className={tdNumClass}>
                       {d.growthPct === undefined ? (
                         <button

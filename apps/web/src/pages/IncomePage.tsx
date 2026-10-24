@@ -1,13 +1,4 @@
-/**
- * /income — canonical IncomeStream list (one row per pension /
- * part-time / one-off windfall the household expects). Header cards
- * show annual recurring income (from pension annuities + part-time)
- * and the cumulative one-time / lump-sum total. Rows grouped by
- * household member; alphabetical within member.
- *
- * Per-row: name + kind badge + amount + schedule summary + Edit /
- * Delete actions.
- */
+/** /income: canonical income stream list grouped by household member, with annual recurring and one-time totals and per-row Edit / Delete. */
 import React, { useEffect, useMemo, useRef } from 'react';
 import { PlusIcon } from '../components/icons';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -53,19 +44,7 @@ interface MemberGroup {
   rows: IncomeRow[];
 }
 
-/** For every linked-CBP lump-sum income stream, project the source CBP
- *  account's balance forward from its latest known value to the lump-
- *  sum's event month and return the resulting amount keyed by stream
- *  id. Resolves event months via the same `oneOffMonth` helper the
- *  engines use, so the magnitude on the row matches the dollars the
- *  Balance Projection page actually transfers.
- *
- *  Uses the **base scenario** for retirement-age resolution — the
- *  Income page is scenario-independent; per-scenario projected
- *  transfer values live on the Balance Projection page instead.
- *  Streams that resolve to a missing event month, a missing CBP
- *  account, or a CBP without any AccountBalance history are skipped
- *  (the row falls back to formatIncomeAmount's default $0 once). */
+// Projects each linked-CBP lump sum's source balance to its event month (the engines' oneOffMonth helper) so the row matches the Balance Projection transfer; uses the base scenario's retirement ages, and unresolvable streams are skipped.
 function computeLinkedCbpProjections(input: {
   incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
@@ -170,10 +149,6 @@ export const IncomePage: React.FC = () => {
   const { confirm, dialog } = useConfirm();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  // Reactive reads: the income list + its derived projections re-read on any
-  // write to the subscribed stores (single saves/deletes via the per-store
-  // fine signal, sync bootstrap / demo fill via the coarse workspace event),
-  // so the page refreshes without a manual reload dep.
   const incomeQuery = useAggregates('incomeStream');
   const memberQuery = useAggregates('householdMember');
   const accountQuery = useAggregates('account');
@@ -193,19 +168,12 @@ export const IncomePage: React.FC = () => {
     scenarioQuery.error
       ? 'Failed to load income sources.'
       : null;
-  // Run-once guard: restore fires at most once per navigation.
   const focusRestoredRef = useRef(false);
 
   const householdMembers = memberQuery.aggregates as ReadonlyArray<
     Aggregate<HouseholdMemberPayload>
   > as Aggregate<HouseholdMemberPayload>[];
 
-  /** Stream id → projected CBP balance at the lump-sum's event month.
-   *  Only populated for `payoutType: 'lumpSum'` streams with
-   *  `linkedCbpAccountId` set. Drives the row's "~$X" rendering so the
-   *  income overview surfaces the dynamic transfer magnitude instead
-   *  of the stored zero. Derived from the BASE scenario's retirement ages
-   *  (the Income overview is scenario-independent). */
   const projectedLumpSumByStreamId = useMemo<Map<string, number>>(
     () =>
       computeLinkedCbpProjections({
@@ -230,9 +198,6 @@ export const IncomePage: React.FC = () => {
     ],
   );
 
-  // Group income rows by member. Stable ordering: primary first, then
-  // secondary, then anything else by name; orphan rows (member unresolved)
-  // land last.
   const groups = useMemo<MemberGroup[]>(() => {
     const incomeStreams = incomeQuery.aggregates as ReadonlyArray<
       Aggregate<IncomeStreamPayload>
@@ -270,7 +235,6 @@ export const IncomePage: React.FC = () => {
         rows: list,
       });
     }
-    // Orphan rows whose member couldn't be resolved.
     for (const [mid, list] of groupByMember) {
       if (orderedMembers.some((m) => m.id === mid)) continue;
       ordered.push({ memberId: mid, ownerName: '(unknown member)', rows: list });
@@ -279,21 +243,13 @@ export const IncomePage: React.FC = () => {
     return ordered;
   }, [incomeQuery.aggregates, householdMembers]);
 
-  // Post-load focus restoration: fires once after the first
-  // successful data load (keyed off the `loading→false` transition via the
-  // `focusRestoredRef` run-once guard — NOT `groups.length`, which is `[]`
-  // for both not-loaded and loaded-empty). Validates `focusIncomeId` against a
-  // safe format, scrolls the matching row into view, focuses its
-  // Edit button, and strips the param via replaceState. A
-  // missing/invalid/unmatched id is a no-op: the param is still stripped
-  // so the URL stays clean.
+  // Restore focus once after the first successful load (keyed off the loading → false transition, not groups.length, which is [] for both not-loaded and loaded-empty); strip the param either way.
   useEffect(() => {
     if (loading) return;
     if (focusRestoredRef.current) return;
     focusRestoredRef.current = true;
 
     const rawId = searchParams.get('focusIncomeId');
-    // Always strip the param from the URL.
     if (rawId !== null) {
       const url = new URL(window.location.href);
       url.searchParams.delete('focusIncomeId');
@@ -302,24 +258,16 @@ export const IncomePage: React.FC = () => {
     if (!rawId) return;
     // Validate: aggregate ids are random UUIDs; reject selector metacharacters.
     if (!/^[\w-]{1,128}$/.test(rawId)) return;
-    // Defer the DOM query one tick so React Aria Table's internal
-    // useLayoutEffect state-update re-render finishes before we look
-    // for the row. waitFor in tests polls until the spy fires.
+    // Defer one tick so React Aria Table's internal useLayoutEffect re-render finishes before the row lookup.
     const captured = rawId;
     const timer = setTimeout(() => {
-      // React Aria Table manages focus at the row (<tr>) level via its grid
-      // pattern — focusing a button inside a cell causes the grid's onFocus
-      // handler to redirect to the active row, so we focus the row directly
-      // data-income-id is passed through to the rendered <tr>.
+      // Focus the row, not a button in a cell: React Aria Table's grid redirects cell focus to the active row. data-income-id is passed through to the <tr>.
       const row = document.querySelector<HTMLElement>(`tr[data-income-id="${captured}"]`);
       if (!row) return;
       // Scroll the row into view (reduced-motion safe).
       row.scrollIntoView({ behavior: 'instant', block: 'nearest' });
-      // Focus the row so React Aria's grid navigation registers it as the
-      // active item (tabIndex=-1 rows are still programmatically focusable).
       row.focus({ preventScroll: true });
     }, 0);
-    // Cancel the pending query if we unmount within the tick.
     return () => clearTimeout(timer);
   }, [loading, searchParams]);
 
@@ -339,8 +287,6 @@ export const IncomePage: React.FC = () => {
       payload: row.payload,
     });
     notifyPending();
-    // The delete tombstone is an `incomeStream` write, so the reactive read
-    // re-runs and drops the row — no manual reload.
   };
 
   if (loading) {

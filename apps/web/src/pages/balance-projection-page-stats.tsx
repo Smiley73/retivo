@@ -1,24 +1,4 @@
-/**
- * Balance Projection page — stat-card sibling. Renders two distinct
- * blocks:
- *
- *   1. A 4-up deterministic KPI grid (`StatGrid cols="four"`): Planned ·
- *      at retirement, Planned · at horizon, TWR · at retirement, TWR · at
- *      horizon — the four headline deterministic balances (the Graphite
- *      Spectrum `.kpi` mock). At-retirement tiles are neutral; at-horizon
- *      tiles tint green when funded (> $0) / red when depleted (≤ $0).
- *   2. A separate "Monte Carlo outcomes" section: a small heading +
- *      caption, then the three percentile tiers (Typical / Pessimistic /
- *      Bad-luck) as dedicated `<BalanceProjectionMcCard>`s in a 3-up grid,
- *      two rows (At retirement / At horizon).
- *
- * Extracted from BalanceProjectionPage.tsx to keep the page itself under
- * the file shape cap. The MC numbers come from the existing
- * `PlanStressTestVm` percentile fields — this is a presentation re-skin,
- * not a new computation. The at-horizon Today's-dollar arithmetic routes
- * through the shared `computePlannedAtHorizonToday` helper — same
- * source of truth the optimizer and the BPP runner consume.
- */
+/** Stat cards: the four deterministic KPI tiles (Planned and TWR, at retirement and at horizon) and the "Monte Carlo outcomes" percentile cards, from existing PlanStressTestVm fields. The at-horizon Today's-dollar arithmetic uses the shared computePlannedAtHorizonToday. */
 import React from 'react';
 import type { PlanStressTestVm } from '../components/PlanStressTestSection';
 import { Stat, StatGrid } from '../components/StatGrid';
@@ -36,9 +16,6 @@ import {
 
 interface BalanceProjectionMethodTotal {
   readonly total: number;
-  /** Count of accounts included at their planned rate under
-   *  the Historical method (lack ≥2 yr empirical history). Was the prior
-   *  "excluded from total" count. */
   readonly plannedRateCount: number;
 }
 
@@ -59,16 +36,9 @@ export interface BalanceProjectionStatsProps {
   readonly lastDeathYear: number | null;
   readonly viewDeflator: (year: number, monthIndex?: number) => number;
   readonly stressVm: PlanStressTestVm;
-  /**
-   * Primary household member's birth year — used to render MC depletion
-   * ages ("Depletes — age N"). `null` when no member has a usable
-   * birthdate; the MC card then falls back to the depletion year.
-   */
   readonly primaryBirthYear: number | null;
 }
 
-/** Compute the at-horizon Today's-dollar balance for a deterministic
- *  method, or `null` when its drawdown didn't run. */
 function atHorizonToday(
   dd: { readonly years: ReadonlyArray<DrawdownYear> } | null,
   horizonYear: number | null,
@@ -76,8 +46,6 @@ function atHorizonToday(
 ): number | null {
   if (!dd || dd.years.length === 0) return null;
   const factor = horizonYear !== null ? viewDeflator(horizonYear, 11) : 1;
-  // Same arithmetic, behind a function boundary shared with the
-  // runner — parity test pins both paths to one source of truth.
   return computePlannedAtHorizonToday({
     drawdownPlannedYears: dd.years,
     factor,
@@ -108,7 +76,6 @@ export const BalanceProjectionStats: React.FC<BalanceProjectionStatsProps> = ({
       : (retirementYear ?? 0) + dd.years.length - 1;
   };
 
-  // MC ending balance + depletion year per tier, keyed for the row map.
   const mcEnding: Record<McTier, number | null> = {
     typical: stressVm.endTypical,
     pessimistic: stressVm.endPessimistic,
@@ -143,9 +110,6 @@ export const BalanceProjectionStats: React.FC<BalanceProjectionStatsProps> = ({
               : null;
             const atHorizon =
               horizonValue !== null ? formatCurrencyShort(horizonValue) : '—';
-            // At horizon: green when the plan still has money, red when it
-            // has run dry (≤ $0); neutral when there's no value to show.
-            // At retirement carries no value-based colour.
             const horizonColor =
               horizonValue == null
                 ? undefined
@@ -189,7 +153,6 @@ export const BalanceProjectionStats: React.FC<BalanceProjectionStatsProps> = ({
               </p>
             </ChartInfoPopover>
           </div>
-          {/* At retirement row — always-positive balances, no status line. */}
           <StatGrid className="mt-2 mb-3" cols="three">
             {MC_TIERS.map((tier) => (
               <BalanceProjectionMcCard
@@ -200,7 +163,6 @@ export const BalanceProjectionStats: React.FC<BalanceProjectionStatsProps> = ({
               />
             ))}
           </StatGrid>
-          {/* At horizon row — funded/depleted status per tier. */}
           <StatGrid cols="three">
             {MC_TIERS.map((tier) => {
               const end = mcEnding[tier];
@@ -232,16 +194,7 @@ export const BalanceProjectionStats: React.FC<BalanceProjectionStatsProps> = ({
   );
 };
 
-/**
- * With-vs-without spending-guardrails success-probability callout.
- * Rendered only when the active scenario ENABLES the guardrail (the
- * `comparison` prop is present). The delta is shown as signal only when it
- * exceeds the paired sampling standard error; below that it renders "about the
- * same" rather than false signal. Handles pending / error states.
- */
-/** Seed-paired with/without-guardrails callout. Exported for
- *  render testing of its five branches. Renders nothing when the
- *  comparison is absent. */
+/** Seed-paired with/without-guardrails callout; the delta shows as signal only when it exceeds the paired sampling standard error, else "about the same". Exported for render testing of its five branches. */
 export const GuardrailsComparisonCallout: React.FC<{
   comparison: PlanStressTestVm['guardrailComparison'];
 }> = ({ comparison }) => {
@@ -250,10 +203,7 @@ export const GuardrailsComparisonCallout: React.FC<{
     v === null ? '—' : `${Math.round(v * 100)}%`;
 
   if (comparison.state === 'pending') {
-    // The sibling (without-guardrails) run is a separate MC pass whose per-path
-    // progress isn't threaded into this VM, so the bar runs INDETERMINATE
-    // (total 0 → animated sweep) — it reads as "working" without a misleading
-    // 0%. The verbatim comparing-copy rides the bar's own label line.
+    // The sibling run's per-path progress isn't threaded into this VM, so the bar runs indeterminate (total 0) rather than showing a misleading 0%.
     return (
       <div className="mt-3" role="status" aria-live="polite">
         <McProgressBar
@@ -277,9 +227,7 @@ export const GuardrailsComparisonCallout: React.FC<{
   if (withPct === null || withoutPct === null || deltaPct === null || se === null) {
     return null;
   }
-  // Only treat the delta as signal when it clears the conservative
-  // unpaired-SE bound (an upper bound on the true paired SE; see the
-  // buildGuardrailComparison docstring).
+  // Signal only when the delta clears the conservative unpaired-SE bound (an upper bound on the true paired SE; see buildGuardrailComparison).
   const meaningful = Math.abs(deltaPct) > se;
   return (
     <div className="mt-3 rounded-lg border border-line bg-surface-raised px-4 py-3 text-sm">

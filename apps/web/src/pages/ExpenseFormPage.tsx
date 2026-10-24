@@ -1,30 +1,4 @@
-/**
- * /expenses/new and /expenses/:id/edit — canonical Expense form.
- *
- * Defaults: monthly, essential, start of retirement, until death of
- * last surviving (or `lifetime` for single-member). Form participates
- * in the standard unsaved-edits guard.
- *
- * SHAPE-LIMIT EXCEPTION (recorded justification; CODING_STANDARDS ≤ 800 lines):
- * this file is over the 800-line limit. Why it cannot be split: it is the
- * single scenario-aware canonical/added/patch expense editor — one
- * form/validation/scenario-write state machine in which the field state, the
- * classification/frequency/timepoint cross-validation, and the
- * canonical-vs-added-vs-patch write path all read and mutate the same draft.
- * The pure scenario-patch delta/save and glide-facts helpers are already
- * extracted to `./expense-form-logic`. The apparent duplication with
- * IncomeFormPage is not a reason to merge the two forms: they are
- * domain-divergent (income and expenses carry different override / patch
- * semantics — glide paths, discretionary classification, and lifetime-end
- * anchors are expense-only), and the only genuinely identical helpers
- * (`jsonEq`, `safeReturnTo`, the scenario-patch write) are already extracted
- * to shared modules. The live projection preview adds only thin wiring here
- * (the extracted `buildExpensePayload`, a debounced selector, and one
- * `<ExpenseProjectionPreview>` render line); all projection / marker / trim
- * logic lives in that bounded component. Trigger: a change adding 5 or more
- * lines here must either refactor the file back under the limit or
- * re-justify this exception in this note.
- */
+/** /expenses/new and /expenses/:id/edit: the canonical, scenario-added and scenario-patch Expense editor. */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckIcon, RefreshIcon, XIcon } from '../components/icons';
 import { RadioGroup } from 'react-aria-components';
@@ -103,7 +77,6 @@ import {
   resolveGlideScenarioFacts,
 } from './expense-form-logic';
 
-/** This flow's `safeReturnTo` fallback (parity with IncomeFormPage). */
 const RETURN_TO_FALLBACK = '/expenses';
 
 type StartKind = ScheduleStart['kind'];
@@ -133,20 +106,9 @@ export interface FormState {
   endDurationValue: number;
   endDurationUnit: 'months' | 'years';
 
-  /** Optional discretionary glide. Edited via `DiscretionaryGlideFields`
-   *  (rendered for any classification, gated only on a non-one-off
-   *  frequency). Toggling the editor off persists `undefined` in
-   *  BOTH canonical and scenario-patch mode. */
+  /** Toggling the editor off persists `undefined` in both canonical and scenario-patch mode. */
   discretionaryGlide?: DiscretionaryGlideOverride;
-  /**
-   * Whether this expense can be paid tax-free from an HSA.
-   * Default `true` for new medical-category expenses (most medical costs
-   * are qualified; premiums are the exception — the user turns it off).
-   * Editing retains the value when the user moves to a non-medical category
-   * and back; the engine ignores it for non-medical rows.
-   * `stateFromPayload` maps an ABSENT legacy value to `false` (not the
-   * new-expense default — conservative for imported rows).
-   */
+  /** `stateFromPayload` maps an absent legacy value to false (conservative for imported rows); new medical expenses default to true. */
   hsaQualified: boolean;
 }
 
@@ -177,8 +139,6 @@ const makeDefaultState = (
   endDurationValue: 12,
   endDurationUnit: 'months',
   discretionaryGlide: undefined,
-  // New medical expenses default to qualified (true) — most spending is
-  // HSA-eligible; premiums are the exception the user turns off.
   hsaQualified: true,
 });
 
@@ -223,16 +183,7 @@ const buildEnd = (s: FormState): ScheduleEnd | undefined => {
   }
 };
 
-/**
- * Pure `FormState → ExpensePayload` assembly. Single source of
- * truth so the live form preview projects exactly what Save persists —
- * `onSubmit` calls this after its own name/category/amount/glide
- * validation (which stays in `onSubmit`, not here). The glide value is
- * retained even when the expense is essential because spending glides
- * apply to any non-one-off expense regardless of classification;
- * classification only gates the scenario-level discretionary adjustment
- * (`bumpPct`), not the glide.
- */
+/** FormState → ExpensePayload, shared by Save and the live preview so both project the same payload. */
 export const buildExpensePayload = (s: FormState): ExpensePayload => {
   const payload: ExpensePayload = {
     name: s.name.trim(),
@@ -248,10 +199,7 @@ export const buildExpensePayload = (s: FormState): ExpensePayload => {
   if (s.discretionaryGlide) {
     payload.discretionaryGlide = s.discretionaryGlide;
   }
-  // Persist hsaQualified only when true (absent ⇒ false,
-  // so omitting false is semantically equivalent and keeps the payload sparse).
-  // A once-set true is retained even on a non-medical-category row (the
-  // engine ignores the flag there, so persisting is harmless).
+  // Persist only when true (absent means false); the engine ignores the flag on non-medical rows.
   if (s.hsaQualified) {
     payload.hsaQualified = true;
   }
@@ -271,9 +219,7 @@ const stateFromPayload = (
   base.categoryId = p.categoryId;
   base.startKind = p.start.kind;
   if (p.start.kind === 'age') {
-    // Expense always carries an explicit memberId; legacy demo data
-    // could theoretically omit it — fall back to primary so the form
-    // doesn't crash on shape it didn't author.
+    // Legacy demo data may omit memberId; fall back to primary.
     base.startMemberId = p.start.memberId ?? 'primary';
     base.startYears = p.start.years;
     base.startMonths = p.start.months;
@@ -304,8 +250,6 @@ const stateFromPayload = (
     }
   }
   base.discretionaryGlide = p.discretionaryGlide;
-  // Absent on a legacy/imported row → not qualified (false).
-  // This is NOT the new-expense default (true) — conservative for existing data.
   // Strict === true (CWE-20): a non-boolean imported value reads as not-qualified.
   base.hsaQualified = p.hsaQualified === true;
   return base;
@@ -317,15 +261,9 @@ export const ExpenseFormPage: React.FC = () => {
   const { id } = useParams<{ id?: string }>();
   const [searchParams] = useSearchParams();
   const isEdit = Boolean(id);
-  // Scenario context: `/expenses/new?scenarioId=` → scenario-only add
-  // (writes overrides.expenses.added[]); `/expenses/:id/edit?scenarioId=`
-  // → scenario-patch mode (writes overrides.expenses.patches[id] with
-  // only the changed keys, never the canonical aggregate). No scenario
-  // param → canonical create / canonical edit (today's behaviour).
+  // No scenarioId: canonical create/edit. With one: scenario-only add (overrides.expenses.added[]) or
+  // scenario-patch (patches[id], changed keys only, never the canonical aggregate).
   const scenarioId = searchParams.get('scenarioId');
-  // Scenario-only add-EDIT: `/expenses/scenario-entry?scenarioId=…&editLocalId=…`
-  // re-opens an existing `added[]` entry (matched by `_localId`) in the
-  // full form. Present → replace-by-`_localId` on Save; absent → append.
   const editLocalId = searchParams.get('editLocalId');
   const returnTo = searchParams.get('returnTo');
 
@@ -333,11 +271,7 @@ export const ExpenseFormPage: React.FC = () => {
   const [categories, setCategories] = useState<Aggregate<ExpenseCategoryPayload>[]>([]);
   const [loadedExpense, setLoadedExpense] = useState<Aggregate<ExpensePayload> | null>(null);
   const [scenarioForAdd, setScenarioForAdd] = useState<Aggregate<ScenarioPayload> | null>(null);
-  // Scenario-only add-edit: the `_localId` of the `added[]` entry being
-  // re-edited. Null → append a fresh entry; set → replace in place.
   const [editingAddedLocalId, setEditingAddedLocalId] = useState<string | null>(null);
-  // Scenario-patch edit mode: the scenario being patched + the resolved
-  // expense payload the form opened with (the per-key delta baseline).
   const [scenarioForPatch, setScenarioForPatch] =
     useState<Aggregate<ScenarioPayload> | null>(null);
   const [openedResolved, setOpenedResolved] = useState<ExpensePayload | null>(null);
@@ -358,34 +292,17 @@ export const ExpenseFormPage: React.FC = () => {
 
   const [state, setState] = useState<FormState | null>(null);
   const [baseline, setBaseline] = useState<FormState | null>(null);
-  // Bumped whenever the form re-seeds from a fresh resolved payload
-  // (initial load, scenario-patch Reset). Drives the
-  // `<DiscretionaryGlideFields key>` so an external reseed remounts the
-  // glide editor with a fresh mode-aware seed, while in-progress
-  // keystrokes (which never change this nonce) never remount it.
+  // Bumped on each reseed so DiscretionaryGlideFields remounts for an external reseed but not for keystrokes.
   const [seedNonce, setSeedNonce] = useState(0);
 
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        // Reset mode-specific state at the START of every load so a
-        // same-component route/query transition (e.g. add-edit → plain add)
-        // doesn't carry stale mode state. These are otherwise only SET inside
-        // conditional branches, never reset — leaving e.g. a stale
-        // `editingAddedLocalId` that would make Save replace a row instead of
-        // appending, or a stale `loadedExpense` that would route Save into
-        // the update branch. Guarded by `active` like the rest of the effect.
+        // Reset mode state at the start of every load: a stale editingAddedLocalId would make Save replace instead of append,
+        // and a stale loadedExpense would route Save into the update branch.
         if (active) {
-          // On a same-component query-only transition (e.g.
-          // add-edit → plain add) `loading` was left `false` by the prior
-          // load's `finally`, so the form body would render the OLD state
-          // (mode flags already reset above) during the async reseed window
-          // — a fast Save there could write stale data through the canonical
-          // branch, or a stale load `error` could linger. Re-enter the
-          // loading state (which gates the form body / Save) and clear any
-          // stale error so the reseed window shows the skeleton, not a
-          // stale-but-actionable form.
+          // Re-enter loading and clear any stale error: otherwise the old form renders during the async reseed and a fast Save writes stale data.
           setLoading(true);
           setError(null);
           setLoadedExpense(null);
@@ -394,16 +311,7 @@ export const ExpenseFormPage: React.FC = () => {
           setScenarioForPatch(null);
           setOpenedResolved(null);
           setNameError(null);
-          // Also clear the form data. The mode-flag reset above plus
-          // `loading=true` is not enough — on a same-route query-only
-          // transition to a MISSING editLocalId the load hits its not-found
-          // early return (sets `error`, clears `loading` in `finally`) but
-          // leaves the OLD `state` non-null, so the `!state && error` error
-          // branch is masked and the stale form renders (and a Save would
-          // route through the canonical branch with stale data). Clearing
-          // state/baseline here makes the not-found path render the error and
-          // is identical to a fresh mount on the success path (the loading
-          // skeleton shows until the reseed completes).
+          // Clear the form data too: a missing editLocalId hits the not-found early return but would leave the old state non-null, masking the error branch.
           setState(null);
           setBaseline(null);
         }
@@ -435,11 +343,7 @@ export const ExpenseFormPage: React.FC = () => {
             return;
           }
           setLoadedExpense(ag);
-          // Scenario-patch mode: pre-fill from the scenario-RESOLVED
-          // expense (canonical + inherited/own patches per key) so the
-          // form opens showing what this scenario actually projects;
-          // Save then stores only the keys the user changes vs this
-          // opened-resolved value.
+          // Scenario-patch mode opens on the scenario-resolved payload; Save stores only keys changed against it.
           let seedPayload = ag.payload;
           if (scenarioId) {
             const sc = (await getAggregate(
@@ -478,10 +382,7 @@ export const ExpenseFormPage: React.FC = () => {
               return;
             }
             setScenarioForAdd(sc);
-            // Scenario-only add-edit: re-open an existing `added[]` entry
-            // (matched by `_localId`) seeded with its stored payload; Save
-            // replaces it in place. Missing entry → hard error (never
-            // silently fall back to an append, which would orphan the row).
+            // A missing entry is a hard error: falling back to an append would orphan the row.
             if (editLocalId) {
               const entry = (sc.payload.overrides.expenses?.added ?? []).find(
                 (a) => a._localId === editLocalId,
@@ -517,12 +418,7 @@ export const ExpenseFormPage: React.FC = () => {
     return JSON.stringify(state) !== JSON.stringify(baseline);
   }, [state, baseline]);
 
-  // Already-retired heuristic: resolve the primary scenario's retirement
-  // age, project the primary member's retirement year, and compare to
-  // today. Used to surface the conditional Amount hint when the user
-  // has already passed retirement — amounts are today's dollars, so
-  // post-retirement users should enter what each expense costs today,
-  // not what it cost when they retired.
+  // Amounts are today's dollars: surface the Amount hint to users already past retirement.
   const alreadyRetired = useMemo(() => {
     const primaryScenario = scenarios.find((s) => s.payload.isPrimary);
     const primaryMember = members.find((m) => m.payload.isPrimary);
@@ -547,11 +443,7 @@ export const ExpenseFormPage: React.FC = () => {
     }
   }, [scenarios, members]);
 
-  // Live single-expense preview. The first resolved state
-  // paints immediately (no flash on edit-load); subsequent edits
-  // recompute on a ~200 ms debounce so the money input doesn't churn
-  // the projection per keystroke. The preview projects exactly what
-  // Save persists via the shared `buildExpensePayload`.
+  // The first state paints immediately; later edits debounce ~200 ms so the money input doesn't churn the projection.
   const [debouncedState, setDebouncedState] = useState<FormState | null>(null);
   const firstPreviewRef = useRef(true);
   useEffect(() => {
@@ -568,17 +460,11 @@ export const ExpenseFormPage: React.FC = () => {
     () => (debouncedState ? buildExpensePayload(debouncedState) : null),
     [debouncedState],
   );
-  // Resolve under the form's TARGET scenario so the preview matches
-  // what Save produces: scenario-patch → `scenarioForPatch`;
-  // scenario-only add → `scenarioForAdd`; else the primary scenario.
   const previewTargetScenarioId =
     scenarioForPatch?.id ?? scenarioForAdd?.id ?? null;
 
   const { pendingNavModal, navigateUnguarded } = useUnsavedChangesGuard(isDirty);
 
-  // A load-time error (expense / scenario / scenario-only entry not found)
-  // leaves `state` null, so surface it instead of an endless skeleton —
-  // the form body below only renders once a real state is seeded.
   if (!state && error) {
     return (
       <section aria-labelledby="expense-form-heading">
@@ -597,15 +483,9 @@ export const ExpenseFormPage: React.FC = () => {
     const norm = candidate.trim().toLowerCase();
     if (!norm) return 'Name is required.';
     if (norm.length > 60) return 'Max 60 characters.';
-    // Scenario-only adds intentionally skip the canonical-collision
-    // check — a scenario can carry an entry named "Vacation" alongside
-    // a household-list "Vacation" without conflict (different
-    // aggregates, different scopes). Collision still applies inside
-    // the scenario's own added[] to avoid duplicates.
+    // Scenario-only adds skip the canonical collision check (different scopes); collision applies within the scenario's added[].
     if (scenarioForAdd) {
       const added = scenarioForAdd.payload.overrides.expenses?.added ?? [];
-      // In add-edit mode the entry being edited is allowed to keep its own
-      // name; only OTHER added entries collide.
       const dupInAdded = added.some(
         (a) =>
           a._localId !== editingAddedLocalId &&
@@ -616,9 +496,6 @@ export const ExpenseFormPage: React.FC = () => {
       }
       return null;
     }
-    // Scenario-patch mode: name uniqueness is scoped to what THIS
-    // scenario projects (the resolved list), not the canonical list —
-    // the resolved list is what the scenario actually shows.
     if (scenarioForPatch) {
       const resolved = resolveExpensesForScenarioSparse(
         scenarioForPatch.id,
@@ -644,8 +521,6 @@ export const ExpenseFormPage: React.FC = () => {
     return null;
   };
 
-  /** Schedule-resolve context for save-time glide validation: the
-   *  resolved scenario's retirement year + member birthdates. */
   const buildGlideCtx = (scId: string | null): ScheduleResolveContext => {
     const primary = members.find((m) => m.payload.isPrimary);
     const secondary = members.find((m) => !m.payload.isPrimary);
@@ -660,24 +535,12 @@ export const ExpenseFormPage: React.FC = () => {
       secondary: secondary?.payload.birthdate
         ? { birthdate: secondary.payload.birthdate }
         : undefined,
-      // Mirror buildExpenseProjectionContext's two life-expectancy
-      // fields exactly so canonical / scenario-patch / scenario-only-add
-      // Save paths resolve a `lifetime`-bound `expenseEnd` identically
-      // to the live preview/engine.
+      // Mirror buildExpenseProjectionContext's life-expectancy fields so every save path resolves a lifetime-bound expenseEnd like the preview.
       lifeExpectancy,
       extendBeyondLifetime: false,
     };
   };
 
-  // NOTE: `onSave` exceeds the 40-line shape limit. The scenario-patch
-  // write algebra is extracted (`computeScenarioPatchSave` +
-  // `buildScenarioExpensePatchWrite`); the residual length is
-  // four inherently-distinct save branches (canonical create/update,
-  // scenario-patch, scenario-only add) plus field validation and
-  // post-save navigation, which cannot collapse without obscuring the
-  // dispatch. A separate decomposition would be its own change.
-  // No-arg (matches IncomeFormPage) so it can drive both the form's
-  // submit event and the PageHeader Save action.
   const onSave = async (): Promise<void> => {
     if (!householdId || !state) return;
     const name = state.name.trim();
@@ -695,51 +558,21 @@ export const ExpenseFormPage: React.FC = () => {
     setSubmitting(true);
     setError(null);
     try {
-      // Pure assembly extracted to module scope so the live
-      // preview below projects exactly what this Save persists.
       const payload = buildExpensePayload(state);
 
-      // Glide validation. Runs whenever the glide is ENABLED on
-      // any non-one-off expense (essential or discretionary) — i.e.
-      // it is present — even when the
-      // numbers currently form a value-equivalent no-op (a glide-end
-      // before glide-start at the default 100% End is still a
-      // mis-configuration the user must see). A cleared glide is now
-      // `undefined` in BOTH canonical and scenario-patch mode (the editor
-      // emits `undefined` when off; the scenario patch carries a `null`
-      // clear-marker, not the old neutral object), so the
-      // `state.discretionaryGlide &&` guard already skips an off glide
-      // without a mode-specific sentinel.
-      //
-      // A one-off is never glided (the engine early-returns multiplier 1
-      // for `frequency === 'oneOff'`, so a stored/inherited glide is
-      // ignored). Validating that hidden, ignored glide would hard-block
-      // Save on an unfixable error, so the block is skipped for one-offs
-      // — exactly mirroring the `<DiscretionaryGlideFields>` render gate
-      // (`state.frequency !== 'oneOff'`). One rule across Save + preview
-      // + engine: a one-off is never glided and never glide-validated.
+      // Validate an enabled glide even when its numbers are a value-equivalent no-op (glide-end before glide-start is still a mis-configuration).
+      // Skip one-offs: the engine never glides them, so validating a hidden glide would hard-block Save on an unfixable error.
       if (state.frequency !== 'oneOff' && state.discretionaryGlide) {
-        // Resolve the glide context under the form's target
-        // scenario — scenario-patch → the patched scenario; scenario-
-        // only add → the add-target; else the primary scenario. Mirrors
-        // the preview's `previewTargetScenarioId` so Save and the inline
-        // preview validate under the same scenario in all three modes.
         const glideCtx = buildGlideCtx(
           scenarioForPatch?.id ?? scenarioForAdd?.id ?? null,
         );
-        // Resolve THIS expense's own start so `durationFromExpenseStart`
-        // glide anchors validate against the real start, not a
-        // retirement-year stand-in. Fall back to the retirement-year
-        // probe when the start can't resolve (e.g. unresolvable `age`).
+        // Anchor on this expense's own start; fall back to the retirement-year probe when it can't resolve.
         const resolvedStart = resolveStartMonth(payload.start, glideCtx);
         const probe = resolvedStart ?? {
           year: Number.isFinite(glideCtx.retirementYear)
             ? glideCtx.retirementYear
             : 0,
-          // Keep the resolved retirement *month* in the fallback so the
-          // month-precise before-expense rule is evaluated correctly
-          // for a mid-year retiree; only drop to 0 when the retirement
-          // date itself can't resolve / month0 is absent.
+          // Keep the retirement month so the month-precise before-expense rule holds for a mid-year retiree.
           month0: glideCtx.retirementMonth0 ?? 0,
         };
         const problem = glideProblem(
@@ -756,11 +589,7 @@ export const ExpenseFormPage: React.FC = () => {
       }
 
       if (loadedExpense && scenarioForPatch) {
-        // Scenario-patch mode: write only the keys that changed vs the
-        // opened-resolved value, merged into THIS scenario's
-        // existing patch. Clearing an inherited optional emits
-        // the `null` clear-marker, not key deletion. The
-        // canonical aggregate is never touched.
+        // Clearing an inherited optional emits the null clear-marker, not key deletion.
         const nextScenarioPayload = computeScenarioPatchSave(
           scenarioForPatch.payload,
           payload,
@@ -785,10 +614,7 @@ export const ExpenseFormPage: React.FC = () => {
           payload,
         });
       } else if (scenarioForAdd) {
-        // Scenario-only add / add-edit — write into the scenario's
-        // overrides.expenses.added[]. Add-edit (`editingAddedLocalId` set)
-        // replaces the matching entry in place, keeping its `_localId` so
-        // the row is updated, not duplicated; plain add appends a fresh one.
+        // Add-edit replaces the entry in place, keeping its _localId; plain add appends.
         const existingOverrides: ExpensesOverride =
           scenarioForAdd.payload.overrides.expenses ?? {};
         const existingAdded = existingOverrides.added ?? [];
@@ -827,10 +653,7 @@ export const ExpenseFormPage: React.FC = () => {
       }
       notifyPending();
       setBaseline(state); // mark clean before navigating away
-      // Use the guard's `navigateUnguarded` — `setBaseline` is async so
-      // `isDirty` is still `true` at the moment `navigate()` fires; the
-      // patched `pushState` would otherwise intercept the save path
-      // and surface the Stay/Leave modal.
+      // navigateUnguarded: setBaseline is async, so isDirty is still true here and the guard would show the Stay/Leave modal.
       navigateUnguarded(safeReturnTo(returnTo, RETURN_TO_FALLBACK));
     } catch {
       setError('Failed to save expense.');
@@ -839,12 +662,6 @@ export const ExpenseFormPage: React.FC = () => {
     }
   };
 
-  /**
-   * Re-seed the form from the scenario-resolved expense after a write
-   * that changed this scenario's patches (the whole-expense Reset). Refetches
-   * scenarios, re-resolves THIS expense, and bumps `seedNonce` so the
-   * glide editor remounts with a fresh mode-aware seed.
-   */
   const reseedFromInherited = async (
     scenario: Aggregate<ScenarioPayload>,
     expense: Aggregate<ExpensePayload>,
@@ -871,13 +688,6 @@ export const ExpenseFormPage: React.FC = () => {
     setSeedNonce((n) => n + 1);
   };
 
-  /**
-   * Whole-expense reset: delete THIS scenario's entire patch
-   * entry for this expense (every overridden key reverts to inherited
-   * at once), then re-seed the form from the now fully-inherited
-   * resolved value. Visible only in scenario-patch mode when this
-   * scenario currently patches the expense.
-   */
   const onResetScenarioPatch = async (): Promise<void> => {
     if (!householdId || !loadedExpense || !scenarioForPatch) return;
     setSubmitting(true);
@@ -954,8 +764,6 @@ export const ExpenseFormPage: React.FC = () => {
         }}
         actionIcon={<CheckIcon />}
         secondaryActions={[
-          // Reset overrides (scenario-patch mode only) sits left of Cancel
-          // as the destructive (danger) header button.
           ...(scenarioPatchesThisExpense
             ? [
                 {
@@ -970,8 +778,7 @@ export const ExpenseFormPage: React.FC = () => {
           {
             label: 'Cancel',
             icon: <XIcon />,
-            // Cancel is an intentional discard — bypass the dirty
-            // guard per CODING_STANDARDS.md.
+            // Explicit Cancel bypasses the dirty guard.
             onClick: () => navigateUnguarded(safeReturnTo(returnTo, RETURN_TO_FALLBACK)),
             tone: 'neutral' as const,
           },
@@ -989,12 +796,7 @@ export const ExpenseFormPage: React.FC = () => {
         noValidate
         className="flex flex-col gap-6 rounded-md border border-line bg-surface-raised p-4"
       >
-        {/* Two columns: the expense's identity + money shape on the left,
-            when-it-happens + the spending glide on the right. The
-            projection graph spans the full width below the grid. */}
         <div className="grid grid-cols-1 items-start gap-x-6 gap-y-6 sm:grid-cols-2">
-          {/* Column 1 — Name, Description (full-width rows), then
-              Category | Frequency and Amount | Classification sharing rows. */}
           <div className="grid min-w-0 grid-cols-2 items-start gap-x-4 gap-y-2">
             <Field
               htmlFor="exp-name"
@@ -1012,9 +814,6 @@ export const ExpenseFormPage: React.FC = () => {
                   update({ name: e.target.value });
                   setNameError(null);
                 }}
-                // Validate on blur (not only at Save) so a name collision or
-                // empty name surfaces while the user is still here, not after
-                // a round-trip from the Save button.
                 onBlur={(e) => setNameError(validateName(e.target.value))}
               />
             </Field>
@@ -1091,10 +890,7 @@ export const ExpenseFormPage: React.FC = () => {
               )}
             </div>
 
-            {/* Essential vs discretionary is a binary CHOICE, not an on/off
-                enablement, so it's a radio group (not a ToggleSwitch): neither
-                value reads naturally as "off". (NOT a `<fieldset>`;
-                labelled group instead.) */}
+            {/* A radio group, not a ToggleSwitch: neither value reads as "off". */}
             <div className="min-w-0">
               <span
                 id="exp-classification-label"
@@ -1115,9 +911,6 @@ export const ExpenseFormPage: React.FC = () => {
               </RadioGroup>
             </div>
 
-            {/* HSA-qualified toggle — visible only for medical-category
-                rows. The value is retained across a non-medical
-                detour; the engine ignores it for non-medical rows. */}
             {medicalCategoryIdsFrom(categories).includes(state.categoryId) && (
               <div className="col-span-2 min-w-0">
                 <div className="flex items-center gap-2">
@@ -1198,7 +991,6 @@ export const ExpenseFormPage: React.FC = () => {
               </div>
             )}
 
-            {/* Projection graph under the left column's fields. */}
             <div className="col-span-2 min-w-0">
               <ExpenseProjectionPreview
                 draft={previewDraft}
@@ -1209,9 +1001,6 @@ export const ExpenseFormPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Column 2 — Start, End, and the spending glide (each its own
-              row). Collapsible anchor cards keep this column compact; the
-              `AnchorCardGroup` keeps only one open at a time. */}
           <AnchorCardGroup>
             <div className="flex min-w-0 flex-col gap-5">
               <StartSection
@@ -1233,10 +1022,7 @@ export const ExpenseFormPage: React.FC = () => {
                 />
               )}
 
-              {/* Always-present polite live region: the glide section shows
-                  for any non-one-off expense, so announce it to
-                  assistive tech (content flips empty → message only when it
-                  mounts — e.g. switching frequency away from one-off). */}
+              {/* Always-mounted polite live region: its content flips from empty to the message only when the glide section mounts. */}
               <div aria-live="polite" className="sr-only">
                 {state.frequency !== 'oneOff'
                   ? 'Spending glide options are shown below.'
@@ -1262,13 +1048,6 @@ export const ExpenseFormPage: React.FC = () => {
   );
 };
 
-// The expense Start picker delegates to the shared `ScheduleAnchorPicker`
-// (collapsible by default — same `<AnchorCard>` chrome it had before)
-// via the `GlideAnchor ↔ ScheduleStart` bridge. The split `FormState`
-// start fields are bridged at the value/onChange boundary; the persisted
-// shape is unchanged. The personalized single-member age-radio label is
-// preserved via the additive `ageLabel` prop; Expense always keeps
-// `age.memberId` (no `ownerRole` / `memberSelectable` passed → defaults).
 const StartSection: React.FC<{
   state: FormState;
   update: (patch: Partial<FormState>) => void;
@@ -1311,8 +1090,6 @@ const EndSection: React.FC<{
   primaryName: string;
   secondaryName: string;
 }> = ({ state, update, members, hasSecondary, primaryName, secondaryName }) => {
-  // `describeEnd` returns a mid-sentence phrase ("until death of …");
-  // capitalise the first letter for the standalone card summary.
   const endPhrase = describeEnd(buildEnd(state), members);
   const summary = endPhrase.charAt(0).toUpperCase() + endPhrase.slice(1);
   return (
@@ -1320,8 +1097,6 @@ const EndSection: React.FC<{
     label="End"
     summary={summary}
   >
-    {/* Alignment grid: radios in column 1, their inputs in column 2 so
-        the controls line up vertically. */}
     <RadioGroup
       aria-label="End"
       value={state.endKind}
@@ -1384,8 +1159,6 @@ const EndSection: React.FC<{
 
       <RadioOption value="endOfRetirementYear">After</RadioOption>
       <div className={ANCHOR_SLIDER_WRAP}>
-        {/* User-facing N = stored offsetYears + 1 (1 = first year only,
-            6 = first 6 years). Slider spans 1–30 retirement years. */}
         <RangeSlider
           ariaLabel="Number of retirement years"
           min={1}
@@ -1409,11 +1182,7 @@ const EndSection: React.FC<{
           value={String(state.endDurationValue)}
           onChange={(e) => update({ endDurationValue: parseClampedInt(e.target.value, 1200) })}
         />
-        {/* Months/years is a two-value CHOICE, but this row lives inside the
-            End `RadioGroup`, and a nested RadioGroup is invalid — so a small
-            Select (showing both options) replaces the old switch, whose label
-            only showed the current value and gave no hint which state was
-            which. */}
+        {/* A Select, not a switch: a nested RadioGroup is invalid inside the End RadioGroup. */}
         <Select
           ariaLabel="Duration unit"
           disabled={state.endKind !== 'durationFromStart'}

@@ -1,13 +1,5 @@
-/**
- * Workspace page: Data card (export / import / restore).
- *
- * Owns the standalone export re-auth gate (export requires a password on every
- * click — a full-household download is never silent), the five-modal import
- * pipeline (unknown-types → cross-household → password → confirm → result), and
- * the Restore-previous-version modal. The export verify+download primitive is
- * shared with the delete-account flow via `useProfileExport`. Self-sources auth
- * + sync from `useAuth` / `useSync`.
- */
+/** Workspace Data card: export, import (unknown-types, cross-household, password, confirm and result modals) and Restore previous version.
+* Export requires a password on every click, because a full-household download is never silent. */
 import React, { useCallback, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { useSync } from '../sync/SyncContext';
@@ -68,11 +60,8 @@ const IMPORT_ERROR_HINTS: Record<DataImportErrorCode, React.ReactNode> = {
 };
 
 interface Props {
-  /** Current household id (null while booting). */
   householdId: string | null;
-  /** Account email for the password re-auth prompt's hidden username. */
   email: string;
-  /** Page-level error sink (single top-of-page Alert). */
   onError: (message: string | null) => void;
 }
 
@@ -84,14 +73,8 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
-  // Count of unresolved local-change records included in the last export;
-  // > 0 tells the user their file merged
-  // unsynced local changes over the server copy and keeps both variants, so it
-  // is worth retaining even after an import.
+  // Greater than 0 means the file merged unsynced local changes over the server copy and keeps both variants, so it is worth retaining even after an import.
   const [exportUnresolvedCount, setExportUnresolvedCount] = useState(0);
-  // Export re-auth modal. Mirrors the
-  // import-password pattern: the gate prompts on every "Export my data"
-  // click and only runs the export after a successful verifyPassword.
   const [exportPassword, setExportPassword] = useState(false);
   const [exportPasswordValue, setExportPasswordValue] = useState('');
   const [exportPasswordError, setExportPasswordError] = useState<string | null>(null);
@@ -99,7 +82,6 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<React.ReactNode>(null);
   const [importSuccess, setImportSuccess] = useState<ApplyImportResult | null>(null);
-  // Self-service "Restore previous version" modal.
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [unknownPrompt, setUnknownPrompt] = useState<{
     bundle: ExportBundle;
@@ -123,8 +105,7 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
     if (!householdId) return;
     onError(null);
     setExportSuccess(false);
-    // Mirror the import/demo local-dev prefill (DEV_DEFAULT_PASSWORD is empty
-    // off a local-dev build, so this is blank on every real deployment).
+    // DEV_DEFAULT_PASSWORD is empty off a local-dev build, so this is blank on every real deployment.
     setExportPasswordValue(DEV_DEFAULT_PASSWORD);
     setExportPasswordError(null);
     setExportPassword(true);
@@ -146,7 +127,6 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
     setExportPasswordVerifying(true);
     try {
       const accessToken = await verifyForExport(exportPasswordValue);
-      // Re-auth passed: tear down the modal, then run the existing export.
       setExportPassword(false);
       setExportPasswordValue('');
       setExporting(true);
@@ -156,15 +136,8 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
         setExportSuccess(true);
         setTimeout(() => setExportSuccess(false), 8000);
       } catch (err) {
-        // The forced-export transport (`createExportSyncTransport`) runs its
-        // own bootstrap()/pull() outside SyncProvider's poll, so a
-        // rollback-detected rejection (a served payload
-        // that isn't sealed with this household's key, or a tampered
-        // freshness head) never reaches SyncProvider's error handling on its
-        // own. Detect it here, flip the shared sync badge via the same hook
-        // SyncProvider registers, and show the SAME non-retry tamper
-        // explanation the badge shows — a plain "try again" would be wrong:
-        // retrying reaches the same compromised/out-of-date server state.
+        // The forced-export transport runs its own bootstrap/pull outside SyncProvider's poll, so a rollback-detected rejection never reaches its error handling:
+        // flip the shared sync badge here and show the same non-retry tamper explanation, since retrying hits the same compromised server state.
         if (isRollbackDetectedRejection(err)) {
           notifyRollbackDetectedOutsideSync();
           onError(describeSyncState({ kind: 'rollback-detected' }));
@@ -193,19 +166,12 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
   ]);
 
   const promptForImportPassword = useCallback((bundle: ExportBundle) => {
-    // Mirror the local-dev prefill (see lib/dev-credentials.ts for the
-    // build-mode + local-host gate): seed the dev user's password so devs
-    // don't re-type credentials on every workspace reset.
-    // `DEV_DEFAULT_PASSWORD` is empty off a local-dev build, so this is
-    // blank on every real deployment.
+    // See lib/dev-credentials.ts for the build-mode and local-host gate; blank on every real deployment.
     setImportPasswordValue(DEV_DEFAULT_PASSWORD);
     setImportPasswordError(null);
     setImportPassword({ bundle });
   }, []);
 
-  // Stage the next modal in the import flow given a validated bundle.
-  // Cross-household bundles get an extra warning before the password
-  // step; same-household bundles go straight to the password modal.
   const advanceAfterValidation = useCallback(
     (bundle: ExportBundle) => {
       if (householdId && bundle.householdId !== householdId) {
@@ -227,8 +193,6 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!householdId) return;
       const file = e.target.files?.[0];
-      // Reset the input value so re-selecting the same file fires
-      // change again. The filesystem reference is captured above.
       if (e.target) e.target.value = '';
       if (!file) return;
       try {
@@ -278,8 +242,6 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
     try {
       await verifyPassword(importPasswordValue);
       const bundle = importPassword.bundle;
-      // Tear down the password modal *before* opening the confirm
-      // dialog so they don't briefly stack.
       setImportPassword(null);
       setImportPasswordValue('');
       const pending = await listPendingMutations();
@@ -300,10 +262,7 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
     setImporting(true);
     setImportError(null);
     try {
-      // Force a sync round-trip before Phase 1 tombstones anything.
-      // `applyImport` enumerates local aggregates only; server-side
-      // rows the local hasn't pulled yet survive the wipe and
-      // reappear on the next pull alongside the imported bundle.
+      // Sync round-trip before the wipe: applyImport enumerates local aggregates only, so unpulled server rows would reappear next to the imported bundle.
       const sync = await syncRoundTrip();
       if (!sync.ok) {
         setImportError(`Cannot import: ${sync.reason}`);
@@ -352,12 +311,6 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
             Imported {importSuccess.total} record{importSuccess.total === 1 ? '' : 's'}.
           </SuccessNotice>
         )}
-        {/* Mock `.kvs`/`.kv` key/value rows — label-left, action-right,
-            hairline divider between — matching the Workspace tools card.
-            Replaces the prior row of three competing primary buttons: only
-            Export (the most common, safe action) keeps the accent fill; the
-            rest are neutral secondary. Each control's accessible name is the
-            full action (label + verb) so intent stays clear. */}
         <div className="flex flex-col">
           {/* eslint-disable-next-line no-restricted-syntax -- Graphite Spectrum mock .kv 13.5px */}
           <div className="flex items-center justify-between gap-3 border-b border-line py-2.5 text-[13.5px]">
@@ -466,10 +419,8 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
         <Muted as="p" className="text-xs">
           Update the app to import these records, or skip and continue without them.
         </Muted>
-        {/* Left-aligned, primary first — AGENTS modal rule. */}
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          {/* Benign: skipping unknown data types and proceeding with the
-              import the user already chose is recoverable, not destructive. */}
+          {/* Benign: proceeding with the import the user already chose is recoverable, not destructive. */}
           <button type="button" className={btnPrimaryClass} onClick={onUnknownContinue}>
             Skip and continue
           </button>
@@ -495,7 +446,6 @@ export const DataCard: React.FC<Props> = ({ householdId, email, onError }) => {
         <Muted as="p" className="text-xs">
           The original household id stays in the file but is overwritten on this device. The next sync push will register the data under your account on the server.
         </Muted>
-        {/* Left-aligned, primary first — AGENTS modal rule. */}
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
             type="button"

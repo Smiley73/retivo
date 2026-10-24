@@ -1,11 +1,4 @@
-/**
- * Create-scenario modal — extracted from `ScenariosPage.tsx` so that page
- * stays under the ≤400-line file shape cap after the Graphite Spectrum card
- * redesign (the per-card activate/delete wiring + lazy-metrics plumbing
- * pushed the parent over the cap). The modal surfaces a name + optional
- * description + parent picker (uniqueness-validated; the parent <Select>
- * carries the indented-tree depth classes).
- */
+/** Create-scenario modal: name, optional description and parent picker (uniqueness-validated; the parent Select carries the indented-tree depth classes). */
 import React, { useMemo, useState } from 'react';
 import { Modal } from '../components/Modal';
 import { TextInput } from '../components/TextInput';
@@ -138,7 +131,6 @@ export const CreateScenarioModal: React.FC<CreateScenarioModalProps> = ({
           />
         </Field>
         {error && <p className={errorTextClass} role="alert">{error}</p>}
-        {/* Left-aligned, primary action first — AGENTS modal rule. */}
         <div className="flex justify-start gap-2">
           <button type="submit" className={btnPrimaryClass} disabled={submitting}>
             {submitting ? 'Creating…' : 'Create'}

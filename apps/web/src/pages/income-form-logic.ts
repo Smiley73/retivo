@@ -1,15 +1,4 @@
-/**
- * Pure (non-React) logic for `IncomeFormPage`: draft/payload conversion,
- * deposit-target eligibility, the scenario-patch delta algebra, and the
- * retirement-facts resolver. Extracted from the page
- * so the page file holds JSX/state only.
- *
- * NOTE: `ExpenseFormPage` has structurally parallel `*ScenarioPatchDelta` /
- * `compute*ScenarioPatchSave` helpers in `expense-form-logic.ts`. They are
- * NOT unified here — they operate on different override fields
- * (income-only rollover/windfall/kind keys vs expense-only glide/
- * hsaQualified keys) and a forced shared abstraction would be premature.
- */
+/** Pure logic for IncomeFormPage: draft/payload conversion, deposit-target eligibility, the scenario-patch delta algebra and the retirement-facts resolver. Kept parallel to, not unified with, the expense helpers (different override fields). */
 import { jsonEq } from '../lib/json-eq';
 import { buildScenarioIncomePatchWrite } from '../lib/scenario-income-patch';
 import { parseDecimal } from '../lib/parse-input';
@@ -36,9 +25,6 @@ import type {
 
 export function draftFromPayload(p: IncomeStreamPayload, fallback: FormDraft): FormDraft {
   const currentYear = new Date().getFullYear();
-  // tracksInflation === true → toggle on (disable the number input).
-  // tracksInflation === false with explicit colaPct → toggle off, use value.
-  // Legacy tracksInflation === undefined → toggle off, colaPct ?? 0.
   const pensionTracksInflation = p.tracksInflation === true;
   const partTimeTracksInflation = p.tracksInflation === true;
   return {
@@ -75,17 +61,8 @@ export function isBuildError(x: IncomeStreamPayload | BuildError): x is BuildErr
   return typeof (x as BuildError).__error === 'string';
 }
 
-// ---------------------------------------------------------------------------
-// Deposit-target eligibility
-// ---------------------------------------------------------------------------
-
-/**
- * Account types that can legally RECEIVE a qualified-plan pension lump-sum
- * rollover. The Cash Balance Pension is the rollover SOURCE, not a
- * destination, and a Roth IRA is a taxable conversion the app does not model —
- * both are excluded. Filtered by type AND treatment so a non-qualified shell
- * (e.g. `OTHER` marked `PRE_TAX`) cannot pose as a rollover destination.
- */
+// Pension rollover destinations: CBP is the source and a Roth IRA is a taxable conversion the app does not model.
+// Filtered by type and treatment so a non-qualified shell (OTHER marked PRE_TAX) cannot pose as a destination.
 const ROLLOVER_TARGET_ACCOUNT_TYPES: ReadonlySet<AccountType> = new Set([
   'RETIREMENT_IRA',
   'RETIREMENT_401K',
@@ -94,17 +71,12 @@ const ROLLOVER_TARGET_ACCOUNT_TYPES: ReadonlySet<AccountType> = new Set([
   'RETIREMENT_TSP',
 ]);
 
-/** Tax treatments a pension rollover destination may carry (pre-tax money). */
 const ROLLOVER_TARGET_TREATMENTS: ReadonlySet<AccountTaxTreatment> = new Set([
   'PRE_TAX',
   'MIXED',
 ]);
 
-/**
- * Account types that can receive a one-off windfall DEPOSIT. External
- * cash realistically lands in a taxable brokerage/cash account — it cannot be
- * added to employer plans / IRAs beyond tiny contribution limits.
- */
+// Windfall cash lands in a taxable brokerage or cash account, not employer plans or IRAs.
 const WINDFALL_TARGET_ACCOUNT_TYPES: ReadonlySet<AccountType> = new Set([
   'BROKERAGE',
   'SAVINGS',
@@ -112,8 +84,6 @@ const WINDFALL_TARGET_ACCOUNT_TYPES: ReadonlySet<AccountType> = new Set([
   'CD',
 ]);
 
-/** A pension lump-sum rollover may only target a pre-tax-capable qualified
- *  account. */
 export function isEligibleRolloverTarget(account: Aggregate<AccountPayload>): boolean {
   const p = account.payload;
   return (
@@ -122,7 +92,6 @@ export function isEligibleRolloverTarget(account: Aggregate<AccountPayload>): bo
   );
 }
 
-/** A one-off windfall deposit may only target a taxable account. */
 export function isEligibleWindfallTarget(account: Aggregate<AccountPayload>): boolean {
   const p = account.payload;
   return (
@@ -154,11 +123,9 @@ export function buildPayload(
       const monthly = parseDecimal(draft.monthlyBenefit);
       if (monthly <= 0) return { __error: 'Monthly benefit must be greater than 0.' };
       base.monthlyBenefit = monthly;
-      // When tracking scenario inflation, omit colaPct entirely
-      // (undefined, never 0); when explicit, store the user value.
+      // Tracking scenario inflation omits colaPct (undefined, never 0).
       if (draft.pensionTracksInflation) {
         base.tracksInflation = true;
-        // colaPct deliberately not set (undefined, not 0)
       } else {
         base.tracksInflation = false;
         base.colaPct = parseDecimal(draft.pensionColaPct);
@@ -166,19 +133,11 @@ export function buildPayload(
       base.jointAndSurvivorPct = draft.jointAndSurvivorPct;
       if (draft.linkedCbpAccountId) base.linkedCbpAccountId = draft.linkedCbpAccountId;
     } else {
-      // Linked-CBP lump-sums derive their amount from the projected
-      // CBP balance at the event month (Balance Projection page wiring
-      // in `loadPageData`). The user-entered field is hidden in the
-      // UI and the payload carries 0 so the income-projection engine's
-      // legacy fallback emits no spurious deposit.
+      // Linked-CBP lump sums derive the amount from the CBP balance at the event month (loadPageData); the payload carries 0 so the legacy fallback emits no spurious deposit.
       if (!draft.lumpSumTargetAccountId) {
         return { __error: 'Pick a target account for the lump-sum deposit.' };
       }
-      // A pension lump-sum is pre-tax money — it may only roll into a
-      // pre-tax-capable qualified account. A target that no longer qualifies
-      // (e.g. a legacy stream whose saved account is now taxable/Roth) is
-      // rejected here rather than silently dropped, so the saved value stays
-      // visible for the user to re-pick (edit-flow legacy).
+      // A target that no longer qualifies (legacy edit) is rejected rather than silently dropped, so the saved value stays visible for re-pick.
       const lumpTarget = accounts.find((a) => a.id === draft.lumpSumTargetAccountId);
       if (!lumpTarget || !isEligibleRolloverTarget(lumpTarget)) {
         return {
@@ -205,11 +164,8 @@ export function buildPayload(
     const endErr = validateEnd(draft.end);
     if (endErr) return { __error: endErr };
     base.end = draft.end;
-    // When tracking scenario inflation, omit colaPct entirely
-    // (undefined, never 0); when explicit, store the user value.
     if (draft.partTimeTracksInflation) {
       base.tracksInflation = true;
-      // colaPct deliberately not set (undefined, not 0)
     } else {
       base.tracksInflation = false;
       base.colaPct = parseDecimal(draft.partTimeColaPct);
@@ -220,9 +176,6 @@ export function buildPayload(
     if (!draft.oneOffTargetAccountId) {
       return { __error: 'Pick the account that receives this windfall.' };
     }
-    // A windfall is external cash — it can only land in a taxable
-    // brokerage/cash account, not a retirement plan. A now-ineligible saved
-    // target (legacy edit) is rejected here, keeping the value visible.
     const windfallTarget = accounts.find((a) => a.id === draft.oneOffTargetAccountId);
     if (!windfallTarget || !isEligibleWindfallTarget(windfallTarget)) {
       return {
@@ -238,21 +191,7 @@ export function buildPayload(
   return base;
 }
 
-/**
- * Per-key delta between the form's built payload and the resolved payload
- * the form opened with (mirrors the expense `scenarioPatchDelta`).
- * Only top-level keys whose value changed are emitted, so the stored patch
- * stays as sparse as the user's actual edits. A kind change carries `kind`
- * plus the new kind's fields. `notes` clears to `''` (an empty string is
- * the field's real value, not a key removal).
- *
- * Clear anything the rebuild dropped: any key present in
- * `opened` but absent in the rebuilt payload emits `null`, the
- * clear-marker. This covers both an emptied in-kind optional (e.g. a
- * pension's `linkedCbpAccountId`) AND an off-kind leftover after a `kind`
- * switch, so the scenario resolves to a clean stream with no stale inert
- * keys. The resolver drops `null`-valued keys after the chain merge.
- */
+// Per-key delta against the resolved payload the form opened with, so the stored patch stays sparse. A key present in opened but absent in the rebuild emits null (the clear-marker), covering emptied optionals and off-kind leftovers after a kind switch.
 function incomeScenarioPatchDelta(
   built: IncomeStreamPayload,
   opened: IncomeStreamPayload,
@@ -274,9 +213,6 @@ function incomeScenarioPatchDelta(
       if (built[k] !== undefined) {
         (delta as Record<string, unknown>)[k] = built[k];
       } else if (opened[k] !== undefined) {
-        // The rebuild dropped a key the scenario opened with — emit the
-        // `null` clear-marker so the resolver omits it rather than
-        // re-inheriting the canonical value.
         (delta as Record<string, unknown>)[k] = null;
       }
     }
@@ -284,13 +220,7 @@ function incomeScenarioPatchDelta(
   return delta;
 }
 
-/**
- * Scenario-patch Save: compute the next `ScenarioPayload` after merging
- * the per-key delta into THIS income's existing patch (never replace —
- * pre-existing patch keys are preserved). Pre-prefix snapshots could
- * store the patch under the raw canonical id, so the merge reads either
- * key and the shared write helper drops both. Pure.
- */
+/** Merges the per-key delta into this income's existing patch, never replacing it; pre-prefix snapshots could store the patch under the raw canonical id, so either key is read and both are dropped. */
 export function computeIncomeScenarioPatchSave(
   scenarioPayload: ScenarioPayload,
   built: IncomeStreamPayload,
@@ -318,15 +248,7 @@ export function computeIncomeScenarioPatchSave(
   );
 }
 
-/**
- * Per-member retirement (year, month0) + the scenario's life-expectancy
- * override, resolved from the form's effective scenario. Feeds the
- * `ScheduleResolveContext` the Save-time schedule validator uses so an
- * owner-relative `retirementStart` / `endOfRetirementYear` / `lifetime`
- * anchor resolves to the same month the projection engine would pick.
- * Returns empties on any failure — the validator treats an unresolved
- * anchor as "don't block" (the engine fail-safes broken anchors).
- */
+/** Per-member retirement (year, month0) and the scenario's life-expectancy override for the Save-time schedule validator; returns empties on failure, and an unresolved anchor never blocks. */
 export function resolveRetirementFacts(
   scenario: Aggregate<ScenarioPayload> | null | undefined,
   scenarios: Aggregate<ScenarioPayload>[],
@@ -359,7 +281,6 @@ export function resolveRetirementFacts(
       }
     }
   } catch {
-    // Leave empties — the validator won't block on an unresolved anchor.
   }
   return { retirementByMember, lifeExpectancy };
 }

@@ -1,15 +1,4 @@
-/**
- * Schedule pickers + the shared `FormDraft` shape for the IncomeStream
- * form. Extracted from `IncomeFormPage` so that page stays under the
- * 400-line shape limit — the pickers + the draft type + the
- * start/end defaults & validators are a cohesive schedule sub-module
- * the page composes. One-directional import (IncomeFormPage →
- * IncomeSchedulePickers); no cycle.
- *
- * v1 form exposes a narrower subset of the partTime start/end
- * vocabulary; the data model still supports the full ScheduleStart /
- * ScheduleEnd discriminated unions.
- */
+/** Schedule pickers and the shared FormDraft shape for the IncomeStream form. The v1 form exposes a narrower partTime start/end vocabulary than the data model supports. */
 import React from 'react';
 import { RadioGroup } from 'react-aria-components';
 import { RadioOption } from '../components/RadioOption';
@@ -41,11 +30,7 @@ import type {
   ScheduleEnd,
 } from '../db/types';
 
-/** Inline numeric text input — the control that sits on the same row as
- *  its radio (mockup "In year […]" inline pattern). Every row's input
- *  stays visible; the inputs whose radio isn't selected are disabled
- *  (not hidden). `type=text inputMode=numeric` (NOT `type=number` —
- *  AGENTS UI standards: no spinner layout jitter). */
+// Inline numeric input sharing a row with its radio; inputs of unselected radios stay visible but disabled. type=text inputMode=numeric, not type=number, to avoid spinner layout jitter.
 const InlineNumberInput: React.FC<{
   ariaLabel: string;
   value: string;
@@ -75,25 +60,14 @@ interface SchedulePickerProps {
 }
 
 interface StartPickerProps extends SchedulePickerProps {
-  /** Heading shown above the radio stack. */
   label: string;
-  /** When true, the `age` kind exposes a member dropdown so partTime
-   *  can anchor to the non-owner spouse. Annuity/lumpSum/oneOff hide it
-   *  (owner-implicit). */
+  /** Exposes a member dropdown so partTime can anchor to the non-owner spouse; other kinds are owner-implicit. */
   showMemberPicker: boolean;
-  /** The stream owner's role, used by the bridge to keep an
-   *  owner-implicit `age.memberId` omitted. Derived in
-   *  `IncomeFormPage` from the selected owner member. */
+  /** Keeps an owner-implicit `age.memberId` omitted. */
   ownerRole?: HouseholdRole;
 }
 
-/**
- * Income Start picker. Renders through the shared `ScheduleAnchorPicker`
- * (always-expanded — `collapsible={false}`); the `GlideAnchor ↔
- * ScheduleStart` conversion and the owner-implicit `memberId` policy live
- * in `lib/schedule-anchor-bridge.ts`. The member `<select>` is
- * gated to partTime via `memberSelectable={showMemberPicker}`.
- */
+/** Income Start picker over the shared ScheduleAnchorPicker (always expanded); the GlideAnchor ↔ ScheduleStart conversion and owner-implicit memberId policy live in lib/schedule-anchor-bridge.ts. */
 export const ScheduleStartPicker: React.FC<StartPickerProps> = ({
   draft,
   setDraft,
@@ -107,9 +81,6 @@ export const ScheduleStartPicker: React.FC<StartPickerProps> = ({
     memberSelectable={showMemberPicker}
     label={label}
     members={members}
-    // Switching to the `age` kind defaults to the stream owner (not a
-    // hardcoded primary), and switching to the `year` kind defaults to
-    // current year + 5 — matching the pre-shared income Start picker.
     defaultMemberId={ownerRole ?? 'primary'}
     defaultYear={new Date().getFullYear() + 5}
     value={scheduleStartToGlideAnchor(draft.start, { memberRole: ownerRole })}
@@ -145,9 +116,7 @@ export const ScheduleEndPicker: React.FC<SchedulePickerProps> = ({
       setEnd({ kind: 'durationFromStart', months: 60 });
   };
   const hasSecondary = members.some((m) => !m.payload.isPrimary);
-  // Every radio's input stays visible — the inactive ones are disabled,
-  // not hidden (matching the expense form). Show the live value when the
-  // kind is active, else a sensible default while disabled.
+  // Inactive radios' inputs stay visible but disabled; show the live value when the kind is active, else a default.
   const lifetimeActive = end.kind === 'lifetime';
   const ageActive = end.kind === 'age';
   const yearActive = end.kind === 'year';
@@ -166,7 +135,6 @@ export const ScheduleEndPicker: React.FC<SchedulePickerProps> = ({
       >);
   return (
     <LabelledGroup id="income-end-group-label" heading="End">
-      {/* Alignment grid: radios in column 1, their inputs in column 2. */}
       <RadioGroup
         aria-labelledby="income-end-group-label"
         value={end.kind}
@@ -231,8 +199,7 @@ export const ScheduleEndPicker: React.FC<SchedulePickerProps> = ({
         </div>
 
         <RadioOption value="endOfRetirementYear">After</RadioOption>
-        {/* User-facing N = stored offsetYears + 1 (1 = first year only,
-            6 = first 6 years). Slider spans 1–30 retirement years. */}
+        {/* Stored offsetYears + 1: N = 1 is the first year only. */}
         <div className={ANCHOR_SLIDER_WRAP}>
           <RangeSlider
             ariaLabel="Number of retirement years"
@@ -266,7 +233,6 @@ const DurationFromStartInput: React.FC<{
   setEnd: (e: ScheduleEnd) => void;
   disabled?: boolean;
 }> = ({ end, setEnd, disabled }) => {
-  // Display unit derived from the stored months: divisible by 12 → years.
   const inYears = end.months % 12 === 0;
   const value = inYears ? end.months / 12 : end.months;
   return (
@@ -286,8 +252,7 @@ const DurationFromStartInput: React.FC<{
           disabled={disabled}
           checked={inYears}
           onChange={(checked) => {
-            // Convert without losing magnitude — `value` is the current
-            // visible number; flipping the unit changes how it's stored.
+            // Convert without losing magnitude when flipping the unit.
             const next = checked ? value * 12 : value;
             setEnd({ kind: 'durationFromStart', months: next });
           }}

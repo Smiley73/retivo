@@ -1,16 +1,5 @@
-/**
- * Tier editor for the custom drawdown order editor section.
- *
- * Exports `TierEditor` (the full drag-and-drop tier stack) and `TierList`
- * (single droppable list). Extracted from ScenarioWithdrawalStrategyCards
- * to keep each file under the 400-line cap.
- *
- * Each list owns its `useDragAndDrop` hook so its `onInsert` and `onRootDrop`
- * close over the correct `tierKey` (a single shared coordinator would route
- * drops to tier-0 whenever `beforeId` is undefined, i.e. any "after-last" or
- * empty-list drop, and hardcode `'excluded'` in `onRootDrop` regardless of
- * which empty list received the drop).
- */
+/** Tier editor for the custom drawdown order: TierEditor (the drag-and-drop tier stack) and TierList (one droppable list).
+* Each list owns its useDragAndDrop hook so onInsert and onRootDrop close over the right tierKey; a shared coordinator would send "after-last" or empty-list drops to tier-0 and hardcode 'excluded'. */
 import React, { useMemo } from 'react';
 import { PlusIcon } from '../components/icons';
 import { textLinkClass } from '../components/TextLink';
@@ -24,16 +13,9 @@ import { Muted } from '../components/Muted';
 import type { AccountPayload, Aggregate } from '../db/types';
 import type { CbpInfoRow } from './scenario-withdrawal-strategy-shared';
 
-/** MIME type used to transfer account IDs between GridList tiers in DnD. */
 const ACCOUNT_DRAG_TYPE = 'application/x-tier-account-id';
 
-/**
- * Pure function: move `movedId` to `targetKey` (e.g. `'tier-0'`, `'tier-1'`,
- * `'excluded'`), optionally before `beforeId`. Returns new `{tiers, excludedAccountIds}`.
- *
- * Extracted from the `TierEditor.moveAccount` closure so tests and callers
- * can exercise the logic directly without rendering the DnD component.
- */
+/** Moves `movedId` to `targetKey` ('tier-N' or 'excluded'), optionally before `beforeId`; pure so tests can exercise it without the DnD component. */
 export function moveAccountAcrossTiers(
   tiers: string[][],
   excludedAccountIds: string[],
@@ -56,15 +38,6 @@ export function moveAccountAcrossTiers(
   return { tiers: nextTiers, excludedAccountIds: nextExcluded };
 }
 
-// ——— TierList ————————————————————————————————————————————
-
-/**
- * One droppable/draggable list (a single tier or the excluded section).
- *
- * Each list owns its `useDragAndDrop` hook, closed over its own
- * `tierKey`. This ensures `onInsert` and `onRootDrop` route to the correct
- * list even when `dropPosition === 'after'` (no `beforeId` available).
- */
 interface TierListProps {
   listKey: string;
   label: string;
@@ -72,9 +45,7 @@ interface TierListProps {
   accountById: Map<string, Aggregate<AccountPayload>>;
   onMoveAccount: (movedId: string, targetKey: string, beforeId?: string) => void;
   onReorderWithinList: (listKey: string, reorderedIds: string[]) => void;
-  /** When true (a drawdown tier, not the Excluded list), each row is prefixed
-   *  with its 1-based drain position so the within-tier sequential order
-   *  is visible. Excluded accounts are never drained, so no number is shown. */
+  /** Prefixes each row with its 1-based drain position in a drawdown tier; the Excluded list is never drained, so it shows none. */
   showOrder?: boolean;
 }
 
@@ -82,7 +53,6 @@ const TierList: React.FC<TierListProps> = ({
   listKey, label, accountIds, accountById, onMoveAccount, onReorderWithinList,
   showOrder = false,
 }) => {
-  // Per-list hook: tierKey is captured in closure — each list routes to itself.
   const { dragAndDropHooks } = useDragAndDrop({
     getItems: (keys) =>
       [...keys].map((k) => ({ [ACCOUNT_DRAG_TYPE]: String(k) })),
@@ -101,10 +71,7 @@ const TierList: React.FC<TierListProps> = ({
       for (const item of e.items) {
         if (item.kind !== 'text' || !item.types.has(ACCOUNT_DRAG_TYPE)) continue;
         const movedId = await item.getText(ACCOUNT_DRAG_TYPE);
-        // dropPosition='before' → insert before the target key.
-        // dropPosition='after' → insert after the target: find the next
-        // element and pass that as beforeId (passing
-        // undefined would always append, losing the user's intended position).
+        // dropPosition 'after' passes the next element as beforeId: undefined would always append and lose the intended position.
         let beforeId: string | undefined;
         if (e.target.dropPosition === 'before') {
           beforeId = String(e.target.key);
@@ -112,7 +79,6 @@ const TierList: React.FC<TierListProps> = ({
           const targetIdx = accountIds.indexOf(String(e.target.key));
           beforeId = targetIdx >= 0 ? accountIds[targetIdx + 1] : undefined;
         }
-        // listKey is captured in closure — always routes to this list.
         onMoveAccount(movedId, listKey, beforeId);
       }
     },
@@ -120,7 +86,6 @@ const TierList: React.FC<TierListProps> = ({
       for (const item of e.items) {
         if (item.kind !== 'text' || !item.types.has(ACCOUNT_DRAG_TYPE)) continue;
         const movedId = await item.getText(ACCOUNT_DRAG_TYPE);
-        // listKey captured in closure — correct target even for empty lists.
         onMoveAccount(movedId, listKey);
       }
     },
@@ -180,41 +145,18 @@ const TierList: React.FC<TierListProps> = ({
   );
 };
 
-// ——— TierEditor ——————————————————————————————————————————
-
 export interface TierEditorProps {
   tiers: string[][];
   excludedAccountIds: string[];
   accounts: ReadonlyArray<Aggregate<AccountPayload>>;
-  /** Read-only CBP accounts shown outside the drag-and-drop lists. */
   cbpInfoRows: ReadonlyArray<CbpInfoRow>;
   onChange: (tiers: string[][], excluded: string[]) => void;
-  /**
-   * Invoked when the user clicks "Elect a payout" on an unconfigured CBP row.
-   * The parent modal routes this through the unsaved-changes discard guard
-   * before navigating to the income-add flow — a raw `<Link>` here
-   * would unmount the dirty modal and silently drop the draft.
-   */
+  /** Routed through the parent's discard guard: a raw <Link> would unmount the dirty modal and drop the draft. */
   onElectPayout: (account: Aggregate<AccountPayload>) => void;
-  /**
-   * Invoked when the user clicks "Review pensions" on a conflicting CBP row
-   * (more than one linked pension stream). Routes — through the same discard
-   * guard — to the Income page so the user can remove the duplicate streams,
-   * mirroring `CbpRemediationBanner`'s duplicate remediation. Adding another
-   * stream (the elect-a-payout path) would deepen the duplication, so the
-   * conflict row never offers it.
-   */
+  /** Routed through the same discard guard to the Income page to remove duplicate streams; adding another (the elect-a-payout path) would deepen the duplication. */
   onReviewPensions: (account: Aggregate<AccountPayload>) => void;
 }
 
-// ——— CbpInfoSection ——————————————————————————————————————
-
-/**
- * Read-only, non-draggable section listing every Cash Balance Pension
- * account with its treatment (annuity / lump-sum-target / unconfigured /
- * conflict). Rendered OUTSIDE the React Aria `GridList` so these never become
- * orderable tier items.
- */
 interface CbpInfoRowLineProps {
   row: CbpInfoRow;
   account: Aggregate<AccountPayload> | undefined;
@@ -307,13 +249,6 @@ const CbpInfoSection: React.FC<{
   );
 };
 
-/**
- * Tier editor: N tier cards + an Excluded card, all cross-draggable.
- *
- * Per-list hooks via `TierList`; `moveAccount` and `reorderWithinList`
- * are stable callbacks threaded down as props so each list's handlers close
- * over the correct `tierKey` without a shared coordinator.
- */
 export const TierEditor: React.FC<TierEditorProps> = ({
   tiers, excludedAccountIds, accounts, cbpInfoRows, onChange, onElectPayout, onReviewPensions,
 }) => {
@@ -322,14 +257,12 @@ export const TierEditor: React.FC<TierEditorProps> = ({
     [accounts],
   );
 
-  /** Move account `movedId` to list `targetKey` before `beforeId` (or at end). */
   const moveAccount = (movedId: string, targetKey: string, beforeId?: string): void => {
     const { tiers: nextTiers, excludedAccountIds: nextExcluded } =
       moveAccountAcrossTiers(tiers, excludedAccountIds, movedId, targetKey, beforeId);
     onChange(nextTiers, nextExcluded);
   };
 
-  /** Reorder within a single list (drag up/down within the same tier). */
   const reorderWithinList = (listKey: string, reorderedIds: string[]): void => {
     if (listKey === 'excluded') {
       onChange(tiers, reorderedIds);

@@ -1,13 +1,4 @@
-/**
- * /expense-categories — manage page for ExpenseCategory aggregates.
- *
- * Renders the household's category list (alphabetical), with Add and
- * Rename modals and a delete affordance that blocks when the category
- * is in use. The "in use" check inspects canonical Expense aggregates
- * + every Scenario's `overrides.expenses.added[*]` — Expense itself
- * lands in a follow-up commit, so this commit's delete check looks at
- * Scenarios only and gracefully treats Expense as not-yet-arrived.
- */
+/** /expense-categories: manage ExpenseCategory aggregates with Add and Rename modals; delete is blocked while an expense or a scenario's overrides.expenses.added[*] references the category. */
 import React, { useMemo, useState } from 'react';
 import { PlusIcon } from '../components/icons';
 import { useAuth } from '../auth/AuthContext';
@@ -52,9 +43,7 @@ interface CategoryRow {
   name: string;
   /** Generic medical marker — drives the +2pp inflation default. */
   isMedical: boolean;
-  /** Reference count across canonical expenses + scenario.added entries. */
   useCount: number;
-  /** Full, uncapped, ordered reference labels (the dialog owns the cap). */
   refLabels: string[];
 }
 
@@ -70,10 +59,6 @@ export const ExpenseCategoriesPage: React.FC = () => {
   const { householdId } = useAuth();
   const { notifyPending } = useSync();
   const { confirm, dialog: confirmDialog } = useConfirm();
-  // Reactive reads: category rows + their reference counts re-derive on any
-  // write to the `expenseCategory` / `expense` / `scenario` stores (single
-  // saves/deletes via the per-store fine signal, the default-categories
-  // bootstrap / demo fill / sync via the coarse workspace event).
   const categoryQuery = useAggregates('expenseCategory');
   const expenseQuery = useAggregates('expense');
   const scenarioQuery = useAggregates('scenario');
@@ -87,25 +72,19 @@ export const ExpenseCategoriesPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const error = actionError ?? loadError;
 
-  // Add modal
   const [addOpen, setAddOpen] = useState(false);
   const [addName, setAddName] = useState('');
   const [addIsMedical, setAddIsMedical] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
-  // Rename modal
   const [renameTarget, setRenameTarget] = useState<CategoryRow | null>(null);
   const [renameName, setRenameName] = useState('');
   const [renameIsMedical, setRenameIsMedical] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
 
-  // Block dialog (deletion blocked because the category is in use).
   const [blockState, setBlockState] = useState<BlockDialogState | null>(null);
 
-  // Seeding state for the empty-state CTA. Older exports (and legacy
-  // imports that landed before the auto-bootstrap) leave the user with
-  // zero categories; offer a one-click "use the standard 8" rather than
-  // forcing 8 separate Add-category clicks.
+  // Offers a one-click standard set to users left with zero categories by older exports or imports.
   const [seeding, setSeeding] = useState(false);
 
   const isDirty = useMemo(() => {
@@ -122,8 +101,6 @@ export const ExpenseCategoriesPage: React.FC = () => {
 
   const { pendingNavModal } = useUnsavedChangesGuard(isDirty);
 
-  // Derive the category rows + their reference counts from the reactive hook
-  // outputs. Pure, so it lives in a `useMemo` (no load effect / loading state).
   const rows = useMemo<CategoryRow[]>(() => {
     const cats = categoryQuery.aggregates as ReadonlyArray<
       Aggregate<ExpenseCategoryPayload>
@@ -135,7 +112,6 @@ export const ExpenseCategoriesPage: React.FC = () => {
       Aggregate<ScenarioPayload>
     >;
 
-    // Build the references index: categoryId -> human-readable labels.
     const refs = new Map<string, string[]>();
     for (const e of expenses) {
       const cid = e.payload.categoryId;
@@ -219,13 +195,10 @@ export const ExpenseCategoriesPage: React.FC = () => {
         householdId,
         operation: 'create',
         expectedVersion: 0,
-        // New categories default off; persist the flag only when on (sparse).
         payload: addIsMedical ? { name, isMedical: true } : { name },
       });
       onCloseAdd();
       notifyPending();
-      // The create writes an `expenseCategory` row, so the reactive read
-      // re-runs and the new row appears — no manual reload.
     } catch {
       setActionError('Failed to add category.');
     } finally {
@@ -262,7 +235,6 @@ export const ExpenseCategoriesPage: React.FC = () => {
       setRenameError(`A category named "${name}" already exists.`);
       return;
     }
-    // No-op only when neither the name nor the flag changed.
     if (
       name === renameTarget.name &&
       renameIsMedical === renameTarget.isMedical
@@ -273,8 +245,7 @@ export const ExpenseCategoriesPage: React.FC = () => {
     setSubmitting(true);
     setActionError(null);
     try {
-      // Full-payload replace: include `isMedical` or a rename would erase the
-      // flag. Persist the flag only when on (sparse — absent ⇒ not medical).
+      // Full-payload replace: include isMedical or a rename would erase the flag; persist it only when on (sparse).
       const payload: ExpenseCategoryPayload = renameIsMedical
         ? { name, isMedical: true }
         : { name };
@@ -288,8 +259,6 @@ export const ExpenseCategoriesPage: React.FC = () => {
       });
       onCloseRename();
       notifyPending();
-      // The update writes the `expenseCategory` row, so the reactive read
-      // re-runs and the renamed row refreshes — no manual reload.
     } catch {
       setActionError('Failed to rename category.');
     } finally {
@@ -319,8 +288,6 @@ export const ExpenseCategoriesPage: React.FC = () => {
         payload: { name: target.name },
       });
       notifyPending();
-      // The delete tombstone is an `expenseCategory` write, so the reactive
-      // read re-runs and drops the row — no manual reload.
     } catch {
       setActionError('Failed to delete category.');
     }
@@ -334,8 +301,6 @@ export const ExpenseCategoriesPage: React.FC = () => {
       const created = await ensureDefaultExpenseCategories(householdId);
       if (created > 0) {
         notifyPending();
-        // The bootstrap writes `expenseCategory` rows, so the reactive read
-        // re-runs and the seeded rows appear — no manual reload.
       }
     } catch {
       setActionError('Failed to seed default categories.');
@@ -406,10 +371,6 @@ export const ExpenseCategoriesPage: React.FC = () => {
                   {r.useCount === 0 ? 'Not used' : `Used by ${r.useCount} expense${r.useCount === 1 ? '' : 's'}`}
                 </Muted>
               </div>
-              {/* Hover-revealed icon cluster, matching the Accounts /
-                  Account Balances row pattern; icons carry their accessible
-                  name via aria-label. Delete stays blocked (aria-disabled +
-                  tooltip) while the category is in use. */}
               <div className="row-actions items-center">
                 <button
                   type="button"
@@ -419,10 +380,7 @@ export const ExpenseCategoriesPage: React.FC = () => {
                 >
                   <PencilIcon />
                 </button>
-                {/* Intentionally NOT disabled when in use: clicking opens a
-                    dialog explaining which expenses block the delete, so the
-                    control must stay actionable for keyboard + AT users. The
-                    `title` is a hover preview of the same hint. */}
+                {/* Not disabled when in use: clicking opens a dialog naming the blocking expenses, so the control must stay actionable for keyboard and AT users. */}
                 <button
                   type="button"
                   className={iactDeleteClass}
@@ -548,7 +506,6 @@ const CategoryNameModal: React.FC<CategoryNameModalProps> = ({
           {error}
         </Alert>
       )}
-      {/* Left-aligned, primary action first — AGENTS modal rule. */}
       <div className="mt-3 flex justify-start gap-2">
         <button type="submit" className={btnPrimaryClass} disabled={submitting}>
           {submitting ? 'Saving…' : submitLabel}

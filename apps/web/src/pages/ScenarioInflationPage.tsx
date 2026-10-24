@@ -1,24 +1,5 @@
-/**
- * Scenario-level inflation overrides at /scenarios/:id/inflation.
- *
- * A general-rate slider (the household-wide inflation rate) plus a list of
- * every expense category, each with an editable effective-rate field. A
- * category whose field equals its default is "inherited" (`= general` /
- * Medical `(+2pp default)`); a different value reads `(custom)`. Per-row
- * reset drops the override.
- *
- * Save always co-persists the general `ratePct` (the slider is always
- * shown) so the generic `resolveScenario` readers of `inflation.ratePct`
- * never lose the general rate. Category rows equal to their default
- * are omitted (sparse `categoryRates`); orphan keys (a stored override
- * whose category no longer exists) are preserved verbatim. Values are
- * validated / clamped to finite `[0, 10]` at the Save boundary.
- *
- * Inheritance-snapshot note: because the page always co-persists
- * `ratePct`, a child scenario that overrides only a category snapshots the
- * then-resolved general rate, so a later change to the parent's general
- * rate no longer flows to this child. Surfaced on the page.
- */
+/** /scenarios/:id/inflation: a general-rate slider plus per-category effective rates. Save always co-persists the general ratePct (so resolveScenario readers keep it) and omits category rows equal to their default; orphan keys are preserved.
+* A child that overrides only a category snapshots the resolved general rate, so a later parent change no longer flows to it. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAuth } from '../auth/AuthContext';
@@ -62,16 +43,12 @@ import {
 
 const INFLATION_STEP = 0.5;
 
-/** Clamp + snap a numeric rate to the persisted finite `[0, 10]` domain. */
 function clampRate(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(INFLATION_MIN, Math.min(INFLATION_MAX, value));
 }
 
-/** A category's default effective rate (the value it inherits when the
- *  scenario sets no override): an `isMedical`-flagged category = general +
- *  spread, all others = general. Displayed UNCAPPED so a high general rate
- *  shows the true default, even past 10%. */
+// A category's inherited default: general + spread for isMedical, else general; displayed uncapped so a high general rate shows the true default.
 function defaultRateFor(isMedical: boolean, generalRate: number): number {
   if (isMedical) {
     return generalRate + DEFAULT_MEDICAL_INFLATION_SPREAD_PCT;
@@ -86,26 +63,19 @@ export const ScenarioInflationPage: React.FC = () => {
 
   const [scenario, setScenario] = useState<ScenarioAggregate | null>(null);
   const [categories, setCategories] = useState<Aggregate<ExpenseCategoryPayload>[]>([]);
-  // Flag-derived medical-id set. Membership drives the +2pp default + the
-  // IRMAA/ACA disclosure on EVERY `isMedical` row, not just the legacy id.
+  // Membership drives the +2pp default and the IRMAA/ACA disclosure on every isMedical row, not just the legacy id.
   const medicalIds = useMemo(
     () => new Set(medicalCategoryIdsFrom(categories)),
     [categories],
   );
   const [generalRate, setGeneralRate] = useState<number>(DEFAULT_INFLATION_PCT);
-  // Draft per-category effective rate keyed by category id. Seeded from the
-  // resolved value; a row equal to its default is dropped on save.
   const [categoryDrafts, setCategoryDrafts] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // The general rate the page loaded with — used to flag dirty.
   const baselineGeneralRef = useRef<number>(DEFAULT_INFLATION_PCT);
-  // Resolved per-category rates at load (the inherited baseline) — used for
-  // dirty detection + reset.
   const baselineCategoryRef = useRef<Map<string, number>>(new Map());
-  // The scenario's OWN stored category overrides at load (so we can keep
-  // orphan keys verbatim on save).
+  // The scenario's own stored overrides, kept so orphan keys survive a save verbatim.
   const ownStoredRatesRef = useRef<Record<string, number>>({});
 
   const reload = useCallback(async () => {
@@ -205,9 +175,7 @@ export const ScenarioInflationPage: React.FC = () => {
     (newRate: number) => {
       const oldGeneral = generalRate;
       setGeneralRate(newRate);
-      // Recompute any inherited category draft to the new default. Without
-      // this, moving the general-rate slider and saving would persist every
-      // category that was at its old default as a stale custom override.
+      // Recompute inherited category drafts to the new default, or saving after moving the slider would persist every category at its old default as a stale custom override.
       setCategoryDrafts((prev) => {
         const next = new Map(prev);
         for (const [catId, draft] of prev) {
@@ -228,10 +196,7 @@ export const ScenarioInflationPage: React.FC = () => {
     setError(null);
     try {
       const general = clampRate(generalRate);
-      // Start from the scenario's own stored category overrides so any
-      // ORPHAN key (a category since deleted / an imported absent category)
-      // is preserved verbatim — never pruned. Sanitise the kept
-      // orphan values to the finite domain.
+      // Start from the stored overrides so orphan keys (deleted or imported-absent categories) are preserved verbatim, sanitised to the finite domain.
       const categoryRates: Record<string, number> = {};
       const liveIds = new Set(categories.map((c) => c.id));
       for (const [key, value] of Object.entries(ownStoredRatesRef.current)) {
@@ -240,22 +205,14 @@ export const ScenarioInflationPage: React.FC = () => {
           categoryRates[key] = clampRate(value);
         }
       }
-      // Persist a live category only when its draft differs from its
-      // uncapped default (sparse — equal-to-default rows inherit; the
-      // uncapped comparison is intentional for Medical when general > 8%).
       for (const cat of categories) {
         const d = categoryDrafts.get(cat.id);
         if (d === undefined) continue;
         const def = defaultRateFor(medicalIds.has(cat.id), general);
-        // Compare draft to the UNCAPPED default before clamping. Without
-        // this order, Medical at general=9% has draft=11, clamp(11)=10,
-        // and 10 ≠ 11 → spuriously persisted as a custom `10` override
-        // instead of inheriting the uncapped default.
+        // Compare against the uncapped default before clamping: Medical at general = 9% has draft 11, clamp gives 10, and 10 ≠ 11 would persist a spurious custom override.
         if (d === def) continue;
         categoryRates[cat.id] = clampRate(d);
       }
-      // Always co-persist `ratePct` so generic resolveScenario readers
-      // keep the general rate.
       const override: InflationOverride = { ratePct: general };
       if (Object.keys(categoryRates).length > 0) {
         override.categoryRates = categoryRates;

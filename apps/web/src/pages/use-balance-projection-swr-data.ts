@@ -1,23 +1,5 @@
-/**
- * Balance Projection page — basis-aware SWR data hook.
- *
- * Adapts the page's ALREADY-BUILT view model (`vm`, from the page's own
- * single `useBalanceProjectionViewModel()` call) onto
- * `balance-projection-swr-derivation.ts`'s pure builder — this hook mounts
- * no view model of its own and triggers no Monte Carlo run: the page's
- * existing `stressVm` already runs (or doesn't) independently of this tab,
- * exactly as it does for every other tab today.
- *
- * One raw input the vm doesn't surface is threaded through independently:
- * the per-year Social Security / pension / part-time / one-off split
- * (`sourceSplitByYear`), via a second call to the already-exported, pure
- * `buildPageCashflowSeries` with the SAME inputs the page's own
- * `cashflowSeries` memo uses — the single source for that split
- * (`CashflowMonthlyPoint`, what
- * `vm.incomeView` DOES surface, carries only the pre-summed `earned`
- * figure, not the per-source breakdown this tab's guaranteed/other-income
- * layers need).
- */
+/** Adapts the page's already-built view model onto balance-projection-swr-derivation; it mounts no view model and starts no Monte Carlo run.
+* The per-source income split (sourceSplitByYear) is not on the vm, so it comes from a second buildPageCashflowSeries call with the same inputs as the page's cashflowSeries memo. */
 import { useMemo } from 'react';
 import type { Aggregate, ExpensePayload, IncomeStreamPayload, SocialSecurityBenefitPayload } from '../db/types';
 import type { ProjectionMethod } from '../components/ProjectionChart';
@@ -34,9 +16,7 @@ import type { BalanceProjectionViewModel } from './use-balance-projection-view-m
 
 export interface UseBalanceProjectionSwrDataInput {
   readonly data: PipelineData | null;
-  /** The page's own view model — the SAME object every other tab reads,
-   *  never a second `useBalanceProjectionViewModel()` call (that would
-   *  duplicate the page's Monte Carlo run). */
+  /** The page's own view model; a second useBalanceProjectionViewModel() call would duplicate the Monte Carlo run. */
   readonly vm: BalanceProjectionViewModel;
   readonly selectedScenarioId: string | null;
   readonly canonicalIncome: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
@@ -66,10 +46,7 @@ export function useBalanceProjectionSwrData(
     nowMonthIndex,
   } = input;
 
-  // ALWAYS Today's-dollars, independent of the page's active toggle:
-  // `vm.viewDeflator` collapses to the identity under Future-dollars, which
-  // would leave the rule figures with no real basis to inflate forward from
-  // (see `balance-projection-swr-derivation.ts`'s docblock).
+  // Always Today's dollars: vm.viewDeflator collapses to the identity under Future dollars, leaving the rule figures no real basis to inflate from.
   const realDeflator = useMemo(
     () =>
       buildViewDeflatorForExport(
@@ -87,7 +64,6 @@ export function useBalanceProjectionSwrData(
     return data.memberRetirementById.get(data.primaryMember.id) ?? null;
   }, [vm.primaryRetirementYear, data]);
 
-  // Mirrors the page's own `cashflowChartEndYear` memo.
   const cashflowChartEndYear = useMemo<number | null>(() => {
     if (vm.primaryRetirementYear === null) return null;
     return vm.lastDeathFractional !== null

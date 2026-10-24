@@ -1,14 +1,4 @@
-/**
- * Account "Tax details" editor section.
- *
- * The React surface only: every pure reader / serializer / validator it uses lives
- * in `lib/account-tax-profile.ts` so the exported report can reuse the same logic
- * without `lib/` depending on the UI layer.
- *
- * Lives beside `AccountFormModal.tsx` rather than inside it:
- * the modal is already at the file-shape cap, and this mirrors the established
- * `accounts-page-chrome.tsx` / `scenario-tax-assumptions-sections.tsx` split.
- */
+/** Account "Tax details" editor section: the React surface over the pure readers, serializers and validators in lib/account-tax-profile.ts, which the exported report reuses without lib/ depending on the UI layer. */
 import React, { useEffect, useId, useState } from 'react';
 import { Button, Disclosure, DisclosurePanel, Heading } from 'react-aria-components';
 import type {
@@ -99,14 +89,7 @@ function draftYear(value: string): number | undefined {
   return /^\d{4}$/.test(trimmed) ? Number(trimmed) : undefined;
 }
 
-/**
- * On an INHERITED Roth IRA neither engine consults
- * the five-year clock any more: every dollar comes out tax-free. The date FIELD is
- * untouched — still asked for, still stored, still gating the completeness
- * indicator on every account type — so only the sentences DESCRIBING what the
- * clock does for an inherited account are corrected here, because they now
- * describe a treatment no code applies.
- */
+// On an inherited Roth IRA neither engine consults the five-year clock: every dollar comes out tax-free. The date field is still asked for and stored; only the sentences describing what the clock does are corrected.
 function clockSummary(resolved: ResolvedRothStartYear, inherited = false): string {
   if (resolved.source === 'explicit') return `Roth start: ${resolved.year} recorded`;
   if (resolved.source === 'balance-history') return `Roth start: ${resolved.year} from balances`;
@@ -124,8 +107,6 @@ const RothYearEditor: React.FC<{
   readonly hint: string;
   readonly value: string;
   readonly resolved: ResolvedRothStartYear;
-  /** See `clockSummary` — an inherited Roth IRA's clock is never consulted, so its
-   *  derived-value line must not characterise it. */
   readonly inherited?: boolean;
   readonly onChange: (value: string) => void;
 }> = ({ id, label, hint, value, resolved, inherited = false, onChange }) => {
@@ -175,8 +156,7 @@ const RothYearEditor: React.FC<{
   );
 };
 
-/** The account editor's "Advanced tax details" disclosure. Renders nothing for account types
- *  that carry no Roth or required-withdrawal facts (savings, brokerage, HSA, …). */
+/** The "Advanced tax details" disclosure; renders nothing for types without Roth or required-withdrawal facts. */
 export const AccountTaxProfileSection: React.FC<AccountTaxProfileSectionProps> = ({
   accountId,
   type,
@@ -227,12 +207,7 @@ export const AccountTaxProfileSection: React.FC<AccountTaxProfileSectionProps> =
   }, [actionRequired]);
   const summaryId = useId();
   if (!showRothIra && !showDesignated && !showRmd) return null;
-  // On an INHERITED Roth IRA the first-contribution year belongs to the ORIGINAL
-  // owner, and the account never merges with a Roth IRA the beneficiary opened
-  // themselves. The field therefore has to ASK for the original owner's year; the
-  // plain "your first contribution" wording invited the wrong person's. What the
-  // answer no longer does is decide tax: every dollar from an inherited
-  // Roth IRA is treated as qualified, so no copy here may characterise its five-year clock.
+  // On an inherited Roth IRA the first-contribution year belongs to the original owner and never merges with the beneficiary's own Roth IRA, so the field must ask for that year; no copy here may characterise the clock, since every dollar is qualified.
   const inheritedRothIra = showRothIra && draft.rmdInheritedAccount;
   const summary = [
     ...(showRothIra || showDesignated ? [clockSummary(rothStart, inheritedRothIra)] : []),
@@ -455,9 +430,7 @@ export const AccountTaxProfileSection: React.FC<AccountTaxProfileSectionProps> =
 
       {showRmd && draft.rmdInheritedAccount && (
         <div className="mt-3 min-w-0">
-          {/* Controls line up because every cell is label-then-control with no
-              extra prose: any field carrying a hint takes its own full-width row
-              (`sm:col-span-2`) rather than making its neighbour's control drop. */}
+          {/* A field carrying a hint takes its own full-width row (sm:col-span-2) so it doesn't make its neighbour's control drop. */}
           <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
             <Field
               htmlFor="rmdBeneficiaryType"

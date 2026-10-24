@@ -1,17 +1,4 @@
-/**
- * Social-Security claim-age configuration modal, extracted from
- * `ScenarioDetailPage.tsx` so the largest page in the app does not keep
- * growing. Shared primitives (`AgeInputs`, default-override constants) live in
- * `scenario-age-modal-shared.tsx`.
- *
- * Behavioral contract: the shared `<Modal>
- * (viewport-centered, focus trap, Esc/scrim) at the AGENTS width-scale
- * width 520 (names like "Christopher"/"Alexandria" wrap narrower);
- * left-aligned, primary-action-first button row; WAI-ARIA
- * `<div role="group">`/`<header>` field groups (NOT `<fieldset>`);
- * numeric age inputs are `type="text" inputMode="numeric"`; the
- * unsaved-edits guard.
- */
+/** Social Security claim-age modal: whole-year claim-age sliders (62-70), optional survivor claim ages for two-member plans, and COLA and reduction knobs, behind the unsaved-edits guard. */
 import React, { useMemo, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Link, useNavigate } from 'react-router';
@@ -56,15 +43,9 @@ import type { ScenarioAggregate } from '../lib/scenario-resolution';
 const BENEFIT_REDUCTION_STEP = 5;
 const COLA_STEP = 0.5;
 
-// SS claim age — US SSA legal range, bounds in `lib/scenario-input-bounds.ts`.
-// Whole-year-only entry — `ageMonths`
-// is always 0 going forward; pre-existing stored months collapse to
-// the nearest whole year on first paint via the formula below.
+// Whole-year-only entry: ageMonths is always 0 going forward and stored months collapse to the nearest year on first paint.
 const SS_CLAIM_STEP = 1;
 
-/** Shared collapse-and-clamp: round a `{ ageYears, ageMonths }`
- *  value to a whole slider year (half-away-from-zero) and clamp into the
- *  given window. Both slider seeds below differ only in their bounds. */
 function collapseAgeToSliderYear(
   years: number,
   months: number,
@@ -75,35 +56,21 @@ function collapseAgeToSliderYear(
   return Math.max(min, Math.min(max, raw));
 }
 
-/** Collapse a `{ ageYears, ageMonths }` value to the slider's whole
- *  year via half-away-from-zero rounding, then clamp into [62, 70].
- *  Cases: 65 years 6 months → 66; 64 years 6 months → 65;
- *  68 years 6 months → 69; 61 years 0 months → 62 (clamp); 71 years
- *  0 months → 70 (clamp). Exported so the formula is testable in
- *  isolation. */
+/** Collapses to the slider's whole year (half-away-from-zero) and clamps into [62, 70], e.g. 65y6m → 66 and 61y → 62. Exported for isolation tests. */
 export function claimAgeToSliderYear(years: number, months: number): number {
   return collapseAgeToSliderYear(years, months, SS_CLAIM_MIN, SS_CLAIM_MAX);
 }
 
-// Survivor-benefit claim age — a SEPARATE decision from the member's
-// own claim age: a widow(er) benefit is payable from age 60 (reduced) and
-// tops out at the survivor's own FRA. Whole-year slider, same month collapse.
+// Survivor benefits are a separate decision from the member's own claim age: payable from 60 (reduced) up to the survivor's own FRA.
 const SURVIVOR_CLAIM_MIN = 60;
 const SURVIVOR_CLAIM_MAX = 70;
-/** Seed for a freshly enabled survivor slider (typical FRA — the age with
- *  no widow(er) reduction). A UI seed only: nothing persists until Save. */
 const SURVIVOR_CLAIM_SEED = 67;
 
-/** Same collapse as `claimAgeToSliderYear` but clamped into the survivor
- *  window [60, 70]. Exported for isolation tests. */
+/** Same collapse clamped into the survivor window [60, 70]. Exported for isolation tests. */
 export function survivorAgeToSliderYear(years: number, months: number): number {
   return collapseAgeToSliderYear(years, months, SURVIVOR_CLAIM_MIN, SURVIVOR_CLAIM_MAX);
 }
 
-/** Build the seeded draft ("what Save would persist right now") from the
- *  resolved baseline: month-collapse on every age, defaults on the
- *  assumption knobs, and the survivor section carried through ONLY where
- *  the baseline sets it (an unset member stays unset — withheld). */
 function seedOverrideDraft(
   baseline: SocialSecurityClaimAgeOverride,
   hasSecondary: boolean,
@@ -118,7 +85,6 @@ function seedOverrideDraft(
     },
     benefitReductionPct: baseline.benefitReductionPct ?? DEFAULT_BENEFIT_REDUCTION_PCT,
     colaPct: baseline.colaPct ?? DEFAULT_COLA_PCT,
-    // Default-on: track inflation unless the baseline explicitly opted out.
     colaTracksInflation: baseline.colaTracksInflation !== false,
   };
   if (hasSecondary) {
@@ -127,8 +93,6 @@ function seedOverrideDraft(
       ageYears: claimAgeToSliderYear(sec.ageYears, sec.ageMonths),
       ageMonths: 0,
     };
-    // Survivor claim ages exist only for two-member plans (a lone member has
-    // no in-plan spouse to survive).
     const survivorPrimary = baseline.survivor?.primary;
     const survivorSecondary = baseline.survivor?.secondary;
     if (survivorPrimary || survivorSecondary) {
@@ -162,22 +126,14 @@ function seedOverrideDraft(
 }
 
 interface SurvivorAgeControlProps {
-  /** The member whose survivor claim age this controls. */
   memberName: string;
-  /** The other member — the spouse whose death would start the benefit. */
   otherName: string;
-  /** Current draft value; `null` = not set (withheld state). */
   value: RetirementAgePerMember | null;
   onToggle: (on: boolean) => void;
   onChange: (years: number) => void;
 }
 
-/**
- * Per-member survivor claim-age control (two-member plans only). The
- * toggle is the explicit opt-in: while OFF nothing persists and the note
- * spells out the withheld-survivor-results state + the missing input (the
- * app never assumes a survivor claim age).
- */
+// The toggle is the explicit opt-in: while off nothing persists, because the app never assumes a survivor claim age.
 const SurvivorAgeControl: React.FC<SurvivorAgeControlProps> = ({
   memberName,
   otherName,
@@ -235,8 +191,7 @@ interface SocialSecurityModalProps {
   scenarios: ScenarioAggregate[];
   primaryMember: Aggregate<HouseholdMemberPayload> | null;
   secondaryMember: Aggregate<HouseholdMemberPayload> | null;
-  /** PIA values keyed by household member ID, loaded by ScenarioDetailPage.
-   *  When null, the live-amount line shows a link to the Social Security page. */
+  /** PIA by member id from ScenarioDetailPage; null shows a link to the Social Security page. */
   benefitsByMemberId: Record<string, { pia: number | null }>;
   householdId: string;
   onClose: (saved: boolean) => void;
@@ -266,40 +221,20 @@ export const SocialSecurityModal: React.FC<SocialSecurityModalProps> = ({
     return DEFAULT_SS_CLAIM;
   }, [scenario, scenarios]);
 
-  // Resolved scenario inflation rate — the rate the SS COLA tracks when
-  // "Track inflation" is on. Shown in the disabled COLA slider so the
-  // value the engine applies is visible while the manual control is off.
   const scenarioInflationPct = useMemo(() => {
     const resolved = resolveScenario(scenario.id, scenarios);
     return resolved.inflation?.ratePct ?? DEFAULT_INFLATION_PCT;
   }, [scenario.id, scenarios]);
 
-  // The modal always shows a secondary input when a secondary member
-  // exists — there's no "same age" toggle. Seed the input from the
-  // baseline if present, otherwise from the FRA default. Whatever the
-  // user lands on Save is what gets persisted as `secondary`. Reduction
-  // and COLA seed from baseline when present, otherwise from defaults
-  // (0% / 2%) — that way the inputs always render with a value.
-  //
-  // SS claim age UI is whole-year only (62-70 slider). On
-  // first paint, fold any pre-existing `ageMonths` into the nearest
-  // year so the slider's seeded value matches what gets saved. The
-  // collapse persists on next Save (ageMonths always 0).
-  //
-  // The survivor section seeds only from the stored per-member survivor
-  // claim ages — an unset member stays UNSET (the projection withholds
-  // survivor-dependent results) until the user explicitly enables it.
+  // The secondary input always shows when a secondary member exists, seeded from the baseline else the FRA default.
+  // The survivor section seeds only from stored claim ages: an unset member stays unset (the projection withholds survivor-dependent results) until the user enables it.
   const hasSecondary = secondaryMember !== null;
   const [draft, setDraft] = useState<SocialSecurityClaimAgeOverride>(() =>
     seedOverrideDraft(baseline, hasSecondary),
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Compare against the *post-default + post-month-collapse* shape so
-  // opening + closing the modal without edits doesn't queue a no-op
-  // mutation. The first-paint month-collapse is part of the
-  // "what would be saved if I clicked Save now" baseline, so it lives
-  // in `initial` too.
+  // Compare against the post-default, post-month-collapse shape so opening and closing without edits queues no no-op mutation.
   const initial = useMemo<SocialSecurityClaimAgeOverride>(
     () => seedOverrideDraft(baseline, hasSecondary),
     [baseline, hasSecondary],
@@ -309,8 +244,6 @@ export const SocialSecurityModal: React.FC<SocialSecurityModalProps> = ({
     isDirty,
     () => onClose(false),
   );
-  // Second guarded-close wired to close + navigate. "Leave" in the
-  // confirm calls this realClose, which closes the modal then navigates.
   const { guardedClose: guardedCloseToSsPage, confirmModal: ssNavConfirmModal } =
     useDirtyModalClose(isDirty, () => {
       onClose(false);
@@ -320,8 +253,6 @@ export const SocialSecurityModal: React.FC<SocialSecurityModalProps> = ({
   const primaryName = primaryMember?.payload.firstName?.trim() || 'Primary';
   const secondaryName = secondaryMember?.payload.firstName?.trim() || 'Secondary';
 
-  // SS claim age is whole-year only (62-70 slider). The
-  // slider hands back the snapped year; `ageMonths` is always 0.
   const updatePrimaryClaimAge = (years: number) => {
     setDraft({ ...draft, primary: { ageYears: years, ageMonths: 0 } });
   };
@@ -331,9 +262,7 @@ export const SocialSecurityModal: React.FC<SocialSecurityModalProps> = ({
     setDraft({ ...draft, secondary: { ageYears: years, ageMonths: 0 } });
   };
 
-  // Per-member survivor claim age. `null` clears the member's entry —
-  // Save then persists NO age for that member and the projection withholds
-  // survivor-dependent results instead of assuming one.
+  // null clears the member's entry: Save persists no age and the projection withholds survivor-dependent results instead of assuming one.
   const setSurvivorAge = (role: 'primary' | 'secondary', years: number | null) => {
     setDraft((d) => {
       const next = { ...(d.survivor ?? {}) };
@@ -361,8 +290,6 @@ export const SocialSecurityModal: React.FC<SocialSecurityModalProps> = ({
   const onSave = async () => {
     setSubmitting(true);
     try {
-      // Strip `secondary` from the persisted value when there's no
-      // secondary member — keeps the override shape minimal.
       const persisted: SocialSecurityClaimAgeOverride = secondaryMember
         ? draft
         : {
@@ -427,8 +354,6 @@ export const SocialSecurityModal: React.FC<SocialSecurityModalProps> = ({
                 onNavigateToSsPage={guardedCloseToSsPage}
               />
             )}
-            {/* Survivor claim age — two-member plans only (single-member
-                plans have no in-plan spouse to survive). */}
             {secondaryMember && (
               <SurvivorAgeControl
                 memberName={primaryName}
@@ -521,9 +446,7 @@ export const SocialSecurityModal: React.FC<SocialSecurityModalProps> = ({
             </Muted>
           </div>
           <div className="flex flex-col gap-1">
-            {/* Visible text IS the switch label (WCAG 2.5.3 label-in-name +
-                click-to-toggle) — same pattern as the pension form's
-                "Use scenario inflation" toggle. */}
+            {/* The visible text is the switch label (WCAG 2.5.3 label-in-name and click-to-toggle). */}
             <ToggleSwitch
               className="mb-2 text-sm"
               label="Track inflation"
@@ -543,9 +466,7 @@ export const SocialSecurityModal: React.FC<SocialSecurityModalProps> = ({
                   value={
                     draft.colaTracksInflation
                       ? // Display-only while tracking: clamp into the slider's
-                        // 0–5 range (the inflation editor allows up to 10%, and
-                        // an out-of-range controlled value paints the fill past
-                        // the track). The helper text below carries the true rate.
+                        // Capped at the 0–5 slider range: an out-of-range controlled value paints the fill past the track; the helper text carries the true rate.
                         Math.min(scenarioInflationPct, COLA_MAX)
                       : draft.colaPct ?? DEFAULT_COLA_PCT
                   }
@@ -566,7 +487,6 @@ export const SocialSecurityModal: React.FC<SocialSecurityModalProps> = ({
 
         {error && <Alert tone="error">{error}</Alert>}
 
-        {/* Left-aligned, primary action first — AGENTS modal rule. */}
         <div className="flex justify-start gap-2">
           <button
             type="button"

@@ -1,8 +1,4 @@
-/**
- * Standing disclaimer card + per-metric toolbars beside the metric
- * radio group. Extracted from `ss-optimizer-page-chrome.tsx` so that
- * file stays under the ≤400-ln shape limit.
- */
+/** Standing disclaimer card and per-metric toolbars beside the metric radio group. */
 import React from 'react';
 import { Alert } from '../components/Alert';
 import { RefreshIcon } from '../components/icons';
@@ -16,11 +12,7 @@ import {
 } from './accounts-page-chrome';
 import type { ProjectionMethod } from '../lib/balance-projection-runner-types';
 
-/** Standing disclaimer card under the page header. A thin wrapper over the
- *  shared `InlineDisclaimerCard` (kept exported — a position test depends on
- *  it). Body text stays `text-xs` deliberate fineprint (a typography
- *  exception); the shared card supplies the canonical lead +
- *  closing, this wrapper supplies the SS-scope middle. */
+/** Wraps the shared InlineDisclaimerCard with the SS-scope middle; kept exported because a position test depends on it. The body stays fineprint text-xs (a typography exception). */
 export const OptimizerDisclaimerCard: React.FC = () => (
   <InlineDisclaimerCard
     ariaLabel="Social Security claim-age comparison disclaimer"
@@ -40,12 +32,7 @@ export const OptimizerDisclaimerCard: React.FC = () => (
   </InlineDisclaimerCard>
 );
 
-/** Pre-run notice shown while the Monte Carlo sweep is in flight (MC
- *  metric only). The deterministic tab is fast and shows no warning.
- *  Reuses the shared info-tone `Alert` (→ `role="status"`, polite live
- *  region) so assistive tech announces the long-run heads-up when the run
- *  starts. The spinning `RefreshIcon` is `aria-hidden` decorative — the
- *  text carries the announcement — and respects `prefers-reduced-motion`. */
+/** Notice while the Monte Carlo sweep runs (MC metric only): an info-tone Alert, so its role="status" live region announces the long-run heads-up; the spinning icon is aria-hidden and respects prefers-reduced-motion. */
 export const OptimizerRunningNotice: React.FC = () => (
   <Alert tone="info" className="mb-3 flex items-start gap-2.5">
     <span
@@ -62,7 +49,6 @@ export const OptimizerRunningNotice: React.FC = () => (
   </Alert>
 );
 
-/** Label + numeric value pairs for the MC path-count selector. */
 const PATH_COUNT_OPTIONS: Array<{ value: '1000' | '5000' | '10000'; label: string }> = [
   { value: '1000', label: '1k scenarios' },
   { value: '5000', label: '5k scenarios' },
@@ -88,15 +74,7 @@ interface OptimizerMcToolbarProps {
   readonly onCancel: () => void;
 }
 
-/** Run / Cancel button + path-count selector + live progress bar beside
- *  the metric radio group when the MC metric is selected. Buttons use
- *  the standalone toolbar-variant classes `btnPrimaryToolbarClass` /
- *  `btnDangerToolbarClass` (not the default role classes) so their
- *  outer height matches the surrounding `<SegmentedRadioGroup>` row at
- *  34px (1px border + 8px py-2 + 16px text-xs line-height) — see the
- *  height-parity math on `btnPrimaryToolbarClass` in
- *  accounts-page-chrome.tsx. The role-class default (`px-4 py-2 text-sm
- *  font-medium`) towers above the radios. */
+/** Run / Cancel, path-count selector and live progress beside the metric radios. The standalone toolbar button classes keep the height at 34px to match the radio row (see btnPrimaryToolbarClass in accounts-page-chrome.tsx). */
 export const OptimizerMcToolbar: React.FC<OptimizerMcToolbarProps> = ({
   mcRunning,
   canRun,
@@ -152,9 +130,7 @@ interface OptimizerDetToolbarProps {
   } | null;
 }
 
-/** Live progress bar shown beside the metric radio group while the
- *  deterministic dispatch loop is in flight. Mirrors the MC toolbar's
- *  shape — mounts and unmounts with the run lifecycle. */
+/** Live progress bar while the deterministic dispatch loop runs; mounts and unmounts with the run. */
 export const OptimizerDetToolbar: React.FC<OptimizerDetToolbarProps> = ({
   detRunning,
   progress,

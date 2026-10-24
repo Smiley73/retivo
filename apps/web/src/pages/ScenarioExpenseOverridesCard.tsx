@@ -1,21 +1,4 @@
-/**
- * Scenario detail page: Expense overrides card.
- *
- * Renders the merged expense list for the scenario with status
- * badges (Canonical | Patched | Added | Disabled). Per-row actions:
- *
- * - Canonical: Edit + Disable
- * - Patched:   Edit + Reset (drop the whole patch)
- * - Added:     Edit (re-open in the shared editor's scenario add-edit
- *              mode, replacing the `added[]` entry in place) + Move to
- *              household list + Delete (drop from added).
- * - Disabled:  Re-enable (green) — row stays in its original position,
- *              greyed out, so the user sees what's been turned off
- *              without scrolling to a separate section.
- *
- * The card writes scenario `update` mutations only — canonical Expense
- * aggregates are never touched from this card.
- */
+/** Scenario detail page Expense overrides card: the merged expense list with Canonical, Patched, Added and Disabled rows; writes scenario `update` mutations only, never the canonical aggregates. */
 import React, { useMemo, useState } from 'react';
 import {
   PlusIcon,
@@ -78,10 +61,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
   const { confirm, dialog } = useConfirm();
   const { notifyPending } = useSync();
   const navigate = useNavigate();
-  // Reactive reads: each canonical list re-reads on any write to its store
-  // (single writes via the fine signal, bulk fills via the coarse workspace
-  // event). Read-only — the override edits write to the scenario, never to
-  // these — so auto-re-read never clobbers an in-progress edit.
   const expenseQuery = useAggregates('expense');
   const categoryQuery = useAggregates('expenseCategory');
   const memberQuery = useAggregates('householdMember');
@@ -98,9 +77,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
       ? 'Failed to load expenses.'
       : null;
 
-  /** Open the shared expense editor pre-filled with this scenario's
-   *  resolved values; Save writes a per-key `Partial<ExpensePayload>`
-   *  patch into this scenario (the canonical aggregate is untouched). */
   const editInScenario = (canonicalId: string): void => {
     const params = new URLSearchParams({
       scenarioId: scenario.id,
@@ -109,8 +85,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
     navigate(`/expenses/${canonicalId}/edit?${params.toString()}`);
   };
 
-  /** Re-open a scenario-only added row in the full form (add-edit mode);
-   *  Save replaces the matching `added[]` entry by `_localId` in place. */
   const editAddedInScenario = (localId: string): void => {
     const params = new URLSearchParams({
       scenarioId: scenario.id,
@@ -120,27 +94,14 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
     navigate(`/expenses/scenario-entry?${params.toString()}`);
   };
 
-  // Local-only overrides — written back to `scenario.payload.overrides.expenses`.
-  // Edit actions (disable/patch/add/remove) mutate the *local* slice so the
-  // override layer for *this* scenario stays minimal; the merged view (used
-  // for what the user sees) is the per-id sparse resolver output so
-  // ancestor disables / patches / added entries this scenario hasn't
-  // re-enabled surface here too.
+  // Edits mutate the local slice so this scenario's override layer stays minimal; the merged view comes from the sparse resolver so ancestor disables, patches and adds surface too.
   const overrides: ExpensesOverride = scenario.payload.overrides.expenses ?? {};
 
-  // An added row is "owned" only when its `_localId` lives in THIS scenario's
-  // `added[]`. Rows inherited from an ancestor's `added[]` resolve here too,
-  // but Edit / Move / Delete all mutate the current scenario's `added[]` only,
-  // so they would no-op (or navigate to a not-found editor) on inherited rows.
-  // Inherited added rows therefore expose no per-row actions.
+  // Rows inherited from an ancestor's added[] resolve here but Edit / Move / Delete mutate only this scenario's added[], so they would no-op: inherited rows expose no actions.
   const isOwnedAdded = (localId: string): boolean =>
     (overrides.added ?? []).some((a) => a._localId === localId);
 
-  // A `patched` row is "owned" only when THIS scenario's `patches` records the
-  // patch (under the prefixed `aggregate:<id>` key or the bare `<id>` key — the
-  // two forms `onResetPatch` deletes). A row that resolves to `patched` purely
-  // from an ancestor's patch has no key here, so Reset (which deletes only the
-  // current scenario's key) would be a no-op — gate it out.
+  // Reset deletes only this scenario's key (prefixed aggregate:<id> or bare <id>), so a row patched only by an ancestor gates it out.
   const hasOwnPatch = (canonicalId: string): boolean => {
     const patches = overrides.patches;
     if (!patches) return false;
@@ -152,14 +113,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
     [scenario.id, scenarios, canonical],
   );
 
-  /**
-   * Build the rendered list by walking the canonical list in its
-   * natural order so disabled rows stay where the user left them
-   * (greyed out + Re-enable). Then append every scenario-only `added`
-   * entry the sparse resolver returns (this scenario's own + any
-   * inherited from ancestors). The flat list is grouped by category
-   * below (see `groups`).
-   */
   type Row =
     | { kind: 'canonical'; id: string; payload: ExpensePayload }
     | { kind: 'patched'; id: string; payload: ExpensePayload }
@@ -184,7 +137,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
     }
     for (const r of resolvedExpenses) {
       if (r.source !== 'added') continue;
-      // `r.id` is `local:<_localId>`; strip prefix for the row key.
       list.push({
         kind: 'added',
         localId: r.id.slice('local:'.length),
@@ -194,14 +146,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
     return list;
   }, [canonical, resolvedExpenses]);
 
-  /**
-   * Group rows by `categoryId`. Walks the categories list in
-   * alphabetical name order so the section order is stable across
-   * renders and matches the Expenses page sort. Categories with
-   * zero rows are dropped. Rows whose `categoryId` no longer
-   * resolves to a category fall into a synthetic "Uncategorised"
-   * trailing group so they remain visible + actionable.
-   */
   const groups = useMemo(() => {
     const byCat = new Map<string, Row[]>();
     for (const r of rows) {
@@ -221,8 +165,7 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
         byCat.delete(c.id);
       }
     }
-    // Anything left points at a missing category — surface it under a
-    // sentinel header so the user can re-categorise / remove it.
+    // Rows whose category no longer resolves go under a sentinel header so they stay visible and actionable.
     const orphans: Row[] = [];
     for (const arr of byCat.values()) orphans.push(...arr);
     if (orphans.length > 0) {
@@ -238,7 +181,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
     setSubmitting(true);
     setError(null);
     try {
-      // Strip empty fields so the override stays minimal.
       const cleaned: ExpensesOverride = {};
       if (next.disabledIds && next.disabledIds.length > 0) cleaned.disabledIds = next.disabledIds;
       if (next.reEnabledIds && next.reEnabledIds.length > 0)
@@ -252,7 +194,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
           expenses: Object.keys(cleaned).length > 0 ? cleaned : undefined,
         },
       };
-      // Drop the key entirely when empty so the resolver inherits.
       if (payload.overrides.expenses === undefined) {
         const rest = { ...payload.overrides };
         delete rest.expenses;
@@ -274,12 +215,10 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
       disabledIds: Array.from(
         new Set([...(overrides.disabledIds ?? []), prefixedId]),
       ),
-      // Disable wins same-scenario conflict: clear any
-      // local re-enable for this id so storage stays minimal.
+      // Disable wins a same-scenario conflict: clear any local re-enable for this id.
       reEnabledIds: (overrides.reEnabledIds ?? []).filter(
         (id) => id !== prefixedId,
       ),
-      // If a local patch existed for this id, drop it — disable wins.
       patches: overrides.patches
         ? Object.fromEntries(
             Object.entries(overrides.patches).filter(
@@ -297,7 +236,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
       (id) => id === prefixedId || id === canonicalId,
     );
     if (inLocalDisabled) {
-      // Disable lives on THIS scenario — drop it locally.
       const next: ExpensesOverride = {
         ...overrides,
         disabledIds: (overrides.disabledIds ?? []).filter(
@@ -307,8 +245,7 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
       await persistOverrides(next);
       return;
     }
-    // Inherited disable from an ancestor — write `reEnabledIds`
-    // explicitly (never mutate ancestor state).
+    // Inherited disable: write reEnabledIds, never mutate ancestor state.
     const next: ExpensesOverride = {
       ...overrides,
       reEnabledIds: Array.from(
@@ -341,7 +278,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
     if (!target) return;
     const name = target.name.trim();
 
-    // Validate: name uniqueness against existing canonical (case-folded).
     const norm = name.toLowerCase();
     const collides = canonical.some(
       (c) => (c.payload.name ?? '').trim().toLowerCase() === norm,
@@ -352,7 +288,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
       );
       return;
     }
-    // Validate: categoryId still resolves.
     const catExists = categories.some((c) => c.id === target.categoryId);
     if (!catExists) {
       setError("This expense's category no longer exists. Pick a new category first.");
@@ -375,7 +310,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
     setSubmitting(true);
     setError(null);
     try {
-      // Strip _localId before promoting; assign a fresh canonical UUID.
       const canonicalPayload: ExpensePayload = {
         name,
         amount: target.amount,
@@ -397,9 +331,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
         expectedVersion: 0,
         payload: canonicalPayload,
       });
-      // Drop the entry from scenario.added in the same batch (separate
-      // mutation; the local queue applies them back-to-back). Rebuild
-      // overrides without the moved entry.
       const next: ExpensesOverride = {
         ...overrides,
         added: (overrides.added ?? []).filter((a) => a._localId !== localId),
@@ -431,9 +362,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
     );
   }
 
-  // Footer counts (mock `.foot-note`) — derived from the rendered rows so
-  // they always match what the user sees (disabled rows kept in-place,
-  // patched rows surfaced as Modified, scenario-only added rows appended).
   const disabledCount = rows.filter((r) => r.kind === 'disabled').length;
   const modifiedCount = rows.filter((r) => r.kind === 'patched').length;
   const scenarioOnlyCount = rows.filter((r) => r.kind === 'added').length;
@@ -475,9 +403,7 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
         <Alert tone="error">{error ?? loadError}</Alert>
       )}
 
-      {/* Single saving indicator while a mutation is in flight: the action
-          buttons only dim via `disabled`, which reads as inert rather than
-          working. A polite status line gives one clear visual + AT cue. */}
+      {/* The action buttons only dim, which reads as inert, so a polite status line gives one visual and assistive-tech cue. */}
       {submitting && (
         <p
           role="status"
@@ -512,13 +438,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
             {g.rows.map((r) => {
               const isDisabled = r.kind === 'disabled';
               const rowKey = r.kind === 'added' ? r.localId : r.id;
-              // User-facing labels:
-              //   canonical → "Default"      (the household-wide entry)
-              //   patched   → "Modified"     (any field overridden in this
-              //                               scenario, or inherited per-key
-              //                               from an ancestor)
-              //   added     → "Scenario-only" (lives only in this scenario)
-              //   disabled  → "Disabled"     (turned off in this scenario)
               const badgeLabel =
                 r.kind === 'canonical'
                   ? 'Default'
@@ -527,8 +446,6 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
                     : r.kind === 'added'
                       ? 'Scenario-only'
                       : 'Disabled';
-              // Soft-tinted status pill per row kind, mapped to the
-              // typed <Badge> tone (Tailwind-defaults).
               const badgeTone: BadgeTone =
                 r.kind === 'canonical'
                   ? 'neutral'
@@ -537,12 +454,7 @@ export const ExpenseOverridesCard: React.FC<Props> = ({
                     : r.kind === 'added'
                       ? 'scenario'
                       : 'disabled';
-              // Mute *content*, not the whole row. A whole-row opacity
-              // would also subdue the green Re-enable button — instead,
-              // strike-through + dim the text columns (name +
-              // description + amount) and keep the action bar at full
-              // saturation so Re-enable reads as the affirmative path
-              // back to normal. Badges are status pills and stay vivid.
+              // Mute the text columns, not the whole row: a row-level opacity would also subdue the Re-enable button, the affirmative path back.
               const struckTextClass = isDisabled
                 ? 'text-muted line-through'
                 : undefined;

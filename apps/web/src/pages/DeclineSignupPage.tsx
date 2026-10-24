@@ -1,8 +1,4 @@
-/**
- * Owner-decline landing route. Mirrors ApproveSignupPage but POSTs to
- * /auth/decline-signup, which marks the user as declined and cascade-
- * deletes the user-row sub-graph synchronously.
- */
+/** Owner-decline landing route, mirroring ApproveSignupPage but POSTing to /auth/decline-signup, which marks the user declined and cascade-deletes the user-row sub-graph synchronously. */
 import React, { useEffect, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Link } from 'react-router';
@@ -20,7 +16,6 @@ type Status =
   | { kind: 'success'; email: string }
   | { kind: 'error'; message: string };
 
-// Tailwind max-w-md — matches ApproveSignupPage (one-sentence outcome copy).
 const DECLINE_CARD_WIDTH = 'w-full max-w-md shadow-lg';
 
 function readTokenFromFragment(): string {

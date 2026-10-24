@@ -1,9 +1,5 @@
-/**
- * Pure logic behind the Expenses page "Add Medicare premiums" helper: the preview
- * rows, which of them look already entered, fixed-name collisions, and the
- * `ExpensePayload` for each row kept. Nothing links an expense to a person, so
- * duplicate detection is a name heuristic shown in the preview, never a filter.
- */
+/** Pure logic behind the Expenses page "Add Medicare premiums" helper: preview rows, already-entered detection, name collisions and the ExpensePayload per kept row.
+* Duplicate detection is a name heuristic shown in the preview, never a filter, since nothing links an expense to a person. */
 import type {
   Aggregate,
   ExpenseCategoryPayload,
@@ -25,13 +21,10 @@ export const MEDICARE_PREMIUMS_URL = `/expenses?${MEDICARE_PREMIUMS_PARAM}=1`;
 
 type MedicarePart = 'B' | 'D';
 
-/** Same limit the expense form enforces on a name. */
 const EXPENSE_NAME_MAX = 60;
 
-/** Medicare starts at 65: the anchor every written row begins at. */
 const MEDICARE_START_AGE_YEARS = 65;
 
-/** An existing expense the preview points at, with the category it sits in. */
 interface MatchedExpense {
   id: string;
   name: string;
@@ -45,37 +38,28 @@ export type PremiumBlock =
   | { kind: 'nameTooLong' };
 
 export interface PremiumRow {
-  /** Stable per row: `<member id>:<part>`. */
   key: string;
   memberId: string;
   role: HouseholdRole;
   memberLabel: string;
   part: MedicarePart;
-  /** The exact name the helper would write. */
   expenseName: string;
-  /** The CMS monthly amount, before any edit. */
   monthly: number;
-  /** Expenses whose name suggests this premium is already entered. */
   alreadyEntered: MatchedExpense[];
   block: PremiumBlock | null;
-  /** On unless the row looks already entered or is blocked. */
   defaultIncluded: boolean;
 }
 
 export interface PremiumMemberGroup {
   memberId: string;
   label: string;
-  /** True when the member has no usable birthdate, so no rows are offered. */
   missingBirthdate: boolean;
   rows: PremiumRow[];
 }
 
 export interface MedicarePremiumPreview {
-  /** The CMS year the amounts belong to. */
   year: number;
-  /** The Medical category the rows would be written to; null when none exists. */
   medicalCategoryId: string | null;
-  /** Empty when there is no Medical category. */
   members: PremiumMemberGroup[];
 }
 
@@ -85,8 +69,6 @@ export interface PremiumPreviewInput {
   categories: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>;
 }
 
-/** The rows the scenario chain adds, and the canonical rows it renames (under
- *  their scenario names, with their canonical ids), as expense aggregates. */
 function scenarioExpenses(
   scenarioId: string,
   scenarios: ScenarioAggregate[],
@@ -139,7 +121,6 @@ export function premiumCheckExpenses(
   return [...canonical, ...scenarioExpenses(effectiveId, scenarios as ScenarioAggregate[], canonical)];
 }
 
-/** Same case-folding and trimming the expense form applies to a name. */
 const normalizeName = (name: string): string => name.trim().toLowerCase();
 
 const hasBirthdate = (m: Aggregate<HouseholdMemberPayload>): boolean => {
@@ -150,7 +131,6 @@ const hasBirthdate = (m: Aggregate<HouseholdMemberPayload>): boolean => {
 const roleOf = (m: Aggregate<HouseholdMemberPayload>): HouseholdRole =>
   m.payload.isPrimary ? 'primary' : 'secondary';
 
-/** Prefer the category named Medical, else the first medical-flagged one. */
 function pickMedicalCategoryId(
   categories: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>,
 ): string | null {
@@ -163,11 +143,9 @@ function pickMedicalCategoryId(
   return named ?? ids[0];
 }
 
-/**
- * Which premium rows a candidate expense name speaks to. `null` when the name
- * mentions neither Medicare nor a part. A named part matches that part only;
- * "Medicare" alone matches both.
- */
+// Which premium rows a candidate expense name speaks to. `null` when the name
+// mentions neither Medicare nor a part. A named part matches that part only;
+// "Medicare" alone matches both.
 function partsNamedBy(name: string): ReadonlySet<MedicarePart> | null {
   const parts = new Set<MedicarePart>();
   if (/\bpart\s+b\b/i.test(name)) parts.add('B');
@@ -186,7 +164,6 @@ const containsWholeWord = (text: string, word: string): boolean =>
     'iu',
   ).test(text);
 
-/** The member an expense belongs to, or `null` when it cannot be told. */
 function attributeToMember(
   expense: ExpensePayload,
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
@@ -253,7 +230,6 @@ export function buildMedicarePremiumPreview(
     if (!expenseByName.has(key)) expenseByName.set(key, toMatch(e));
   }
 
-  // Primary first, so the preview reads in household order.
   const ordered = [...input.members].sort(
     (a, b) => Number(b.payload.isPrimary) - Number(a.payload.isPrimary),
   );
@@ -302,7 +278,6 @@ export function buildMedicarePremiumPreview(
   return { ...base, members };
 }
 
-/** The include state a row has once the person's toggles are applied. */
 export function isRowIncluded(
   row: PremiumRow,
   edits: Readonly<Record<string, boolean>>,
@@ -311,8 +286,8 @@ export function isRowIncluded(
   return edits[row.key] ?? row.defaultIncluded;
 }
 
-/** Monthly, essential, HSA-eligible, from the member's 65th birthday for life;
- *  anchors name the member's role, never an id. */
+// Monthly, essential, HSA-eligible, from the member's 65th birthday for life;
+// anchors name the member's role, never an id.
 function buildPremiumPayload(
   row: PremiumRow,
   amount: number,
@@ -335,7 +310,6 @@ function buildPremiumPayload(
   };
 }
 
-/** Payloads for the rows kept: included, not blocked, with any edited amount. */
 export function buildPremiumPayloads(
   preview: MedicarePremiumPreview,
   includeEdits: Readonly<Record<string, boolean>>,

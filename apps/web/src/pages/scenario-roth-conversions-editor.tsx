@@ -1,21 +1,4 @@
-/**
- * Working-years Roth-conversions list editor.
- *
- * Non-modal page editor hosted by ScenarioRothConversionsPage: owns the draft
- * (via useRothConversionsDraft), the per-entry list UI, the scenario-level
- * assumed tax-rate field, the per-year tax-burden display + disclosure, an
- * explicit Save (sparse-persist via the save helpers), and the page-level
- * unsaved-changes guard (beforeunload + in-app nav / X / Esc / scrim).
- *
- * Source picker: active PRE_TAX or MIXED accounts (excluding cash-balance
- * pensions). Target picker is source-aware: for a PRE_TAX or MIXED source it
- * lists active Roth IRA accounts, plus (for a MIXED Roth-designated source)
- * the same account as a same-account in-plan Roth conversion option.
- *
- * Tax burden: the displayed burden is computed via the shared
- * `resolveConversionLeg` cents helper (one math home — no re-derivation) and is
- * informational only — it is NEVER deducted from the projection.
- */
+/** Working-years Roth-conversions list editor for ScenarioRothConversionsPage; the displayed tax burden is informational and never deducted from the projection. */
 import React, { useMemo, useState } from 'react';
 import { MoneyInput } from '../components/MoneyInput';
 import { PercentInput } from '../components/PercentInput';
@@ -65,30 +48,17 @@ import {
   buildNextRothConversionTaxRate,
 } from './scenario-roth-conversions-save-helpers';
 
-/** A fresh entry seed: the first available pre-tax source + Roth-IRA target,
- *  a $10k/yr placeholder, and a single calendar-year window at the current
- *  year (a one-year "convert $X in year Y" entry).
- *
- *  Window semantics (matches the sibling MAGI-cap convention + the engine):
- *  a `year` END anchor is INCLUSIVE of its calendar year. `resolveEndMonth`
- *  maps `end:{kind:'year', year:Y}` to Jan 1 of Y+1 (the exclusive month
- *  boundary), so the engine's half-open `[startYear, endYear)` month window
- *  fully includes calendar year Y. Therefore `start = end = year Y` converts
- *  exactly the one calendar year Y (NOT zero) — the "Convert through Y" label
- *  is honest, and the default Add always converts ≥ 1 working year. The
- *  end-to-end binding of this default to the engine year-set is locked by
- *  scenario-roth-conversions-editor.default-window.test.ts.
- *
- *  Exported only so that regression test can run this exact default-Add seed
- *  through the save helper + engine (no UI-layer-only assertion). */
+/**
+* A fresh seed: the first pre-tax source and Roth-IRA target, $10k/yr, a one-year window at the current year.
+* A year END anchor is inclusive (resolveEndMonth maps it to Jan 1 of Y+1), so start = end converts exactly one year. Exported for the default-window regression test.
+*/
 export function defaultConversion(
   sourceId: string,
   targetId: string,
 ): DraftRothConversion {
   const thisYear = new Date().getFullYear();
   return {
-    // Stable per-entry key so removing a middle row never mis-associates
-    // uncommitted picker UI state. STRIPPED before persist (save helpers).
+    // Stable key so removing a middle row never mis-associates picker state; stripped before persist.
     draftId: cryptoUuid(),
     sourceAccountId: sourceId,
     targetRothAccountId: targetId,
@@ -103,20 +73,11 @@ interface PickerOption {
   name: string;
 }
 
-/** Resolve a picker option's display name, falling back to a plain-English
- *  placeholder when the id no longer matches an offered option (e.g. a
- *  dangling/pruned account). */
 function nameOf(options: ReadonlyArray<PickerOption>, id: string): string {
   return options.find((o) => o.id === id)?.name ?? 'Missing account';
 }
 
-/** Cap for the two window pickers of one conversion row — the source-account
- *  owner's last convertible working point. The engine converts ONLY in years
- *  strictly BEFORE the owner retires, so a pickable value at/after retirement
- *  would be a dead (silently-dropped) year. `age` = owner's last working age;
- *  `year` = owner's last working calendar year. Undefined ⇒ no resolvable
- *  retirement (missing birthdate / no `retirementAge`) ⇒ leave the picker
- *  uncapped. */
+// Caps the window pickers at the owner's last working point: the engine converts only in years strictly before retirement, so a later pick would be a silently dropped year. Undefined leaves the picker uncapped.
 function conversionWindowCap(
   sourceAccountId: string,
   accounts: ReadonlyArray<Aggregate<AccountPayload>>,
@@ -130,8 +91,6 @@ function conversionWindowCap(
   const owner = members.find((m) => m.id === ownerId);
   if (!owner) return undefined;
 
-  // ISO retirement date for the owner (honors same-date snapping). The year
-  // before it is the owner's last convertible calendar year.
   const retIso = resolveMemberRetirementDates(
     retirementAge,
     members.map((m) => ({
@@ -144,8 +103,7 @@ function conversionWindowCap(
 
   const retYear = Number(retIso.slice(0, 4));
   if (!Number.isFinite(retYear)) return undefined;
-  // Already retired (last working year is in the past) ⇒ don't invert the
-  // range; fall back to uncapped so the slider stays usable.
+  // Already retired: don't invert the range; fall back to uncapped so the slider stays usable.
   if (retYear - 1 < now.getUTCFullYear()) return undefined;
 
   const ownerAgeYears = owner.payload.isPrimary
@@ -159,9 +117,6 @@ function conversionWindowCap(
   return { age: ageCap, year: retYear - 1 };
 }
 
-/** One conversion row editor: a collapsed one-line summary that expands to
- *  the source + target pickers, annual amount, the start/end year window,
- *  and the per-year tax-burden line. */
 const ConversionRow: React.FC<{
   index: number;
   entry: DraftRothConversion;
@@ -169,20 +124,11 @@ const ConversionRow: React.FC<{
   targets: ReadonlyArray<PickerOption>;
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
   taxRatePct: number;
-  /** Upper bound for the window pickers — the source-owner's last working
-   *  age/year. Undefined ⇒ no resolvable retirement, leave pickers uncapped. */
   windowCap: { age?: number; year?: number } | undefined;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
-  /** True when this row is implicated by the backwards-window or
-   *  same-account-overlap guards. */
   hasWindowProblem: boolean;
-  /** Defined when the row's SAVED target is absent from its eligible-target
-   *  list (deleted, deactivated, marked inherited, or orphaned by a
-   *  source-owner change). Carries the account's real display name when the
-   *  account still exists, so the summary never calls a visible account
-   *  "Missing". The row then shows a notice instead of silently converting
-   *  nothing and being pruned at the next Save. */
+  /** Set when the saved target dropped out of the eligible list; the row shows a notice instead of silently converting nothing and being pruned at Save. */
   staleTarget: { name: string } | undefined;
   onChange: (next: DraftRothConversion) => void;
   onRemove: () => void;
@@ -201,8 +147,7 @@ const ConversionRow: React.FC<{
   onChange,
   onRemove,
 }) => {
-  // Burden uses the shared cents helper so the page + report agree to the cent
-  // (the math lives once in resolveConversionLeg, never re-derived here).
+  // Shared cents helper so the page and report agree to the cent.
   const { taxBurdenCents } = resolveConversionLeg(
     Math.round(entry.annualAmountDollars * 100),
     taxRatePct,
@@ -210,10 +155,7 @@ const ConversionRow: React.FC<{
   const startAnchor: GlideAnchor = magiCapEndToGlideAnchor(entry.start);
   const endAnchor: GlideAnchor = magiCapEndToGlideAnchor(entry.end);
 
-  // Same-account in-plan Roth conversion: the source and target ids are
-  // identical (a MIXED account converting into its own Roth-designated
-  // side) — show the account name once + an In-plan badge instead of a
-  // confusing self-referential "X → X".
+  // Same-account in-plan conversion (MIXED into its own Roth side): show the name once with an In-plan badge instead of "X → X".
   const isInPlan = entry.sourceAccountId === entry.targetRothAccountId;
   const summary = (
     <>
@@ -279,10 +221,6 @@ const ConversionRow: React.FC<{
                   onChange={(v) => onChange({ ...entry, targetRothAccountId: v })}
                   options={targets.map((a) => ({ value: a.id, label: a.name }))}
                 />
-                {/* Mirrors the Fill-mode window's `fillNoTarget` notice: a saved
-                    target that dropped out of the eligible list must say so
-                    rather than silently converting nothing and vanishing at
-                    Save. */}
                 {staleTarget && (
                   <Muted className="text-sm">
                     This conversion&apos;s Roth account can no longer receive
@@ -359,9 +297,7 @@ export interface RothConversionsEditorProps {
   householdId: string;
   accounts: ReadonlyArray<Aggregate<AccountPayload>>;
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
-  /** Route to return to (the scenario detail page). Cancel navigates here. */
   backPath: string;
-  /** Persist succeeded — the page re-fetches the version-bumped scenario. */
   onSaved: () => Promise<void>;
 }
 
@@ -385,10 +321,7 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
     isDirty,
   } = useRothConversionsDraft(scenario, scenarios);
 
-  // Source = active PRE_TAX or MIXED accounts (excluding cash-balance pensions).
-  // Target = source-aware: Roth IRAs are always listed; for a MIXED Roth-designated
-  // source the same account also appears as a same-account in-plan Roth conversion
-  // option (even when the account's current post-tax balance is zero).
+  // Targets: Roth IRAs always; a MIXED Roth-designated source also offers itself (in-plan conversion) even with a zero post-tax balance.
   const sources = useMemo<PickerOption[]>(
     () =>
       accounts
@@ -397,15 +330,11 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
     [accounts],
   );
 
-  /** Compute target options for one conversion row given its current source id. */
   const targetsForSource = useMemo<(sourceId: string) => PickerOption[]>(
     () =>
       (sourceId: string): PickerOption[] => {
         const sourceAccount = accounts.find((a) => a.id === sourceId);
-        // Filter Roth IRA targets to accounts owned by the SAME owner as the
-        // source. Cross-owner conversions are silently pruned at save by the
-        // `isValidWorkingYearsRothConversionPair` guard — showing cross-owner options
-        // causes confusing silent disappearance on save.
+        // Same-owner Roth IRAs only: cross-owner pairs are pruned at save by isValidWorkingYearsRothConversionPair, so offering them would vanish silently.
         const sourceOwnerId = sourceAccount?.payload.ownerId;
         const rothIraTargets = accounts
           .filter(
@@ -415,8 +344,6 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
           )
           .map((a) => ({ id: a.id, name: a.payload.name }));
         if (!sourceAccount) return rothIraTargets;
-        // Same-account in-plan Roth conversion: when the source is an active
-        // MIXED Roth-designated account, offer it as a target too.
         const sameAccountRec = { id: sourceAccount.id, payload: sourceAccount.payload };
         if (isSameAccountMixedInPlanConversion(sameAccountRec, sameAccountRec)) {
           return [
@@ -432,16 +359,11 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
     [accounts],
   );
 
-  // Find the first source that has at least one valid target — some sources
-  // (e.g. MIXED OTHER with no same-owner Roth IRA) may have no targets at all.
+  // Some sources (e.g. MIXED OTHER with no same-owner Roth IRA) have no targets at all.
   const firstUsableSource = sources.find((s) => targetsForSource(s.id).length > 0);
   const canAdd = firstUsableSource !== undefined;
 
-  // Resolve every row to its inclusive `[startYear, endYear]`, keyed by index,
-  // with the same helper the summary card uses. A `null` entry is unresolvable
-  // (e.g. an `age` anchor whose member has no birthdate) and is skipped by
-  // both validations below. Reused by the backwards + same-account-overlap
-  // checks.
+  // A null entry is unresolvable (e.g. an age anchor with no birthdate) and is skipped by both validations below.
   const resolvedYears = useMemo<({ startYear: number; endYear: number } | null)[]>(
     () => {
       const ctx = buildRothConversionResolveCtx(members);
@@ -450,10 +372,7 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
     [conversions, members],
   );
 
-  // Backwards-window guard (1-based conversion numbers): a row whose START
-  // resolves to a year AFTER its END converts nothing. An unresolvable anchor
-  // (missing birthdate) is NOT a backwards window, so skip it here. start ==
-  // end is a valid single-year conversion.
+  // An unresolvable anchor is not a backwards window; start == end is a valid single-year conversion.
   const backwardsRows = useMemo<number[]>(() => {
     const offending: number[] = [];
     resolvedYears.forEach((years, i) => {
@@ -463,12 +382,7 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
   }, [resolvedYears]);
   const hasBackwardsWindow = backwardsRows.length > 0;
 
-  // Same-account overlap guard: two rows converting FROM the same source
-  // account whose inclusive year-ranges intersect (`a1 <= b2 AND b1 <= a2`).
-  // Unlike QCD there is no single-giver framing here — group strictly by
-  // `sourceAccountId`. Skip unresolvable or backwards rows (their range is
-  // meaningless / handled by validation 1). Collects ALL 1-based row numbers
-  // involved in any same-account overlap.
+  // Rows from the same source account whose inclusive year ranges intersect; unresolvable or backwards rows are skipped.
   const overlapRows = useMemo<number[]>(() => {
     const offending = new Set<number>();
     for (let i = 0; i < conversions.length; i += 1) {
@@ -491,13 +405,10 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Single-open-at-a-time collapsible rows, keyed by the row's stable
-  // `draftId` (removing a row above the open one renumbers labels but
-  // must not steal or drop the open state). All rows start collapsed.
+  // Keyed by the stable draftId so removing a row above the open one doesn't steal or drop the open state.
   const [openRowId, setOpenRowId] = useState<string | null>(null);
 
-  // Page-level dirty guard hosted here (where `isDirty` lives). Its global
-  // pushState/replaceState patch also intercepts the breadcrumb <Link>.
+  // The global pushState/replaceState patch also intercepts the breadcrumb <Link>.
   const { pendingNavModal, navigateUnguarded } = useUnsavedChangesGuard(isDirty);
 
   const onAdd = (): void => {
@@ -514,9 +425,7 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
     setError(null);
     let savedOk = false;
     try {
-      // Strip the pair first so a sparse OMIT (an all-removed list / a rate
-      // dropped to 0) DELETES the previously-stored key, then re-spread only
-      // the present fragments.
+      // Strip the pair first so a sparse omit deletes the previously stored key.
       const {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure-to-omit: bindings exist only to strip the keys from the rest
         preRetirementRothConversions: _omitList,
@@ -588,17 +497,7 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
             >
               {conversions.map((entry, i) => {
                 const targets = targetsForSource(entry.sourceAccountId);
-                // A row's SAVED target can drop out of its eligible-target
-                // list after the fact — deleted, deactivated, marked inherited
-                // (an inherited Roth IRA cannot receive conversions), or
-                // orphaned by a source-owner change. Such a row converts
-                // nothing (`resolvePreRetirementRothConversions` re-applies
-                // the same predicate at the engine boundary) and
-                // `buildNextRothConversions` prunes it at the next Save, so it
-                // must SAY so — mirrors the Fill-mode window's `fillNoTarget`
-                // notice. The real account name (when the account still
-                // exists) keeps the collapsed summary from calling a visible
-                // account "Missing".
+                // The saved target left the eligible list (deleted, deactivated, inherited or orphaned by a source-owner change): such a row converts nothing and Save prunes it, so say so.
                 const staleTarget = targets.some(
                   (t) => t.id === entry.targetRothAccountId,
                 )
@@ -716,7 +615,6 @@ export const RothConversionsEditor: React.FC<RothConversionsEditorProps> = ({
 
       {error && <Alert tone="error">{error}</Alert>}
 
-      {/* Left-aligned, primary action first — AGENTS action-order rule. */}
       <div className="flex justify-start gap-2">
         <button
           type="button"

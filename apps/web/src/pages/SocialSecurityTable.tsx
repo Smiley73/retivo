@@ -1,10 +1,4 @@
-/**
- * Per-member benefits table for the Social Security page, extracted
- * from `SocialSecurityPage.tsx` to keep that file under the ≤400-line
- * shape limit (the React Aria Table migration + NotesIndicator pushed
- * the parent file past its baseline). Render-only — the page owns
- * IndexedDB reads, modal state, and the delete confirm flow.
- */
+/** Per-member benefits table for the Social Security page; render-only, the page owns reads, modal state and the delete confirm. */
 import React from 'react';
 import {
   Cell,
@@ -70,10 +64,7 @@ export const SocialSecurityTable: React.FC<SocialSecurityTableProps> = ({
   onOpenModal,
   onRemoveBenefit,
 }) => (
-  // Canonical TableScroll card; scroll={false} because the rows carry the
-  // hover-revealed `.row-actions` cluster. The prior `overflow-x-auto`
-  // wrapper was the exact WebKit stuck-`:hover` trigger TableScroll's
-  // non-scrolling variant exists to remove.
+  // scroll={false}: the rows carry the hover-revealed .row-actions cluster, and an overflow wrapper triggers WebKit's stuck-:hover bug (see TableScroll).
   <TableScroll
     label="Social Security benefits per household member"
     scroll={false}
@@ -136,9 +127,6 @@ export const SocialSecurityTable: React.FC<SocialSecurityTableProps> = ({
               </Cell>
               <Cell className={tdClass}>
                 {benefit ? (
-                  // Hover-revealed icon cluster (mock `rowActs(false)`),
-                  // matching the Accounts / Account Balances row pattern;
-                  // icons carry their accessible name via aria-label.
                   <div className="row-actions items-center">
                     <button
                       type="button"
@@ -158,9 +146,7 @@ export const SocialSecurityTable: React.FC<SocialSecurityTableProps> = ({
                     </button>
                   </div>
                 ) : (
-                  // Empty state isn't modeled in the mock's row-actions
-                  // (which assumes data present) — keep an always-visible
-                  // Add affordance rather than a hover-hidden one.
+                  // The empty state keeps an always-visible Add affordance, not a hover-hidden one.
                   <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"

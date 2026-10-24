@@ -1,23 +1,4 @@
-/**
- * Dashboard "Portfolio allocation - by tax treatment" card (Graphite
- * Spectrum mock).
- *
- * A horizontal stacked allocation bar (one segment per tax-treatment slice
- * — tax-deferred / taxable / tax-free (Roth) / tax-free (HSA) — coloured by
- * the registered bucket fills) above a key/value legend list: swatch + label
- * on the left, right-aligned mono percentage on the right.
- *
- * The four-slice split is the cheap current-balance aggregate computed in
- * `useDashboardProjection` (via `deriveTaxTreatmentAllocation`) — no
- * projection needed; tax-free is split into a Roth slice and an HSA slice.
- * The segment fills are
- * the same `bg-{bucket}` token pairs the account tables' bucket bar uses
- * (already AA-registered in contrast.ts); the bar + swatches are
- * `aria-hidden` decoration, the percentages carry the meaning for
- * assistive tech via the legend's text.
- *
- * The dashboard surface mirrors the Balance Projection portfolio split.
- */
+/** Dashboard "Portfolio allocation - by tax treatment" card: a stacked allocation bar (tax-deferred, taxable, tax-free Roth, tax-free HSA) above a key/value legend. The bar and swatches are aria-hidden; the legend text carries the percentages for assistive tech. */
 import React from 'react';
 import type {
   DashboardAllocationSlice,
@@ -27,9 +8,7 @@ import type {
 const BUCKET_BG: Record<TaxTreatmentSliceKey, string> = {
   pretax: 'bg-pretax',
   taxable: 'bg-taxable',
-  // Tax-free splits into a Roth slice and an HSA slice; each reuses its
-  // established bucket hue (violet `roth`, teal `hsa`) rather than minting
-  // a new colour.
+  // Tax-free splits into Roth and HSA slices, each reusing its established bucket hue.
   taxfree_roth: 'bg-roth',
   taxfree_hsa: 'bg-hsa',
 };
@@ -71,8 +50,6 @@ export const DashboardAllocationCard: React.FC<DashboardAllocationCardProps> = (
         </p>
       ) : (
         <>
-          {/* Decorative stacked bar — the legend below carries the
-              numbers for assistive tech, so the bar is aria-hidden. */}
           <div
             aria-hidden="true"
             className="flex h-3 w-full overflow-hidden rounded-full"

@@ -1,9 +1,4 @@
-/**
- * Owner-approval landing route. The approval mail link points here with
- * the token in the URL fragment (`#token=…`). Same posture as
- * VerifyEmailPage: read once on mount, scrub the fragment via
- * `history.replaceState`, then POST.
- */
+/** Owner-approval landing route: reads the token from the URL fragment once on mount (as VerifyEmailPage), scrubs it via history.replaceState, then POSTs. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { apiRequest, ApiRequestError } from '../api/client';
@@ -20,7 +15,6 @@ type Status =
   | { kind: 'success'; email: string }
   | { kind: 'error'; message: string };
 
-// Tailwind max-w-md — one-sentence outcome copy card.
 const APPROVE_CARD_WIDTH = 'w-full max-w-md shadow-lg';
 
 function readTokenFromFragment(): string {

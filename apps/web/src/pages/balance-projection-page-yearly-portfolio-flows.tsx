@@ -1,9 +1,4 @@
-/**
- * Balance Projection page — "Annual Portfolio Flow" band (portfolio
- * flows chart + disclaimer). Extracted from
- * `balance-projection-page-yearly.tsx` to keep the yearly section
- * file under the 400-ln file shape cap.
- */
+/** "Annual Portfolio Flow" band: portfolio flows chart and disclaimer. */
 import React, { useCallback, useMemo } from 'react';
 import { PortfolioFlowsChart } from '../components/PortfolioFlowsChart';
 import { ChartInfoPopover } from '../components/ChartInfoPopover';
@@ -28,13 +23,9 @@ export interface YearlyPortfolioFlowsBandProps {
     readonly netChange: number;
     readonly fractionalYear?: number;
   }>;
-  /** Retirement + life-expectancy markers (the canonical teal
-   *  `Retires <Mon YYYY>` retirement line plus the death lines). */
   readonly chartMarkers: ReadonlyArray<CashflowChartMarker>;
   readonly tooltipMembers: ReadonlyArray<TooltipMember>;
   readonly depletionYear: number | null;
-  /** Active deterministic method label (Planned / TWR) suffixed onto the
-   *  card title so the user can tell which basis this chart reflects. */
   readonly methodLabel: string;
 }
 
@@ -45,7 +36,7 @@ export const YearlyPortfolioFlowsBand: React.FC<YearlyPortfolioFlowsBandProps> =
   depletionYear,
   methodLabel,
 }) => {
-  // Hook lives here (section), not in the lazy Inner.
+  // Hook lives in the section, not the lazy Inner.
   const xDomainFull = useMemo((): [number, number] => {
     if (portfolioFlowsRows.length === 0) return [0, 0];
     return [
@@ -59,15 +50,12 @@ export const YearlyPortfolioFlowsBand: React.FC<YearlyPortfolioFlowsBandProps> =
     [portfolioFlowsRows],
   );
 
-  // Y-range for visible portfolio flow values so the y-axis auto-fits on zoom.
   const computeY = useCallback(
     (visibleRows: readonly { x: number }[]): [number, number] | null => {
       const xs = new Set(visibleRows.map((r) => r.x));
       const visible = portfolioFlowsRows.filter((r) => xs.has(r.year));
       if (visible.length < 2) return null;
-      // Withdrawals are already stored as a negative value; use directly.
-      // Include 0 as baseline so the withdrawal bar never gets a positive lower
-      // bound.
+      // Withdrawals are already negative; include 0 as baseline so the withdrawal bar never gets a positive lower bound.
       const vals = visible.flatMap((r) => [
         r.contributions, r.gains, r.deposits, r.withdrawals, r.qcd, r.netChange,
       ]);

@@ -1,31 +1,5 @@
-/**
- * Balance Projection page — the "Safe withdrawal rate" tab panel body.
- *
- * Computes nothing of its own: calls the resolver
- * (`useBalanceProjectionSwrData`) against the page's already-resolved view
- * model, renders the card figures straight off the returned bundle, and
- * mounts the stacked composition chart with the bundle's per-year rows —
- * every layer, including the other-income residual and the tooltip's
- * per-source split, passed straight through. This panel force-mounts with
- * its siblings, so it reads only fields the page's own single view-model
- * call already computed; it never flips `runStressTest` or starts a Monte
- * Carlo run of its own.
- *
- * States: the page's existing loading / error / no-accounts / no-history /
- * no-retirement-age guards intercept before any tab renders, and Historical-
- * unavailable / an unresolved Monte Carlo tier surface in the pinned strip
- * and CBP banner outside every panel — this module adds no copy for those
- * (`historical-unavailable` / `mc-run-unavailable` render nothing). Three
- * states have no page-level precedent and get their own bare state here:
- * `already-retired` (a retirement boundary already in the past resolves no
- * at-retirement figure — no CTA, this being no misconfiguration),
- * `insufficient-data` (the resolver reports no usable comparison at all), and
- * `mc-index-out-of-range` (the representative run's own retirement boundary
- * sits inside its own first modeled year, so there is no accumulation-phase
- * year-end to value the portfolio at — the Basis select still offers and
- * enables the tier and nothing else on the page surfaces this, so it is
- * NOT one of the two inherited-blank states above).
- */
+/** "Safe withdrawal rate" tab panel: renders the resolver's bundle (useBalanceProjectionSwrData) off the page's own view model and computes nothing itself.
+* It force-mounts with its siblings, so it never flips runStressTest or starts a Monte Carlo run; bare states cover already-retired, insufficient-data and mc-index-out-of-range. */
 import React from 'react';
 import { Link } from 'react-router';
 import { EmptyState } from '../components/EmptyState';
@@ -55,8 +29,6 @@ import {
 
 export interface BalanceProjectionSwrSectionProps {
   readonly data: PipelineData | null;
-  /** The page's own view model — the SAME object every other tab reads,
-   *  never a second `useBalanceProjectionViewModel()` call. */
   readonly vm: BalanceProjectionViewModel;
   readonly selectedScenarioId: string | null;
   readonly canonicalIncome: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
@@ -67,27 +39,19 @@ export interface BalanceProjectionSwrSectionProps {
   readonly activeMcBasis: McBasis | null;
   readonly nowYear: number;
   readonly nowMonthIndex: number;
-  /** `resolvedBasisLabel(activeMcBasis, activeMethod)` — the same label every
-   *  other MC-aware section on this page suffixes onto its own title. */
   readonly resolvedLabel: string;
   readonly isMcBasisActive: boolean;
   readonly tooltipMembers: ReadonlyArray<TooltipMember>;
 }
 
-/** `+$4k above` / `-$4k below` / an exact match — states the DIRECTION in
- *  words rather than a sign glyph, and never colors the figure: this card
- *  compares against a fixed heuristic, it does not verdict the plan. Mirrors
- *  the deleted `RetirementReadinessSwrCard.formatDelta`. */
+// States the direction in words rather than a sign glyph and never colors the figure: the card compares against a heuristic, it does not verdict the plan.
 function formatDelta(delta: number): string {
   if (delta === 0) return 'Exactly matches';
   const magnitude = formatCurrencyShort(Math.abs(delta));
   return delta > 0 ? `${magnitude} above` : `${magnitude} below`;
 }
 
-/** No page-level guard catches an already-past retirement date (only "no
- *  retirement age configured at all" is a page-level guard) — so once this
- *  panel mounts, no CTA is offered: there is nothing to set in the scenario
- *  editor, the retirement date already exists. */
+// No page-level guard catches an already-past retirement date; no CTA, since there is nothing to set.
 const AlreadyRetired: React.FC = () => (
   <EmptyState bare>
     This scenario&rsquo;s retirement date has already passed, so there&rsquo;s
@@ -97,20 +61,8 @@ const AlreadyRetired: React.FC = () => (
   </EmptyState>
 );
 
-/** No page-level guard catches this either: the representative run itself
- *  has arrived and its tier stays enabled on the Basis select, but the
- *  run's OWN retirement boundary sits inside its own first modeled year (a
- *  household retiring later in the current calendar year), leaving no
- *  earlier accumulation-phase year-end to value the portfolio at under this
- *  basis (`balance-projection-swr-derivation.ts` state 6). Unlike
- *  Historical-unavailable / an unresolved MC run, nothing else on the page
- *  surfaces this — the pinned strip and CBP banner report no error.
- *
- *  A different basis is the ONLY remedy offered: `firstYear` is a property
- *  of the shared `MonteCarloInput`, identical for every path in the summary,
- *  so "Show another likely path" replays a different seed against the same
- *  first year and the state's `primaryRetirementYear <= firstYear` test comes
- *  out the same every time. Never offer the reroll here. */
+// No page-level guard catches this: the MC run's own retirement boundary sits inside its first modeled year, leaving no accumulation year-end to value the portfolio at (balance-projection-swr-derivation.ts state 6).
+// Only a different basis helps: firstYear is shared by every path, so "Show another likely path" would not change it. Never offer the reroll here.
 const NoAccumulationYearEnd: React.FC = () => (
   <EmptyState bare>
     We can&rsquo;t value the portfolio under this basis — this example
@@ -142,12 +94,7 @@ const InsufficientData: React.FC<{ readonly scenarioId: string | null }> = ({
   </EmptyState>
 );
 
-/** Methodology prose for the card's `(i)` popover — the after-tax-draw
- *  quantity the rules are compared against, the resulting deviation from
- *  the published rates (which are themselves stated on the withdrawal
- *  BEFORE tax), and a known exclusion (this card's own portfolio figure is not
- *  the same total the page's summary stats show; fixing that stat is a
- *  separate change). */
+// Methodology prose for the (i) popover; this card's portfolio figure differs from the page's summary stats (a known exclusion).
 const SwrMethodologyContent: React.FC = () => (
   <div className="flex flex-col gap-2">
     <p className="m-0">
@@ -173,16 +120,7 @@ const SwrMethodologyContent: React.FC = () => (
   </div>
 );
 
-/** Names the year and instant the portfolio is valued, the year the
- *  rule comparison starts, and why they can be up to a year apart. The
- *  partial retirement-TRANSITION year (when one exists — never on a January
- *  1 retirement) is a SEPARATE year from the valuation year: they coincide
- *  on the deterministic path (the transition year IS the valuation year),
- *  but under a Monte Carlo tier the valuation instant sits a full year
- *  earlier still — the representative run's own last accumulation
- *  year-end, not the transition year (see
- *  `balance-projection-swr-derivation.ts`). Read off the row the resolver already
- *  marks `isPartialYear`, never re-derived from `valuationYear`. */
+// The partial retirement-transition year (isPartialYear) differs from the valuation year under an MC tier, where valuation sits a year earlier; read off the flagged row, never re-derived.
 function buildValuationNote(
   bundle: SwrComparisonBundle,
   isMcBasisActive: boolean,
@@ -197,12 +135,6 @@ function buildValuationNote(
   const comparisonStart =
     `The comparison below starts ${bundle.anchorYear}, the first full ` +
     `calendar year of retirement`;
-  // The retirement TRANSITION year is a partial year (01's `isPartialYear`
-  // flag, carried on the first row whenever it applies — rows always start
-  // at the transition year) — a DIFFERENT year from `valuationYear` under an
-  // MC tier, where the valuation instant sits a further year earlier still
-  // (the representative run's own last full accumulation year-end). Never
-  // reuse `valuationYear` for both roles.
   const partialYear = bundle.rows.find((row) => row.isPartialYear)?.year ?? null;
   if (partialYear === null) {
     return `Your portfolio is valued at ${valuedAt}. ${comparisonStart}.`;
@@ -307,12 +239,7 @@ export const BalanceProjectionSwrSection: React.FC<BalanceProjectionSwrSectionPr
     nowMonthIndex,
   });
 
-  // Inherited states: Historical-unavailable already disables that option on
-  // the Basis select, and an unresolved/vanished MC tier's own option is
-  // disabled the same way — both surface in the pinned strip, not here.
-  // `mc-index-out-of-range` is NOT one of these (see the module docblock):
-  // the tier stays enabled and nothing else on the page says anything, so it
-  // gets its own bare state below instead of an empty panel.
+  // Historical-unavailable and unresolved MC tiers surface in the pinned strip, not here; mc-index-out-of-range does not, so it gets its own state below.
   if (
     result.state === 'historical-unavailable' ||
     result.state === 'mc-run-unavailable'
