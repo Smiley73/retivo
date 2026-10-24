@@ -1,26 +1,12 @@
-/**
- * Optimizer transition cells: render a scenario's current value → the
- * optimizer's recommendation as "current → recommended". `AgeTransition`
- * does this for claim ages (e.g. "62 → 65"); `MetricTransition` for the
- * ending balance / plan-success metric (e.g. "$1.1M → $1.3M"). In both,
- * when the current value already equals the recommendation — or no
- * baseline is available — only the recommended value shows, so an
- * already-applied row reads as a plain value.
- *
- * Shared by both the Monte Carlo and deterministic tabs so the two render
- * identically.
- */
+/** Optimizer "current → recommended" cells, shared by the MC and deterministic tabs: AgeTransition for claim ages and MetricTransition for the ending balance / plan-success metric. When the current value equals the recommendation, or there is no baseline, only the recommended value shows. */
 import React from 'react';
 import { formatAgeYearsMonths } from '../lib/format-age';
 import { claimAgeMatches } from './ss-optimizer-row-view';
 import type { RetirementAgePerMember } from '../db/types';
 
 export interface AgeTransitionProps {
-  /** Scenario's current claim age for this member, or `null` when unset. */
   readonly current: RetirementAgePerMember | null;
-  /** Optimizer's recommended claim age, years part. */
   readonly recommendedYears: number;
-  /** Months part; absent or 0 is a whole year. */
   readonly recommendedMonths?: number;
 }
 
@@ -56,13 +42,8 @@ export const AgeTransition: React.FC<AgeTransitionProps> = ({
 };
 
 export interface MetricTransitionProps {
-  /** Metric value at the scenario's current claim ages, or `undefined`
-   *  when no whole-year baseline candidate exists. */
   readonly baseline: number | undefined;
-  /** Optimizer's recommended (winning) metric value. */
   readonly recommended: number;
-  /** Formats a metric value for display (e.g. `formatCurrencyShort` for
-   *  balance, percent for plan success). */
   readonly format: (value: number) => string;
 }
 
@@ -72,9 +53,6 @@ export const MetricTransition: React.FC<MetricTransitionProps> = ({
   format,
 }) => {
   const recommendedLabel = format(recommended);
-  // No baseline (current ages off-grid), or the metric doesn't move — show
-  // just the recommended value, mirroring AgeTransition's already-applied
-  // single-value rendering.
   if (baseline === undefined || baseline === recommended) {
     return <>{recommendedLabel}</>;
   }

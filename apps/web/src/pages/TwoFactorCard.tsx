@@ -1,28 +1,5 @@
-/**
- * Security page: Two-factor authentication card (see "The second factor" in
- * docs/security.md).
- *
- * Two sections, both driven by the MFA-management methods on `useAuth()`:
- *  - Authenticator app (TOTP): the QR setup screen (`TotpEnrollment`) opens
- *    immediately — `enrollStart` mints an unconfirmed pending secret and
- *    writes nothing sensitive — so the slow part (scanning) happens before
- *    any proof is collected. Continue opens the fresh-proof gate (password
- *    always, plus a step-up factor when `AUTH_MFA_ENFORCED` is on). The live
- *    6-digit authenticator code is typed in whichever gate modal is the LAST
- *    step (the password prompt on the flag-off floor, the step-up modal when
- *    enforced), and that modal's OWN submit performs the real
- *    `enrollTotpConfirm(code, password, proof)` write, exactly like the
- *    disable/passkey-add gates below. Two properties follow: every input is
- *    verified for real by the modal that owns it, with all of its fields
- *    still editable when the server says no;
- *    and the TOTP code — valid for only ~a minute, server
- *    tolerance ±30 s — is seconds old when spent, instead of frozen before a
- *    password + emailed-code round trip that routinely outlasts it.
- *    Disable behind password
- *    re-verification and (when enforced) fresh step-up; a restricted factor
- *    (enrolled right after a password reset) renders its own confirm action.
- *  - Trusted devices: {@link TrustedDevicesList}.
- */
+/** Security page two-factor card: authenticator app (TOTP) setup and disable, and trusted devices (see "The second factor" in docs/security.md).
+* The live TOTP code is typed in the last gate modal and that modal's own submit performs the enrollTotpConfirm write, so the ~1-minute code is seconds old when spent. */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import type { MfaStatus, TrustedDevice } from '../auth/useMfaManagement';
@@ -46,12 +23,7 @@ import {
   btnDangerSmClass,
 } from './profile-page-chrome';
 
-/**
- * Which op is in flight — drives password re-verification and, when
- * `AUTH_MFA_ENFORCED` is on, the reusable fresh-factor modal. `enroll` gates
- * setting up the authenticator app exactly like
- * `disable` gates turning it off.
- */
+// Which op is in flight; both gate behind password re-verification and, when AUTH_MFA_ENFORCED is on, the fresh-factor modal.
 type StepUp = null | 'enroll' | 'disable';
 
 function errMessage(err: unknown, fallback: string): string {
@@ -79,25 +51,16 @@ export const TwoFactorCard: React.FC = () => {
   const [devices, setDevices] = useState<TrustedDevice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
-  // Confirmation line after a factor change — the
-  // server emails the account when the authenticator app is added or turned
-  // off, with a single-use undo link, and reports `noticeSent`; the line only
-  // claims an email went out when it did (a warning otherwise).
+  // Claims an email went out only when the server reports noticeSent (a warning otherwise).
   const [notice, setNotice] = useState<{ tone: 'success' | 'warning'; text: string } | null>(
     null,
   );
-  // The live authenticator code — typed into the LAST gate modal (see the
-  // header comment), so it is seconds old when `performOp` spends it.
   const [enrollCode, setEnrollCode] = useState('');
-  // Password step-up modal state.
   const [stepUp, setStepUp] = useState<StepUp>(null);
   const [pwValue, setPwValue] = useState('');
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwBusy, setPwBusy] = useState(false);
-  // Fresh-second-factor step: shown after the
-  // password step when `AUTH_MFA_ENFORCED` is on. `showFactor` gates the modal.
   const [showFactor, setShowFactor] = useState(false);
-  // Confirming (lifting) the TOTP factor's post-reset restriction.
   const [confirming, setConfirming] = useState(false);
 
   const load = useCallback(async () => {
@@ -114,9 +77,7 @@ export const TwoFactorCard: React.FC = () => {
     void load();
   }, [load]);
 
-  // Closing the gate (Cancel / Esc on the password prompt) drops everything
-  // typed into it; for `enroll` the QR screen behind it stays open, so the
-  // pending secret is not lost and the person can try again.
+  // Closing the gate drops what was typed; for enroll the QR screen stays open so the pending secret isn't lost.
   const closeStepUp = useCallback((): void => {
     setStepUp(null);
     setShowFactor(false);
@@ -126,10 +87,6 @@ export const TwoFactorCard: React.FC = () => {
     setEnrollCode('');
   }, []);
 
-  // The QR screen is already open (started unconditionally on "Set up" click
-  // — `enrollStart` writes nothing sensitive). Continue there opens the
-  // password (+ step-up) gate below; the code is typed in the last of those
-  // and THAT modal's own submit performs the real write (`performOp`).
   const onEnrollContinue = useCallback(() => {
     setStepUp('enroll');
     setPwValue('');
@@ -143,16 +100,8 @@ export const TwoFactorCard: React.FC = () => {
     setEnrollCode('');
   }, []);
 
-  // Run the chosen op with the entered password, carrying a fresh step-up factor
-  // when one was collected (the flag-off floor is password-only, so `proof` stays
-  // undefined). Throws on failure so the step-up path surfaces the modal's
-  // non-retryable error; the password-only path catches below. This IS the
-  // real verification for `enroll` too — a wrong password, step-up code or
-  // authenticator code fails here and surfaces on the gate modal that collected
-  // it, with the field still editable,
-  // not deferred past this call. The server
-  // checks the authenticator code BEFORE spending the step-up proof, so a retry
-  // with a corrected code reuses the same password + proof.
+  // Throws on failure so the step-up path surfaces the modal's non-retryable error; the password-only path catches below.
+  // This is the real verification for enroll too: the server checks the authenticator code before spending the step-up proof, so a retry with a corrected code reuses the same password and proof.
   const performOp = useCallback(
     async (proof?: StepUpProof): Promise<void> => {
       if (stepUp === 'disable') {
@@ -183,27 +132,16 @@ export const TwoFactorCard: React.FC = () => {
     [stepUp, pwValue, disableTotp, enrollTotpConfirm, enrollCode],
   );
 
-  // Fresh-second-factor collection (flag on): on a verified factor, run the op
-  // inline; `onVerified` closes the modals + reloads status.
   const stepUpFactor = useStepUp({
     purpose: stepUp === 'enroll' ? 'mfa_totp_enroll' : 'mfa_totp_disable',
     methods: status?.methods ?? ['email_otp'],
-    // Enrollment: the emailed code is the floor
-    // ONLY while the account has no enrolled factor — `methods` lists it
-    // exactly then — and the server refuses it otherwise
-    // (`STEP_UP_FACTOR_NOT_ELIGIBLE`), so the recovery list is not offered for
-    // `enroll`. `disable` keeps the no-lockout floor. `undefined`, not a
-    // fresh `[]`: the hook's `reset` identity follows this value, and the
-    // open-modal effect below re-runs `reset` (wiping the typed code) on every
-    // render whenever it changes.
+    // Enrollment: the emailed code is the floor only while nothing is enrolled, and the server refuses it otherwise (STEP_UP_FACTOR_NOT_ELIGIBLE).
+    // undefined, not a fresh []: the hook's reset identity follows this value and the open-modal effect would wipe the typed code every render.
     recoveryMethods: stepUp === 'enroll' ? undefined : (status?.recoveryMethods ?? []),
     onSendEmailOtp: stepUpSendEmailOtp,
     onPasskeyOptions: stepUpPasskeyOptions,
     onVerify: (proof) => performOp(proof),
     onVerified: () => {
-      // The write already committed (`performOp` above ran the real
-      // `enrollTotpConfirm`/`disableTotp` call) — close every modal and, for
-      // `enroll`, close the QR/code UI too, then reload the fresh status.
       setShowFactor(false);
       setStepUp(null);
       setPwValue('');
@@ -217,18 +155,13 @@ export const TwoFactorCard: React.FC = () => {
   });
   const resetStepUpFactor = stepUpFactor.reset;
 
-  // Seed the factor picker to the loaded strongest-first factor once the factor
-  // modal opens (the hook's initial factor was captured before status loaded).
+  // The hook's initial factor was captured before status loaded.
   useEffect(() => {
     if (showFactor) resetStepUpFactor();
   }, [showFactor, resetStepUpFactor]);
 
-  // Password step: verify the password server-side. When the flag is on, advance
-  // to the fresh-factor step; otherwise run the op with the password only.
   const onPwContinue = useCallback(async () => {
     if (status?.stepUpRequired) {
-      // Keep the entered password; collect the factor next (the op call carries
-      // both). The password itself is re-verified server-side by the op.
       setPwError(null);
       setShowFactor(true);
       return;
@@ -275,17 +208,12 @@ export const TwoFactorCard: React.FC = () => {
     }
   }, [forgetDevices, load]);
 
-  // Confirm (lift) the TOTP factor's post-reset restriction. No password
-  // baseline — the proof must come from an already-enrolled, non-restricted
-  // factor that predates the reset: only `totp`/`passkey` can vouch (Email-OTP
-  // has no enrollment timestamp to compare, and the server rejects it) — TOTP
-  // is a singleton, so in practice only a predating passkey can confirm it.
+  // Only totp and passkey can vouch (Email-OTP has no enrollment timestamp, and the server rejects it); TOTP is a singleton, so in practice only a predating passkey confirms.
   const restrictionConfirmMethods = useMemo(
     () => (status?.methods ?? []).filter((m) => m === 'totp' || m === 'passkey'),
     [status?.methods],
   );
-  // Nothing predates the reset — the escape hatch is disabling + re-enrolling,
-  // not a modal that can never succeed.
+  // Nothing predates the reset: the escape hatch is disabling and re-enrolling, not a modal that can never succeed.
   const confirmHasNoEligibleFactor = confirming && restrictionConfirmMethods.length === 0;
 
   const confirmRestrictionStepUp = useStepUp({
@@ -305,9 +233,6 @@ export const TwoFactorCard: React.FC = () => {
     if (confirming && !confirmHasNoEligibleFactor) resetConfirmRestrictionStepUp();
   }, [confirming, confirmHasNoEligibleFactor, resetConfirmRestrictionStepUp]);
 
-  // The live authenticator code field for `enroll` — rendered inside whichever
-  // gate modal is the LAST step (see the header comment), never in both: the
-  // password prompt on the flag-off floor, the step-up modal when enforced.
   const enrollCodeReady = enrollCode.trim() !== '';
   const enrollCodeField = (
     <Field htmlFor="totp-enroll-code" label="Authenticator app code">
@@ -342,7 +267,6 @@ export const TwoFactorCard: React.FC = () => {
           </Alert>
         )}
 
-        {/* --- Authenticator app (TOTP) --- */}
         <section className="mb-5">
           <h3 className="m-0 mb-1 text-sm font-semibold text-ink">
             Authenticator app
@@ -418,7 +342,6 @@ export const TwoFactorCard: React.FC = () => {
           )}
         </section>
 
-        {/* --- Trusted devices --- */}
         <section>
           <h3 className="m-0 mb-2 text-sm font-semibold text-ink">
             Trusted devices
@@ -431,12 +354,6 @@ export const TwoFactorCard: React.FC = () => {
         </section>
       </SettingsCard>
 
-      {/* Fresh-proof gate: for `enroll` this opens
-          from the QR screen's Continue; on the flag-off floor it is the LAST
-          step, so it also collects the live authenticator code and its own
-          Continue carries password + code into the real `enrollTotpConfirm`
-          write. For `disable` there is no live code, just password
-          re-verification. */}
       <PasswordPromptModal
         open={(stepUp === 'enroll' || stepUp === 'disable') && !showFactor}
         onClose={closeStepUp}
@@ -461,14 +378,7 @@ export const TwoFactorCard: React.FC = () => {
         {enrollCodeInPasswordStep ? enrollCodeField : undefined}
       </PasswordPromptModal>
 
-      {/* Fresh second-factor step-up: shown after
-          the password step when `AUTH_MFA_ENFORCED` is on. Verifying a factor
-          runs the op inline; an ambiguous failure surfaces the non-retryable
-          error. For `enroll` this is the LAST step, so it also collects
-          the live authenticator code (`extraFields`) right before its submit
-          spends it. Email-OTP is the no-lockout floor for DISABLE, so turning
-          TOTP off stays completable even by a user who lost the factor;
-          for enroll it is offered only while nothing else is enrolled. */}
+      {/* Email-OTP is the no-lockout floor for disable, so turning TOTP off stays completable by a user who lost the factor; for enroll it is offered only while nothing else is enrolled. */}
       <StepUpModal
         open={showFactor}
         onClose={() => {
@@ -496,9 +406,6 @@ export const TwoFactorCard: React.FC = () => {
         </Muted>
       </StepUpModal>
 
-      {/* Confirm (lift) the TOTP factor's post-reset restriction.
-          No password step — the proof must come
-          from an already-enrolled factor that predates the reset. */}
       <StepUpModal
         open={confirming && !confirmHasNoEligibleFactor}
         onClose={() => {
@@ -516,9 +423,6 @@ export const TwoFactorCard: React.FC = () => {
         </Muted>
       </StepUpModal>
 
-      {/* Nothing predates the reset — there is no factor that could ever
-          confirm this one. The escape hatch is disabling + re-enrolling, not
-          a dead-end modal. */}
       <ConfirmDialog
         open={confirmHasNoEligibleFactor}
         title="Confirm this authenticator app"

@@ -1,21 +1,5 @@
-/**
- * Projected withdrawals page — turns the deterministic per-account drawdown
- * projection into a plain-language view of the withdrawals projected from each
- * account this year for the sidebar-selected scenario.
- *
- * Surface: a selected-year hero card (year stepper + "jump to current year")
- * showing per-account projected withdrawals, the required minimum by legal
- * aggregation group, the year's income tax + Medicare and after-tax
- * spendable, plus an expandable full year-by-year per-account schedule and
- * a standing "not financial advice" disclaimer + a keep-balances-current
- * nudge.
- *
- * READ-ONLY: every figure derives from the deterministic
- * `runBalanceProjectionForPage` output — the same engine the Balance Projection
- * page uses, so this page can't silently disagree with it. The per-account
- * RMD reuses the deterministic `DrawdownYear.perAccountRmdCents` field; nothing
- * here touches the Monte Carlo path.
- */
+/** Projected withdrawals page: the selected year's per-account withdrawals, required minimums by aggregation group, tax + Medicare and after-tax spendable, plus an expandable year-by-year schedule.
+* Read-only, from the same deterministic runBalanceProjectionForPage output as the Balance Projection page. */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { PageHeader } from '../components/PageHeader';
@@ -72,12 +56,7 @@ const BASIS_OPTIONS: ReadonlyArray<{
   },
 ];
 
-/**
- * Plain-language note under an HSA account line: HSA dollars appear only
- * for modeled medical costs (tax-free) or as a last-resort emergency reserve.
- * Renders nothing for non-HSA accounts or when the HSA had no withdrawal.
- * Exported for the focused render + a11y test.
- */
+/** Note under an HSA line: HSA dollars come only from modeled medical costs (tax-free) or as a last-resort emergency reserve. Exported for the render and a11y test. */
 export function HsaSplitNote({
   acc,
   format,
@@ -99,13 +78,7 @@ export function HsaSplitNote({
   );
 }
 
-/**
- * Plain-language note under a MIXED account line: shows how much of the
- * projected withdrawal comes from the pre-tax sub-account and how much from the
- * Roth (or after-tax) sub-account. Renders nothing for non-MIXED accounts or when
- * no per-sub-account split data is available. Exported for the focused render +
- * a11y test.
- */
+/** Note under a MIXED line splitting the withdrawal between pre-tax and Roth/after-tax sub-accounts. Exported for the render and a11y test. */
 export function MixedSplitNote({
   acc,
   format,
@@ -124,7 +97,6 @@ export function MixedSplitNote({
   );
 }
 
-/** Render one RMD aggregation group as a plain-language projected-amount line. */
 function RmdGroupLine({
   group,
   ownerLabel,
@@ -167,8 +139,6 @@ export const WithdrawalGuidancePage: React.FC = () => {
     data.scenarios.find((s) => s.id === data.selectedScenarioId)?.payload.name ??
     null;
 
-  // Owner-id → display name + a per-account metadata map for the aggregation
-  // grouping. Members carry `firstName`; accounts carry `ownerId` + `type`.
   const ownerNameById = useMemo(() => {
     const m = new Map<string, string>();
     for (const member of data.members) {
@@ -194,9 +164,7 @@ export const WithdrawalGuidancePage: React.FC = () => {
     return m;
   }, [data.accounts]);
 
-  // Run the deterministic projection for the selected scenario. Mirrors the
-  // Balance Projection page's arg assembly. `null` when the scenario
-  // can't be projected (no primary / unresolved retirement / config error).
+  // null when the scenario can't be projected (no primary, unresolved retirement or a config error).
   const projection = useMemo(() => {
     if (!data.ready || !data.selectedScenarioId) return null;
     if (!data.scenarios.some((s) => s.id === data.selectedScenarioId)) {
@@ -236,8 +204,6 @@ export const WithdrawalGuidancePage: React.FC = () => {
     data.incomeStreams,
   ]);
 
-  // Historical is offered only when the projection produced a TWR method;
-  // otherwise the toggle falls back to Planned with a visible note.
   const twrAvailable =
     projection !== null &&
     projection.sharedCtx.methodAvailable &&
@@ -257,8 +223,6 @@ export const WithdrawalGuidancePage: React.FC = () => {
     return buildGuidanceYearRows(methodResult.years, accountsById);
   }, [methodResult, accountsById]);
 
-  // Deflator: today's-dollars view divides each nominal figure by the
-  // inflation factor at its year; actual-dollars view is the identity.
   const ctx = projection?.sharedCtx.ctx ?? null;
   const formatAt = useMemo(() => {
     return (dollars: number, year: number): string => {
@@ -272,15 +236,8 @@ export const WithdrawalGuidancePage: React.FC = () => {
   const firstYear = rows.length > 0 ? rows[0].year : null;
   const lastYear = rows.length > 0 ? rows[rows.length - 1].year : null;
 
-  // The page opens on the current calendar year, but the first projected
-  // drawdown row can start later (e.g. retirement is a few years out). Snap to
-  // the first row when firstYear first becomes available, so the hero shows the
-  // earliest actionable guidance year instead of a pre-range slot.
-  //
-  // Uses a functional updater so `selectedYear` is NOT in the dep array — the
-  // effect fires only when `firstYear` changes (e.g. projection loads), not on
-  // every user navigation, so clicking "Jump to current year" doesn't get
-  // immediately overridden by the clamp.
+  // Snap to the first projected drawdown row when firstYear becomes available, so the hero shows the earliest actionable year.
+  // A functional updater keeps selectedYear out of the deps, so "Jump to current year" isn't immediately overridden by the clamp.
   useEffect(() => {
     if (firstYear !== null) {
       setSelectedYear((prev) => (prev < firstYear ? firstYear : prev));
@@ -290,8 +247,6 @@ export const WithdrawalGuidancePage: React.FC = () => {
   const selectedIndex = indexForYear(rows, selectedYear);
   const selectedRow = selectedIndex >= 0 ? rows[selectedIndex] : null;
 
-  // Last year for which a real (non-seed) balance exists — drives the
-  // keep-current nudge. The runner re-anchors off the latest entered balance.
   const lastBalanceYear = useMemo(() => {
     let max: number | null = null;
     for (const b of data.balances) {
@@ -473,10 +428,6 @@ export const WithdrawalGuidancePage: React.FC = () => {
                   </p>
                 )}
 
-                {/* The engine's own required-withdrawal disclosures
-                    for this year: which accounts are on hold for missing
-                    inherited details, which are deferred while still working,
-                    and when two required withdrawals land in one year. */}
                 {selectedRow.rmdDisclosures.length > 0 && (
                   <ul className="m-0 mt-2 list-disc space-y-1 pl-5 text-sm text-muted">
                     {selectedRow.rmdDisclosures.map((note) => (
@@ -488,8 +439,7 @@ export const WithdrawalGuidancePage: React.FC = () => {
             )}
           </Card>
 
-          {/* Standing disclaimer, ABOVE the schedule (before the numbers a
-              reader would act on) — the point-of-use reliance defense. */}
+          {/* Above the schedule, before the numbers a reader would act on: the point-of-use reliance defense. */}
           <InlineDisclaimerCard
             ariaLabel="Projected withdrawals disclaimer"
             className="my-3"

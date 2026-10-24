@@ -1,14 +1,5 @@
-/**
- * Draft-state hook for the QCD sub-page. Mirrors the
- * working-years Roth-conversions draft hook: seeds the editable list from the
- * parent-chain `effective` overrides (so an inherited config shows from first
- * paint), tracks its own `isDirty` via a frozen-at-mount baseline JSON
- * snapshot, and exposes add / update / remove helpers.
- *
- * The QCD list is one inheritable key (first-ancestor-wins; a child that sets
- * it replaces the whole parent list — same shape as `preRetirementRothConversions`),
- * so the draft seeds from `effective` and Save writes the whole list.
- */
+/** Draft-state hook for the QCD sub-page, mirroring the Roth-conversions draft hook: seeds the list from the parent-chain effective overrides and tracks isDirty against a frozen-at-mount baseline snapshot.
+* The QCD list is one inheritable key: a child that sets it replaces the whole parent list. */
 import { useMemo, useState } from 'react';
 import { resolveScenario, scenarioChain } from '../lib/scenario-resolution';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
@@ -17,22 +8,15 @@ import { cryptoUuid } from '../lib/crypto-uuid';
 
 type ScenarioOverrides = ScenarioPayload['overrides'];
 
-/** A persisted QCD entry — the exact stored shape. */
 type PersistedQcd = NonNullable<
   ScenarioOverrides['qualifiedCharitableDistributions']
 >[number];
 
-/** One editable QCD entry. The persisted field shape plus a transient per-entry
- *  `draftId` — a stable React key so removing a middle row never mis-associates
- *  uncommitted picker UI state. The `draftId` is UI-only and is STRIPPED before
- *  persist (see the save helpers). */
+/** One editable QCD entry plus a transient draftId, a stable React key so removing a middle row never mis-associates picker state; stripped before persist. */
 export type DraftQcd = PersistedQcd & {
   draftId: string;
 };
 
-/** Resolve the parent-chain effective overrides for the scenario. Falls back to
- *  local overrides if resolution throws (consistent with the sibling draft
- *  hooks). */
 function resolveEffectiveOverrides(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -54,9 +38,7 @@ interface QcdDraftState {
   qcds: DraftQcd[];
 }
 
-/** Pure: JSON snapshot of the dirty-tracked fields. Symmetric with the baseline
- *  so a single string-equality check decides `isDirty`. The transient per-entry
- *  `draftId` is STRIPPED so it never influences dirty tracking. */
+// The draftId is stripped so it never influences dirty tracking.
 function snapshot(state: QcdDraftState): string {
   return JSON.stringify({
     qcds: state.qcds.map((q) => ({
@@ -73,8 +55,7 @@ export interface QcdDraftResult {
   draft: QcdDraftState;
   localOverrides: ScenarioOverrides;
   effective: ScenarioOverrides;
-  /** Name of the nearest ancestor whose QCD list this child inherits (the list
-   *  is shown but not locally overridden). `null` when local or absent. */
+  /** Nearest ancestor whose QCD list this child inherits; null when local or absent. */
   inheritedFromName: string | null;
   addQcd: (entry: DraftQcd) => void;
   updateQcd: (index: number, entry: DraftQcd) => void;
@@ -103,10 +84,7 @@ export function useQcdDraft(
 
   const [qcds, setQcds] = useState<DraftQcd[]>(seededQcds);
 
-  // Inherited-from name: the child shows a list it has not locally overridden.
-  // Effective is first-ancestor-wins, so walk the chain to the NEAREST ancestor
-  // that actually sets `qualifiedCharitableDistributions`, not just the
-  // immediate parent (mirrors the Roth-conversions hook).
+  // Effective is first-ancestor-wins, so walk to the nearest ancestor that sets qualifiedCharitableDistributions, not just the parent.
   const inheritedFromName = useMemo<string | null>(() => {
     if (localOverrides.qualifiedCharitableDistributions !== undefined) return null;
     if ((effective.qualifiedCharitableDistributions ?? []).length === 0) {
@@ -115,8 +93,6 @@ export function useQcdDraft(
     if (!scenario.payload.parentScenarioId) return null;
     try {
       const chain = scenarioChain(scenario.id, scenarios);
-      // Skip the current scenario (index 0); find the nearest ancestor that
-      // sets the QCD key.
       for (let i = 1; i < chain.length; i += 1) {
         if (
           chain[i].payload.overrides.qualifiedCharitableDistributions !==

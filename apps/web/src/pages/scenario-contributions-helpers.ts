@@ -1,7 +1,4 @@
-/**
- * Pure helpers for the Scenario contributions override screen,
- * extracted from `ScenarioContributionsPage.tsx` so that page stays small.
- */
+/** Pure helpers for the Scenario contributions override screen. */
 import {
   resolveAccountContributionsForScenario,
   resolveContributionGrowth,
@@ -19,9 +16,7 @@ import type {
 export interface DraftRow {
   preTax: number;
   postTax: number;
-  /** This scenario's OWN explicit annual-increase override (percent).
-   *  `undefined` = inherit (the resolved baseline / "Match inflation"); an
-   *  explicit number incl. `0` (flat-nominal) overrides. */
+  /** This scenario's own explicit annual-increase override (percent); undefined inherits, and 0 is flat-nominal. */
   growthPct?: number;
 }
 
@@ -30,9 +25,7 @@ export function buildInheritedMap(
   scenarios: ScenarioAggregate[],
   accounts: Aggregate<AccountPayload>[],
 ): Map<string, DraftRow> {
-  // "Inherited" = what the row would resolve to if THIS scenario had
-  // no local override entry for the account. Achieved by resolving the
-  // parent (or, on the base, the account's own baseline).
+  // "Inherited" is what the row would resolve to with no local override entry: resolve the parent, or on the base the account's own baseline.
   if (scenario.payload.parentScenarioId === null) {
     const out = new Map<string, DraftRow>();
     for (const a of accounts) {
@@ -67,9 +60,7 @@ export function buildInitialDrafts(
   const out = new Map<string, DraftRow>();
   for (const [id, inh] of inherited) {
     const o = own[id];
-    // The draft's growth is THIS scenario's own explicit override only —
-    // `undefined` = inherit. An out-of-band stored value is treated as
-    // absent (inherit) so the draft never seeds a corrupt rate.
+    // Own explicit override only (undefined inherits); an out-of-band stored value is treated as absent so the draft never seeds a corrupt rate.
     const ownGrowth = o?.contributionGrowthPct;
     out.set(id, {
       preTax: o?.plannedContributionPreTax ?? inh.preTax,
@@ -80,21 +71,12 @@ export function buildInitialDrafts(
   return out;
 }
 
-/**
- * The growth value each account INHERITS — i.e. what the row resolves to if
- * THIS scenario carried no local growth override. On a base scenario that is
- * the account baseline (or tracks-inflation); on a child it is the parent
- * chain's resolved growth. The `{ mode, ratePct }` drives the scenario
- * placeholder: `'tracks-inflation'` → "Match inflation (X%)" with X = the
- * resolved general inflation rate; `'fixed'` → the inherited explicit rate.
- */
+/** What each account inherits if this scenario carried no growth override: the account baseline on a base scenario, the parent chain's resolved growth on a child. Mode 'tracks-inflation' renders "Match inflation (X%)" with the resolved general rate; 'fixed' the inherited explicit rate. */
 export function buildInheritedGrowthMap(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
   accounts: Aggregate<AccountPayload>[],
 ): Map<string, ResolvedContributionGrowth> {
-  // For a child, resolve the PARENT chain — independent of THIS scenario's
-  // own override (mirrors `buildInheritedMap`'s parent-resolve for amounts).
   if (scenario.payload.parentScenarioId !== null) {
     return resolveContributionGrowth(
       scenario.payload.parentScenarioId,
@@ -102,10 +84,7 @@ export function buildInheritedGrowthMap(
       accounts,
     );
   }
-  // On a base scenario the inherited value is the ACCOUNT baseline, so resolve
-  // it directly (resolving the base's own id would fold in its own override).
-  // The tracks-inflation `ratePct` is the base scenario's resolved general
-  // inflation rate, matching what `resolveContributionGrowth` materialises.
+  // On a base scenario resolve the account baseline directly, since resolving the base's own id would fold in its own override; the tracks-inflation ratePct is the base's resolved general inflation rate.
   const inflationRatePct = resolveInflationForScenario(
     scenario.id,
     scenarios,

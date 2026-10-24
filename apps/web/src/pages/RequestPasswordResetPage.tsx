@@ -1,17 +1,5 @@
-/**
- * "Forgot your password?" entry page. Collects an email and POSTs it to
- * the request-reset endpoint, which always returns an opaque 202 (never
- * reveals whether the account exists). We surface the same "if an account
- * exists, a link is on its way" copy regardless, so the page is not a
- * user-existence oracle.
- *
- * Up-front recovery-key warning: completing a reset restores sign-in,
- * NOT access to encrypted data — the saved recovery key (or an enrolled
- * passkey) is required to unlock afterward. Worded in plain English.
- *
- * Layout mirrors LoginPage / VerifyEmailPage: a centered card outside the
- * app shell, built from shared typed components + the shared auth chrome.
- */
+/** "Forgot your password?" entry page: POSTs an email to the request-reset endpoint, which always returns an opaque 202, and shows the same "if an account exists, a link is on its way" copy so the page is not a user-existence oracle.
+* Completing a reset restores sign-in, not access to encrypted data: the saved recovery key (or an enrolled passkey) is still needed to unlock, and the up-front warning says so. */
 import React, { useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Link } from 'react-router';
@@ -51,9 +39,7 @@ export const RequestPasswordResetPage: React.FC = () => {
     setDevLink(null);
     try {
       const res = await requestPasswordReset(email.trim());
-      // Opaque response: the copy is identical whether or not the account
-      // exists. The dev token (non-prod, real send only) drives a click-
-      // through shortcut so local dev works without a real SES delivery.
+      // The dev token (non-prod, real send only) drives a click-through shortcut so local dev works without SES delivery.
       setStatus(
         'If an account exists for that email, a password-reset link is on its way. The link is valid for 15 minutes.',
       );
@@ -61,8 +47,7 @@ export const RequestPasswordResetPage: React.FC = () => {
         setDevLink(`/auth/reset-password#token=${encodeURIComponent(res.resetToken)}`);
       }
     } catch (err) {
-      // A gateway-level throttle/timeout with no error envelope reads
-      // the shared busy copy instead of the raw upstream status text.
+      // A gateway-level throttle or timeout with no error envelope reads the shared busy copy.
       if (err instanceof ApiRequestError) setError(isBusyResponse(err) ? BUSY_MESSAGE : err.error.message);
       else setError('Could not request a reset link right now. Try again shortly.');
     } finally {
@@ -82,7 +67,6 @@ export const RequestPasswordResetPage: React.FC = () => {
             Enter the email you signed in with and we&rsquo;ll send a link to
             set a new password.
           </p>
-          {/* Up-front recovery-key warning, plain English. */}
           <Alert tone="warning" role="status" className="mb-4">
             Resetting your password lets you sign in again, but it does
             <strong> not</strong> unlock your saved financial data. After you
@@ -123,9 +107,7 @@ export const RequestPasswordResetPage: React.FC = () => {
           {devLink && (
             <p className={authMutedClass}>
               <small>
-                {/* Plain anchor (not <Link>) so the navigation is a full
-                    reload — ResetPasswordPage reads the token from the URL
-                    fragment only at mount. */}
+                {/* A plain anchor, not <Link>, so navigation is a full reload: ResetPasswordPage reads the token from the fragment only at mount. */}
                 <DevShortcutBadge />{' '}
                 <a href={devLink} className={authDevLinkClass}>
                   reset now

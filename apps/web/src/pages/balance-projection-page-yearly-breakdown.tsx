@@ -1,14 +1,4 @@
-/**
- * Balance Projection page — per-account breakdown sub-section: a
- * show/hide disclosure button wrapping the "Projected at retirement"
- * per-account grid + totals row + hidden-account footer counts. Collapsed
- * by default (matching the year-by-year table). The projection method is
- * now chosen by the page-header "Basis" select (Graphite Spectrum
- * redesign) — the buried per-card method tab strip is gone, so the active
- * deterministic method arrives as a read-only prop. Extracted from
- * `balance-projection-page-yearly.tsx` to keep the yearly
- * section file under the file shape cap.
- */
+/** Per-account breakdown sub-section: a show/hide disclosure wrapping the "Projected at retirement" per-account grid, totals row and hidden-account footer counts, collapsed by default. The active method arrives as a read-only prop from the page-header Basis select. */
 import React from 'react';
 import {
   Cell,
@@ -49,7 +39,6 @@ import type {
 const METHOD_TOTAL_LABELS: Readonly<Record<ProjectionMethod, string>> =
   PROJECTION_METHOD_LABELS;
 
-/** Short tax-treatment label for the per-account breakdown column. */
 function treatmentShortLabel(tt: AccountTaxTreatment): string {
   switch (tt) {
     case 'PRE_TAX':
@@ -71,16 +60,12 @@ export interface BalanceProjectionYearlyBreakdownProps {
   readonly accountRows: ReadonlyArray<BreakdownAccountRow>;
   readonly activeMethod: ProjectionMethod;
   readonly displayedTotals: Record<ProjectionMethod, BalanceProjectionMethodTotal> | null;
-  /** When an MC basis is the resolved basis, render an explanatory note
-   *  instead of the per-account projected-at-retirement table (the MC engine
-   *  runs a single pooled portfolio — no per-account counterpart). The
-   *  expand/collapse toggle is hidden too. */
+  /** Under an MC basis an explanatory note replaces the table and the toggle is hidden (the MC engine runs one pooled portfolio). */
   readonly isMcBasisActive: boolean;
   readonly hiddenInactiveCount: number;
   readonly hiddenZeroHistoryCount: number;
   readonly primaryRetirementYear: number | null;
   readonly viewDeflator: (year: number, monthIndex?: number) => number;
-  /** Disclosure state for the collapsible breakdown table. */
   readonly breakdownTableOpen: boolean;
   readonly onToggleBreakdownTable: () => void;
 }
@@ -101,10 +86,6 @@ export const BalanceProjectionYearlyBreakdown: React.FC<
 }) => {
   const totalFactor =
     primaryRetirementYear !== null ? viewDeflator(primaryRetirementYear, 11) : 1;
-  // Under an MC basis the per-account projected-at-retirement table has
-  // no counterpart (the MC engine runs a single pooled portfolio). Show a note
-  // pointing the user back to a deterministic method instead of the table, and
-  // hide the expand/collapse toggle.
   if (isMcBasisActive) {
     return (
       <Muted as="p" className="m-0 text-sm">
@@ -125,12 +106,8 @@ export const BalanceProjectionYearlyBreakdown: React.FC<
           ? 'Hide account-by-account projection'
           : 'Show account-by-account projection'}
       </button>
-      {/* Always mounted but `display:none`/out of the a11y tree when collapsed
-         : print reveals only `.bp-print-expand[hidden]` so the table
-          force-expands on paper without un-hiding unrelated DOM. */}
+      {/* Always mounted but hidden when collapsed; print reveals only .bp-print-expand[hidden]. */}
       <div hidden={!breakdownTableOpen} className="bp-print-expand">
-      {/* Canonical scrollable card matching its sibling projection tables
-          (year-by-year, tax detail): TableScroll + sticky headers. */}
       <TableScroll label="Projected at retirement: account-by-account">
       <Table
         className={tableClass}
@@ -151,9 +128,7 @@ export const BalanceProjectionYearlyBreakdown: React.FC<
               const out = row.outputs[activeMethod];
               const showWarning =
                 row.hasInsufficientHistory && activeMethod !== 'planned';
-              // Deflate at this owner's retirement year if known; the
-              // page-level deflator collapses to 1 in "Future dollars"
-              // mode so the nominal values pass through unchanged.
+              // The page-level deflator collapses to 1 in Future dollars, so nominal values pass through.
               const accountRetirementYear = row.ownerRetirementDate
                 ? Number(row.ownerRetirementDate.slice(0, 4))
                 : primaryRetirementYear;
@@ -216,9 +191,6 @@ export const BalanceProjectionYearlyBreakdown: React.FC<
                     key="__totals"
                     id="__totals"
                     data-totals="true"
-                    // Now inside a TableScroll region — pin the totals
-                    // row to the bottom so it stays visible while the body
-                    // scrolls (see "Tables" in docs/ui-conventions.md).
                     className={`${rowTotalsClass} ${rowStickyBottomClass}`}
                   >
                     <Cell className={tdClass}>Total</Cell>

@@ -1,28 +1,4 @@
-/**
- * Security page: Passkeys card. Passkey sign-in, step-up and the encryption
- * unlock slots are described in docs/security.md.
- *
- * Owns the passkey list (load / register / remove), the household PRF-binding
- * read that drives the per-passkey "Use for encryption" toggle, and the
- * just-registered "Use this passkey to unlock your data?" ConfirmDialog.
- * Self-sources auth from `useAuth`. Surfaces its own list/register/enroll
- * errors at page level via the `onError` callback so the page keeps a single
- * top-of-page `<Alert>` location.
- *
- * Adding a passkey is gated: a password re-verify
- * baseline always runs first, plus a fresh step-up factor when
- * `AUTH_MFA_ENFORCED` is on — mirroring the existing remove flow's shape. A
- * restricted passkey (enrolled right after a password reset) renders a
- * "Needs confirmation" badge with its own confirm action.
- *
- * Passkey-encryption enrollment (the "Use for encryption" toggle and the
- * post-registration confirm) carries the SAME password-then-factor shape
- * as add/remove: the shared `PasswordPromptModal` opens first,
- * unconditionally, in both `AUTH_MFA_ENFORCED` states; Continue advances to
- * `StepUpModal` only when the flag is on, and the enroll call always carries
- * the password plus any collected proof in one request. The server refuses
- * the write without a correct password.
- */
+/** Security page Passkeys card: list, add, remove and encryption-unlock enrollment (see docs/security.md). */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth, type PasskeyInfo } from '../auth/AuthContext';
 import { ApiRequestError } from '../api/client';
@@ -70,48 +46,20 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     stepUpSendEmailOtp,
   } = useAuth();
   const email = me?.email ?? '';
-  // Every passkey control on this card — list, register (Add passkey), remove,
-  // and the "Use for encryption" key-envelope enroll — maps to a server
-  // endpoint on the authenticated exemption allowlist (passkey register/finish,
-  // passkey remove, key-envelopes PUT), so all of them stay enabled even while
-  // the disclaimer gate is blocked: passkey/key management are account-security
-  // operations a blocked user must still be able to perform.
+  // Every passkey control maps to an endpoint on the authenticated exemption allowlist, so all stay enabled while the disclaimer gate blocks: a blocked user must still manage account-security keys.
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [removeTarget, setRemoveTarget] = useState<PasskeyInfo | null>(null);
-  // credentialBinding of the household's current passkey_prf slot (one per
-  // household), or null when none is enrolled. Drives the per-passkey "Use
-  // for encryption" toggle state.
   const [prfCredentialId, setPrfCredentialId] = useState<string | null>(null);
-  // True only after `loadPrfBinding` actually completed a `getKeyEnvelopes()`
-  // read (whether or not a PRF slot was found). Stays false while the fetch is
-  // in flight or after it threw. The auto-enroll-on-registration guard keys off
-  // this, NOT off `prfCredentialId === null` alone: that value is also null
-  // before the fetch resolves or when it silently failed, so treating it as
-  // "no PRF slot" risks a fresh enroll silently replacing an existing
-  // household PRF slot (the "never silently steals the encryption role"
-  // contract). Positive confirmation only.
+  // Positive confirmation only: prfCredentialId is also null before the fetch resolves or after it failed, and treating that as "no PRF slot" could let an enroll silently replace the household's existing slot.
   const [prfBindingResolved, setPrfBindingResolved] = useState(false);
   const [enrollingCredentialId, setEnrollingCredentialId] = useState<string | null>(null);
-  // Registration encryption confirmation: after a passkey
-  // registers while unlocked, ask whether to use it as the encryption unlocker
-  // (replaces the prior silent auto-enroll). Holds the just-registered passkey;
-  // null when the dialog is closed. `enrollError` carries a clear inline message
-  // when the confirmed enroll fails (e.g. a PRF-unsupported authenticator).
   const [registerEnrollTarget, setRegisterEnrollTarget] = useState<PasskeyInfo | null>(null);
-  // Confirmation line after a factor change — the
-  // server emails the account when a passkey is added or removed, with a
-  // single-use undo link, and reports `noticeSent`; the line only claims an
-  // email went out when it did (a warning otherwise). Cleared at the start of
-  // the next add/remove attempt so a stale line never survives a fresh action.
+  // Claims an email went out only when the server reports noticeSent (a warning otherwise); cleared at the start of the next add or remove.
   const [notice, setNotice] = useState<{ tone: 'success' | 'warning'; text: string } | null>(
     null,
   );
 
-  // Passkey removal requires a password re-verify baseline (+ a fresh
-  // step-up factor when `AUTH_MFA_ENFORCED` is on). `removeTarget` drives the confirm; the
-  // password + factor steps follow. `removeError`/`removeBusy` are local to the
-  // remove flow so a bad password surfaces on the password modal itself.
   const [removePassword, setRemovePassword] = useState('');
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
@@ -121,10 +69,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
   const [stepUpMethods, setStepUpMethods] = useState<string[]>(['email_otp']);
   const [stepUpRecoveryMethods, setStepUpRecoveryMethods] = useState<string[]>([]);
 
-  // Adding a passkey is gated the same way: a
-  // password re-verify baseline always runs, plus a fresh step-up factor when
-  // `AUTH_MFA_ENFORCED` is on. `registering` covers the WebAuthn ceremony
-  // itself (after the gate resolves) for the button's busy label.
   const [registering, setRegistering] = useState(false);
   const [addPassword, setAddPassword] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
@@ -132,11 +76,7 @@ export const PasskeyManagementCard: React.FC<Props> = ({
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [showAddFactor, setShowAddFactor] = useState(false);
 
-  // Confirming (lifting) a restricted passkey's post-reset restriction. No
-  // password baseline here — `ConfirmRestrictedFactorDto` requires only the
-  // fresh factor proof itself (the whole point is proving an OLD factor).
-  // `StepUpModal` renders `confirmStepUp.error` itself on a failed lift
-  // (e.g. a proof that doesn't predate the reset) — no separate error state.
+  // Lifting a restriction needs no password baseline: ConfirmRestrictedFactorDto requires only a fresh factor proof, which proves an old factor.
   const [confirmTarget, setConfirmTarget] = useState<PasskeyInfo | null>(null);
 
   useEffect(() => {
@@ -148,8 +88,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
         if (s.methods?.length) setStepUpMethods(s.methods);
         if (s.recoveryMethods) setStepUpRecoveryMethods(s.recoveryMethods);
       })
-      // A status-read failure leaves the default (no factor step shown); the
-      // server still enforces the factor, surfacing as an error on the call.
       .catch(() => undefined);
     return () => {
       cancelled = true;
@@ -161,7 +99,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
       const keys = await listPasskeys();
       setPasskeys(keys);
     } catch {
-      // Silently fail — passkeys are optional
     } finally {
       setLoading(false);
     }
@@ -171,21 +108,15 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     loadPasskeys();
   }, [loadPasskeys]);
 
-  // Learn which passkey (if any) currently holds the household's passkey_prf
-  // slot so the per-passkey toggle reflects the real state. Only meaningful once
-  // encryption is unlocked; failures are silent (the toggles just read "off").
   const loadPrfBinding = useCallback(async () => {
     if (!isUnlocked) return;
     try {
       const envelopes = await getKeyEnvelopes();
       const prf = envelopes.slots.find((s) => s.slotType === 'passkey_prf');
       setPrfCredentialId(prf?.credentialBinding ?? null);
-      // Positively confirmed the household's PRF-slot state (found or absent) —
-      // the auto-enroll guard may now trust `prfCredentialId === null`.
       setPrfBindingResolved(true);
     } catch {
-      // Silent — encryption-unlock state is optional UI. Leave the binding
-      // UNRESOLVED so the auto-enroll guard stays conservative (no enroll).
+      // Leave the binding unresolved so the auto-enroll guard stays conservative.
     }
   }, [isUnlocked]);
 
@@ -193,15 +124,8 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     loadPrfBinding();
   }, [loadPrfBinding]);
 
-  // Passkey-encryption enrollment gate: a
-  // write into a household that already holds a slot always requires a
-  // proof (there is no first-ever-enrollment exemption) —
-  // AND the write always carries the account password floor, in EITHER
-  // `AUTH_MFA_ENFORCED` state. Mirrors add/remove's password-then-factor
-  // shape: `showEnrollPassword` opens unconditionally on either enrollment
-  // entry point; Continue advances to `showEnrollStepUp` only when the flag
-  // is on. `pendingEnrollTargetRef` names which write to run (the toggle vs.
-  // the post-registration confirm) so both entry points share one gate.
+  // Enrolling into a household that already holds a slot always needs a proof (no first-ever exemption) plus the password floor, in either AUTH_MFA_ENFORCED state.
+  // pendingEnrollTargetRef lets the toggle and the post-registration confirm share one gate.
   const pendingEnrollTargetRef = useRef<{ credentialId: string; isConfirm: boolean } | null>(null);
   const [enrollPassword, setEnrollPassword] = useState('');
   const [enrollError, setEnrollError] = useState<string | null>(null);
@@ -209,7 +133,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
   const [showEnrollPassword, setShowEnrollPassword] = useState(false);
   const [showEnrollStepUp, setShowEnrollStepUp] = useState(false);
 
-  // Reset every stage of the enroll flow (password → factor → write).
   const resetEnroll = useCallback(() => {
     pendingEnrollTargetRef.current = null;
     setShowEnrollPassword(false);
@@ -219,10 +142,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     setEnrollBusy(false);
   }, []);
 
-  // Enable a passkey as a zero-knowledge unlock method. Triggers a targeted
-  // WebAuthn assertion (PRF), wraps the HDK into the passkey_prf slot, and
-  // refreshes the binding so the toggle reflects the new state. No internal
-  // catch — callers below classify the failure against their own error sink.
   const enableEncryptionCore = useCallback(
     async (credentialId: string, password: string, proof?: StepUpProof): Promise<void> => {
       setEnrollingCredentialId(credentialId);
@@ -251,11 +170,7 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     setShowEnrollPassword(true);
   }, [registerEnrollTarget]);
 
-  // A PRF-unsupported authenticator throws KeyWrappingError "did not return a
-  // PRF result" — surface a CLEAR inline message only on the post-registration
-  // confirm entry point (the registration itself already succeeded and is NOT
-  // rolled back; the manual toggle remains a retry). Every other failure is the
-  // server's own message.
+  // A PRF-unsupported authenticator throws KeyWrappingError; give a clear message only on the post-registration confirm, whose registration already succeeded and is not rolled back.
   const classifyEnrollError = useCallback((err: unknown, isConfirm: boolean): string => {
     const noPrf = err instanceof Error && /did not return a PRF result/i.test(err.message);
     if (noPrf && isConfirm) return "This passkey can't be used for encryption (no PRF support).";
@@ -264,22 +179,8 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     return 'Failed to enable this passkey for encryption.';
   }, []);
 
-  // Run the enroll write with the entered password (+ any collected proof)
-  // and clear whichever error sink the target write reports to. A failure the
-  // server answered (`ApiRequestError`: a wrong password, a rejected factor,
-  // a real server error) or that left the factor-carrying request's outcome
-  // unknown (`EnrollmentCommitAmbiguousError`) is re-thrown — matches
-  // `doRegister`/`doRemove` below — so the step-up path
-  // surfaces it INSIDE the still-open `StepUpModal` via
-  // `useStepUp`'s own ambiguity handling, instead of a detached write
-  // that tears the flow down before the server even replies. Every OTHER
-  // failure happened locally BEFORE any proof was sent — an authenticator
-  // with no PRF support, a locked or ended session, a cancelled WebAuthn
-  // prompt — so identity was never in question: reporting "we couldn't
-  // confirm it's you" and offering a fresh code would name the wrong cause
-  // and a next step that can never work. Those go to
-  // the card's own sink, classified exactly as the password-only path always
-  // did, and the flow closes.
+  // Re-throw server-answered (ApiRequestError) and ambiguous (EnrollmentCommitAmbiguousError) failures so the step-up path shows them inside the still-open StepUpModal.
+  // Local failures (no PRF support, ended session, cancelled prompt) happened before any proof was sent, so "couldn't confirm it's you" would name the wrong cause; they go to the card's own sink.
   const doEnroll = useCallback(
     async (proof?: StepUpProof): Promise<void> => {
       const target = pendingEnrollTargetRef.current;
@@ -300,11 +201,7 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     [enableEncryptionCore, enrollPassword, onEnrollError, onError, classifyEnrollError, resetEnroll],
   );
 
-  // Password step: when the flag is on, advance to the fresh-factor step (the
-  // enroll call runs from `enrollStepUp`'s `onVerify` below); otherwise run
-  // the enroll with the password alone. Only a server-answered or ambiguous
-  // failure reaches the catch here (`doEnroll` handles local ones itself), so
-  // a wrong password lands inline on the password prompt where it belongs.
+  // Only server-answered or ambiguous failures reach this catch (doEnroll handles local ones), so a wrong password lands inline on the prompt.
   const onEnrollPasswordContinue = useCallback(async () => {
     const target = pendingEnrollTargetRef.current;
     if (!target) return;
@@ -325,8 +222,7 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     }
   }, [stepUpRequired, doEnroll, classifyEnrollError, resetEnroll]);
 
-  // User-initiated dismissal of the enroll flow — blocked while in flight so
-  // an in-flight call can't be orphaned mid-request.
+  // Blocked while in flight so the call cannot be orphaned mid-request.
   const cancelEnroll = useCallback(() => {
     if (enrollBusy) return;
     resetEnroll();
@@ -348,7 +244,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     if (showEnrollStepUp) resetEnrollStepUp();
   }, [showEnrollStepUp, resetEnrollStepUp]);
 
-  // Reset every stage of the add flow (password → factor → ceremony).
   const resetAdd = useCallback(() => {
     setShowAddPassword(false);
     setShowAddFactor(false);
@@ -358,10 +253,7 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     setRegistering(false);
   }, []);
 
-  // Run the full registration ceremony + gated write with the entered
-  // password (+ a fresh factor when collected). Throws on failure so the
-  // step-up path surfaces the modal's non-retryable error; the
-  // password-only path catches below.
+  // Throws on failure so the step-up path surfaces the modal's non-retryable error; the password-only path catches below.
   const doRegister = useCallback(
     async (proof?: StepUpProof): Promise<void> => {
       setRegistering(true);
@@ -378,15 +270,7 @@ export const PasskeyManagementCard: React.FC<Props> = ({
               }
             : { tone: 'warning', text: "Passkey added, but we couldn't email you about it." },
         );
-        // Encryption confirmation (replaces the prior silent auto-enroll): when the
-        // session is unlocked (the HDK is in memory to wrap) AND the PRF-binding
-        // state is positively resolved (a successful key-envelope read — guards
-        // against treating an in-flight / failed fetch as "no slot"), prompt the
-        // user to decide whether THIS passkey should unlock encrypted data on this
-        // device. The dialog warns when another passkey already holds the slot
-        // (confirming replaces it). Locked or unresolved → no dialog; registration
-        // completes and the explicit "Use for encryption" toggle remains the path.
-        // The enroll itself fires only on explicit confirmation (onConfirmRegisterEnroll).
+        // Prompt only when unlocked and the PRF binding is positively resolved; enrolling fires only on explicit confirmation, and the dialog warns that confirming replaces another passkey's slot.
         if (isUnlocked && prfBindingResolved) {
           onEnrollError(null);
           setRegisterEnrollTarget(result);
@@ -401,11 +285,7 @@ export const PasskeyManagementCard: React.FC<Props> = ({
   const addStepUp = useStepUp({
     purpose: 'passkey_enroll',
     methods: stepUpMethods,
-    // Enrollment: the emailed code is the floor
-    // ONLY while the account has no enrolled factor — `stepUpMethods` lists
-    // it exactly then — and the server refuses it otherwise
-    // (`STEP_UP_FACTOR_NOT_ELIGIBLE`), so no `recoveryMethods` are offered
-    // here. Removal (`removeStepUp` below) keeps the no-lockout floor.
+    // The emailed code is the floor only while the account has no enrolled factor, and the server refuses it otherwise (STEP_UP_FACTOR_NOT_ELIGIBLE), so no recoveryMethods here; removal keeps the no-lockout floor.
     onSendEmailOtp: stepUpSendEmailOtp,
     onPasskeyOptions: stepUpPasskeyOptions,
     onVerify: (proof) => doRegister(proof),
@@ -419,16 +299,12 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     if (showAddFactor) resetAddStepUp();
   }, [showAddFactor, resetAddStepUp]);
 
-  // "Add passkey" → collect the password (baseline, unconditional).
   const onAddPasskeyClick = useCallback(() => {
     onError(null);
     setAddError(null);
     setShowAddPassword(true);
   }, [onError]);
 
-  // Password step: when the flag is on, advance to the fresh-factor step
-  // (the WebAuthn ceremony + write run from the StepUpModal's onVerify);
-  // otherwise run the ceremony + write with the password only.
   const onAddPasswordContinue = useCallback(async () => {
     if (stepUpRequired) {
       setAddError(null);
@@ -444,8 +320,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
       if (err instanceof ApiRequestError) {
         setAddError(err.error.message);
       } else if (err instanceof Error) {
-        // WebAuthn errors from @simplewebauthn/browser carry a useful
-        // message (NotAllowedError, ConstraintError, etc.).
         setAddError(err.message);
       } else {
         setAddError('Failed to register passkey. Please try again.');
@@ -455,14 +329,11 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     }
   }, [stepUpRequired, doRegister, resetAdd]);
 
-  // User-initiated dismissal of the add flow — blocked while in flight so an
-  // in-flight call can't be orphaned mid-request.
   const cancelAdd = useCallback(() => {
     if (addBusy || registering || addStepUp.submitting) return;
     resetAdd();
   }, [addBusy, registering, addStepUp.submitting, resetAdd]);
 
-  // Reset every stage of the remove flow (confirm → password → factor).
   const resetRemove = useCallback(() => {
     setRemoveTarget(null);
     setShowRemovePassword(false);
@@ -471,9 +342,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     setRemoveError(null);
   }, []);
 
-  // Perform the removal with the entered password (+ a fresh factor when
-  // collected). Throws on failure so the step-up path surfaces the modal's
-  // non-retryable error; the password-only path catches below.
   const doRemove = useCallback(
     async (proof?: StepUpProof): Promise<void> => {
       if (!removeTarget) return;
@@ -508,22 +376,17 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     if (showRemoveFactor) resetRemoveStepUp();
   }, [showRemoveFactor, resetRemoveStepUp]);
 
-  // User-initiated dismissal of the remove flow — blocked while a remove is in
-  // flight so an in-flight call can't be orphaned mid-request.
   const cancelRemove = useCallback(() => {
     if (removeBusy || removeStepUp.submitting) return;
     resetRemove();
   }, [removeBusy, removeStepUp.submitting, resetRemove]);
 
-  // Confirm-dialog "Delete" → collect the password (baseline).
   const onRemoveConfirm = useCallback(() => {
     setRemoveError(null);
     setNotice(null);
     setShowRemovePassword(true);
   }, []);
 
-  // Password step: when the flag is on, advance to the fresh-factor step;
-  // otherwise remove with the password only (the server re-verifies it).
   const onRemovePasswordContinue = useCallback(async () => {
     if (stepUpRequired) {
       setRemoveError(null);
@@ -546,18 +409,12 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     }
   }, [stepUpRequired, doRemove, resetRemove]);
 
-  // Lift a restricted passkey's post-reset restriction. Only `totp` / `passkey`
-  // can vouch (Email-OTP has no enrollment timestamp to compare against the
-  // reset — the server rejects it, so it's never offered here); `stepUpMethods`
-  // already excludes restricted factors (computeFactors), so this also never
-  // offers the target factor (or another restricted one) back to itself.
+  // Only totp and passkey can vouch: Email-OTP has no enrollment timestamp to compare with the reset, and the server rejects it.
   const restrictionConfirmMethods = useMemo(
     () => stepUpMethods.filter((m) => m === 'totp' || m === 'passkey'),
     [stepUpMethods],
   );
-  // Nothing predates the reset (an Email-OTP-only account whose sole factor is
-  // the one being confirmed) — the escape hatch is removal, not a modal that
-  // can never succeed.
+  // Nothing predates the reset: the escape hatch is removal, not a modal that can never succeed.
   const confirmHasNoEligibleFactor = confirmTarget !== null && restrictionConfirmMethods.length === 0;
 
   const confirmStepUp = useStepUp({
@@ -588,8 +445,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
     setConfirmTarget(pk);
   }, []);
 
-  // "Nothing to confirm with" → remove instead (the existing gated remove
-  // flow, starting from its own "Delete passkey?" confirm).
   const onRemoveInsteadOfConfirm = useCallback(() => {
     const target = confirmTarget;
     setConfirmTarget(null);
@@ -631,8 +486,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
           </div>
         )}
 
-        {/* Add passkey sits BELOW the list (mock places it after the
-            list, not in the card header). Behavior unchanged. */}
         <button
           type="button"
           className={`${btnPrimarySmClass} mt-3 gap-1.5`}
@@ -644,10 +497,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
         </button>
       </SettingsCard>
 
-      {/* Registration encryption confirmation: after a
-          passkey registers while unlocked, ask whether to use it to unlock
-          encrypted data on this device. Warns when another passkey already
-          holds the single per-household slot (confirming replaces it). */}
       <ConfirmDialog
         open={!!registerEnrollTarget}
         size="lg"
@@ -671,16 +520,12 @@ export const PasskeyManagementCard: React.FC<Props> = ({
         }
         confirmLabel="Use for encryption"
         cancelLabel="Not now"
-        // Benign: enrolling a passkey as an unlocker (or swapping which passkey
-        // unlocks) changes nothing destructively — lime confirm, not red.
+        // Benign: enrolling or swapping an unlocker destroys nothing, so a lime confirm, not red.
         destructive={false}
         onConfirm={onConfirmRegisterEnroll}
         onCancel={() => setRegisterEnrollTarget(null)}
       />
 
-      {/* Fresh-proof gate before adding a passkey:
-          the account password is always re-verified; the second factor step
-          only shows when `AUTH_MFA_ENFORCED` is on. */}
       <PasswordPromptModal
         open={showAddPassword && !showAddFactor}
         onClose={cancelAdd}
@@ -727,7 +572,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
         onCancel={() => setRemoveTarget(null)}
       />
 
-      {/* Password re-verify baseline: removal always requires the account password. */}
       <PasswordPromptModal
         open={showRemovePassword && !showRemoveFactor}
         onClose={cancelRemove}
@@ -744,10 +588,7 @@ export const PasskeyManagementCard: React.FC<Props> = ({
         cancelDisabled={removeBusy}
       />
 
-      {/* Fresh second-factor step-up: shown after
-          the password step when `AUTH_MFA_ENFORCED` is on. Email-OTP is the
-          no-lockout floor, so removal stays completable even when the passkey
-          being removed is the only routine factor. */}
+      {/* Email-OTP is the no-lockout floor, so removal stays completable even when the removed passkey is the only routine factor. */}
       <StepUpModal
         open={showRemoveFactor}
         onClose={() => {
@@ -763,9 +604,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
         </Muted>
       </StepUpModal>
 
-      {/* Password floor before passkey-encryption enrollment — opens
-          unconditionally, in BOTH `AUTH_MFA_ENFORCED` states, mirroring
-          add/remove above. */}
       <PasswordPromptModal
         open={showEnrollPassword && !showEnrollStepUp}
         onClose={cancelEnroll}
@@ -782,10 +620,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
         cancelDisabled={enrollBusy}
       />
 
-      {/* Fresh second-factor step-up: shown
-          after the password step when `AUTH_MFA_ENFORCED` is on — a
-          passkey-encryption write into a household that already holds a slot
-          is never exempt, including the first-ever enrollment. */}
       <StepUpModal
         open={showEnrollStepUp}
         onClose={() => {
@@ -802,9 +636,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
         </Muted>
       </StepUpModal>
 
-      {/* Confirm (lift) a restricted passkey's post-reset restriction.
-          No password step — the proof must come
-          from an already-enrolled factor that predates the reset. */}
       <StepUpModal
         open={!!confirmTarget && !confirmHasNoEligibleFactor}
         onClose={() => {
@@ -822,8 +653,6 @@ export const PasskeyManagementCard: React.FC<Props> = ({
         </Muted>
       </StepUpModal>
 
-      {/* Nothing predates the reset — there is no factor that could ever
-          confirm this one. The escape hatch is removal, not a dead-end modal. */}
       <ConfirmDialog
         open={confirmHasNoEligibleFactor}
         title="Confirm this passkey"
@@ -911,15 +740,10 @@ const PasskeyRow: React.FC<PasskeyRowProps> = ({
                 prfCredentialId === pk.credentialId
               }
               onChange={(next) => {
-                // Enable only — disabling a PRF slot is out of scope
-                // (one slot per household; replaced by enabling another).
                 if (next) void onEnableEncryption(pk);
               }}
             />
-            {/* The toggle locks ON for the active key (you switch
-                encryption by enabling a different passkey, not by
-                turning this one off); say so, since a disabled
-                control with no reason reads as broken. */}
+            {/* A disabled control with no reason reads as broken, so say why it is locked on: switch by enabling a different passkey. */}
             {prfCredentialId === pk.credentialId && (
               <span className="text-xs text-muted">
                 Currently in use for encryption

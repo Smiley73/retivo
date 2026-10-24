@@ -1,31 +1,4 @@
-/**
- * Scenario-level per-account minimum-balance floor editor at
- * /scenarios/:id/floors. Mirrors the
- * Returns / Contributions per-account override sub-screens.
- *
- * Only floor-eligible accounts are listed — the engine predicate is
- * `taxTreatment ∈ {POST_TAX, HSA}`; the presentational gate keeps
- * the row set in sync (BROKERAGE / SAVINGS / MONEY_MARKET / CD / OTHER /
- * HSA all resolve to POST_TAX or HSA). Pre-tax / Roth accounts never
- * appear.
- *
- * Each row carries a dollar floor (a `<MoneyInput>`; "no floor" is the
- * unset state, surfaced as a "No floor" (set-one) affordance — `null`
- * clears an inherited floor). HSA rows additionally carry a
- * `emergencyOnly` / `strict` mode toggle; POST_TAX accounts ignore
- * the mode and show no toggle.
- *
- * Floors are stored in NOMINAL dollars — they do not inflation-
- * adjust, so a static disclosure note states the real value erodes over
- * long horizons.
- *
- * Trim on save: a row whose draft equals the inherited baseline on BOTH
- * fields is dropped from the override map; the whole `accountFloors` key
- * is removed when no account carries an override (one `saveScenario`
- * mutation). Mount-only load (no reactive `useAggregates` seed read), so a mid-edit workspace change cannot remount the editor and drop the draft;
- * dirty edits are protected by page-level
- * `useUnsavedChangesGuard`.
- */
+/** /scenarios/:id/floors: per-account minimum-balance floor editor for floor-eligible accounts. Floors are nominal dollars (a note says their real value erodes); loaded once on mount so a mid-edit workspace change cannot drop the draft. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
@@ -82,34 +55,19 @@ import type {
 
 type HsaMode = 'emergencyOnly' | 'strict';
 
-/**
- * Engine floor-eligibility predicate: a floor only applies to an
- * account whose `taxTreatment` is POST_TAX or HSA. The presentational
- * account-type gate (BROKERAGE / SAVINGS / MONEY_MARKET / CD / OTHER /
- * HSA) is a consequence of this — the tax treatment is the source of
- * truth, so a stray POST_TAX BROKERAGE still appears and a PRE_TAX
- * BROKERAGE never does.
- */
+// The engine applies floors only to taxTreatment POST_TAX or HSA; the tax treatment, not the account type, is the source of truth.
 function isFloorEligibleTreatment(t: AccountTaxTreatment): boolean {
   return t === 'POST_TAX' || t === 'HSA';
 }
 
-/** A row draft: `floorDollars === null` means "no floor". `hsaMode` is
- *  only meaningful for HSA accounts; POST_TAX rows ignore it. */
 interface FloorDraft {
   floorDollars: number | null;
   hsaMode: HsaMode;
 }
 
-/** A row with no floor and the default HSA mode (the fallback when an
- *  account has no draft yet). */
 const EMPTY_DRAFT: FloorDraft = { floorDollars: null, hsaMode: 'emergencyOnly' };
 
-/** Resolve an account's own override entry into the stored effective draft,
- *  falling through to the inherited baseline per field. A locally-overridden
- *  field wins: `null` clears (so "no floor" regardless of an inherited floor),
- *  a finite `≥ 0` number overrides, and anything else falls back to inherited;
- *  an absent field inherits. */
+// A locally-overridden field wins (null clears, a finite number ≥ 0 overrides, anything else inherits); an absent field inherits.
 function resolveStoredDraft(
   ownEntry: { floorDollars?: number | null; hsaMode?: HsaMode | null } | undefined,
   inherited: FloorDraft,
@@ -131,28 +89,19 @@ function resolveStoredDraft(
   return { floorDollars, hsaMode };
 }
 
-/** The inherited (parent-chain) floor for each eligible account: the
- *  baseline a row falls back to on Reset. `null` floorDollars = no
- *  inherited floor. */
 function buildInheritedFloors(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
   accounts: Aggregate<AccountPayload>[],
 ): Map<string, FloorDraft> {
   const out = new Map<string, FloorDraft>();
-  // The inherited baseline is the parent chain's resolved floor (an
-  // ancestor floor still applies to a child that does not override it).
-  // The base scenario has no parent → no inherited floor anywhere.
+  // An ancestor floor still applies to a child that does not override it; the base scenario has none.
   const parentId = scenario.payload.parentScenarioId;
   const resolved: Map<string, ResolvedAccountFloor> =
     parentId === null
       ? new Map()
       : resolveAccountFloorsForScenario(parentId, scenarios, accounts);
-  // `resolveAccountFloorsForScenario` drops accounts with no numeric floor, so
-  // a parent entry that sets ONLY `hsaMode` (no floorDollars) never appears in
-  // its map. Resolve hsaMode independently by walking the parent chain for the
-  // first ancestor entry that defines a mode (regardless of its floor), so an
-  // inherited mode-only override is not lost.
+  // resolveAccountFloorsForScenario drops entries with no numeric floor, so resolve hsaMode separately by walking the parent chain, or a mode-only inherited override is lost.
   const parentChain =
     parentId === null ? [] : scenarioChain(parentId, scenarios);
   for (const a of accounts) {
@@ -175,9 +124,6 @@ function buildInheritedFloors(
   return out;
 }
 
-/** This scenario's own (local) override entry resolved into a draft,
- *  falling through to the inherited baseline per field when the local
- *  entry omits a field. */
 function buildInitialDrafts(
   scenario: ScenarioAggregate,
   inherited: Map<string, FloorDraft>,
@@ -230,8 +176,6 @@ export const ScenarioFloorsPage: React.FC = () => {
         listAggregates('account') as Promise<Aggregate<AccountPayload>[]>,
         listAggregates('householdMember') as Promise<Aggregate<HouseholdMemberPayload>[]>,
       ]);
-      // Only floor-eligible accounts (taxTreatment ∈ {POST_TAX, HSA})
-      // are editable; ineligible types are filtered out of the row set.
       const eligibleAccounts = allAccounts
         .filter((a) => a.payload.active && isFloorEligibleTreatment(a.payload.taxTreatment))
         .sort((a, b) => a.payload.name.localeCompare(b.payload.name));
@@ -259,9 +203,6 @@ export const ScenarioFloorsPage: React.FC = () => {
     void reload();
   }, [reload]);
 
-  // A row is dirty when its draft differs from the stored effective value
-  // (this scenario's own override falling through to the inherited
-  // baseline per field).
   const dirtyAccountIds = useMemo(() => {
     const own = scenario?.payload.overrides.accountFloors?.perAccount ?? {};
     const dirty: string[] = [];
@@ -270,7 +211,6 @@ export const ScenarioFloorsPage: React.FC = () => {
       const inh = baselineRef.current.get(a.id);
       if (!d || !inh) continue;
       const stored = resolveStoredDraft(own[a.id], inh);
-      // hsaMode only matters for HSA rows; a POST_TAX row's mode is inert.
       const modeMatters = a.payload.taxTreatment === 'HSA';
       if (
         d.floorDollars !== stored.floorDollars ||
@@ -321,10 +261,7 @@ export const ScenarioFloorsPage: React.FC = () => {
     setSaving(true);
     setError(null);
     try {
-      // Rebuild perAccount: an entry is kept only when a field diverges
-      // from the inherited baseline. A floor that drops below an inherited
-      // floor writes an explicit `null` (clear); a numeric
-      // floor writes the number; an unchanged inherited mode is omitted.
+      // An entry is kept only when a field diverges from the inherited baseline; a floor dropped below an inherited one writes an explicit null (clear).
       const perAccount: Record<
         string,
         { floorDollars?: number | null; hsaMode?: HsaMode }
@@ -335,13 +272,9 @@ export const ScenarioFloorsPage: React.FC = () => {
         if (!d || !inh) continue;
         const entry: { floorDollars?: number | null; hsaMode?: HsaMode } = {};
         if (d.floorDollars !== inh.floorDollars) {
-          // Differs from the inherited floor → persist. `null` clears an
-          // inherited floor; a number overrides it.
           entry.floorDollars = d.floorDollars;
         }
-        // hsaMode only persists for HSA accounts with a real floor (a
-        // mode without a floor is inert noise) and only when it differs from
-        // the inherited mode (POST_TAX rows never write a mode).
+        // hsaMode persists only for HSA accounts with a real floor, and only when it differs from the inherited mode.
         if (
           a.payload.taxTreatment === 'HSA' &&
           d.floorDollars !== null &&
@@ -447,8 +380,6 @@ export const ScenarioFloorsPage: React.FC = () => {
                 {
                   label: 'Cancel',
                   icon: <XIcon />,
-                  // Revert edits: reload re-reads the saved overrides and
-                  // resets the drafts, flipping isDirty back off.
                   onClick: () => {
                     setError(null);
                     void reload();
@@ -522,9 +453,6 @@ export const ScenarioFloorsPage: React.FC = () => {
                 const isHsa = a.payload.taxTreatment === 'HSA';
                 return (
                   <Row key={a.id} id={a.id}>
-                    {/* The name cell hosts the absolutely-positioned bucket
-                        bar, so it must be `relative` (same approach as
-                        AccountsPage). */}
                     <Cell className={`${tdClass} relative`}>
                       <BucketBar bucket={bucket} />
                       {a.payload.name}
@@ -540,11 +468,7 @@ export const ScenarioFloorsPage: React.FC = () => {
                         {ACCOUNT_TYPE_LABELS[a.payload.type]}
                       </Badge>
                     </Cell>
-                    {/* Floor cell: an unset floor shows a "No floor" (set-one)
-                        affordance; an explicit number shows the editable
-                        MoneyInput + a clear button (which writes `null` = no
-                        floor). This mirrors the contributions page's growth
-                        cell so "no floor" is unambiguous (not a `$0.00`). */}
+                    {/* An unset floor shows a "No floor" affordance so it is never read as $0.00; an explicit number shows the MoneyInput plus a clear button (null = no floor). */}
                     <Cell className={tdNumClass}>
                       {d.floorDollars === null ? (
                         <button
@@ -579,8 +503,6 @@ export const ScenarioFloorsPage: React.FC = () => {
                         </span>
                       )}
                     </Cell>
-                    {/* HSA floor mode. Only HSA rows show the toggle;
-                        POST_TAX accounts ignore the mode entirely. */}
                     <Cell className={tdClass}>
                       {isHsa ? (
                         <SegmentedRadioGroup

@@ -1,10 +1,4 @@
-/**
- * Deterministic-tab child row (`Planned` / `TWR`) + the apply-button
- * adapter that drives the per-method Apply flow. Extracted from
- * `ss-optimizer-row-variants.tsx` so each file stays under the ≤400-ln
- * shape limit. Sibling-file lives `ChildLoadingRow` / `ChildStatusRow`
- * scaffolding for the narrow non-result branches.
- */
+/** Deterministic-tab child row (Planned / TWR) and the apply-button adapter driving the per-method Apply flow. */
 import React from 'react';
 import { CheckIcon, PlayIcon } from '../components/icons';
 import { Link } from 'react-router';
@@ -49,14 +43,9 @@ interface MethodChildRowProps {
   readonly child: MethodChildResult;
   readonly hasSecondary: boolean;
   readonly onApply: (row: ScenarioRow, method?: ProjectionMethod) => void;
-  /** True while an optimizer run is in flight — disables Apply. */
   readonly running: boolean;
 }
 
-/** One of the two child rows that sit under each scenario parent on the
- *  deterministic tab (Planned + TWR). Dispatches per result-kind to a
- *  narrow sub-renderer so this top-level fn stays under the 40-line
- *  shape cap. */
 export const MethodChildRow: React.FC<MethodChildRowProps> = ({
   row,
   aggregates,
@@ -154,7 +143,6 @@ interface ChildResultRowProps {
   readonly aggregates: OptimizerAggregates;
   readonly hasSecondary: boolean;
   readonly onApply: (row: ScenarioRow, method?: ProjectionMethod) => void;
-  /** True while an optimizer run is in flight — disables Apply. */
   readonly running: boolean;
 }
 
@@ -179,9 +167,7 @@ const ChildResultRow: React.FC<ChildResultRowProps> = ({
   const resolvedFromAncestor =
     row.scenario.payload.overrides.socialSecurity === undefined &&
     row.scenario.payload.parentScenarioId !== null;
-  // Live current claim ages → "current → recommended" cell + applied state.
-  // Derived from `aggregates` so applying a recommendation immediately
-  // flips the row to "Applied" without trusting the engine's baked flag.
+  // Derived from aggregates so applying a recommendation flips the row to "Applied" immediately, without trusting the engine's baked flag.
   const current = resolveCurrentClaimAges(row.scenario.id, aggregates.scenarios);
   const alreadyAtOptimum =
     claimAgeMatches(current.primary, winner.primaryAgeYears, winner.primaryAgeMonths) &&
@@ -290,7 +276,6 @@ interface MethodApplyButtonProps {
   readonly parentName: string | null;
   readonly resolvedFromAncestor: boolean;
   readonly onApply: (row: ScenarioRow, method?: ProjectionMethod) => void;
-  /** True while an optimizer run is in flight — disables Apply. */
   readonly running: boolean;
 }
 
@@ -319,8 +304,7 @@ const MethodApplyButton: React.FC<MethodApplyButtonProps> = ({
     );
   }
   if (running) {
-    // Method child rows are deterministic-tab only (the balance toolbar
-    // has no Cancel button) → use the no-cancel copy.
+    // Method child rows exist on the deterministic tab only, whose toolbar has no Cancel button: use the no-cancel copy.
     return (
       <Tooltip content={APPLY_RUNNING_TIP_DETERMINISTIC}>
         <button type="button" disabled className={className}>

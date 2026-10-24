@@ -1,27 +1,12 @@
-/**
- * Dashboard "Plan basics" card: the small KV list that sits beside
- * `DashboardPlanHealthBlock` — current net worth, projected-at-retirement,
- * retirement year, plus the methodology-modal trigger and the
- * today's-dollars note.
- *
- * Deliberately takes no view-model: the dashboard renders this card even
- * when the plan-stress-test view-model is `null` on a config error, so a
- * `vm` prop would force it off the page in exactly the state it is meant
- * to survive. Net worth is always live; the other two figures render "—"
- * when `null`. No dim, no `aria-busy`, no live region — it carries no
- * simulation-derived figure.
- */
+/** Dashboard "Plan basics" card: net worth, projected-at-retirement and retirement year, plus the methodology-modal trigger and the today's-dollars note.
+* It takes no view model so the dashboard can still render it on a config error; it carries no simulation-derived figure, so no dim, aria-busy or live region. */
 import React from 'react';
 import { formatCurrencyShort } from '../lib/format-currency';
 import { MonteCarloMethodologyModal } from '../components/MonteCarloMethodologyModal';
 
 export interface DashboardPlanBasicsCardProps {
-  /** Today's total net worth — a deterministic figure, always live. */
   readonly netWorth: number;
-  /** Active-scenario deterministic portfolio total at the retirement year
-   *  (today's dollars). `null` until the projection load resolves. */
   readonly projectedAtRetirement: number | null;
-  /** Active-scenario primary retirement year. */
   readonly retirementYear: number | null;
 }
 
@@ -46,10 +31,6 @@ export const DashboardPlanBasicsCard: React.FC<DashboardPlanBasicsCardProps> = (
         >
           Plan basics
         </h2>
-        {/* Methodology explainer moved here from the hero: the
-            success figure it explains now lives on the health block, but
-            the affordance still belongs beside the plan's headline
-            numbers. */}
         <MonteCarloMethodologyModal />
       </div>
 

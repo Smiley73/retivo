@@ -1,16 +1,4 @@
-/**
- * Balance Projection page — "Stress-test outcomes" card: the Monte Carlo
- * plan-success chart, its data-table disclosure, and the market-stress
- * comparison beneath it. Extracted from `BalanceProjectionPage.tsx`
- * so the page stays a thin orchestration layer under the file shape cap.
- *
- * `yScale` is page state read by both the per-year projection chart and
- * this card's stress fan + market-stress comparison — it is threaded in
- * as a prop, not owned here, so the two surfaces cannot drift out of sync.
- * This card carries no running-status slot: the running progress bar (+
- * error toast) lives in the page header's controls toolbar next to the
- * title.
- */
+/** "Stress-test outcomes" card: the Monte Carlo plan-success chart, its data-table disclosure and the market-stress comparison. yScale is page state read by this card and the per-year chart, passed in so the two cannot drift out of sync. */
 import React from 'react';
 import {
   PlanStressTestEmpty,
@@ -25,8 +13,6 @@ import {
 } from './balance-projection-page-constants';
 
 export interface BalanceProjectionStressCardProps {
-  /** Rings the card while a Monte Carlo basis drives the screen, foregrounding
-   *  the card that explains the scenario. */
   readonly mcActive: boolean;
   readonly stressVm: PlanStressTestVm;
   readonly yScale: 'linear' | 'log';
@@ -62,17 +48,9 @@ export const BalanceProjectionStressCard: React.FC<BalanceProjectionStressCardPr
           </p>
         </ChartInfoPopover>
       </div>
-      {/* The running progress bar (+ error toast) now lives in the page
-          header's controls toolbar next to the title — the running
-          state swaps the Recalculate button for the progress bar there, so
-          this card no longer carries a status slot. */}
     </div>
     {stressVm.error && !stressVm.result && (
-      /* Print-only: the on-screen error toast lives in the page-header
-         controls toolbar (report-print-hide), so it is omitted from print.
-         This block re-surfaces the failure reason on the printout only —
-         screen-hidden via `hidden`, revealed by the @media print rule for
-         `.bp-print-error` (mirrors the bp-print-header reveal). */
+      /* Print-only: the on-screen error toast is hidden from print, so this re-surfaces the failure reason on the printout (screen-hidden, revealed by the .bp-print-error print rule). */
       <div hidden className="bp-print-error" role="alert">
         Stress-test failed: {stressVm.error}
       </div>
@@ -87,8 +65,6 @@ export const BalanceProjectionStressCard: React.FC<BalanceProjectionStressCardPr
           dataTableOpen={dataTableOpen}
           onToggleDataTable={onToggleDataTable}
         />
-        {/* Same-path comparison against each approved market
-            stress. Starts itself once the run above settles. */}
         <div className="flex flex-col gap-2 border-t border-line pt-3">
           <h3 className="m-0 text-base font-semibold text-ink">
             Compare against market stresses

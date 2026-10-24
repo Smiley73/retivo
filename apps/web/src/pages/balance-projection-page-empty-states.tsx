@@ -1,10 +1,4 @@
-/**
- * Balance Projection page — early-state renderers (error, loading, and the
- * three no-projection CTAs). Extracted from `BalanceProjectionPage.tsx`
- * so the page's guard ladder stays a one-line dispatch and the
- * page file lands under the shape cap. Each renderer keeps the page's
- * `aria-labelledby="balance-projection-heading"` landmark wiring.
- */
+/** Early-state renderers (error, loading and the three no-projection CTAs), each keeping the aria-labelledby="balance-projection-heading" landmark wiring. */
 import React from 'react';
 import { Link } from 'react-router';
 import { Alert } from '../components/Alert';

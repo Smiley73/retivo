@@ -1,32 +1,5 @@
-/**
- * Scenario detail page. Header (name, description, parent picker,
- * action buttons) + Notes textarea + subsection summaries.
- *
- * The header form (name / description / notes / parent) tracks its own
- * dirty state and uses the standard unsaved-edits guard. Subsections
- * (v1: retirement age) live in their own modal dialogs — the page
- * renders a summary card with a Configure button; the modal owns its
- * own state and saves directly via `saveScenario`. This keeps the
- * page surface small as more subsections accrue.
- *
- * Promote / Delete / Reset-all-overrides act on the scenario as a
- * whole and stay on the page header; they're hidden / disabled for
- * the base scenario.
- *
- * SHAPE-LIMIT EXCEPTION (recorded justification; CODING_STANDARDS ≤ 800 lines):
- * this file is over the 800-line limit. Why it cannot be split: the header
- * edit form, the modal routing for each override subsection, and
- * the summary-card wiring all read and write the one resolved scenario
- * aggregate and share a single unsaved-edits guard — the dirty-state machine
- * that gates navigation, the Configure-button modal wiring, and the save path
- * are interdependent, so a renderer split would have to re-thread that shared
- * guard + aggregate through props. The cohesive subsection cards that COULD
- * move already have: `ScenarioAssetAllocationCard`, `ScenarioIncomeOverridesCard`,
- * `ScenarioExpenseOverridesCard` (siblings in pages/), and the seven summary
- * cards in `components/scenario/`. Trigger: a change adding 5 or more lines
- * here must either refactor the file back under the limit or re-justify this
- * exception in this note.
- */
+/** Scenario detail page: header form (name, description, notes, parent) behind the unsaved-edits guard, plus summary cards whose Configure buttons open per-subsection modals or pages.
+* Promote, Delete and Reset-all act on the whole scenario and are hidden or disabled for the base. */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -182,9 +155,6 @@ export const ScenarioDetailPage: React.FC = () => {
   const [taxAssumptionsInitialTab, setTaxAssumptionsInitialTab] =
     useState<'hsa' | 'penalties' | 'filing'>('hsa');
   const [acaCoverageModalOpen, setAcaCoverageModalOpen] = useState(false);
-  // Notes start collapsed — the textarea is heavy chrome most visits don't
-  // need; expanding it gives a tall editing area (the rest of the header
-  // form stays compact).
   const [notesExpanded, setNotesExpanded] = useState(false);
 
   const reload = useCallback(async () => {
@@ -199,7 +169,6 @@ export const ScenarioDetailPage: React.FC = () => {
     setScenarios(scenarioRows);
     setMembers(allMembers as Aggregate<HouseholdMemberPayload>[]);
     setAccounts(allAccounts as Aggregate<AccountPayload>[]);
-    // Build memberId → { pia } map for the SocialSecurityModal live-amount display.
     const ssMap: Record<string, { pia: number | null }> = {};
     for (const agg of allSsBenefits as Aggregate<SocialSecurityBenefitPayload>[]) {
       ssMap[agg.payload.householdMemberId] = { pia: agg.payload.pia };
@@ -239,10 +208,7 @@ export const ScenarioDetailPage: React.FC = () => {
   const secondaryMember = members.find((m) => !m.payload.isPrimary) ?? null;
   const otherScenarioCount = scenarios.length - 1;
 
-  // Ask the PRODUCTION resolver whether this scenario's stored
-  // filing facts convert cleanly, resolved through the parent chain exactly as
-  // the engines read them. A non-undefined detail means the projections are
-  // still running on the legacy scalar and the user needs to resolve it.
+  // Ask the production resolver whether the stored filing facts convert cleanly (resolved through the parent chain as the engines read them); a non-undefined detail means projections still run on the legacy scalar.
   const unresolvedFilingPrompt = useMemo(() => {
     if (!scenario) return undefined;
     const effective = (() => {
@@ -276,10 +242,6 @@ export const ScenarioDetailPage: React.FC = () => {
     );
   }, [scenarios, scenario, trimmedName, draft]);
 
-  // `blocked` is derived at render-time inside the parent-picker options
-  // map — no separate useMemo needed (the computation is O(n) tree walk
-  // and only runs when the `!scenario.payload.isPrimary` branch renders).
-
   const onSave = async () => {
     if (!scenario || !draft || !householdId) return;
     if (trimmedName.length === 0) {
@@ -312,7 +274,6 @@ export const ScenarioDetailPage: React.FC = () => {
         parentScenarioId: scenario.payload.isPrimary ? null : draft.parentScenarioId,
         isPrimary: scenario.payload.isPrimary,
         notes: draft.notes.slice(0, MAX_NOTES),
-        // overrides preserved verbatim — subsection modals own them.
         overrides: scenario.payload.overrides,
       };
       await saveScenario({ scenario, payload, householdId });
@@ -466,7 +427,6 @@ export const ScenarioDetailPage: React.FC = () => {
     );
     if (!ok) return;
     try {
-      // Withdrawal-strategy keys compose into one payload → one mutation.
       // The MAGI bootstrap is two split lookback fields; reset both.
       let payload = resetField(scenario.payload, 'withdrawalStrategy');
       payload = resetField(payload, 'assumedCostBasisFractionOfTaxableWithdrawal');
@@ -490,10 +450,7 @@ export const ScenarioDetailPage: React.FC = () => {
     );
     if (!ok) return;
     try {
-      // Three independent tax keys compose into one payload → one mutation.
-      // `taxFilingPlan` counts toward this group's "customized" badge, so
-      // the reset must clear it too — otherwise the group stays flagged as
-      // customized with no control able to clear it.
+      // taxFilingPlan counts toward this group's "customized" badge, so the reset must clear it too or the group stays flagged with no control able to clear it.
       let payload = resetField(scenario.payload, 'hsaQualifiedMedicalExpensePct');
       payload = resetField(payload, 'earlyWithdrawalPenaltyExemptAccountIds');
       payload = resetField(payload, 'taxFilingPlan');
@@ -513,7 +470,6 @@ export const ScenarioDetailPage: React.FC = () => {
     );
     if (!ok) return;
     try {
-      // Three independent keys compose into one payload → one mutation.
       let payload = scenario.payload;
       for (const k of ROTH_CONVERSION_OVERRIDE_KEYS) {
         payload = resetField(payload, k);
@@ -554,7 +510,6 @@ export const ScenarioDetailPage: React.FC = () => {
     );
     if (!ok) return;
     try {
-      // The card owns four keys, so Reset clears all four together.
       let payload = resetField(scenario.payload, 'acaMarketplaceOptOutMemberIds');
       payload = resetField(payload, 'healthCoverageMonths');
       payload = resetField(payload, 'acaFplRegion');
@@ -603,10 +558,6 @@ export const ScenarioDetailPage: React.FC = () => {
     );
   }
 
-  // Whole-scenario actions live in the page header (right of the title),
-  // matching the form-page convention (IncomeFormPage / ExpenseFormPage):
-  // Cancel + the scenario-wide controls are neutral secondaries, Delete is
-  // the destructive one, and Save is the lone primary action.
   const headerSecondaryActions: NonNullable<
     React.ComponentProps<typeof PageHeader>['secondaryActions']
   > = [];
@@ -726,9 +677,6 @@ export const ScenarioDetailPage: React.FC = () => {
             className={inputClass}
           />
         </label>
-        {/* Notes collapse by default so the header form stays compact;
-            expanding reveals a tall editing area. Mirrors the in-app
-            disclosure pattern (PlanStressTestSection data table). */}
         <div className="flex flex-col gap-2">
           <button
             type="button"
@@ -757,11 +705,8 @@ export const ScenarioDetailPage: React.FC = () => {
         </div>
       </section>
 
-      {/* Override cards grouped into 4 sections. The outer wrapper keeps
-          data-testid="scenario-overrides-row" for backward-compat with
-          existing tests. */}
+      {/* The outer wrapper keeps data-testid="scenario-overrides-row" for existing tests. */}
       <div className="mt-4 space-y-8" data-testid="scenario-overrides-row">
-        {/* ── Timing & longevity ── */}
         {(() => {
           const isPrimary = scenario.payload.isPrimary;
           const ov = scenario.payload.overrides;
@@ -800,7 +745,6 @@ export const ScenarioDetailPage: React.FC = () => {
           );
         })()}
 
-        {/* ── Income & expenses ── */}
         {(() => {
           const isPrimary = scenario.payload.isPrimary;
           const ov = scenario.payload.overrides;
@@ -849,7 +793,6 @@ export const ScenarioDetailPage: React.FC = () => {
           );
         })()}
 
-        {/* ── Savings & investments ── */}
         {(() => {
           const isPrimary = scenario.payload.isPrimary;
           const ov = scenario.payload.overrides;
@@ -890,7 +833,6 @@ export const ScenarioDetailPage: React.FC = () => {
           );
         })()}
 
-        {/* ── Withdrawals & taxes ── */}
         {(() => {
           const isPrimary = scenario.payload.isPrimary;
           const ov = scenario.payload.overrides;
@@ -907,11 +849,7 @@ export const ScenarioDetailPage: React.FC = () => {
           ].filter(Boolean).length;
           return (
             <ScenarioCardGroup title="Withdrawals & taxes" id="withdrawals" customizedCount={count} icon={<ScaleIcon />}>
-              {/* Filing facts that cannot be read for both spouses
-                  (an older scalar setting, or a saved choice that no longer fits
-                  this household) keep driving projections unchanged
-                  until the user resolves them here. Nothing is dropped, so this
-                  is a prompt, not a blocker. */}
+              {/* Unreadable filing facts keep driving projections unchanged until resolved here; nothing is dropped, so this is a prompt, not a blocker. */}
               {unresolvedFilingPrompt !== undefined && (
                 <Alert tone="warning">
                   <span className="flex flex-wrap items-center gap-2">

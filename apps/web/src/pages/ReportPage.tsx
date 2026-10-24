@@ -1,34 +1,4 @@
-/**
- * Export PDF page.
- *
- * This page is the single entry point for the unified PDF export. The old
- * on-screen report inventory (overview / accounts / expenses / income /
- * scenarios sections + the CSS print button) is gone — that content now lives
- * INSIDE the generated PDF. The page is a small control surface:
- *
- *   - a Scenario picker, a Basis picker (Planned / Historical / the three Monte
- *     Carlo tiers — un-projectable MC tiers disabled with a reason), and a
- *     Today's / Future display-mode segmented control;
- *   - a per-year PREVIEW chart of the selected example path (the same
- *     `ProjectionChart` the Balance Projection page draws), with a "Show
- *     another likely path" reroll;
- *   - an Export button (disabled + progress while a build is in flight) and a
- *     Cancel button.
- *
- * The export flow mounts the off-screen `ReportPagePdfRenderHost` ONLY while
- * exporting: it captures each chart's `<svg>` (forced-light, off-canvas), then
- * `buildPdfSectionModel` + `buildAndDownloadPdf` assemble + download one PDF.
- * A bounded timeout + a `finally` that always tears the host down and re-enables
- * Export guarantee the page can't get stuck mid-export; any failure surfaces a
- * typed error and never produces a partial download.
- *
- * Reactive reads: the page reads scenario / account / expense / income data via
- * `useAggregates(type)`; the selected-scenario *pointer* is not a store-subscription
- * slice, so it re-reads via the narrow `useSelectedScenarioRevision()` signal.
- *
- * Mounts its own `<MonteCarloProvider>` (the Balance Projection view model's
- * stress VM runs MC through it) wrapping both the preview and the render host.
- */
+/** Export PDF page: scenario, basis and display-mode pickers, a preview chart, and the Export action that builds and downloads one PDF. */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { MonteCarloProvider } from '../monte-carlo/MonteCarloProvider';
@@ -125,35 +95,19 @@ import type { ScenarioAggregate } from '../lib/scenario-resolution';
 import { buildProjection } from './ExpensesPage';
 import type { ExpenseRow } from './expense-group-card';
 
-/** Bounded ceiling for a single export run before it self-aborts (D: the
- *  `finally` tears the host down + re-enables Export). */
+// A single export run self-aborts after this; the finally block tears the host down and re-enables Export.
 const EXPORT_TIMEOUT_MS = 30_000;
 
-/** Basis-picker MC tier keys. */
 const MC_BASES: ReadonlyArray<McBasis> = ['mc-typical', 'mc-pessimistic', 'mc-bad-luck'];
 
 function isMcBasisValue(v: string): v is McBasis {
   return (MC_BASES as ReadonlyArray<string>).includes(v);
 }
 
-/**
- * One "what this report assumed" panel: a labelled `role="note"` card with an
- * optional body and a trailing disclosure list.
- *
- * The filing, health-coverage, market-stress, and Roth/required-withdrawal
- * panels are all the same chrome around different bodies, so the card, its
- * accessible name wiring, and the disclosure list live here once — a new
- * assumption panel cannot ship with a missing `role`, a heading that is not
- * the accessible name, or a differently-styled bullet list.
- */
 const ReportAssumptionsPanel: React.FC<{
-  /** DOM id of the heading — also the panel's accessible name. */
   readonly headingId: string;
   readonly title: string;
-  /** Standing disclosures. Rendered as the panel's closing bullet list. */
   readonly disclosures: ReadonlyArray<string>;
-  /** Panel body (definition lists, lead paragraphs, warnings). Optional: a
-   *  disclosure-only panel renders just the list. */
   readonly children?: React.ReactNode;
 }> = ({ headingId, title, disclosures, children }) => (
   <div
@@ -173,10 +127,8 @@ const ReportAssumptionsPanel: React.FC<{
   </div>
 );
 
-/** Props injectable for tests: a mock PDF lib loader so jsdom never imports
- *  real jsPDF. */
+/** Test seam: a mock PDF lib loader so jsdom never imports real jsPDF. */
 export interface ReportPageProps {
-  /** Test seam — the PDF library loader (defaults to the real lazy loader). */
   readonly pdfLibLoader?: PdfLibLoader;
 }
 
@@ -189,8 +141,6 @@ export const ReportPage: React.FC<ReportPageProps> = (props) => (
 const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
   const { resolvedTheme } = useTheme();
   const { isBetaFeatureVisible } = useBetaFeatures();
-  // Reactive reads: every slice re-reads on a write to its store, so a
-  // sync bootstrap / demo fill while the page is open refreshes by construction.
   const scenarioAgg = useAggregates('scenario');
   const accountAgg = useAggregates('account');
   const balanceAgg = useAggregates('accountBalance');
@@ -200,9 +150,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
   const incomeAgg = useAggregates('incomeStream');
   const ssAgg = useAggregates('socialSecurityBenefit');
   const householdAgg = useAggregates('household');
-  // The selected-scenario pointer is not a store-subscription slice; re-read it
-  // when the sidebar scenario switch fires so the default pick follows the
-  // active selection.
   const selectedScenarioRevision = useSelectedScenarioRevision();
 
   const scenarios = scenarioAgg.aggregates as ReadonlyArray<ScenarioAggregate>;
@@ -237,7 +184,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     householdAgg.error ??
     null;
 
-  // Default scenario: the sidebar selection if present, else the base.
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -250,7 +196,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
         sel && scenarios.some((s) => s.id === sel.scenarioId)
           ? sel.scenarioId
           : (base?.id ?? null);
-      // Keep an explicit user pick if it is still a valid scenario.
       setSelectedScenarioId((prev) =>
         prev && scenarios.some((s) => s.id === prev) ? prev : next,
       );
@@ -272,15 +217,11 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
   const [exportError, setExportError] = useState<string | null>(null);
   const [generatedAt] = useState(() => new Date());
 
-  // Single render-clock anchor (mirrors the Balance Projection page).
   const renderNow = new Date();
   const nowYear = renderNow.getFullYear();
   const nowMonthIndex = renderNow.getMonth();
   const nowDay = renderNow.getDate();
 
-  // Deterministic pipeline data for the selected scenario. Wrapped in
-  // try/catch so an un-projectable scenario surfaces a typed error rather than
-  // throwing into the render.
   const [configError, setConfigError] = useState<string | null>(null);
   const data = useMemo<PipelineData | null>(() => {
     if (!readyAll || !selectedScenarioId) return null;
@@ -383,7 +324,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     resolvedTheme,
   });
 
-  // An MC tier is selectable only once its representative run is available.
   const mcDisabled = useCallback(
     (basis: McBasis): boolean =>
       !vm.representativeByBasis || vm.representativeByBasis[basis] == null,
@@ -406,7 +346,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     return { color, label: MC_BASIS_LABELS[activeMcBasis] };
   }, [activeMcBasis, chartColors]);
 
-  // Build the report inventory data for the PDF (current values).
   const reportData = useMemo<ReportData | null>(() => {
     if (!selectedScenarioId || !scenarios.some((s) => s.id === selectedScenarioId)) {
       return null;
@@ -449,8 +388,7 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     generatedAt,
   ]);
 
-  // Expense projection data for the PDF's expense chart sections.
-  // Rendered at 'light' theme (PDF is always white-page, light palette).
+  // Rendered at the light theme: the PDF is always a white page.
   const expenseProjection = useMemo(() => {
     const categoryNameById = new Map<string, string>();
     for (const c of categories) categoryNameById.set(c.id, c.payload.name);
@@ -472,8 +410,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     );
   }, [expenses, categories, members, scenarios, selectedScenarioId, displayMode, nowMonthIndex]);
 
-  // The off-screen host resolves its SVGs into this promise once geometry
-  // commits; the export flow awaits it.
   const svgReadyRef = useRef<{
     resolve: (m: Record<string, SVGElement>) => void;
     reject: (e: Error) => void;
@@ -511,9 +447,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     [accountsForHost, vm.excludedAccountIds],
   );
 
-  // Withdrawal-guidance metadata: per-account meta keyed by id (carries the
-  // RMD-grouping fields + tax treatment) and owner display names by member id,
-  // for the PDF's withdrawal-guidance table (the final section).
   const guidanceAccountsById = useMemo<ReadonlyMap<string, GuidanceAccountMeta>>(
     () => {
       const m = new Map<string, GuidanceAccountMeta>();
@@ -538,19 +471,12 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     return m;
   }, [members]);
 
-  // Nominal (pre-deflation) per-year guidance rows — built from the active
-  // deterministic method's drawdown years (deterministic-only); empty under
-  // an MC basis. Deflated to display basis only when the table is actually built.
   const guidanceRows = useMemo(() => {
     if (vm.isMcBasisActive) return [];
     const years = vm.drawdownByMethod?.[activeMethod]?.years ?? [];
     return buildGuidanceYearRows(years, guidanceAccountsById);
   }, [vm.isMcBasisActive, vm.drawdownByMethod, activeMethod, guidanceAccountsById]);
 
-  // The withdrawal-guidance section spec (final PDF section): the MC note, the
-  // empty note, or the full display-basis table — via the pure selection helper
-  // applying the total-function precedence (MC → empty → table). Display dollars
-  // use `vm.basisDeflator` for document-internal consistency.
   const withdrawalGuidanceTableSpec = useMemo<PdfTableSpec>(
     () =>
       buildWithdrawalGuidanceSectionSpec({
@@ -563,11 +489,7 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     [vm.isMcBasisActive, guidanceRows, vm.basisDeflator, ownerNameById],
   );
 
-  // Burden-chart rows for the PDF render host — built from the view model's
-  // resolved drawdown via the SAME pure builders the on-page charts use, so the
-  // PDF's Tax / RMD / Roth charts derive identical rows (no drift). The RMD +
-  // Roth builders fall back to the active deterministic method when no MC run is
-  // resolved (mirrors `resolvedDrawdown ?? drawdownByMethod[activeMethod]`).
+  // Same pure builders as the on-page charts so the PDF cannot drift; RMD and Roth fall back to the active deterministic method when no MC run is resolved.
   const rmdDrawdown =
     vm.resolvedDrawdown ?? vm.drawdownByMethod?.[activeMethod] ?? null;
   const taxBurdenRows = useMemo(
@@ -608,15 +530,10 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     [rmdDrawdown, vm.basisDeflator, vm.lastDeathFractional, displayMode],
   );
 
-  // Per-chart data tables for the PDF (rendered UNDER each chart). Each entry
-  // is added ONLY when its chart actually renders — tied to the SAME
-  // data-presence gates the render host uses (see `report-page-pdf-render-host`)
-  // so there is never a table without its chart or vice-versa. All numbers are
-  // already display-basis; the builders only format + aggregate to annual.
+  // Each table is added only when its chart renders, tied to the same data-presence gates as the render host, so no table appears without its chart.
   const chartTablesBySection = useMemo<ReadonlyMap<string, PdfTableSpec>>(() => {
     const map = new Map<string, PdfTableSpec>();
 
-    // Balance line — always present.
     map.set(
       'chart-balance',
       buildBalanceTableSpec(
@@ -626,7 +543,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
       ),
     );
 
-    // Stress-test fan — only when the MC run has a renderable result.
     const stressResult = vm.stressVm.result;
     if (
       !vm.stressVm.hasNoAccounts &&
@@ -679,7 +595,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
       map.set('chart-roth-conversions', buildRothConversionsTableSpec(rothRows));
     }
 
-    // Account-balance bands — always present (the host always mounts them).
     map.set(
       'chart-account-balances-tier',
       buildAccountBalancesByTypeTableSpec(
@@ -696,11 +611,7 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
       ),
     );
 
-    // Expense charts — only when there are expense projection rows. The
-    // tables read the ANNUAL (headline) totals from the same projection build,
-    // so they tie out to the year-by-year math in every display basis (the
-    // chart series themselves stay the monthly run-rate samples the host
-    // plots).
+    // Tables read the annual headline totals so they tie out to the year-by-year math; the charts plot monthly run-rate samples.
     if (expenseProjection.rows.length > 0) {
       map.set(
         'chart-expenses-total',
@@ -751,20 +662,17 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
     exportAbortRef.current = ac;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
-      // Timeout fires abort() which propagates to both the SVG-capture promise
-      // and the build phase (checked before doc.save()), covering the full pipeline.
+      // The timeout aborts both the SVG-capture promise and the build phase (checked before doc.save()).
       timeoutId = setTimeout(() => {
         ac.abort(new Error('PDF export timed out.'));
       }, EXPORT_TIMEOUT_MS);
 
-      // Resolves the moment the signal aborts — raced against both phases so a
-      // cancel / timeout unblocks even a hung build (e.g. a stuck lib loader).
+      // Raced against both phases so a cancel or timeout unblocks even a hung build.
       const aborted = new Promise<never>((_, reject) => {
         ac.signal.addEventListener('abort', () => {
           reject(ac.signal.reason instanceof Error ? ac.signal.reason : new Error('Export aborted.'));
         }, { once: true });
       });
-      // Never goes unhandled if the run completes before any abort.
       aborted.catch(() => undefined);
 
       const svgMap = await Promise.race([
@@ -774,14 +682,10 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
         aborted,
       ]);
 
-      // Title-page + household-overview + Scenario-page detail for the active
-      // scenario.
       const activeReportScenario = reportData.scenarios.find(
         (s) => s.id === selectedScenarioId,
       );
 
-      // Standardized red/amber/green tier for the success figure on the
-      // Scenario page (same thresholds as the Plan stress-test + Dashboard).
       const successProbability = vm.stressVm.result?.successProbability ?? null;
       const successProbabilityColor =
         STATUS_HEX.light[
@@ -801,8 +705,7 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
         date: { year: nowYear, month: nowMonthIndex + 1, day: nowDay },
         chartTablesBySection,
         withdrawalGuidanceTableSpec,
-        // A beta feature the user has not switched on stays out of the PDF
-        // too — the export mirrors what the app shows.
+        // A beta feature the user has not switched on stays out of the PDF too.
         excludedSectionIds: hiddenBetaPdfSectionIds(isBetaFeatureVisible),
       });
 
@@ -839,12 +742,10 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
       ]);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      // A user cancel is not an error surface.
       if (message !== 'Export cancelled.') setExportError(message);
     } finally {
       if (timeoutId !== null) clearTimeout(timeoutId);
       exportAbortRef.current = null;
-      // Only reset shared state if this run still owns the slot.
       if (runGenRef.current === gen) {
         svgReadyRef.current = null;
         setIsExporting(false);
@@ -872,28 +773,17 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
   ]);
 
   const hasScenarios = scenarios.length > 0;
-  // The selected scenario's filing treatment + disclosures.
   const filingAssumptions =
     reportData && selectedScenarioId
       ? (reportData.scenarios.find((s) => s.id === selectedScenarioId)
           ?.filingAssumptions ?? null)
       : null;
-  // The standing Roth / required-withdrawal disclosures, including
-  // which accounts fell back to a cautious default and which have a WITHHELD
-  // required-withdrawal estimate. Household-level (the facts are per account, not
-  // per scenario), so it does not depend on the selected scenario.
   const taxProfileDisclosures = reportData?.taxProfileDisclosures ?? [];
-  // The selected scenario's health-coverage assumptions:
-  // who is on a Marketplace plan, which poverty guidelines size the subsidy,
-  // which benchmark plan price was used, and which coverage months were stated.
   const healthAssumptions =
     reportData && selectedScenarioId
       ? (reportData.scenarios.find((s) => s.id === selectedScenarioId)
           ?.healthAssumptions ?? null)
       : null;
-  // The selected scenario's market-stress assumptions: what
-  // each named stress changes, and the standing no-forecast / approximation
-  // disclosures.
   const marketStressAssumptions =
     reportData && selectedScenarioId
       ? (reportData.scenarios.find((s) => s.id === selectedScenarioId)
@@ -1012,11 +902,6 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
           />
         </div>
 
-        {/* Export action sits to the right of the Dollars control. An invisible
-            label mirrors the other fields' label row; the column stretches to
-            the row height and the action centers within the control area, so the
-            button lines up with the input controls' vertical center. Both
-            progress bars (build + simulation) sit to the right of the button. */}
         <div className="flex flex-col gap-1 self-stretch">
           <span aria-hidden="true" className="select-none text-sm text-transparent">
             Export
@@ -1069,12 +954,7 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
         </div>
       </div>
 
-      {/* The filing treatment this scenario's projections used,
-          with its standing approximation disclosures. Always rendered when a
-          scenario is selected, so an exported report never presents a retained
-          limitation (standard deduction only, federal tax only) as supported
-          functionality. The assumption panels sit BELOW the chart so the
-          preview is the first thing on screen after the export controls. */}
+      {/* Always rendered so an exported report never presents a retained limitation (standard deduction only, federal tax only) as supported functionality. */}
       {filingAssumptions ? (
         <ReportAssumptionsPanel
           headingId="report-filing-heading"
@@ -1100,11 +980,7 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
         </ReportAssumptionsPanel>
       ) : null}
 
-      {/* The health-coverage assumptions this
-          scenario's projections used, with the standing rough-benchmark and
-          Medicare-premium disclosures. Always rendered when a scenario is
-          selected, so an exported report never presents the rough ACA estimate
-          as an exchange quote or implies the base Medicare premium is modeled. */}
+      {/* Always rendered so the report never presents the rough ACA estimate as an exchange quote or implies the base Medicare premium is modeled. */}
       {healthAssumptions ? (
         <ReportAssumptionsPanel
           headingId="report-health-heading"
@@ -1132,9 +1008,7 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
         </ReportAssumptionsPanel>
       ) : null}
 
-      {/* Market-stress assumptions. Always rendered when a
-          report can be built, so an exported report never leaves a named stress
-          ("higher fees") undefined for the reader. */}
+      {/* Always rendered so a named stress ("higher fees") is never left undefined for the reader. */}
       {marketStressAssumptions ? (
         <ReportAssumptionsPanel
           headingId="report-market-stress-heading"
@@ -1152,10 +1026,7 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
         </ReportAssumptionsPanel>
       ) : null}
 
-      {/* Roth / required-withdrawal disclosures. Always rendered when
-          a report can be built, so an exported report never presents a cautious
-          default (no recorded basis, an unmet five-year clock) or a withheld
-          inherited-account estimate as a modeled fact. */}
+      {/* Always rendered so a cautious default or a withheld inherited-account estimate is never presented as a modeled fact. */}
       {taxProfileDisclosures.length > 0 ? (
         <ReportAssumptionsPanel
           headingId="report-tax-profile-heading"
@@ -1164,8 +1035,7 @@ const ExportPdfPageInner: React.FC<ReportPageProps> = ({ pdfLibLoader }) => {
         />
       ) : null}
 
-      {/* Off-screen render host — mounted ONLY while exporting so the charts
-          aren't rendered (and don't run the SVG engine) on every page view. */}
+      {/* Mounted only while exporting, so the charts don't run the SVG engine on every page view. */}
       {isExporting && reportData ? (
         <ReportPagePdfRenderHost
           displayRows={vm.displayRows}

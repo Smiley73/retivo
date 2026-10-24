@@ -1,29 +1,5 @@
-/**
- * Security page: Account record card + verified email-change flow.
- *
- * Two responsibilities:
- *  - The account record (email / name / birthdate) loaded from `GET
- *    /auth/me`. Name + birthdate are editable inline (Edit/Save/Cancel) via
- *    `PATCH /auth/me` — session-only, no password re-entry or MFA step-up.
- *    This is the READABLE account record; the encrypted household
- *    member records the projections read are a separate record, edited
- *    separately on the Household page, and are untouched by this card. Email
- *    stays on the verified flow below.
- *  - The verified email-change flow: a modal that re-authenticates with the
- *    current password + the new address (`POST /auth/change-email/request`),
- *    completes a fresh MFA factor when `AUTH_MFA_ENFORCED` is on, then shows a
- *    pending state ("check your new inbox") until the user clicks the
- *    verification link (which lands on ChangeEmailConfirmPage). The current
- *    email keeps working until then.
- *
- * Password-manager interop ("Password managers" in docs/ui-conventions.md): the
- * password field lives in a real `<form>` with a `type="submit"` action, the
- * `current-password` autocomplete token, and a `HiddenUsernameField`. The
- * re-auth modal renders through `<PasswordManagerModal>` (its scrim swallows
- * outside clicks so a password-manager popup rendered outside the dialog can't
- * dismiss it, and the background is never inert so the popup stays clickable),
- * mirroring PasswordChangeCard.
- */
+/** Security page Account card: the inline-editable account record (name, birthdate via PATCH /auth/me) and the verified email-change flow (password re-auth, a step-up factor when AUTH_MFA_ENFORCED is on, a pending state until the link is clicked).
+* Separate from the household member records on the Household page. */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useAuth, type AccountRecord } from '../auth/AuthContext';
@@ -49,15 +25,11 @@ import {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Modal sub-state. `form` collects the new email + password; `stepUp`
- * collects a fresh MFA factor (via the reusable {@link StepUpModal}); `pending`
- * confirms the link was sent. */
+// form collects the new email and password, stepUp a fresh MFA factor, pending confirms the link was sent.
 type Stage = 'form' | 'stepUp' | 'pending';
 
 interface Props {
-  /** Fallback email (from the JWT claim) shown before /auth/me resolves. */
   email: string;
-  /** Page-level error sink (single top-of-page Alert). */
   onError: (message: string | null) => void;
 }
 
@@ -72,11 +44,7 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
   } = useAuth();
 
   const [record, setRecord] = useState<AccountRecord | null>(null);
-  // Tracks the initial `GET /auth/me` fetch:
-  // Edit stays disabled until it settles, and stays
-  // disabled on failure too, so a person can never open the edit form with
-  // blank seed values that are indistinguishable from a legitimately-unset
-  // field.
+  // Edit stays disabled until /auth/me settles, and on failure too, so the form never opens with blank seeds that look like genuinely unset fields.
   const [recordLoading, setRecordLoading] = useState(true);
   const [recordLoadFailed, setRecordLoadFailed] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -88,9 +56,6 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
   const [pendingEmail, setPendingEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Account-record edit form: a
-  // separate Edit/Save/Cancel surface for firstName/lastName/birthdate,
-  // independent of the email-change modal above.
   const [editing, setEditing] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -102,10 +67,7 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
   const [editError, setEditError] = useState<string | null>(null);
   const birthdateRange = useMemo(() => birthdateBounds(), []);
 
-  // Change-email step-up runs on the reusable modal/hook.
-  // The Email-OTP send is change-email's OWN endpoint (legacy `<userId>` row,
-  // bound by the pending intent); the passkey factor uses the generic
-  // purpose-scoped options endpoint; verify is change-email's verify-step-up.
+  // Email-OTP send is change-email's own endpoint (bound by the pending intent); passkey uses the generic purpose-scoped options endpoint.
   const onStepUpVerify = useCallback(
     async (proof: StepUpProof): Promise<void> => {
       await verifyEmailChangeStepUp(proof.method, proof.code ?? '', proof.response);
@@ -123,10 +85,7 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
   });
   const resetStepUp = stepUp.reset;
 
-  // Load the read-only account record once. On failure, surface it via
-  // `onError` and leave `record` unset rather than seeding it with blank
-  // fields — a blank field is otherwise indistinguishable from a genuinely
-  // unset one, and `startEdit` must never be reachable off a failed load.
+  // On failure leave record unset rather than seeding blanks, which look like genuinely unset fields; startEdit must never be reachable off a failed load.
   useEffect(() => {
     let cancelled = false;
     setRecordLoading(true);
@@ -151,14 +110,11 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
   const displayedEmail = record?.email ?? email;
   const fullName = [record?.firstName, record?.lastName].filter(Boolean).join(' ');
 
-  // Dirty only on the credential-collecting `form` stage — any non-empty field
-  // means the user typed something. The later stages are post-submit.
   const isDirty = useMemo(
     () => showModal && stage === 'form' && (newEmail !== '' || password !== ''),
     [showModal, stage, newEmail, password],
   );
 
-  // Edit-form dirty: any typed field differs from the last-loaded record.
   const editIsDirty = useMemo(
     () =>
       editing &&
@@ -204,12 +160,9 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
         lastName: trimmedLast,
         birthdate: birthdateInput,
       });
-      // Render from the server's response, not the typed values.
       setRecord(updated);
       setEditing(false);
     } catch (err) {
-      // Leave the form open with the entered values; the displayed record
-      // stays the last-loaded one (we never called setRecord).
       setEditError(
         err instanceof ApiRequestError
           ? err.error.message
@@ -237,8 +190,6 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
   }, [submitting, resetModal]);
 
   const { guardedClose, immediateClose, confirmModal } = useDirtyModalClose(isDirty, closeModal);
-  // Combined page-level guard: either the email-change form or the edit form
-  // being dirty blocks in-app navigation / tab close.
   const { pendingNavModal } = useUnsavedChangesGuard(isDirty || editIsDirty);
 
   const emailValid = EMAIL_REGEX.test(newEmail);
@@ -250,7 +201,6 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
     try {
       const res = await changeEmail(newEmail, password);
       setPendingEmail(newEmail);
-      // Drop the password from memory once the request succeeds.
       setPassword('');
       if (res.stepUpRequired) {
         setMethods(res.methods ?? []);
@@ -270,8 +220,7 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
     }
   };
 
-  // Seed the step-up factor picker once the request returns the eligible
-  // factors (the hook's initial factor is captured before `methods` populates).
+  // The hook's initial factor is captured before methods populate.
   useEffect(() => {
     if (stage === 'stepUp') resetStepUp();
   }, [stage, resetStepUp]);
@@ -429,13 +378,7 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
         )}
       </SettingsCard>
 
-      {/* Render through PasswordManagerModal (the containment-free overlay):
-          the scrim swallows outside clicks — a password-manager popup renders
-          outside the dialog, so clicking it would otherwise fire the dirty-guard
-          close mid-entry — and the background is never inert, so the popup stays
-          interactive. Esc is left enabled (`keyboardDismissDisabled` unset) so it
-          routes through `guardedClose` (the dirty guard); Cancel still closes
-          immediately. Mirrors PasswordChangeCard. */}
+      {/* PasswordManagerModal: the scrim swallows outside clicks (a manager popup renders outside the dialog and would fire the dirty-guard close) and the background stays interactive. Esc routes through guardedClose. */}
       <PasswordManagerModal
         open={showModal && stage !== 'stepUp'}
         onClose={guardedClose}
@@ -452,8 +395,6 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
               void onSubmitRequest();
             }}
           >
-            {/* Hidden username = the CURRENT email so a password manager
-                associates the re-auth password with this account. */}
             <HiddenUsernameField email={displayedEmail} />
             <div className="flex flex-col gap-3">
               <Field
@@ -520,9 +461,6 @@ export const AccountCard: React.FC<Props> = ({ email, onError }) => {
         ) : null}
       </PasswordManagerModal>
 
-      {/* Reusable step-up modal: confirm the change with a
-          fresh second factor — authenticator / emailed code / passkey — before
-          the confirmation link is sent to the new address. */}
       <StepUpModal
         open={showModal && stage === 'stepUp'}
         onClose={immediateClose}

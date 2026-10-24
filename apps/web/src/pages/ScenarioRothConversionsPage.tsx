@@ -1,22 +1,5 @@
-/**
- * Working-years Roth-conversions sub-screen at
- * /scenarios/:id/roth-conversions.
- *
- * A dedicated list editor for the per-scenario working-years (still-employed)
- * Roth conversions: each entry moves money from the pre-tax side of a PRE_TAX
- * or MIXED account into a Roth IRA, or from the pre-tax side of a MIXED
- * employer plan into that same account's Roth-designated side (an in-plan Roth
- * conversion), in the chosen working-year window. The page shows the extra
- * income tax that move would create — at an assumed rate, NOT taken out of the
- * plan. Plus the scenario-level assumed tax-rate field. The annual
- * amount is a flat nominal figure converted as-is each working year.
- *
- * Mirrors ScenarioWithdrawalStrategyPage's data-load shape: a mount-only load
- * (no workspace-revision dep: an
- * explicit-Save guarded editor must not remount mid-edit and drop the draft),
- * then hosts the non-modal RothConversionsEditor keyed to the scenario version
- * so a successful save reload remounts it clean.
- */
+/** /scenarios/:id/roth-conversions: list editor for working-years Roth conversions (pre-tax to Roth IRA, or a MIXED employer plan's pre-tax side to its own Roth side), with the extra tax shown at an assumed rate and not taken out of the plan.
+* Mount-only load: an explicit-Save guarded editor must not remount mid-edit and drop the draft. */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAuth } from '../auth/AuthContext';
@@ -50,9 +33,7 @@ export const ScenarioRothConversionsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Reads + applies the workspace data. THROWS on failure so the post-save
-  // caller can surface the distinct "saved; refresh failed" state. The mount
-  // loader below wraps this in its own try/catch.
+  // Throws on failure so the post-save caller can surface the distinct "saved; refresh failed" state.
   const loadData = useCallback(async () => {
     const [allScenarios, allMembers, allAccounts] = await Promise.all([
       listAggregates('scenario') as Promise<Aggregate<ScenarioPayload>[]>,
@@ -77,8 +58,6 @@ export const ScenarioRothConversionsPage: React.FC = () => {
     }
   }, [loadData]);
 
-  // Mount-only load (no workspace revision) so a mid-edit bulk event cannot
-  // remount the editor and drop the draft.
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -145,9 +124,7 @@ export const ScenarioRothConversionsPage: React.FC = () => {
       >
         {TAX_SNAPSHOT_NOTE}
       </InlineDisclaimerCard>
-      {/* Remount key keyed to the just-saved version: a successful save reload
-          re-fetches the version-bumped scenario, the key changes, and the
-          editor remounts clean so Save re-disables. */}
+      {/* Keyed to the just-saved version so a successful save reload remounts the editor clean and Save re-disables. */}
       <RothConversionsEditor
         key={`prc-${scenario.id}-${scenario.version}`}
         scenario={scenario}
@@ -158,8 +135,7 @@ export const ScenarioRothConversionsPage: React.FC = () => {
         backPath={backPath}
         onSaved={async () => {
           notifyPending();
-          // Propagate a reload failure so the editor can show the
-          // "saved; refresh failed" state — the save is already durable.
+          // Propagate a reload failure so the editor can show "saved; refresh failed": the save is already durable.
           await loadData();
         }}
       />

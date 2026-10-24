@@ -52,7 +52,6 @@ export const TwrSummary: React.FC<TwrSummaryProps> = ({ rows, isMixed }) => {
   return (
     <div className="mb-5" aria-label="Balance summary">
       <StatGrid cols="four">
-        {/* Row 1: the headline figures. */}
         <Stat
           label="Contributions"
           value={formatCurrency(totalContributionsAll)}
@@ -73,7 +72,6 @@ export const TwrSummary: React.FC<TwrSummaryProps> = ({ rows, isMixed }) => {
           label="Ann. Return"
           value={<span className={negPos(twr)}>{formatPercent(twr)}</span>}
         />
-        {/* Row 2: the pre-/post-tax split (mixed accounts only). */}
         {isMixed && (
           <>
             <Stat

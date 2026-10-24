@@ -47,9 +47,7 @@ export const BalanceTable: React.FC<BalanceTableProps> = ({
   const active = account.payload.active === true;
   return (
     <>
-      {/* Canonical TableScroll card; scroll={false} because the active
-          rows carry the hover-revealed `.row-actions` cluster (WebKit
-          stuck-`:hover` bug — see TableScroll). */}
+      {/* scroll={false}: the active rows carry the hover-revealed .row-actions cluster (WebKit stuck-:hover bug, see TableScroll). */}
       <TableScroll label="Annual balance entries" scroll={false}>
         <Table aria-label="Annual balance entries" className={tableClass}>
           <TableHeader>
@@ -161,10 +159,6 @@ export const BalanceTable: React.FC<BalanceTableProps> = ({
                   </Cell>
                   {active && (
                     <Cell className={tdClass}>
-                      {/* Hover-revealed icon cluster (mock
-                          `account-balance-detail` `.acts`), matching the
-                          Accounts row pattern; icons carry their
-                          accessible name via aria-label. */}
                       <div className="row-actions items-center">
                         <button
                           type="button"

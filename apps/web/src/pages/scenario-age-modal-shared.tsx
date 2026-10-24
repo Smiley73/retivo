@@ -1,19 +1,4 @@
-/**
- * Shared primitives for the Retirement-Age + Social-Security claim-age
- * modals (extracted from `ScenarioDetailPage.tsx`).
- *
- * The two modals + their shared helpers were lifted out of the largest
- * page in the app so that page stays small. This module holds the slice
- * both modals depend on:
- * default-override constants, the years/months age display helper, the
- * WAI-ARIA `AgeInputs` pair (NOT `type="number"` — spinner jitter in
- * constrained dialogs), and the `RetirementDateLine` (`formatDate`-
- * backed). The retirement-timing mode picker is the typed
- * `<SegmentedRadioGroup>` invoked inline at the modal call sites
- * (no wrapper component). Visual style is
- * Tailwind defaults; the framework-independent behavioral contract is
- * preserved verbatim.
- */
+/** Shared primitives for the Retirement-Age and Social-Security claim-age modals: default-override constants, the years/months display helper, the AgeInputs slider pair and the RetirementDateLine. */
 import React from 'react';
 import { formatDate } from '../lib/format-date';
 import { formatAgeYearsMonths } from '../lib/format-age';
@@ -35,10 +20,7 @@ export const DEFAULT_PER_MEMBER_AGE: RetirementAgePerMember = {
   ageMonths: 0,
 };
 
-/** Default Social Security claim age applied when no override exists in
- *  the parent chain — Full Retirement Age for everyone born 1960 or
- *  later. Mirrors `DEFAULT_SOCIAL_SECURITY_CLAIM_AGE` in
- *  `lib/scenario-bootstrap.ts`. */
+/** Applied when no override exists in the parent chain: Full Retirement Age for anyone born 1960 or later; mirrors DEFAULT_SOCIAL_SECURITY_CLAIM_AGE in lib/scenario-bootstrap.ts. */
 export const DEFAULT_SS_CLAIM: SocialSecurityClaimAgeOverride = {
   primary: { ageYears: 67, ageMonths: 0 },
 };
@@ -49,8 +31,6 @@ export const SS_PER_MEMBER_DEFAULT: RetirementAgePerMember = {
 
 export const DEFAULT_BENEFIT_REDUCTION_PCT = 0;
 
-/** Years-months age display (e.g. "65" or "65 years 6 months") for
- *  summary text. Thin `{ ageYears, ageMonths }` → canonical adapter. */
 export function formatAge(age: { ageYears: number; ageMonths: number }): string {
   return formatAgeYearsMonths({ years: age.ageYears, months: age.ageMonths });
 }
@@ -66,12 +46,7 @@ export function modeOf(o: RetirementAgeOverride): RetirementMode {
   return 'independent';
 }
 
-/**
- * Recomputes the non-anchor's age from birthdates so the persisted
- * payload always carries both members' ages even in same-date mode.
- * Calculations downstream read `primary.age` + `secondary.age`
- * directly without consulting birthdates.
- */
+/** Recomputes the non-anchor's age from birthdates so the payload always carries both members' ages in same-date mode; downstream calculations read primary.age and secondary.age without consulting birthdates. */
 export function recomputeNonAnchorAge(
   draft: RetirementAgeOverride,
   primaryBirthdate: string | undefined,
@@ -112,12 +87,7 @@ export const AgeInputs: React.FC<AgeInputsProps> = ({
   ariaLabelPrefix,
   disabled,
 }) => {
-  // Years + months as sliders (label on the left, slider filling the
-  // rest). The slider value/onChange wiring is identical to the prior
-  // numeric inputs, so the same-date auto-recompute + derived-side
-  // disabling driven by the modal continue to work unchanged. A
-  // disabled (derived) side never fires `onChange`, so its persisted
-  // value stays whatever the auto-recompute set.
+  // A disabled (derived) side never fires onChange, so its persisted value stays whatever the same-date auto-recompute set.
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-3">
@@ -164,13 +134,7 @@ interface RetirementDateLineProps {
   birthdate: string | undefined;
   age: { ageYears: number; ageMonths: number };
   ariaPrefix: string;
-  /**
-   * Optional ISO `YYYY-MM-DD` to display verbatim instead of computing
-   * `birthdate + age`. Used by the same-date modes so the non-anchor's
-   * "Retires" line matches the anchor's exact date — `birthdate + age`
-   * rounds to the non-anchor's day-of-month, which can drift several
-   * weeks from the anchor's actual retirement date.
-   */
+  /** Displayed verbatim by the same-date modes so the non-anchor's "Retires" line matches the anchor's exact date; birthdate + age rounds to the day-of-month and can drift weeks. */
   overrideIsoDate?: string | null;
 }
 

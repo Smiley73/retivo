@@ -1,24 +1,4 @@
-/**
- * Qualified Charitable Distribution (QCD) list editor.
- *
- * Non-modal page editor hosted by ScenarioQcdPage: owns the draft (via
- * useQcdDraft), the per-entry list UI, an explicit Save (sparse-persist via the
- * save helpers), and the page-level unsaved-changes guard (beforeunload +
- * in-app nav / Cancel).
- *
- * Each entry directs a fixed REAL annual gift from a designated traditional IRA
- * (a `RETIREMENT_IRA` with `PRE_TAX` treatment) owned by the chosen member to
- * charity at 70½+. The member picker lists only members who own at least one
- * eligible IRA; the source picker lists only that member's eligible IRAs (the
- * same cross-owner filter the resolver re-checks). The gift drops out of that
- * member's taxable income / MAGI, and once an IRA RMD applies it counts toward
- * that RMD.
- *
- * Each owner-year gift is automatically capped at the smaller of the indexed
- * per-person IRS limit and the IRA's available balance (disclosed below); the
- * editor never enforces the cap on the input. A documented double-counting
- * warning reminds the user a QCD is independent of any charitable expense.
- */
+/** QCD list editor hosted by ScenarioQcdPage; each gift is capped by the indexed IRS limit and the IRA balance (disclosed below), never enforced on the input. */
 import React, { useMemo, useState } from 'react';
 import { MoneyInput } from '../components/MoneyInput';
 import { Badge } from '../components/Badge';
@@ -54,10 +34,7 @@ import { btnPrimaryClass, btnSecondaryClass } from './scenarios-page-chrome';
 import { useQcdDraft, type DraftQcd } from './scenario-qcd-draft-hook';
 import { buildNextQcd, isEligibleQcdSource } from './scenario-qcd-save-helpers';
 
-/** Latest published indexed per-person §408(d)(8) limit — used only for the
- *  read-only disclosure copy. The engine inflation-extrapolates this forward
- *  per year; the editor shows the most-recently published figure as the
- *  current-dollar cap reference. */
+// Latest published indexed §408(d)(8) limit, for the read-only disclosure copy; the engine extrapolates it forward per year.
 function latestPublishedQcdLimitDollars(): number {
   const years = Object.keys(QCD_LIMITS.values)
     .map((y) => Number(y))
@@ -68,18 +45,13 @@ function latestPublishedQcdLimitDollars(): number {
     : 0;
 }
 
-/** A fresh entry seed: the first eligible member + their first eligible IRA, a
- *  $10k/yr placeholder, and a window from the member's 70½ first-eligible tax
- *  year through that same year (a one-year gift — the resolver clamps `start`
- *  up to 70½ regardless). */
 function defaultQcd(
   memberId: string,
   sourceAccountId: string,
   firstEligibleYear: number,
 ): DraftQcd {
   return {
-    // Stable per-entry key so removing a middle row never mis-associates
-    // uncommitted picker UI state. STRIPPED before persist (save helpers).
+    // Stable key so removing a middle row never mis-associates picker state; stripped before persist.
     draftId: cryptoUuid(),
     memberId,
     sourceAccountId,
@@ -89,9 +61,7 @@ function defaultQcd(
   };
 }
 
-/** Floor for the QCD window age slider. 70 on the whole-year slider represents
- *  the 70½ statutory first-eligible floor — the engine clamps the resolved start
- *  up to the precise 70½ tax year, so the slider never needs a half-year notch. */
+// 70 on the whole-year slider stands for the 70½ floor; the engine clamps the resolved start to the precise 70½ tax year.
 const QCD_MIN_AGE = 70;
 
 interface MemberOption {
@@ -104,14 +74,10 @@ interface AccountOption {
   name: string;
 }
 
-/** Resolve a picker option's display name, falling back to a plain-English
- *  placeholder when the id no longer matches an offered option (e.g. a
- *  dangling/pruned account). */
 function nameOf(options: ReadonlyArray<AccountOption>, id: string): string {
   return options.find((o) => o.id === id)?.name ?? 'Missing account';
 }
 
-/** Resolve a member's display name, falling back to the member id. */
 function memberDisplayName(
   member: Aggregate<HouseholdMemberPayload> | undefined,
   memberId: string,
@@ -123,9 +89,6 @@ function memberDisplayName(
   return full.length > 0 ? full : memberId;
 }
 
-/** Resolve a member's 70½ first-eligible tax year from their birthdate, or
- *  `undefined` when the birthdate is missing / malformed (the hint is then
- *  suppressed and the resolver drops the entry). */
 function firstEligibleYearFor(
   member: Aggregate<HouseholdMemberPayload> | undefined,
 ): number | undefined {
@@ -138,24 +101,13 @@ function firstEligibleYearFor(
   }
 }
 
-/** Resolve the giver's `HouseholdRole` from the entry's `memberId` (a member
- *  UUID). A QCD's eligibility window is intrinsically the giver's (their 70½),
- *  and `resolveQcdForScenario` resolves the age window from the GIVER's
- *  birthdate, ignoring the anchor's own `memberId`. So the age anchor must
- *  ALWAYS carry the giver's role — never a different member — for honest display
- *  + correct slider bounds. Defaults to `'primary'` for a dangling member id. */
+// The age anchor must always carry the giver's role: resolveQcdForScenario resolves the window from the giver's birthdate and ignores the anchor's own memberId. Defaults to 'primary' for a dangling member id.
 function giverRoleFor(
   member: Aggregate<HouseholdMemberPayload> | undefined,
 ): HouseholdRole {
   return member?.payload.isPrimary === false ? 'secondary' : 'primary';
 }
 
-/** Force an `age` anchor's `memberId` to the giver's role (a `year` anchor has
- *  no member). Keeps the persisted/displayed anchor honest with the engine's
- *  giver-based window resolution — the member selector is hidden, but a
- *  freshly-switched `age` kind or a stored cross-member anchor is normalized
- *  here so the slider bounds + display always reflect the giver. Generic over
- *  the `start` / `end` anchor (both are the `age | year` subset). */
 function withGiverAnchorMember<A extends QcdEntry['start'] | QcdEntry['end']>(
   anchor: A,
   giverRole: HouseholdRole,
@@ -165,9 +117,6 @@ function withGiverAnchorMember<A extends QcdEntry['start'] | QcdEntry['end']>(
     : anchor;
 }
 
-/** One QCD row editor: a collapsed one-line summary that expands to the
- *  member + source pickers, annual amount, the start/end window, and the
- *  inline 70½ eligibility hint. */
 const QcdRow: React.FC<{
   index: number;
   entry: DraftQcd;
@@ -178,8 +127,6 @@ const QcdRow: React.FC<{
   firstEligibleYear: number | undefined;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
-  /** True when this row is implicated by the backwards-window or
-   *  same-account-overlap guards. */
   hasWindowProblem: boolean;
   onChange: (next: DraftQcd) => void;
   onRemove: () => void;
@@ -196,21 +143,12 @@ const QcdRow: React.FC<{
   onChange,
   onRemove,
 }) => {
-  // The age-anchor member is ALWAYS the giver — the engine resolves the QCD
-  // window from the giver's birthdate (resolveQcdForScenario), ignoring the
-  // anchor's own member. So normalize both anchors to the giver's role before
-  // widening for the picker (honest display + correct slider bounds), and pass
-  // `memberSelectable={false}` so the picker never offers a non-giver member.
   const giverRole = giverRoleFor(members.find((m) => m.id === entry.memberId));
   const giverStart = withGiverAnchorMember(entry.start, giverRole);
   const giverEnd = withGiverAnchorMember(entry.end, giverRole);
   const startAnchor: GlideAnchor = magiCapEndToGlideAnchor(giverStart);
   const endAnchor: GlideAnchor = magiCapEndToGlideAnchor(giverEnd);
-  // Floor the whole window at the giver's 70½ eligibility: the age slider min is
-  // 70 (the 70½ statutory floor on a whole-year slider) and the year slider min
-  // is the giver's 70½ first-eligible year. A giver with no birthdate has no
-  // resolvable year, so floor only the age (never invent a year floor). Both
-  // pickers share the same floor — the entire QCD window must be ≥ 70½.
+  // Floor the whole window at 70½: age slider min 70, year slider min the giver's first-eligible year (no birthdate means no year floor, never invent one).
   const windowFloor =
     firstEligibleYear !== undefined
       ? { age: QCD_MIN_AGE, year: firstEligibleYear }
@@ -351,9 +289,7 @@ export interface QcdEditorProps {
   householdId: string;
   accounts: ReadonlyArray<Aggregate<AccountPayload>>;
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
-  /** Route to return to (the scenario detail page). Cancel navigates here. */
   backPath: string;
-  /** Persist succeeded — the page re-fetches the version-bumped scenario. */
   onSaved: () => Promise<void>;
 }
 
@@ -375,10 +311,6 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
     isDirty,
   } = useQcdDraft(scenario, scenarios);
 
-  // Eligible source IRAs for a given member: active `RETIREMENT_IRA` with
-  // `PRE_TAX` treatment owned by that member (the same cross-owner filter the
-  // resolver re-checks). `isEligibleQcdSource` already excludes inactive
-  // accounts, so a closed IRA never seeds a dead source.
   const sourcesForMember = useMemo<(memberId: string) => AccountOption[]>(
     () =>
       (memberId: string): AccountOption[] =>
@@ -388,7 +320,6 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
     [accounts],
   );
 
-  // Members who own at least one eligible IRA — the only members offered.
   const memberOptions = useMemo<MemberOption[]>(
     () =>
       members
@@ -405,18 +336,12 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
     [members],
   );
 
-  // Account payload by id (mirrors `buildNextQcd`) — used to scope window
-  // validation to the rows that will SURVIVE the save-prune.
   const accountById = useMemo<Map<string, AccountPayload>>(
     () => new Map(accounts.map((a) => [a.id, a.payload])),
     [accounts],
   );
 
-  // True iff a draft row's source passes the same kept-draft predicate
-  // `buildNextQcd` prunes by (active `RETIREMENT_IRA` + `PRE_TAX` owned by the
-  // giver). A row that FAILS this is going to be pruned on save, so the window
-  // validations below must NOT flag it — a prunable bad-source row's backwards
-  // or overlapping window must never block the documented save-prune cleanup.
+  // A row failing the kept-draft predicate is pruned on save, so the window validations must not flag it or block the prune cleanup.
   const isKeptDraft = useMemo<(q: DraftQcd) => boolean>(
     () =>
       (q: DraftQcd): boolean =>
@@ -424,21 +349,11 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
     [accountById],
   );
 
-  // Resolve every row to its inclusive `[startYear, endYear]`, keyed by index.
-  // Each row's anchors are EXPLICITLY normalized to the giver's role here
-  // (mirroring the display / save / engine paths) BEFORE resolution, so the age
-  // window always resolves against the giver's birthdate — never a stored or
-  // imported non-giver anchor member (which differs in age). A `null` entry is
-  // unresolvable — EITHER missing birthdate OR an ineligible source that the
-  // save-prune will drop (so its window is never validated/flagged). Both
-  // validations skip a `null` entry. Reused by the backwards +
-  // same-account-overlap checks below.
+  // Anchors are normalized to the giver's role before resolving; a null entry is unresolvable (missing birthdate, or a source the save-prune drops) and both validations skip it.
   const resolvedYears = useMemo<({ startYear: number; endYear: number } | null)[]>(
     () => {
       const ctx = buildQcdResolveCtx(members);
       return qcds.map((q) => {
-        // A row whose source is ineligible will be PRUNED on save, so treat it
-        // as not-validated (null) — never flag a window that won't persist.
         if (!isKeptDraft(q)) return null;
         const giverRole = giverRoleFor(memberById.get(q.memberId));
         return resolveQcdYears(
@@ -453,10 +368,6 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
     [qcds, members, memberById, isKeptDraft],
   );
 
-  // Validation 1 — backwards window (end year before start year). A row whose
-  // resolved startYear > endYear gives nothing. `start == end` (single-year) is
-  // valid; an unresolvable row is skipped (handled by the missing-birthdate
-  // hint, not flagged here). 1-based row numbers.
   const backwardsRows = useMemo<number[]>(() => {
     const offending: number[] = [];
     resolvedYears.forEach((years, i) => {
@@ -466,12 +377,6 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
   }, [resolvedYears]);
   const hasBackwardsWindow = backwardsRows.length > 0;
 
-  // Validation 2 — two rows that draw from the SAME source IRA over overlapping
-  // years. Inclusive year-ranges intersect iff `a1 <= b2 AND a2 <= b1`. Skip
-  // unresolvable or backwards rows (their range is meaningless / handled by
-  // validation 1). Group strictly by `sourceAccountId` (a source is owned by a
-  // single giver, so same account ⟹ same giver). Collects ALL 1-based row
-  // numbers involved in any same-account overlap.
   const overlapRows = useMemo<number[]>(() => {
     const offending = new Set<number>();
     for (let i = 0; i < qcds.length; i += 1) {
@@ -494,13 +399,9 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Single-open-at-a-time collapsible rows, keyed by the row's stable
-  // `draftId` (removing a row above the open one renumbers labels but
-  // must not steal or drop the open state). All rows start collapsed.
   const [openRowId, setOpenRowId] = useState<string | null>(null);
 
-  // Page-level dirty guard hosted here (where `isDirty` lives). Its global
-  // pushState/replaceState patch also intercepts the breadcrumb <Link>.
+  // The global pushState/replaceState patch also intercepts the breadcrumb <Link>.
   const { pendingNavModal, navigateUnguarded } = useUnsavedChangesGuard(isDirty);
 
   const onAdd = (): void => {
@@ -525,8 +426,7 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
     setError(null);
     let savedOk = false;
     try {
-      // Strip the key first so a sparse OMIT (an all-removed list) DELETES the
-      // previously-stored key, then re-spread only the present fragment.
+      // Strip the key first so a sparse omit deletes the previously stored key.
       const {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructure-to-omit: binding exists only to strip the key from the rest
         qualifiedCharitableDistributions: _omit,
@@ -615,11 +515,7 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
                     backwardsRows.includes(i + 1) || overlapRows.includes(i + 1)
                   }
                   onChange={(next) => {
-                    // Switching the giver re-points the source to that member's
-                    // first eligible IRA when the current one no longer applies,
-                    // and re-points the age anchors' member to the new giver's
-                    // role (the anchor member must always follow the giver — the
-                    // engine resolves the window from the giver's birthdate).
+                    // Switching the giver re-points the source and the age anchors' member to the new giver (the window resolves from the giver's birthdate).
                     if (next.memberId !== entry.memberId) {
                       const newGiverRole = giverRoleFor(
                         memberById.get(next.memberId),
@@ -706,7 +602,6 @@ export const QcdEditor: React.FC<QcdEditorProps> = ({
 
       {error && <Alert tone="error">{error}</Alert>}
 
-      {/* Left-aligned, primary action first — AGENTS action-order rule. */}
       <div className="flex justify-start gap-2">
         <button
           type="button"

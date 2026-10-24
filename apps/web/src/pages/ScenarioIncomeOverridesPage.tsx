@@ -1,10 +1,4 @@
-/**
- * Scenario income-overrides sub-screen at /scenarios/:id/income.
- *
- * Hosts the full IncomeOverridesCard for a single scenario. The main
- * scenario detail page renders only a summary link card to keep its
- * surface small. Mirrors ScenarioExpenseOverridesPage one-for-one.
- */
+/** Scenario income-overrides sub-screen at /scenarios/:id/income, hosting the full IncomeOverridesCard. */
 import React, { useMemo } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Link, useParams } from 'react-router';
@@ -23,10 +17,7 @@ export const ScenarioIncomeOverridesPage: React.FC = () => {
   const { id = '' } = useParams<{ id: string }>();
   const { householdId } = useAuth();
   const { notifyPending } = useSync();
-  // Reactive read: the `scenario` store re-reads on any write — single
-  // edits via the fine signal, bulk fills via the coarse workspace event.
-  // The card writes scenario `update` mutations, whose fine signal flows
-  // back through this hook, so there is no separate post-save reload token.
+  // The card writes scenario update mutations whose fine signal flows back through this hook, so there is no separate post-save reload token.
   const scenarioQuery = useAggregates('scenario');
 
   const scenarios = useMemo(
@@ -74,17 +65,12 @@ export const ScenarioIncomeOverridesPage: React.FC = () => {
       </nav>
 
       {householdId ? (
-        // The card owns the page header (title + Reset / Add actions) and
-        // the footer summary; it carries the `scenario-income-heading` id
-        // this section is labelled by.
         <IncomeOverridesCard
           scenario={scenario}
           scenarios={scenarios}
           householdId={householdId}
           onChanged={() => {
-            // The scenario `update` write's fine signal flows back through
-            // `useAggregates('scenario')`, so the card + this page refresh
-            // reactively — `onChanged` only nudges the sync indicator.
+            // The write's fine signal refreshes the card and page reactively; onChanged only nudges the sync indicator.
             notifyPending();
           }}
         />

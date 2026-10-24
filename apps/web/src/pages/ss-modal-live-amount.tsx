@@ -1,9 +1,4 @@
-/**
- * Live monthly-benefit estimate shown inside `SocialSecurityModal` for
- * each member's current slider position.
- *
- * Extracted to keep `SocialSecurityModal.tsx` under the 400-line file cap.
- */
+/** Live monthly-benefit estimate for a member's slider position inside SocialSecurityModal. */
 import React from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Muted } from '../components/Muted';
@@ -18,23 +13,11 @@ import type { Aggregate, HouseholdMemberPayload } from '../db/types';
 interface LiveBenefitAmountProps {
   member: Aggregate<HouseholdMemberPayload>;
   claimAgeYears: number;
-  /** PIA for the member; null when the user has not yet entered one. */
   pia: number | null;
-  /** Called when the user clicks the "Social Security page" link in the
-   *  null-PIA prompt. Should guard dirty state before navigating. */
   onNavigateToSsPage: () => void;
 }
 
-/**
- * Renders the live monthly-benefit estimate for a member's current slider
- * position.
- *
- * - `pia === null` → prompt with a button linking to the SS page (dirty-
- *   state guard fires via `onNavigateToSsPage`).
- * - Unsupported birth year (pre-1943 or unparseable) → graceful fallback
- *   (InvalidBirthYearError handling).
- * - Otherwise → formatted monthly estimate.
- */
+/** Prompts with a link to the SS page when `pia` is null (the dirty guard fires via onNavigateToSsPage), and falls back gracefully for an unsupported birth year (InvalidBirthYearError). */
 export const LiveBenefitAmount: React.FC<LiveBenefitAmountProps> = ({
   member,
   claimAgeYears,
@@ -57,9 +40,7 @@ export const LiveBenefitAmount: React.FC<LiveBenefitAmountProps> = ({
     );
   }
 
-  // fraMonthsForBirthdate throws InvalidBirthYearError for pre-1943
-  // births or an empty / unparseable birthdate. Return a graceful
-  // fallback instead of propagating the exception into the render tree.
+  // fraMonthsForBirthdate throws InvalidBirthYearError for pre-1943 births or an unparseable birthdate; fall back instead of propagating into the render tree.
   let fra: number;
   try {
     fra = fraMonthsForBirthdate(member.payload.birthdate ?? '');

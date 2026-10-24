@@ -1,23 +1,4 @@
-/**
- * Balance Projection page — "Account balances over time" band.
- *
- * Stacked-area chart over a UNIFIED, continuous timeline: historical actuals
- * (from the earliest recorded balance year) → accumulation projection →
- * retirement drawdown. The caller assembles + deflates the rows (historical
- * stays nominal, the projected region deflates through the active path); this
- * band only groups (per-tier when `customOrder` is active, per-AccountType
- * otherwise, or per-individual-account) and renders.
- *
- * The projected region (after the last actual year) is distinguished by a
- * dashed vertical boundary marker at the last actual year + a lower fill
- * opacity across accumulation + drawdown. Per-account carried-forward
- * spans (years held flat from a prior entry) render with a dashed top-edge +
- * more muted fill.
- *
- * The same band serves the Account Balances page as a historical-only surface
- * (`methodLabel` omitted → bare title, no boundary, no projected zone;
- * `showExcludedToggle={false}` → the Show-excluded toggle is suppressed).
- */
+/** "Account balances over time" stacked-area band over a unified timeline (historical actuals, accumulation, drawdown); the caller assembles and deflates the rows and this band only groups and renders. */
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   AccountBalanceStackChart,
@@ -43,9 +24,6 @@ import { bandSectionH2Class } from './accounts-page-chrome';
 
 export type {  StackBandYear };
 
-// ---- AccountType → bucket mapping -------------------------------------------
-
-/** Pre-tax retirement account types (401k / IRA / 403b / 457b / TSP / CBP). */
 const PRE_TAX_TYPES = new Set<AccountType>([
   'RETIREMENT_401K',
   'RETIREMENT_IRA',
@@ -55,7 +33,6 @@ const PRE_TAX_TYPES = new Set<AccountType>([
   'RETIREMENT_CASH_BALANCE',
 ]);
 
-/** Roth account types. */
 const ROTH_TYPES = new Set<AccountType>([
   'RETIREMENT_ROTH_IRA',
   'RETIREMENT_ROTH_401K',
@@ -64,13 +41,10 @@ const ROTH_TYPES = new Set<AccountType>([
   'RETIREMENT_ROTH_TSP',
 ]);
 
-/** Taxable brokerage account types. */
 const TAXABLE_TYPES = new Set<AccountType>(['BROKERAGE']);
 
-/** HSA. */
 const HSA_TYPES = new Set<AccountType>(['HSA']);
 
-/** Cash savings account types (non-retirement liquid). */
 const CASH_TYPES = new Set<AccountType>([
   'SAVINGS',
   'MONEY_MARKET',
@@ -78,61 +52,34 @@ const CASH_TYPES = new Set<AccountType>([
   'OTHER',
 ]);
 
-// ---- Types ------------------------------------------------------------------
-
 interface AccountMeta {
-  /** Account ID (used as key into the per-year account map). */
   readonly id: string;
   readonly name: string;
   readonly type: AccountType;
-  /**
-   * Account tax treatment. Optional: callers that don't supply it (and
-   * existing test fixtures) are treated as non-MIXED/non-Roth-designated, so
-   * a missing value routes the full balance through the by-`type` buckets as
-   * before.
-   */
+  /** Optional: a missing value routes the full balance through the by-type buckets. */
   readonly taxTreatment?: AccountTaxTreatment;
 }
 
 type GroupByMode = 'tier' | 'account';
 
 export interface AccountBalanceStackBandProps {
-  /** Resolved accounts for the active household (name + type + id). */
   readonly accounts: ReadonlyArray<AccountMeta>;
-  /** Unified continuous-timeline rows (historical + accumulation + drawdown),
-   *  already in display dollars. */
   readonly rows: ReadonlyArray<StackBandYear>;
-  /** The last actual (historical) year — the dashed boundary sits here and the
-   *  projected region begins after it. Null/undefined on the
-   *  historical-only accounts surface (no boundary, no projected zone). */
+  /** The dashed boundary sits at the last actual year; null on the historical-only accounts surface (no boundary, no projected zone). */
   readonly boundaryYear?: number | null;
-  /**
-   * When the active strategy is `customOrder`, the ordered tiers and
-   * excluded IDs. Null/undefined → fall back to per-AccountType grouping.
-   */
+  /** The ordered tiers when the strategy is customOrder; null falls back to per-AccountType grouping. */
   readonly customTiers?: ReadonlyArray<ReadonlyArray<string>> | null;
   readonly excludedAccountIds?: ReadonlyArray<string> | null;
-  /** Retirement + death markers rendered as dashed reference lines. */
   readonly markers?: ReadonlyArray<CashflowChartMarker>;
-  /** Household members shown in tooltip header — "<First> (age N)". */
   readonly members?: ReadonlyArray<TooltipMember>;
-  /** Basis label suffixed onto the band title (the MC tier under an MC basis,
-   *  else the deterministic method). OMITTED on the accounts-page surface →
-   *  the bare title "Account balances over time" (no method suffix). */
+  /** Omitted on the accounts-page surface, giving the bare title. */
   readonly methodLabel?: string;
-  /** Optional small note rendered below the band title (shown only under an MC
-   *  basis: "Based on one example simulated path."). */
   readonly subLabel?: string;
-  /** When false, the "Show excluded accounts" toggle + its machinery are
-   *  suppressed (the historical accounts surface). Default true. */
+  /** False suppresses the Show-excluded toggle on the historical accounts surface. */
   readonly showExcludedToggle?: boolean;
-  /** Initial Tier/Type-vs-Account grouping. Defaults to `'tier'` (the
-   *  on-screen default). The PDF render host renders one band per grouping by
-   *  passing `'tier'` and `'account'` so the export captures both views. */
+  /** The PDF render host renders one band per grouping ('tier' and 'account') so the export captures both. */
   readonly initialGroupBy?: GroupByMode;
 }
-
-// ---- Component --------------------------------------------------------------
 
 export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = ({
   accounts,
@@ -154,11 +101,8 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
 
   const hasTiers = customTiers != null && customTiers.length > 0;
 
-  // ---- Build series definition -----------------------------------------------
-
   const series = useMemo((): AccountBalanceStackSeries[] => {
     if (groupBy === 'account') {
-      // Per-account view: one series per account; excluded accounts optionally shown.
       const excludedSet = new Set(excludedAccountIds ?? []);
       const tierColors = [
         colors.acctPreTax,
@@ -183,7 +127,6 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
     }
 
     if (hasTiers) {
-      // Per-tier grouping (customOrder strategy active).
       const tierPalette = [
         colors.acctPreTax,
         colors.acctRoth,
@@ -209,7 +152,6 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
       return result;
     }
 
-    // Per-AccountType fallback for other strategies.
     const result: AccountBalanceStackSeries[] = [
       {
         dataKey: 'acct_preTax',
@@ -240,12 +182,7 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
     colors,
   ]);
 
-  // ---- Build rows ------------------------------------------------------------
-
-  /** For each band row, the per-series `carriedForward` signal: a series is
-   *  carried-forward in a year when every account contributing a non-zero
-   *  balance to it that year is itself carried-forward. Keyed
-   *  series.dataKey → boolean[] aligned with `timeline`. */
+  // A series is carried-forward in a year when every account contributing a non-zero balance to it is itself carried-forward.
   const carriedBySeries = useMemo((): Map<string, boolean[]> => {
     const out = new Map<string, boolean[]>();
     const excludedSet = new Set(excludedAccountIds ?? []);
@@ -258,7 +195,6 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
         const idx = Number(dataKey.slice('tier_'.length));
         return [...(customTiers?.[idx] ?? [])];
       }
-      // Type buckets: map every account into its bucket key.
       return accounts
         .filter((a) => bucketKeyForAccount(a) === dataKey)
         .map((a) => a.id);
@@ -286,7 +222,6 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
     const excludedSet = new Set(excludedAccountIds ?? []);
 
     return timeline.map((yr) => {
-      // Mutable builder; cast to readonly AccountBalanceStackRow at return.
       const row: Record<string, number> = { year: yr.year };
       const balMap = yr.accountBalances;
 
@@ -311,7 +246,6 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
           );
         }
       } else {
-        // Per-AccountType aggregation (canonical routing).
         const buckets = stackTypeBucketsForYear(accounts, yr);
         row['acct_preTax'] = buckets.preTax;
         row['acct_roth'] = buckets.roth;
@@ -331,8 +265,6 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
     accounts,
   ]);
 
-  // ---- Per-series style zones (projected region + carried-forward) ----
-
   const seriesWithZones = useMemo((): AccountBalanceStackSeries[] => {
     if (timeline.length === 0) return series;
     return series.map((s) => {
@@ -344,8 +276,6 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
       return zones.length > 1 ? { ...s, zones } : s;
     });
   }, [series, timeline, boundaryYear, carriedBySeries]);
-
-  // ---- Zoom ------------------------------------------------------------------
 
   const xDomainFull = useMemo((): [number, number] => {
     if (rows.length === 0) return [0, 0];
@@ -359,8 +289,7 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
       const xs = new Set(visibleRows.map((r) => r.x));
       const visible = rows.filter((r) => xs.has(r.year));
       if (visible.length < 2) return null;
-      // Use per-row stacked sum (not individual series max) so the y-domain
-      // matches what the stacked chart actually renders at its tallest bar.
+      // Stacked sum, not individual series max, so the y-domain fits the tallest rendered bar.
       const yMax = Math.max(
         0,
         ...visible.map((r) => series.reduce((sum, s) => sum + (r[s.dataKey] ?? 0), 0)),
@@ -372,8 +301,6 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
   );
 
   const zoom = useChartZoom({ xDomainFull, rowsForY, computeY });
-
-  // ---- Render ----------------------------------------------------------------
 
   const groupByLabel = hasTiers ? 'Group by: Tier | Account' : 'Group by: Type | Account';
   const title =
@@ -430,11 +357,6 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
         </div>
         <div className="report-print-hide flex flex-wrap items-center gap-3">
           <ChartZoomReset isZoomed={zoom.isZoomed} onReset={zoom.reset} />
-          {/* Show-excluded toggle sits left of the Tier/Account picker so
-              the user can decide what to look at before choosing how to
-              group it. Suppressed on the historical accounts surface,
-              where exclusions are a scenario/drawdown concept that doesn't
-              apply. */}
           {showExcludedToggle && (
             <ToggleSwitch
               label="Show excluded accounts"
@@ -480,11 +402,7 @@ export const AccountBalanceStackBand: React.FC<AccountBalanceStackBandProps> = (
   );
 };
 
-// ---- Helpers ----------------------------------------------------------------
-
-/** The five tax-treatment type buckets the by-type band stacks, for one year.
- *  Exported so the PDF table builder mirrors the chart's grouping EXACTLY
- *  (no drift). */
+/** Exported so the PDF table builder mirrors the chart's grouping exactly. */
 export interface StackTypeBuckets {
   readonly preTax: number;
   readonly roth: number;
@@ -493,9 +411,7 @@ export interface StackTypeBuckets {
   readonly cash: number;
 }
 
-/** Sum each account's balance for one timeline year into the five type buckets
- *  the by-type band renders (canonical routing). Shared by the band's
- *  per-type `rows` build and the PDF account-balances-by-type table builder. */
+/** Sums each account's balance for one timeline year into the type buckets; shared by the band's rows and the PDF by-type table builder. */
 export function stackTypeBucketsForYear(
   accounts: ReadonlyArray<AccountMeta>,
   yr: StackBandYear,
@@ -507,9 +423,7 @@ export function stackTypeBucketsForYear(
   let hsa = 0;
   let cash = 0;
   accounts.forEach((acct) => {
-    // MIXED Roth-designated retirement accounts: split pre→Pre-tax band,
-    // post→Roth band. Runs BEFORE PRE_TAX_TYPES so a MIXED TSP isn't
-    // double-routed.
+    // MIXED Roth-designated accounts split pre to Pre-tax and post to Roth; runs before PRE_TAX_TYPES so a MIXED TSP isn't double-routed.
     if (
       acct.taxTreatment === 'MIXED' &&
       isRothDesignatedRetirementType(acct.type)
@@ -519,8 +433,6 @@ export function stackTypeBucketsForYear(
       roth += acctYear?.postEnd ?? 0;
       return;
     }
-    // Pure POST_TAX Roth-designated retirement accounts route the full
-    // balance to the Roth band before the PRE_TAX_TYPES check.
     if (
       acct.taxTreatment === 'POST_TAX' &&
       isRothDesignatedRetirementType(acct.type)
@@ -538,11 +450,8 @@ export function stackTypeBucketsForYear(
   return { preTax, roth, taxable, hsa, cash };
 }
 
-/** The per-AccountType bucket dataKey an account routes to (Type grouping). */
 function bucketKeyForAccount(acct: AccountMeta): string {
   if (acct.taxTreatment === 'MIXED' && isRothDesignatedRetirementType(acct.type)) {
-    // A MIXED Roth-designated account contributes to both Pre-tax and Roth; for
-    // carried-forward signalling treat it under Pre-tax (the dominant bucket).
     return 'acct_preTax';
   }
   if (acct.taxTreatment === 'POST_TAX' && isRothDesignatedRetirementType(acct.type)) {
@@ -556,12 +465,7 @@ function bucketKeyForAccount(acct: AccountMeta): string {
   return 'acct_cash';
 }
 
-/** Classify each row of a series into a zone kind, then collapse contiguous
- *  runs into `SeriesZone` spans covering `[fromX, toX]` (adjacent spans share
- *  their boundary year). A row is `projected` when it sits past the boundary
- *  year; otherwise `carried` when the series is held flat that year, else
- *  `actual`. Returns a single zone (no split) when the whole series is one
- *  kind. */
+// Collapses contiguous runs of one zone kind (projected past the boundary year, carried when held flat, else actual) into spans; adjacent spans share their boundary year.
 function buildSeriesZones({
   timeline,
   boundaryYear,
@@ -582,10 +486,7 @@ function buildSeriesZones({
   for (let i = 1; i <= kinds.length; i++) {
     if (i === kinds.length || kinds[i] !== kinds[start]) {
       const kind = kinds[start];
-      // Each span extends one row BEFORE its start so the filled area visually
-      // connects to the prior zone at their shared boundary row. The forward
-      // end is NOT extended — only one row is shared per boundary, avoiding the
-      // double-paint opacity darkening that a two-row overlap would cause.
+      // Each span extends one row before its start so the fill connects to the prior zone; the forward end is not extended, avoiding double-paint opacity darkening.
       const fromIdx = Math.max(0, start - 1);
       const toIdx = i - 1;
       zones.push({
@@ -601,15 +502,12 @@ function buildSeriesZones({
   return zones;
 }
 
-/** Fill opacity per zone kind: actual full, carried muted, projected lighter.
- * The base series opacity is 0.55. */
 const ZONE_FILL_OPACITY: Record<SeriesZone['kind'], number> = {
   actual: 0.55,
   carried: 0.3,
   projected: 0.28,
 };
 
-/** Top-edge dash per zone kind — only carried-forward spans dash. */
 const ZONE_DASH: Record<SeriesZone['kind'], string | undefined> = {
   actual: undefined,
   carried: '4 3',

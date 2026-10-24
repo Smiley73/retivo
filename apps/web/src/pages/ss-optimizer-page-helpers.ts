@@ -1,9 +1,4 @@
-/**
- * Pure helpers for `SsOptimizerPage.tsx` — row shape, dispatch loops
- * (deterministic + MC), aggregate fan-out, soft-refresh + cache splice
- * primitives, and re-exports of the Apply-flow helpers. Extracted so
- * the page stays under the ≤400-ln shape cap.
- */
+/** Pure helpers for SsOptimizerPage: row shape, deterministic and MC dispatch loops, aggregate fan-out, soft-refresh and cache splice, and re-exports of the Apply helpers. */
 import { dispatchToOptimizerWorker } from '../lib/optimizer-worker-dispatch';
 import { idVersionSignature } from '../lib/aggregate-signature';
 import { listAggregates } from '../db/store';
@@ -40,11 +35,6 @@ export {
   applyMergedOverride,
 } from './ss-optimizer-apply-helpers';
 
-/**
- * Pure splice: returns the row array with the (scenarioId, method)
- * child slot populated. Exposed so the page effect's `onMethodResult`
- * callback stays a one-liner.
- */
 export function spliceMethodResult(
   rows: ReadonlyArray<ScenarioRow>,
   scenarioId: string,
@@ -63,7 +53,6 @@ export function spliceMethodResult(
   });
 }
 
-/** Pure predicate: all deterministic children have resolved. */
 export function allMethodsResolved(rows: ReadonlyArray<ScenarioRow>): boolean {
   return rows.every(
     (r) =>
@@ -72,14 +61,8 @@ export function allMethodsResolved(rows: ReadonlyArray<ScenarioRow>): boolean {
   );
 }
 
-/** Methods the deterministic dispatch loop covers — one worker post
- *  per (scenario, method). Defined once so the orchestrator + progress
- *  totals share one source of truth. */
 const DET_METHODS: ReadonlyArray<ProjectionMethod> = ['planned', 'twr'];
 
-/** Parallel `listAggregates` fan-out — every aggregate type the
- *  optimizer reads. Lives here so the page stays under the ≤400-ln
- *  shape limit. */
 export async function loadOptimizerAggregates(): Promise<OptimizerAggregates> {
   const [
     scenarios,
@@ -121,15 +104,7 @@ export async function loadOptimizerAggregates(): Promise<OptimizerAggregates> {
   };
 }
 
-/**
- * Cheap content signature of a loaded optimizer batch — every aggregate's
- * `id:version` across all sets plus the resolved medical-category ids. The
- * page uses it to keep the `aggregates` state reference stable across
- * no-op re-reads (each `useAggregates` subscription settles its array once
- * on mount and on every store write); a real edit changes a version / set
- * membership and so changes the signature, restarting the dependent runs +
- * invalidating the row cache.
- */
+/** Content signature (id:version across all sets plus medical-category ids) that keeps the page's `aggregates` reference stable across no-op re-reads; a real edit changes it and invalidates the dependent runs and row cache. */
 export function optimizerAggregatesSignature(
   aggregates: OptimizerAggregates,
 ): string {
@@ -150,11 +125,7 @@ export function mcRowFromOutcome(
   outcome: OptimizerMcOutcome | undefined,
   scenarios: ReadonlyArray<ScenarioAggregate>,
 ): ScenarioRow {
-  // Map each MC outcome kind to the worker-equivalent payload so the
-  // page's row-view derivation handles MC + deterministic uniformly.
-  // `cancelled` keeps `result: null` but flags the row so the table
-  // routes it to `CancelledRow` (em-dashes + "Cancelled") instead of
-  // the pre-run idle state.
+  // `cancelled` keeps result: null but flags the row so the table shows CancelledRow instead of the idle state.
   if (!outcome || outcome.kind === 'cancelled') {
     return {
       scenario,
@@ -236,11 +207,7 @@ function parentNameOf(
   return parent?.payload.name ?? null;
 }
 
-/**
- * Filter out soft-deleted scenarios and sort primary-first, then by
- * `name`. Used by both the deterministic + MC dispatch paths so row
- * order matches across metric switches.
- */
+/** Filters soft-deleted scenarios and sorts primary-first, then by name, so row order matches across metric switches. */
 export function orderScenarios(
   scenarios: ReadonlyArray<ScenarioAggregate>,
 ): ScenarioAggregate[] {
@@ -254,14 +221,7 @@ export function orderScenarios(
   );
 }
 
-/**
- * Seed the per-scenario row array with `loading: true` placeholders.
- *  - `metric === 'balance'` → seeds two-method children (Planned + TWR)
- *    so the deterministic table renders parent + 2 child rows from
- *    first paint.
- *  - `metric === 'mc'` → seeds the legacy single-row shape (MC path
- *    unchanged).
- */
+/** Seeds loading placeholders: two-method children (Planned + TWR) for 'balance', the single-row shape for 'mc'. */
 export function buildInitialRows(
   ordered: ReadonlyArray<ScenarioAggregate>,
   allScenarios: ReadonlyArray<ScenarioAggregate>,
@@ -287,10 +247,7 @@ export function buildInitialRows(
   });
 }
 
-/** Aggregate-change refresh: keep existing results visible (worker
- *  overwrites them in place), add new scenarios as loading
- *  placeholders, drop removed ones. Preserves both deterministic
- *  children when present. */
+/** Aggregate-change refresh: keeps existing results visible, adds new scenarios as loading placeholders and drops removed ones. */
 export function softRefreshRows(
   current: ReadonlyArray<ScenarioRow>,
   ordered: ReadonlyArray<ScenarioAggregate>,
@@ -339,34 +296,20 @@ export interface DeterministicRunArgs {
     readonly ssBenefits: ReadonlyArray<Aggregate<SocialSecurityBenefitPayload>>;
     readonly expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
     readonly incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
-    /** Flag-derived medical category ids — threaded into both the
-     *  deterministic worker input and the MC run args so the optimizer's
-     *  +2pp medical-inflation default follows the `isMedical` flag. */
     readonly medicalCategoryIds?: ReadonlyArray<string>;
   };
   readonly todayIso: string;
   readonly worker: Worker;
   readonly isCurrentRun: () => boolean;
-  /** Per-method reply for one scenario. Page splices into the row's
-   *  `methods[method]` child slot. */
   readonly onMethodResult: (
     scenarioId: string,
     method: ProjectionMethod,
     out: OptimizerWorkerOutbound,
   ) => void;
-  /** Fires on each (scenario, method) tick BEFORE the worker dispatch
-   *  so the progress bar shows the in-flight pair. */
   readonly onProgress?: (tick: DetProgressTick) => void;
 }
 
-/**
- * Dispatch each ordered scenario through the deterministic worker
- * twice — once per method (Planned + TWR). The caller owns the
- * `runIdRef`; `isCurrentRun()` lets the loop drop a stale write
- * whenever a newer dispatch / metric switch raced ahead. Each
- * (scenario, method) reply is forwarded to `onMethodResult`, and a
- * progress tick fires before each dispatch.
- */
+/** Runs each ordered scenario through the deterministic worker per method; isCurrentRun() lets the loop drop a stale write when a newer dispatch raced ahead. */
 export async function runDeterministicOptimizer(
   args: DeterministicRunArgs,
 ): Promise<void> {
@@ -415,24 +358,17 @@ export interface McDispatchArgs {
     a: RunOptimizerMonteCarloArgs,
   ) => Promise<OptimizerMcResult>;
   readonly onProgress: (p: OptimizerMcProgress) => void;
-  /** Per-scenario reply — fires as each scenario's grid resolves so the
-   *  page can splice that one row in before the whole sweep finishes. */
   readonly onScenarioResult: (
     scenarioId: string,
     outcome: OptimizerMcOutcome,
   ) => void;
-  /** Smooth per-scenario path progress — drives the in-flight row's bar. */
   readonly onScenarioProgress: (
     scenarioId: string,
     progress: OptimizerMcScenarioProgress,
   ) => void;
 }
 
-/**
- * Drive the MC orchestrator. Returns the populated rows on a fresh
- * run, or `null` when a newer run / metric switch superseded this
- * one (the page drops the write in that case).
- */
+/** Drives the MC orchestrator; returns the rows, or null when a newer run or metric switch superseded this one. */
 export async function dispatchMcRun(
   args: McDispatchArgs,
 ): Promise<ScenarioRow[] | null> {

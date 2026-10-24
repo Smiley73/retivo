@@ -1,10 +1,4 @@
-/**
- * Deterministic-tab progress bar — sibling of `OptimizerMcProgressBar`,
- * same React Aria `ProgressBar` shape. Ticks are scenario+method pairs
- * (≈ 2N ticks for N non-deleted scenarios — one per method). The
- * verbatim aria-label is `"scenario X / N, method Planned/Historical"` —
- * the method label comes from the canonical `PROJECTION_METHOD_LABELS` map.
- */
+/** Deterministic-tab progress bar (React Aria ProgressBar); ticks are scenario+method pairs and the aria-label is "scenario X / N, method <label>" with the label from PROJECTION_METHOD_LABELS. */
 import React from 'react';
 import { ProgressBar } from 'react-aria-components';
 import type { ProjectionMethod } from '../lib/balance-projection-runner-types';
@@ -13,12 +7,8 @@ import { PROJECTION_METHOD_LABELS } from '../lib/projection-method-labels';
 export interface OptimizerDetProgressBarProps {
   readonly scenarioIdx: number;
   readonly method: ProjectionMethod;
-  /** Global 1-based tick index (scenario × method). Bar's `value`. */
   readonly cumulativeIdx: number;
-  /** Total ticks across the run — `2 × scenarios`. Bar's `maxValue`. */
   readonly totalTicks: number;
-  /** Total non-deleted scenarios; drives the sighted "Scenario X of Y"
-   *  line so the user sees per-scenario rather than tick progress. */
   readonly scenarios: number;
 }
 

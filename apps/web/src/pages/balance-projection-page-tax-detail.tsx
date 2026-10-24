@@ -1,18 +1,4 @@
-/**
- * Balance Projection page — "Taxes & health costs" year-by-year sub-table.
- * Renders the six visible tax-cashflow fields per retirement
- * year — federal tax, IRMAA withheld from Social Security, IRMAA cash-paid,
- * ACA premium-tax-credit offset, the total tax-funded withdrawal, and the
- * credit applied to premiums that lowers the draw — in a
- * dedicated `<TableScroll>` below the main balance table, so the main 8–9
- * column table is not widened.
- *
- * Tax cashflow AFFECTS balances: the engine raised each year's
- * withdrawal target by the tax need, so these dollars were drawn from the
- * portfolio. Years where the solver could not fully fund the bill (or did
- * not converge) surface a per-year warning icon plus a section-level alert,
- * reusing the MAGI-cap breach diagnostic pattern.
- */
+/** "Taxes & health costs" year-by-year sub-table: the six tax-cashflow fields per retirement year in its own TableScroll so the main balance table isn't widened. Years the solver could not fully fund or did not converge get a warning icon and a section alert. */
 import React, { useMemo } from 'react';
 import {
   Cell,
@@ -46,32 +32,19 @@ interface TaxDetailRow {
   readonly irmaaCashPaid: number;
   readonly acaPtcOffset: number;
   readonly taxFundedWithdrawals: number;
-  /** ACA credit left after the offset that lowered the year's draw. */
   readonly acaCreditApplied: number;
-  /** Net TAXABLE required minimum distribution after the QCD offset for the year
-   *  (`gross IRA-pool RMD − min(Q, gross)`). 0 in years with no QCD. */
   readonly netTaxableRmd: number;
-  /** True when a Qualified Charitable Distribution applied this year — gates the
-   *  conditional "Net taxable IRA RMD" column display. */
   readonly hasQcd: boolean;
-  /** True when the solver did not converge OR could not fully fund the
-   *  year's tax bill — drives the per-year warning icon + section alert. */
   readonly unfunded: boolean;
 }
 
 export interface BalanceProjectionTaxDetailProps {
-  /** Active method's runner drawdown years (carry the tax-cashflow fields). */
   readonly drawdownYears: ReadonlyArray<DrawdownYear>;
-  /** Year-end (Dec) deflator → today's dollars when displayMode === 'today'. */
   readonly viewDeflator: (year: number, monthIndex?: number) => number;
-  /** When rendered inside the Tax Burden chart's collapsible disclosure, the
-   *  surrounding section already carries the heading + the toggle-button label
-   *  ("Show taxes & health costs table"), so the component's own `<h2>` would
-   *  be redundant — suppress it. Standalone (default) keeps the heading. */
+  /** Suppresses the component's own <h2> when rendered inside the Tax Burden disclosure, whose section already carries the heading. */
   readonly embedded?: boolean;
 }
 
-/** Map runner drawdown years into the displayed tax-detail rows. */
 function buildTaxDetailRows(
   drawdownYears: ReadonlyArray<DrawdownYear>,
   viewDeflator: (year: number, monthIndex?: number) => number,
@@ -96,10 +69,7 @@ function buildTaxDetailRows(
   });
 }
 
-/** Column header row for the tax-detail table. The "Net taxable IRA RMD" column
- *  is shown only when a Qualified Charitable Distribution applies in the
- *  projection (QCD) so the table is not widened for the common no-QCD
- *  case. */
+// The Net taxable IRA RMD column shows only when a QCD applies, so the common case keeps the original six columns.
 const TaxDetailHeader: React.FC<{ readonly showQcdColumn: boolean }> = ({
   showQcdColumn,
 }) => (
@@ -145,7 +115,6 @@ const TaxDetailHeader: React.FC<{ readonly showQcdColumn: boolean }> = ({
   </TableHeader>
 );
 
-/** Section-level warning alert for years the solver could not fully fund. */
 const UnfundedBanner: React.FC<{ readonly unfundedYears: ReadonlyArray<number> }> = ({
   unfundedYears,
 }) => {
@@ -163,7 +132,6 @@ const UnfundedBanner: React.FC<{ readonly unfundedYears: ReadonlyArray<number> }
   );
 };
 
-/** Body rows for the tax-detail table (one per retirement year). */
 const TaxDetailRows: React.FC<{
   readonly rows: ReadonlyArray<TaxDetailRow>;
   readonly showQcdColumn: boolean;
@@ -228,8 +196,6 @@ export const BalanceProjectionTaxDetail: React.FC<
     [rows],
   );
 
-  // Show the net-taxable-IRA-RMD-after-QCD column only when a QCD applies
-  // — the common no-QCD projection keeps the original six columns.
   const showQcdColumn = rows.some((r) => r.hasQcd);
 
   return (

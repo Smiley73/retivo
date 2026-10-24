@@ -1,40 +1,12 @@
-/**
- * Shared chrome for the scenarios / expenses / income area (Graphite Spectrum
- * semantic tokens). The
- * semantic-token replacement for the legacy `.card` / `.field` /
- * `.field-group` / `.section-card-*` / `.banner` / `.muted` / `.error`
- * markup these pages leaned on.
- *
- * Why a chrome module (not inline strings everywhere): these
- * pages share one control vocabulary — the scenario subsection summary
- * card (title + body + Configure/Reset actions, with an "overridden"
- * tint), a WAI-ARIA labelled field group (the preserved
- * `<div role="group">` + `<header>` pattern, NOT `<fieldset>`), and a
- * status banner. Centralising the class strings keeps the code DRY and
- * — critically — keeps the already-oversized `ScenarioDetailPage`
- * and the other large
- * pages from growing as legacy classes are replaced by longer utility
- * strings. Mirrors the established `accounts-page-chrome.tsx` /
- * `auth-page-chrome.tsx` pattern; the control classes (buttons, inputs,
- * selects, tables) are re-exported from `accounts-page-chrome.tsx` so
- * there is one source of truth for the shared form vocabulary.
- *
- * Visual style only — no behavioral contract. Every fg/bg pair is an
- * AA-safe Graphite Spectrum pair from apps/web/src/lib/contrast.ts.
- */
+/** Shared chrome for the scenarios, expenses and income pages: summary cards, field groups, banners and the re-exported control classes. */
 import React from 'react';
 import { Muted } from '../components/Muted';
 import { RefreshIcon, SlidersIcon } from '../components/icons';
-// Internal use by the chrome components below (the re-export block makes
-// the same strings available to call sites).
 import {
   btnSecondarySmClass as btnSecondarySmClassInternal,
   btnDangerSmClass as btnDangerSmClassInternal,
 } from './accounts-page-chrome';
 
-// Re-export the shared form-control vocabulary so these call sites
-// import everything from one chrome module (single source of truth —
-// these strings live in accounts-page-chrome.tsx).
 export {
   btnPrimaryClass,
   btnSecondaryClass,
@@ -52,16 +24,7 @@ export {
   breadcrumbNavClass,
 } from './accounts-page-chrome';
 
-/**
- * Success button at the small size (row actions). A **standalone** class
- * string — not a full-size success class with `px-2.5 py-1 text-xs`
- * appended — because Tailwind v4 emits same-specificity utilities in
- * numeric source order, so a role class's `px-4 py-2` would beat the
- * appended `px-2.5 py-1` regardless of className order (the concat path
- * silently rendered the full-size padding). Compact sizing
- * (`px-2.5 py-1 text-xs`, no `font-medium`); AA-safe pair unchanged.
- * See "Buttons and destructive actions" in docs/ui-conventions.md.
- */
+/** Standalone, not concatenated with a size class (Tailwind v4 source order; see "Buttons and destructive actions" in docs/ui-conventions.md). */
 export const btnSuccessSmClass =
   'inline-flex items-center justify-center rounded-md ' +
   'bg-positive px-2.5 py-1 text-xs text-surface shadow-sm ' +
@@ -69,42 +32,17 @@ export const btnSuccessSmClass =
   'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
   'disabled:cursor-not-allowed disabled:opacity-50';
 
-/** Inline error line (legacy `.error`). */
 export const errorTextClass =
   'my-2 text-sm font-medium text-negative';
 
-/**
- * Footer summary line below an overrides screen (the mock `.foot-note`):
- * a muted, slightly-undersized count line ("N disabled · N modified · N
- * scenario-only." / "N of M accounts overridden."). Sits below the
- * content card / table with the mock's 18px top margin. The 12.5px size
- * and 18px margin are exact mock values with no nearest-token equivalent
- * (`text-xs`=12px / `text-sm`=14px both miss 12.5px; `mt-4`=16px /
- * `mt-5`=20px both miss 18px), so they ride arbitrary-value utilities.
- */
 export const footNoteClass =
   // eslint-disable-next-line no-restricted-syntax -- Graphite Spectrum mock .foot-note geometry (12.5px text, 18px top margin) has no nearest-token equivalent
   'mt-[18px] text-[12.5px] text-muted';
 
-/**
- * Bordered explanation callout (the mock `.note`): a sunken-surface block
- * with a hairline border, used for the intro explanation above the
- * Contributions / Returns override tables instead of plain muted
- * paragraphs. The 14px radius, 16px/18px padding, 13.5px text, and 22px
- * bottom margin are exact mock values with no nearest-token equivalent,
- * so they ride arbitrary-value utilities. The `line` border on the
- * `surface-sunken` fill is decorative (the fill + padding convey the
- * block — WCAG 1.4.11-exempt, same carve-out as `<Card>`); the
- * `muted`-on-`surface-sunken` text pair is an AA pair in contrast.ts.
- */
 export const noteClass =
   // eslint-disable-next-line no-restricted-syntax -- Graphite Spectrum mock .note geometry (14px radius, 16px/18px pad, 13.5px text, 22px margin) has no nearest-token equivalent
   'mb-[22px] rounded-[14px] border border-line bg-surface-sunken px-[18px] py-[16px] text-[13.5px] leading-relaxed text-muted';
 
-/**
- * Status banner (legacy `.banner` / `.banner--warn`). A soft-tinted
- * informational block; `tone="warn"` is the amber variant.
- */
 export function bannerClass(tone: 'neutral' | 'warn' = 'neutral'): string {
   const base = 'my-2 rounded-md border px-3.5 py-2.5 text-sm';
   return tone === 'warn'
@@ -112,13 +50,7 @@ export function bannerClass(tone: 'neutral' | 'warn' = 'neutral'): string {
     : `${base} border-line bg-surface-sunken text-ink`;
 }
 
-/**
- * WAI-ARIA labelled field group — the preserved
- * `<div role="group">` + `<header>` pattern (NOT a `<fieldset>`; see
- * AGENTS UI coding standards: native fieldset has
- * first-paint flex/grid sizing quirks). Deterministic flex layout from
- * the first paint; the header text is the accessible group name.
- */
+// A `<div role="group">` + `<header>`, not a `<fieldset>`: native fieldset has first-paint flex/grid sizing quirks.
 interface FieldGroupProps {
   /** Visible header text — also the accessible group name. */
   legend: React.ReactNode;
@@ -161,18 +93,6 @@ export const FieldGroup: React.FC<FieldGroupProps> = ({
   );
 };
 
-/**
- * Scenario subsection summary card — the legacy
- * `.card.stack[.card--overridden]` + `.section-card-row` /
- * `.section-card-body` / `.section-card-actions` pattern, re-expressed
- * in Tailwind defaults. Title above a two-column row: body copy on the
- * left, stacked action buttons (Configure + optional Reset) on the
- * right. `overridden` applies a soft accent wash surfacing the
- * "customised" state without shifting layout.
- *
- * The card flexes to fill a row and never shrinks below 280px (the
- * legacy `flex: 1; min-width: 280px`).
- */
 interface SummarySectionCardProps {
   /** Visible card title — also the accessible section name. */
   title: React.ReactNode;
@@ -193,8 +113,6 @@ const SUMMARY_CARD_BASE =
 
 const SUMMARY_CARD_TONE = {
   default: 'bg-surface-raised',
-  // Soft accent wash for the "this section is customised" state — the
-  // legacy `.card--overridden` accent tint, AA-safe.
   overridden: 'bg-accent-subtle',
 } as const;
 
@@ -229,10 +147,6 @@ export const SummarySectionCard: React.FC<SummarySectionCardProps> = ({
   );
 };
 
-/**
- * The "No scenario overrides." / summary line inside a
- * `<SummarySectionCard>` — a single muted line with no margin.
- */
 export const SummaryCardBody: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => (
@@ -241,13 +155,6 @@ export const SummaryCardBody: React.FC<{ children: React.ReactNode }> = ({
   </Muted>
 );
 
-/**
- * The Configure + optional Reset action pair every scenario subsection
- * summary card renders in its `<SummarySectionCard actions>` slot.
- * Centralised so the ~17-line button block isn't copy-pasted into every
- * card (keeps the already-oversized `ScenarioDetailPage` /
- * `ScenarioExpenseSubsectionCards` from growing).
- */
 interface ConfigureResetActionsProps {
   /** Visible-label suffix for the aria-labels (e.g. "life expectancy"). */
   subject: string;
@@ -283,14 +190,6 @@ export const ConfigureResetActions: React.FC<ConfigureResetActionsProps> = ({
   </>
 );
 
-/**
- * A labelled group of scenario override cards — the 4 plain-English topic
- * groups (Timing & longevity · Income & expenses · Savings & investments ·
- * Withdrawals & taxes) the edit screen organises its 13 override cards into.
- * Header carries the group label plus an optional "N customized" badge
- * (absent when the count is 0); the body is the existing three-up override
- * grid. Page-chrome-local — same category as `SummarySectionCard`.
- */
 interface ScenarioCardGroupProps {
   title: string;
   id: string;

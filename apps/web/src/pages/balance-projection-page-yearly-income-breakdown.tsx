@@ -1,9 +1,4 @@
-/**
- * Balance Projection page — "Income breakdown" band (stacked income
- * chart + disclaimer). Extracted from `balance-projection-page-yearly.tsx`
- * to keep the yearly section file under the 400-ln file shape
- * cap.
- */
+/** "Income breakdown" band: stacked income chart and disclaimer. */
 import React, { useCallback, useMemo } from 'react';
 import {
   IncomeBreakdownChart,
@@ -23,17 +18,11 @@ const SECTION_H3_CLASS =
 
 export interface YearlyIncomeBreakdownBandProps {
   readonly breakdownChartRows: ReadonlyArray<IncomeBreakdownPoint>;
-  /** Retirement + life-expectancy markers (the canonical teal
-   *  `Retires <Mon YYYY>` retirement line plus the death lines). */
   readonly chartMarkers: ReadonlyArray<CashflowChartMarker>;
   readonly tooltipMembers: ReadonlyArray<TooltipMember>;
   readonly depletionYear: number | null;
-  /** Granularity owned by this card's own Monthly/Yearly toggle —
-   *  independent of the cashflow card's toggle (they may drift). */
   readonly incomeBreakdownGranularity: CashflowGranularity;
   readonly onGranularityChange: (g: CashflowGranularity) => void;
-  /** Active deterministic method label (Planned / TWR) suffixed onto the
-   *  card title so the user can tell which basis this chart reflects. */
   readonly methodLabel: string;
 }
 
@@ -46,7 +35,7 @@ export const YearlyIncomeBreakdownBand: React.FC<YearlyIncomeBreakdownBandProps>
   onGranularityChange,
   methodLabel,
 }) => {
-  // Hook lives here (section), not in the lazy Inner.
+  // Hook lives in the section, not the lazy Inner.
   const xDomainFull = useMemo((): [number, number] => {
     if (breakdownChartRows.length === 0) return [0, 0];
     return [
@@ -60,7 +49,6 @@ export const YearlyIncomeBreakdownBand: React.FC<YearlyIncomeBreakdownBandProps>
     [breakdownChartRows],
   );
 
-  // Y-range for visible income values so the y-axis auto-fits on zoom.
   const computeY = useCallback(
     (visibleRows: readonly { x: number }[]): [number, number] | null => {
       const xs = new Set(visibleRows.map((r) => r.x));
@@ -95,8 +83,6 @@ export const YearlyIncomeBreakdownBand: React.FC<YearlyIncomeBreakdownBandProps>
         </div>
         <div className="report-print-hide flex items-center gap-2">
           <ChartZoomReset isZoomed={zoom.isZoomed} onReset={zoom.reset} />
-          {/* This card owns an independent granularity toggle, separate
-              from the cashflow card's. */}
           <SegmentedRadioGroup<CashflowGranularity>
             size="sm"
             ariaLabel="Income breakdown chart granularity"

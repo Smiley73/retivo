@@ -1,10 +1,4 @@
-/**
- * Per-scenario per-account asset-mix override page. Mirrors
- * ScenarioReturnsPage.tsx: a table of accounts, each row with an
- * "override?" toggle and three percent inputs (stocks / bonds / cash)
- * that activate when the toggle is on. First-ancestor-wins resolution
- * through the parent chain provides the baseline.
- */
+/** Per-scenario per-account asset-mix overrides, mirroring ScenarioReturnsPage: an "override?" toggle and stocks / bonds / cash percent inputs per account, with first-ancestor-wins baseline resolution through the parent chain. */
 import React, { useEffect, useMemo, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import {
@@ -225,9 +219,6 @@ export function ScenarioAssetMixPage() {
                     {formatPercent(sum)}
                     {r.override && !valid && ' (≠ 100)'}
                   </Cell>
-                  {/* Slash-separated ratios are numeric comparands — mono +
-                      tabular + right-aligned via tdNumClass so they line up
-                      down the column (Tabular-Money Rule). */}
                   <Cell className={`${tdNumClass} text-muted`}>
                     {r.inherited.stocksPct.toFixed(0)}/
                     {r.inherited.bondsPct.toFixed(0)}/

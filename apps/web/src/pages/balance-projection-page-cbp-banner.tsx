@@ -1,8 +1,4 @@
-/**
- * Balance Projection page — CBP remediation banner sibling. Renders
- * when `cbpResolution.ok === false`; otherwise null. Extracted so the
- * page itself stays under the file shape cap.
- */
+/** CBP remediation banner; renders when cbpResolution.ok === false, otherwise null. */
 import React from 'react';
 import { CbpRemediationBanner } from '../components/CbpRemediationBanner';
 import type {

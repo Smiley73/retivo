@@ -1,18 +1,5 @@
-/**
- * Dashboard "Portfolio allocation - by account type" card (Graphite Spectrum).
- *
- * Same visual shell as `DashboardAllocationCard` (a horizontal stacked bar
- * above a key/value legend), but buckets WHOLE accounts by
- * `accountCategory` rather than by tax treatment — so a MIXED 401(k) shows
- * in full under Retirement here, where the allocation card splits it across
- * pre-tax / taxable. The two cards intentionally don't match.
- *
- * HSA gets its own standalone account-category colour (`bg-hsa`) — NOT one
- * of the four locked account-bucket hues; the other categories reuse the
- * bucket fills (pretax / roth / taxable / cash) and Other reuses the
- * neutral `bg-muted`. The bar + swatches are `aria-hidden` decoration; the
- * legend text carries the meaning for assistive tech.
- */
+/** Dashboard "Portfolio allocation - by account type" card: a stacked bar above a legend like DashboardAllocationCard, but bucketing whole accounts by accountCategory (a MIXED 401(k) shows in full under Retirement, so the two cards intentionally don't match).
+* HSA gets a standalone bg-hsa outside the four locked bucket hues; the bar and swatches are aria-hidden and the legend text carries the meaning. */
 import React from 'react';
 import type { AccountCategory } from '../lib/account-category';
 import type { DashboardByTypeSlice } from './use-dashboard-projection';
@@ -65,8 +52,6 @@ export const DashboardByAccountTypeCard: React.FC<
         </p>
       ) : (
         <>
-          {/* Decorative stacked bar — the legend below carries the
-              numbers for assistive tech, so the bar is aria-hidden. */}
           <div
             aria-hidden="true"
             className="flex h-3 w-full overflow-hidden rounded-full"

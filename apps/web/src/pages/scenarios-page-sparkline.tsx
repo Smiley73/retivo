@@ -1,20 +1,5 @@
-/**
- * Scenario-card balance sparkline (the Graphite Spectrum mock `.scn-spark`).
- * A tiny inline trend line of a scenario's per-year portfolio balance —
- * green when the plan still has money at the horizon (final point > $0),
- * red when it has run dry (final point at/below $0). The colour tracks the
- * at-horizon outcome, NOT the rise/fall of the line, so it matches the
- * neighbouring at-horizon dollar figure (red at/below $0) — a normal
- * spend-down that ends with money left over stays green.
- *
- * Purely decorative (`aria-hidden`): the numeric ending balance beside it
- * already carries the meaning for assistive tech, so the line adds no new
- * information — same WCAG 1.4.11 carve-out as the chart-marker glyphs.
- *
- * Geometry (104×34 viewBox, 2px stroke) mirrors the mock exactly; these
- * are SVG-coordinate primitives, not Tailwind spacing, so they live as
- * literal SVG attributes rather than utility classes.
- */
+/** Scenario-card balance sparkline: green when the final point is above $0, red at or below, tracking the at-horizon outcome like the neighbouring dollar figure, not the line's rise or fall.
+* Decorative (aria-hidden): the ending balance beside it carries the meaning (same WCAG 1.4.11 carve-out as the chart-marker glyphs). */
 import React from 'react';
 
 const W = 104;

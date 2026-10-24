@@ -1,16 +1,4 @@
-/**
- * Security page: Change-password card (trigger + modal). The modal is a real
- * `<form>` with current-/new-password autocomplete tokens + a hidden username
- * and locked outside-click dismissal (see "Password managers" in
- * docs/ui-conventions.md).
- *
- * Owns the change-password modal state and its dirty-modal-close +
- * unsaved-changes navigation guards. The success notice is hoisted to the page
- * (it renders at the very top, above the card rows) via `onSuccess`, so the DOM
- * order is identical to the pre-split page. The page-level navigation-guard
- * modal is rendered here too (`pwPendingNavModal`) — its placement does not
- * affect behavior since it portals.
- */
+/** Security page change-password card (trigger + modal), a real form for password managers (see "Password managers" in docs/ui-conventions.md). */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { PasswordChangeCommittedError, PasswordChangeNotSentError } from '../auth/types';
@@ -35,61 +23,21 @@ import {
   KeyIcon,
 } from './profile-page-chrome';
 
-// Mirrors the server-side COMPLEXITY_REGEX (password-validator.service.ts): at
-// least one lower, upper, digit, and one special character from the exact
-// 32-character POSIX [:punct:] ASCII set (hex-range class), so client and
-// server accept the same character set.
+// Mirrors the server's COMPLEXITY_REGEX: one lower, upper, digit and special character from the exact 32-character POSIX punct set.
 const PASSWORD_REGEX =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])/;
 
-/** Rolling-deployment / superseded-session answer: never a validation
- * error on the form — a reload prompt instead. */
 const RELOAD_MESSAGE = 'A newer version of this page is available. Reload the page and try again.';
 
-/** Lost-response wording: the
- * request left the client and there is no authenticated read that can prove
- * an outcome, so neither password can be assumed correct. */
 const SIGN_IN_AGAIN_MESSAGE =
   'We could not confirm whether your password changed. Sign in again — try your new password first, and your old one if that fails.';
 
-/**
- * Error codes the server only ever throws BEFORE any commit — session
- * revocation, denylisting, or re-issue — happens (`ChangePasswordService.
- * commitChangeTransaction`, apps/api/src/auth/change-password.service.ts).
- * A response carrying one of these is a definite rejection, not a lost
- * response: the credential row and the slot are provably unchanged, the same
- * as the 409 `STALE_ENVELOPE_VERSION` / `UPGRADE_REQUIRED` cases already
- * classified `rejected`. Currently only `CHANGE_PASSWORD_CONFLICT` (503, a
- * transient DynamoDB failure caught inside `runTransactWrite`'s
- * `TransientTransactionError` handler) falls outside the ordinary 4xx range
- * this guarantee would otherwise cover.
- */
+// Codes the server only throws before any commit, so a response carrying one is a definite rejection (CHANGE_PASSWORD_CONFLICT is a 503, outside the 4xx range).
 const PRE_COMMIT_GUARANTEED_REJECTION_CODES = new Set(['CHANGE_PASSWORD_CONFLICT']);
 
-/**
- * The observable outcome of a `changePassword` attempt:
- *  - `not-sent` — a preparation failure ({@link PasswordChangeNotSentError}):
- *    nothing was ever sent to the server. Definitely unchanged, safe to retry
- *    from this form with the SAME old password.
- *  - `upgrade-required` — the rolling-deployment / superseded-session answer:
- *    reload, never a validation error.
- *  - `rejected` — a known pre-commit validation/conflict code from the server
- *    (4xx, not the client's own synthesized `UNKNOWN_ERROR` /
- *    `INVALID_RESPONSE` codes, plus any code in
- *    {@link PRE_COMMIT_GUARANTEED_REJECTION_CODES}): the commit was refused
- *    server-side before anything that could make the outcome ambiguous.
- *    Definitely unchanged, safe to retry from this form.
- *  - `committed` — the server CONFIRMED the commit (a 200) but this device
- *    could not durably advance its rollback pin afterwards
- *    ({@link PasswordChangeCommittedError}): the password definitely changed
- *    and the workspace is now locked on this device. Never the sign-in-again
- *    wording (that claims ignorance of a verdict the client has), and never
- *    a route back to the form (the OLD password is definitely wrong now).
- *  - `indeterminate` — a network failure, an unparseable response, or any
- *    other 5xx: the request may have committed and there is no authenticated
- *    read that can tell. Never claim a verdict — sign in again instead of
- *    replaying the old password against the shared per-account login backoff.
- */
+// not-sent and rejected: provably unchanged, retry with the same old password. upgrade-required: reload.
+// committed: the server confirmed but this device could not advance its rollback pin, so the workspace is locked here and the old password is wrong.
+// indeterminate: the request may have committed with no authenticated read to tell, so never claim a verdict; sign in again rather than replaying the old password against the shared login backoff.
 type ChangeOutcome = 'not-sent' | 'upgrade-required' | 'rejected' | 'committed' | 'indeterminate';
 
 function classifyChangePasswordOutcome(err: unknown): ChangeOutcome {
@@ -103,22 +51,16 @@ function classifyChangePasswordOutcome(err: unknown): ChangeOutcome {
     }
     return 'indeterminate';
   }
-  // A network failure / timeout thrown mid-request (not wrapped as
-  // ApiRequestError) after the POST left the client.
   return 'indeterminate';
 }
 
-/** The message for a `not-sent` or `rejected` outcome — nothing changed, so
- * surface the specific reason and keep the form open for a retry. */
 function retryableMessage(err: unknown): string {
   if (err instanceof ApiRequestError) return err.error.message;
   if (err instanceof Error) return err.message;
   return 'Could not change your password. Try again.';
 }
 
-/** What a `rejected` / `not-sent` outcome shows: the server's message, except
- * for `PASSWORD_SLOT_NOT_CANONICAL`, whose reporting link only the web can
- * build — keyed on the error code, never on the message text. */
+// Keyed on the error code, never the message: PASSWORD_SLOT_NOT_CANONICAL's reporting link can only be built by the web.
 function rejectionNotice(err: unknown): React.ReactNode {
   if (err instanceof ApiRequestError && err.error.code === 'PASSWORD_SLOT_NOT_CANONICAL') {
     return (
@@ -132,12 +74,10 @@ function rejectionNotice(err: unknown): React.ReactNode {
 }
 
 interface Props {
-  /** Account email for the hidden username field. */
   email: string;
   /** Page-level error sink (single top-of-page Alert). A node, not only a
    * string, so a message can carry a link. */
   onError: (message: React.ReactNode) => void;
-  /** Fired after a successful change so the page can show the top-of-page notice. */
   onSuccess: () => void;
 }
 
@@ -155,20 +95,10 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
   const [pwNew, setPwNew] = useState('');
   const [pwConfirm, setPwConfirm] = useState('');
   const [pwSubmitting, setPwSubmitting] = useState(false);
-  // A terminal outcome: set on a lost response (`indeterminate` — sign
-  // in again, whichever password signs in is now theirs) or a confirmed
-  // commit whose device-side confirmation failed (`committed` — the workspace
-  // is locked on this device). Once set, the card renders this notice IN
-  // PLACE of the "Change password" trigger, so there is no route back to the
-  // change form that would replay the old password against the shared
-  // per-account login backoff — merely closing the modal would leave the
-  // trigger a click away.
+  // Terminal outcome (indeterminate or committed): rendered in place of the trigger, so no route leads back to a form that would replay the old password against the shared login backoff.
   const [terminalNotice, setTerminalNotice] = useState<string | null>(null);
 
-  // Step-up eligibility: when `AUTH_MFA_ENFORCED`
-  // is on, changing the password requires a fresh second factor on top of the
-  // current password. Loaded on mount from GET /auth/mfa/status; when off the
-  // flow is unchanged (no step-up step).
+  // With AUTH_MFA_ENFORCED on, changing the password also needs a fresh second factor; loaded from GET /auth/mfa/status.
   const [stepUpRequired, setStepUpRequired] = useState(false);
   const [stepUpMethods, setStepUpMethods] = useState<string[]>(['email_otp']);
   const [stepUpRecoveryMethods, setStepUpRecoveryMethods] = useState<string[]>([]);
@@ -183,17 +113,12 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
         if (s.methods?.length) setStepUpMethods(s.methods);
         if (s.recoveryMethods) setStepUpRecoveryMethods(s.recoveryMethods);
       })
-      // A status-read failure leaves the default (no step-up shown); the server
-      // still enforces the factor, surfacing as an error on the change call.
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [getMfaStatus]);
 
-  // The password fields all start empty when the modal opens, so any non-empty
-  // value means the user has typed something — baseline is implicit, no ref
-  // needed. See "Form controls" in docs/ui-conventions.md.
   const isPwDirty = useMemo(
     () => showPwModal && (pwCurrent !== '' || pwNew !== '' || pwConfirm !== ''),
     [showPwModal, pwCurrent, pwNew, pwConfirm],
@@ -214,16 +139,12 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
 
   const pwValid = pwNew.length >= 16 && PASSWORD_REGEX.test(pwNew);
 
-  // Run the actual change, carrying a collected step-up factor when one was
-  // required (the flag-off floor is password-only, so `proof` stays undefined).
   const performChange = useCallback(
     async (proof?: StepUpProof) => {
       setPwSubmitting(true);
       try {
         await changePassword(pwCurrent, pwNew, proof);
-        // Clear the fields BEFORE flipping the modal closed so the dirty memo
-        // sees a clean state on the next render and doesn't briefly think we're
-        // navigating away with unsaved edits.
+        // Clear the fields before closing so the dirty memo doesn't briefly see unsaved edits and block navigation.
         setPwCurrent('');
         setPwNew('');
         setPwConfirm('');
@@ -237,20 +158,8 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
     [changePassword, pwCurrent, pwNew, onSuccess],
   );
 
-  // Step-up factor collection: on a verified factor, run the change inline (so an
-  // ambiguous confirm failure surfaces the modal's non-retryable error).
-  //
-  // `onVerify` runs the WHOLE change-password request (the factor proof rides
-  // in the same body as the passwords) — a failure here is a
-  // password-change outcome, not a bare step-up-factor rejection, so it is
-  // routed through the SAME classifier `onChangePassword` uses
-  // rather than left to `useStepUp`'s generic ambiguous-factor
-  // handling, which would show "couldn't confirm it's you" after a change
-  // that may have already committed, leave the step-up flow open, and still
-  // enable Confirm. The error is swallowed here (never rethrown) so
-  // `useStepUp`'s own catch never runs; `onVerified()` still fires afterward
-  // via the normal resolve path, which is harmless — `onError` already holds
-  // the right message.
+  // onVerify runs the whole change request, so a failure is a password-change outcome: route it through the same classifier as onChangePassword.
+  // useStepUp's generic handling would say "couldn't confirm it's you" after a change that may have committed; the error is swallowed so that handling never runs.
   const stepUp = useStepUp({
     purpose: 'change_password',
     methods: stepUpMethods,
@@ -263,13 +172,7 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
       } catch (err) {
         const outcome = classifyChangePasswordOutcome(err);
         if (outcome === 'indeterminate' || outcome === 'committed') {
-          // Terminal either way: close BOTH modals, never leave Confirm
-          // enabled to invite a replay, and replace the card's trigger with
-          // the outcome notice so the form cannot be reopened. For a lost
-          // response that is the new-password-first sign-in instruction; for
-          // a confirmed-but-unpinned commit it is the specific
-          // change-succeeded / unlock-again message (never the "may or may
-          // not" wording for a verdict the client does have).
+          // Terminal either way: close both modals so Confirm can't invite a replay, and replace the trigger with the outcome notice.
           const notice =
             outcome === 'indeterminate' ? SIGN_IN_AGAIN_MESSAGE : retryableMessage(err);
           setTerminalNotice(notice);
@@ -278,10 +181,7 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
           onError(notice);
           return;
         }
-        // 'upgrade-required' | 'rejected' | 'not-sent': the commit definitely
-        // did not happen server-side. Return to the password form — the
-        // factor was never the problem — rather than leaving the step-up
-        // modal open on it.
+        // The commit definitely did not happen: return to the password form, since the factor was never the problem.
         setShowStepUp(false);
         onError(outcome === 'upgrade-required' ? RELOAD_MESSAGE : rejectionNotice(err));
       }
@@ -290,8 +190,7 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
   });
   const resetStepUp = stepUp.reset;
 
-  // Seed the factor picker once the modal opens (the hook's initial factor was
-  // captured before `methods` loaded from mfa/status — mirrors DeleteAccountCard).
+  // The hook's initial factor was captured before methods loaded from mfa/status (same as DeleteAccountCard).
   useEffect(() => {
     if (showStepUp) resetStepUp();
   }, [showStepUp, resetStepUp]);
@@ -306,9 +205,6 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
       onError('Password must contain at least one uppercase letter, one lowercase letter, one digit, and one special character');
       return;
     }
-    // When step-up is required, gate the change behind a fresh factor: open the
-    // reusable modal, which runs the change on a verified factor. Otherwise
-    // (flag off) change straight away with the password only.
     if (stepUpRequired) {
       setShowStepUp(true);
       return;
@@ -318,14 +214,6 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
     } catch (err) {
       const outcome = classifyChangePasswordOutcome(err);
       if (outcome === 'indeterminate' || outcome === 'committed') {
-        // Lost response: the request may or may not have completed
-        // server-side, and there is no authenticated read that can tell —
-        // never claim a verdict. Or a CONFIRMED commit whose device-side pin
-        // confirmation failed: the change definitely happened and the
-        // workspace is locked here. Both are terminal for this card: close
-        // the form AND replace the trigger with the outcome notice, so
-        // nothing routes back to a form that would replay the old password
-        // against the shared login backoff.
         const notice =
           outcome === 'indeterminate' ? SIGN_IN_AGAIN_MESSAGE : retryableMessage(err);
         setTerminalNotice(notice);
@@ -334,13 +222,9 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
         return;
       }
       if (outcome === 'upgrade-required') {
-        // Rolling-deployment / superseded-session answer: never shown
-        // as a validation error on the form — a reload prompt instead.
         onError(RELOAD_MESSAGE);
         return;
       }
-      // 'rejected' | 'not-sent': nothing changed — the old password still
-      // signs in and still unlocks. Safe to retry from this form.
       onError(rejectionNotice(err));
     }
   };
@@ -352,11 +236,6 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
         subtitle="Change the password you use to sign in."
       >
         {terminalNotice ? (
-          // A terminal outcome replaced the trigger: reopening the form
-          // to replay the old password is exactly what the lost-response
-          // handling exists to prevent, so the way forward (sign in again /
-          // unlock again) is stated instead until a fresh session renders
-          // this card anew.
           <Muted className="block text-sm">{terminalNotice}</Muted>
         ) : needsKeySetup ? (
           <Muted className="block text-sm">
@@ -378,30 +257,20 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
         )}
       </SettingsCard>
 
-      {/* Render through PasswordManagerModal (the containment-free overlay):
-          the scrim swallows outside clicks — a password-manager popup renders
-          outside the dialog, so clicking it would otherwise fire the
-          dirty-guard close mid-entry — and the background is never inert, so
-          the popup stays interactive. Esc is left enabled
-          (`keyboardDismissDisabled` unset) so it routes through
-          `pwGuardedClose` (the dirty guard); Cancel still closes immediately. */}
+      {/* PasswordManagerModal: the scrim swallows outside clicks (a password-manager popup renders outside the dialog and would fire the dirty-guard close) and the background stays interactive. Esc routes through pwGuardedClose. */}
       <PasswordManagerModal
         open={showPwModal && !showStepUp}
         onClose={pwGuardedClose}
         title="Change password"
         size="md"
       >
-        {/* Real form (password-manager interop): managers detect the
-            change-password shape from the
-            current-/new-password autocomplete tokens + the hidden username,
-            offer "update password?" on submit, and can fill-and-submit. */}
+        {/* A real form with current-/new-password autocomplete tokens and a hidden username, so managers offer to update the password. */}
         <form
           method="post"
           noValidate
           onSubmit={(e) => {
             e.preventDefault();
-            // Same gate as the submit button: Enter (or a manager's
-            // fill-and-submit) can't bypass validation or double-fire.
+            // Same gate as the submit button, so Enter or a manager's fill-and-submit can't bypass validation or double-fire.
             if (pwSubmitting || !pwCurrent || !pwValid || pwNew !== pwConfirm) return;
             void onChangePassword();
           }}
@@ -467,7 +336,6 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
               />
             </Field>
           </div>
-          {/* Left-aligned, primary first — AGENTS modal rule. */}
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <button
               type="submit"
@@ -488,10 +356,6 @@ export const PasswordChangeCard: React.FC<Props> = ({ email, onError, onSuccess 
         </form>
       </PasswordManagerModal>
 
-      {/* Fresh second-factor step-up: shown only
-          when `AUTH_MFA_ENFORCED` is on, after the password form. Verifying a
-          factor runs the change inline; an ambiguous failure surfaces the
-          modal's non-retryable error. */}
       <StepUpModal
         open={showStepUp}
         onClose={() => {

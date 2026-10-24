@@ -1,11 +1,4 @@
-/**
- * Preferences view (Settings → Preferences). Route shell + card layout only.
- * Holds the Appearance theme picker, the Beta features switch and (when the
- * build offers it) the AI assistants card; the
- * security/account and data/workspace cards moved to the Security and
- * Workspace pages. The route path stays `/profile` for back-compat; the nav
- * label and page heading read "Preferences".
- */
+/** Preferences view (Settings → Preferences): route shell and card layout with the Appearance theme picker, the Beta features switch and, when the build offers it, the AI assistants card. The route path stays /profile for back-compat. */
 import React, { useId } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { SegmentedRadioGroup } from '../components/SegmentedRadioGroup';
@@ -19,11 +12,7 @@ import { PageHeader } from '../components/PageHeader';
 import { AssistantSettingsCard } from './AssistantSettingsCard';
 import { CardPair, SettingsCard } from './profile-page-chrome';
 
-// Theme-picker glyphs for the Appearance SegmentedRadioGroup (mock
-// `.seg button svg` sun / moon / monitor, 14px, currentColor so they
-// inherit the option's ink — accent-ink when checked). Decorative: the
-// SegmentedRadioGroup renders them aria-hidden, so each option's
-// accessible name stays its label ("Light" / "Dark" / "System").
+// Decorative theme-picker glyphs: SegmentedRadioGroup renders them aria-hidden, so each option's accessible name stays its label.
 const themeIconClass = 'size-3.5';
 
 const SunIcon = () => (
@@ -46,12 +35,7 @@ const MonitorIcon = () => (
   </svg>
 );
 
-/**
- * The Beta features card: the "Show beta features" switch plus a plain
- * disclaimer about what beta means. Renders nothing when this build offers no
- * beta features (the config list is `none`) — a switch that controls nothing
- * would only confuse.
- */
+// The "Show beta features" switch; renders nothing when the build offers no beta features, since a switch that controls nothing would only confuse.
 const BetaFeaturesCard: React.FC = () => {
   const { showBetaFeatures, setShowBetaFeatures, offeredBetaFeatures } = useBetaFeatures();
   const disclaimerId = useId();
@@ -99,11 +83,7 @@ export const PreferencesPage: React.FC = () => {
           <p className="m-0 mb-4 text-xs text-muted">
             Choose your preferred theme.
           </p>
-          {/* Mock `.seg` icon-segmented theme picker (replaces the prior
-              <Select> dropdown). The "Appearance" card title is the label,
-              so the group's accessible name rides `ariaLabel="Theme"`.
-              Wired to useTheme() — selecting an option persists identically
-              to the dropdown (setTheme → localStorage, no behavior change). */}
+          {/* The card title is the label, so the group's accessible name rides ariaLabel="Theme". */}
           <SegmentedRadioGroup
             ariaLabel="Theme"
             size="sm"
@@ -118,7 +98,6 @@ export const PreferencesPage: React.FC = () => {
         </Card>
         <BetaFeaturesCard />
       </CardPair>
-      {/* Absent unless the build carries the bridge port and the beta feature is visible. */}
       {assistantOffered && (
         <div className="mb-6 [&>*]:mb-0">
           <AssistantSettingsCard />

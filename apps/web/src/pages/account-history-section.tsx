@@ -1,13 +1,4 @@
-/**
- * Per-account Balances page — history chart section card (ending
- * balance + return % stacked line charts). Extracted from
- * AccountBalancesPage.tsx to keep the page under the 400-ln
- * file shape cap.
- *
- * Owns the section card chrome, the h2 header, the ChartZoomReset
- * button, and the useChartZoom call so the Reset button stays visible
- * during the lazy-chart Suspense fallback.
- */
+/** Per-account history chart section: ending balance and return % stacked line charts. Owns the useChartZoom call so the Reset button stays visible during the lazy-chart Suspense fallback. */
 import React, { useCallback, useMemo } from 'react';
 import {
   AccountHistoryCharts,
@@ -23,8 +14,7 @@ export interface AccountHistorySectionProps {
 export const AccountHistorySection: React.FC<AccountHistorySectionProps> = ({
   rows,
 }) => {
-  // Hook lives here (section), not in the lazy Inner.
-  // Sort once; reuse for xDomainFull and rowsForY.
+  // Hook lives in the section, not the lazy Inner. Sorted once for xDomainFull and rowsForY.
   const sorted = useMemo(
     () => [...rows].sort((a, b) => a.year - b.year),
     [rows],
@@ -40,8 +30,6 @@ export const AccountHistorySection: React.FC<AccountHistorySectionProps> = ({
     [sorted],
   );
 
-  // Y-range for visible balance values so the y-axis auto-fits on zoom.
-  // Use `sorted` (not `rows`) so filter matches the already-sorted set.
   const computeY = useCallback(
     (visibleRows: readonly { x: number }[]): [number, number] | null => {
       const xs = new Set(visibleRows.map((r) => r.x));

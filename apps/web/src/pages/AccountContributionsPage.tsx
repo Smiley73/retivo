@@ -1,12 +1,4 @@
-/**
- * Annual contributions.
- *
- * Reads `account` + `accountBalance` + `householdMember` aggregates
- * from IndexedDB; computes planned/actual/remaining via
- * `apps/web/src/lib/contributions-calc.ts` (same shape the legacy
- * server returned). Saves the per-row planned values by queueing an
- * `update` mutation on each dirty `Account` aggregate.
- */
+/** Annual contributions: planned, actual and remaining per account via lib/contributions-calc.ts; saves dirty rows by queueing an update on each Account aggregate. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Cell,
@@ -70,22 +62,12 @@ import {
 interface PlannedDraft {
   preTax: number;
   postTax: number;
-  /** Per-account annual-increase rate (percent). `undefined` = tracks
-   *  inflation (the "Match inflation" placeholder); an explicit number
-   *  (incl. `0` = flat-nominal) overrides. Mirrors the optional
-   *  `AccountPayload.contributionGrowthPct` field. */
+  /** undefined tracks inflation (the "Match inflation" placeholder); an explicit number, including 0 = flat-nominal, overrides. */
   growthPct?: number;
 }
 
-// HSA accounts show the PRE-TAX contribution field ONLY: an HSA contribution is
-// made pre-tax (payroll deduction), so it is stored on the pre-tax side
-// (`plannedContributionPreTax`, e.g. the demo $4,150) and the post-tax field is
-// hidden. Tax-free withdrawals are handled separately by `taxTreatment === 'HSA'`
-// (and, for Roth, `taxTreatment === 'ROTH'`), independent of the contribution
-// field. The app does not enforce IRS
-// contribution limits.
-// Treatment-editability rules live in contributions-calc.ts (shared with the
-// scenario contributions page).
+// HSA shows the pre-tax field only: an HSA contribution is made pre-tax (payroll deduction), so it is stored on the pre-tax side and the post-tax field is hidden.
+// The app does not enforce IRS contribution limits. Editability rules live in contributions-calc.ts, shared with the scenario contributions page.
 const isEditablePreTax = isTreatmentEditablePreTax;
 const isEditablePostTax = isTreatmentEditablePostTax;
 
@@ -127,10 +109,7 @@ export const AccountContributionsPage: React.FC = () => {
         const summary = computeContributionSummary(accountInputs, balances, memberById, year);
         setData(summary);
 
-        // The growth rate lives on the raw `AccountPayload` (not on the
-        // computed contribution row), so map it by id here. An out-of-band
-        // stored value is dropped to absent (tracks inflation) so the draft
-        // never seeds a corrupt rate.
+        // Growth lives on the raw AccountPayload; an out-of-band stored value is dropped to absent (tracks inflation) so the draft never seeds a corrupt rate.
         const growthById = new Map<string, number | undefined>();
         for (const a of accounts) {
           const pct = a.payload.contributionGrowthPct;
@@ -185,9 +164,6 @@ export const AccountContributionsPage: React.FC = () => {
     [],
   );
 
-  // Set an explicit annual-increase rate (incl. `0` = flat-nominal). Passing
-  // `undefined` clears it back to the tracks-inflation default ("Match
-  // inflation").
   const updateGrowth = useCallback(
     (accountId: string, value: number | undefined) => {
       setDrafts((prev) => ({
@@ -216,9 +192,7 @@ export const AccountContributionsPage: React.FC = () => {
           plannedContributionPreTax: nextPlannedPre,
           plannedContributionPostTax: nextPlannedPost,
         };
-        // `undefined` growth = tracks inflation → omit the field entirely so
-        // the resolver falls back to the default. An explicit number (incl.
-        // `0` = flat-nominal) is stored; an out-of-band value is dropped.
+        // undefined growth omits the field so the resolver falls back to the default; an out-of-band value is dropped.
         if (isValidContributionGrowthPct(draft.growthPct)) {
           payload.contributionGrowthPct = draft.growthPct;
         } else {
@@ -272,8 +246,6 @@ export const AccountContributionsPage: React.FC = () => {
                 {
                   label: 'Cancel',
                   icon: <XIcon />,
-                  // Revert edits: bumping the reload token re-reads the
-                  // saved values and resets the drafts, flipping isDirty off.
                   onClick: () => setReloadToken((n) => n + 1),
                   disabled: saving,
                   tone: 'neutral',
@@ -290,9 +262,6 @@ export const AccountContributionsPage: React.FC = () => {
           const { accounts, summary } = data;
           const colorTotal = (v: number) =>
             v < 0 ? valueNegativeClass : v > 0 ? valuePositiveClass : undefined;
-          // `remainingLabel` / `remainingText` (the Overpaid relabel +
-          // absolute-amount display) live in accounts-page-chrome so
-          // this page stays under the ≤400-line shape limit.
           const remainingTile = (v: number) => remainingText(v, formatCurrency);
           const formatRemaining = (planned: number, remaining: number) => {
             if (planned === 0) return { text: '—', cls: undefined };
@@ -359,8 +328,6 @@ export const AccountContributionsPage: React.FC = () => {
                 </EmptyState>
               ) : (
                 <>
-                  {/* Canonical scrolling TableScroll card + sticky headers
-                      matching the other data tables. */}
                   <TableScroll label="Annual contributions per account">
                   <Table
                     aria-label="Annual contributions per account"
@@ -386,9 +353,6 @@ export const AccountContributionsPage: React.FC = () => {
                         const bucket = accountBucket(a.type);
                         return (
                           <Row key={a.id} id={a.id}>
-                            {/* Name cell hosts the absolutely-positioned
-                                bucket bar, so it must be `relative` — matching
-                                Accounts / Account Balances. */}
                             <Cell className={`${cell} relative`}>
                               <BucketBar bucket={bucket} />
                               {a.name}
@@ -405,11 +369,6 @@ export const AccountContributionsPage: React.FC = () => {
                                 {ACCOUNT_TYPE_LABELS[a.type]}
                               </Badge>
                             </Cell>
-                            {/* Editable amount columns are kept narrow (the
-                                input no longer claims full cell width) so the
-                                Name / Owner / Type text columns get the slack.
-                                tdNumClass right-aligns the box under its
-                                right-aligned header. */}
                             <Cell className={tdNumClass}>
                               {editablePre && (
                                 <span className="inline-block w-28">
@@ -436,11 +395,7 @@ export const AccountContributionsPage: React.FC = () => {
                                 </span>
                               )}
                             </Cell>
-                            {/* Annual-increase rate. Absent = the
-                                non-numeric "Match inflation" placeholder
-                                (this page has no scenario context, so no
-                                resolved %); an explicit number (incl. 0 =
-                                flat-nominal) overrides. */}
+                            {/* Absent shows the non-numeric "Match inflation" placeholder (no scenario context here, so no resolved %); an explicit number overrides. */}
                             <Cell className={tdNumClass}>
                               {draft.growthPct === undefined ? (
                                 <button
