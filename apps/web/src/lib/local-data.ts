@@ -1,16 +1,9 @@
-// The "clear data on this device" wipe and the account-deletion wipe. Adding a
-// storage mechanism means extending `clearAllLocalData`.
+// The "clear data on this device" and account-deletion wipe; a new storage mechanism must extend `clearAllLocalData`.
 
 import { dropLocalDatabase } from '../db/store';
 import { clear as clearDiagnosticsRings } from './diagnostics/logger';
 
-/**
- * `preserveSessionKeys` keeps the account-deletion toast across the
- * `sessionStorage.clear()`. `preserveLocalKeys` keeps the deviceId there: that
- * path does not reload, so a stale in-memory deviceId against a wiped stored
- * one would trip `DEVICE_MISMATCH` on re-login. The clear-data button passes
- * neither and hard-reloads, which regenerates the deviceId.
- */
+/** `preserveSessionKeys` keeps the account-deletion toast; `preserveLocalKeys` keeps the deviceId on that no-reload path, where a stale in-memory id against a wiped stored one would trip `DEVICE_MISMATCH` on re-login. */
 export interface ClearAllLocalDataOptions {
   preserveLocalKeys?: readonly string[];
   preserveSessionKeys?: readonly string[];
@@ -32,21 +25,10 @@ function clearStoragePreserving(
 }
 
 /**
- * Wipes every client-side storage surface; does not sign anyone out. The
- * device-clear caller reaches it only after `AuthContext.signOutForDeviceClear`
- * has proven the server session is gone.
- *
- * Surfaces covered:
- * 1. `localStorage` and `sessionStorage`, cleared wholesale whatever the key,
- *    minus the `preserve*` keys.
- * 2. The single `retirement` IndexedDB database, which already holds the Monte
- *    Carlo cache, `selectedScenario`, `deviceMetadata` and `diagnosticLogs`.
- * 3. The diagnostics logger's in-memory ring buffers, which live outside
- *    IndexedDB and survive the drop.
- * 4. Cache Storage, best-effort: a rejection never aborts the wipe or the reload.
- *
- * Cookies are not touched: the auth cookies are HTTP-only and server-managed,
- * so JS cannot clear them.
+ * Wipes every client-side storage surface without signing anyone out: `localStorage` and `sessionStorage` (minus the `preserve*` keys),
+ * the `retirement` IndexedDB database, the diagnostics logger's in-memory ring buffers (outside IndexedDB, so the drop leaves them)
+ * and Cache Storage (best-effort: a rejection never aborts the wipe). Cookies are untouched: the auth cookies are HTTP-only and
+ * server-managed, so JS cannot clear them.
  */
 export async function clearAllLocalData(
   opts: ClearAllLocalDataOptions = {},
@@ -62,7 +44,7 @@ export async function clearAllLocalData(
         await globalThis.caches.delete(key);
       }
     } catch {
-      // Best-effort: never block the wipe.
+      // Best-effort.
     }
   }
 }

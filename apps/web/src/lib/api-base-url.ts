@@ -21,15 +21,7 @@ function resolveApiBaseUrl(): string {
 }
 
 /**
- * API base URL, resolved once at module load; the first match wins:
- * 1. A non-empty `VITE_API_BASE_URL` is used verbatim.
- * 2. Dev with a blank or missing value derives `http://${location.hostname}:3001`,
- *    so a localhost browser and a LAN device each reach the API on the host
- *    they loaded from. This branch must run before the same-origin one: the
- *    web port has no API behind it.
- * 3. Prod with a blank value (`""`) is same-origin, behind CloudFront `/api/*`.
- * 4. Prod with a missing value throws, so a misconfigured build fails visibly.
- *
- * A non-default API port needs an explicit `VITE_API_BASE_URL`.
+ * First match wins, resolved once at load: (1) non-empty `VITE_API_BASE_URL`, verbatim; (2) dev: `http://${location.hostname}:3001`, tried before 3 because the web port has no API;
+ * (3) prod `""`: same-origin behind CloudFront `/api/*`; (4) prod unset: throws. A non-default API port needs an explicit value.
  */
 export const API_BASE_URL: string = resolveApiBaseUrl();
