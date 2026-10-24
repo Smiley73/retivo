@@ -1,11 +1,3 @@
-/**
- * API base URL resolution tests.
- *
- * The module resolves `API_BASE_URL` once at load, so each case stubs the
- * env + browser host, resets the module registry, then dynamically imports
- * a fresh copy. Covers: explicit env wins; dev + blank → derive from the
- * browser host (localhost and LAN); prod + missing → throw.
- */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 async function loadModule(opts: {

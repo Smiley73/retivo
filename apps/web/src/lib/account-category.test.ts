@@ -1,10 +1,3 @@
-/**
- * Exhaustive mapping test for `accountCategory` — every `AccountType` enum
- * member maps to its expected whole-account category. The case list mirrors
- * the enum in db/types.ts; a new account type added there without a category
- * mapping fails the TS exhaustiveness check in account-category.ts and this
- * test's enum coverage.
- */
 import { describe, expect, it } from 'vitest';
 import { accountCategory, type AccountCategory } from './account-category';
 import type { AccountType } from '../db/types';

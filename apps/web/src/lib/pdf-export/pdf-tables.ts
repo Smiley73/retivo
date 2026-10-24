@@ -59,7 +59,7 @@ export function formatDollars(value: number | null | undefined): string {
 }
 
 /** Format a percent value (already a percent, e.g. `5.5`) to one decimal. */
-export function formatPercent(value: number | null | undefined): string {
+function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—';
   return `${value.toFixed(1)}%`;
 }
@@ -207,7 +207,7 @@ export function buildReportIncomeTableSpec(
  * Sum `fields` of `rows` per calendar year in first-seen order; rows already one-per-year pass
  * through.
  */
-export function aggregateByYear<K extends string>(
+function aggregateByYear<K extends string>(
   rows: ReadonlyArray<{ year: number } & Record<K, number>>,
   fields: ReadonlyArray<K>,
 ): Array<{ year: number } & Record<K, number>> {
@@ -566,7 +566,7 @@ function guidanceAccountSplit(account: GuidanceYearRow['accounts'][number]): str
  * Withdrawal-guidance table from display-basis rows: per year a summary row, RMD group instruction
  * rows and per-account sub-rows, then the notes once.
  */
-export function buildWithdrawalGuidanceTableSpec(
+function buildWithdrawalGuidanceTableSpec(
   displayRows: ReadonlyArray<GuidanceYearRow>,
   ownerNameById: ReadonlyMap<string, string>,
 ): PdfTableSpec {
@@ -608,7 +608,7 @@ export function buildWithdrawalGuidanceTableSpec(
 }
 
 /** One-row note spec, used for the MC-basis and no-withdrawal disclaimers. */
-export function buildGuidanceNoteSpec(note: string): PdfTableSpec {
+function buildGuidanceNoteSpec(note: string): PdfTableSpec {
   return {
     head: [[pdfSectionTitle('table-withdrawal-guidance')]],
     body: [[note]],
@@ -616,11 +616,11 @@ export function buildGuidanceNoteSpec(note: string): PdfTableSpec {
 }
 
 /** The MC-basis disclaimer note (the projected withdrawals are deterministic-only). */
-export const WITHDRAWAL_GUIDANCE_MC_NOTE =
+const WITHDRAWAL_GUIDANCE_MC_NOTE =
   'Projected withdrawals reflect the deterministic projection; not available for Monte Carlo bases.';
 
 /** The no-withdrawal disclaimer note (a projectable scenario with no draws). */
-export const WITHDRAWAL_GUIDANCE_EMPTY_NOTE =
+const WITHDRAWAL_GUIDANCE_EMPTY_NOTE =
   'No portfolio withdrawals are projected for this scenario.';
 
 /**

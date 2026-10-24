@@ -20,7 +20,7 @@ import {
   putAggregate,
   writeSelectedScenario,
 } from '../db/store';
-import { notifySelectedScenarioChanged } from '../lib/scenario-mutations';
+import { SELECTED_SCENARIO_CHANGED_EVENT } from '../lib/scenario-mutations';
 import type {
   Aggregate,
   ExpenseCategoryPayload,
@@ -393,7 +393,7 @@ describe('ExpensesPage — reactive reads', () => {
     );
   });
 
-  it('re-projects on notifySelectedScenarioChanged (active scenario switch)', async () => {
+  it('re-projects on SELECTED_SCENARIO_CHANGED_EVENT (active scenario switch)', async () => {
     // Future-dollar mode so the projection compounds at the SELECTED
     // scenario's inflation rate — switching the active scenario changes the
     // chart-sum the mocked Total section renders.
@@ -445,7 +445,7 @@ describe('ExpensesPage — reactive reads', () => {
       updatedAt: '2026-05-02T00:00:00Z',
     });
     await act(async () => {
-      notifySelectedScenarioChanged();
+      window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
     });
 
     // The page re-read the pointer and re-projected under the 9% rate, so the

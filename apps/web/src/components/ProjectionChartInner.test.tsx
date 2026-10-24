@@ -22,7 +22,6 @@ import type {
 import { expectNoA11yViolations } from '../test/a11y';
 import { renderWithTheme, seriesColor } from '../test/theme-render';
 import { CHART_COLORS } from '../lib/tokens';
-import { LOG_SCALE_FLOOR } from '../lib/chart-markers';
 import { LOG_FLOOR, resolveYDomain } from './charts';
 
 const ROWS: ProjectionChartRow[] = [
@@ -223,8 +222,7 @@ describe('buildProjectionData — MC lines outlive the deterministic rows', () =
 });
 
 describe('ProjectionChartInner — log-scale Y-axis floor', () => {
-  it('shares the $10k floor constant with the engine', () => {
-    expect(LOG_SCALE_FLOOR).toBe(10000);
+  it('pins the floor at $10k', () => {
     expect(LOG_FLOOR).toBe(10000);
   });
 

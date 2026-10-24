@@ -9,10 +9,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildSwrComparisonData, type BuildSwrComparisonDataParams } from './balance-projection-swr-derivation';
-import {
-  SAFE_WITHDRAWAL_RATE_BENGEN_PCT,
-  SAFE_WITHDRAWAL_RATE_BENGEN_REFINED_PCT,
-} from '../lib/safe-withdrawal-rate';
 import { buildViewDeflator } from '../lib/view-deflator';
 import type { CashflowMonthlyPoint } from '../components/CashflowProjectionChart';
 import type { DrawdownYear } from '../lib/drawdown-engine';
@@ -539,8 +535,8 @@ describe('buildSwrComparisonData — both dollar modes', () => {
         drawdownByMethod: { planned: methodResult(1_000_000), twr: null },
       }),
     );
-    const expected4 = (SAFE_WITHDRAWAL_RATE_BENGEN_PCT / 100) * 1_000_000;
-    const expected45 = (SAFE_WITHDRAWAL_RATE_BENGEN_REFINED_PCT / 100) * 1_000_000;
+    const expected4 = (4 / 100) * 1_000_000;
+    const expected45 = (4.5 / 100) * 1_000_000;
     for (const row of result.bundle!.rows) {
       expect(row.fourPercentRuleValue).toBeCloseTo(expected4, 6);
       expect(row.fourPointFivePercentRuleValue).toBeCloseTo(expected45, 6);
@@ -581,13 +577,13 @@ describe('buildSwrComparisonData — both dollar modes', () => {
     // year) cancel exactly, landing on the flat NOMINAL figure at that one
     // year — a robust, inflation-arithmetic-independent pin.
     expect(rows[0].fourPercentRuleValue).toBeCloseTo(
-      (SAFE_WITHDRAWAL_RATE_BENGEN_PCT / 100) * 1_000_000,
+      (4 / 100) * 1_000_000,
       6,
     );
     // Every later year's value equals the SAME real figure re-expressed at
     // that year, relative to the retirement year's own deflation factor.
     const realAtRetirement =
-      (SAFE_WITHDRAWAL_RATE_BENGEN_PCT / 100) * 1_000_000 * realDeflator(2031, 11);
+      (4 / 100) * 1_000_000 * realDeflator(2031, 11);
     for (const row of rows) {
       const expected = realAtRetirement / realDeflator(row.year, 11);
       expect(row.fourPercentRuleValue).toBeCloseTo(expected, 2);

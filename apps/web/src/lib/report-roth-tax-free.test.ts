@@ -1,14 +1,4 @@
-/**
- * Unit tests for `report-roth-tax-free.ts` — the "Roth tax-free amounts" PDF
- * table builder.
- *
- * The cross-check test drives the real `buildPipelineContext` from `Aggregate`
- * fixtures (same fixture style as `balance-projection-runner-mc.test.ts`) so
- * the built rows are compared against what the production pipeline actually
- * resolved — a report-local re-derivation over hand-built inputs could not
- * catch an account-selection mismatch between the report and the engines,
- * which is exactly the failure mode this table exists to prevent.
- */
+// The cross-check drives the real `buildPipelineContext` from Aggregate fixtures so the rows are compared against what the production pipeline resolved; a report-local re-derivation could not catch an account-selection mismatch.
 import { describe, expect, it } from 'vitest';
 import { buildRothTaxFreeRows } from './report-roth-tax-free';
 import { buildPipelineContext } from './balance-projection-runner-context';
@@ -120,8 +110,6 @@ function balanceRow(
   };
 }
 
-/** Recorded regular contributions — the §408A history a Roth IRA pool's
- *  contribution basis is derived from. */
 function withContributions(
   row: Aggregate<AccountBalancePayload>,
   totalContributions: number,
@@ -129,8 +117,6 @@ function withContributions(
   return { ...row, payload: { ...row.payload, totalContributions } };
 }
 
-/** Recorded conversion amounts on a balance row — the source of a Roth IRA
- *  pool's remaining conversion-lot principal. */
 function withConversion(
   row: Aggregate<AccountBalancePayload>,
   taxable: number,
@@ -146,8 +132,6 @@ function withConversion(
   };
 }
 
-/** Recorded in-plan-rollover principal — an employer plan's whole
- *  designated-Roth basis. */
 function withInPlanRollover(
   row: Aggregate<AccountBalancePayload>,
   taxableDollars: number,
@@ -206,11 +190,7 @@ function buildArgs(fixture: Fixture): RunBalanceProjectionArgs {
 }
 
 describe('buildRothTaxFreeRows — cross-check against buildPipelineContext', () => {
-  // Alex (m1) owns two Roth IRAs — one active, one INACTIVE but carrying real
-  // §408A history (the pool counts inactive accounts' history) — plus a
-  // conversion lot. Sam (m2) owns an active MIXED-401k designated-Roth plan (in-plan rollover) and a CLOSED
-  // designated-Roth 403b (recorded rollover, but inactive — must produce no
-  // row at all).
+  // Alex owns two Roth IRAs (one inactive but with real §408A history, which the pool counts) plus a conversion lot; Sam owns an active MIXED-401k designated-Roth plan and a closed 403b that must produce no row.
   const alex = member('m1', true, 'Alex', 1965);
   const sam = member('m2', false, 'Sam', 1967);
   const activeIra = account('roth-ira-active', 'm1', 'RETIREMENT_ROTH_IRA', 'ROTH');
@@ -259,13 +239,9 @@ describe('buildRothTaxFreeRows — cross-check against buildPipelineContext', ()
     const personRow = rows.find((r) => r.kind === 'person' && r.label === 'Alex');
     expect(personRow).toBeDefined();
     expect(personRow!.amount).toBeCloseTo(expectedCents / 100, 6);
-    // The basis COMPONENT (not the row total, which also includes the lot)
-    // matches the per-owner deterministic/MC seed exactly.
     expect(ctx.rothBasisCentsByOwner.get('m1')).toBe(
       pool.rothIra!.regularContributionBasisCents,
     );
-    // The inactive sibling's recorded contribution history is IN the
-    // pooled basis.
     expect(pool.rothIra!.regularContributionBasisCents).toBe(28_000_00);
   });
 
@@ -288,15 +264,10 @@ describe('buildRothTaxFreeRows — inherited absence', () => {
   it('prints no pooled line for a person whose only Roth IRA is inherited, but does print an own $0 pool and an inherited employer plan', () => {
     const alex = member('m1', true, 'Alex', 1965);
     const sam = member('m2', false, 'Sam', 1967);
-    // m1's only Roth IRA is inherited — no pool at all.
     const inheritedIra = account('roth-ira-inherited', 'm1', 'RETIREMENT_ROTH_IRA', 'ROTH', {
       rmdInheritedAccount: true,
     });
-    // m2's own Roth IRA resolves to $0 (no recorded history) — still a real,
-    // computed pool and DOES get a row.
     const ownZeroIra = account('roth-ira-own-zero', 'm2', 'RETIREMENT_ROTH_IRA', 'ROTH');
-    // An inherited designated-Roth employer plan keeps its §402A treatment —
-    // it DOES get a row.
     const inheritedPlan = account(
       'roth-401k-inherited',
       'm2',
@@ -314,13 +285,10 @@ describe('buildRothTaxFreeRows — inherited absence', () => {
       balances,
       members: [alex, sam],
     });
-    // m1 has no person row at all (absence, not $0).
     expect(rows.some((r) => r.kind === 'person' && r.label === 'Alex')).toBe(false);
-    // m2's own $0 pool DOES get a row.
     const zeroRow = rows.find((r) => r.kind === 'person' && r.label === 'Sam');
     expect(zeroRow).toBeDefined();
     expect(zeroRow!.amount).toBe(0);
-    // The inherited employer plan DOES get a row.
     expect(rows.some((r) => r.kind === 'employer' && r.label === 'roth-401k-inherited')).toBe(
       true,
     );
@@ -346,18 +314,7 @@ describe('buildRothTaxFreeRows', () => {
 });
 
 describe('buildRothTaxFreeRows — all-inactive §408A pool (unreachable by either engine; report omits it)', () => {
-  // Sam's only Roth IRA is closed, but its recorded contribution history
-  // leaves real basis behind — `rothIraByPool` still emits the pool (flagged
-  // `allAccountsInactive`). Both engines agree that basis is unreachable,
-  // each by its own mechanism: Monte Carlo's seed
-  // (`mcDrawableRothBasisCentsByOwner`) excludes
-  // the pool explicitly, while the deterministic engine credits basis only
-  // through a DRAWN pool and charges only drawn ledger owners — and its ledger
-  // holds active accounts only, so an all-inactive pool is never drawn.
-  // `ctx.rothBasisCentsByOwner` still sums the pool's resolved basis, but
-  // nothing consumes that entry (present, and inert). The report omits the
-  // row for the same reason; this test pins the omission against the real
-  // `PipelineContext`/`McTaxContext`, not the report builder against itself.
+  // Sam's only Roth IRA is closed, but its recorded history leaves basis that both engines treat as unreachable (MC's seed excludes the pool; the deterministic ledger holds active accounts only), so the report omits the row; this pins the omission against the real PipelineContext/McTaxContext.
   const sam = member('m2', true, 'Sam', 1967);
   const closedIra = account('roth-ira-closed', 'm2', 'RETIREMENT_ROTH_IRA', 'ROTH', {
     active: false,
@@ -392,17 +349,7 @@ describe('buildRothTaxFreeRows — all-inactive §408A pool (unreachable by eith
 });
 
 describe('buildRothTaxFreeRows — regular POST_TAX TSP correctly produces no employer row', () => {
-  // `RETIREMENT_TSP` stored plain `POST_TAX` (not `MIXED`) does not match
-  // `buildRothDistributionFacts`'s designated-Roth branch, so this shape
-  // produces no `designatedByAccount` fact and, in turn, no employer row
-  // here. This is correct, not an engine gap needing wider matching:
-  // the balance-evidence matrix excludes a
-  // regular POST_TAX TSP's recorded fields from qualifying as designated-Roth
-  // §402A basis/clock evidence — crediting it here without the rest of the
-  // engines treating it as designated-Roth would understate tax on its own
-  // withdrawals while overstating a sibling plan's pro-rata basis.
-  // Whether such an account shape should count as designated-Roth is a
-  // separate, open question.
+  // A plain POST_TAX RETIREMENT_TSP does not match buildRothDistributionFacts's designated-Roth branch, so it yields no employer row; the balance-evidence matrix excludes its fields as §402A evidence. Whether it should count is a separate open question.
   it('prints no section at all for a household whose only Roth account is an active RETIREMENT_TSP stored POST_TAX', () => {
     const alex = member('m1', true, 'Alex', 1965);
     const tsp = account('tsp-roth', 'm1', 'RETIREMENT_TSP', 'POST_TAX', {

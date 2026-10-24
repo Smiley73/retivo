@@ -1,17 +1,3 @@
-/**
- * Unit tests for the per-expense spending glide path (rise or fall, any
- * classification).
- *
- * The module is pure + isolated, so this file carries the bulk of the
- * curve coverage: the piecewise shape, the degenerate-window snap,
- * per-expense relative anchors, the fail-safes (including the
- * floor-not-strictly-after-glide-end fail-through), the clamps, and the
- * ND15b value-equivalent-neutral no-op (the scenario-patch "off").
- *
- * Source switch (per-expense): the glide spec is read from the
- * expense's own `discretionaryGlide`, not a scenario-level context
- * field — `glideMultiplierFor(expense, atMonthIndex, ctx)`.
- */
 import { describe, expect, it } from 'vitest';
 import { glideMultiplierFor } from './expense-glide';
 import type { ScheduleResolveContext } from './schedule-resolution';
@@ -140,7 +126,6 @@ describe('glideMultiplierFor — clamps', () => {
       endMultiplierPct: 250, // → clamps to 200 ⇒ 2.0
       glideStart: { kind: 'year', year: 2030 },
       glideEnd: { kind: 'year', year: 2040 },
-      // Rising glide: the plateau is a ceiling ≥ end; an over-cap 300 → 200.
       floor: { multiplierPct: 300, anchor: { kind: 'year', year: 2050 } },
     };
     expect(glideMultiplierFor(disc(glide), idx(2040), ctx())).toBeCloseTo(2, 6);
@@ -174,12 +159,7 @@ describe('glideMultiplierFor — increasing glide', () => {
   });
 
   it('wrong-side plateau (end=100, floor>100) is ineffective — stays 1 every month', () => {
-    // A serialized `{ endMultiplierPct: 100, floor.multiplierPct: 150 }`
-    // (reachable via verbatim data-import; the form's floorProblem rejects
-    // it) is NOT direction-aware effective (`hasEffectiveFloor` false: at a
-    // flat end the tie-break is to floor, so a floor ABOVE 100 never steps).
-    // The engine must fall through to the bare neutral curve (multiplier 1)
-    // so it can never disagree with `isNeutralGlide`.
+    // A serialized end 100 with floor 150 (reachable via data import; the form rejects it) is not effective: the engine must fall through to the neutral curve so it never disagrees with `isNeutralGlide`.
     const glide: DiscretionaryGlideOverride = {
       ...yearGlide(100, 2030, 2040),
       floor: { multiplierPct: 150, anchor: { kind: 'year', year: 2050 } },
@@ -190,9 +170,7 @@ describe('glideMultiplierFor — increasing glide', () => {
   });
 
   it('rising glide with a ceiling BELOW the end holds flat at the end mult, never steps down', () => {
-    // `{ end: 150, floor: 120 }` — the plateau is a wrong-side ceiling
-    // (below the glide end), so it is ineffective: the curve must hold at
-    // the end multiplier (1.5) after glide-end, not step DOWN to 1.2.
+    // A wrong-side ceiling (floor 120 below end 150) is ineffective: hold at the end multiplier, not step down.
     const glide: DiscretionaryGlideOverride = {
       ...yearGlide(150, 2030, 2040),
       floor: { multiplierPct: 120, anchor: { kind: 'year', year: 2050 } },
@@ -220,9 +198,6 @@ describe('glideMultiplierFor — increasing glide', () => {
 
 describe('glideMultiplierFor — value-equivalent neutral (the scenario-patch "off")', () => {
   it('endMultiplierPct:100 with NO effective floor yields 1 every active month', () => {
-    // The scenario-patch "off" object — a flat-100% no-op. The engine
-    // multiplier must be exactly 1 at every month so a cleared-inherited
-    // glide produces no decline.
     const neutral: DiscretionaryGlideOverride = {
       endMultiplierPct: 100,
       glideStart: { kind: 'age', memberId: 'primary', years: 0, months: 0 },
@@ -234,8 +209,6 @@ describe('glideMultiplierFor — value-equivalent neutral (the scenario-patch "o
   });
 
   it('counter-case: endMultiplierPct:100 WITH an active floor<100 still steps down', () => {
-    // Proves the no-op requires BOTH end=100 AND no effective floor: a
-    // floor.multiplierPct < 100 still steps spending down.
     const endButFloor: DiscretionaryGlideOverride = {
       ...yearGlide(100, 2030, 2040),
       floor: { multiplierPct: 50, anchor: { kind: 'year', year: 2050 } },
@@ -268,9 +241,7 @@ describe('glideMultiplierFor — per-expense relative anchor', () => {
 
 describe('glideMultiplierFor — expenseEnd glide-end anchor', () => {
   it('resolves the glide-end to the expense’s own resolved end', () => {
-    // glide-start year 2030; glide-end = the expense’s `end`
-    // (age 80 of primary born 1965-03 ⇒ 2045-03 exclusive). The curve
-    // reaches endMult exactly at that month and holds flat after.
+    // Glide-end is the expense's end: age 80 of a primary born 1965-03, so 2045-03 (exclusive).
     const glide: DiscretionaryGlideOverride = {
       endMultiplierPct: 50,
       glideStart: { kind: 'year', year: 2030 },
@@ -282,22 +253,16 @@ describe('glideMultiplierFor — expenseEnd glide-end anchor', () => {
       years: 80,
       months: 0,
     });
-    // end resolves to 2045-03 (idx 24543); midpoint ~2037-09.
     expect(glideMultiplierFor(e, idx(2030, 0), ctx())).toBe(1);
     expect(glideMultiplierFor(e, idx(2045, 2), ctx())).toBeCloseTo(0.5, 6);
     expect(glideMultiplierFor(e, idx(2050, 0), ctx())).toBeCloseTo(0.5, 6);
-    // strictly between start and end → mid-decline (monotone < 1, > 0.5)
     const mid = glideMultiplierFor(e, idx(2037, 8), ctx());
     expect(mid).toBeLessThan(1);
     expect(mid).toBeGreaterThan(0.5);
   });
 
   it('a scenario patch to the expense end moves the expenseEnd glide-end (resolved-expense basis)', () => {
-    // The engine multiplies the *resolved* expense — scenario resolution
-    // applies an `end` patch upstream, so `glideMultiplierFor` sees the
-    // patched `end`. Canonical end = age 80 (2045-03); a scenario patch
-    // overrides it to age 90 (2055-03). The expenseEnd-anchored glide
-    // must reach endMult at the PATCHED month, not the canonical one.
+    // Scenario resolution applies an `end` patch upstream: an expenseEnd-anchored glide must reach endMult at the patched month (age 90, 2055-03), not the canonical one (age 80, 2045-03).
     const glide: DiscretionaryGlideOverride = {
       endMultiplierPct: 50,
       glideStart: { kind: 'year', year: 2030 },
@@ -318,9 +283,6 @@ describe('glideMultiplierFor — expenseEnd glide-end anchor', () => {
     const canonical = disc(glide, { kind: 'year', year: 2030 }, canonicalEnd);
     const patched = disc(glide, { kind: 'year', year: 2030 }, patchedEnd);
 
-    // At the canonical end month (2045-03) the canonical curve has
-    // reached endMult, but the patched curve is still mid-decline (its
-    // end is 10 years later) — proves the glide-end tracks the patch.
     expect(glideMultiplierFor(canonical, idx(2045, 2), ctx())).toBeCloseTo(
       0.5,
       6,
@@ -333,8 +295,6 @@ describe('glideMultiplierFor — expenseEnd glide-end anchor', () => {
     expect(patchedAtCanonicalEnd).toBeGreaterThan(0.5);
     expect(patchedAtCanonicalEnd).toBeLessThan(1);
 
-    // The patched curve reaches endMult exactly at the PATCHED end
-    // (age 90 of primary born 1965-03 ⇒ 2055-03) and holds flat after.
     expect(glideMultiplierFor(patched, idx(2055, 2), ctx())).toBeCloseTo(
       0.5,
       6,
@@ -351,7 +311,6 @@ describe('glideMultiplierFor — expenseEnd glide-end anchor', () => {
       glideStart: { kind: 'year', year: 2030 },
       glideEnd: { kind: 'expenseEnd' },
     };
-    // `end` references secondary, who has no birthdate ⇒ end unresolvable
     const c = ctx();
     c.secondary = undefined;
     const e = disc(glide, { kind: 'year', year: 2030 }, {
@@ -369,8 +328,7 @@ describe('glideMultiplierFor — expenseEnd glide-end anchor', () => {
       glideStart: { kind: 'year', year: 2030 },
       glideEnd: { kind: 'expenseEnd' },
     };
-    // Literal fixture (the `disc` helper's default param would coerce a
-    // passed `undefined` back to the lifetime default).
+    // Literal fixture: the `disc` helper's default param would coerce a passed `undefined` back to the lifetime default.
     const e = {
       classification: 'discretionary' as const,
       frequency: 'monthly' as const,
@@ -392,9 +350,7 @@ describe('glideMultiplierFor — one-off never glided', () => {
       end: undefined,
       discretionaryGlide: glide,
     };
-    // mid-glide month where a recurring expense would read 0.5
     expect(glideMultiplierFor(oneOff, idx(2035), ctx())).toBe(1);
-    // recurring control with the identical glide DOES decline
     expect(
       glideMultiplierFor(
         disc(glide, { kind: 'year', year: 2035 }),

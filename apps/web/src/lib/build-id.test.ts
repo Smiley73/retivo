@@ -1,251 +1,179 @@
-/**
- * Unit tests for the build-id detector that powers the version banner.
- * Pure module — no React, no fetch — so we can drive it directly and
- * assert the listener semantics + verification gate + sessionStorage
- * interaction. The bundle-live verifier is stubbed via
- * `__setVerifierForTest`; the real `defaultVerifier` is exercised via
- * the existing fetch-based integration in api/client.ts.
- */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  __resetBuildIdState,
-  __resetVerifyThrottleForTest,
-  __setClientBuildIdForTest,
-  __setVerifierForTest,
-  type BundleVerifier,
-  dismissCurrentMismatch,
-  getCurrentMismatch,
-  isMismatch,
-  recordSchemaAhead,
-  recordServerBuildId,
-  subscribeToVersionMismatch,
-} from './build-id';
+// Drives the build-id gate through its public API; `__BUILD_ID__` and `fetch` are stubbed before each fresh import.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-/** Flush microtasks so the verifier promise + its `.then`/`finally`
- *  callbacks resolve before assertions run. Two ticks because the
- *  result handling sits inside the async function after `await`. */
-async function flushVerification(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+type BuildIdModule = typeof import('./build-id');
+
+type FetchOutcome = string | 'fail' | 'bad-status';
+
+function stubFetch(outcome: () => FetchOutcome): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(async () => {
+    const result = outcome();
+    if (result === 'fail') throw new Error('network');
+    if (result === 'bad-status') return { ok: false } as Response;
+    return { ok: true, json: async () => ({ buildId: result }) } as Response;
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
 }
 
-function liveVerifier(): BundleVerifier {
-  return vi.fn(async () => 'live' as const);
+async function load(clientId: string, outcome: () => FetchOutcome = () => 'server-build-2') {
+  vi.resetModules();
+  vi.stubGlobal('__BUILD_ID__', clientId);
+  const fetchMock = stubFetch(outcome);
+  const mod: BuildIdModule = await import('./build-id');
+  const listener = vi.fn();
+  mod.subscribeToVersionMismatch(listener);
+  return { ...mod, fetchMock, listener };
 }
 
-function oldVerifier(): BundleVerifier {
-  return vi.fn(async () => 'old' as const);
-}
+const flush = () => vi.advanceTimersByTimeAsync(0);
 
-function unknownVerifier(): BundleVerifier {
-  return vi.fn(async () => 'unknown' as const);
-}
+const BUILD_MISMATCH = { buildId: 'server-build-2', reason: 'build-mismatch' };
+const SCHEMA_AHEAD = { buildId: 'server-build-2', reason: 'schema-ahead' };
 
-describe('isMismatch', () => {
-  it('returns false when ids match', () => {
-    expect(isMismatch('abc', 'abc')).toBe(false);
-  });
+beforeEach(() => {
+  window.sessionStorage.clear();
+  vi.useFakeTimers();
+});
 
-  it('returns false when the server id is missing', () => {
-    expect(isMismatch('abc', null)).toBe(false);
-    expect(isMismatch('abc', undefined)).toBe(false);
-    expect(isMismatch('abc', '')).toBe(false);
-  });
-
-  it('returns false when either side is the dev sentinel', () => {
-    expect(isMismatch('dev', 'abc')).toBe(false);
-    expect(isMismatch('abc', 'dev')).toBe(false);
-  });
-
-  it('returns true on a real mismatch', () => {
-    expect(isMismatch('abc', 'def')).toBe(true);
-  });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('recordServerBuildId', () => {
-  beforeEach(() => {
-    __resetBuildIdState();
-    __setClientBuildIdForTest('client-build-1');
-  });
-
-  it('keeps the detector idle while the server id matches', async () => {
-    const verifier = liveVerifier();
-    __setVerifierForTest(verifier);
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
-    recordServerBuildId('client-build-1');
-    await flushVerification();
-    expect(verifier).not.toHaveBeenCalled();
+  it.each([
+    ['the server id matches', 'client-build-1', 'client-build-1'],
+    ['the server id is missing', 'client-build-1', undefined],
+    ['the server id is empty', 'client-build-1', ''],
+    ['the client is a dev build', 'dev', 'some-real-build-id'],
+    ['the server is a dev build', 'client-build-1', 'dev'],
+  ])('never verifies or prompts when %s', async (_name, clientId, serverId) => {
+    const { recordServerBuildId, getCurrentMismatch, listener, fetchMock } = await load(clientId);
+    recordServerBuildId(serverId);
+    await flush();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(listener).not.toHaveBeenCalled();
     expect(getCurrentMismatch()).toBeNull();
   });
 
-  it('does not raise a mismatch under the dev sentinel', async () => {
-    __setClientBuildIdForTest('dev');
-    const verifier = liveVerifier();
-    __setVerifierForTest(verifier);
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
-    recordServerBuildId('some-real-build-id');
-    await flushVerification();
-    expect(verifier).not.toHaveBeenCalled();
-    expect(listener).not.toHaveBeenCalled();
-    expect(getCurrentMismatch()).toBeNull();
-  });
-
-  it('notifies subscribers once verification confirms the bundle is live', async () => {
-    __setVerifierForTest(liveVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it('prompts only once /build-id.json reports the server id live', async () => {
+    const { recordServerBuildId, getCurrentMismatch, listener, fetchMock } =
+      await load('client-build-1');
     recordServerBuildId('server-build-2');
-    // Verification is async — listener has not fired yet.
     expect(listener).not.toHaveBeenCalled();
-    await flushVerification();
+    await flush();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/build-id.json'),
+      expect.objectContaining({ cache: 'no-store', credentials: 'omit' }),
+    );
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledWith({
-      buildId: 'server-build-2',
-      reason: 'build-mismatch',
-    });
-    expect(getCurrentMismatch()).toEqual({
-      buildId: 'server-build-2',
-      reason: 'build-mismatch',
-    });
+    expect(listener).toHaveBeenCalledWith(BUILD_MISMATCH);
+    expect(getCurrentMismatch()).toEqual(BUILD_MISMATCH);
   });
 
-  it('stays quiet when the deployed bundle is still the client build', async () => {
-    __setVerifierForTest(oldVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it.each([
+    ['still serves the client build', () => 'client-build-1'],
+    ['serves an unrelated id', () => 'other-build'],
+    ['answers with an error status', () => 'bad-status' as const],
+    ['cannot be reached', () => 'fail' as const],
+  ])('stays quiet while /build-id.json %s', async (_name, outcome) => {
+    const { recordServerBuildId, getCurrentMismatch, listener } = await load(
+      'client-build-1',
+      outcome,
+    );
     recordServerBuildId('server-build-2');
-    await flushVerification();
+    await flush();
     expect(listener).not.toHaveBeenCalled();
     expect(getCurrentMismatch()).toBeNull();
   });
 
-  it('stays quiet when verification fails or returns an unexpected id', async () => {
-    __setVerifierForTest(unknownVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it('prompts on a later response once the deployed bundle catches up', async () => {
+    let deployed = 'client-build-1';
+    const { recordServerBuildId, listener, fetchMock } = await load('client-build-1', () => deployed);
     recordServerBuildId('server-build-2');
-    await flushVerification();
-    expect(listener).not.toHaveBeenCalled();
-    expect(getCurrentMismatch()).toBeNull();
-  });
-
-  it('emits on a later record once CF catches up', async () => {
-    let phase: 'old' | 'live' = 'old';
-    const verifier: BundleVerifier = vi.fn(async () => phase);
-    __setVerifierForTest(verifier);
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
-
-    recordServerBuildId('server-build-2');
-    await flushVerification();
+    await flush();
     expect(listener).not.toHaveBeenCalled();
 
-    phase = 'live';
-    __resetVerifyThrottleForTest();
+    deployed = 'server-build-2';
+    vi.advanceTimersByTime(5_000);
     recordServerBuildId('server-build-2');
-    await flushVerification();
+    await flush();
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledWith({
-      buildId: 'server-build-2',
-      reason: 'build-mismatch',
-    });
-    expect(verifier).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenCalledWith(BUILD_MISMATCH);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('does not re-notify for the same mismatched id', async () => {
-    __setVerifierForTest(liveVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it('verifies at most once per throttle window and does not re-notify for the same id', async () => {
+    const { recordServerBuildId, getCurrentMismatch, listener, fetchMock } = await load(
+      'client-build-1',
+      () => 'client-build-1',
+    );
     recordServerBuildId('server-build-2');
-    await flushVerification();
+    await flush();
     recordServerBuildId('server-build-2');
-    recordServerBuildId('server-build-2');
-    await flushVerification();
-    expect(listener).toHaveBeenCalledTimes(1);
-  });
-
-  it('throttles back-to-back verifications within the cooldown window', async () => {
-    const verifier = oldVerifier();
-    __setVerifierForTest(verifier);
-    recordServerBuildId('server-build-2');
-    await flushVerification();
-    recordServerBuildId('server-build-2');
-    await flushVerification();
     recordServerBuildId('server-build-3');
-    await flushVerification();
-    // Verifier ran once for the first record; the duplicate call and
-    // the newer-id call both arrive inside the throttle window so
-    // `runVerification` returns before invoking the stub.
-    expect(verifier).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(getCurrentMismatch()).toBeNull();
+
+    const live = await load('client-build-1');
+    live.recordServerBuildId('server-build-2');
+    await flush();
+    live.recordServerBuildId('server-build-2');
+    live.recordServerBuildId('server-build-2');
+    await flush();
+    expect(live.listener).toHaveBeenCalledTimes(1);
+    expect(listener).not.toHaveBeenCalled();
   });
 
-  it('notifies again when a newer server build is verified live', async () => {
-    __setVerifierForTest(liveVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it('prompts again when a newer build is verified live', async () => {
+    let deployed = 'server-build-2';
+    const { recordServerBuildId, getCurrentMismatch, listener } = await load(
+      'client-build-1',
+      () => deployed,
+    );
     recordServerBuildId('server-build-2');
-    await flushVerification();
-    __resetVerifyThrottleForTest();
+    await flush();
+    deployed = 'server-build-3';
+    vi.advanceTimersByTime(5_000);
     recordServerBuildId('server-build-3');
-    await flushVerification();
+    await flush();
     expect(listener).toHaveBeenCalledTimes(2);
-    expect(getCurrentMismatch()).toEqual({
-      buildId: 'server-build-3',
-      reason: 'build-mismatch',
-    });
+    expect(getCurrentMismatch()).toEqual({ buildId: 'server-build-3', reason: 'build-mismatch' });
   });
 
-  it('skips a build the user already dismissed in this session', async () => {
-    __setVerifierForTest(liveVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it('stays quiet for a dismissed id but prompts for a brand new build', async () => {
+    let deployed = 'server-build-2';
+    const { recordServerBuildId, dismissCurrentMismatch, getCurrentMismatch, listener } =
+      await load('client-build-1', () => deployed);
     recordServerBuildId('server-build-2');
-    await flushVerification();
+    await flush();
     dismissCurrentMismatch();
     listener.mockClear();
-    __resetVerifyThrottleForTest();
+
+    vi.advanceTimersByTime(5_000);
     recordServerBuildId('server-build-2');
-    await flushVerification();
+    await flush();
     expect(listener).not.toHaveBeenCalled();
     expect(getCurrentMismatch()).toBeNull();
-  });
 
-  it('still surfaces a brand new build after a prior dismiss', async () => {
-    __setVerifierForTest(liveVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
-    recordServerBuildId('server-build-2');
-    await flushVerification();
-    dismissCurrentMismatch();
-    listener.mockClear();
-    __resetVerifyThrottleForTest();
+    deployed = 'server-build-3';
+    vi.advanceTimersByTime(5_000);
     recordServerBuildId('server-build-3');
-    await flushVerification();
+    await flush();
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledWith({
-      buildId: 'server-build-3',
-      reason: 'build-mismatch',
-    });
+    expect(listener).toHaveBeenCalledWith({ buildId: 'server-build-3', reason: 'build-mismatch' });
   });
 });
 
 describe('dismissCurrentMismatch', () => {
-  beforeEach(() => {
-    __resetBuildIdState();
-    __setClientBuildIdForTest('client-build-1');
-  });
-
-  it('clears state and notifies listeners with null', async () => {
-    __setVerifierForTest(liveVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it('clears the mismatch and notifies listeners with null', async () => {
+    const { recordServerBuildId, dismissCurrentMismatch, getCurrentMismatch, listener } =
+      await load('client-build-1');
     recordServerBuildId('server-build-2');
-    await flushVerification();
+    await flush();
     listener.mockClear();
     dismissCurrentMismatch();
     expect(listener).toHaveBeenCalledTimes(1);
@@ -253,103 +181,79 @@ describe('dismissCurrentMismatch', () => {
     expect(getCurrentMismatch()).toBeNull();
   });
 
-  it('is a no-op when no mismatch is active', () => {
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it('is a no-op when no mismatch is active', async () => {
+    const { dismissCurrentMismatch, listener } = await load('client-build-1');
     dismissCurrentMismatch();
     expect(listener).not.toHaveBeenCalled();
   });
 });
 
 describe('recordSchemaAhead', () => {
-  beforeEach(() => {
-    __resetBuildIdState();
-    __setClientBuildIdForTest('client-build-1');
-  });
-
-  it('surfaces the banner using the most recent server build id', async () => {
-    __setVerifierForTest(liveVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
-    // Capture a server id without raising the banner (matches client).
-    recordServerBuildId('client-build-1');
-    await flushVerification();
-    expect(listener).not.toHaveBeenCalled();
-    // Then a different id arrives via the same channel — captured but
-    // banner stays quiet because verification path reaches via mismatch.
+  it('is a no-op while the build-mismatch prompt for that id is already up', async () => {
+    const { recordServerBuildId, recordSchemaAhead, listener } = await load('client-build-1');
     recordServerBuildId('server-build-2');
-    await flushVerification();
-    expect(listener).toHaveBeenCalledWith({
-      buildId: 'server-build-2',
-      reason: 'build-mismatch',
-    });
+    await flush();
     listener.mockClear();
-    // Schema-ahead while already-prompted should be a no-op.
-    __resetVerifyThrottleForTest();
     recordSchemaAhead();
-    await flushVerification();
+    await flush();
     expect(listener).not.toHaveBeenCalled();
   });
 
-  it('forces the banner past a prior user-dismissal, tagged with reason "schema-ahead"', async () => {
-    __setVerifierForTest(liveVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it('forces the prompt past a dismissal, tagged schema-ahead', async () => {
+    const { recordServerBuildId, recordSchemaAhead, dismissCurrentMismatch, listener } =
+      await load('client-build-1');
     recordServerBuildId('server-build-2');
-    await flushVerification();
-    expect(listener).toHaveBeenCalledWith({
-      buildId: 'server-build-2',
-      reason: 'build-mismatch',
-    });
+    await flush();
     dismissCurrentMismatch();
     listener.mockClear();
-    // Without recordSchemaAhead, the dismissed id stays suppressed even
-    // if the same id is observed again. Schema-ahead is a stronger signal
-    // (the bundle truly cannot read the data) so dismissal must be cleared
-    // — and the re-armed mismatch is tagged with the stronger reason.
-    __resetVerifyThrottleForTest();
     recordSchemaAhead();
-    await flushVerification();
-    expect(listener).toHaveBeenCalledWith({
-      buildId: 'server-build-2',
-      reason: 'schema-ahead',
-    });
+    await flush();
+    expect(listener).toHaveBeenCalledWith(SCHEMA_AHEAD);
   });
 
-  it('tags a fresh schema-ahead mismatch with reason "schema-ahead" (no prior verified build-mismatch banner)', async () => {
-    // The initial build-mismatch verification never resolves 'live' (CF
-    // hasn't caught up), so no banner has surfaced yet for this id.
-    __setVerifierForTest(oldVerifier());
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
-    recordServerBuildId('server-build-9');
-    await flushVerification();
-    expect(listener).not.toHaveBeenCalled();
+  it('tags a prompt that was never raised for the id as schema-ahead', async () => {
+    let deployed = 'client-build-1';
+    const { recordServerBuildId, recordSchemaAhead, getCurrentMismatch, listener } = await load(
+      'client-build-1',
+      () => deployed,
+    );
+    recordServerBuildId('server-build-2');
+    await flush();
     expect(getCurrentMismatch()).toBeNull();
-    // Schema-ahead re-triggers verification for the same id; this time it
-    // verifies live, and the surfaced mismatch is tagged 'schema-ahead'.
-    __setVerifierForTest(liveVerifier());
-    __resetVerifyThrottleForTest();
+
+    deployed = 'server-build-2';
     recordSchemaAhead();
-    await flushVerification();
-    expect(listener).toHaveBeenCalledWith({
-      buildId: 'server-build-9',
-      reason: 'schema-ahead',
-    });
-    expect(getCurrentMismatch()).toEqual({
-      buildId: 'server-build-9',
-      reason: 'schema-ahead',
-    });
+    await flush();
+    expect(listener).toHaveBeenCalledWith(SCHEMA_AHEAD);
+    expect(getCurrentMismatch()).toEqual(SCHEMA_AHEAD);
   });
 
-  it('logs and bails when no server build id has been observed yet', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const listener = vi.fn();
-    subscribeToVersionMismatch(listener);
+  it('wins the reason when it arrives while the verification is still in flight', async () => {
+    let release: (id: string) => void = () => undefined;
+    const pending = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const { recordServerBuildId, recordSchemaAhead, listener, fetchMock } = await load(
+      'client-build-1',
+    );
+    fetchMock.mockImplementation(
+      async () =>
+        ({ ok: true, json: async () => ({ buildId: await pending }) }) as Response,
+    );
+    recordServerBuildId('server-build-2');
     recordSchemaAhead();
-    await flushVerification();
+    release('server-build-2');
+    await flush();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(SCHEMA_AHEAD);
+  });
+
+  it('warns and does nothing when no server build id has been seen', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { recordSchemaAhead, listener } = await load('client-build-1');
+    recordSchemaAhead();
+    await flush();
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(listener).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
   });
 });

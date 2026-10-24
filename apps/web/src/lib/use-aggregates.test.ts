@@ -1,13 +1,3 @@
-/**
- * useAggregates reactive read-hook tests.
- *
- * Drives the IndexedDB code paths via fake-indexeddb. Covers the live-query
- * contract: the hook returns the current non-deleted aggregates on mount and
- * re-renders on any write to that type's store (put / tombstone-put / delete /
- * clear), on the coarse `WORKSPACE_CHANGED_EVENT` bulk-fill path, settles a
- * write burst to one correct final render (cancel-stale), surfaces an error,
- * and unsubscribes cleanly on unmount.
- */
 import 'fake-indexeddb/auto';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -94,7 +84,6 @@ describe('useAggregates', () => {
     const { result } = renderHook(() => useAggregates('householdMember'));
     await waitFor(() => expect(result.current.aggregates).toHaveLength(1));
 
-    // The dominant app delete path writes a `deletedAt` row via putAggregate.
     await act(async () => {
       await putAggregate('householdMember', {
         ...memberAgg('hm-1'),
@@ -140,10 +129,7 @@ describe('useAggregates', () => {
     await waitFor(() => expect(result.current.ready).toBe(true));
     expect(result.current.aggregates).toHaveLength(0);
 
-    // Isolate the coarse channel: write the row directly through the IDB
-    // handle (no fine put-signal reaches this reader), then fire only the
-    // coarse `WORKSPACE_CHANGED_EVENT` as a bulk fill does. The hook must
-    // re-read off the coarse channel alone.
+    // Write the row directly through the IDB handle so no fine put-signal reaches the reader, then fire only the coarse WORKSPACE_CHANGED_EVENT, as a bulk fill does.
     const handle = await store.db();
     await handle.put('householdMembers', memberAgg('hm-1'));
     act(() => {
@@ -159,8 +145,6 @@ describe('useAggregates', () => {
     const { result } = renderHook(() => useAggregates('householdMember'));
     await waitFor(() => expect(result.current.ready).toBe(true));
 
-    // Fire a burst of single-row writes back-to-back. The hook must collapse
-    // the storm to one settled render reflecting the final store state.
     await act(async () => {
       await putAggregate('householdMember', memberAgg('hm-1'));
       await putAggregate('householdMember', memberAgg('hm-2'));
@@ -181,10 +165,7 @@ describe('useAggregates', () => {
     const { result } = renderHook(() => useAggregates('householdMember'));
     await waitFor(() => expect(result.current.ready).toBe(true));
 
-    // Spy the subscriber wake count via the fine-store listener (not a raw
-    // read count): a batched bulk fill of N rows must wake the reader exactly
-    // ONCE on scope exit, then settle to the correct final data — the explicit
-    // de-storm guard.
+    // Count wakes via the fine-store listener: a batched bulk fill of N rows must wake the reader once on scope exit.
     const wakeSpy = vi.fn();
     const unsubscribe = subscribeToStoreChanges('householdMembers', wakeSpy);
 
@@ -193,13 +174,10 @@ describe('useAggregates', () => {
         await putAggregate('householdMember', memberAgg('hm-1'), batch);
         await putAggregate('householdMember', memberAgg('hm-2'), batch);
         await putAggregate('householdMember', memberAgg('hm-3'), batch);
-        // Mid-scope: no signal has fired yet, so the reader hasn't been woken.
         expect(wakeSpy).not.toHaveBeenCalled();
       });
     });
 
-    // Exactly one wake for the three-row bulk fill, and the reader lands on the
-    // correct final three rows.
     expect(wakeSpy).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(result.current.aggregates).toHaveLength(3));
     expect(result.current.aggregates.map((a) => a.id).sort()).toEqual([
@@ -227,7 +205,6 @@ describe('useAggregates', () => {
   it('clears error on recovery after failure', async () => {
     await clearAllStores();
     const recovered = [memberAgg('hm-1')];
-    // First read rejects; the next write re-reads and resolves cleanly.
     const spy = vi
       .spyOn(store, 'listAggregates')
       .mockRejectedValueOnce(new Error('read boom'))
@@ -238,8 +215,6 @@ describe('useAggregates', () => {
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect(result.current.error?.message).toBe('read boom');
 
-    // A subsequent store write signal triggers a fresh read off the now-healthy
-    // mock; the hook must clear the error and surface the recovered rows.
     await act(async () => {
       await putAggregate('householdMember', memberAgg('hm-1'));
     });
@@ -252,7 +227,6 @@ describe('useAggregates', () => {
   it('unsubscribes from the store on unmount (no leak)', async () => {
     await clearAllStores();
 
-    // Capture the fine-channel unsubscribe so we can prove the cleanup fn ran.
     const unsubscribeSpy = vi.fn();
     const realSubscribe = store.subscribeToStoreChanges;
     const subscribeSpy = vi
@@ -269,14 +243,9 @@ describe('useAggregates', () => {
 
     unmount();
 
-    // The subscription cleanup must have run — the hook released its fine-store
-    // listener instead of leaking it past unmount.
     expect(unsubscribeSpy).toHaveBeenCalled();
     subscribeSpy.mockRestore();
 
-    // After unmount a further write must not throw or schedule work that
-    // touches the torn-down hook. The afterEach clearAllStores also exercises
-    // this; here we assert the write resolves cleanly post-unmount.
     await expect(
       putAggregate('householdMember', memberAgg('hm-late')),
     ).resolves.not.toThrow();

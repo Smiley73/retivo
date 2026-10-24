@@ -20,7 +20,6 @@ describe('PDF_SECTION_MANIFEST', () => {
   it('leads with the scenario summary (household overview folded in)', () => {
     const ids = PDF_SECTION_MANIFEST.map((s) => s.id);
     expect(ids[1]).toBe('report-scenarios');
-    // The standalone household overview page has been removed.
     expect(ids).not.toContain('report-overview');
   });
 
@@ -36,7 +35,6 @@ describe('PDF_SECTION_MANIFEST', () => {
     expect(last.id).toBe('table-withdrawal-guidance');
     expect(last.kind).toBe('table');
     expect(last.title).toBe('Projected withdrawals');
-    // It sits strictly after the tax detail table (the former terminal entry).
     const ids = PDF_SECTION_MANIFEST.map((s) => s.id);
     expect(ids.indexOf('table-withdrawal-guidance')).toBe(
       ids.indexOf('table-tax-detail') + 1,

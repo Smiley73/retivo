@@ -1,6 +1,3 @@
-/**
- * Tests for the shared CBP resolver + validator. Pins the election, remediation and annuity-match rules.
- */
 import { describe, expect, it } from 'vitest';
 import {
   resolveLinkedCbpIncomeStreams,
@@ -145,8 +142,6 @@ describe('resolveLinkedCbpIncomeStreams', () => {
     const streams = [
       stream('s1', { linkedCbpAccountId: 'cbp-1', payoutType: 'annuity' }),
     ];
-    // Parent disables the canonical annuity; child adds a lump-sum
-    // replacement linked to the same CBP account.
     const parent = scenario('parent', null, {
       overrides: { income: { disabledIds: ['aggregate:s1'] } },
     });

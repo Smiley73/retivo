@@ -1,8 +1,3 @@
-/**
- * Tests for the Modified-Dietz + portfolio-summary helpers. Mirrors the
- * scenarios covered by the legacy server-side
- * `apps/api/src/account-balances/portfolio-stats.spec.ts`.
- */
 import {
   accountReturns,
   computePortfolioSummary,
@@ -11,7 +6,6 @@ import {
   gainLoss,
   isPureRothEmployerType,
   isReturnBearingRow,
-  returnPct,
   totalContributions,
 } from '../lib/balance-calc';
 import type {
@@ -91,27 +85,27 @@ describe('balance-calc per-row math', () => {
     expect(gainLoss(p)).toBe(115_000 - 100_000 - 10_000 - 1_000 + 500);
   });
 
-  it('returnPct uses half-weight contributions on existing accounts', () => {
+  it('deriveAll returnPct uses half-weight contributions on existing accounts', () => {
     const p = payload({
       startingBalance: 100_000,
       totalContributions: 10_000,
       endingBalance: 115_000,
     });
     // gainLoss = 5000, avgCapital = 100000 + 0.5*10000 = 105000, return = 4.76%
-    expect(returnPct(p)).toBeCloseTo(4.76, 1);
+    expect(deriveAll(p).returnPct).toBeCloseTo(4.76, 1);
   });
 
-  it('returnPct uses full-weight contributions on new accounts (startingBalance = 0)', () => {
+  it('deriveAll returnPct uses full-weight contributions on new accounts (startingBalance = 0)', () => {
     const p = payload({
       startingBalance: 0,
       totalContributions: 10_000,
       endingBalance: 11_000,
     });
     // gainLoss = 1000, avgCapital = 0 + 1.0*10000 = 10000, return = 10%
-    expect(returnPct(p)).toBe(10);
+    expect(deriveAll(p).returnPct).toBe(10);
   });
 
-  it('returnPct half-weights distributions in the denominator', () => {
+  it('deriveAll returnPct half-weights distributions in the denominator', () => {
     const p = payload({
       startingBalance: 10_000,
       totalContributions: 0,
@@ -120,7 +114,7 @@ describe('balance-calc per-row math', () => {
     });
     // gainLoss = 10500 - 10000 - 0 - 0 + 600 = 1100
     // avgCapital = 10000 - 0.5*600 = 9700
-    expect(returnPct(p)).toBeCloseTo(11.34, 1);
+    expect(deriveAll(p).returnPct).toBeCloseTo(11.34, 1);
   });
 
   it('totalContributions for MIXED sums all four split components', () => {
@@ -165,7 +159,6 @@ describe('computePortfolioSummary', () => {
     expect(r.accounts).toHaveLength(1);
     expect(r.accounts[0].currentBalance).toBe(60_000);
     expect(r.accounts[0].currentBalanceYear).toBe(2024);
-    // "As of" tracks the latest-year entry's lastUpdated, not the prior year's.
     expect(r.accounts[0].currentBalanceAsOf).toBe('2024-11-15T10:00:00Z');
     expect(r.summary.totalCurrentBalance).toBe(60_000);
   });
@@ -278,10 +271,7 @@ describe('computePortfolioSummary', () => {
   });
 
   it('a legacy PRE_TAX-stored HSA is classified by treatment, not type', () => {
-    // The tax-free accumulator is treatment-based
-    // (`taxTreatment === 'ROTH' || 'HSA'`). A pre-migration HSA still stored as
-    // PRE_TAX therefore lands in the pre-tax bucket by its treatment, not in
-    // tax-free. The v1→v2 migration carries real HSAs to the 'HSA' treatment.
+    // Pre-migration HSA still stored as PRE_TAX lands in the pre-tax bucket: tax-free is treatment-based.
     const acc = accountAgg({ name: 'H', type: 'HSA', taxTreatment: 'PRE_TAX' });
     const balances = [
       aggregate('accountBalance', 'bal-H-2025', payload({ accountId: acc.id, year: 2025, endingBalance: 30_000 })),
@@ -292,11 +282,7 @@ describe('computePortfolioSummary', () => {
   });
 
   it('a legacy POST_TAX-stored HSA is classified by treatment, not type', () => {
-    // The tax-free accumulator is treatment-based
-    // (`taxTreatment === 'ROTH' || 'HSA'`), not type-based. A pre-migration
-    // HSA still stored as POST_TAX therefore lands in the post-tax bucket by
-    // its treatment — the v1→v2 migration is what carries real HSAs to the
-    // 'HSA' treatment (covered by the next test).
+    // Pre-migration HSA stored as POST_TAX lands in the post-tax bucket (treatment-based).
     const acc = accountAgg({ name: 'H', type: 'HSA', taxTreatment: 'POST_TAX' });
     const balances = [
       aggregate('accountBalance', 'bal-H-2025', payload({ accountId: acc.id, year: 2025, endingBalance: 20_000 })),
@@ -314,8 +300,6 @@ describe('computePortfolioSummary', () => {
     const { summary } = computePortfolioSummary([{ account: acc, ownerDisplayName: 'X' }], balances);
     expect(summary.totalTaxFreeBalance).toBe(29_000);
     expect(summary.taxFreePct).toBe(100);
-    // The 'HSA' treatment balance arm is a no-op — HSA must NOT double-count
-    // into pre-tax or post-tax (so pre + post + tax-free reconstitutes total).
     expect(summary.totalPreTaxBalance).toBe(0);
     expect(summary.totalPostTaxBalance).toBe(0);
   });
@@ -326,8 +310,7 @@ describe('computePortfolioSummary', () => {
       aggregate('accountBalance', 'bal-H-2025', payload({ accountId: acc.id, year: 2025, startingBalance: 0, totalContributions: 4_150, endingBalance: 29_000 })),
     ];
     const { summary } = computePortfolioSummary([{ account: acc, ownerDisplayName: 'X' }], balances);
-    // HSA contributions are pre-tax deductible; PortfolioSummary has no
-    // tax-free contributions bucket, so they route to pre-tax contributions.
+    // HSA contributions are pre-tax deductible; the summary has no tax-free contributions bucket.
     expect(summary.totalPreTaxContributions).toBe(4_150);
     expect(summary.totalPostTaxContributions).toBe(0);
   });
@@ -348,10 +331,7 @@ describe('computePortfolioSummary', () => {
   });
 
   it('a MIXED Roth-designated 401(k) keeps the three percentages summing to 100', () => {
-    // Regression for the Roth-designated double-count: the Roth sub-bucket of a
-    // MIXED 401(k) used to land in BOTH totalPostTaxBalance and
-    // totalTaxFreeBalance, pushing preTaxPct + postTaxPct + taxFreePct past 100.
-    // A PRE_TAX 401(k) is included so the pre-tax bucket is non-trivial.
+    // Regression: the Roth sub-bucket of a MIXED 401(k) landed in both totalPostTaxBalance and totalTaxFreeBalance, pushing the percentages past 100.
     const mixed = accountAgg({ name: 'M', type: 'RETIREMENT_401K', taxTreatment: 'MIXED' });
     const pre = accountAgg({ name: 'K', type: 'RETIREMENT_401K', taxTreatment: 'PRE_TAX' });
     const balances = [
@@ -375,24 +355,19 @@ describe('computePortfolioSummary', () => {
       ],
       balances,
     );
-    // The Roth-designated post-tax sub-bucket is tax-free ONLY.
     expect(summary.totalPreTaxBalance).toBe(125_000);
     expect(summary.totalPostTaxBalance).toBe(0);
     expect(summary.totalTaxFreeBalance).toBe(25_000);
-    // Balances reconstitute the current balance.
     expect(
       summary.totalPreTaxBalance +
         summary.totalPostTaxBalance +
         summary.totalTaxFreeBalance,
     ).toBe(summary.totalCurrentBalance);
-    // Percentages sum to 100 (within rounding) — the bug pushed this past 100.
     expect(summary.preTaxPct + summary.postTaxPct + summary.taxFreePct).toBeCloseTo(100, 5);
   });
 
   it('a MIXED OTHER post-tax sub-bucket lands in Taxable, not Tax-Free', () => {
-    // Guard against over-correction: only Roth-designated retirement types
-    // (401k/403b/457b/TSP) route their post-tax sub-bucket to tax-free. A MIXED
-    // OTHER account's post-tax sub-bucket is plain taxable money.
+    // Only Roth-designated retirement types route their post-tax sub-bucket to tax-free; a MIXED OTHER account's is plain taxable.
     const other = accountAgg({ name: 'O', type: 'OTHER', taxTreatment: 'MIXED' });
     const balances = [
       aggregate('accountBalance', 'bal-O-2025', payload({
@@ -412,7 +387,6 @@ describe('computePortfolioSummary', () => {
 });
 
 describe('deriveTaxTreatmentAllocation', () => {
-  /** Build the summary + flat account rows the helper consumes. */
   function build(
     specs: ReadonlyArray<{
       name: string;
@@ -458,37 +432,27 @@ describe('deriveTaxTreatmentAllocation', () => {
   });
 
   it('places an HSA-treatment account in tax-free and does NOT inflate pre-tax (no double-count)', () => {
-    // PRE_TAX 401(k) 100k + HSA 20k ('HSA' treatment, the post-migration value).
-    // Tax-free is treatment-based, so the HSA is identified by its 'HSA'
-    // treatment and the HSA balance arm is a no-op in the pre/post split.
     const split = build([
       { name: 'K', type: 'RETIREMENT_401K', taxTreatment: 'PRE_TAX', ending: 100_000 },
       { name: 'H', type: 'HSA', taxTreatment: 'HSA', ending: 20_000 },
     ]);
     expect(split.taxFreeBalance).toBe(20_000);
-    // Tax-free splits Roth vs HSA: this is all HSA, no Roth.
     expect(split.taxFreeHsa).toBe(20_000);
     expect(split.taxFreeRoth).toBe(0);
     expect(split.taxFreeRoth + split.taxFreeHsa).toBe(split.taxFreeBalance);
-    // Pre-tax is the 401(k) only — the HSA is NOT double-counted.
     expect(split.pretaxBalance).toBe(100_000);
     expect(split.taxableBalance).toBe(0);
     expect(split.pretaxBalance + split.taxableBalance + split.taxFreeBalance).toBe(120_000);
   });
 
   it('places an HSA-treatment account in tax-free, not taxable', () => {
-    // Brokerage 60k (POST_TAX) + HSA 20k ('HSA' treatment). Tax-free is
-    // treatment-based, so the HSA is identified by its 'HSA' treatment (the
-    // value real HSAs carry post-migration), not by account type.
     const split = build([
       { name: 'B', type: 'BROKERAGE', taxTreatment: 'POST_TAX', ending: 60_000 },
       { name: 'H', type: 'HSA', taxTreatment: 'HSA', ending: 20_000 },
     ]);
     expect(split.taxFreeBalance).toBe(20_000);
-    // Tax-free is all HSA here.
     expect(split.taxFreeHsa).toBe(20_000);
     expect(split.taxFreeRoth).toBe(0);
-    // Taxable excludes the HSA — it belongs to tax-free.
     expect(split.taxableBalance).toBe(60_000);
     expect(split.pretaxBalance).toBe(0);
     expect(split.pretaxBalance + split.taxableBalance + split.taxFreeBalance).toBe(80_000);
@@ -500,7 +464,6 @@ describe('deriveTaxTreatmentAllocation', () => {
       { name: 'R', type: 'RETIREMENT_ROTH_IRA', taxTreatment: 'ROTH', ending: 10_000 },
     ]);
     expect(split.taxFreeBalance).toBe(10_000);
-    // Tax-free is all Roth here, no HSA.
     expect(split.taxFreeRoth).toBe(10_000);
     expect(split.taxFreeHsa).toBe(0);
     expect(split.taxableBalance).toBe(40_000);
@@ -508,7 +471,6 @@ describe('deriveTaxTreatmentAllocation', () => {
   });
 
   it('splits a mixed portfolio of Roth + HSA into separate tax-free slices', () => {
-    // Roth IRA 30k + HSA 20k → tax-free total 50k, split 30k Roth / 20k HSA.
     const split = build([
       { name: 'R', type: 'RETIREMENT_ROTH_IRA', taxTreatment: 'ROTH', ending: 30_000 },
       { name: 'H', type: 'HSA', taxTreatment: 'HSA', ending: 20_000 },
@@ -532,10 +494,7 @@ describe('deriveTaxTreatmentAllocation', () => {
       },
     ]);
     expect(split.pretaxBalance).toBe(75_000);
-    // No POST_TAX brokerage → nothing taxable.
     expect(split.taxableBalance).toBe(0);
-    // The Roth-designated sub-bucket is tax-free, and it lands in the Roth
-    // slice (there is no HSA here).
     expect(split.taxFreeBalance).toBe(25_000);
     expect(split.taxFreeRoth).toBe(25_000);
     expect(split.taxFreeHsa).toBe(0);
@@ -543,9 +502,7 @@ describe('deriveTaxTreatmentAllocation', () => {
   });
 
   it('keeps a MIXED OTHER account post-tax sub-bucket in taxable, NOT tax-free', () => {
-    // OTHER is MIXED-capable per TAX_TREATMENT_RULES, but its post-tax
-    // sub-bucket is plain taxable money — NOT Roth-designated — so it must
-    // not be reclassified as tax-free. $30k pre-tax + $10k post-tax.
+    // OTHER is MIXED-capable but its post-tax sub-bucket is plain taxable, not Roth-designated.
     const split = build([
       {
         name: 'O',
@@ -556,9 +513,7 @@ describe('deriveTaxTreatmentAllocation', () => {
         postTax: 10_000,
       },
     ]);
-    // Pre-tax slice → pretax.
     expect(split.pretaxBalance).toBe(30_000);
-    // Post-tax sub-bucket stays taxable, not zeroed into tax-free.
     expect(split.taxableBalance).toBe(10_000);
     expect(split.taxFreeBalance).toBe(0);
     expect(split.pretaxBalance + split.taxableBalance + split.taxFreeBalance).toBe(40_000);
@@ -579,9 +534,7 @@ describe('deriveTaxTreatmentAllocation', () => {
       [{ account: acc, ownerDisplayName: 'X' }],
       balances,
     );
-    // The post-tax sub-bucket of a MIXED OTHER account is NOT tax-free.
     expect(result.summary.totalTaxFreeBalance).toBe(0);
-    // By taxTreatment the splits are unchanged.
     expect(result.summary.totalPreTaxBalance).toBe(30_000);
     expect(result.summary.totalPostTaxBalance).toBe(10_000);
   });
@@ -602,15 +555,9 @@ describe('deriveTaxTreatmentAllocation', () => {
       balances,
     );
     expect(result.accounts[0].currentBalancePostTax).toBe(25_000);
-    // The Roth-designated portion folds into the tax-free total.
     expect(result.summary.totalTaxFreeBalance).toBe(25_000);
-    // The pre-tax sub-bucket goes to pre-tax; the Roth-designated post-tax
-    // sub-bucket is tax-free ONLY, so it must NOT land in totalPostTaxBalance
-    // (counting it in both buckets would double-count it).
     expect(result.summary.totalPreTaxBalance).toBe(75_000);
     expect(result.summary.totalPostTaxBalance).toBe(0);
-    // Invariant: the three balance buckets reconstitute the current balance,
-    // and the three percentages sum to 100 (within rounding).
     expect(
       result.summary.totalPreTaxBalance +
         result.summary.totalPostTaxBalance +
@@ -639,11 +586,8 @@ describe('deriveTaxTreatmentAllocation', () => {
       { name: 'B', type: 'BROKERAGE', taxTreatment: 'POST_TAX', ending: 60_000 },
     ]);
     const total = 200_000;
-    // pretax = MIXED pre-tax slice only.
     expect(split.pretaxBalance).toBe(70_000);
-    // taxable = brokerage only (Roth + MIXED Roth-designated removed).
     expect(split.taxableBalance).toBe(60_000);
-    // tax-free = Roth IRA $40k + MIXED Roth-designated $30k.
     expect(split.taxFreeBalance).toBe(70_000);
     expect(split.pretaxBalance + split.taxableBalance + split.taxFreeBalance).toBe(total);
     expect(split.pretaxPct).toBeCloseTo((70_000 / total) * 100, 5);
@@ -653,10 +597,7 @@ describe('deriveTaxTreatmentAllocation', () => {
   });
 
   it('computes all four slices for a MIXED 401(k) + brokerage + Roth + HSA mix after workaround removal', () => {
-    // MIXED 401(k) $100k (70% pre → $70k pre, $30k Roth-designated),
-    // brokerage $60k (POST_TAX → taxable), Roth IRA $40k (tax-free Roth),
-    // HSA $20k (tax-free HSA). Total $220k. With the taxFreePostTax workaround
-    // removed, taxableBalance is just summary.totalPostTaxBalance.
+    // MIXED 401(k) $100k (70% pre), brokerage $60k, Roth IRA $40k, HSA $20k.
     const split = build([
       {
         name: 'M',
@@ -671,17 +612,10 @@ describe('deriveTaxTreatmentAllocation', () => {
       { name: 'H', type: 'HSA', taxTreatment: 'HSA', ending: 20_000 },
     ]);
     const total = 220_000;
-    // pretax = MIXED pre-tax slice only.
     expect(split.pretaxBalance).toBe(70_000);
-    // taxable = brokerage only (MIXED Roth-designated stays tax-free; the
-    // workaround that used to subtract it is gone, and the summary no longer
-    // counts it as post-tax, so the slice is correct without subtraction).
     expect(split.taxableBalance).toBe(60_000);
-    // tax-free total = Roth IRA $40k + MIXED Roth-designated $30k + HSA $20k.
     expect(split.taxFreeBalance).toBe(90_000);
-    // tax-free-roth = Roth IRA $40k + MIXED Roth-designated $30k.
     expect(split.taxFreeRoth).toBe(70_000);
-    // tax-free-hsa = HSA $20k.
     expect(split.taxFreeHsa).toBe(20_000);
     expect(split.taxFreeRoth + split.taxFreeHsa).toBe(split.taxFreeBalance);
     expect(split.pretaxBalance + split.taxableBalance + split.taxFreeBalance).toBe(total);
@@ -723,9 +657,7 @@ describe('accountReturns', () => {
       aggregate('accountBalance', 'bal-A-2024', payload({ accountId: acc.id, year: 2024, startingBalance: 115_000, totalContributions: 10_000, endingBalance: 130_000 })),
     ];
     const r = accountReturns(balances);
-    // 2023 returnPct: gainLoss=5000, avgCapital=105000 -> 4.76 (rounded by returnPct to 2dp)
-    // 2024 returnPct: gainLoss=5000, avgCapital=120000 -> 4.17
-    // Match the same rounding the per-row helper applies.
+    // 2023 return 4.76% (gain 5000 / capital 105000), 2024 4.17% (5000 / 120000).
     expect(r.twr).toBeCloseTo((Math.sqrt((1 + 4.76 / 100) * (1 + 4.17 / 100)) - 1) * 100, 1);
   });
 
@@ -738,15 +670,12 @@ describe('accountReturns', () => {
     ];
     const portfolio = computePortfolioSummary([{ account: acc, ownerDisplayName: 'X' }], balances);
     const single = accountReturns(balances);
-    // The portfolio aggregator computes capital + gain unrounded per year then divides;
-    // accountReturns starts from `returnPct` which rounds to 2 decimals. Tolerate ~0.01% difference.
+    // The aggregator divides unrounded per year while accountReturns starts from the 2dp-rounded returnPct; tolerate ~0.01%.
     expect(single.twr).toBeCloseTo(portfolio.summary.twr ?? 0, 1);
   });
 });
 
 describe('seed-$0 row exclusion across all three TWR surfaces', () => {
-  // A narrow seed shape: all of startingBalance / endingBalance /
-  // totalContributions / rollover / distributions are 0.
   const SEED = (accountId: string, year: number) =>
     aggregate(
       'accountBalance',
@@ -770,8 +699,7 @@ describe('seed-$0 row exclusion across all three TWR surfaces', () => {
         }),
       ),
     ];
-    // Only one return-bearing row → null (the seed must not make it a 2-row
-    // diluted geometric mean flipping the account to "has empirical history").
+    // One return-bearing row gives null: the seed must not make a diluted 2-row mean.
     expect(accountReturns(balances)).toEqual({ twr: null });
   });
 
@@ -819,16 +747,14 @@ describe('seed-$0 row exclusion across all three TWR surfaces', () => {
   });
 
   it('isReturnBearingRow: a distributions-only row is return-bearing (not a seed)', () => {
-    // Only distributions > 0, every other field 0 — a withdrawal happened, so
-    // the row carries activity and must NOT be dropped as a no-flow seed.
+    // A distribution-only row is activity, not a no-flow seed.
     expect(
       isReturnBearingRow(payload({ distributions: 100 })),
     ).toBe(true);
   });
 
   it('a real rollover-funded zero-capital row is NOT excluded as degenerate', () => {
-    // startingBalance==0, rollover>0, endingBalance>0 → carries return info.
-    // Two such rows must produce a finite TWR (narrow predicate keeps them).
+    // startingBalance 0, rollover > 0, endingBalance > 0 carries return info.
     const acc = accountAgg({ name: 'A' });
     const balances = [
       aggregate(
@@ -845,7 +771,6 @@ describe('seed-$0 row exclusion across all three TWR surfaces', () => {
     const r = accountReturns(balances);
     expect(r.twr).not.toBeNull();
     expect(Number.isFinite(r.twr)).toBe(true);
-    // The list column also keeps the rollover-funded account (not demoted to —).
     const portfolio = computePortfolioSummary(
       [{ account: acc, ownerDisplayName: 'X' }],
       balances,

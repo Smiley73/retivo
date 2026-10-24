@@ -112,10 +112,6 @@ describe('buildReportTaxProfileAssumptions', () => {
     );
   });
 
-  // The conditional Roth-basis disclosures are gone. A blank
-  // basis field on a Roth IRA and on a MIXED employer plan now produces no
-  // disclosure mentioning either basis, while the start-year and RMD groups
-  // (unaffected by this removal) still appear.
   it('produces no contribution/designated-Roth-basis disclosure, while start-year and RMD groups still appear', () => {
     const disclosures = buildReportTaxProfileAssumptions({
       accounts: [
@@ -227,10 +223,7 @@ describe('buildReportTaxProfileAssumptions', () => {
     expect(disclosures.join(' ')).not.toContain('Inactive Roth IRA');
   });
 
-  // No engine consults an inherited Roth IRA's five-year clock, so no Roth
-  // start-year group may name one: whichever way its year resolved, that
-  // resolution decides nothing. The date FIELD is untouched, and the
-  // inherited-blocker groups + an inherited designated-Roth plan are unaffected.
+  // No engine consults an inherited Roth IRA's five-year clock, so no Roth start-year group may name one.
   it('names no inherited Roth IRA in any Roth start-year group', () => {
     const disclosures = buildReportTaxProfileAssumptions({
       accounts: [
@@ -252,23 +245,17 @@ describe('buildReportTaxProfileAssumptions', () => {
       balances: [balance('inh-derived', 2015, { endingBalance: 5_000 })],
       members: [member('owner', '1960-01-01')],
     });
-    // Scoped to the three Roth start-year groups: the inherited accounts still
-    // appear in the interim $0-basis group and in their blocker groups.
     const startYearGroups = disclosures.filter(
       (d) => d.startsWith('Roth start years') || d.startsWith('No supporting Roth history'),
     );
     const joined = startYearGroups.join('\n');
     expect(joined).not.toContain('Inherited Roth IRA (history)');
     expect(joined).not.toContain('Inherited Roth IRA (no history)');
-    // The owner's OWN Roth IRA still reports its unavailable clock.
     expect(startYearGroups).toContain(
       'No supporting Roth history was found, so the five-year rule is treated as unmet: Own Roth IRA.',
     );
   });
 
-  // The conditional
-  // basis-disclosure groups are gone entirely, including for an inherited
-  // Roth IRA's blank basis field.
   it('produces no basis disclosure for an inherited Roth IRA either', () => {
     const disclosures = buildReportTaxProfileAssumptions({
       accounts: [

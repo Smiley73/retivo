@@ -1,9 +1,3 @@
-/**
- * Tests for `projectIncomeByMonth` — pension annuity start month
- * (Jan-default given year-only data model), part-time start/end at
- * actual month, one-off windfall + lump-sum spike at receipt month
- * at `amount × 12` annualized rate.
- */
 import { describe, expect, it } from 'vitest';
 import {
   buildIncomeContext,
@@ -11,7 +5,6 @@ import {
   collectTargetedDepositEvents,
   projectIncomeByMonth,
   projectIncomeByYear,
-  resolveIncomeColaPct,
 } from './income-projection';
 import type { ResolvedIncomeStream } from './income-resolution';
 import type {
@@ -49,10 +42,7 @@ const stream = (
 });
 
 const ctxOf = (overrides: { retirementMonth0?: number } = {}) => {
-  // Per-member retirement dates so the owner-relative `retirementStart`
-  // anchors resolve correctly. Both members retire in 2030 for these
-  // fixtures; sub-year `retirementMonth0` propagates per-member when
-  // overridden (used by the "honors retirementMonth0" test).
+  // Both members retire in 2030; `retirementMonth0` propagates per member when overridden.
   const dateByMember = new Map<string, { year: number; month0?: number }>([
     ['p', { year: 2030, month0: overrides.retirementMonth0 }],
     ['s', { year: 2030, month0: overrides.retirementMonth0 }],
@@ -85,13 +75,10 @@ describe('projectIncomeByMonth — pension annuity', () => {
       start: { kind: 'age', years: 65, months: 0 },
       colaPct: 0,
     } as IncomeStreamPayload);
-    // Primary born March 1965 → age 65 = March 2030.
     const out = projectIncomeByMonth([p], ctxOf(), { from: 2029, to: 2030 });
-    // 2029 + Jan/Feb 2030 — pre-start.
     expect(out.find((r) => r.year === 2029 && r.month0 === 11)!.pensionIncome).toBe(0);
     expect(out.find((r) => r.year === 2030 && r.month0 === 0)!.pensionIncome).toBe(0);
     expect(out.find((r) => r.year === 2030 && r.month0 === 1)!.pensionIncome).toBe(0);
-    // March 2030 onward — $12k/yr rate.
     for (let m = 2; m < 12; m += 1) {
       expect(
         out.find((r) => r.year === 2030 && r.month0 === m)!.pensionIncome,
@@ -100,9 +87,7 @@ describe('projectIncomeByMonth — pension annuity', () => {
   });
 
   it('J&S survivor reduction kicks in Jan of the year after the pensioner dies', () => {
-    // Primary born March 1960, life 90 → deathYear = 2050. Death = Dec 31
-    // of deathYear, so the full pension is paid through Dec 2050 and the
-    // J&S reduction kicks in Jan 2051.
+    // Death is Dec 31 of the death year (born 1960, life 90): full pension through Dec 2050, J&S reduction from Jan 2051.
     const ctx = {
       ...buildIncomeContext(
         [
@@ -127,13 +112,11 @@ describe('projectIncomeByMonth — pension annuity', () => {
       jointAndSurvivorPct: 50,
     } as IncomeStreamPayload);
     const out = projectIncomeByMonth([p], ctx, { from: 2050, to: 2051 });
-    // Every month of the death year (2050) — full pension ($12k/yr).
     for (let m = 0; m < 12; m++) {
       expect(
         out.find((r) => r.year === 2050 && r.month0 === m)!.pensionIncome,
       ).toBeCloseTo(12000, 2);
     }
-    // Jan 2051 — J&S 50% kicks in ($6k/yr).
     expect(
       out.find((r) => r.year === 2051 && r.month0 === 0)!.pensionIncome,
     ).toBeCloseTo(6000, 2);
@@ -142,7 +125,6 @@ describe('projectIncomeByMonth — pension annuity', () => {
 
 describe('projectIncomeByMonth — part-time', () => {
   it('age-anchored start fires on the resolved birthday month', () => {
-    // Primary born March 1965 → age 65 → start March 2030.
     const p = stream('pt', {
       name: 'PT',
       kind: 'partTime',
@@ -153,10 +135,8 @@ describe('projectIncomeByMonth — part-time', () => {
       colaPct: 0,
     } as IncomeStreamPayload);
     const out = projectIncomeByMonth([p], ctxOf(), { from: 2030, to: 2030 });
-    // Jan, Feb 2030 — pre-start.
     expect(out[0].partTimeIncome).toBe(0);
     expect(out[1].partTimeIncome).toBe(0);
-    // March 2030 onward — active.
     for (let m = 2; m < 12; m += 1) {
       expect(out[m].partTimeIncome).toBe(24000);
     }
@@ -172,7 +152,6 @@ describe('projectIncomeByMonth — part-time', () => {
       end: { kind: 'durationFromStart', months: 24 },
       colaPct: 0,
     } as IncomeStreamPayload);
-    // Retirement March 2030, retirementMonth0 = 2.
     const out = projectIncomeByMonth([p], ctxOf({ retirementMonth0: 2 }), {
       from: 2030,
       to: 2030,
@@ -194,7 +173,6 @@ describe('projectIncomeByMonth — one-off', () => {
       start: { kind: 'year', year: 2035 },
     } as IncomeStreamPayload);
     const out = projectIncomeByMonth([p], ctxOf(), { from: 2035, to: 2035 });
-    // Year-only data → spike in Jan (month0 = 0).
     expect(out[0].oneOffIncome).toBe(50000);
     expect(out[0].total).toBe(50000);
     for (let m = 1; m < 12; m += 1) {
@@ -211,8 +189,6 @@ describe('projectIncomeByMonth — one-off', () => {
       lumpSumAmount: 100000,
       start: { kind: 'age', years: 65, months: 0 },
     } as IncomeStreamPayload);
-    // Primary born March 1965 → age 65 = year 2030. Receipt resolves to
-    // birthday-month: March 2030 (month0 = 2).
     const out = projectIncomeByMonth([p], ctxOf(), { from: 2030, to: 2030 });
     expect(out[2].oneOffIncome).toBe(100000);
     expect(out[2].total).toBe(100000);
@@ -225,9 +201,7 @@ describe('projectIncomeByMonth — one-off', () => {
 
 describe('owner-relative retirementStart', () => {
   it('resolves to the OWNER\'s retirement year on a secondary-owned stream', () => {
-    // Primary retires 2028; secondary retires 2032. A secondary-owned
-    // partTime stream with `retirementStart` should fire in 2032, not
-    // 2028 (the household-level / primary's date).
+    // A secondary-owned partTime stream anchored at retirementStart fires at the secondary's retirement (2032), not the primary's (2028).
     const dateByMember = new Map<string, { year: number; month0?: number }>([
       ['p', { year: 2028, month0: 0 }],
       ['s', { year: 2032, month0: 0 }],
@@ -254,11 +228,9 @@ describe('owner-relative retirementStart', () => {
       colaPct: 0,
     } as IncomeStreamPayload);
     const out = projectIncomeByMonth([p], ctx, { from: 2028, to: 2032 });
-    // 2028–2031: pre-secondary's retirement, no income.
     for (const y of [2028, 2029, 2030, 2031]) {
       expect(out.find((r) => r.year === y && r.month0 === 0)!.partTimeIncome).toBe(0);
     }
-    // 2032 Jan onward — secondary retires, partTime begins.
     expect(out.find((r) => r.year === 2032 && r.month0 === 0)!.partTimeIncome).toBe(
       24000,
     );
@@ -274,11 +246,7 @@ describe('projectIncomeByMonth — fractionalYear', () => {
   });
 });
 
-// Pinned: one-off + pension-lump-sum amounts are entered as
-// today's-dollar values and inflated month-precise to the event month
-// when the context supplies `todayYear` + `inflationPct`. Default
-// (legacy) behaviour with no inflation context produces the literal
-// amount — covered above.
+// One-off and pension lump-sum amounts are today's dollars, inflated month-precise to the event month when the context supplies todayYear and inflationPct.
 describe('one-off + lump-sum roll forward from today', () => {
   const ctxWithInflation = (rate: number, todayYear = 2026, todayMonthIndex = 0) => ({
     ...buildIncomeContext(
@@ -313,8 +281,6 @@ describe('one-off + lump-sum roll forward from today', () => {
       from: 2035,
       to: 2035,
     });
-    // year=2035 (month0=0 for year-anchored), todayYear=2026 month=0 →
-    // 9 years out → factor = 1.03^9.
     expect(out[0].spendable.oneOff).toBeCloseTo(50_000 * Math.pow(1.03, 9), 1);
   });
 
@@ -327,15 +293,12 @@ describe('one-off + lump-sum roll forward from today', () => {
       lumpSumAmount: 100_000,
       start: { kind: 'age', years: 65, months: 0 },
     } as IncomeStreamPayload);
-    // Primary born March 1965 → age 65 = March 2030 (month0=2). Today
-    // = Jan 2026 (asOfMonth = 2026*12). Months from anchor = (2030*12 + 2) − (2026*12 + 0) = 50.
     const out = projectIncomeByYear([p], ctxWithInflation(3), {
       from: 2030,
       to: 2030,
     });
     const expected = 100_000 * Math.pow(1.03, 50 / 12);
-    // Pension lumpSum without `targetAccountId` is treated as untargeted
-    // spendable income (engine fallback — see income-projection.ts).
+    // A pension lumpSum without targetAccountId is untargeted spendable income (engine fallback).
     expect(out[0].spendable.oneOff).toBeCloseTo(expected, 1);
   });
 
@@ -380,8 +343,6 @@ describe('one-off + lump-sum roll forward from today', () => {
       oneOffAmount: 50_000,
       start: { kind: 'year', year: 2035 },
     } as IncomeStreamPayload);
-    // Anchor June 2026 (month0=5). Event Jan 2035 (month0=0).
-    // Months gap = (2035*12 + 0) − (2026*12 + 5) = 103.
     const out = projectIncomeByYear([p], ctxWithInflation(3, 2026, 5), {
       from: 2035,
       to: 2035,
@@ -390,12 +351,7 @@ describe('one-off + lump-sum roll forward from today', () => {
   });
 });
 
-// Classify one-off / lump-sum receipts by
-// `targetAccountId`. Untargeted → spendable income (offsets expenses).
-// Targeted → portfolio addition (`deposits.byAccount[accountId]`),
-// never offsets expenses. Pinned defect: prior behaviour put targeted
-// windfalls in BOTH the spendable bucket AND the deposit bucket,
-// which double-counted them (offset expenses + grew portfolio).
+// Targeted one-offs are portfolio deposits (deposits.byAccount) and never offset expenses; untargeted ones are spendable.
 describe('one-off classification by targetAccountId', () => {
   it('untargeted windfall flows to spendable.oneOff, not deposits', () => {
     const p = stream('w', {
@@ -413,10 +369,7 @@ describe('one-off classification by targetAccountId', () => {
   });
 
   it('targeted windfall flows to deposits.byAccount, not spendable', () => {
-    // Pinned defect: prior shape had `oneOffIncome` populated from
-    // targeted windfalls AND `depositsByAccount` — same dollar counted
-    // twice (offset expenses + portfolio grew). New contract: targeted
-    // amount sits exclusively in deposits.
+    // Pinned defect: targeted windfalls used to land in both oneOffIncome and depositsByAccount, double-counting them.
     const p = stream('w', {
       name: 'Targeted windfall',
       kind: 'oneOff',
@@ -472,11 +425,7 @@ describe('one-off classification by targetAccountId', () => {
 });
 
 describe('linked-CBP lump-sum amount derivation', () => {
-  // When a `payoutType: 'lumpSum'` stream sets `linkedCbpAccountId`,
-  // the UI saves `lumpSumAmount = 0` (the field is hidden). The
-  // engine must substitute the deposit amount from
-  // `ctx.linkedCbpBalanceLookup` instead — otherwise the transfer
-  // disappears entirely.
+  // A linked-CBP lump sum saves lumpSumAmount = 0 (the field is hidden), so the engine must read the deposit from ctx.linkedCbpBalanceLookup or the transfer vanishes.
   const linkedStream = stream('cbp-lump', {
     name: 'CBP rollover',
     kind: 'pension',
@@ -531,9 +480,6 @@ describe('linked-CBP lump-sum amount derivation', () => {
   });
 
   it('ignores the user-entered lumpSumAmount when linkedCbpAccountId is set', () => {
-    // Even if the payload still carries a non-zero `lumpSumAmount`
-    // (legacy data, future bug, etc.), the linked-CBP path must read
-    // from the lookup. The user-entered value is intentionally ignored.
     const legacyStream = stream('cbp-lump-legacy', {
       ...linkedStream.payload,
       lumpSumAmount: 999_999, // stale; should NOT be emitted.
@@ -547,30 +493,27 @@ describe('linked-CBP lump-sum amount derivation', () => {
   });
 });
 
-// resolveIncomeColaPct — single resolution rule converting
-// tracksInflation / colaPct pairs into an effective rate.
-describe('resolveIncomeColaPct', () => {
-  it('returns scenarioInflationPct when tracksInflation=true', () => {
-    expect(resolveIncomeColaPct({ tracksInflation: true }, 3.5)).toBe(3.5);
-  });
-
-  it('returns explicit colaPct when tracksInflation=false', () => {
-    expect(resolveIncomeColaPct({ tracksInflation: false, colaPct: 2 }, 3.5)).toBe(2);
-  });
-
-  it('returns 0 when tracksInflation=false and colaPct absent', () => {
-    expect(resolveIncomeColaPct({ tracksInflation: false }, 3.5)).toBe(0);
-  });
-
-  it('returns 0 when tracksInflation absent and colaPct absent (pre-migration)', () => {
-    // tracksInflation === undefined → not strictly true → falls back to colaPct ?? 0
-    expect(resolveIncomeColaPct({}, 3.5)).toBe(0);
+describe('pension COLA resolution', () => {
+  it.each([
+    ['tracksInflation is true: scenario inflation', { tracksInflation: true }, 3.5],
+    ['tracksInflation is false: the explicit colaPct', { tracksInflation: false, colaPct: 2 }, 2],
+    ['tracksInflation is false and colaPct absent', { tracksInflation: false }, 0],
+    ['both absent (pre-migration)', {}, 0],
+  ])('grows at the rate when %s', (_name, cola, ratePct) => {
+    const p = stream('pen', {
+      name: 'Co Pension',
+      kind: 'pension',
+      payoutType: 'annuity',
+      memberId: 'p',
+      monthlyBenefit: 1000,
+      start: { kind: 'age', years: 65, months: 0 },
+      ...cola,
+    } as IncomeStreamPayload);
+    const out = projectIncomeByMonth([p], { ...ctxOf(), inflationPct: 3.5 }, { from: 2032, to: 2032 });
+    expect(out[0].pensionIncome).toBeCloseTo(12000 * Math.pow(1 + ratePct / 100, 2), 2);
   });
 });
 
-// Direct coverage for collectPostRetirementPlainPensionPlacements — the
-// per-account placement filter has 4 distinct paths (included + 3 exclusions).
-// Both members retire in 2030 (ctxOf), so primaryRetirementAbsMonth = 2030*12.
 describe('collectPostRetirementPlainPensionPlacements', () => {
   const PRIMARY_RET_ABS = 2030 * 12;
 
@@ -582,7 +525,6 @@ describe('collectPostRetirementPlainPensionPlacements', () => {
       memberId: 'p',
       lumpSumAmount: 100_000,
       targetAccountId: 'acct-ira',
-      // 2032 ≥ retirement (2030) → post-retirement.
       start: { kind: 'year', year: 2032 },
     } as IncomeStreamPayload);
     const out = collectPostRetirementPlainPensionPlacements([p], ctxOf(), PRIMARY_RET_ABS);
@@ -599,9 +541,6 @@ describe('collectPostRetirementPlainPensionPlacements', () => {
       kind: 'pension',
       payoutType: 'lumpSum',
       memberId: 'p',
-      // Linked-CBP elections force lumpSumAmount to 0 on save; the amount would
-      // come from the CBP balance lookup. The placement collector excludes them
-      // regardless of amount because linkedCbpAccountId is set.
       lumpSumAmount: 0,
       linkedCbpAccountId: 'cbp-1',
       targetAccountId: 'acct-ira',
@@ -619,7 +558,6 @@ describe('collectPostRetirementPlainPensionPlacements', () => {
       memberId: 'p',
       lumpSumAmount: 100_000,
       targetAccountId: 'acct-ira',
-      // 2029 < retirement (2030) → pre-retirement, excluded.
       start: { kind: 'year', year: 2029 },
     } as IncomeStreamPayload);
     const out = collectPostRetirementPlainPensionPlacements([p], ctxOf(), PRIMARY_RET_ABS);
@@ -633,7 +571,6 @@ describe('collectPostRetirementPlainPensionPlacements', () => {
       payoutType: 'lumpSum',
       memberId: 'p',
       lumpSumAmount: 100_000,
-      // targetAccountId omitted → not a per-account placement.
       start: { kind: 'year', year: 2032 },
     } as IncomeStreamPayload);
     const out = collectPostRetirementPlainPensionPlacements([p], ctxOf(), PRIMARY_RET_ABS);

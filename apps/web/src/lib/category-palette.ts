@@ -30,7 +30,7 @@ export function assembleCategoryMeta(
 }
 
 /** Stacked-area palette for a theme, from the chart-color map. */
-export function categoryPaletteFor(theme: 'light' | 'dark'): readonly string[] {
+function categoryPaletteFor(theme: 'light' | 'dark'): readonly string[] {
   const c = CHART_COLORS[theme];
   return [
     c.essential,

@@ -398,7 +398,7 @@ export function rmdSaveBlockerMessages(
  * before the local save, or an oversized account would be locally valid yet
  * unsyncable for good.
  */
-export const MAX_ACCOUNT_PAYLOAD_PLAINTEXT_BYTES = 40 * 1024;
+const MAX_ACCOUNT_PAYLOAD_PLAINTEXT_BYTES = 40 * 1024;
 
 /** Plain-English error when the serialized payload exceeds the sync budget, else `null`. */
 export function accountPayloadSizeError(payload: unknown): string | null {

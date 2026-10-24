@@ -1,8 +1,4 @@
-/**
- * The minimum behind the credit applied to premiums. The table rows are the
- * worked 2026 household in docs/math-social-security-and-health.md; each limit
- * binds in at least one row.
- */
+// The table rows are the worked 2026 household in docs/math-social-security-and-health.md; each limit binds in at least one row.
 import { describe, expect, it } from 'vitest';
 import {
   creditAppliedToPremiumsCents,
@@ -69,8 +65,6 @@ describe('creditAppliedToPremiumsCents, poverty-line limit', () => {
 });
 
 describe('povertyLineLimitCents', () => {
-  // `incomeDrawCents` is the draw from accounts whose withdrawals are income and
-  // `magiOfDrawCents` the ACA MAGI it carries (all of a pre-tax dollar).
   const income = (cents: number, magiCents = cents) => ({ incomeDrawCents: cents, magiOfDrawCents: magiCents });
 
   it('is the headroom when the draw is MAGI the lowered draw would shed', () => {
@@ -79,9 +73,7 @@ describe('povertyLineLimitCents', () => {
   });
 
   it('is no limit when the draw sheds no more MAGI than the headroom', () => {
-    // A $15,650 pension on the line, drawing qualified Roth only: nothing to shed.
     expect(povertyLineLimitCents({ headroomCents: 0, ...income(0) })).toBe(Number.POSITIVE_INFINITY);
-    // $3,000 of pre-tax inside $6,350 of headroom: the line can take it all.
     expect(povertyLineLimitCents({ headroomCents: 635_000, ...income(300_000) })).toBe(
       Number.POSITIVE_INFINITY,
     );
@@ -95,7 +87,6 @@ describe('povertyLineLimitCents', () => {
     // $8,000 from a brokerage account at half basis: $4,000 of MAGI against $2,350 of
     // headroom, so the draw can fall by $4,700 (each dollar sheds 50 cents of MAGI).
     expect(povertyLineLimitCents({ headroomCents: 235_000, ...income(800_000, 400_000) })).toBe(470_000);
-    // And by all of it when the gain fits inside the headroom.
     expect(povertyLineLimitCents({ headroomCents: 400_000, ...income(800_000, 400_000) })).toBe(
       Number.POSITIVE_INFINITY,
     );
@@ -138,7 +129,6 @@ describe('sumPositiveNeed', () => {
 });
 
 describe('foldYearDrawIntoExpense', () => {
-  /** The year's draw: the sum of the months' positive need. */
   const draw = (expense: Float64Array, income: Float64Array): number =>
     sumPositiveNeed(expense, income, 0, expense.length);
 

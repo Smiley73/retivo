@@ -53,7 +53,7 @@ export function isNeutralGlide(g: DiscretionaryGlideOverride): boolean {
   return isFlat && noFloor;
 }
 
-export function anchorResolved(a: GlideAnchor): boolean {
+function anchorResolved(a: GlideAnchor): boolean {
   return a.kind === 'age' ? a.years > 0 : true;
 }
 

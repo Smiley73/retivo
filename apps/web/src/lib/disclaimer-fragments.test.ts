@@ -1,7 +1,3 @@
-/**
- * Semantic guards for the shared report disclaimer: the terms it must state
- * and the references it must no longer make.
- */
 import { describe, expect, it } from 'vitest';
 import {
   INLINE_DISCLAIMER_CLOSING,

@@ -83,7 +83,7 @@ export function gainLoss(p: AccountBalancePayload): number {
  * year (starting balance 0), else 0.5; distributions 0.5; rollovers are
  * excluded as transfers of existing assets.
  */
-export function returnPct(p: AccountBalancePayload): number {
+function returnPct(p: AccountBalancePayload): number {
   const tc = totalContributions(p);
   const gl = gainLoss(p);
   const contributionWeight = p.startingBalance === 0 ? 1 : 0.5;

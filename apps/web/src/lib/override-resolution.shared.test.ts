@@ -1,8 +1,4 @@
-/**
- * Cases that expense and income override resolution must satisfy identically:
- * same-scenario disable beats re-enable, and un-prefixed ids are treated as
- * `aggregate:<id>`. Each kind-specific file keeps its own cases.
- */
+// Cases expense and income override resolution must satisfy identically; each kind-specific file keeps its own.
 import { describe, expect, it } from 'vitest';
 import { resolveExpensesForScenarioSparse } from './expense-override-resolution';
 import { resolveIncomeForScenarioSparse } from './income-override-resolution';
@@ -45,9 +41,7 @@ interface Resolved {
 
 interface Kind {
   section: 'expenses' | 'income';
-  /** Numeric payload field the patch case changes. */
   field: 'amount' | 'monthlyBenefit';
-  /** Resolves one canonical item (id, numeric value) under a scenario. */
   resolveOne: (scenarioAggregate: ScenarioAggregate, id: string, value: number) => Resolved[];
 }
 

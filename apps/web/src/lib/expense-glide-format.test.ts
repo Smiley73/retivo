@@ -1,15 +1,8 @@
-/**
- * Pure-helper tests for the Expense glide path Configure card. Locks the
- * neutral-state / clamp / anchor-resolution / member-label contracts so
- * future refactors don't silently change save-time validation or the
- * anchor-picker option labels.
- */
 import { describe, expect, it } from 'vitest';
 import {
   PCT_MIN,
   PCT_MAX,
   NEUTRAL_END_PCT,
-  anchorResolved,
   clampPct,
   glideProblem,
   isNeutralGlide,
@@ -21,7 +14,6 @@ import type { ScheduleResolveContext } from './schedule-resolution';
 import type {
   Aggregate,
   DiscretionaryGlideOverride,
-  GlideAnchor,
   HouseholdMemberPayload,
   ScheduleEnd,
 } from '../db/types';
@@ -137,26 +129,6 @@ describe('isNeutralGlide', () => {
   });
 });
 
-describe('anchorResolved', () => {
-  it('returns false for an age anchor with years = 0', () => {
-    const a: GlideAnchor = { kind: 'age', years: 0, months: 0 };
-    expect(anchorResolved(a)).toBe(false);
-  });
-
-  it('returns true for an age anchor with years > 0', () => {
-    const a: GlideAnchor = { kind: 'age', years: 65, months: 0 };
-    expect(anchorResolved(a)).toBe(true);
-  });
-
-  it('returns true for non-age kinds', () => {
-    expect(anchorResolved({ kind: 'retirementStart' })).toBe(true);
-    expect(anchorResolved({ kind: 'year', year: 2040 })).toBe(true);
-    expect(
-      anchorResolved({ kind: 'durationFromExpenseStart', months: 0 }),
-    ).toBe(true);
-  });
-});
-
 describe('clampPct', () => {
   it('clamps below the minimum up to PCT_MIN', () => {
     expect(clampPct(-10)).toBe(PCT_MIN);
@@ -256,16 +228,8 @@ describe('glideProblem', () => {
     );
   });
 
-  // When the expense start can't resolve, the caller falls back to
-  // a retirement-year probe. That probe must carry the resolved
-  // retirement *month* — a mid-year retiree whose expense start is
-  // unresolved must still have the before-expense rule evaluated
-  // against the real retirement month, not a hardcoded January.
+  // A mid-year retiree whose expense start is unresolved must be probed at the real retirement month, not a hardcoded January.
   it('rejects a year-anchored glide-start that lands before a mid-year retirement probe', () => {
-    // Retire June 2030 (month0 = 5). Expense start unresolvable →
-    // caller's fallback probe must be { year: 2030, month0: 5 }. A
-    // `year: 2030` glide-start resolves to Jan 2030 (month0 = 0), which
-    // is BEFORE the real June retirement, so it must be rejected.
     const g: DiscretionaryGlideOverride = {
       endMultiplierPct: 60,
       glideStart: { kind: 'year', year: 2030 },
@@ -274,9 +238,7 @@ describe('glideProblem', () => {
     expect(glideProblem(g, ctx, { year: 2030, month0: 5 })).toMatch(
       /spending glide starts before the expense/i,
     );
-    // Control: with a January probe (the buggy hardcoded fallback) the
-    // same glide-start would NOT trip the rule — proving the month
-    // precision matters.
+    // Control: a January probe (the old hardcoded fallback) would not trip the rule.
     expect(glideProblem(g, ctx, { year: 2030, month0: 0 })).toBeNull();
   });
 });
@@ -323,8 +285,6 @@ describe('glideProblem — direction-aware floor/ceiling', () => {
   });
 
   it('increasing glide: plateau-ordering message names the "ceiling" not the "floor"', () => {
-    // A rising glide whose plateau (ceiling) resolves at-or-before glide-end
-    // must surface a direction-aware "ceiling must begin after" message.
     const ceilingTooEarly: DiscretionaryGlideOverride = {
       endMultiplierPct: 150,
       glideStart: { kind: 'year', year: 2030 },
@@ -334,7 +294,6 @@ describe('glideProblem — direction-aware floor/ceiling', () => {
     expect(glideProblem(ceilingTooEarly, ctx, { year: 2030, month0: 0 })).toMatch(
       /ceiling must begin after/i,
     );
-    // And the declining counterpart still says "floor".
     const floorTooEarly: DiscretionaryGlideOverride = {
       endMultiplierPct: 60,
       glideStart: { kind: 'year', year: 2030 },
@@ -347,8 +306,6 @@ describe('glideProblem — direction-aware floor/ceiling', () => {
   });
 
   it('increasing glide: missing-anchor message names the "ceiling" not the "floor"', () => {
-    // A rising glide whose plateau anchor can't resolve (absent member)
-    // surfaces a direction-aware "ceiling is missing an age" message.
     const ceilingUnresolvable: DiscretionaryGlideOverride = {
       endMultiplierPct: 150,
       glideStart: { kind: 'year', year: 2030 },
@@ -392,8 +349,6 @@ describe('glideProblem — expenseEnd glide-end anchor', () => {
       glideStart: { kind: 'year', year: 2055 },
       glideEnd: { kind: 'expenseEnd' },
     };
-    // end resolves to ~2050 (age 85, born 1965) — before the 2055
-    // glide-start, so the ordering rule must reject it.
     const end: ScheduleEnd = {
       kind: 'age',
       memberId: 'primary',
@@ -411,10 +366,8 @@ describe('glideProblem — expenseEnd glide-end anchor', () => {
       glideStart: { kind: 'year', year: 2030 },
       glideEnd: { kind: 'expenseEnd' },
     };
-    // No `end` threaded ⇒ expenseEnd cannot resolve.
     const msg = glideProblem(g, ctx, { year: 2030, month0: 0 }, undefined);
     expect(msg).toMatch(/can't be determined here/i);
-    // Distinct from the age-centric "missing an age" string.
     expect(msg).not.toMatch(/missing an age/i);
   });
 
@@ -424,7 +377,6 @@ describe('glideProblem — expenseEnd glide-end anchor', () => {
       glideStart: { kind: 'year', year: 2030 },
       glideEnd: { kind: 'expenseEnd' },
     };
-    // end references the secondary member, who has no birthdate here.
     const end: ScheduleEnd = {
       kind: 'age',
       memberId: 'secondary',
@@ -437,8 +389,6 @@ describe('glideProblem — expenseEnd glide-end anchor', () => {
   });
 
   it('skips floor checks entirely when glide-end is expenseEnd', () => {
-    // A floor that would normally be rejected (anchor at/before
-    // glide-end, floor% > end%) must be ignored under expenseEnd.
     const g: DiscretionaryGlideOverride = {
       endMultiplierPct: 60,
       glideStart: { kind: 'year', year: 2030 },

@@ -1,13 +1,4 @@
-/**
- * The ACA credit applied to premiums, end to end in both engines.
- *
- * One retired single filer, a Roth IRA as the only account, $31,300 of Social
- * Security and a user-entered 2026 benchmark of $7,200: no taxable Social
- * Security, $0 federal tax, ACA MAGI at 200.0% of the $15,650 poverty guideline,
- * so the credit is $5,134.20 with nothing to offset (HHS 2025 poverty guideline,
- * 2026 applicable percentages, IRC §86, Rev. Proc. 2025-32). Monthly benefits
- * are whole cents, so the projected benefit is pinned to exactly $31,300.
- */
+// One retired single filer: Roth IRA only, $31,300 Social Security, $7,200 benchmark. ACA MAGI is 200.0% of the $15,650 poverty guideline, so the credit is $5,134.20 (HHS 2025 poverty guideline, 2026 applicable percentages, IRC §86, Rev. Proc. 2025-32).
 import { describe, expect, it, vi } from 'vitest';
 import { runMonteCarlo, validateMonteCarloInput } from './monte-carlo.js';
 import { applyStress } from './market-stress.js';
@@ -69,8 +60,6 @@ function expense(id: string, categoryId: string, amount: number): Aggregate<Expe
   };
 }
 
-/** A monthly expense: for life, or for its first `months` retirement months only
- *  (an uneven year, as a one-off bill or a benefit that starts mid-year makes). */
 function monthlyExpense(
   id: string,
   categoryId: string,
@@ -89,8 +78,6 @@ function monthlyExpense(
   };
 }
 
-/** A fixed pension with no COLA, paid from the first retirement month: ordinary
- *  income for case E. */
 function pension(annual: number): Aggregate<IncomeStreamPayload> {
   return {
     ...BASE,
@@ -105,23 +92,16 @@ function pension(annual: number): Aggregate<IncomeStreamPayload> {
 }
 
 interface Household {
-  /** Medical rows (not HSA-qualified) and everything else, dollars a year. */
   readonly medical: number;
   readonly other: number;
   readonly pensionAnnual?: number;
-  /** Extra non-medical monthly spending in the first `months` months only. */
   readonly shortMonthly?: { readonly amount: number; readonly months: number };
-  /** Medical dollars a month for life, instead of the yearly `medical` row. */
   readonly medicalMonthly?: number;
-  /** A pre-tax IRA instead of the Roth IRA. */
   readonly preTax?: boolean;
   readonly noMedicalCategory?: boolean;
   readonly noSocialSecurity?: boolean;
-  /** A Roth IRA first funded in 2025: nonqualified draws, taxable earnings. */
   readonly nonqualifiedRoth?: boolean;
-  /** Age at retirement on 2026-01-01 (default 63, when Social Security starts). */
   readonly age?: number;
-  /** A taxable brokerage account of this balance instead of the Roth IRA. */
   readonly brokerageBalance?: number;
 }
 
@@ -207,7 +187,6 @@ function detRow(h: Household) {
   return row;
 }
 
-/** [need before the line, line, draw after, dropped] in cents for one household. */
 const cents = (dollars: number): number => Math.round(dollars * 100);
 
 describe('credit applied to premiums, deterministic engine', () => {
@@ -259,7 +238,6 @@ describe('credit applied to premiums, deterministic engine', () => {
   });
 });
 
-/** One injected-flat path, zero CPI: the representative first retirement row. */
 function mcFirstRow(h: Household) {
   const input = runBalanceProjectionMc(args(h));
   const steps = (input.horizonYear - input.firstYear + 1) * 12;
@@ -276,9 +254,7 @@ function mcFirstRow(h: Household) {
 }
 
 describe('credit applied to premiums, deterministic versus Monte Carlo', () => {
-  // The stress test rounds each month's expense base to the cent while the
-  // deterministic series does not, so these households spend a whole number of
-  // cents a month (annual figures divisible by 12) to compare to the cent.
+  // The stress test rounds each month's expense base to the cent, so annual figures are divisible by 12 to compare to the cent.
   it.each([
     ['A', { medical: 7_200, other: 64_008 }, 5_134.2],
     ['B', { medical: 7_200, other: 26_796 }, 2_696],
@@ -299,7 +275,6 @@ describe('credit applied to premiums, Monte Carlo input', () => {
   const sumYear = (series: readonly number[] | undefined, year0: number): number =>
     (series ?? []).slice(year0 * 12, year0 * 12 + 12).reduce((a, b) => a + b, 0);
 
-  /** The household plus a second medical category at its own inflation rate. */
   function twoRateArgs(medicalCategoryIds: string[]): RunBalanceProjectionArgs {
     const base = args(household);
     const scenario = base.scenarios[0];
@@ -325,7 +300,6 @@ describe('credit applied to premiums, Monte Carlo input', () => {
   it('carries every isMedical row, not just the HSA-qualified subset', () => {
     const input = runBalanceProjectionMc(args(household));
     expect(sumYear(input.monthlyMedicalExpenseBase, 0)).toBeCloseTo(7_200, 2);
-    // Nothing is HSA-qualified here, so the HSA demand base is absent.
     expect(input.monthlyMedicalDemandBase).toBeUndefined();
     expect(input.monthlyMedicalExpenseBase).toHaveLength(input.monthlyExpenseBase.length);
   });
@@ -437,9 +411,7 @@ describe('credit applied to premiums, near the poverty line', () => {
       expect(r.withdrawn).toBeGreaterThanOrEqual(GUIDELINE_DOLLARS - 0.01);
       expect(r.acaCreditAppliedToPremiumsCents).toBeLessThanOrEqual(cents(22_008 - GUIDELINE_DOLLARS));
     }
-    // The lowered draw still earns a credit on the row the engine reports.
     expect(det.acaPtcSubsidyCents).toBeGreaterThan(0);
-    // The line is the whole fall in the stress test's draw.
     expect(Math.round((without.withdrawn - row.withdrawn) * 100)).toBe(
       row.acaCreditAppliedToPremiumsCents,
     );
@@ -520,7 +492,6 @@ describe('credit applied to premiums, taxable brokerage near the poverty line', 
     const { row } = mcFirstRow(h);
     for (const r of [det, row]) {
       expect(r.acaCreditAppliedToPremiumsCents).toBeGreaterThan(cents(4_600));
-      // The lowered draw still earns a credit: its gain keeps MAGI at the guideline.
       expect(14_000 + r.withdrawn / 2).toBeGreaterThanOrEqual(GUIDELINE_DOLLARS - 0.01);
     }
     expect(Math.abs(row.acaCreditAppliedToPremiumsCents! - det.acaCreditAppliedToPremiumsCents!)).toBeLessThanOrEqual(2);

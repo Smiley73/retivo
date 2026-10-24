@@ -1,9 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BETA_FEATURES,
   betaFeature,
   hiddenBetaPdfSectionIds,
-  parseBetaFeatureConfig,
 } from './feature-flags';
 
 function reviewByCheckSkipped(env: Record<string, string | undefined>): boolean {
@@ -16,31 +15,43 @@ function expectNoFlagPastReviewBy(flags: readonly { id: string; reviewBy: string
   }
 }
 
-describe('parseBetaFeatureConfig', () => {
-  const allIds = BETA_FEATURES.map((f) => f.id);
+// `OFFERED_BETA_FEATURE_IDS` is resolved from `VITE_BETA_FEATURES` once at load, so each case imports a fresh copy.
+async function offeredFor(raw: string | undefined) {
+  vi.resetModules();
+  vi.stubEnv('VITE_BETA_FEATURES', raw);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const { OFFERED_BETA_FEATURE_IDS } = await import('./feature-flags');
+  return { offered: [...OFFERED_BETA_FEATURE_IDS].sort(), warn };
+}
+
+describe('VITE_BETA_FEATURES', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  const allIds = BETA_FEATURES.map((f) => f.id).sort();
 
   it.each([undefined, '', '   ', 'all', 'ALL'])(
     'offers every registered feature for %j',
-    (raw) => {
-      expect([...parseBetaFeatureConfig(raw)].sort()).toEqual([...allIds].sort());
+    async (raw) => {
+      expect((await offeredFor(raw)).offered).toEqual(allIds);
     },
   );
 
-  it('offers nothing for "none"', () => {
-    expect(parseBetaFeatureConfig('none').size).toBe(0);
-    expect(parseBetaFeatureConfig(' None ').size).toBe(0);
+  it.each(['none', ' None '])('offers nothing for %j', async (raw) => {
+    expect((await offeredFor(raw)).offered).toEqual([]);
   });
 
-  it('offers exactly the listed ids (whitespace + case tolerant)', () => {
-    const offered = parseBetaFeatureConfig(' Guardrails , ,projected-withdrawals ');
-    expect([...offered].sort()).toEqual(['guardrails', 'projected-withdrawals']);
+  it('offers exactly the listed ids (whitespace + case tolerant)', async () => {
+    const { offered } = await offeredFor(' Guardrails , ,projected-withdrawals ');
+    expect(offered).toEqual(['guardrails', 'projected-withdrawals']);
   });
 
-  it('reports unknown ids and ignores them', () => {
-    const onUnknown = vi.fn();
-    const offered = parseBetaFeatureConfig('guardrails,typo-feature', onUnknown);
-    expect([...offered]).toEqual(['guardrails']);
-    expect(onUnknown).toHaveBeenCalledWith('typo-feature');
+  it('warns about unknown ids and ignores them', async () => {
+    const { offered, warn } = await offeredFor('guardrails,typo-feature');
+    expect(offered).toEqual(['guardrails']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"typo-feature"'));
   });
 });
 
@@ -68,8 +79,7 @@ describe('BETA_FEATURES registry', () => {
     }
   });
 
-  // Pull-request CI sets SKIP_REVIEW_BY_DATE_CHECK=1 so a flag's date passing
-  // cannot red unrelated PRs; `main`, dispatch and local runs leave it unset.
+  // PR CI sets SKIP_REVIEW_BY_DATE_CHECK=1 so a passing review date cannot red unrelated PRs.
   it.skipIf(reviewByCheckSkipped(process.env))(
     'has no flag past its reviewBy date (promote or retire it, then update the entry)',
     () => {
@@ -81,7 +91,6 @@ describe('BETA_FEATURES registry', () => {
     expect(reviewByCheckSkipped({})).toBe(false);
     expect(reviewByCheckSkipped({ SKIP_REVIEW_BY_DATE_CHECK: '' })).toBe(false);
     expect(reviewByCheckSkipped({ SKIP_REVIEW_BY_DATE_CHECK: '1' })).toBe(true);
-    // With the variable unset the assertion still bites: a past date fails it.
     const stale = [{ ...BETA_FEATURES[0], reviewBy: '2000-01-01' }];
     expect(() => expectNoFlagPastReviewBy(stale, '2026-10-08')).toThrow();
     expect(() => expectNoFlagPastReviewBy(stale, '1999-12-31')).not.toThrow();

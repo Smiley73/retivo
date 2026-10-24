@@ -1,6 +1,3 @@
-/**
- * Tests for the lazy base-scenario bootstrap helper.
- */
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
@@ -49,8 +46,6 @@ describe('ensureBaseScenario', () => {
     expect(payload.notes).toBe('');
     expect(payload.overrides.retirementAge).toEqual(DEFAULT_RETIREMENT_AGE);
     expect(payload.overrides.socialSecurity).toEqual(DEFAULT_SOCIAL_SECURITY_CLAIM_AGE);
-    // Seeds the Tax-efficient default explicitly so a fresh base scenario never
-    // carries an absent strategy.
     expect(payload.overrides.withdrawalStrategy).toEqual({ kind: 'taxEfficient' });
   });
 
@@ -75,7 +70,6 @@ describe('ensureBaseScenario', () => {
   });
 
   it('is a no-op when any scenario already exists', async () => {
-    // Seed a non-base scenario directly (simulating a pulled remote row).
     await ensureBaseScenario(HOUSEHOLD_ID);
     const queue = await listPendingMutations();
     expect(queue).toHaveLength(1);
@@ -86,11 +80,7 @@ describe('ensureBaseScenario', () => {
   });
 
   it('non-base scenario with no ss override resolves to 67y0m via read-time fallback', () => {
-    // The base scenario seeds `overrides.socialSecurity.primary` at
-    // bootstrap (creation-time, not migration). A non-base scenario that
-    // overrides nothing resolves to no SS section through the parent
-    // chain — consumers then apply the read-time fallback constant
-    // `{ ageYears: 67, ageMonths: 0 }` (e.g. balance-projection-runner-mc).
+    // The base scenario seeds `overrides.socialSecurity.primary` at bootstrap; a non-base scenario that overrides nothing resolves no SS section, so consumers apply the read-time fallback `{ ageYears: 67, ageMonths: 0 }`.
     const nonBase: ScenarioAggregate = {
       id: 'scen-alt',
       householdId: HOUSEHOLD_ID,
@@ -110,7 +100,6 @@ describe('ensureBaseScenario', () => {
     };
     const resolved = resolveScenario('scen-alt', [nonBase]);
     expect(resolved.socialSecurity).toBeUndefined();
-    // Read-time fallback the consumers apply when no override is present.
     const claimAgePrimary =
       resolved.socialSecurity?.primary ?? { ageYears: 67, ageMonths: 0 };
     expect(claimAgePrimary).toEqual({ ageYears: 67, ageMonths: 0 });

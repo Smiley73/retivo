@@ -11,14 +11,11 @@ describe('formatDate', () => {
   });
 
   it('parses YYYY-MM-DD as UTC (no timezone shift)', () => {
-    // Plain `new Date('2026-03-01')` parses to midnight UTC, which is
-    // Feb 28 in any timezone west of GMT. The util must avoid that.
+    // `new Date('2026-03-01')` is midnight UTC, i.e. Feb 28 west of GMT; the util must avoid that.
     expect(formatDate('2026-03-01')).toBe('March 1, 2026');
   });
 
   it('formats a full ISO timestamp using local calendar date', () => {
-    // Pick a noon-UTC time so every reasonable timezone agrees on the
-    // calendar date.
     expect(formatDate('2026-05-20T12:00:00Z')).toBe('May 20, 2026');
   });
 

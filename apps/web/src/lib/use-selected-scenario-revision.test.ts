@@ -1,19 +1,8 @@
-/**
- * useSelectedScenarioRevision unit test.
- *
- * Proves the narrow selected-scenario subscription: the returned number
- * increments once per dispatched SELECTED_SCENARIO_CHANGED_EVENT, stays put on
- * the two sibling channels it deliberately ignores (WORKSPACE_CHANGED_EVENT and
- * SCENARIOS_CHANGED_EVENT), and removes its listener on unmount.
- */
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useSelectedScenarioRevision } from './use-selected-scenario-revision';
 import { WORKSPACE_CHANGED_EVENT } from './workspace-events';
-import {
-  SCENARIOS_CHANGED_EVENT,
-  SELECTED_SCENARIO_CHANGED_EVENT,
-} from './scenario-mutations';
+import { notifyScenariosChanged, SELECTED_SCENARIO_CHANGED_EVENT } from './scenario-mutations';
 
 function dispatch(eventName: string): void {
   act(() => {
@@ -43,9 +32,9 @@ describe('useSelectedScenarioRevision', () => {
     expect(result.current).toBe(0);
   });
 
-  it('does NOT increment on SCENARIOS_CHANGED_EVENT', () => {
+  it('does NOT increment on notifyScenariosChanged', () => {
     const { result } = renderHook(() => useSelectedScenarioRevision());
-    dispatch(SCENARIOS_CHANGED_EVENT);
+    act(() => notifyScenariosChanged());
     expect(result.current).toBe(0);
   });
 
@@ -70,7 +59,6 @@ describe('useSelectedScenarioRevision', () => {
     dispatch(SELECTED_SCENARIO_CHANGED_EVENT);
     expect(result.current).toBe(1);
     unmount();
-    // No throw + value frozen: the handler is gone.
     dispatch(SELECTED_SCENARIO_CHANGED_EVENT);
     expect(result.current).toBe(1);
   });

@@ -25,16 +25,18 @@ import {
   clearSelectedScenario,
   writeSelectedScenario,
 } from '../db/store';
-import { notifySelectedScenarioChanged } from '../lib/scenario-mutations';
+import { SELECTED_SCENARIO_CHANGED_EVENT } from '../lib/scenario-mutations';
 import { loadDemoData } from '../lib/demo-data-loader';
 import { expectNoA11yViolations } from '../test/a11y';
 import { ROUGH_BENCHMARK_ASSUMPTIONS } from '../lib/aca-ptc';
 import { ThemeProvider } from '../contexts/ThemeContext';
 import { BetaFeaturesProvider } from '../contexts/BetaFeaturesContext';
 import { ReportPage } from './ReportPage';
-import type { PdfLibs, PdfLibLoader } from '../lib/pdf-export/lazy-load';
+import type { PdfLibLoader } from '../lib/pdf-export/lazy-load';
 import { buildReportData } from '../lib/report-data';
 import { buildPdfSectionModel } from '../lib/pdf-export/build-pdf';
+
+type PdfLibs = Awaited<ReturnType<PdfLibLoader>>;
 
 vi.mock('../lib/report-data', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/report-data')>();
@@ -384,7 +386,7 @@ describe('ReportPage (Export PDF page)', () => {
     );
   });
 
-  it('re-runs the pointer read on notifySelectedScenarioChanged without clobbering a resolved pick', async () => {
+  it('re-runs the pointer read on SELECTED_SCENARIO_CHANGED_EVENT without clobbering a resolved pick', async () => {
     // Mounted with no sidebar selection → the page resolves the default base
     // pick. Firing the narrow selected-scenario event re-runs the pointer read
     // via useSelectedScenarioRevision, but the page deliberately preserves an
@@ -401,7 +403,7 @@ describe('ReportPage (Export PDF page)', () => {
       updatedAt: new Date().toISOString(),
     });
     await act(async () => {
-      notifySelectedScenarioChanged();
+      window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
     });
 
     // Resolved pick preserved (explicit-pick preservation).

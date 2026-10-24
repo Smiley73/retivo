@@ -5,7 +5,6 @@ import {
   type ProjectionContext,
 } from './projection-context';
 
-/** Build a ProjectionContext with sane defaults; tests override slices. */
 const ctx = (overrides: Partial<ProjectionContext> = {}): ProjectionContext => ({
   asOfYear: 2026,
   asOfMonthIndex: 0,
@@ -27,8 +26,6 @@ describe('inflationFactorAt', () => {
   });
 
   it('compounds month-precise from asOfMonth at 3 %/yr', () => {
-    // asOf = June 2026 (monthIndex 5). Target = Dec 2026 (monthIndex 11).
-    // Gap = 6 months → factor = (1.03)^(6/12).
     const c = ctx({
       asOfYear: 2026,
       asOfMonthIndex: 5,
@@ -45,7 +42,6 @@ describe('inflationFactorAt', () => {
       asOfMonth: 2026 * 12 + 0,
       inflationPct: 3,
     });
-    // Jan 2029 is exactly 3 years after Jan 2026.
     expect(inflationFactorAt(c, 2029, 0)).toBeCloseTo(Math.pow(1.03, 3), 10);
   });
 
@@ -56,7 +52,6 @@ describe('inflationFactorAt', () => {
       asOfMonth: 2026 * 12 + 5,
       inflationPct: 3,
     });
-    // Jan 2026 is 5 months before June 2026 → factor = (1.03)^(-5/12) < 1.
     const factor = inflationFactorAt(c, 2026, 0);
     expect(factor).toBeLessThan(1);
     expect(factor).toBeCloseTo(Math.pow(1.03, -5 / 12), 10);

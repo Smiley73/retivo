@@ -30,13 +30,13 @@ import { raiseWaitNotice } from './toast-queue';
  * Queue statuses the server has not yet accepted: for these ids the local view,
  * not the server baseline, owns the importable bundle.
  */
-export const RETAINED_INTENT_STATUSES: ReadonlySet<PendingMutation['status']> =
+const RETAINED_INTENT_STATUSES: ReadonlySet<PendingMutation['status']> =
   new Set(['pending', 'pushing', 'failed-conflict', 'failed-error']);
 
 // Ceiling so a server that never reports `hasMore: false` cannot spin the export.
 const MAX_PULL_PAGES = 10_000;
 
-export type ServerDataExportErrorCode =
+type ServerDataExportErrorCode =
   | 'MALFORMED_LOCAL_MUTATION'
   | 'SERVER_STATE_UNAVAILABLE';
 
@@ -45,7 +45,7 @@ export type ServerDataExportErrorCode =
  * queue row or a missing server baseline), so the user sees a failure and not
  * a partial download.
  */
-export class ServerDataExportError extends Error {
+class ServerDataExportError extends Error {
   constructor(
     public readonly code: ServerDataExportErrorCode,
     message: string,
@@ -126,7 +126,7 @@ function applyServerChange(
  * Builds the server aggregate state in memory from a forced bootstrap plus its
  * pull tail; server deletes stay as `deletedAt` tombstones.
  */
-export function materializeServerState(
+function materializeServerState(
   bootstrap: BootstrapResponseBody,
   pulls: readonly PullResponseBody[],
   householdId: string,
@@ -182,7 +182,7 @@ async function raiseOnWait<T>(op: () => Promise<T>): Promise<T> {
  * Forces a fresh bootstrap, then walks pull pages to the end. Any transport
  * error throws; the caller must not fall back to a local-only bundle.
  */
-export async function fetchServerAuthoritativeState(
+async function fetchServerAuthoritativeState(
   transport: SyncTransport,
 ): Promise<{ bootstrap: BootstrapResponseBody; pulls: PullResponseBody[] }> {
   const bootstrap = await raiseOnWait(() => transport.bootstrap({ force: true }));
@@ -243,7 +243,7 @@ function byTimestampThenId(a: PendingMutation, b: PendingMutation): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-export interface MergeExportInput {
+interface MergeExportInput {
   serverByType: Map<AggregateType, Map<string, Aggregate>>;
   /** Includes tombstones. */
   localByType: Map<AggregateType, Map<string, Aggregate>>;
@@ -259,7 +259,7 @@ export interface MergeExportInput {
  * id takes the server baseline, so a stale local row never overwrites current
  * server data.
  */
-export function mergeServerExportBundle(input: MergeExportInput): ExportBundle {
+function mergeServerExportBundle(input: MergeExportInput): ExportBundle {
   const retained = input.mutations.filter((m) => RETAINED_INTENT_STATUSES.has(m.status));
   for (const m of retained) assertValidRetainedMutation(m);
 
@@ -339,7 +339,7 @@ export interface BuildServerExportOptions {
  * Builds the complete server-authoritative bundle. Read-only: never writes
  * workspace or queue state.
  */
-export async function buildServerAuthoritativeExportBundle(
+async function buildServerAuthoritativeExportBundle(
   opts: BuildServerExportOptions,
 ): Promise<ExportBundle> {
   const readLocalAggregates = opts.readLocalAggregates ?? listAggregatesIncludingDeleted;

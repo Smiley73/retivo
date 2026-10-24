@@ -55,27 +55,17 @@ export type {
   OptimizerMcScenarioProgress,
 } from './optimizer-mc-runner-types';
 
-export type { MinimalMcWorker } from '../monte-carlo/mc-worker-pool';
-
 // Whole-year grid step; 2 gives the coarse 25-pair grid.
 const OPTIMIZER_MC_CANDIDATE_STEP_YEARS = 1;
 /** Fallback MC path count per triple when the caller passes no `pathCount`. */
 export const OPTIMIZER_MC_DEFAULT_PATH_COUNT = 1000;
 
 // Bounded so adversarial input variation cannot grow the cache without limit; LRU eviction.
-export const OPTIMIZER_MC_CACHE_MAX_ENTRIES = 500;
+const OPTIMIZER_MC_CACHE_MAX_ENTRIES = 500;
 
 // Per-scenario outcome keyed on a hash of every optimizer-relevant input. Warm for the page session, cold on reload.
 // A Map keeps insertion order, so the first key is the LRU victim and a hit re-inserts.
 const optimizerOutcomeCache = new Map<string, OptimizerMcOutcome>();
-
-export function clearOptimizerMcCache(): void {
-  optimizerOutcomeCache.clear();
-}
-
-export function optimizerMcCacheSize(): number {
-  return optimizerOutcomeCache.size;
-}
 
 function cacheGet(key: string): OptimizerMcOutcome | undefined {
   const hit = optimizerOutcomeCache.get(key);

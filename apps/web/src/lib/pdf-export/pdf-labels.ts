@@ -8,7 +8,7 @@ import type { ProjectionMethod } from '../../components/ProjectionChart';
 import { resolvedBasisLabel } from '../../pages/balance-projection-page-constants';
 import { pad2 } from './format';
 
-export function displayModeLabel(displayMode: DisplayMode): string {
+function displayModeLabel(displayMode: DisplayMode): string {
   return displayMode === 'today' ? "Today's dollars" : 'Future dollars';
 }
 
@@ -35,7 +35,7 @@ export interface CoverLabels {
   readonly generatedOn: string;
 }
 
-export function formatIsoDate(date: {
+function formatIsoDate(date: {
   year: number;
   month: number;
   day: number;

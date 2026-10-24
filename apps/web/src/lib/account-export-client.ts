@@ -28,14 +28,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export type AccountExportErrorCode = 'ACCOUNT_EXPORT_UNAVAILABLE';
+type AccountExportErrorCode = 'ACCOUNT_EXPORT_UNAVAILABLE';
 
 /**
  * Thrown when the export cannot complete honestly (non-2xx, or a page loop that
  * never reports `nextCursor: null`); callers must not fall back to a partial
  * account section.
  */
-export class AccountExportError extends Error {
+class AccountExportError extends Error {
   constructor(
     public readonly code: AccountExportErrorCode,
     message: string,

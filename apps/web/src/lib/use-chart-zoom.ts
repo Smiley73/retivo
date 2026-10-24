@@ -42,7 +42,7 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 /** Snaps both ends to whole years; null when the range is under a year. */
-export function snapAndCommit(
+function snapAndCommit(
   a: number,
   b: number,
   fullMin: number,
@@ -55,7 +55,7 @@ export function snapAndCommit(
 }
 
 /** Visible-window y-domain from `computeY`; null when it is absent, no rows are visible, or the domain collapses. */
-export function computeYDomain(
+function computeYDomain(
   rowsForY: readonly { x: number }[] | null,
   newMin: number,
   newMax: number,

@@ -2,10 +2,10 @@
 // (`lib-independent-of-ui`). The at-retirement portfolio is already in today's dollars; each rule's first-year spend is held flat in real terms.
 
 /** Bengen's 1994 finding: an inflation-adjusted 4% initial withdrawal survived every rolling 30-year period (Journal of Financial Planning), corroborated by the Trinity study. */
-export const SAFE_WITHDRAWAL_RATE_BENGEN_PCT = 4;
+const SAFE_WITHDRAWAL_RATE_BENGEN_PCT = 4;
 
 /** Bengen's later refinement: 4.5% under a more equity-heavy mix than the 1994 baseline. */
-export const SAFE_WITHDRAWAL_RATE_BENGEN_REFINED_PCT = 4.5;
+const SAFE_WITHDRAWAL_RATE_BENGEN_REFINED_PCT = 4.5;
 
 interface SafeWithdrawalRuleYearValue {
   readonly year: number;
@@ -27,7 +27,7 @@ export interface SafeWithdrawalRuleComparison {
   readonly fourPointFivePercentRule: SafeWithdrawalRuleFigures;
 }
 
-export function computeSafeWithdrawalRuleFigures(params: {
+function computeSafeWithdrawalRuleFigures(params: {
   readonly portfolioAtRetirement: number;
   /** Any order; each maps to the same value. */
   readonly years: ReadonlyArray<number>;

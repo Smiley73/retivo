@@ -72,7 +72,7 @@ export type PreviewResult =
       members: TooltipMember[];
     };
 
-export interface ResolvedCtx {
+interface ResolvedCtx {
   ctx: ReturnType<typeof buildExpenseProjectionContext>;
   resolved: ReturnType<typeof resolveScenario>;
   primary: Aggregate<HouseholdMemberPayload>;
@@ -107,7 +107,7 @@ function resolvePrimaryRetirementIso(
   return retirementMap.get(primary.id) ?? null;
 }
 
-export function resolveTargetCtx(
+function resolveTargetCtx(
   members: Aggregate<HouseholdMemberPayload>[],
   scenarios: ScenarioAggregate[],
   targetScenarioId: string | null,
@@ -152,7 +152,7 @@ export function resolveTargetCtx(
  * and one-off expenses (never glided; their glide section is hidden) return null,
  * so for a moving glide the preview and the Save block agree.
  */
-export function glideProblemForDraft(
+function glideProblemForDraft(
   draft: ExpensePayload,
   rc: ResolvedCtx,
 ): string | null {

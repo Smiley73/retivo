@@ -15,16 +15,6 @@
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { VersionBanner } from './VersionBanner';
-import { AppToastRegion } from './AppToastRegion';
-import {
-  __resetBuildIdState,
-  __resetVerifyThrottleForTest,
-  __setClientBuildIdForTest,
-  __setVerifierForTest,
-  recordSchemaAhead,
-  recordServerBuildId,
-} from '../lib/build-id';
 import { expectNoA11yViolations } from '../test/a11y';
 
 const BUILD_MISMATCH_DESCRIPTION =
@@ -32,11 +22,20 @@ const BUILD_MISMATCH_DESCRIPTION =
 const SCHEMA_AHEAD_DESCRIPTION =
   'A newer version of the app is required to read the latest changes — reload to update.';
 
+let deployedBuildId = 'server-2';
+let banner: {
+  VersionBanner: typeof import('./VersionBanner').VersionBanner;
+  AppToastRegion: typeof import('./AppToastRegion').AppToastRegion;
+  recordServerBuildId: typeof import('../lib/build-id').recordServerBuildId;
+  recordSchemaAhead: typeof import('../lib/build-id').recordSchemaAhead;
+};
+
 /** Render both halves of the relocated toast: the subscriber (no DOM) and
  *  the shared region that actually renders the markup — matching how
  *  App.tsx mounts them (VersionBanner in AppShell, AppToastRegion in App,
  *  above the routes). */
 function renderVersionBanner() {
+  const { VersionBanner, AppToastRegion } = banner;
   return render(
     <>
       <VersionBanner />
@@ -50,10 +49,8 @@ function renderVersionBanner() {
  *  microtasks so the listener fires before assertions. */
 async function recordVerifiedMismatch(serverId: string): Promise<void> {
   await act(async () => {
-    recordServerBuildId(serverId);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    banner.recordServerBuildId(serverId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
@@ -64,11 +61,9 @@ async function recordVerifiedMismatch(serverId: string): Promise<void> {
  *  even though this is the id's first-ever notification. */
 async function recordVerifiedSchemaAhead(serverId: string): Promise<void> {
   await act(async () => {
-    recordServerBuildId(serverId);
-    recordSchemaAhead();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    banner.recordServerBuildId(serverId);
+    banner.recordSchemaAhead();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
@@ -80,14 +75,29 @@ function expectReloadAndDismissButtons(): void {
 }
 
 describe('VersionBanner', () => {
-  beforeEach(() => {
-    __resetBuildIdState();
-    __setClientBuildIdForTest('client-1');
-    __setVerifierForTest(async () => 'live');
-  });
+  // Fresh build-id module state per case; the first import is slow on a cold transform cache.
+  beforeEach(async () => {
+    window.sessionStorage.clear();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    deployedBuildId = 'server-2';
+    vi.resetModules();
+    vi.stubGlobal('__BUILD_ID__', 'client-1');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ buildId: deployedBuildId }) })),
+    );
+    const [{ VersionBanner }, { AppToastRegion }, { recordSchemaAhead, recordServerBuildId }] =
+      await Promise.all([
+        import('./VersionBanner'),
+        import('./AppToastRegion'),
+        import('../lib/build-id'),
+      ]);
+    banner = { VersionBanner, AppToastRegion, recordSchemaAhead, recordServerBuildId };
+  }, 60_000);
 
   afterEach(() => {
-    __resetBuildIdState();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -128,13 +138,12 @@ describe('VersionBanner', () => {
     // layer reports schema-ahead for that same newer id — re-arming the
     // open toast (VersionBanner's `currentReason !== mismatch.reason`
     // branch) instead of leaving the weaker build-mismatch copy showing.
-    __resetVerifyThrottleForTest();
+    deployedBuildId = 'server-3';
+    vi.advanceTimersByTime(5_000);
     await act(async () => {
-      recordServerBuildId('server-3');
-      recordSchemaAhead();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      banner.recordServerBuildId('server-3');
+      banner.recordSchemaAhead();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(screen.getAllByTestId('version-banner')).toHaveLength(1);
@@ -144,7 +153,7 @@ describe('VersionBanner', () => {
   });
 
   it('stays hidden when the deployed bundle is still the client build', async () => {
-    __setVerifierForTest(async () => 'old');
+    deployedBuildId = 'client-1';
     renderVersionBanner();
     await recordVerifiedMismatch('server-2');
     expect(screen.queryByTestId('version-banner')).not.toBeInTheDocument();

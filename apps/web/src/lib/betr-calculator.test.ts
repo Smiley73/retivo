@@ -1,34 +1,15 @@
-/**
- * Unit tests for the BETR math library.
- * Hand-computed fixtures for all four tax-payment sources, bracket-headroom
- * boundaries, per-bracket tranches, and T_future derivation from a seeded
- * DrawdownYear set. Federal lookups use the real FEDERAL_TAX_CONFIG + the
- * default calibration bundle.
- */
-
 import { describe, it, expect } from 'vitest';
 import {
   computeBETR,
-  computeBracketHeadroom,
-  computeConversionTranches,
   computeWorkingYearsBETRSummary,
   computeRetirementYearsBETR,
   type BETRScenarioContext,
 } from './betr-calculator';
 import { EARLY_WITHDRAWAL_PENALTY_RATE } from './early-withdrawal-penalty';
-import { FEDERAL_TAX_CONFIG } from './federal-tax-config';
-import {
-  DEFAULT_TAX_CALIBRATION_BUNDLE,
-  resolveFederalTaxSnapshotForYear,
-} from './tax-integration-helpers';
+import { DEFAULT_TAX_CALIBRATION_BUNDLE } from './tax-integration-helpers';
 import type { DrawdownYear } from './drawdown-engine-types';
 
-const SNAPSHOT = FEDERAL_TAX_CONFIG;
 const BUNDLE = DEFAULT_TAX_CALIBRATION_BUNDLE;
-
-// ---------------------------------------------------------------------------
-// computeBETR — four sources
-// ---------------------------------------------------------------------------
 
 describe('computeBETR', () => {
   it('should_equal_T_now_for_the_from_IRA_source_regardless_of_n_and_r', () => {
@@ -74,13 +55,10 @@ describe('computeBETR', () => {
   });
 
   it('should_apply_the_10pct_early_withdrawal_penalty_to_the_from_IRA_source_when_under59Penalty', () => {
-    // Under 59½ the withheld-tax dollars take the 10% §72(t) penalty, so the
-    // from-IRA BETR is T_now × 1.10. IEEE-754: 0.22 × 1.1 !== 0.242 exactly, so
-    // compare against the same expression (the file's toBeCloseTo(…, 12) convention).
+    // Under 59½ the withheld-tax dollars take the 10% §72(t) penalty: from-IRA BETR is T_now × 1.10.
     const expected = 0.22 * (1 + EARLY_WITHDRAWAL_PENALTY_RATE);
     expect(computeBETR('ira', 0.22, 15, 0.07, { under59Penalty: true })).toBeCloseTo(expected, 12);
-    // n-independent: the penalty applies at any n, including n = 0 (the IRA
-    // branch returns before the `n <= 0` guard, so the penalty is not skipped).
+    // The IRA branch returns before the n <= 0 guard, so the penalty applies at n = 0 too.
     expect(computeBETR('ira', 0.22, 0, 0.07, { under59Penalty: true })).toBeCloseTo(expected, 12);
     expect(computeBETR('ira', 0.35, 30, 0.05, { under59Penalty: true })).toBeCloseTo(
       0.35 * (1 + EARLY_WITHDRAWAL_PENALTY_RATE),
@@ -105,107 +83,6 @@ describe('computeBETR', () => {
     }
   });
 });
-
-// ---------------------------------------------------------------------------
-// computeBracketHeadroom
-// ---------------------------------------------------------------------------
-
-describe('computeBracketHeadroom', () => {
-  it('should_compute_room_to_the_next_ceiling_without_re_subtracting_deduction', () => {
-    // MFJ 2025: 22% band 96,950–206,700. Income $150,000 post-deduction; no
-    // existing conversion. Room to the 24% ceiling = 206,700 − 150,000 = 56,700.
-    const result = computeBracketHeadroom(150_000_00, 0, 2025, 'MFJ', SNAPSHOT);
-    expect(result.ceilingCents).toBe(206_700_00);
-    expect(result.headroomCents).toBe(56_700_00);
-    expect(result.currentRate).toBe(0.22);
-  });
-
-  it('should_subtract_an_existing_conversion_from_headroom', () => {
-    const result = computeBracketHeadroom(150_000_00, 10_000_00, 2025, 'MFJ', SNAPSHOT);
-    expect(result.headroomCents).toBe(46_700_00);
-  });
-
-  it('should_return_0_when_income_plus_conversion_already_reaches_the_ceiling', () => {
-    const result = computeBracketHeadroom(200_000_00, 10_000_00, 2025, 'MFJ', SNAPSHOT);
-    expect(result.headroomCents).toBe(0);
-  });
-
-  it('should_report_infinite_headroom_in_the_top_bracket', () => {
-    const result = computeBracketHeadroom(900_000_00, 0, 2025, 'MFJ', SNAPSHOT);
-    expect(result.ceilingCents).toBe(Infinity);
-    expect(result.headroomCents).toBe(Infinity);
-    expect(result.currentRate).toBe(0.37);
-  });
-
-  it('should_handle_a_post_2026_year_via_a_caller_resolved_snapshot', () => {
-    // The standalone helper requires the caller to pass a snapshot that
-    // contains `year` (same contract as marginalOrdinaryRate). For a post-2026
-    // row the caller resolves the extrapolating snapshot first.
-    const { lookupYear, snapshot } = resolveFederalTaxSnapshotForYear(SNAPSHOT, 2035, 2.5);
-    const run = (): ReturnType<typeof computeBracketHeadroom> =>
-      computeBracketHeadroom(150_000_00, 0, lookupYear, 'MFJ', snapshot);
-    expect(run).not.toThrow();
-    expect(Number.isFinite(run().ceilingCents)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// computeConversionTranches
-// ---------------------------------------------------------------------------
-
-describe('computeConversionTranches', () => {
-  it('should_split_a_conversion_at_the_bracket_boundary_with_distinct_rates', () => {
-    // MFJ 2025: income at 90,000 (12% band, ceiling 96,950). Convert $50k:
-    //   tranche 1: 6,950 at 12%
-    //   tranche 2: 43,050 at 22% (next ceiling 206,700)
-    const tranches = computeConversionTranches(
-      90_000_00,
-      50_000_00,
-      0.30, // T_future high → both convert
-      15,
-      0.07,
-      'ira',
-      {},
-      2025,
-      'MFJ',
-      SNAPSHOT,
-    );
-    expect(tranches).toHaveLength(2);
-    expect(tranches[0].amountCents).toBe(6_950_00);
-    expect(tranches[0].T_now).toBe(0.12);
-    expect(tranches[1].amountCents).toBe(43_050_00);
-    expect(tranches[1].T_now).toBe(0.22);
-  });
-
-  it('should_mark_convert_when_T_future_exceeds_betr_and_hold_otherwise', () => {
-    // From-IRA betr == T_now. T_future 0.20: 12% tranche converts (0.20>0.12),
-    // 22% tranche holds (0.20<0.22).
-    const tranches = computeConversionTranches(
-      90_000_00,
-      50_000_00,
-      0.20,
-      15,
-      0.07,
-      'ira',
-      {},
-      2025,
-      'MFJ',
-      SNAPSHOT,
-    );
-    expect(tranches[0].verdict).toBe('convert');
-    expect(tranches[1].verdict).toBe('hold');
-  });
-
-  it('should_return_empty_for_a_zero_proposed_amount', () => {
-    expect(
-      computeConversionTranches(90_000_00, 0, 0.3, 15, 0.07, 'ira', {}, 2025, 'MFJ', SNAPSHOT),
-    ).toHaveLength(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Scenario context fixtures + T_future / row analysis
-// ---------------------------------------------------------------------------
 
 function ctx(overrides: Partial<BETRScenarioContext> = {}): BETRScenarioContext {
   return {
@@ -244,8 +121,7 @@ function drawdownYear(year: number, magiCents?: number, taxableSsCents?: number)
 
 describe('computeWorkingYearsBETRSummary', () => {
   it('should_derive_T_future_from_RMD_era_rows_only', () => {
-    // Owner born 1958 → trigger age 73 → RMD era starts 2031. Rows before that
-    // are excluded. RMD-era rows at $200k MAGI (MFJ, post-deduction ~22% band).
+    // Owner born 1958: trigger age 73, so RMD-era rows start 2031.
     const rows = [
       drawdownYear(2030, 90_000_00), // pre-RMD, excluded
       drawdownYear(2031, 200_000_00),
@@ -258,24 +134,57 @@ describe('computeWorkingYearsBETRSummary', () => {
   });
 
   it('should_never_leak_the_under59Penalty_into_the_working_years_Apply_tranche_path', () => {
-    // Apply's write-back amount is the from-IRA convert-verdict tranche SUM at
-    // the UNPENALIZED rate (betr == T_now). This pins convertTotalCents and the
-    // tranche betr so an accidental under59Penalty leak into
-    // computeWorkingYearsBETRSummary (which must keep passing `{}`) fails loudly.
+    // Apply's amount is the from-IRA convert tranche sum at the unpenalized rate; pins against an under59Penalty leak into computeWorkingYearsBETRSummary.
     const rows = [drawdownYear(2031, 300_000_00), drawdownYear(2032, 300_000_00)];
     const summary = computeWorkingYearsBETRSummary(ctx(), rows, BUNDLE);
-    // MFJ 2025, $150k post-deduction income: room to the 22% ceiling (206,700) is
-    // 56,700; T_future (RMD-era, 24% band at ~$270k taxable) = 0.24 > the from-IRA
-    // BETR (0.22), so the whole tranche converts. A leaked penalty would push the
-    // tranche BETR to 0.242 > 0.24 → hold → convertTotalCents collapses to 0.
+    // Room 56,700; T_future 0.24 > betr 0.22 converts the tranche. A leaked penalty (0.242) would hold it and collapse convertTotalCents to 0.
     expect(summary.bracketHeadroomCents).toBe(56_700_00);
     expect(summary.T_future).toBe(0.24);
     expect(summary.convertTotalCents).toBe(56_700_00);
     expect(summary.tranches).toHaveLength(1);
     for (const t of summary.tranches) {
-      // The from-IRA identity: betr == T_now, NOT T_now × 1.10.
       expect(t.betr).toBe(t.T_now);
     }
+    expect(summary.tranches[0].T_now).toBe(0.22);
+  });
+
+  it('should_hold_the_tranche_when_T_future_is_below_the_from_IRA_rate', () => {
+    const rows = [drawdownYear(2031, 90_000_00), drawdownYear(2032, 90_000_00)];
+    const summary = computeWorkingYearsBETRSummary(ctx(), rows, BUNDLE);
+    expect(summary.T_future).toBeLessThan(0.22);
+    expect(summary.tranches).toHaveLength(1);
+    expect(summary.tranches[0].verdict).toBe('hold');
+    expect(summary.convertTotalCents).toBe(0);
+  });
+
+  it('should_subtract_an_existing_conversion_from_the_headroom', () => {
+    const rows = [drawdownYear(2031, 300_000_00)];
+    const summary = computeWorkingYearsBETRSummary(
+      ctx({ existingAnnualConversionDollars: 10_000 }),
+      rows,
+      BUNDLE,
+    );
+    expect(summary.bracketHeadroomCents).toBe(46_700_00);
+  });
+
+  it('should_have_no_headroom_once_income_plus_conversion_reaches_the_ceiling', () => {
+    const summary = computeWorkingYearsBETRSummary(
+      ctx({ preRetirementTaxableIncomeDollars: 200_000, existingAnnualConversionDollars: 10_000 }),
+      [drawdownYear(2031, 300_000_00)],
+      BUNDLE,
+    );
+    expect(summary.bracketHeadroomCents).toBe(0);
+    expect(summary.tranches).toHaveLength(0);
+  });
+
+  it('should_convert_nothing_in_the_top_bracket_where_headroom_is_unbounded', () => {
+    const summary = computeWorkingYearsBETRSummary(
+      ctx({ preRetirementTaxableIncomeDollars: 900_000 }),
+      [drawdownYear(2031, 300_000_00)],
+      BUNDLE,
+    );
+    expect(summary.bracketHeadroomCents).toBe(0);
+    expect(summary.tranches).toHaveLength(0);
   });
 
   it('should_return_a_needs_input_summary_when_taxable_income_is_absent', () => {
@@ -309,10 +218,7 @@ describe('computeWorkingYearsBETRSummary', () => {
   });
 
   it('should_not_throw_for_a_post_2026_current_calendar_year', () => {
-    // A working year past the latest published federal table (2027) must route
-    // through the extrapolating snapshot, not throw UnsupportedTaxYearError on
-    // the raw config. retirementYear 2032 keeps n > 0; RMD-era rows still derive
-    // T_future. The summary should come back populated, not crash.
+    // A working year past the latest published federal table must use the extrapolating snapshot, not throw UnsupportedTaxYearError.
     const run = (): ReturnType<typeof computeWorkingYearsBETRSummary> =>
       computeWorkingYearsBETRSummary(
         ctx({ currentCalendarYear: 2027, retirementYear: 2032 }),
@@ -362,14 +268,7 @@ describe('computeRetirementYearsBETR', () => {
   });
 
   it('should_apply_the_OBBBA_senior_bonus_phaseout_to_T_now_inside_the_window', () => {
-    // Exercises the senior-bonus phase-out arithmetic in deriveTaxableIncomeCents
-    // (never hit by the other fixtures, which all use taxpayersAge65Plus: 0).
-    // Single 2025: std $15,750, age-65 add-on $2,000, senior-bonus cap $6,000,
-    // phase-out base $75,000 @ 6%. Row year 2025 (senior bonus active), MAGI
-    // $120,000 — INSIDE the phase-out band (> $75k base):
-    //   age65=0 → deduction $15,750 → taxable $104,250 → 24% band (> $103,350).
-    //   age65=1 → phaseout 0.06×($120k−$75k)=$2,700 → bonus $3,300 → deduction
-    //             $21,050 → taxable $98,950 → 22% band. T_now drops 24% → 22%.
+    // Senior-bonus phase-out: Single 2025, MAGI $120,000 inside the band. age65=0 gives taxable $104,250 (24%); age65=1 gives bonus $3,300, taxable $98,950 (22%).
     const single2025 = (age65: 0 | 1): BETRScenarioContext =>
       ctx({
         filingStatus: 'Single',
@@ -383,8 +282,6 @@ describe('computeRetirementYearsBETR', () => {
     expect(baseline).toHaveLength(1);
     expect(withSenior).toHaveLength(1);
     expect(baseline[0].T_now).toBe(0.24);
-    // The phased-out senior bonus lowers taxable income across the 24% → 22%
-    // boundary, so the deduction is provably changing the math.
     expect(withSenior[0].T_now).toBe(0.22);
     expect(withSenior[0].T_now).not.toBe(baseline[0].T_now);
   });

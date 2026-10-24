@@ -17,7 +17,7 @@ function absMonth(year: number, monthIndex: number): number {
 }
 
 /** Returns `series.startYear * 12 + series.startMonthIndex`. */
-export function seriesStartAbs(series: MonthlyCashflowSeries): number {
+function seriesStartAbs(series: MonthlyCashflowSeries): number {
   return absMonth(series.startYear, series.startMonthIndex);
 }
 

@@ -108,7 +108,7 @@ export interface TaxCashflowSolveArgs {
 }
 
 /** Per-bucket withdrawal classification returned by the funding callback. */
-export interface WithdrawalClassification {
+interface WithdrawalClassification {
   readonly preTaxDollars: number;
   readonly postTaxNonRothDollars: number;
   readonly postTaxCashLikeDollars: number;

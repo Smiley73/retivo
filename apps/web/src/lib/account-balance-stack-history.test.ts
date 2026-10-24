@@ -1,11 +1,3 @@
-/**
- * account-balance-stack-history — historical row assembly.
- *
- * Behavior-named coverage: single + multiple accounts, MIXED pre/post split,
- * HSA/Roth route to post-tax with preEnd===0, carry-forward across gap years +
- * carried-forward marker, $0-last-entry drop-out, inactive included,
- * deletedAt excluded, latest-actual-year reducer, distinct-year threshold.
- */
 import { describe, expect, it } from 'vitest';
 import {
   buildAccountBalanceStackHistory,
@@ -123,9 +115,7 @@ describe('buildAccountBalanceStackHistory', () => {
     ];
     const rows = buildAccountBalanceStackHistory(accounts, balances);
     expect(rows.map((r) => r.year)).toEqual([2020, 2021]);
-    // 'b' has no 2020 entry and starts in 2021, so it is absent from 2020.
     expect(rows[0].accountBalances.has('b')).toBe(false);
-    // 'a' carries forward into 2021 (no 2021 entry).
     expect(rows[1].accountBalances.get('a')?.carriedForward).toBe(true);
     expect(rows[1].accountBalances.get('b')?.balance).toBe(50);
   });
@@ -186,7 +176,6 @@ describe('buildAccountBalanceStackHistory', () => {
     ];
     const rows = buildAccountBalanceStackHistory(accounts, balances);
     expect(rows.map((r) => r.year)).toEqual([2020, 2021, 2022, 2023]);
-    // Internal gap years 2021, 2022 hold 2020's 100 flat, marked carriedForward.
     expect(rows[1].accountBalances.get('a')).toEqual({
       balance: 100,
       preEnd: 100,
@@ -204,7 +193,6 @@ describe('buildAccountBalanceStackHistory', () => {
     ];
     const balances = [
       makeBalance({ accountId: 'a', year: 2020, endingBalance: 100 }),
-      // 'b' extends the latest actual year to 2022; 'a' holds flat to 2022.
       makeBalance({ accountId: 'b', year: 2022, endingBalance: 50 }),
     ];
     const rows = buildAccountBalanceStackHistory(accounts, balances);
@@ -228,9 +216,7 @@ describe('buildAccountBalanceStackHistory', () => {
       makeBalance({ accountId: 'b', year: 2022, endingBalance: 50 }),
     ];
     const rows = buildAccountBalanceStackHistory(accounts, balances);
-    // 2021 has the explicit $0 entry → present but zero.
     expect(rows[1].accountBalances.get('a')?.balance).toBe(0);
-    // 2022 carries forward the $0 → 'a' drops out entirely.
     expect(rows[2].accountBalances.has('a')).toBe(false);
   });
 
@@ -314,7 +300,6 @@ describe('buildAccountBalanceStackHistory', () => {
       }),
     ];
     const rows = buildAccountBalanceStackHistory(accounts, balances);
-    // Deleted account 'a' excluded; deleted 2021 'b' balance excluded → only 2020.
     expect(rows.map((r) => r.year)).toEqual([2020]);
     expect(rows[0].accountBalances.has('a')).toBe(false);
     expect(rows[0].accountBalances.get('b')?.balance).toBe(50);
@@ -349,9 +334,7 @@ describe('latestActualBalanceYear', () => {
       makeBalance({ accountId: 'live', year: 2023, endingBalance: 100 }),
       makeBalance({ accountId: 'gone', year: 2025, endingBalance: 50 }),
     ];
-    // Without the accounts param the deleted account's year wins.
     expect(latestActualBalanceYear(balances)).toBe(2025);
-    // With it, the deleted account's row is ignored.
     expect(latestActualBalanceYear(balances, accounts)).toBe(2023);
   });
 });

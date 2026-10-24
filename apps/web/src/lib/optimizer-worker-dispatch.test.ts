@@ -1,24 +1,5 @@
-/**
- * Regression tests for `dispatchToOptimizerWorker`. The helper has two
- * concerns:
- *
- * 1. Per-call correlation via `runId`. Two consecutive dispatches for
- *    the same `scenarioId` must NOT have the second resolve to the
- *    first dispatch's stale reply — that bug surfaced when the page
- *    effect re-ran mid-flight (aggregates change via
- *    WORKSPACE_CHANGED_EVENT or cross-tab sync) and a fresh listener
- *    was registered while the OLD reply was still in-flight.
- * 2. Worker error capture. When the underlying `Worker` emits an
- *    `error` event, the helper resolves with a `kind: 'error'` reply
- *    carrying the inbound `scenarioId` + `runId` so the page can
- *    render a row-level error instead of hanging.
- *
- * The tests use a hand-rolled fake `Worker` implementing the minimal
- * `addEventListener`/`removeEventListener`/`postMessage` surface
- * `dispatchToOptimizerWorker` calls. Each posted message is recorded
- * so a test can inspect the dispatched `runId` and play it back as a
- * reply.
- */
+// Per-call runId correlation (a stale reply from a re-run effect must not resolve the newer dispatch) and worker `error` capture.
+// A hand-rolled fake Worker records posted messages and plays them back as replies.
 import { describe, expect, it } from 'vitest';
 import { dispatchToOptimizerWorker } from './optimizer-worker-dispatch';
 import type {
@@ -80,8 +61,6 @@ function makeFakeWorker(): FakeWorker {
 }
 
 function makeInput(scenarioId: string): OptimizerWorkerInput {
-  // Minimal shape — the dispatch helper only reads `scenarioId`; the
-  // rest is passed opaquely to the worker.
   return {
     scenarioId,
     scenarios: [],
@@ -109,10 +88,7 @@ describe('dispatchToOptimizerWorker', () => {
   });
 
   it('should_not_resolve_new_dispatch_with_stale_reply_for_same_scenarioId', async () => {
-    // Concurrency regression — two consecutive dispatches for scenario
-    // 's'. The OLD reply arrives AFTER the new listener is registered.
-    // Without runId filtering, the new dispatch's promise resolves to
-    // the OLD reply (both listeners match scenarioId='s').
+    // Two consecutive dispatches for scenario 's': without runId filtering the new dispatch would resolve to the OLD reply.
     const worker = makeFakeWorker();
     const firstPromise = dispatchToOptimizerWorker(
       worker as unknown as Worker,
@@ -125,8 +101,6 @@ describe('dispatchToOptimizerWorker', () => {
     );
     const newRunId = worker.posted[1].runId;
 
-    // Deliver the OLD reply first. The NEW promise must NOT resolve
-    // from it; the OLD promise must.
     worker.emitMessage({
       kind: 'result',
       runId: oldRunId,
@@ -140,8 +114,6 @@ describe('dispatchToOptimizerWorker', () => {
     expect(oldOut.kind).toBe('result');
     if (oldOut.kind === 'result') expect(oldOut.runId).toBe(oldRunId);
 
-    // The NEW promise has not resolved yet — race it against a short
-    // timer to assert pending.
     const sentinel = Symbol('pending');
     const raced = await Promise.race([
       secondPromise,
@@ -149,7 +121,6 @@ describe('dispatchToOptimizerWorker', () => {
     ]);
     expect(raced).toBe(sentinel);
 
-    // Now deliver the NEW reply; the NEW promise resolves to it.
     worker.emitMessage({
       kind: 'result',
       runId: newRunId,
@@ -168,10 +139,6 @@ describe('dispatchToOptimizerWorker', () => {
   });
 
   it('should_resolve_with_error_kind_when_worker_emits_error', async () => {
-    // onError branch — when the underlying Worker emits an `error`
-    // event the helper resolves (never rejects) with a kind:'error'
-    // reply carrying the inbound scenarioId + runId so the page can
-    // render a row-level error.
     const worker = makeFakeWorker();
     const promise = dispatchToOptimizerWorker(
       worker as unknown as Worker,

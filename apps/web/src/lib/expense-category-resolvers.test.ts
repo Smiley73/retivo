@@ -1,12 +1,4 @@
-/**
- * Tests for the medical-category resolver — the SOLE normalisation point for
- * the `isMedical` flag. Strict `=== true` (CWE-20) + dangerous-key drop
- * (CWE-1321) live here.
- *
- * Also tests `isHsaQualifiedMedical` — the SOLE normalisation point for the
- * `hsaQualified` flag. Strict `=== true` (CWE-20); absent ⇒ not
- * qualified; non-boolean truthy ⇒ not qualified (CWE-20).
- */
+// `isMedical` is normalised strictly (`=== true`, CWE-20) with a dangerous-key drop (CWE-1321); `hsaQualified` is strict too, and absent or truthy-non-boolean is not qualified.
 import { describe, it, expect } from 'vitest';
 import {
   medicalCategoryIdsFrom,
@@ -131,8 +123,6 @@ describe('isHsaQualifiedMedical', () => {
   });
 
   it('ignores the flag on a non-medical category (flag is inert)', () => {
-    // Even if stored on a non-medical row the predicate returns false; the
-    // engine ignores the flag unless the category is medical first.
     expect(isHsaQualifiedMedical(exp('cat-food', true), medicalIds)).toBe(false);
   });
 });

@@ -1,14 +1,7 @@
-/**
- * Unit tests for the pure account tax-profile logic — the draft readers, the
- * payload serializer, the ENGINE-sourced readiness/blocker list, the sync payload
- * budget, and the completeness classifier the account editor, the accounts list,
- * and the exported report all share.
- */
 import { describe, expect, it } from 'vitest';
 import type { AccountPayload } from '../db/types';
 import {
   EMPTY_TAX_PROFILE_DRAFT,
-  MAX_ACCOUNT_PAYLOAD_PLAINTEXT_BYTES,
   accountPayloadSizeError,
   readTaxProfileDraft,
   rmdBlockerMessages,
@@ -21,7 +14,6 @@ import {
   type TaxProfileDraft,
 } from './account-tax-profile';
 
-/** A minimal valid account payload plus any tax facts under test. */
 function payload(over: Partial<AccountPayload> = {}): AccountPayload {
   return {
     name: 'Test account',
@@ -45,6 +37,8 @@ const draft = (over: Partial<TaxProfileDraft> = {}): TaxProfileDraft => ({
   ...over,
 });
 
+const PAYLOAD_CAP_BYTES = 40 * 1024;
+
 describe('field visibility', () => {
   it('shows Roth-IRA fields only for a Roth IRA', () => {
     expect(showsRothIraFields('RETIREMENT_ROTH_IRA')).toBe(true);
@@ -55,14 +49,12 @@ describe('field visibility', () => {
   it('shows designated-Roth fields for a pure Roth plan and for a MIXED employer plan', () => {
     expect(showsDesignatedRothFields('RETIREMENT_ROTH_401K', 'ROTH')).toBe(true);
     expect(showsDesignatedRothFields('RETIREMENT_401K', 'MIXED')).toBe(true);
-    // A pre-tax-only employer plan has no Roth-designated slice.
     expect(showsDesignatedRothFields('RETIREMENT_401K', 'PRE_TAX')).toBe(false);
     expect(showsDesignatedRothFields('BROKERAGE', 'POST_TAX')).toBe(false);
   });
 
   it('shows required-withdrawal fields for retirement types only', () => {
     expect(showsRmdFields('RETIREMENT_IRA')).toBe(true);
-    // A Roth IRA can be INHERITED, which owes beneficiary distributions.
     expect(showsRmdFields('RETIREMENT_ROTH_IRA')).toBe(true);
     expect(showsRmdFields('BROKERAGE')).toBe(false);
     expect(showsRmdFields('HSA')).toBe(false);
@@ -78,7 +70,6 @@ describe('readTaxProfileDraft — every stored value is re-validated', () => {
   it('drops corrupt / out-of-range stored values to BLANK rather than round-tripping them', () => {
     const d = readTaxProfileDraft(
       payload({
-        // Out of the documented [1998, 2200] tax-year bounds.
         rothIraFirstContributionTaxYear: 1899,
         rmdBeneficiaryBirthdate: '1965-02-30', // calendar-impossible
         rmdBeneficiaryType: 'NOT_A_CATEGORY' as never,
@@ -88,7 +79,6 @@ describe('readTaxProfileDraft — every stored value is re-validated', () => {
     expect(d.rothIraFirstContributionTaxYear).toBe('');
     expect(d.rmdBeneficiaryBirthdate).toBe('');
     expect(d.rmdBeneficiaryType).toBe('');
-    // A non-boolean tri-state reads back UNKNOWN, the conservative default.
     expect(d.rmdFivePercentOwner).toBe('');
   });
 });
@@ -104,7 +94,6 @@ describe('taxProfileToPayloadFields — only type-appropriate facts are emitted'
     expect(taxProfileToPayloadFields(d, 'RETIREMENT_ROTH_IRA', 'ROTH')).toEqual({
       rothIraFirstContributionTaxYear: 2012,
     });
-    // Switching the type must not leave orphan Roth facts behind.
     expect(taxProfileToPayloadFields(d, 'BROKERAGE', 'POST_TAX')).toEqual({});
   });
 
@@ -115,10 +104,7 @@ describe('taxProfileToPayloadFields — only type-appropriate facts are emitted'
         rmdBeneficiaryType: 'SPOUSE',
         rmdInheritedOwnerDeathDate: '2023-04-02',
         rmdInheritedOwnerDiedOnOrAfterRbd: 'no',
-        // Hidden legacy copy must not be re-saved; the household member record is
-        // now the canonical beneficiary birthdate.
         rmdBeneficiaryBirthdate: '1983-05-01',
-        // Owner-side facts must NOT survive on an inherited account.
         rmdCurrentEmployerPlan: true,
         rmdSoleSpouseBeneficiary: true,
       }),
@@ -132,7 +118,6 @@ describe('taxProfileToPayloadFields — only type-appropriate facts are emitted'
     expect(inherited.rmdCurrentEmployerPlan).toBeUndefined();
     expect(inherited.rmdSoleSpouseBeneficiary).toBeUndefined();
 
-    // The still-working facts only apply to employer plans, never an IRA.
     const ownerIra = taxProfileToPayloadFields(
       draft({ rmdCurrentEmployerPlan: true, rmdFivePercentOwner: 'no' }),
       'RETIREMENT_IRA',
@@ -210,9 +195,7 @@ describe('taxProfileValidationError — a mistyped year is refused, not silently
   });
 
   it('names the ORIGINAL-OWNER label variant on an inherited Roth IRA', () => {
-    // The editor relabels the year field for the original owner when the inherited
-    // toggle is on (it is the DECEDENT's year), so the refusal has to quote the
-    // label actually on screen.
+    // The editor relabels the year field for the original owner when inherited, so the refusal quotes that label.
     const message = taxProfileValidationError(
       draft({
         rmdInheritedAccount: true,
@@ -226,8 +209,6 @@ describe('taxProfileValidationError — a mistyped year is refused, not silently
   });
 
   it('ignores fields the account type does not show', () => {
-    // A brokerage account emits no Roth facts at all, so a leftover draft value
-    // cannot block its save.
     expect(
       taxProfileValidationError(
         draft({ rothIraFirstContributionTaxYear: 'nonsense' }),
@@ -271,8 +252,7 @@ describe('rmdBlockerMessages — derived from the ENGINE’s own withhold reason
     expect(messages).toEqual([]);
   });
 
-  // The pre-fix predicate demanded a beneficiary birthdate AND an election from an
-  // estate/charity/trust, neither of which any rule for that category needs.
+  // The pre-fix predicate demanded a birthdate and an election from an estate/charity/trust.
   it('does NOT demand a birthdate or an election from an estate / charity / trust beneficiary', () => {
     const messages = rmdBlockerMessages(
       draft({
@@ -283,8 +263,6 @@ describe('rmdBlockerMessages — derived from the ENGINE’s own withhold reason
       }),
       'RETIREMENT_IRA',
     );
-    // Owner died BEFORE their required beginning date → the five-year rule applies
-    // with no further facts needed, so nothing blocks.
     expect(messages).toEqual([]);
   });
 
@@ -301,7 +279,6 @@ describe('rmdBlockerMessages — derived from the ENGINE’s own withhold reason
     expect(messages).toEqual([]);
   });
 
-  // Engine blockers the pre-fix predicate never surfaced.
   it('surfaces the original owner’s birthdate when they died on/after their start date', () => {
     const messages = rmdBlockerMessages(
       draft({
@@ -348,11 +325,7 @@ describe('rmdBlockerMessages — derived from the ENGINE’s own withhold reason
   });
 
   it('does not demand the died-on/after-RBD fact for an inherited ROTH account (its owner has no lifetime RBD)', () => {
-    // Every other required fact is recorded; `rmdInheritedOwnerDiedOnOrAfterRbd`
-    // is deliberately left blank. A pre-tax IRA in the same shape WOULD be
-    // blocked on it (next test) — a Roth account must not be, since the engine
-    // (`resolveRmdRule` -> `resolveInheritedRmdRule`) always forces the
-    // pre-RBD regime for a Roth owner and never reads the stored flag.
+    // A Roth account must not block on `rmdInheritedOwnerDiedOnOrAfterRbd`: the engine always forces the pre-RBD regime for a Roth owner.
     const messages = rmdBlockerMessages(
       draft({
         rmdInheritedAccount: true,
@@ -396,25 +369,20 @@ describe('accountPayloadSizeError — sync payload budget', () => {
   });
 
   it('rejects a payload that could never sync, in plain English', () => {
-    const huge = payload({ notes: 'x'.repeat(MAX_ACCOUNT_PAYLOAD_PLAINTEXT_BYTES + 1) });
+    const huge = payload({ notes: 'x'.repeat(PAYLOAD_CAP_BYTES + 1) });
     const message = accountPayloadSizeError(huge);
     expect(message).not.toBeNull();
     expect(message).toContain('too large to save and sync');
   });
 
   it('rejects an oversized payload that crosses the sync budget', () => {
-    // No repeatable list remains on the account payload — both dated Roth facts
-    // moved to the annual balance rows — so a long notes field is now the only
-    // way to reach the budget, and the only thing the error can usefully advise
-    // shortening.
     expect(accountPayloadSizeError(payload({ notes: 'y'.repeat(1_000) }))).toBeNull();
     const message = accountPayloadSizeError(
-      payload({ notes: 'y'.repeat(MAX_ACCOUNT_PAYLOAD_PLAINTEXT_BYTES + 1) }),
+      payload({ notes: 'y'.repeat(PAYLOAD_CAP_BYTES + 1) }),
     );
     expect(message).not.toBeNull();
     expect(message).toContain('too large to save and sync');
     expect(message).toContain('shorten the notes');
-    // The advice must not name rows that no longer exist.
     expect(message).not.toMatch(/conversion or rollover rows/i);
   });
 
@@ -429,8 +397,6 @@ describe('accountPayloadSizeError — sync payload budget', () => {
   });
 
   it('is complete for a Roth IRA once its start year alone is recorded', () => {
-    // The contribution-basis total is no longer collected (it is derived from
-    // recorded balance history), so the start year is the whole Roth-IRA ask.
     expect(
       taxProfileCompleteness(payload({ rothIraFirstContributionTaxYear: 2012 })),
     ).toBe('complete');
@@ -444,10 +410,6 @@ describe('accountPayloadSizeError — sync payload budget', () => {
     ).toBe('complete');
   });
 
-  // The Roth first-contribution year still gates completeness on an
-  // INHERITED Roth IRA exactly as on an owner account. The engines stop
-  // consulting that year; it does not change what the field is or what the
-  // completeness indicator does with it.
   it('still scores the first-contribution year on an INHERITED Roth IRA', () => {
     const inherited = {
       rmdInheritedAccount: true,
@@ -473,9 +435,7 @@ describe('accountPayloadSizeError — sync payload budget', () => {
   });
 
   it('is partial for an employer plan whose still-working questions are unanswered', () => {
-    // A brand-new pre-tax 401(k) with nothing entered reported `complete` — the
-    // 5%-owner and plan-terms questions are unanswered, so the projection is using a
-    // cautious default and the badge must say there is something to add.
+    // A brand-new pre-tax 401(k) with nothing entered used to report `complete`.
     expect(
       taxProfileCompleteness(payload({ type: 'RETIREMENT_401K', taxTreatment: 'PRE_TAX' })),
     ).toBe('partial');

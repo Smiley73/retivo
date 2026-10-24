@@ -109,7 +109,7 @@ export function sortReportAccounts<T extends AccountOrderFields>(
 }
 
 /** Returns the ordered accounts included in the selected scenario's by-account view. */
-export function selectReportByAccountAccounts<T extends AccountOrderFields>(
+function selectReportByAccountAccounts<T extends AccountOrderFields>(
   accounts: ReadonlyArray<T>,
   excludedAccountIds: ReadonlyArray<string>,
 ): T[] {

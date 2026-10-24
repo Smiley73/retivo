@@ -1,9 +1,3 @@
-/**
- * Default-categories bootstrap tests. Mirrors the auto-base-scenario
- * tests in scenario-bootstrap.test (if any) — verifies the seed runs
- * once on an empty store and is a no-op when at least one category
- * already exists.
- */
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {

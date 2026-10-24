@@ -1,8 +1,3 @@
-/**
- * Diagnostics logger tests. Ring cap/eviction (at-cap + below-cap), namespace
- * parse, must-not-throw, flush → IDB persistence, clear/clearAll. Uses
- * `fake-indexeddb/auto` so the real `db/store.ts` append+prune path runs.
- */
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -10,7 +5,6 @@ import {
   clearAll,
   flush,
   getEntries,
-  parseNamespace,
   recordBreadcrumb,
   recordError,
   recordSyncWarn,
@@ -21,24 +15,6 @@ import {
   listDiagnosticLogs,
 } from '../../db/store';
 import * as store from '../../db/store';
-
-describe('parseNamespace', () => {
-  it('should_extract_a_bracketed_namespace_from_the_first_string_arg', () => {
-    expect(parseNamespace('[sync] pull failed')).toEqual({
-      namespace: 'sync',
-      rest: 'pull failed',
-    });
-  });
-
-  it('should_return_no_namespace_when_the_first_arg_has_no_prefix', () => {
-    expect(parseNamespace('plain message')).toEqual({ rest: 'plain message' });
-  });
-
-  it('should_return_no_namespace_when_the_first_arg_is_not_a_string', () => {
-    const obj = { code: 'X' };
-    expect(parseNamespace(obj)).toEqual({ rest: obj });
-  });
-});
 
 describe('diagnostics logger', () => {
   beforeEach(async () => {
@@ -63,7 +39,6 @@ describe('diagnostics logger', () => {
     for (let i = 0; i < 1010; i += 1) recordError(`e${i}`);
     const errors = getEntries().filter((e) => e.level === 'error');
     expect(errors).toHaveLength(1000);
-    // Oldest 10 evicted → first surviving is e10.
     expect(errors[0].message).toBe('e10');
   });
 
@@ -73,7 +48,6 @@ describe('diagnostics logger', () => {
     const errors = getEntries().filter((e) => e.level === 'error');
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toBe('important error');
-    // Breadcrumb ring capped at 200.
     const crumbs = getEntries().filter((e) => e.level === 'log');
     expect(crumbs).toHaveLength(200);
   });
@@ -83,6 +57,15 @@ describe('diagnostics logger', () => {
     const [entry] = getEntries();
     expect(entry.namespace).toBe('sync');
     expect(entry.message).toBe('something happened');
+  });
+
+  it('should_record_no_namespace_for_an_unprefixed_or_non_string_first_arg', () => {
+    recordWarn('plain message');
+    recordWarn({ code: 'X' });
+    const entries = getEntries();
+    expect(entries).toHaveLength(2);
+    expect(entries.every((e) => e.namespace === undefined)).toBe(true);
+    expect(entries[0].message).toBe('plain message');
   });
 
   it('should_record_recordSyncWarn_as_a_warn_level_sync_entry_in_the_durable_ring', () => {
@@ -122,7 +105,6 @@ describe('diagnostics logger', () => {
       },
     };
     expect(() => recordError('msg', hostile)).not.toThrow();
-    // The entry is still recorded (message captured; detail collapses safely).
     expect(getEntries().length).toBeGreaterThan(0);
   });
 
@@ -146,9 +128,7 @@ describe('diagnostics logger', () => {
   });
 
   it('should_not_throw_and_requeue_the_batch_when_idb_append_rejects', async () => {
-    // IDB unavailable (private mode) — appendDiagnosticLogs rejects. flush()
-    // must not throw, must keep the ring authoritative, and must re-queue the
-    // drained batch so a later successful flush persists it.
+    // IDB unavailable (private mode): flush() must not throw and must re-queue the drained batch.
     recordError('survives idb failure');
     const spy = vi
       .spyOn(store, 'appendDiagnosticLogs')
@@ -158,12 +138,9 @@ describe('diagnostics logger', () => {
       );
     await expect(flush()).resolves.toBeUndefined();
     expect(getEntries().some((e) => e.message === 'survives idb failure')).toBe(true);
-    // Nothing persisted on the failed attempt; the batch is re-queued.
     expect(await listDiagnosticLogs()).toHaveLength(0);
-    // Second flush also rejects (quota) — still no throw, still re-queued.
     await expect(flush()).resolves.toBeUndefined();
     expect(await listDiagnosticLogs()).toHaveLength(0);
-    // Restore the real append — the re-queued batch now persists.
     spy.mockRestore();
     await flush();
     const rows = await listDiagnosticLogs();
@@ -176,7 +153,6 @@ describe('diagnostics logger', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0].message).toBe('identical loop');
     expect(entries[0].count).toBe(5);
-    // A differing record starts a fresh entry (count resets).
     recordError('a different line');
     const after = getEntries();
     expect(after).toHaveLength(2);
@@ -185,9 +161,7 @@ describe('diagnostics logger', () => {
   });
 
   it('should_NOT_coalesce_two_different_Error_messages', () => {
-    // JSON.stringify(new Error(...)) is '{}' for both, so a naive key would
-    // over-coalesce and drop the second message. The Error-aware key keeps them
-    // distinct.
+    // JSON.stringify(new Error(...)) is '{}', so a naive coalesce key would drop the second message.
     recordError(new Error('first'));
     recordError(new Error('second'));
     const entries = getEntries();
@@ -205,8 +179,7 @@ describe('diagnostics logger', () => {
   });
 
   it('should_NOT_over_coalesce_on_token_boundary_collisions', () => {
-    // `['ab','c']` and `['a','bc']` join to the same string under an empty-
-    // string delimiter; the unit-separator delimiter keeps them distinct.
+    // ['ab','c'] and ['a','bc'] join to the same string under an empty delimiter; the unit-separator keeps them distinct.
     recordError('ab', 'c');
     recordError('a', 'bc');
     const entries = getEntries();
@@ -226,16 +199,12 @@ describe('diagnostics logger', () => {
   });
 
   it('should_drain_at_most_MAX_FLUSH_BATCH_per_flush_and_reschedule_the_remainder', async () => {
-    // > MAX_FLUSH_BATCH (200) distinct entries so none coalesce.
     for (let i = 0; i < 250; i += 1) recordError(`batch-${i}`);
-    // One flush drains at most 200 to IDB and re-schedules the remainder.
     await flush();
     let rows = await listDiagnosticLogs();
     expect(rows).toHaveLength(200);
     expect(rows[0].message).toBe('batch-0');
     expect(rows[199].message).toBe('batch-199');
-    // A second flush drains the re-queued remainder (the reschedule's timer
-    // would do the same; calling flush directly avoids fake-timer/IDB interop).
     await flush();
     rows = await listDiagnosticLogs();
     expect(rows).toHaveLength(250);
@@ -243,9 +212,7 @@ describe('diagnostics logger', () => {
   });
 
   it('should_NOT_resurrect_a_drained_batch_when_clear_interleaves_a_failing_flush', async () => {
-    // Cross-user leak race: a flush drains user A's batch, then clear()
-    // runs (cross-user dropLocalDatabase wipe) BEFORE appendDiagnosticLogs
-    // rejects. The catch path must NOT re-queue the prior user's batch.
+    // Cross-user leak race: clear() runs after a flush drained user A's batch but before the append rejects; the catch path must not re-queue it.
     recordError('user A secret');
     let rejectAppend: (reason?: unknown) => void = () => {};
     vi.spyOn(store, 'appendDiagnosticLogs').mockImplementationOnce(
@@ -255,14 +222,10 @@ describe('diagnostics logger', () => {
         }),
     );
     const flushing = flush(); // drains the batch, now awaiting the append
-    // User A logs out → cross-user wipe empties the rings + queue.
     clear();
-    // The in-flight append now fails.
     rejectAppend(new Error('IDB unavailable'));
     await flushing;
-    // The drained batch must NOT have been resurrected into the cleared queue.
     expect(getEntries()).toHaveLength(0);
-    // A subsequent new-user record + flush persists ONLY the new entry.
     recordError('user B entry');
     await flush();
     const rows = await listDiagnosticLogs();
