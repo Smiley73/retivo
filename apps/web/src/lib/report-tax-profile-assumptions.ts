@@ -76,12 +76,8 @@ export function buildReportTaxProfileAssumptions({
     const hasRothIra = showsRothIraFields(payload.type);
     const hasDesignated = showsDesignatedRothFields(payload.type, payload.taxTreatment);
 
-    // Neither engine consults an INHERITED Roth IRA's five-year clock, so no
-    // Roth start-year group may name one: whichever way its year resolved, that
-    // resolution decides nothing. (The date field itself is
-    // still collected, stored and scored for completeness.) An inherited
-    // DESIGNATED-Roth plan keeps its groups, and so do the inherited
-    // required-withdrawal blocker groups further down.
+    // Neither engine consults an inherited Roth IRA's five-year clock, so no Roth start-year group may name one. An
+    // inherited designated-Roth plan keeps its groups, as do the inherited required-withdrawal blocker groups below.
     const inheritedRothIra = hasRothIra && payload.rmdInheritedAccount === true;
     if ((hasRothIra || hasDesignated) && !inheritedRothIra) {
       const baseInput = {

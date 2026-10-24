@@ -1,15 +1,4 @@
-/**
- * Retirement-age date arithmetic for the same-date scenario mode.
- *
- * Given a birthdate (`YYYY-MM-DD`) and an age in years + months, returns
- * the calendar date the person hits that age. Inverse helper computes
- * one member's age at another member's retirement date.
- *
- * Uses pure UTC date math — no `Date` parsing of strings via the local
- * timezone (which would shift birthdays around midnight). All inputs
- * and outputs are calendar-date strings; nothing here is time-of-day
- * sensitive.
- */
+// Retirement-age date arithmetic: the calendar date a person reaches an age, in UTC string math so a local timezone cannot shift birthdays.
 
 export interface YearsMonths {
   ageYears: number;
@@ -37,17 +26,10 @@ function toIso({ year, month, day }: YMD): string {
 }
 
 function daysInMonth(year: number, month: number): number {
-  // month 1–12; new Date(year, month, 0) returns last day of `month` because
-  // day=0 rolls back into prior month; works in UTC by reading getUTCDate
-  // after constructing in UTC.
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-/**
- * Returns the calendar date `birthdate + ageYears years + ageMonths
- * months`. Day-of-month is preserved (clamped to the month's length so
- * "Feb 31" -> "Feb 28/29").
- */
+/** `birthdate + ageYears + ageMonths`; the day is clamped to the month's length ("Feb 31" becomes Feb 28/29). */
 export function retirementDate(birthdate: string, age: YearsMonths): string {
   const { year, month, day } = parseYmd(birthdate);
   const totalMonths = (month - 1) + age.ageMonths;
@@ -58,11 +40,7 @@ export function retirementDate(birthdate: string, age: YearsMonths): string {
   return toIso({ year: newYear, month: newMonth, day: clampedDay });
 }
 
-/**
- * Returns the age (years + whole months, floored) on `targetDate` for
- * someone born on `birthdate`. Negative inputs (target earlier than
- * birthdate) clamp to 0y 0m — the caller decides how to surface that.
- */
+/** Age (years and whole months) on `targetDate`; a target before the birthdate clamps to 0y 0m. */
 export function ageOnDate(birthdate: string, targetDate: string): YearsMonths {
   const b = parseYmd(birthdate);
   const t = parseYmd(targetDate);
@@ -85,11 +63,7 @@ export function ageOnDate(birthdate: string, targetDate: string): YearsMonths {
   return { ageYears: years, ageMonths: months };
 }
 
-/**
- * True iff the two members would retire on different calendar dates
- * given each member's birthdate + age. Used for the "different dates
- * not yet supported" warning on the retirement-age modal.
- */
+/** True iff the two members would retire on different calendar dates. */
 export function retirementDatesDiffer(
   primaryBirthdate: string,
   primaryAge: YearsMonths,
@@ -102,24 +76,6 @@ export function retirementDatesDiffer(
   );
 }
 
-/**
- * Per-member retirement dates for a household, honoring `sameDateAnchor`.
- *
- * Stored ages are floored to whole years + whole months. The day-of-month
- * gap between two birthdates can't be encoded in that representation, so
- * recomputing the non-anchor's age from the anchor's retirement date and
- * feeding it back through `birthdate + age` lands on the non-anchor's
- * birthday-of-month — NOT the anchor's. Without the snap below, two
- * members configured to "retire on the same day" can drift up to ~30 days
- * apart in display + downstream calculations.
- *
- * Rule (same-date precision): consumers
- * that materialise dates MUST go through this helper, never directly
- * through `retirementDate(member.birthdate, member.age)` for both sides.
- *
- * Returns `null` for a member when their age is missing or birthdate is
- * unparseable. Members beyond primary/secondary always return `null`.
- */
 export interface MemberForRetirement {
   id: string;
   isPrimary: boolean;
@@ -132,6 +88,14 @@ export interface RetirementAgeResolved {
   sameDateAnchor?: 'primary' | 'secondary';
 }
 
+/**
+ * Per-member retirement dates, honoring `sameDateAnchor`. Stored ages are floored
+ * to years and months, so recomputing the non-anchor from the anchor's date lands
+ * on the non-anchor's own birthday-of-month, up to ~30 days off. The non-anchor
+ * therefore takes the anchor's date directly, and consumers must use this helper
+ * rather than `retirementDate` for both sides. A member with no age or an
+ * unparseable birthdate gets `null`.
+ */
 export function resolveMemberRetirementDates(
   retirementAge: RetirementAgeResolved | undefined,
   members: ReadonlyArray<MemberForRetirement>,
@@ -158,7 +122,7 @@ export function resolveMemberRetirementDates(
   let primaryDate = dateFor(primary, retirementAge.primary);
   let secondaryDate = dateFor(secondary, retirementAge.secondary);
 
-  // The snap. See the doc block above.
+  // Snap to the anchor's date; see `resolveMemberRetirementDates`.
   if (retirementAge.sameDateAnchor === 'primary' && primaryDate) {
     secondaryDate = primaryDate;
   } else if (retirementAge.sameDateAnchor === 'secondary' && secondaryDate) {

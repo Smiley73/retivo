@@ -11,62 +11,34 @@ import { splitInitialByTaxTreatment } from './tax-treatment-split';
 import { contributionGrowthFactor } from './contribution-growth';
 import type { ResolvedContributionGrowth } from './scenario-resolution';
 
-/**
- * Per-account ledger entry for the MC runner's per-account sampling (annuity-elected CBPs are
- * excluded upstream).
- */
+/** Per-account ledger entry for the MC runner's sampling; annuity-elected CBPs are excluded upstream. */
 export interface AccountMcLedgerEntry {
   readonly id: string;
   readonly initialPre: number;
   readonly initialPost: number;
-  /** Planned pre-tax contribution per step (zero post-retirement). */
   readonly contribPre: Float64Array;
-  /** Planned post-tax contribution per step, plus targeted events routed here. */
   readonly contribPost: Float64Array;
-  /**
-   * `'fixed'` bakes the explicit growth into the series; `'tracks-inflation'` leaves a
-   * today's-dollars
-   * base the runner scales by `cumCpi[i]` (routed event dollars are nominal and unscaled).
-   */
+  /** `'fixed'` bakes the growth into the series; `'tracks-inflation'` leaves a today's-dollars base the runner scales by `cumCpi[i]` (routed event dollars are nominal and unscaled). */
   readonly contribGrowthMode: ResolvedContributionGrowth['mode'];
-  /** Drawdown deposit dollars per step (post-retirement targeted events), summed across sources. */
   readonly deposit: Float64Array;
-  /**
-   * Pre-tax slice of post-primary spouse contributions; no engine path reads it (derived as
-   * `deposit − depositPost`).
-   */
+  /** Pre-tax slice of post-primary spouse contributions; no engine path reads it. */
   readonly depositPre: Float64Array;
-  /**
-   * Designated-Roth slice of post-primary spouse contributions, routed to the `post` bucket by the
-   * named-strategy drawdown only; a MIXED account's Roth slice stays RMD-exempt (SECURE 2.0 §325).
-   */
+  /** Designated-Roth slice of post-primary spouse contributions, routed to `post` by the named-strategy drawdown only; a MIXED account's Roth slice stays RMD-exempt (SECURE 2.0 §325). */
   readonly depositPost: Float64Array;
   readonly assetMix: AssetMix | null;
-  /** Per-step mix from a `retirementAllocation` glide, applied instead of `assetMix`. */
   readonly assetMixSeries: ReadonlyArray<AssetMix> | null;
-  /** Non-null for a non-annuity CBP: its monthly equivalent is a constant return, not sampled. */
   readonly cbpPlanningReturnPct: number | null;
   readonly taxTreatment: AccountTaxTreatment;
-  /** Roth routes by `taxTreatment`, not this type. */
   readonly accountType: AccountType;
   readonly ownerId: string;
-  /**
-   * Planned-only post-tax base (today's dollars) taken before events are routed onto `contribPost`;
-   * non-null only for tracks-inflation, so the runner CPI-scales just the planned part.
-   */
+  /** Planned-only post-tax base (today's dollars) taken before events route onto `contribPost`; non-null only for tracks-inflation, so the runner CPI-scales just the planned part. */
   readonly plannedContribPostBase: Float64Array | null;
-  /**
-   * Minimum-balance floor in dollars, sanitised (CWE-20) and enforced per MC path; absent means
-   * none.
-   */
+  /** Minimum-balance floor in dollars, sanitised and enforced per MC path. */
   readonly floorDollars?: number;
   readonly floorHsaMode?: 'emergencyOnly' | 'strict';
 }
 
-/**
- * Build a ledger entry: initial buckets split by tax treatment, with zeroed arrays for event
- * routing to fill.
- */
+/** Builds a ledger entry: initial buckets split by tax treatment, with zeroed arrays for event routing to fill. */
 export function buildLedgerEntry(args: {
   account: Aggregate<AccountPayload>;
   latestBalance: number;
@@ -76,10 +48,8 @@ export function buildLedgerEntry(args: {
   retirementStepIdx: number;
   cbpPlanningReturnPct: number | null;
   assetMixSeries?: ReadonlyArray<AssetMix> | null;
-  /** Omitted means tracks-inflation with a flat base (direct-bundle test callers). */
   contributionGrowth?: ResolvedContributionGrowth;
   firstYear: number;
-  /** Today's month (0 = Jan), anchoring baked fixed growth to the deterministic engine. */
   todayMonthIndex?: number;
   floor?: { floorDollars: number; hsaMode: 'emergencyOnly' | 'strict' };
 }): AccountMcLedgerEntry {
@@ -87,7 +57,6 @@ export function buildLedgerEntry(args: {
   const { initialPre, initialPost } = splitInitialByTaxTreatment(
     latestBalance,
     account.payload.taxTreatment,
-    // Actual stored buckets so MIXED accounts honor their split.
     resolveMixedBuckets(args.latestBalancePreTax, args.latestBalancePostTax),
   );
   const growthMode = args.contributionGrowth?.mode ?? 'tracks-inflation';
@@ -99,7 +68,6 @@ export function buildLedgerEntry(args: {
     asOfMonth: args.firstYear * 12 + (args.todayMonthIndex ?? 0),
     firstYear: args.firstYear,
   });
-  // Planned-only base, captured before event routing; only tracks-inflation accounts need it.
   const plannedContribPostBase =
     growthMode === 'tracks-inflation' ? contribPost.slice() : null;
   const assetMix =
@@ -151,9 +119,7 @@ function buildPlannedContribSeries(args: {
     args;
   const contribPre = new Float64Array(stepCount);
   const contribPost = new Float64Array(stepCount);
-  // Planned contributions run /12 per month from step 0 to retirement. HSA is entered pre-tax but
-  // grows in the tax-free (post) bucket, so its amount comes from the pre-tax field and routes to
-  // post, as in the deterministic `computePerMonthContribution`.
+  // HSA is entered pre-tax but grows in the post bucket, as in the deterministic `computePerMonthContribution`.
   const preMonthly =
     account.payload.taxTreatment === 'HSA'
       ? 0
@@ -162,9 +128,7 @@ function buildPlannedContribSeries(args: {
     (account.payload.taxTreatment === 'HSA'
       ? account.payload.plannedContributionPreTax
       : account.payload.plannedContributionPostTax) / 12;
-  // Fixed growth is baked month-precise from the today anchor (`asOfMonth`) to match the
-  // deterministic engine; tracks-inflation keeps a flat base the MC runner scales per path (the
-  // helper returns factor 1 there).
+  // Fixed growth is baked month-precise from the today anchor to match the deterministic engine; tracks-inflation keeps a flat base the runner scales per path.
   const bakeFixedGrowth = growth?.mode === 'fixed';
   const fixedPct = bakeFixedGrowth ? growth.ratePct : 0;
   for (let i = 0; i < Math.min(retirementStepIdx, stepCount); i += 1) {

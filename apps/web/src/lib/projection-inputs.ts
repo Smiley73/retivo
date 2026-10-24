@@ -1,10 +1,6 @@
-/**
- * The seven-aggregate batch every deterministic projection reads, loaded in
- * one place. The Scenarios cards, the AI assistant tools and any later
- * consumer share it, so "the numbers the assistant sees are the numbers the
- * app shows" starts from the same rows. Reads IndexedDB through `db/store`
- * (never a hook), so it also works outside React.
- */
+// The seven-aggregate batch every deterministic projection reads, shared by the Scenarios cards and the AI assistant tools so they see the app's numbers.
+// Reads through `db/store`, not a hook, so it also works outside React.
+
 import { listAggregates } from '../db/store';
 import type {
   AccountBalancePayload,
@@ -24,13 +20,11 @@ export interface ProjectionInputs {
   readonly expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
   readonly incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
   readonly ssBenefits: ReadonlyArray<Aggregate<SocialSecurityBenefitPayload>>;
-  /** Household expense categories — threaded into the deterministic +
-   *  MC projections so the Scenarios cards apply the flag-derived +2pp
-   *  medical-inflation default (else they diverge from BPP). */
+  /** Threaded into the projections so the Scenarios cards apply the flag-derived +2pp medical-inflation default, else they diverge from the Balance Projection page. */
   readonly categories: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>;
 }
 
-/** Read every aggregate the deterministic projection needs (one batch). */
+/** Reads every aggregate the deterministic projection needs, in one batch. */
 export async function loadProjectionInputs(): Promise<ProjectionInputs> {
   const [
     members,

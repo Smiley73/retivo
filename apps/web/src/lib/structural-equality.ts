@@ -1,12 +1,8 @@
 /**
- * Deep structural equality for engine results (`DrawdownYear` rows hold
- * `ReadonlyMap`s and nested objects, and no equality helper existed).
- *
- * Handles primitives, arrays, typed arrays, `Map` (order-insensitive by key),
- * `Set` (order-insensitive) and plain objects. Two deliberate leniencies: `NaN`
- * equals `NaN`, and `0` equals `-0` (the engine normalises `-0` in places, so a
- * sign-of-zero mismatch is not a difference). An own key holding `undefined` is
- * the same as an absent key. Acyclic data only.
+ * Deep structural equality for engine results (`DrawdownYear` rows hold Maps and
+ * nested objects). Map and Set compare order-insensitively; `NaN` equals `NaN` and
+ * `0` equals `-0` (the engine normalises `-0` in places); an own key holding
+ * `undefined` equals an absent one. Acyclic data only.
  */
 export function structurallyEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true; // also 0 === -0

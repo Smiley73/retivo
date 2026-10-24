@@ -1,59 +1,24 @@
-/**
- * Pure helper: turn recorded `accountBalance` aggregates into the per-year,
- * per-account historical rows the Account Balance Stack chart consumes.
- *
- * The output row shape mirrors the band's drawdown-row shape:
- *   `{ year, accountBalances: Map<id, { balance, preEnd, postEnd, carriedForward }> }`
- * so the existing per-AccountType / per-account bucketing path renders the
- * historical prefix exactly as it renders the projected suffix.
- *
- * Routing follows the canonical tax-bucket table, NOT a naive
- * route-by-`taxTreatment`: for a non-MIXED account `preEnd = balance` ONLY
- * when `taxTreatment === 'PRE_TAX'`, otherwise `preEnd = 0` and
- * `postEnd = balance` (HSA → post / tax-free, ROTH → post, POST_TAX → post).
- * MIXED accounts seed `preEnd` / `postEnd` from the recorded
- * `endingBalancePreTax` / `endingBalancePostTax` split.
- *
- * Carry-forward: a per-account band holds its last known
- * `endingBalance` flat across any year it has no entry, through to the latest
- * actual year (internal gaps between entries AND years after the account's own
- * last entry). An account whose last recorded entry is `$0` (closed)
- * contributes `0` thereafter (drops out of the stack). Soft-deleted accounts
- * (`deletedAt`) are excluded entirely.
- *
- * Carried-forward marking: every per-account-year whose value is held
- * flat from a prior entry — internal gaps AND post-last-entry hold years —
- * carries `carriedForward: true`. Years with an actual recorded entry carry
- * `carriedForward: false`.
- *
- * Historical rows carry ONLY the stacking trio (`balance` / `preEnd` /
- * `postEnd`) plus the `carriedForward` marker — no tax / RMD / conversion
- * cent fields — so no display consumer deflates an absent field.
- */
+// Turns recorded `accountBalance` aggregates into per-year, per-account rows for the Account Balance Stack chart (routing in `routeBalance`).
+// A band holds its last `endingBalance` flat (`carriedForward: true`) to the latest actual year; a $0 last entry drops it.
+
 import type {
   AccountBalancePayload,
   AccountPayload,
   Aggregate,
 } from '../db/types';
 
-/** One per-account year-end balance in a historical row — the band's stacking
- *  trio plus the carried-forward marker. */
 interface HistoryAccountYear {
   readonly balance: number;
   readonly preEnd: number;
   readonly postEnd: number;
-  /** True when this year's value was held flat from a prior entry. */
   readonly carriedForward: boolean;
 }
 
-/** One historical calendar year across every contributing account. */
 export interface HistoryYearRow {
   readonly year: number;
   readonly accountBalances: ReadonlyMap<string, HistoryAccountYear>;
 }
 
-/** Split a single recorded balance into the band's pre/post stacking trio
- *  following the canonical routing table. */
 function routeBalance(
   account: AccountPayload,
   bal: AccountBalancePayload,
@@ -62,25 +27,19 @@ function routeBalance(
   if (account.taxTreatment === 'MIXED') {
     const preEnd = bal.endingBalancePreTax ?? 0;
     const postEnd = bal.endingBalancePostTax ?? 0;
-    // When both explicit splits are absent but a total balance exists, route the
-    // full balance to the pre-tax bucket (dominant-bucket convention) so the
-    // account isn't silently dropped from the stack.
+    // With both splits absent, route the full balance to pre-tax (the dominant bucket) so the account is not dropped.
     if (preEnd === 0 && postEnd === 0 && balance > 0) {
       return { balance, preEnd: balance, postEnd: 0 };
     }
     return { balance, preEnd, postEnd };
   }
-  // Non-MIXED: pre-tax buckets all balance into preEnd; everything else
-  // (POST_TAX / ROTH / HSA) routes the full balance to the post bucket.
+  // Only PRE_TAX goes to preEnd; POST_TAX, ROTH and HSA go to postEnd.
   if (account.taxTreatment === 'PRE_TAX') {
     return { balance, preEnd: balance, postEnd: 0 };
   }
   return { balance, preEnd: 0, postEnd: balance };
 }
 
-/** Sorted distinct years across every (non-deleted) balance row. When
- *  `liveIds` is supplied, balance rows for accounts absent from that set
- *  (deleted accounts) are skipped so they cannot extend the window. */
 function distinctBalanceYears(
   balances: ReadonlyArray<Aggregate<AccountBalancePayload>>,
   liveIds?: ReadonlySet<string>,
@@ -94,9 +53,7 @@ function distinctBalanceYears(
   return [...years].sort((a, b) => a - b);
 }
 
-/** The latest calendar year any (non-deleted) account balance has. Null
- *  when no balance rows exist. When `accounts` is supplied, balance rows for
- *  deleted accounts are excluded so they cannot extend the window. */
+/** Latest year any live account has a balance row, or null; rows of deleted accounts are excluded when `accounts` is given. */
 export function latestActualBalanceYear(
   balances: ReadonlyArray<Aggregate<AccountBalancePayload>>,
   accounts?: ReadonlyArray<Aggregate<AccountPayload>>,
@@ -113,9 +70,7 @@ export function latestActualBalanceYear(
   return latest;
 }
 
-/** Count of distinct years that carry at least one (non-deleted) balance row —
- *  the render gate (≥ 2 to render the Account Balances page chart). When
- *  `accounts` is supplied, deleted-account balance rows are excluded. */
+/** Count of distinct years with a balance row (the chart renders at 2 or more); deleted-account rows are excluded when `accounts` is given. */
 export function distinctBalanceYearCount(
   balances: ReadonlyArray<Aggregate<AccountBalancePayload>>,
   accounts?: ReadonlyArray<Aggregate<AccountPayload>>,
@@ -126,26 +81,18 @@ export function distinctBalanceYearCount(
   return distinctBalanceYears(balances, liveIds).length;
 }
 
-/**
- * Build the historical per-year, per-account rows.
- *
- * @returns rows from the earliest balance year through the latest actual year,
- *   each carrying the contributing accounts' year-end stacking trios + the
- *   carried-forward marker. Empty when there are no (non-deleted) balance rows.
- */
+/** Rows from the earliest balance year to the latest actual year; empty when there are no live balance rows. */
 export function buildAccountBalanceStackHistory(
   accounts: ReadonlyArray<Aggregate<AccountPayload>>,
   balances: ReadonlyArray<Aggregate<AccountBalancePayload>>,
 ): HistoryYearRow[] {
-  // Per-account map of year → recorded balance payload (latest-deleted excluded).
   const accountById = new Map<string, AccountPayload>();
   for (const a of accounts) {
     if (a.deletedAt) continue;
     accountById.set(a.id, a.payload);
   }
 
-  // Built from the live-account set so deleted-account balance rows cannot
-  // extend the timeline window.
+  // From the live accounts, so deleted-account rows cannot extend the window.
   const years = distinctBalanceYears(balances, new Set(accountById.keys()));
   if (years.length === 0) return [];
   const latestYear = years[years.length - 1];
@@ -171,8 +118,7 @@ export function buildAccountBalanceStackHistory(
       const account = accountById.get(accountId);
       if (!account) continue;
       const firstYear = Math.min(...yearMap.keys());
-      // No band before the account's first recorded entry (a band starts
-      // at its first entry, not the global earliest year).
+      // A band starts at the account's own first entry.
       if (year < firstYear) continue;
       const actual = yearMap.get(year);
       if (actual) {
@@ -180,14 +126,12 @@ export function buildAccountBalanceStackHistory(
         accountBalances.set(accountId, { ...routed, carriedForward: false });
         continue;
       }
-      // No entry this year → carry the most recent prior entry forward.
       let priorYear = -Infinity;
       for (const y of yearMap.keys()) {
         if (y < year && y > priorYear) priorYear = y;
       }
       if (priorYear === -Infinity) continue; // before the band's first entry
       const prior = yearMap.get(priorYear)!;
-      // A $0 last-known balance drops out (closed account).
       if (prior.endingBalance === 0) continue;
       const routed = routeBalance(account, prior);
       accountBalances.set(accountId, { ...routed, carriedForward: true });

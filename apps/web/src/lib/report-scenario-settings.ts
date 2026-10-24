@@ -1,11 +1,5 @@
-/**
- * Scenario-settings builder for the CFP Report / PDF Scenario page — split
- * out of `report-data.ts` to keep that
- * aggregator under the 800-line shape limit. Pure code motion: no logic
- * changes. `report-data.ts` imports `buildScenarioSettings` (and
- * `lookupCanonicalName`, needed by its own `summariseExpenseOverrides`)
- * back from here.
- */
+// Scenario-settings builder for the report / PDF Scenario page.
+
 import type {
   AccountPayload,
   Aggregate,
@@ -35,63 +29,34 @@ import {
   type StoredHealthCoverageMonths,
 } from './tax-integration-helpers';
 
-/** The exported-settings label for each non-default poverty-guideline
- *  schedule. Keyed by the union so a new region is a compile error. */
 const FPL_REGION_SETTING_LABELS: Readonly<Record<Exclude<AcaFplRegion, 'contiguous'>, string>> = {
   alaska: 'Alaska',
   hawaii: 'Hawaii',
 };
 
-/**
- * The exported-settings label for a stored NON-DEFAULT region, or
- * `undefined` when the stored value is the default or is not a region at all.
- *
- * Read through `Object.hasOwn` (CWE-1321) exactly like `fplRegionReportLabel`
- * below: the value comes off an envelope-only-validated import, and indexing the
- * map directly returned an inherited FUNCTION for `acaFplRegion: "constructor"`
- * (and `undefined` for any other unknown value), either of which then broke the
- * PDF settings table. An unrecognised region is OMITTED — the projection prices
- * it as the contiguous default, which this page reports by saying nothing.
- */
+// Own-property lookup: an imported `acaFplRegion: "constructor"` would index an inherited function and break the PDF
+// table. An unrecognised or default region is omitted; the projection prices it as contiguous.
 function fplRegionSettingLabel(region: string | undefined): string | undefined {
   return region !== undefined && Object.hasOwn(FPL_REGION_SETTING_LABELS, region)
     ? FPL_REGION_SETTING_LABELS[region as Exclude<AcaFplRegion, 'contiguous'>]
     : undefined;
 }
 
-/**
- * The plain-English names of the three HHS poverty-guideline schedules.
- *
- * Typed by the `AcaFplRegion` union so adding a region is a compile error
- * rather than a silent fallback, and read through `Object.hasOwn` (CWE-1321):
- * the stored value reaches this map straight off an imported
- * aggregate, and import hardening rejects `__proto__` / `constructor` only in
- * KEY position — so `acaFplRegion: "constructor"` would otherwise return an
- * inherited FUNCTION, sail past the `??` fallback, and crash the Report render
- * when React tried to use it as a child.
- */
+// Read through `Object.hasOwn`: import hardening rejects `constructor` only in key position, so an imported
+// `acaFplRegion: "constructor"` would return an inherited function and crash the Report render.
 const FPL_REGION_REPORT_LABELS: Readonly<Record<AcaFplRegion, string>> = {
   contiguous: 'The 48 mainland states and Washington, DC',
   alaska: 'Alaska (higher federal poverty guidelines)',
   hawaii: 'Hawaii (higher federal poverty guidelines)',
 };
 
-/** The label for a stored region value, own-property-safe. */
 export function fplRegionReportLabel(region: string | undefined): string {
   return region !== undefined && Object.hasOwn(FPL_REGION_REPORT_LABELS, region)
     ? FPL_REGION_REPORT_LABELS[region as AcaFplRegion]
     : FPL_REGION_REPORT_LABELS.contiguous;
 }
 
-/**
- * The tax years for which ANY member has stated coverage months, sorted
- * ascending (one implementation shared by both report modules).
- *
- * Walks the map through the shared shape-checking
- * `storedCoverageMonthEntries` reader, so an imported `{ perMember: { id: null } }`
- * reads as "nothing stated" instead of throwing out of the Report render and
- * the PDF settings build.
- */
+/** Tax years with stated coverage months for any member, ascending; shared by both report modules. */
 export function statedCoverageYears(
   override: StoredHealthCoverageMonths | undefined,
 ): number[] {
@@ -102,32 +67,18 @@ export function statedCoverageYears(
 
 import { formatAgeYearsMonths, type AgeYearsMonths } from './format-age';
 
-// ---------- Local types ----------
-
-/** One human-readable scenario setting / change for the PDF's Scenario page:
- *  a label and its detail value. Effective (resolved) settings show their value;
- *  per-account / expense / income overrides show the actual change
- *  ("$0 to $5,000"), so the page describes WHAT the scenario does, not a count.
- *  Values are ASCII-only (jsPDF's standard font lacks glyphs like → / ≤). */
+/** One scenario setting or change: a label and its detail value. Values are ASCII-only (jsPDF's standard font lacks → and ≤). */
 interface ReportScenarioSetting {
   label: string;
   value: string;
 }
 
-/** A titled group of related scenario settings — rendered as its own small
- *  table on the PDF's Scenario page so no single table is overloaded. */
 export interface ReportScenarioSettingGroup {
   title: string;
   rows: ReportScenarioSetting[];
 }
 
-// ---------- Canonical-id / name helpers (shared with `report-data.ts`'s
-// `summariseExpenseOverrides`, imported back from there) ----------
-
-/** Resolve a prefixed/raw override id to a canonical expense name. Only
- *  `aggregate:<uuid>` / raw ids map to a canonical expense; `local:` ids
- *  are scenario-only adds (named via the `added` payload, handled
- *  separately). */
+/** Resolves an override id to a canonical expense name; `local:` ids are scenario-only adds, named via the `added` payload. */
 export function lookupCanonicalName(
   rawId: string,
   expenseNameById: ReadonlyMap<string, string>,
@@ -137,16 +88,11 @@ export function lookupCanonicalName(
   return expenseNameById.get(id);
 }
 
-/** Strip the override-id prefix to the canonical aggregate id, or `undefined`
- *  for a `local:` (scenario-only) id that has no canonical aggregate. */
 function canonicalId(rawId: string): string | undefined {
   if (rawId.startsWith('local:')) return undefined;
   return rawId.startsWith('aggregate:') ? rawId.slice('aggregate:'.length) : rawId;
 }
 
-// ---------- Scenario settings (for the PDF Scenario page) ----------
-
-/** Display labels for the resolved withdrawal-strategy kind. */
 const WITHDRAWAL_STRATEGY_LABELS: Record<string, string> = {
   taxEfficient: 'Tax-efficient',
   proportional: 'Proportional',
@@ -154,9 +100,6 @@ const WITHDRAWAL_STRATEGY_LABELS: Record<string, string> = {
   customOrder: 'Custom order',
 };
 
-/** Plain-English, one-line explanation of what each withdrawal strategy does —
- *  surfaced on the Scenario page so a reader (e.g. a financial planner) need
- *  not guess what "Tax-efficient" means. Layman's terms (no jargon). */
 const WITHDRAWAL_STRATEGY_DESCRIPTIONS: Record<string, string> = {
   taxEfficient:
     'Draws taxable accounts first, then tax-deferred, then Roth last — an order that tends to carry lower lifetime tax drag, though the actual result depends on your brackets and account mix.',
@@ -166,25 +109,15 @@ const WITHDRAWAL_STRATEGY_DESCRIPTIONS: Record<string, string> = {
   customOrder: 'Draws accounts in the custom order set on this scenario (see the tiers below).',
 };
 
-/** Default fraction of a taxable (non-Roth) withdrawal treated as long-term
- *  gain / qualified dividend when no scenario in the chain overrides it (see
- *  db/types — `assumedCostBasisFractionOfTaxableWithdrawal` defaults to 0.5). */
 const DEFAULT_TAXABLE_LTCG_FRACTION = 0.5;
 
-/** Default share of EMERGENCY HSA withdrawals assumed to be qualified
- *  (tax-free) medical spending when unset — modeled medical-qualified
- *  withdrawals are always 100% qualified (engine default — `tax-integration`
- *  uses 100). */
+// Modeled medical-qualified withdrawals are always 100% qualified.
 const DEFAULT_HSA_QUALIFIED_PCT = 100;
 
-/** Whole-dollar formatter for scenario-setting values. */
 function settingMoney(n: number): string {
   return `$${Math.round(n).toLocaleString('en-US')}`;
 }
 
-/** Summarise an expense patch into "what changed" — scalar fields show
- *  old → new (old from the canonical expense when available); schedule /
- *  category changes are noted generically. ASCII-only. */
 function describeExpensePatch(
   patch: Record<string, unknown>,
   base: ExpensePayload | undefined,
@@ -207,7 +140,6 @@ function describeExpensePatch(
   return parts.join(', ') || 'modified';
 }
 
-/** Summarise an income-stream patch into "what changed". ASCII-only. */
 function describeIncomePatch(
   patch: Record<string, unknown>,
   base: IncomeStreamPayload | undefined,
@@ -230,21 +162,14 @@ function describeIncomePatch(
 }
 
 /**
- * Coverage ledger for the PDF Scenario page. The `satisfies` clause makes
- * `tsc` FAIL the moment a key is added to `ScenarioOverrides` without a
- * decision here — so every future scenario setting is forced into the report
- * (`true` = surfaced by `buildScenarioSettings`; flip to `false` ONLY with a
- * deliberate "intentionally omitted because …" reason). Keep this in lockstep
- * with the `ScenarioOverrides` shape in `db/types.ts`.
+ * Coverage ledger: the `satisfies` clause fails `tsc` when a key is added to
+ * `ScenarioOverrides` without a decision here. `true` means surfaced by
+ * `buildScenarioSettings`; flip to `false` only with a stated reason it is omitted.
  */
 export const SCENARIO_SETTING_COVERAGE = {
   retirementAge: true,
   socialSecurity: true,
   filingStatus: true,
-  // Tax filing plan — surfaced in the
-  // PDF Taxes group: the plan's treatment drives the Filing status row(s), the
-  // per-spouse separate-return rows, the lived-together fact, and one row per
-  // year-bounded exception window.
   taxFilingPlan: true,
   contributions: true,
   lifeExpectancy: true,
@@ -264,34 +189,23 @@ export const SCENARIO_SETTING_COVERAGE = {
   accountContributions: true,
   accountReturns: true,
   accountAssetMix: true,
-  // Rendered as the "Account limits" group — the
-  // resolved effective floors constrain the drawdown engine (it never takes a
-  // discretionary withdrawal below a floor), so a reader of the exported
-  // report must see them.
   accountFloors: true,
   hsaQualifiedMedicalExpensePct: true,
   earlyWithdrawalPenaltyExemptAccountIds: true,
   acaMarketplaceOptOutMemberIds: true,
-  // per-member/year Medicare/Marketplace coverage months + FPL region.
-  // Rendered in the Withdrawals & taxes group below (non-default values only).
   healthCoverageMonths: true,
   acaFplRegion: true,
   preRetirementRothConversions: true,
   preRetirementRothConversionTaxRatePct: true,
-  // Roth conversion comparison working-years taxable-income input — used only by
-  // that page's bracket-headroom math, not surfaced in the PDF scenario-settings
-  // page. Registered here only to satisfy the `Record<keyof ScenarioOverrides,
-  // true>` compile guard.
+  // Used only by the Roth conversion page's bracket-headroom math, not shown in the PDF.
   preRetirementTaxableIncomeDollars: true, // not shown in PDF — BETR-page-only setting
   qualifiedCharitableDistributions: true,
 } satisfies Record<keyof ScenarioOverrides, true>;
 
 interface ScenarioSettingsInput {
-  /** Fully resolved overrides for this scenario (own + inherited chain). Drives
-   *  the EFFECTIVE scenario-level setting values. */
+  /** Own plus inherited chain; drives the effective setting values. */
   resolved: ScenarioOverrides;
-  /** This scenario's OWN override section — drives the per-account / expense /
-   *  income "what actually changed" rows. */
+  /** This scenario's own overrides; drive the per-account, expense and income change rows. */
   ownOverrides: ScenarioOverrides;
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
   hasSecondary: boolean;
@@ -306,35 +220,20 @@ interface ScenarioSettingsInput {
   expenseById: ReadonlyMap<string, ExpensePayload>;
   incomeNameById: ReadonlyMap<string, string>;
   incomeById: ReadonlyMap<string, IncomeStreamPayload>;
-  /** Hardened QCD entries for this scenario (resolveQcdForScenario output) —
-   *  the report summarizes only VALID resolved QCDs, never raw overrides. */
+  /** Output of `resolveQcdForScenario`: only valid QCDs are summarized, never raw overrides. */
   qcdEntries: ReadonlyArray<ResolvedQcdEntry>;
-  /** Resolved effective per-account minimum-balance floors for this scenario
-   *  (resolveAccountFloorsForScenario output) — resolved, not own-only, so a
-   *  child scenario inheriting a floor from an ancestor still reports the
-   *  constraint its projection actually ran under. */
+  /** Resolved, not own-only, so a child inheriting an ancestor's floor reports the constraint its projection ran under. */
   accountFloors: ReadonlyMap<string, ResolvedAccountFloor>;
   categoryNameById: ReadonlyMap<string, string>;
-  /** Flag-derived medical category ids — each renders its own
-   *  `general + spread` (uncapped) default row and is excluded from the
-   *  generic remaining-rates loop. */
+  /** Each renders its own uncapped `general + spread` default row and is excluded from the generic category loop. */
   medicalCategoryIds: ReadonlySet<string>;
 }
 
 /**
- * Build the grouped scenario-settings for the PDF's Scenario page. Scenario-
- * level knobs show their EFFECTIVE (resolved) value; per-account / expense /
- * income overrides show the ACTUAL change made on this scenario ("$0 to
- * $5,000", "Travel removed") rather than a count, and unchanged inventory is
- * omitted so the page carries detail, not noise. Account floors are the one
- * per-account exception: they render RESOLVED-effective (like scenario-level
- * knobs), because an inherited floor still constrains this scenario's
- * projection and the reader must see it. Settings are split into small
- * titled groups (one table each) so no single table is overloaded. Values are
- * ASCII-only — jsPDF's standard font has no glyph for → / ≤, so " to " /
- * "up to " are used. Every key the report knows about is registered in
- * `SCENARIO_SETTING_COVERAGE` (a compile-time guard that forces future
- * override fields into this builder).
+ * Builds the grouped settings for the Scenario page. Scenario-level knobs and
+ * account floors show their effective value (an inherited floor still constrains
+ * the projection); account, expense and income overrides show the actual change
+ * made on this scenario, and unchanged inventory is omitted.
  */
 export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScenarioSettingGroup[] {
   const {
@@ -370,7 +269,6 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
   const accountChanges: ReportScenarioSetting[] = [];
   const inventoryChanges: ReportScenarioSetting[] = [];
 
-  // ----- Retirement & longevity -----
   longevity.push({ label: `Retirement age — ${memberNames.primary}`, value: formatAgeYearsMonths(retire.primary) });
   if (hasSecondary && retire.secondary) {
     longevity.push({ label: `Retirement age — ${memberNames.secondary}`, value: formatAgeYearsMonths(retire.secondary) });
@@ -380,8 +278,6 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     longevity.push({ label: `Social Security claim age — ${memberNames.secondary}`, value: `age ${claim.secondary}` });
   }
   const ss = resolved.socialSecurity;
-  // Always-show effective values (even when inherited / at their default), so a
-  // reader sees the full Social Security assumption set, not just overrides.
   const benefitCut = ss?.benefitReductionPct ?? 0;
   longevity.push({
     label: 'Social Security benefit cut',
@@ -405,12 +301,7 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     });
   }
 
-  // ----- Taxes & filing -----
-  // Every filing surface reads the SAME resolver-backed summary
-  // (`summarizeFilingPlan`), so the PDF, the on-screen report card, and the
-  // engines can never disagree about which return the projection actually
-  // filed — including the case where an un-convertible legacy setting is
-  // still in force.
+  // Every filing surface reads `summarizeFilingPlan`, so the PDF, the report card and the engines agree on the filed return.
   const filingSummary = summarizeFilingPlan({
     taxFilingPlan: resolved.taxFilingPlan,
     filingStatusOverride: resolved.filingStatus,
@@ -432,8 +323,6 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     });
   }
   if (filingSummary.units.length > 1) {
-    // Disclose the residual even-split approximation right where the
-    // separate-return settings are presented.
     taxes.push({
       label: 'Separate-return estimate',
       value:
@@ -442,8 +331,6 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     });
   }
   if (filingSummary.afterADeath !== undefined) {
-    // A separate plan does NOT collapse to a joint return in the death
-    // year; the summary states whichever is true for this plan.
     taxes.push({ label: 'After a spouse dies', value: filingSummary.afterADeath });
   }
   if (filingSummary.unresolvedLegacyDetail !== undefined) {
@@ -469,12 +356,8 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
   if (resolved.magiBootstrapLookbackMinus1 != null) {
     taxes.push({ label: 'MAGI bootstrap (1 yr pre-retirement)', value: settingMoney(resolved.magiBootstrapLookbackMinus1) });
   }
-  // Walked through the ONE shared shape-checking enumerator: the array
-  // arrives from an envelope-only-validated import, so a non-array payload used
-  // to throw out of the whole PDF settings build.
-  // The row states the proration contract (the entered figure is a
-  // whole-year price charged pro rata to the Marketplace coverage months), which
-  // a bare `$…/yr` did not. Values stay ASCII-only for jsPDF's standard font.
+  // Walked through the shape-checking enumerator: an imported non-array used to throw out of the whole PDF build.
+  // The row states that the whole-year price is prorated to the Marketplace coverage months.
   for (const b of storedAcaBenchmarkOverrides(resolved.acaPtcBenchmark)) {
     taxes.push({
       label: `ACA benchmark (SLCSP) ${b.taxYear}`,
@@ -482,15 +365,10 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     });
   }
 
-  // ----- Inflation & spending -----
   const generalInflation = resolved.inflation?.ratePct ?? DEFAULT_INFLATION_PCT;
   const categoryRates = resolved.inflation?.categoryRates ?? {};
   inflationSpending.push({ label: 'Inflation rate', value: `${generalInflation}%` });
-  // Medical inflation: always show each `isMedical` category's effective
-  // rate (a medical category runs at general + a default spread unless
-  // explicitly overridden), even when inherited / defaulted. Multiple medical
-  // categories are allowed; a flag-derived id the chain never rate-set is
-  // absent from `categoryRates`, so render it with the uncapped default.
+  // Each medical category shows its effective rate; a flag-derived id the chain never rate-set renders the uncapped default.
   for (const catId of medicalCategoryIds) {
     const medicalRate =
       categoryRates[catId] ?? generalInflation + DEFAULT_MEDICAL_INFLATION_SPREAD_PCT;
@@ -521,7 +399,6 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     inflationSpending.push({ label: 'Future contributions', value: 'Stopped today (coast on growth)' });
   }
 
-  // ----- Withdrawal strategy + drawdown order + allocation -----
   withdrawal.push({ label: 'Withdrawal strategy', value: WITHDRAWAL_STRATEGY_LABELS[kind] ?? kind });
   if (WITHDRAWAL_STRATEGY_DESCRIPTIONS[kind]) {
     withdrawal.push({ label: 'How it works', value: WITHDRAWAL_STRATEGY_DESCRIPTIONS[kind] });
@@ -546,9 +423,7 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
   if (exempt.length) {
     withdrawal.push({ label: 'Early-withdrawal-penalty exempt', value: exempt.map(accountName).join(', ') });
   }
-  // ACA Marketplace opt-out: resolve each opted-out member id to its display
-  // name, label-guarding any id with no matching live member (member deletion
-  // is a live flow — a dangling id is skipped, never rendered blank).
+  // A dangling opted-out id (the member was deleted) is skipped, not rendered blank.
   const optedOutNames = (resolved.acaMarketplaceOptOutMemberIds ?? [])
     .map((mid) => members.find((m) => m.id === mid))
     .filter((m): m is Aggregate<HouseholdMemberPayload> => m !== undefined)
@@ -556,13 +431,7 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
   if (optedOutNames.length) {
     taxes.push({ label: 'ACA Marketplace — other coverage', value: optedOutNames.join(', ') });
   }
-  // The health-coverage assumptions that actually drive the projection.
-  // Only non-default values are listed, matching the rest of this page.
-  // A lookup keyed by the `AcaFplRegion` union, not a magic-string ternary
-  // that rendered any future non-Alaska region as "Hawaii".
-  // Read through the own-property-safe helper, so an imported
-  // `acaFplRegion: "constructor"` is omitted rather than emitting an inherited
-  // function as a PDF cell value.
+  // Non-default values only, read through the own-property-safe helper.
   const fplRegionLabel = fplRegionSettingLabel(resolved.acaFplRegion);
   if (fplRegionLabel !== undefined) {
     taxes.push({ label: 'Federal poverty guidelines', value: fplRegionLabel });
@@ -574,18 +443,8 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
       value: coverageYears.join(', '),
     });
   }
-  // The per-year `ACA benchmark (SLCSP) <year>` rows above are the
-  // ONE representation of a benchmark override in this group. A second combined
-  // "Benchmark plan price" row listed every override again, so an exported PDF
-  // repeated the same setting under two labels.
-
-  // ----- Account limits (per-account minimum-balance floors) -----
-  // Only floors the engine actually applies are reported: the resolver does
-  // not type-gate (eligibility is enforced at the engine boundary), so a floor on an
-  // ineligible-treatment or inactive account — or a $0 floor, which the
-  // engine's single read point (`floorEligibleDollars`) treats as no floor —
-  // is filtered here exactly like the engine ignores it. Rows order by the
-  // shared report collator + id tie-break, matching the account tables.
+  // Only floors the engine applies: it ignores ineligible-treatment or inactive accounts and a $0
+  // floor, so they are filtered here too. Ordered like the account tables.
   const floorRows: ReportScenarioSetting[] = [];
   const eligibleFloors = [...accountFloors]
     .filter(([id, floor]) => {
@@ -616,10 +475,7 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     });
   }
   if (floorRows.length) {
-    // One shared caveat row: the fixed-dollar warning the Account limits
-    // screen carries, plus the reserve semantics (projection-floor-reserve-
-    // depletion) — a floor is not an absolute hard stop; the engine drains
-    // it as a last resort once every other funding path is exhausted.
+    // A floor is not a hard stop: the engine drains it as a last resort once every other funding path is exhausted.
     floorRows.push({
       label: 'Floor amounts',
       value:
@@ -628,15 +484,12 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     });
   }
 
-  // ----- MAGI cap ladder (own group: values are long) -----
   const cap = resolved.magiCap;
   if (cap) {
     if (isMagiCapDisabled(cap)) {
       magiCapRows.push({ label: 'MAGI cap', value: 'Disabled (inherited cap turned off)' });
     } else {
       cap.windows.forEach((w, i) => {
-        // Label by the active period (years), like the rest of the page; fall
-        // back to "Window N" only if the anchors yield no readable period.
         const period = `${describeStart(w.start, members, 'lowercase')} to ${describeEnd(w.end, members)}`.trim();
         const mode = w.capMode === 'fill' ? 'fill to Roth' : 'minimize';
         const line = w.capMagiLine === 'aca' ? 'ACA-PTC' : 'IRMAA';
@@ -649,21 +502,13 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     }
   }
 
-  // ----- Working-years Roth conversions (own group: values are long) -----
-  // Each entry: source pre-tax -> target Roth account, annual amount + working-year
-  // window. The displayed additional tax burden uses the assumed rate and is
-  // NOT deducted from the projection. Account ids resolve to display
-  // names; an orphan/dangling id falls back to the raw id (never blank).
-  // Same-account in-plan conversions (sourceAccountId === targetRothAccountId)
-  // render as "within <Account name> (in-plan Roth conversion)".
+  // Same-account in-plan conversions render as "within <Account>". The assumed rate is shown only, not deducted from the projection.
   const conversions = resolved.preRetirementRothConversions ?? [];
   if (conversions.length) {
     const ratePct = resolved.preRetirementRothConversionTaxRatePct ?? 0;
     conversions.forEach((c, i) => {
       const period =
         `${describeStart(c.start, members, 'lowercase')} to ${describeEnd(c.end, members)}`.trim();
-      // Same-account in-plan Roth conversion — id equality check, no
-      // eligibility helper import (keeps the display layer dependency-free).
       const isSameAccount = c.sourceAccountId === c.targetRothAccountId;
       const transferDesc = isSameAccount
         ? `within ${accountName(c.sourceAccountId)} (in-plan Roth conversion)`
@@ -673,21 +518,13 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
         value: `${settingMoney(c.annualAmountDollars)}/yr; ${transferDesc}`,
       });
     });
-    // One shared burden/disclosure row — the assumed rate applies to every
-    // entry and the shown burden is informational only (not deducted).
     rothConversionRows.push({
       label: 'Assumed tax rate (shown, not deducted)',
       value: `${ratePct}%`,
     });
   }
 
-  // ----- Qualified Charitable Distributions (own group: values are long) -----
-  // Each entry: a fixed REAL annual gift directly from a designated traditional
-  // IRA over a window. The QCD counts toward the owner's RMD and drops out of
-  // taxable income / MAGI (both engines apply it). `qcdEntries` is
-  // the HARDENED resolveQcdForScenario output —
-  // orphan / non-IRA / cross-owner / pre-70½ entries are already dropped, so the
-  // report never renders an invalid QCD. Account ids resolve to display names.
+  // `qcdEntries` is the hardened resolver output: orphan, non-IRA, cross-owner and pre-70½ entries are already dropped.
   if (qcdEntries.length) {
     qcdEntries.forEach((q, i) => {
       const period =
@@ -699,7 +536,6 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     });
   }
 
-  // ----- Per-account overrides set on THIS scenario (the actual change) -----
   for (const [id, ov] of Object.entries(ownOverrides.accountReturns?.perAccount ?? {})) {
     if (ov.planningReturnPct == null) continue;
     const base = accountById.get(id)?.planningReturnPct;
@@ -728,7 +564,6 @@ export function buildScenarioSettings(input: ScenarioSettingsInput): ReportScena
     });
   }
 
-  // ----- Expense + income overrides set on THIS scenario -----
   const ex = ownOverrides.expenses;
   if (ex) {
     for (const a of ex.added ?? []) {

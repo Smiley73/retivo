@@ -1,12 +1,5 @@
-/**
- * Annual-contributions math, ported from the legacy server's
- * `apps/api/src/account-contributions/account-contributions.service.ts`.
- *
- * Inputs: local `account` + `accountBalance` + `householdMember` aggregates.
- * Output: per-account row + portfolio totals identical in shape to the
- * legacy `AccountContributionsSummaryResponse` so the page renders
- * unchanged.
- */
+// Annual-contributions math: per-account rows and portfolio totals for the Account Contributions page.
+
 import type {
   AccountBalancePayload,
   AccountPayload,
@@ -50,15 +43,7 @@ export interface ContributionSummary {
   summary: ContributionSummaryTotals;
 }
 
-/**
- * Whether the pre-tax planned-contribution field is editable for a treatment.
- * PRE_TAX / MIXED / HSA show the pre-tax input; POST_TAX and ROTH hide it. An
- * HSA contribution is made pre-tax (payroll deduction), so HSA shows the
- * pre-tax field ONLY (its post-tax field is hidden).
- * A Roth is post-tax funded, so it
- * mirrors POST_TAX (no pre-tax field). Tax-free withdrawals are handled
- * separately by `taxTreatment === 'HSA'` / `'ROTH'`, independent of this field.
- */
+/** Whether the pre-tax planned-contribution field is editable: PRE_TAX, MIXED and HSA (an HSA is funded pre-tax); POST_TAX and ROTH hide it. */
 export function isTreatmentEditablePreTax(treatment: AccountTaxTreatment): boolean {
   switch (treatment) {
     case 'PRE_TAX':
@@ -73,14 +58,7 @@ export function isTreatmentEditablePreTax(treatment: AccountTaxTreatment): boole
   }
 }
 
-/**
- * Whether the post-tax planned-contribution field is editable for a treatment.
- * POST_TAX / MIXED / ROTH show the post-tax input; PRE_TAX and HSA hide it. An
- * HSA's planned contribution is stored on the pre-tax side
- * (`plannedContributionPreTax`) because HSA contributions are made pre-tax, so
- * the post-tax field is not shown for HSA. A Roth is post-tax funded, so it
- * shows the post-tax field like POST_TAX.
- */
+/** Whether the post-tax planned-contribution field is editable: POST_TAX, MIXED and ROTH; PRE_TAX and HSA hide it (an HSA's planned contribution is stored pre-tax). */
 export function isTreatmentEditablePostTax(treatment: AccountTaxTreatment): boolean {
   switch (treatment) {
     case 'POST_TAX':
@@ -128,16 +106,10 @@ export function computeContributionSummary(
         actualPostTax =
           (balance.contributionsPostTax ?? 0) + (balance.companyContributionsPostTax ?? 0);
       } else if (a.taxTreatment === 'PRE_TAX' || a.taxTreatment === 'HSA') {
-        // HSA contributions are made pre-tax (payroll deduction) and stored on
-        // the pre-tax side (`plannedContributionPreTax`), so the per-account
-        // split mirrors PRE_TAX: actualPreTax = total, actualPostTax = 0. This
-        // matches the Account Balances portfolio-summary card, which also shows
-        // HSA contributions under Pre-Tax Contributions. (Tax-free withdrawals
-        // are handled separately by `taxTreatment === 'HSA'`.)
+        // HSA contributions are made pre-tax, so the split mirrors PRE_TAX (as the Account Balances summary card does).
         actualPreTax = balance.totalContributions;
       } else if (a.taxTreatment === 'POST_TAX' || a.taxTreatment === 'ROTH') {
-        // Roth is post-tax funded — actuals route to actualPostTax, same as
-        // POST_TAX.
+        // Roth is post-tax funded, like POST_TAX.
         actualPostTax = balance.totalContributions;
       } else {
         assertNever(a.taxTreatment);

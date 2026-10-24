@@ -1,8 +1,5 @@
-/**
- * Display helpers for Expense aggregates. Pure functions — no React,
- * no DOM. Wraps the generic schedule-format helpers with expense-only
- * concerns (amount/frequency formatting, the `(one-off)` end label).
- */
+// Display helpers for Expense aggregates, wrapping the generic schedule-format helpers with expense-only concerns.
+
 import type {
   Aggregate,
   ExpenseFrequency,
@@ -24,9 +21,7 @@ export function frequencyToAnnual(f: ExpenseFrequency): number {
     case 'yearly':
       return 1;
     case 'oneOff':
-      // OneOff is a single event — callers handle it specially. The
-      // multiplier here just lets generic code default-multiply by 1
-      // without branching.
+      // A single event; the multiplier of 1 lets generic code multiply without branching.
       return 1;
   }
 }
@@ -59,22 +54,10 @@ export function describeExpenseEnd(
   return describeEnd(end, members);
 }
 
-/**
- * Resolve a household member's display label. Prefers `firstName` (per
- * docs/ui-conventions.md, "Member labels"); falls back to the lowercase slot
- * label (`primary` / `secondary`) when the member is absent or the
- * trimmed first name is empty.
- *
- * The `members` parameter is accepted for call-site flexibility — some
- * call sites resolve the member by id from a members array before
- * invoking; the helper itself only reads the named `member`.
- */
+/** A member's display label: `firstName` (docs/ui-conventions.md, "Member labels"), else the lowercase slot label. */
 export function memberLabel(
   member: Aggregate<HouseholdMemberPayload> | undefined,
-  // The `members` parameter is unused inside this helper — kept on the
-  // signature so call sites that already pass it (e.g. the CBP banner,
-  // which looks up an ownerId → member upstream) don't need a parallel
-  // variant. The lookup is the caller's responsibility.
+  // Unused; kept so call sites that already pass it need no parallel variant.
   _members: ReadonlyArray<Aggregate<HouseholdMemberPayload>> | undefined,
   fallbackSlot: 'primary' | 'secondary',
 ): string {

@@ -1,26 +1,11 @@
-/**
- * sfc32 — Small Fast Counting PRNG (Chris Doty-Humphrey).
- *
- * Period ~2^128. Passes TestU01 BigCrush. Pure 32-bit integer math —
- * deterministic across JS engines, browsers, and Node. Seeded from a
- * 32-bit integer via splitmix32 to produce the four state words.
- *
- * Used by the Monte Carlo engine for all random draws. Never use
- * Math.random or Web Crypto in hot paths — bit-identical reproducibility
- * is required.
- */
+// sfc32 PRNG (Chris Doty-Humphrey), seeded from a 32-bit integer via splitmix32. Pure 32-bit math, so draws are bit-identical across engines.
+// The Monte Carlo engine uses it for every random draw; never `Math.random` or Web Crypto in hot paths.
 
 export interface Rng {
-  /** Uniform [0, 1). */
   next(): number;
-  /** Uniform integer in [lo, hi] (inclusive both sides). */
   uniformInt(lo: number, hi: number): number;
 }
 
-/**
- * splitmix32 — used to expand a 32-bit seed into the four state words
- * sfc32 needs. Stable, fast, well-distributed for seeding purposes.
- */
 function splitmix32(seed: number): () => number {
   let state = seed | 0;
   return () => {
@@ -67,13 +52,7 @@ export function makeRng(seed: number): Rng {
   };
 }
 
-/**
- * Derive a stable 32-bit seed from arbitrary input string. Used by the
- * Monte Carlo provider to produce the deterministic "Reset" seed from
- * the input hash. Not a cryptographic hash — just a stable spread.
- *
- * FNV-1a 32-bit. ~10 LOC, no external deps.
- */
+/** A stable 32-bit seed from a string (FNV-1a), for the provider's deterministic "Reset" seed. Not cryptographic. */
 export function seedFromString(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
