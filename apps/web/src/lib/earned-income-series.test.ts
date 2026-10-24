@@ -1,9 +1,3 @@
-/**
- * Tests for the shared per-member earned-income series — the ONE
- * SSA earnings-test input builder both the drawdown runner and the Balance
- * Projection page consume, so the two surfaces cannot disagree on
- * earnings-tested scenarios.
- */
 import { describe, expect, it } from 'vitest';
 import {
   buildEarnedIncomeSeries,
@@ -99,20 +93,15 @@ describe('buildEarnedIncomeSeries', () => {
       { from: 2026, to: 2028 },
     );
     expect(series).toBeDefined();
-    // $24k/yr for the primary in 2026 + 2027; nothing after the end window.
     expect(series!.annualByMember.p[2026]).toBeCloseTo(24_000, 6);
     expect(series!.annualByMember.p[2027]).toBeCloseTo(24_000, 6);
     expect(series!.annualByMember.p[2028]).toBeUndefined();
-    // Actual per-month dollars = run-rate ÷ 12 → $2,000/mo.
     expect(series!.monthlyByMember.p[2026]).toHaveLength(12);
     expect(series!.monthlyByMember.p[2026][0]).toBeCloseTo(2_000, 6);
-    // Scoped to the owning member — the secondary's stream never leaks in.
     expect(series!.annualByMember.s[2026]).toBeCloseTo(12_000, 6);
   });
 
   it('feeds the SS earnings test identically on any consuming surface', () => {
-    // The reconciliation contract: two surfaces building their
-    // SS context from THIS series produce identical earnings-tested rows.
     const benefit: Aggregate<SocialSecurityBenefitPayload> = {
       id: 'ss-p',
       householdId: 'h',
@@ -142,17 +131,12 @@ describe('buildEarnedIncomeSeries', () => {
       });
     const withEarnings = projectSsByYear(ctxFor(series)!, { from: 2027, to: 2027 });
     const withoutEarnings = projectSsByYear(ctxFor(undefined)!, { from: 2027, to: 2027 });
-    // The wages actually reduce the pre-FRA benefit — a surface that omits
-    // the series (such as an older Balance Projection page) disagrees.
     expect(withEarnings[0].total).toBeLessThan(withoutEarnings[0].total);
   });
 });
 
-// The shared series must start no later than the earliest year any
-// member's SS entitlement (own or survivor claim) can begin, so the
-// projection engine's earnings-test/ARF warm-up sees pre-retirement years.
+// The shared series must start no later than the earliest SS entitlement year, so the earnings-test/ARF warm-up sees pre-retirement years.
 describe('earliestSsEntitlementYear', () => {
-  // Benefit-purpose birth years: p → 1964, s → 1965.
   it('returns the earliest own-claim year across members', () => {
     expect(
       earliestSsEntitlementYear(members, {

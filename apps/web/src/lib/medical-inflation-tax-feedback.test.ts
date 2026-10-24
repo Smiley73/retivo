@@ -1,14 +1,4 @@
-/**
- * Deterministic tax-feedback regression for per-category (Medical)
- * inflation.
- *
- * Proves the no-seam threading: faster Medical growth raises the
- * deterministic expense series the drawdown engine reads → larger
- * pre-tax withdrawals → higher MAGI → a higher MAGI-driven output
- * (federal tax). Two otherwise-identical runs differ only by the Medical
- * effective rate (general+2pp via the materialised default vs an explicit
- * Medical = general override that removes the spread).
- */
+// Faster Medical inflation raises the expense series, pre-tax withdrawals, MAGI and so federal tax: two otherwise-identical runs differ only by the Medical rate (general+2pp default vs an explicit override at general).
 import { describe, expect, it } from 'vitest';
 import { runBalanceProjection } from './balance-projection-runner';
 import type {
@@ -165,7 +155,6 @@ function taxScenario(inflation: ScenarioOverrides['inflation']): ScenarioAggrega
         socialSecurity: { primary: { ageYears: 67, ageMonths: 0 } },
         retirementAge: { primary: { ageYears: 67, ageMonths: 0 } },
         lifeExpectancy: { primary: 90 },
-        // Tax-integration runs for every named strategy.
         withdrawalStrategy: { kind: 'taxEfficient' },
         inflation,
       },
@@ -182,7 +171,6 @@ function runWith(inflation: ScenarioOverrides['inflation']) {
     balances: [balanceRow('a1', 2025, 2_000_000)],
     members: [member('m1', true, 1965)],
     ssBenefits: [ssBenefit('m1', 2000)],
-    // Big Medical expense so the +2pp spread moves withdrawals materially.
     expenses: [medicalExpense(8_000)],
     incomeStreams: [],
     todayYear: TODAY.getUTCFullYear(),
@@ -192,23 +180,17 @@ function runWith(inflation: ScenarioOverrides['inflation']) {
 
 describe('deterministic tax feedback from per-category Medical inflation', () => {
   it('the Medical +2pp default raises later-year withdrawals → MAGI → federal tax', () => {
-    // With spread: Medical defaults to general + 2pp (materialised).
     const withSpread = runWith({ ratePct: 3 });
-    // Without spread: an explicit Medical = general override removes it.
     const noSpread = runWith({ ratePct: 3, categoryRates: { 'cat-medical': 3 } });
 
-    // Pick a late-but-in-horizon year so the compounded spread is
-    // meaningful. Born 1965, retire 2032, horizon 2055 → use 2050.
+    // Born 1965, retire 2032, horizon 2055: 2050 is late enough for the compounded spread to matter.
     const targetYear = 2050;
     const wSpread = withSpread.drawdownYears.find((y) => y.year === targetYear);
     const wNoSpread = noSpread.drawdownYears.find((y) => y.year === targetYear);
     expect(wSpread).toBeDefined();
     expect(wNoSpread).toBeDefined();
 
-    // Faster Medical inflation → larger gross expense need → larger pre-tax
-    // withdrawal → higher MAGI.
     expect(wSpread!.magiCents).toBeGreaterThan(wNoSpread!.magiCents ?? 0);
-    // … and a higher MAGI-driven output (federal tax).
     expect(wSpread!.federalTaxCents ?? 0).toBeGreaterThan(
       wNoSpread!.federalTaxCents ?? 0,
     );

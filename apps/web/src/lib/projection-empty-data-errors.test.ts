@@ -1,8 +1,3 @@
-/**
- * Tests for `isEmptyProjectionDataError` — the shared type guard
- * RothBETRPage and WithdrawalGuidancePage use to collapse a projection build
- * failure to an empty state instead of re-throwing to ErrorBoundary.
- */
 import { describe, it, expect } from 'vitest';
 import { isEmptyProjectionDataError } from './projection-empty-data-errors';
 import { NoPrimaryRetirementError } from './balance-projection-runner';

@@ -9,7 +9,7 @@ const MAX_COMPONENT_LENGTH = 40;
  * Reduce a user-entered name to `[A-Za-z0-9-_]` (runs collapsed, no leading dots, max 40 chars);
  * `'untitled'` when nothing usable remains.
  */
-export function sanitizeFilenameComponent(name: string): string {
+function sanitizeFilenameComponent(name: string): string {
   // A leading dot would make a hidden file.
   const noLeadingDots = name.replace(/^\.+/, '');
   const collapsed = noLeadingDots

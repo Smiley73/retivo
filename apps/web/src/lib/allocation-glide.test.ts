@@ -1,12 +1,3 @@
-/**
- * Shared allocation-glide helper tests. Migrated from the retired
- * `drawdown-engine.test.ts` `targetGrowthPct` describes: the bucket
- * path is gone, so the glide-share math lives here, exercised through
- * `targetGrowthShareForStep` (now shared with the deterministic per-account
- * blended glide + the MC mix glide) and `blendedGlideReturnPct`.
- *
- * Returns are FRACTIONS (0..1), not the old 0..100 percent.
- */
 import { describe, expect, it } from 'vitest';
 import {
   blendedGlideReturnPct,
@@ -25,7 +16,6 @@ const flat: RetirementAllocationOverride = {
   incomeOnlyYear: null,
 };
 
-/** Resolve anchors + evaluate the share at calendar year `y`. */
 function share(alloc: RetirementAllocationOverride, y: number, retirementYear = 2030): number {
   const { effectiveGlideStartYear, glideEnabled } = resolveGlideAnchors(alloc, retirementYear);
   return targetGrowthShareForStep(y, alloc, effectiveGlideStartYear, glideEnabled);
@@ -125,7 +115,6 @@ describe('targetGrowthShareForStep — glide boundary', () => {
   });
 
   it('already-retired household: glide anchors to the actual retirement year, not a later one', () => {
-    // retirementYear 2030, glideStartYear omitted → effectiveGlideStartYear = 2030.
     const alloc: RetirementAllocationOverride = { ...flat, endGrowthPct: 10, endYear: 2032 };
     const { effectiveGlideStartYear } = resolveGlideAnchors(alloc, 2030);
     expect(effectiveGlideStartYear).toBe(2030);
@@ -137,15 +126,12 @@ describe('targetGrowthShareForStep — glide boundary', () => {
 
 describe('blendedGlideReturnPct — scalar two-rate blend', () => {
   it('blends growth/income rates by the year-share (flat allocation)', () => {
-    // 50% growth · 7% + 50% income · 3% = 5%.
     expect(blendedGlideReturnPct(2030, flat, 2030)).toBeCloseTo(5, 9);
   });
 
   it('shifts toward the income rate as the glide reduces the growth share', () => {
     const glide: RetirementAllocationOverride = { ...flat, endGrowthPct: 0, endYear: 2040 };
-    // At endYear: 0% growth → 100% income → 3%.
     expect(blendedGlideReturnPct(2040, glide, 2030)).toBeCloseTo(3, 9);
-    // Halfway: 25% growth → 0.25·7 + 0.75·3 = 4%.
     expect(blendedGlideReturnPct(2035, glide, 2030)).toBeCloseTo(4, 9);
   });
 

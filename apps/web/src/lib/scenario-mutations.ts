@@ -44,7 +44,7 @@ const PROMOTION_MARKER_KEY = 'retivo.scenarios.promotionInProgress';
  * Fired after any local scenario aggregate change so listeners can refresh without polling; the
  * caller dispatches after `queueLocalMutation` resolves.
  */
-export const SCENARIOS_CHANGED_EVENT = 'retivo.scenarios.changed';
+const SCENARIOS_CHANGED_EVENT = 'retivo.scenarios.changed';
 
 export function notifyScenariosChanged(): void {
   if (typeof window === 'undefined') return;
@@ -57,7 +57,7 @@ export function notifyScenariosChanged(): void {
  */
 export const SELECTED_SCENARIO_CHANGED_EVENT = 'retivo.scenarios.selected-changed';
 
-export function notifySelectedScenarioChanged(): void {
+function notifySelectedScenarioChanged(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
 }
@@ -80,7 +80,7 @@ interface PromotionMarker {
   expectedSurvivorIds: string[];
 }
 
-export function readPromotionMarker(): PromotionMarker | null {
+function readPromotionMarker(): PromotionMarker | null {
   try {
     const raw = localStorage.getItem(PROMOTION_MARKER_KEY);
     if (!raw) return null;
@@ -94,7 +94,7 @@ function writePromotionMarker(marker: PromotionMarker): void {
   localStorage.setItem(PROMOTION_MARKER_KEY, JSON.stringify(marker));
 }
 
-export function clearPromotionMarker(): void {
+function clearPromotionMarker(): void {
   localStorage.removeItem(PROMOTION_MARKER_KEY);
 }
 

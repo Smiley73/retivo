@@ -1,8 +1,4 @@
-/**
- * Per-id sparse override resolver — mirror of
- * `expense-override-resolution.test.ts` for the income section. Pins
- * the same semantics.
- */
+// Mirrors expense-override-resolution.test.ts for the income section.
 import { describe, expect, it } from 'vitest';
 import { resolveIncomeForScenarioSparse } from './income-override-resolution';
 import type {
@@ -176,7 +172,6 @@ describe('resolveIncomeForScenarioSparse — per-key chain merge', () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0].source).toBe('patched');
-    // parent's monthlyBenefit AND child's colaPct both survive the merge.
     expect(result[0].payload.monthlyBenefit).toBe(3000);
     expect(result[0].payload.colaPct).toBe(2);
     expect(result[0].payload.name).toBe('Pension'); // unpatched key inherits
@@ -248,7 +243,6 @@ describe('resolveIncomeForScenarioSparse — null clears an inherited key', () =
     expect(result).toHaveLength(1);
     expect(result[0].source).toBe('patched');
     expect(result[0].payload).not.toHaveProperty('linkedCbpAccountId');
-    // Other canonical keys still inherit.
     expect(result[0].payload.monthlyBenefit).toBe(1000);
   });
 
@@ -290,7 +284,6 @@ describe('resolveIncomeForScenarioSparse — null clears an inherited key', () =
       },
     });
     const result = resolveIncomeForScenarioSparse('child', [parent, child], inc);
-    // Child's clear is closest → the key is dropped despite the parent set.
     expect(result[0].payload).not.toHaveProperty('linkedCbpAccountId');
   });
 
@@ -309,7 +302,6 @@ describe('resolveIncomeForScenarioSparse — null clears an inherited key', () =
       },
     });
     const result = resolveIncomeForScenarioSparse('child', [parent, child], inc);
-    // Child's set is closest → it wins over the deeper clear.
     expect(result[0].payload.linkedCbpAccountId).toBe('acc-child');
   });
 

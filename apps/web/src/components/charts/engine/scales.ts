@@ -5,7 +5,7 @@
  */
 import type { ChartDatum, SeriesSpec } from './types';
 
-/** Floor for log-scale Y domains; mirrors `chart-markers.ts` LOG_SCALE_FLOOR. */
+/** Floor ($) for log-scale Y domains: starting at 1 wastes the height on the empty $1-$10k band. */
 export const LOG_FLOOR = 10000;
 
 /** Linear map: value in [d0,d1] → pixel in [r0,r1]. */

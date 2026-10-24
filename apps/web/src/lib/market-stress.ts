@@ -25,7 +25,7 @@ export const STRESS_CASE_IDS: readonly StressCaseId[] = [
 ];
 
 /** Each field is a positive "worse than base" delta; a case leaves inactive levers at 0. */
-export interface StressShocks {
+interface StressShocks {
   /** Annual investment cost (pp); the base plan carries none, so this is the modeled fee. */
   readonly investmentCostPctDelta: number;
   readonly returnShockStocksPct: number;

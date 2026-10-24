@@ -7,10 +7,10 @@ import { CLIENT_BUILD_ID } from '../build-id.js';
 import { gzipJson, triggerBrowserDownload } from '../data-export.js';
 import { getEntries, type DiagnosticEntry } from './logger.js';
 
-export const DIAGNOSTICS_EXPORT_FORMAT = 'retivo-diagnostics';
+const DIAGNOSTICS_EXPORT_FORMAT = 'retivo-diagnostics';
 const DIAGNOSTICS_EXPORT_VERSION = 1;
 
-export interface DiagnosticsExportEnvelope {
+interface DiagnosticsExportEnvelope {
   format: typeof DIAGNOSTICS_EXPORT_FORMAT;
   version: number;
   exportedAt: string;
@@ -20,7 +20,7 @@ export interface DiagnosticsExportEnvelope {
 }
 
 /** ISO date (YYYY-MM-DD); the full timestamp lives in `exportedAt`. */
-export function diagnosticsExportFilename(exportedAt: string): string {
+function diagnosticsExportFilename(exportedAt: string): string {
   return `retivo-diagnostics-${exportedAt.slice(0, 10)}.json.gz`;
 }
 
@@ -28,7 +28,7 @@ export function diagnosticsExportFilename(exportedAt: string): string {
  * Merge persisted rows and in-memory rings by `id` (in-memory wins: fresher `count`); falls back to
  * the rings alone on an IDB read failure.
  */
-export async function buildDiagnosticsEnvelope(
+async function buildDiagnosticsEnvelope(
   householdId?: string,
 ): Promise<DiagnosticsExportEnvelope> {
   let entries: DiagnosticEntry[];

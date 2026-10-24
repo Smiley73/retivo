@@ -1,8 +1,3 @@
-/**
- * Redaction tests. Allowlist serialization + entropy/digit masking +
- * Error handling, each with a masked (positive) AND a benign-passes (negative)
- * case.
- */
 import { describe, expect, it } from 'vitest';
 import { redactArgs, redactMessage } from './redact';
 
@@ -49,7 +44,6 @@ describe('redactArgs', () => {
 
   it('should_reduce_an_Error_to_name_plus_masked_message_dropping_own_props', () => {
     const err = new Error('failed for user 555123456 token AAAAAAAAAAAAAAAAAAAAAAAA');
-    // Attach an enumerable own-prop carrying PII — must be dropped.
     (err as unknown as Record<string, unknown>).email = 'leak@example.com';
     const detail = redactArgs([err]);
     expect(detail).toContain('Error');
@@ -59,8 +53,7 @@ describe('redactArgs', () => {
   });
 
   it('should_drop_a_generic_name_key_while_preserving_code_and_scenarioId', () => {
-    // `name` on a plain-object arg is a member/account/scenario label (PII) and
-    // is NOT allowlisted; code + scenarioId survive.
+    // `name` on a plain object is a member/account/scenario label (PII), so it is not allowlisted.
     const detail = redactArgs([{ name: 'Jane Public', code: 'X', scenarioId: 's1' }]);
     expect(detail).not.toContain('Jane Public');
     expect(detail).toContain('X');
@@ -68,8 +61,6 @@ describe('redactArgs', () => {
   });
 
   it('should_keep_an_Error_name_via_the_Error_path_not_the_object_allowlist', () => {
-    // Dropping the generic `name` key must NOT lose Error names — `redactError`
-    // captures `name` directly, independent of the object allowlist.
     const detail = redactArgs([new Error('boom')]);
     expect(detail).toContain('Error');
   });
@@ -79,11 +70,7 @@ describe('redactArgs', () => {
   });
 
   it('should_drop_a_generic_reason_key_so_free_text_cannot_leak_via_diagnostics', () => {
-    // `reason` is NOT allowlisted: an arbitrary object arg carrying prose/PII
-    // under `reason` must be dropped (only high-entropy/long-digit strings are
-    // masked, so free text would otherwise survive). The sync engine formats
-    // its known rejection enum into a safe summary string itself, never relying
-    // on this key surviving.
+    // `reason` is not allowlisted: free text under it would otherwise survive, since only high-entropy or long-digit strings are masked.
     const detail = redactArgs([
       { reason: 'declined by member Jane Q. Public', code: 'X' },
     ]);

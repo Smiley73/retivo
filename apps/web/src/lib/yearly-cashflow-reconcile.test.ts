@@ -1,14 +1,7 @@
-/**
- * Tests for `reconcileYearlyCashflow` — the per-year budget-vs-engine
- * reconciliation that gates the Yearly cashflow shortfall on the drawdown
- * engine's depletion signal.
- */
 import { describe, expect, it } from 'vitest';
 import { reconcileYearlyCashflow } from './yearly-cashflow-reconcile';
 
 describe('reconcileYearlyCashflow', () => {
-  // RD2 — funded steady year: engine monthly-basis withdrawn already equals
-  // the per-year net need, so reconciliation is a no-op.
   it('funded steady year: withdrawal = net need, Total income == Expenses, no shortfall', () => {
     const r = reconcileYearlyCashflow({
       earned: 20_000,
@@ -22,11 +15,7 @@ describe('reconcileYearlyCashflow', () => {
     expect(r.shortfall).toBe(0);
   });
 
-  // RD2 — the bug: a funded transition year where the engine's monthly-basis
-  // `withdrawn` differs from the per-year (Expenses − Earned) net need by a
-  // material (> $1) proration residual. Pre-fix this rendered a phantom
-  // shortfall of $50; reconciliation snaps Withdrawal to the per-year net
-  // need so Total income == Expenses and shortfall is 0.
+  // The bug: a funded transition year where the engine's monthly-basis `withdrawn` differs from the per-year net need by a material (> $1) proration residual used to render a phantom $50 shortfall; reconciliation snaps Withdrawal to the net need.
   it('funded transition year: snaps Withdrawal to per-year net need, kills the phantom shortfall', () => {
     const r = reconcileYearlyCashflow({
       earned: 20_000,
@@ -39,8 +28,6 @@ describe('reconcileYearlyCashflow', () => {
     expect(r.shortfall).toBe(0); // phantom $50 gap eliminated
   });
 
-  // RD2 — funded surplus year: earned income exceeds expenses. No withdrawal
-  // needed; Total income legitimately exceeds Expenses; no shortfall.
   it('funded surplus year (earned > expense): withdrawal 0, Total income = earned > Expenses, no shortfall', () => {
     const r = reconcileYearlyCashflow({
       earned: 80_000,
@@ -54,8 +41,6 @@ describe('reconcileYearlyCashflow', () => {
     expect(r.shortfall).toBe(0);
   });
 
-  // RD3 — genuinely depleted year: engine `withdrawn` is capped below net
-  // need. NOT reconciled — the real post-depletion gap is preserved.
   it('depleted year: engine-actual withdrawn + real shortfall preserved', () => {
     const r = reconcileYearlyCashflow({
       earned: 20_000,
@@ -68,9 +53,6 @@ describe('reconcileYearlyCashflow', () => {
     expect(r.shortfall).toBe(10_000); // max(0, 60_000 − 50_000)
   });
 
-  // RD3 — a transition year that is ALSO the depletion year stays
-  // engine-actual (funded=false): the proration residual rides along on the
-  // earned split but is immaterial against the real post-depletion gap.
   it('depleted transition year: not reconciled, engine-actual shortfall stands', () => {
     const r = reconcileYearlyCashflow({
       earned: 20_000,
@@ -83,9 +65,6 @@ describe('reconcileYearlyCashflow', () => {
     expect(r.shortfall).toBeCloseTo(9_950, 6); // engine-actual, not 10_000
   });
 
-  // RD1 (b)/(a) — no drawdown for the method, or year past the engine's
-  // `years` horizon: funded=false, engineWithdrawn=0. Must be byte-identical
-  // to today's `withdrawn ?? 0` math: shortfall = max(0, expense − earned).
   it('no-drawdown / no-year-row (funded=false, engineWithdrawn=0): byte-identical to legacy withdrawn ?? 0', () => {
     const r = reconcileYearlyCashflow({
       earned: 20_000,
@@ -98,8 +77,6 @@ describe('reconcileYearlyCashflow', () => {
     expect(r.shortfall).toBe(40_000); // max(0, 60_000 − 20_000)
   });
 
-  // RD2 edge — funded year with zero expense and zero earned: degenerate but
-  // must not produce a negative withdrawal or NaN.
   it('funded zero/zero year: all zero', () => {
     const r = reconcileYearlyCashflow({
       earned: 0,

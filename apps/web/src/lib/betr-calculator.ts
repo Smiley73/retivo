@@ -45,7 +45,7 @@ export interface ConversionTranche {
   readonly allInRate?: number;
 }
 
-export interface BracketHeadroomResult {
+interface BracketHeadroomResult {
   readonly headroomCents: number;
   readonly ceilingCents: number;
   readonly currentRate: number;
@@ -154,7 +154,7 @@ export function computeBETR(
  * Headroom before the next ordinary bracket boundary: `max(0, ceiling − taxableIncome − conversion)`.
  * `taxableIncomeCents` is already post-deduction.
  */
-export function computeBracketHeadroom(
+function computeBracketHeadroom(
   taxableIncomeCents: number,
   conversionCents: number,
   year: number,
@@ -181,7 +181,7 @@ export function computeBracketHeadroom(
  * `T_now`, the source BETR, and a verdict (`convert` when `T_future > betr`).
  * `allInRate` is filled later by `computeRetirementYearsBETR`.
  */
-export function computeConversionTranches(
+function computeConversionTranches(
   taxableIncomeCents: number,
   proposedCents: number,
   T_future: number,

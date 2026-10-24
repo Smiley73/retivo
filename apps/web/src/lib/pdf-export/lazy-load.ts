@@ -3,7 +3,7 @@
  * Tests substitute a mock so real jsPDF (canvas, fonts) never loads under jsdom.
  */
 
-export interface PdfLibs {
+interface PdfLibs {
   readonly jsPDF: typeof import('jspdf').jsPDF;
   readonly autoTable: typeof import('jspdf-autotable').default;
   readonly svg2pdf: typeof import('svg2pdf.js').svg2pdf;

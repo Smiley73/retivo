@@ -18,7 +18,6 @@ import {
   getEntries as getDiagnosticsEntries,
   recordError as recordDiagnosticsError,
 } from '../lib/diagnostics/logger';
-import { buildDiagnosticsEnvelope } from '../lib/diagnostics/export';
 
 interface StubState {
   storedUserId: string | null;
@@ -228,11 +227,8 @@ describe('maybeResetForNewUser', () => {
     expect(state.dropCalls).toBe(0);
   });
 
-  it('integration: a real cross-user drop empties the rings, the IDB store, and the next-user export', async () => {
-    // End-to-end leak closure: record + flush real entries as user A, run the
-    // transition with the REAL logger.clear wired + REAL fake-indexeddb drop,
-    // then assert user B inherits nothing — empty rings, empty persisted store,
-    // empty export envelope.
+  it('integration: a real cross-user drop empties the rings and the IDB store', async () => {
+    // Real logger.clear and a real fake-indexeddb drop: user B inherits nothing.
     clearDiagnosticsRings();
     await clearDiagnosticLogs();
     recordDiagnosticsError('user A captured secret');
@@ -252,11 +248,9 @@ describe('maybeResetForNewUser', () => {
     };
     await maybeResetForNewUser(CLAIMS_B, deps);
 
-    // User B: rings emptied, persisted store dropped, export carries nothing.
+    // User B: rings emptied, persisted store dropped.
     expect(getDiagnosticsEntries()).toHaveLength(0);
     expect(await listDiagnosticLogs()).toHaveLength(0);
-    const envelope = await buildDiagnosticsEnvelope('hh-B');
-    expect(envelope.entries).toHaveLength(0);
   });
 
   it('production guard wires the real dropLocalDatabase, not the clear-data nuke (non-regression)', () => {

@@ -53,7 +53,6 @@ import {
   DEFAULT_SS_CLAIM_AGE_YEARS,
   annualExpenseAmount,
   buildGlideSummary,
-  buildReportTimestamp,
   describeExpenseEndLabel,
   describeGlideAnchorFreeStart,
   memberName,
@@ -78,8 +77,6 @@ import {
   buildRothTaxFreeRows,
   type ReportRothTaxFreeRow,
 } from './report-roth-tax-free';
-
-export { buildGlideSummary, buildReportTimestamp };
 
 // ---------- Public shape ----------
 

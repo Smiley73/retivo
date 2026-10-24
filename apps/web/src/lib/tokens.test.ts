@@ -1,16 +1,4 @@
-/**
- * Chart-color map drift guard. Replaces the deleted
- * `--chart-*` CSS-var parity
- * test: there is no CSS var to compare against anymore — `tokens.ts` is
- * the sole chart-color source, consumed via `useChartColors()`. This
- * suite locks the map's shape so a chart never silently loses its
- * dark-theme value (which would read as an unstyled hole on a dark
- * surface) and so a new key can't land in only one theme.
- *
- * Per-chart theme-reactivity (the color prop actually flips light↔dark
- * in a rendered chart) is gated by the per-chart `*.test.tsx` render
- * tests; this file is the static shape contract.
- */
+// Chart-color map drift guard: `tokens.ts` is the sole chart-color source, so this locks the map's shape (no chart loses its dark value, no key lands in only one theme); per-chart theme reactivity is gated by the chart render tests.
 import { describe, expect, it } from 'vitest';
 
 import { CHART_COLORS, lifeMarkerColors } from './tokens';
@@ -39,8 +27,6 @@ describe('CHART_COLORS — map drift guard', () => {
         expect(typeof dark).toBe('string');
         expect(light).toMatch(HEX_OR_RGBA);
         expect(dark).toMatch(HEX_OR_RGBA);
-        // The whole point of a theme map: a flat value across the
-        // cascade reads as a hole punched in the dark surface.
         expect(light).not.toBe(dark);
       });
     }

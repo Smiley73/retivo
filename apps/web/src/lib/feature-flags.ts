@@ -59,7 +59,7 @@ export function betaFeature(id: BetaFeatureId): BetaFeature {
  * in a local `.env` hides that feature rather than breaking the app; deploys fail
  * loud on one in `build_spa`.
  */
-export function parseBetaFeatureConfig(
+function parseBetaFeatureConfig(
   raw: string | undefined,
   onUnknownId: (id: string) => void = () => undefined,
 ): ReadonlySet<BetaFeatureId> {

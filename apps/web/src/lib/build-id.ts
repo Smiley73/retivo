@@ -30,8 +30,6 @@ type Listener = (mismatch: VersionMismatch | null) => void;
 
 type BundleVerification = 'live' | 'old' | 'unknown';
 
-export type BundleVerifier = (serverBuildId: string) => Promise<BundleVerification>;
-
 let currentMismatch: VersionMismatch | null = null;
 let pendingServerBuildId: string | null = null;
 let pendingReason: MismatchReason = 'build-mismatch';
@@ -39,9 +37,8 @@ let lastSeenServerBuildId: string | null = null;
 let lastVerifyAt = 0;
 let verifyInFlight = false;
 const listeners = new Set<Listener>();
-let activeClientId: string = CLIENT_BUILD_ID;
 
-const defaultVerifier: BundleVerifier = async (serverBuildId) => {
+async function verifyBundle(serverBuildId: string): Promise<BundleVerification> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), VERIFY_TIMEOUT_MS);
   try {
@@ -55,16 +52,14 @@ const defaultVerifier: BundleVerifier = async (serverBuildId) => {
     const deployedId = typeof json?.buildId === 'string' ? json.buildId : null;
     if (!deployedId) return 'unknown';
     if (deployedId === serverBuildId) return 'live';
-    if (deployedId === activeClientId) return 'old';
+    if (deployedId === CLIENT_BUILD_ID) return 'old';
     return 'unknown';
   } catch {
     return 'unknown';
   } finally {
     clearTimeout(timer);
   }
-};
-
-let verifier: BundleVerifier = defaultVerifier;
+}
 
 function readDismissed(): string | null {
   try {
@@ -83,7 +78,7 @@ function writeDismissed(id: string): void {
 }
 
 /** Pure comparator; a `dev` id on either side never mismatches. */
-export function isMismatch(clientId: string, serverId: string | null | undefined): boolean {
+function isMismatch(clientId: string, serverId: string | null | undefined): boolean {
   if (!serverId) return false;
   if (clientId === 'dev' || serverId === 'dev') return false;
   return clientId !== serverId;
@@ -105,7 +100,7 @@ export function recordServerBuildId(serverBuildId: string | null | undefined): v
   if (typeof serverBuildId === 'string' && serverBuildId.length > 0) {
     lastSeenServerBuildId = serverBuildId;
   }
-  if (!isMismatch(activeClientId, serverBuildId)) return;
+  if (!isMismatch(CLIENT_BUILD_ID, serverBuildId)) return;
   const id = serverBuildId as string;
   if (currentMismatch?.buildId === id) return;
   if (readDismissed() === id) return;
@@ -126,7 +121,7 @@ export function recordSchemaAhead(): void {
     console.warn('[build-id] schema-ahead reported before any server build id observed');
     return;
   }
-  if (id === activeClientId) return;
+  if (id === CLIENT_BUILD_ID) return;
   if (readDismissed() === id) {
     try {
       window.sessionStorage.removeItem(DISMISS_KEY);
@@ -153,7 +148,7 @@ async function runVerification(): Promise<void> {
   verifyInFlight = true;
   lastVerifyAt = now;
   try {
-    const result = await verifier(id);
+    const result = await verifyBundle(id);
     if (result !== 'live') {
             // 'old' or 'unknown': leave pendingServerBuildId set so the next response after the throttle retries.
       return;
@@ -189,38 +184,4 @@ export function dismissCurrentMismatch(): void {
   writeDismissed(currentMismatch.buildId);
   currentMismatch = null;
   for (const l of listeners) l(null);
-}
-
-/** Test-only: reset module state between cases. */
-export function __resetBuildIdState(): void {
-  currentMismatch = null;
-  pendingServerBuildId = null;
-  pendingReason = 'build-mismatch';
-  lastSeenServerBuildId = null;
-  lastVerifyAt = 0;
-  verifyInFlight = false;
-  verifier = defaultVerifier;
-  listeners.clear();
-  activeClientId = CLIENT_BUILD_ID;
-  try {
-    window.sessionStorage.removeItem(DISMISS_KEY);
-  } catch {
-    // ignore
-  }
-}
-
-/** Test-only: override the compile-time client id used in comparisons. */
-export function __setClientBuildIdForTest(id: string): void {
-  activeClientId = id;
-}
-
-/** Test-only: replace the bundle-live verifier with a stub. */
-export function __setVerifierForTest(fn: BundleVerifier): void {
-  verifier = fn;
-}
-
-/** Test-only: clear the verification throttle so back-to-back checks fire. */
-export function __resetVerifyThrottleForTest(): void {
-  lastVerifyAt = 0;
-  verifyInFlight = false;
 }

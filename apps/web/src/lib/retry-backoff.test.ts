@@ -1,47 +1,40 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import {
-  nextRetryDelayMs,
-  retryAfterMs,
-  resolveRetryDelayMs,
-  RETRY_BASE_MS,
-  RETRY_CAP_MS,
-} from './retry-backoff';
+import { retryAfterMs, resolveRetryDelayMs, RETRY_CAP_MS } from './retry-backoff';
+
+const BASE_MS = 15_000;
+const computedDelay = (attempt: number): number => resolveRetryDelayMs(attempt, null);
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('nextRetryDelayMs', () => {
+describe('computed retry delay (no served wait)', () => {
   it('is actually random: repeated draws at one attempt spread across the interval', () => {
-    // The property this module exists for: de-synchronizing a fleet of
-    // tabs. A bounds-only assertion would pass even against a fixed delay
-    // (e.g. always returning the ceiling) — assert the draws actually vary
-    // and cover a meaningful spread of the interval.
-    const draws = Array.from({ length: 200 }, () => nextRetryDelayMs(0));
+    // A bounds-only assertion passes against a fixed delay; assert the draws vary and spread over the interval, since de-synchronizing tabs is the point.
+    const draws = Array.from({ length: 200 }, () => computedDelay(0));
     const distinctValues = new Set(draws).size;
     expect(distinctValues).toBeGreaterThan(100);
-    expect(Math.min(...draws)).toBeLessThan(RETRY_BASE_MS * 0.25);
-    expect(Math.max(...draws)).toBeGreaterThan(RETRY_BASE_MS * 0.75);
+    expect(Math.min(...draws)).toBeLessThan(BASE_MS * 0.25);
+    expect(Math.max(...draws)).toBeGreaterThan(BASE_MS * 0.75);
     for (const d of draws) {
       expect(d).toBeGreaterThanOrEqual(0);
-      expect(d).toBeLessThanOrEqual(RETRY_BASE_MS);
+      expect(d).toBeLessThanOrEqual(BASE_MS);
     }
   });
 
   it('doubles the ceiling per consecutive attempt and stops at the 2-minute cap', () => {
     vi.spyOn(Math, 'random').mockReturnValue(1); // pin every draw to its ceiling
-    expect(nextRetryDelayMs(0)).toBe(15_000);
-    expect(nextRetryDelayMs(1)).toBe(30_000);
-    expect(nextRetryDelayMs(2)).toBe(60_000);
-    expect(nextRetryDelayMs(3)).toBe(120_000);
-    // Further attempts stay pinned at the cap, not 240s/480s/...
-    expect(nextRetryDelayMs(4)).toBe(RETRY_CAP_MS);
-    expect(nextRetryDelayMs(10)).toBe(RETRY_CAP_MS);
+    expect(computedDelay(0)).toBe(15_000);
+    expect(computedDelay(1)).toBe(30_000);
+    expect(computedDelay(2)).toBe(60_000);
+    expect(computedDelay(3)).toBe(120_000);
+    expect(computedDelay(4)).toBe(RETRY_CAP_MS);
+    expect(computedDelay(10)).toBe(RETRY_CAP_MS);
   });
 
   it('never returns a negative attempt-0 ceiling for a negative attempt number', () => {
     vi.spyOn(Math, 'random').mockReturnValue(1);
-    expect(nextRetryDelayMs(-1)).toBe(RETRY_BASE_MS);
+    expect(computedDelay(-1)).toBe(BASE_MS);
   });
 });
 
@@ -91,12 +84,7 @@ describe('resolveRetryDelayMs', () => {
 
   it('a served value above the cap is ignored — the computed delay applies', () => {
     vi.spyOn(Math, 'random').mockReturnValue(1);
-    expect(resolveRetryDelayMs(3, RETRY_CAP_MS + 1)).toBe(nextRetryDelayMs(3));
-  });
-
-  it('no served value falls back to the computed delay', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(1);
-    expect(resolveRetryDelayMs(2, null)).toBe(nextRetryDelayMs(2));
+    expect(resolveRetryDelayMs(1, RETRY_CAP_MS + 1)).toBe(30_000);
   });
 
   it('adds up to 20% jitter on top of an honored served value', () => {
@@ -104,10 +92,7 @@ describe('resolveRetryDelayMs', () => {
     expect(resolveRetryDelayMs(0, 10_000)).toBe(12_000);
   });
 
-  // A served `Retry-After` of exactly 0 (or a past HTTP-date, also parsed to
-  // 0 by `retryAfterMs`) must never resolve to a 0ms delay — that would
-  // schedule the very next macrotask as a retry, an unbounded hot loop
-  // against a server that just asked for a wait.
+  // A served Retry-After of 0 (or a past HTTP-date) must not resolve to a 0ms delay: that would be an unbounded hot loop against a server that asked for a wait.
   it('floors a served zero-length wait to a real, non-trivial delay instead of 0ms', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0); // no extra jitter
     expect(resolveRetryDelayMs(0, 0)).toBeGreaterThan(0);

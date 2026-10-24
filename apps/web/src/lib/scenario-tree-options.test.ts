@@ -1,7 +1,3 @@
-/**
- * Unit tests for buildScenarioTreeOptions — indented-tree ordering helper.
- * Covers the enumerated cases including cycle and orphan edge cases.
- */
 import { describe, expect, it } from 'vitest';
 import { buildScenarioTreeOptions } from './scenario-tree-options';
 import type { ScenarioAggregate } from './scenario-resolution';
@@ -92,7 +88,6 @@ describe('buildScenarioTreeOptions', () => {
     ];
     const result = buildScenarioTreeOptions(scenarios);
     expect(result).toHaveLength(2);
-    // Base (isPrimary) renders first; orphan is a non-primary natural root — after.
     expect(result[0].scenario.id).toBe('base');
     expect(result[0].depth).toBe(0);
     expect(result[1].scenario.id).toBe('orphan');
@@ -118,7 +113,6 @@ describe('buildScenarioTreeOptions', () => {
     ];
     const result = buildScenarioTreeOptions(scenarios);
     expect(result).toHaveLength(2);
-    // Both cycle nodes — no natural root → Phase 2 flat emit, alpha order.
     expect(result[0].scenario.id).toBe('a');
     expect(result[1].scenario.id).toBe('b');
     expect(result.map((r) => r.depth)).toEqual([0, 0]);
@@ -139,10 +133,8 @@ describe('buildScenarioTreeOptions', () => {
     ];
     const result = buildScenarioTreeOptions(scenarios);
     expect(result).toHaveLength(2);
-    // Phase 1 emits Base only (A is not a child of Base — its parent is itself).
     expect(result[0].scenario.id).toBe('base');
     expect(result[0].depth).toBe(0);
-    // Phase 2 emits A as unvisited cycle node.
     expect(result[1].scenario.id).toBe('a');
     expect(result[1].depth).toBe(0);
   });
@@ -155,7 +147,6 @@ describe('buildScenarioTreeOptions', () => {
     ];
     const result = buildScenarioTreeOptions(scenarios);
     expect(result).toHaveLength(3);
-    // All in cycle, no natural root → Phase 2 flat, alpha.
     expect(result.map((r) => r.scenario.id)).toEqual(['a', 'b', 'c']);
     expect(result.map((r) => r.depth)).toEqual([0, 0, 0]);
   });

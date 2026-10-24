@@ -1,7 +1,7 @@
 // Month-precise growth factor for an explicit `contributionGrowthPct` (factor 1 at `asOfMonth`); `tracks-inflation` accounts do not use it.
 
 /** Lower bound (exclusive): -100% would zero the contribution, so anything below is a data error. */
-export const MIN_CONTRIBUTION_GROWTH_PCT = -100;
+const MIN_CONTRIBUTION_GROWTH_PCT = -100;
 /** Upper bound (inclusive): a safety rail for aggressive raises, not a modeling claim. */
 export const MAX_CONTRIBUTION_GROWTH_PCT = 25;
 /** Lowest value the annual-increase input allows: just above the validator's exclusive -100. */

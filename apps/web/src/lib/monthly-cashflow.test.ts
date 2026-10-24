@@ -1,7 +1,3 @@
-/**
- * Tests for the MonthlyCashflowSeries adapters. Pins that the series holds
- * actual dollars per month, not chart run-rates.
- */
 import { describe, expect, it } from 'vitest';
 import {
   addOneOff,
@@ -11,7 +7,6 @@ import {
   emptyMonthlySeries,
   rollupYear,
   seriesEndAbs,
-  seriesStartAbs,
   sumMonthlySeries,
   validateSeries,
 } from './monthly-cashflow';
@@ -59,11 +54,7 @@ describe('buildMonthlyFromAnnualMap', () => {
 });
 
 describe('addOneOff', () => {
-  // Pinned defect: a September one-off windfall must
-  // land in September, not January. The pre-monthly drawdown engine
-  // pinned every annualized deposit to month 0, so a $40k Sept event
-  // appeared as a January spike on the cashflow chart and got
-  // compounded for 12 extra months by the projection engine.
+  // Pinned defect: the pre-monthly drawdown engine pinned every annualized deposit to month 0, so a September windfall showed as a January spike.
   it('drops $40k into Sept only — surrounding months stay at 0', () => {
     const series = emptyMonthlySeries(2030, 2030);
     addOneOff(series, 2030, 8, 40000); // Sept = index 8
@@ -142,10 +133,9 @@ describe('sumMonthlySeries', () => {
   });
 });
 
-describe('seriesStartAbs / seriesEndAbs', () => {
-  it('returns absolute month indices for the series window', () => {
+describe('seriesEndAbs', () => {
+  it('returns the absolute month index of the last month in the window', () => {
     const series = emptyMonthlySeries(2030, 2031);
-    expect(seriesStartAbs(series)).toBe(2030 * 12);
     expect(seriesEndAbs(series)).toBe(2030 * 12 + 23);
   });
 });
@@ -169,8 +159,6 @@ describe('validateSeries', () => {
 });
 
 describe('rollupYear', () => {
-  // `rollupYear` is the bucket drawdown path's bridge from monthly
-  // inputs back to annual cadence.
   it('returns the same sum as annualRollup (aliases)', () => {
     const series = emptyMonthlySeries(2030, 2030);
     addOneOff(series, 2030, 0, 1000);

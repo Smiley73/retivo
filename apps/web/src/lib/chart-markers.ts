@@ -10,12 +10,6 @@ export function labelAnchorForX(
   return t > 0.75 ? 'end' : 'middle';
 }
 
-/**
- * Y-axis floor ($) for the projection charts' log-scale mode, shared so the stacked charts clip identically. A domain starting at 1
- * wastes the chart height on the empty $1-$10k band; `allowDataOverflow` stays on so a lower point clips to the floor.
- */
-export const LOG_SCALE_FLOOR = 10000;
-
 // Marker-label staggering for charts that float `<ReferenceLine>` labels in the top margin; slot 0 is nearest the plot edge.
 const SLOT_COUNT = 3;
 const SLOT_BASE_DY = -16;

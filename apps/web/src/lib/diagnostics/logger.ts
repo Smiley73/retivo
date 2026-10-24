@@ -11,7 +11,7 @@ import { CLIENT_BUILD_ID } from '../build-id.js';
 import { redactArgs, redactMessage } from './redact.js';
 
 export type DiagnosticLevel = 'error' | 'warn' | 'info' | 'log';
-export type DiagnosticSource = 'console' | 'window' | 'boundary' | 'sync';
+type DiagnosticSource = 'console' | 'window' | 'boundary' | 'sync';
 
 export interface DiagnosticEntry {
   /** Stable unique id (primary key in IDB). */
@@ -102,7 +102,7 @@ function newId(): string {
  * Split a leading `[namespace]` token off the first string arg (e.g. `[sync] …`); no namespace when
  * absent.
  */
-export function parseNamespace(first: unknown): {
+function parseNamespace(first: unknown): {
   namespace?: string;
   rest: unknown;
 } {

@@ -1,8 +1,4 @@
-/**
- * Completeness tests for the clear-local-data nuke. Proves every client-
- * side storage surface is wiped, the selective-preserve carve-outs work,
- * and Cache Storage handling is best-effort (present + absent).
- */
+// Every client-side storage surface is wiped, the selective-preserve carve-outs hold, and Cache Storage handling is best-effort.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { clearAllLocalData } from './local-data';
@@ -14,7 +10,6 @@ async function seedAll(): Promise<void> {
   localStorage.setItem('retivo.optimizer.pathCount', '5000');
   sessionStorage.setItem('retivo.auth.signoutReason', 'idle-timeout');
   sessionStorage.setItem('retivo.auth.deletedNotice', 'gone');
-  // Seed IndexedDB through the real store so the drop is observable.
   await writeDeviceMetadata({
     deviceId: 'dev-123',
     syncCursor: '7',

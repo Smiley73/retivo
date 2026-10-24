@@ -1,11 +1,3 @@
-/**
- * Unit tests for `resolveGlideAnchorMonth` — the 5-kind anchor resolver
- * the discretionary glide path relies on. The three
- * absolute kinds reuse `resolveStartMonth`'s arithmetic; the relative
- * kind is offset from the caller-supplied expense start; the
- * glide-end-only `expenseEnd` kind resolves via the caller-threaded
- * resolved expense `end`.
- */
 import { describe, expect, it } from 'vitest';
 import {
   resolveEndMonth,
@@ -37,7 +29,6 @@ describe('resolveGlideAnchorMonth', () => {
   });
 
   it('age → birth month + years·12 + months', () => {
-    // Primary born March 1965; age 70y 0m → March 2035.
     expect(
       resolveGlideAnchorMonth(
         { kind: 'age', memberId: 'primary', years: 70, months: 0 },
@@ -58,7 +49,6 @@ describe('resolveGlideAnchorMonth', () => {
   });
 
   it('durationFromExpenseStart → expense start offset by N months', () => {
-    // expenseStart = Jan 2033; +18 months → Jul 2034.
     expect(
       resolveGlideAnchorMonth(
         { kind: 'durationFromExpenseStart', months: 18 },
@@ -84,8 +74,6 @@ describe('resolveGlideAnchorMonth', () => {
   });
 
   it('expenseEnd → the resolved expense end (via resolveEndMonth)', () => {
-    // end = age 80 of primary born March 1965 → March 2045 (exclusive
-    // end boundary, identical arithmetic to resolveEndMonth's age case).
     const end: ScheduleEnd = {
       kind: 'age',
       memberId: 'primary',
@@ -126,9 +114,7 @@ describe('resolveGlideAnchorMonth', () => {
   });
 
   it('lifetime end (via expenseEnd) → exclusive boundary Jan 1 of deathYear + 1', () => {
-    // Primary born March 1965, default life expectancy 95 → deathYear =
-    // 2060. Death = Dec 31 of deathYear, so the exclusive end boundary is
-    // Jan 1 of 2061 regardless of the March birth month.
+    // Born March 1965, default life expectancy 95: death is Dec 31 of 2060, so the exclusive end boundary is Jan 1 2061 regardless of birth month.
     const end: ScheduleEnd = { kind: 'lifetime', whose: 'primary' };
     expect(
       resolveGlideAnchorMonth({ kind: 'expenseEnd' }, expenseStart, ctx, end),
@@ -151,9 +137,6 @@ describe('resolveGlideAnchorMonth', () => {
 });
 
 describe('resolveEndMonth — lifetime (death = Dec 31 of deathYear)', () => {
-  // Non-Jan births: the exclusive end boundary is Jan 1 of deathYear + 1
-  // regardless of birth month, so the window stays active through Dec of
-  // deathYear. lifeExpectancy override sets the per-member ages.
   const lifeCtx: ScheduleResolveContext = {
     retirementYear: 2030,
     primary: { birthdate: '1965-03-12' }, // March 1965
@@ -163,22 +146,18 @@ describe('resolveEndMonth — lifetime (death = Dec 31 of deathYear)', () => {
   const startMonth = { year: 2030, month0: 0 };
 
   it("whose: 'primary' → Jan 1 of (birthYear + age) + 1", () => {
-    // 1965 + 90 = 2055 → exclusive boundary Jan 2056.
     expect(
       resolveEndMonth({ kind: 'lifetime', whose: 'primary' }, startMonth, lifeCtx),
     ).toEqual({ year: 2056, month0: 0 });
   });
 
   it("whose: 'secondary' → Jan 1 of (birthYear + age) + 1", () => {
-    // 1968 + 95 = 2063 → exclusive boundary Jan 2064.
     expect(
       resolveEndMonth({ kind: 'lifetime', whose: 'secondary' }, startMonth, lifeCtx),
     ).toEqual({ year: 2064, month0: 0 });
   });
 
   it("whose: 'last' → the later member's deathYear + 1", () => {
-    // Primary deathYear 2055, secondary deathYear 2063 → later is the
-    // secondary; exclusive boundary Jan 2064.
     expect(
       resolveEndMonth({ kind: 'lifetime', whose: 'last' }, startMonth, lifeCtx),
     ).toEqual({ year: 2064, month0: 0 });

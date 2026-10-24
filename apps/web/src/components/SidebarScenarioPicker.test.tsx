@@ -23,7 +23,7 @@ import {
   writeSelectedScenario,
 } from '../db/store';
 import type { Aggregate, ScenarioPayload } from '../db/types';
-import { notifySelectedScenarioChanged } from '../lib/scenario-mutations';
+import { SELECTED_SCENARIO_CHANGED_EVENT } from '../lib/scenario-mutations';
 import { expectNoA11yViolations } from '../test/a11y';
 
 vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
@@ -183,7 +183,7 @@ describe('SidebarScenarioPicker', () => {
     expect(button).toHaveTextContent('Base (Base)');
   });
 
-  it('follows the active pointer on notifySelectedScenarioChanged', async () => {
+  it('follows the active pointer on SELECTED_SCENARIO_CHANGED_EVENT', async () => {
     await seedScenario('base', 'Base', true);
     await seedScenario('alt', 'Aggressive', false, 'base');
     renderPicker();
@@ -201,7 +201,7 @@ describe('SidebarScenarioPicker', () => {
       updatedAt: new Date().toISOString(),
     });
     await act(async () => {
-      notifySelectedScenarioChanged();
+      window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
     });
 
     await waitFor(() => expect(button).toHaveTextContent('Aggressive'));

@@ -1,6 +1,3 @@
-/**
- * Focused report-data plumbing tests for PDF account metrics.
- */
 import { describe, expect, it } from 'vitest';
 import type {
   AccountPayload,

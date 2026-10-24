@@ -1,39 +1,7 @@
-/**
- * Tests for `runOptimizerMonteCarlo`. The orchestrator is mocked at the
- * `MinimalMcWorker` seam — a fake `postMessage` records every input the
- * orchestrator hands the worker and synthesises deterministic
- * `{ kind: 'result' }` replies via a captured `message` listener.
- *
- * Mirror tests:
- *  - one `postMessage` per `(scenario, primary, secondary)` triple
- *  - iteration order matches the candidate grid
- *  - accumulator returns the per-scenario max
- *  - `signal.aborted` triggers `worker.terminate()` + resolves partial
- *  - progress callback fires per triple
- *  - seed pinned to 1 + pathCount pinned to the constant
- *  - BPP-equivalence: captured `postMessage` argument matches the input
- *    a separate `runBalanceProjectionMc` produces for the same triple.
- *  - worker-isolation: `runMonteCarlo` is never invoked on the main
- *    thread (mock the `monte-carlo` module to spy on the symbol).
- *
- * The orchestrator now fans triples across a worker pool. Every test in
- * this block pins `concurrency: 1` so dispatch is serial and the
- * single shared-instance fake (one `() => fake`) models exactly one
- * worker — keeping the legacy assertions (grid order, per-triple
- * progress, terminate count) exact. The parallel path (out-of-order
- * replies, result-identity across pool sizes) is covered by the
- * dedicated `concurrency` describe block at the end, which uses a
- * fresh-worker-per-call fake factory.
- */
+// Fake `MinimalMcWorker`s record posted inputs and reply with a deterministic success probability.
+// Most cases pin `concurrency: 1` because they share one fake across the pool.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  runOptimizerMonteCarlo,
-  clearOptimizerMcCache,
-  optimizerMcCacheSize,
-  OPTIMIZER_MC_CACHE_MAX_ENTRIES,
-  type MinimalMcWorker,
-  OPTIMIZER_MC_DEFAULT_PATH_COUNT,
-} from './optimizer-mc-runner';
+import { OPTIMIZER_MC_DEFAULT_PATH_COUNT } from './optimizer-mc-runner';
 import { OPTIMIZER_MC_SEED } from './balance-projection-runner-mc';
 import { runBalanceProjectionMc } from './balance-projection-runner';
 import type {
@@ -56,9 +24,6 @@ vi.mock('../workers/monte-carlo.worker.ts?worker', () => {
   return { default: StubWorker };
 });
 
-// Spy on `runMonteCarlo` exported from `./monte-carlo` — the worker
-// isolation assertion proves the orchestrator never invokes it on the
-// main thread.
 const runMonteCarloSpy = vi.fn();
 vi.mock('./monte-carlo', async () => {
   const actual = await vi.importActual<typeof import('./monte-carlo')>('./monte-carlo');
@@ -72,6 +37,22 @@ vi.mock('./monte-carlo', async () => {
 });
 
 const TODAY = new Date('2026-06-15T00:00:00Z');
+
+type MinimalMcWorker = ReturnType<
+  NonNullable<Parameters<typeof import('./optimizer-mc-runner').runOptimizerMonteCarlo>[0]['workerFactory']>
+>;
+
+// The outcome cache is module state, so every case imports a fresh copy.
+async function freshRunner(): Promise<typeof import('./optimizer-mc-runner').runOptimizerMonteCarlo> {
+  vi.resetModules();
+  return (await import('./optimizer-mc-runner')).runOptimizerMonteCarlo;
+}
+
+let runOptimizerMonteCarlo: Awaited<ReturnType<typeof freshRunner>>;
+
+beforeEach(async () => {
+  runOptimizerMonteCarlo = await freshRunner();
+});
 
 function member(
   id: string,
@@ -208,7 +189,6 @@ interface FakeWorker extends MinimalMcWorker {
   readonly terminateCount: number;
 }
 
-/** Minimal `MonteCarloSummary` for a posted input + success probability. */
 function buildFakeSummary(
   input: MonteCarloInput,
   successProbability: number,
@@ -241,8 +221,6 @@ function buildFakeSummary(
 
 function makeFakeWorker(
   summaryFor: (input: MonteCarloInput) => number,
-  /** When set, emit one mid-triple `{ kind: 'progress', done }` message
-   *  before the terminal `result` so path-progress wiring is exercised. */
   progressDone?: number,
 ): FakeWorker {
   const listeners = new Set<(ev: MessageEvent) => void>();
@@ -267,7 +245,6 @@ function makeFakeWorker(
       const m = msg as { kind: 'run'; input: MonteCarloInput };
       posted.push(m.input);
       const fakeSummary = buildFakeSummary(m.input, summaryFor(m.input));
-      // Deliver the reply asynchronously to mirror real Worker behaviour.
       setTimeout(() => {
         if (progressDone != null) {
           const pev = {
@@ -285,7 +262,6 @@ function makeFakeWorker(
   };
 }
 
-/** `makeFakeWorker` variant that emits a mid-triple progress message. */
 function makeProgressFakeWorker(
   summaryFor: (input: MonteCarloInput) => number,
   progressDone: number,
@@ -297,10 +273,6 @@ const PIA_HIGH = 3500;
 const SINGLE_SCENARIO_GRID_PAIRS = 9; // 62..70
 
 describe('runOptimizerMonteCarlo', () => {
-  // The session cache is module-level state; clear it before every test so
-  // an earlier test's identical fixture can't serve a later run from cache.
-  beforeEach(() => clearOptimizerMcCache());
-
   it('should_post_one_run_message_per_candidate_pair_per_scenario', async () => {
     const members = [member('m1', true, 1965)];
     const ss = [ssBenefit('m1', PIA_HIGH)];
@@ -317,7 +289,7 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
     });
     expect(fake.postedInputs.length).toBe(
@@ -331,8 +303,6 @@ describe('runOptimizerMonteCarlo', () => {
     const accounts = [brokerage('m1')];
     const balances = [balanceRow(800_000)];
     const scenarios = [scenarioFixture('s1')];
-    // Return higher success for higher SS claim age (deterministic
-    // ramp). The orchestrator must pick age 70 as the winner.
     let call = 0;
     const fake = makeFakeWorker(() => {
       call += 1;
@@ -347,7 +317,7 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
     });
     const outcome = result.get('s1');
@@ -373,11 +343,10 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
       onProgress,
     });
-    // 9 progress calls in order (pairIdx 1..9).
     expect(onProgress).toHaveBeenCalledTimes(SINGLE_SCENARIO_GRID_PAIRS);
     expect(onProgress.mock.calls[0][0].pairIdx).toBe(1);
     expect(onProgress.mock.calls[8][0].pairIdx).toBe(9);
@@ -399,9 +368,6 @@ describe('runOptimizerMonteCarlo', () => {
     const balances = [balanceRow(800_000)];
     const scenarios = [scenarioFixture('s1')];
     const onScenarioProgress = vi.fn();
-    // Fake worker that emits one mid-triple `progress` (done=500) before
-    // the terminal `result`, exercising the path-progress → scenario
-    // progress roll-up in the orchestrator.
     const fake = makeProgressFakeWorker(() => 0.5, 500);
     await runOptimizerMonteCarlo({
       scenarios,
@@ -412,20 +378,18 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
       onScenarioProgress,
     });
     const pathCount = OPTIMIZER_MC_DEFAULT_PATH_COUNT;
     const total = SINGLE_SCENARIO_GRID_PAIRS * pathCount;
-    // One emit per triple — the completed-triple base advances each time.
     expect(onScenarioProgress).toHaveBeenCalledTimes(SINGLE_SCENARIO_GRID_PAIRS);
     expect(onScenarioProgress.mock.calls[0]).toEqual(['s1', { done: 500, total }]);
     expect(onScenarioProgress.mock.calls[8]).toEqual([
       's1',
       { done: 8 * pathCount + 500, total },
     ]);
-    // Monotonic non-decreasing `done`, capped at `total`.
     const dones = onScenarioProgress.mock.calls.map((c) => c[1].done as number);
     for (let i = 1; i < dones.length; i += 1) {
       expect(dones[i]).toBeGreaterThan(dones[i - 1]);
@@ -441,7 +405,6 @@ describe('runOptimizerMonteCarlo', () => {
     const scenarios = [scenarioFixture('s1')];
     const controller = new AbortController();
     const fake = makeFakeWorker(() => {
-      // Abort on the first post — orchestrator should bail out.
       queueMicrotask(() => controller.abort());
       return 0.5;
     });
@@ -454,46 +417,16 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
       signal: controller.signal,
     });
     expect(fake.terminateCount).toBeGreaterThan(0);
-    // Result is a Map (the partial accumulator). May be empty if the
-    // abort fired before the first reply landed.
+    // The partial accumulator may be empty if the abort fired before the first reply.
     expect(result).toBeInstanceOf(Map);
   });
 
-  it('should_pin_seed_and_path_count_constants_on_every_post', async () => {
-    const members = [member('m1', true, 1965)];
-    const ss = [ssBenefit('m1', PIA_HIGH)];
-    const accounts = [brokerage('m1')];
-    const balances = [balanceRow(800_000)];
-    const scenarios = [scenarioFixture('s1')];
-    const fake = makeFakeWorker(() => 0.5);
-    await runOptimizerMonteCarlo({
-      scenarios,
-      accounts,
-      balances,
-      members,
-      ssBenefits: ss,
-      expenses: [],
-      incomeStreams: [],
-      today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
-      workerFactory: () => fake,
-    });
-    for (const input of fake.postedInputs) {
-      expect(input.seed).toBe(OPTIMIZER_MC_SEED);
-      expect(input.pathCount).toBe(OPTIMIZER_MC_DEFAULT_PATH_COUNT);
-    }
-  });
-
   it('should_match_runBalanceProjectionMc_assembly_for_BPP_equivalence', async () => {
-    // The orchestrator's per-triple assembly must equal what a direct
-    // call to `runBalanceProjectionMc` with the same overlay returns
-    // (modulo pinned pathCount + seed). Confirms the MC path threads
-    // through the same routing as the deterministic path.
     const members = [member('m1', true, 1965)];
     const ss = [ssBenefit('m1', PIA_HIGH)];
     const accounts = [brokerage('m1')];
@@ -509,10 +442,9 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
     });
-    // First posted input == the orchestrator's first triple (age 62).
     const expected = runBalanceProjectionMc({
       scenarioId: 's1',
       scenarios,
@@ -533,23 +465,15 @@ describe('runOptimizerMonteCarlo', () => {
     expect(first.firstYear).toBe(expected.firstYear);
     expect(first.retirementYear).toBe(expected.retirementYear);
     expect(first.horizonYear).toBe(expected.horizonYear);
-    // ssByYear replaces annualSocialSecurity scalar.
     expect(first.ssByYear).toEqual(expected.ssByYear);
-    // v40: the windowed per-month base is candidate-invariant.
     expect(first.monthlyExpenseBase).toEqual(expected.monthlyExpenseBase);
-    // Pinned values:
-    expect(first.seed).toBe(OPTIMIZER_MC_SEED);
-    expect(first.pathCount).toBe(OPTIMIZER_MC_DEFAULT_PATH_COUNT);
+    for (const input of fake.postedInputs) {
+      expect(input.seed).toBe(OPTIMIZER_MC_SEED);
+      expect(input.pathCount).toBe(OPTIMIZER_MC_DEFAULT_PATH_COUNT);
+    }
   });
 
-  // Orchestrator-level
-  // coverage for the precheck-empty + per-scenario-empty + abort
-  // outcome contracts.
-
   it('should_emit_empty_no_primary_member_when_no_primary_member', async () => {
-    // No `isPrimary: true` member in the household → global precheck
-    // fires before any triple assembly; every non-deleted scenario
-    // surfaces `kind: 'empty', reason: 'no-primary-member'`.
     const members = [member('m2', false, 1965)];
     const ss = [ssBenefit('m2', PIA_HIGH)];
     const scenarios = [scenarioFixture('s1'), scenarioFixture('s2')];
@@ -563,7 +487,7 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
     });
     expect(result.get('s1')).toEqual({
@@ -574,13 +498,10 @@ describe('runOptimizerMonteCarlo', () => {
       kind: 'empty',
       reason: 'no-primary-member',
     });
-    // Precheck short-circuits — no worker dispatch.
     expect(fake.postedInputs.length).toBe(0);
   });
 
   it('should_emit_empty_no_retirement_date_when_household_state_is_empty', async () => {
-    // Primary present but birthdate invalid → `derivePrecheckEmpty`
-    // returns `no-retirement-date` for every scenario.
     const noBirthdate: Aggregate<HouseholdMemberPayload> = {
       ...member('m1', true, 1965),
       payload: { ...member('m1', true, 1965).payload, birthdate: '' },
@@ -597,7 +518,7 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
     });
     expect(result.get('s1')).toEqual({
@@ -608,23 +529,14 @@ describe('runOptimizerMonteCarlo', () => {
   });
 
   it('should_emit_empty_no_retirement_date_for_scenario_without_resolved_retirement_age', async () => {
-    // Scenario-aware empty-state routing. Primary HAS a valid
-    // birthdate so the global precheck passes, but the scenario chain
-    // resolves no `retirementAge` override AND both PIA grids are
-    // empty. Pre-fix `buildTriples` pre-seeded `pastWindowOrMissingPia`
-    // (Add PIAs copy); post-fix the per-scenario probe routes through
-    // `no-retirement-date`.
+    // Pre-fix, buildTriples pre-seeded `pastWindowOrMissingPia` here; the per-scenario probe now routes through no-retirement-date.
     const members = [member('m1', true, 1965)];
-    // Both PIAs empty → `buildCandidateGrid` returns [] for primary.
     const ss = [ssBenefit('m1', null)];
-    // Scenario without `retirementAge` override on the chain.
     const noRetirementAge: ScenarioAggregate = {
       ...scenarioFixture('s1'),
       payload: {
         ...scenarioFixture('s1').payload,
         overrides: {
-          // Deliberately omit `retirementAge`; everything else stays
-          // valid so the orchestrator can run.
           socialSecurity: { primary: { ageYears: 67, ageMonths: 0 } },
           inflation: { ratePct: 0 },
           lifeExpectancy: { primary: 90 },
@@ -641,28 +553,24 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
     });
     expect(result.get('s1')).toEqual({
       kind: 'empty',
       reason: 'no-retirement-date',
     });
-    // No PIA → no triples queued → no worker dispatch.
     expect(fake.postedInputs.length).toBe(0);
   });
 
   it('should_emit_cancelled_outcome_for_unprocessed_scenarios_on_abort', async () => {
-    // Abort mid-sweep → scenarios with no accumulated
-    // winner surface `kind: 'cancelled'` (NOT `winner: null`, which the
-    // page renders as past-window).
+    // An aborted scenario with no winner is `cancelled`, not `winner: null`, which the page renders as past-window.
     const members = [member('m1', true, 1965)];
     const ss = [ssBenefit('m1', PIA_HIGH)];
     const accounts = [brokerage('m1')];
     const balances = [balanceRow(800_000)];
     const scenarios = [scenarioFixture('s1'), scenarioFixture('s2')];
     const controller = new AbortController();
-    // Pre-abort the signal so every triple short-circuits.
     controller.abort();
     const fake = makeFakeWorker(() => 0.5);
     const result = await runOptimizerMonteCarlo({
@@ -674,7 +582,7 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
       signal: controller.signal,
     });
@@ -683,10 +591,6 @@ describe('runOptimizerMonteCarlo', () => {
   });
 
   it('should_NOT_construct_a_worker_when_signal_pre_aborted', async () => {
-    // A pre-aborted signal short-circuits before workerFactory
-    // ever runs — preSeeded outcomes (no-PIA / past-window) survive
-    // (covered by the cancelled-outcome test above), but no Worker is
-    // constructed at all. workerFactory must NOT be invoked.
     const members = [member('m1', true, 1965)];
     const ss = [ssBenefit('m1', PIA_HIGH)];
     const accounts = [brokerage('m1')];
@@ -704,7 +608,7 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: factorySpy,
       signal: controller.signal,
     });
@@ -712,9 +616,6 @@ describe('runOptimizerMonteCarlo', () => {
   });
 
   it('should_NOT_call_runMonteCarlo_on_the_main_thread', async () => {
-    // Invariant: only `monte-carlo.worker.ts` may execute
-    // `runMonteCarlo`. The orchestrator assembles inputs + posts to the
-    // worker; the spy on `runMonteCarlo` must never be touched.
     runMonteCarloSpy.mockClear();
     const members = [member('m1', true, 1965)];
     const ss = [ssBenefit('m1', PIA_HIGH)];
@@ -731,18 +632,14 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
     });
     expect(runMonteCarloSpy).not.toHaveBeenCalled();
   });
 
   it('should_thread_retirementAllocation_assetMixSeries_into_posted_input', async () => {
-    // Regression: pre-fix the assetMixSeries slot was null even when
-    // retirementAllocation was present → successProbability invariant
-    // between scenarios with different glide paths. This test proves the
-    // posted MonteCarloInput carries a non-null assetMixSeries when the
-    // scenario includes a retirementAllocation override.
+    // Regression: assetMixSeries was null even with a retirementAllocation, so success probability ignored glide paths.
     const members = [member('m1', true, 1965)];
     const ss = [ssBenefit('m1', PIA_HIGH)];
     const accounts = [brokerage('m1')];
@@ -775,11 +672,9 @@ describe('runOptimizerMonteCarlo', () => {
       expenses: [],
       incomeStreams: [],
       today: TODAY,
-      concurrency: 1, // single-worker pool: serial, shared-fake-safe (see header note)
+      concurrency: 1,
       workerFactory: () => fake,
     });
-    // Every posted input must carry at least one ledger entry with a
-    // non-null assetMixSeries (the glide trajectory).
     expect(fake.postedInputs.length).toBeGreaterThan(0);
     for (const input of fake.postedInputs) {
       const hasGlideSeries = input.accountMcLedger.some(
@@ -839,7 +734,6 @@ describe('runOptimizerMonteCarlo', () => {
     const first = await runOnce();
     expect(first.posted).toBe(SINGLE_SCENARIO_GRID_PAIRS);
     const second = await runOnce();
-    // Cache hit: no MC inputs posted, identical outcome returned.
     expect(second.posted).toBe(0);
     expect(second.outcome).toEqual(first.outcome);
   });
@@ -864,7 +758,6 @@ describe('runOptimizerMonteCarlo', () => {
     const fake1 = makeFakeWorker(() => 0.5);
     await runOptimizerMonteCarlo({ ...base, workerFactory: () => fake1 });
     expect(fake1.postedInputs.length).toBe(SINGLE_SCENARIO_GRID_PAIRS);
-    // Path-count change → different cache key → full recompute.
     const fake2 = makeFakeWorker(() => 0.5);
     await runOptimizerMonteCarlo({
       ...base,
@@ -872,7 +765,6 @@ describe('runOptimizerMonteCarlo', () => {
       workerFactory: () => fake2,
     });
     expect(fake2.postedInputs.length).toBe(SINGLE_SCENARIO_GRID_PAIRS);
-    // Balance change (aggregate input) → different cache key → recompute.
     const fake3 = makeFakeWorker(() => 0.5);
     await runOptimizerMonteCarlo({
       ...base,
@@ -883,7 +775,6 @@ describe('runOptimizerMonteCarlo', () => {
   });
 
   it('should_miss_the_session_cache_when_medicalCategoryIds_changes (FNV signature)', async () => {
-    clearOptimizerMcCache();
     const base = {
       scenarios: [scenarioFixture('s1')],
       accounts: [brokerage('m1')],
@@ -902,7 +793,6 @@ describe('runOptimizerMonteCarlo', () => {
       workerFactory: () => fake1,
     });
     expect(fake1.postedInputs.length).toBe(SINGLE_SCENARIO_GRID_PAIRS);
-    // A different medical-id set must NOT collide on the prior cached setup.
     const fake2 = makeFakeWorker(() => 0.5);
     await runOptimizerMonteCarlo({
       ...base,
@@ -912,17 +802,13 @@ describe('runOptimizerMonteCarlo', () => {
     expect(fake2.postedInputs.length).toBe(SINGLE_SCENARIO_GRID_PAIRS);
   });
 
-  it('should_cap_the_session_cache_at_the_max_entries_bound_with_LRU_eviction', { timeout: 60_000 }, async () => {
-    clearOptimizerMcCache();
+  it('should_cap_the_session_cache_at_500_entries_with_LRU_eviction', { timeout: 60_000 }, async () => {
+    const CACHE_CAP = 500;
     const members = [member('m1', true, 1965)];
     const ss = [ssBenefit('m1', PIA_HIGH)];
     const accounts = [brokerage('m1')];
-    // Drive past the cap: each run uses a distinct balance (distinct key).
-    // One scenario per run → one cache entry per run. A large candidate
-    // step clamps the grid to a single age, so each sweep posts one input
-    // — keeping 500+ sweeps fast.
-    const total = OPTIMIZER_MC_CACHE_MAX_ENTRIES + 5;
-    for (let i = 0; i < total; i += 1) {
+    // A cache hit posts nothing. A large candidate step keeps the grid tiny so 500+ sweeps stay fast.
+    const runWithBalance = async (i: number): Promise<number> => {
       const fake = makeFakeWorker(() => 0.5);
       await runOptimizerMonteCarlo({
         scenarios: [scenarioFixture('s1')],
@@ -937,32 +823,20 @@ describe('runOptimizerMonteCarlo', () => {
         concurrency: 1,
         workerFactory: () => fake,
       });
-      expect(optimizerMcCacheSize()).toBeLessThanOrEqual(
-        OPTIMIZER_MC_CACHE_MAX_ENTRIES,
-      );
-    }
-    expect(optimizerMcCacheSize()).toBe(OPTIMIZER_MC_CACHE_MAX_ENTRIES);
+      return fake.postedInputs.length;
+    };
+    for (let i = 0; i < CACHE_CAP + 5; i += 1) await runWithBalance(i);
+    expect(await runWithBalance(5)).toBe(0);
+    expect(await runWithBalance(4)).toBeGreaterThan(0);
   });
 });
 
-/**
- * Pool-concurrency coverage. The serial tests above pin `concurrency: 1`
- * and reuse a single shared-instance fake. These exercise the real pool
- * with a fresh worker per `factory()` call (the pool spins up one worker
- * per slot), proving: (a) results are identical across pool sizes —
- * the constant seed makes each triple order-independent, so winners must
- * not depend on how triples are partitioned across workers — and (b) the
- * pool actually dispatches up to `size` triples at once.
- */
 interface FakeFactory {
   readonly factory: () => MinimalMcWorker;
   readonly postedCount: number;
   readonly terminateCount: number;
 }
 
-/** Fresh worker per `factory()` call, all writing to one shared tally so
- *  assertions span the whole pool. Each worker replies only to its own
- *  listeners, so the pool's per-worker reply correlation is exercised. */
 function makeFakeFactory(
   summaryFor: (input: MonteCarloInput) => number,
   progressDone?: number,
@@ -980,8 +854,6 @@ function makeFakeFactory(
       const listeners = new Set<(ev: MessageEvent) => void>();
       return {
         addEventListener(t, fn) {
-          // The pool also registers an `error` listener; this fake only
-          // emits `message` events, so keep the error listener out of the set.
           if (t !== 'error') listeners.add(fn);
         },
         removeEventListener(t, fn) {
@@ -1011,17 +883,12 @@ function makeFakeFactory(
   return tally;
 }
 
-/** Deterministic per-triple success probability derived from the posted
- *  input. The claim-age overlay is the only thing that varies between a
- *  scenario's triples, and it flows into `ssByYear`, so this assigns a
- *  stable, distinct value per triple without any call-order coupling. */
 function successFromInput(input: MonteCarloInput): number {
   const sum = input.ssByYear.reduce((a, b) => a + b, 0);
   return (sum % 99_991) / 99_991;
 }
 
 describe('runOptimizerMonteCarlo — stored month-level claim age', () => {
-  beforeEach(() => clearOptimizerMcCache());
   const members = [member('m1', true, 1965)];
   const scenarioWithMonths = (): ScenarioAggregate => {
     const sc = scenarioFixture('s1');
@@ -1033,7 +900,6 @@ describe('runOptimizerMonteCarlo — stored month-level claim age', () => {
     summaryFor: (call: number) => number,
     extra: Partial<Parameters<typeof runOptimizerMonteCarlo>[0]> = {},
   ) => {
-    // Serial pool: call N is the Nth triple, and the stored pair is last.
     let call = 0;
     const fake = makeFakeWorker(() => summaryFor((call += 1)));
     return {
@@ -1099,7 +965,6 @@ describe('runOptimizerMonteCarlo — stored month-level claim age', () => {
 });
 
 describe('runOptimizerMonteCarlo — pool concurrency', () => {
-  beforeEach(() => clearOptimizerMcCache());
 
   const members = [member('m1', true, 1965)];
   const ss = [ssBenefit('m1', PIA_HIGH)];
@@ -1109,9 +974,7 @@ describe('runOptimizerMonteCarlo — pool concurrency', () => {
   it('should_produce_identical_winners_across_pool_sizes', async () => {
     const scenarios = [scenarioFixture('s1')];
     const runAt = async (concurrency: number) => {
-      // Clear so the parallel run recomputes instead of serving the
-      // serial run's cached outcome.
-      clearOptimizerMcCache();
+      const runOptimizerMonteCarlo = await freshRunner();
       const fakes = makeFakeFactory(successFromInput);
       const result = await runOptimizerMonteCarlo({
         scenarios,
@@ -1129,8 +992,6 @@ describe('runOptimizerMonteCarlo — pool concurrency', () => {
     };
     const serial = await runAt(1);
     const parallel = await runAt(8);
-    // Constant seed → order-independent: same winner, metric, and row
-    // contract regardless of how triples were spread across workers.
     expect(parallel).toEqual(serial);
     if (serial?.kind !== 'result') throw new Error('expected result');
     expect(serial.winner).not.toBeNull();
@@ -1144,8 +1005,6 @@ describe('runOptimizerMonteCarlo — pool concurrency', () => {
       const listeners = new Set<(ev: MessageEvent) => void>();
       return {
         addEventListener(t, fn) {
-          // The pool also registers an `error` listener; this fake only
-          // emits `message` events, so keep the error listener out of the set.
           if (t !== 'error') listeners.add(fn);
         },
         removeEventListener(t, fn) {
@@ -1177,7 +1036,6 @@ describe('runOptimizerMonteCarlo — pool concurrency', () => {
       concurrency: 4,
       workerFactory: factory,
     });
-    // 9 triples, 4 workers → all four post before the first reply lands.
     expect(peak).toBe(4);
   });
 

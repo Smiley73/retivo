@@ -19,9 +19,7 @@ describe('formatCurrency', () => {
   });
 
   it('rounds at the negative half-dollar boundary toward +Infinity', () => {
-    // Math.round(-100.5) === -100, so the result is -$100. The old
-    // toLocaleString body used ICU halfExpand (away from zero) and
-    // produced -$101 — the only observable delta, accepted scope.
+    // Math.round(-100.5) is -100; the old ICU halfExpand body gave -$101 (accepted delta).
     expect(formatCurrency(-100.5)).toBe('-$100');
   });
 });

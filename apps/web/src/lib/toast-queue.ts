@@ -10,7 +10,7 @@ interface VersionToastContent {
   reason: MismatchReason;
 }
 
-export interface WaitToastContent {
+interface WaitToastContent {
   kind: 'wait';
   /** Epoch-ms the wait ends; the region ticks its own countdown, this module runs no timer. */
   deadlineAt: number;

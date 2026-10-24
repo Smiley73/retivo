@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildAndDownloadPdf, buildPdfSectionModel } from './build-pdf';
 import { PDF_SECTION_MANIFEST } from './section-manifest';
-import type { PdfLibs } from './lazy-load';
+import type { PdfLibLoader } from './lazy-load';
 import type { ReportData } from '../report-data';
 import type { YearlyTableRow } from '../../pages/balance-projection-page-yearly';
 import { ONE_LINE_DISCLAIMER, REPORT_DISCLAIMER } from '../disclaimer-fragments';
 import { jsPDF } from 'jspdf';
 import { APP_NAME, OPEN_SOURCE_TEXT, REPO_HOST_PATH, REPO_URL } from '../brand';
+
+type PdfLibs = Awaited<ReturnType<PdfLibLoader>>;
 
 function emptyReportData(scenarioName: string): ReportData {
   return {
@@ -177,8 +179,6 @@ describe('buildPdfSectionModel', () => {
     const ids = buildModel('X').sections.map((s) => s.manifest.id);
     expect(ids[0]).toBe('cover');
     expect(ids.indexOf('chart-balance')).toBeGreaterThan(0);
-    // The scenario summary (with the household overview folded in) leads the
-    // content sections; the standalone overview page is gone.
     expect(ids[1]).toBe('report-scenarios');
     expect(ids).not.toContain('report-overview');
     expect(ids.indexOf('report-scenarios')).toBeLessThan(
@@ -210,7 +210,6 @@ describe('buildPdfSectionModel', () => {
     if (balanceChart?.data.kind === 'chart') {
       expect(balanceChart.data.tableSpec?.body[0][0]).toBe('2040');
     }
-    // A chart section with no supplied table carries a null tableSpec.
     const stressChart = model.sections.find(
       (s) => s.manifest.id === 'chart-stress-test',
     );
@@ -280,8 +279,6 @@ describe('buildPdfSectionModel', () => {
   });
 
   it('does not leak another scenario’s data when a specific scenario is passed', () => {
-    // Two distinct scenarios → the cover + report only ever carry the
-    // scenario actually handed in.
     const a = buildModel('Scenario A', emptyReportData('Scenario A'));
     const b = buildModel('Scenario B', emptyReportData('Scenario B'));
     expect(a.coverLabels.scenarioName).toBe('Scenario A');
@@ -368,7 +365,6 @@ describe('buildAndDownloadPdf (mock loader)', () => {
     expect(docStub.rect).not.toHaveBeenCalled();
     expect(docStub.roundedRect).not.toHaveBeenCalled();
     expect(docStub.text).toHaveBeenCalledWith(APP_NAME, 68, 69);
-    // At least one table rendered (year-by-year has rows).
     expect(autoTableStub).toHaveBeenCalled();
   });
 
@@ -660,8 +656,6 @@ describe('buildAndDownloadPdf (mock loader)', () => {
   });
 
   it('stamps the one-line disclaimer footer once on every page', async () => {
-    // Page-counting docStub: addPage increments; getNumberOfPages returns the
-    // running count so the footer loop iterates the true page count.
     let pageCount = 1;
     const textCalls: Array<{ str: unknown; x: number; y: number }> = [];
     const docStub = {
@@ -702,17 +696,14 @@ describe('buildAndDownloadPdf (mock loader)', () => {
       disclaimer: REPORT_DISCLAIMER,
     });
 
-    // The cover retitle + the page-2 heading.
     expect(textCalls.some((c) => c.str === 'Retirement Planning Report')).toBe(true);
     expect(textCalls.some((c) => c.str === 'Important Information')).toBe(true);
 
-    // One footer disclaimer per page, always on the footer baseline (y=825).
     const footerCalls = textCalls.filter((c) => c.str === ONE_LINE_DISCLAIMER);
     expect(pageCount).toBeGreaterThan(1);
     expect(footerCalls).toHaveLength(pageCount);
     for (const c of footerCalls) expect(c.y).toBe(825);
 
-    // The repo address (no scheme) sits at the left edge of every page's footer.
     const repoCalls = textCalls.filter((c) => c.str === REPO_HOST_PATH);
     expect(repoCalls).toHaveLength(pageCount);
     for (const c of repoCalls) {
@@ -720,16 +711,13 @@ describe('buildAndDownloadPdf (mock loader)', () => {
       expect(c.y).toBe(825);
     }
 
-    // No retired operator identity (old brand mark, old host) in the drawn text.
     for (const c of textCalls) {
       expect(String(c.str)).not.toMatch(/b[a]dger|app[.]retivo[.]money/i);
     }
   });
 
   it('the footer repo address clears the left edge of the centred one-line disclaimer', () => {
-    // A per-call stub cannot see overlap, so measure with real jsPDF at the
-    // footer's 8pt, using the same anchors `buildAndDownloadPdf` draws at
-    // (address at x=40, disclaimer centred at x=297).
+    // A per-call stub cannot see overlap, so measure with real jsPDF at the footer's 8pt using the anchors buildAndDownloadPdf draws at (address x=40, disclaimer centred x=297).
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
     doc.setFontSize(8);
     const addressRightEdge = 40 + doc.getTextWidth(REPO_HOST_PATH);
@@ -780,8 +768,6 @@ describe('buildAndDownloadPdf (mock loader)', () => {
       disclaimer: REPORT_DISCLAIMER,
     });
 
-    // Exactly one external link, to the repo, and its visible string is the
-    // page-one open-source line (never repeated per page).
     const repoLinks = linkCalls.filter((c) => c.url === REPO_URL);
     expect(repoLinks).toHaveLength(1);
     expect(repoLinks[0]!.str).toBe(OPEN_SOURCE_TEXT);

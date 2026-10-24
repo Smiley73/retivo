@@ -29,8 +29,6 @@ describe('adaptiveYearTicks', () => {
   });
 
   it('drops to a yearly grid when zoomed into a narrow span', () => {
-    // A 5-year grid would yield zero ticks for 2031–2034 (no multiple of 5);
-    // the adaptive grid still shows ticks.
     expect(adaptiveYearTicks(2031, 2034)).toEqual([2031, 2032, 2033, 2034]);
   });
 
@@ -80,8 +78,6 @@ describe('assignMarkerLabelSlots', () => {
   });
 
   it('wraps back to slot 0 at the slot-count boundary', () => {
-    // Four markers each 1 year apart (all < MIN_DELTA_YEARS) climb
-    // slots 0,1,2 then wrap to 0 once SLOT_COUNT (3) is reached.
     const slots = assignMarkerLabelSlots([
       { fractionalYear: 2030 },
       { fractionalYear: 2031 },

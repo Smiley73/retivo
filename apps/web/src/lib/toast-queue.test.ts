@@ -1,15 +1,7 @@
-/**
- * Unit tests for the shared toast queue's wait-notice raise entry point:
- * the drop-if-not-positive guard (and
- * the absence of any upper ceiling), the coalescing rule (a materially later
- * observation extends the live notice; an earlier, equal, or within-tolerance
- * one is a no-op), and that closing the live notice lets a fresh raise start
- * a new one rather than trying to extend the gone toast.
- * `VersionBanner`/`AppToastRegion` render the `'version'` content kind and
- * are covered by their own component tests.
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { appToastQueue, raiseWaitNotice, type WaitToastContent } from './toast-queue';
+import { appToastQueue, raiseWaitNotice, type AppToastContent } from './toast-queue';
+
+type WaitToastContent = Extract<AppToastContent, { kind: 'wait' }>;
 
 function waitToasts(): { key: string; content: WaitToastContent }[] {
   return appToastQueue.visibleToasts
@@ -22,8 +14,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // The queue is a module-level singleton — close anything a test left
-  // live so it can't leak into the next one.
+  // The queue is a module-level singleton: close anything a test left live.
   for (const t of appToastQueue.visibleToasts) appToastQueue.close(t.key);
   vi.useRealTimers();
 });
@@ -79,11 +70,7 @@ describe('raiseWaitNotice', () => {
     expect(toasts[0]!.key).toBe(firstKey);
   });
 
-  // 3.experience.1: concurrent requests all served the SAME Retry-After land
-  // a few ms apart, so their deadlines differ by those few ms. That is not
-  // an extension — replacing the toast would re-announce the whole alert
-  // once per response. The live toast must survive untouched: same key,
-  // same deadline.
+  // Concurrent requests served the same Retry-After land a few ms apart; that is not an extension, and replacing the toast would re-announce the alert once per response.
   it('coalesces a SAME-wait observation a few ms later into the live toast without replacing it', () => {
     vi.setSystemTime(1_000_000);
     raiseWaitNotice(30_000); // deadline 1,030,000
@@ -116,10 +103,7 @@ describe('raiseWaitNotice', () => {
     expect(waitToasts()).toHaveLength(1);
   });
 
-  // There is no upper cutoff, and this API's hour-window
-  // throttles (MFA/step-up/change-email, `ttl: 3_600_000`) really serve
-  // Retry-After values this large on a required sign-in path. The notice
-  // must report the wait the server asked for, however long.
+  // This API's hour-window throttles (MFA/step-up/change-email, ttl 3_600_000) serve Retry-After values this large on a required sign-in path, so there is no upper ceiling.
   it('raises for an hour-scale Retry-After — there is no upper ceiling on a raisable wait', () => {
     vi.setSystemTime(1_000_000);
     raiseWaitNotice(3_600_000); // @nestjs/throttler's 1-hour blockDuration, in ms

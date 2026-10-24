@@ -1,7 +1,3 @@
-/**
- * schedule-anchor-bridge — `GlideAnchor ↔ ScheduleStart` conversion +
- * owner-implicit `memberId` policy.
- */
 import { describe, expect, it } from 'vitest';
 import {
   scheduleStartToGlideAnchor,
@@ -32,8 +28,7 @@ describe('scheduleStartToGlideAnchor (inbound widen)', () => {
   });
 
   it('resolves an owner-implicit age.memberId to the passed memberRole', () => {
-    // Income owner-implicit: no stored memberId → resolves to the owner
-    // role so the picker displays/bounds the actual owner.
+    // Income owner-implicit (no stored memberId) resolves to the owner role so the picker displays and bounds the actual owner.
     expect(
       scheduleStartToGlideAnchor(
         { kind: 'age', years: 65, months: 0 },
@@ -49,7 +44,6 @@ describe('scheduleStartToGlideAnchor (inbound widen)', () => {
   });
 
   it('preserves a non-zero months on an untouched age (no collapse at the boundary)', () => {
-    // The bridge translates only; it does not zero a legacy months.
     expect(
       scheduleStartToGlideAnchor({ kind: 'age', years: 65, months: 6 }),
     ).toEqual({ kind: 'age', memberId: 'primary', years: 65, months: 6 });
@@ -68,9 +62,6 @@ describe('glideAnchorToScheduleStart (outbound narrow)', () => {
   });
 
   it('rejects the two impossible glide-only kinds (guards to retirementStart)', () => {
-    // A Start picker never offers `durationFromExpenseStart` / `expenseEnd`
-    // (relativeKind / expenseEndKind are off). The exhaustive guard still
-    // refuses them rather than trust the caller.
     expect(
       glideAnchorToScheduleStart({
         kind: 'durationFromExpenseStart',
@@ -144,7 +135,6 @@ describe('glideAnchorToScheduleStart (outbound narrow)', () => {
 
 describe('round-trip (income owner-implicit partTime)', () => {
   it('a secondary-owned owner-implicit age stays owner-implicit through a years-only edit', () => {
-    // Inbound: owner-implicit age → resolves to the owner (secondary).
     const anchor = scheduleStartToGlideAnchor(
       { kind: 'age', years: 65, months: 0 },
       { memberRole: 'secondary' },
@@ -155,8 +145,6 @@ describe('round-trip (income owner-implicit partTime)', () => {
       years: 65,
       months: 0,
     });
-    // The picker edits the years (still anchored to the owner); outbound
-    // re-omits memberId because the role equals the owner.
     const edited: GlideAnchor = { ...anchor, years: 66 } as GlideAnchor;
     expect(
       glideAnchorToScheduleStart(edited, {
@@ -167,14 +155,12 @@ describe('round-trip (income owner-implicit partTime)', () => {
   });
 
   it('explicitly choosing the non-owner persists the role; re-choosing the owner re-omits it', () => {
-    // Owner is primary; user picks secondary → role kept.
     expect(
       glideAnchorToScheduleStart(
         { kind: 'age', memberId: 'secondary', years: 65, months: 0 },
         { memberSelectable: true, ownerRole: 'primary' },
       ),
     ).toEqual({ kind: 'age', memberId: 'secondary', years: 65, months: 0 });
-    // Re-choosing the owner (primary) → role re-omitted.
     expect(
       glideAnchorToScheduleStart(
         { kind: 'age', memberId: 'primary', years: 65, months: 0 },

@@ -32,7 +32,7 @@ import {
 } from '../db/store';
 import * as store from '../db/store';
 import { clearMonteCarloCache } from '../db/monte-carlo-cache';
-import { notifySelectedScenarioChanged } from '../lib/scenario-mutations';
+import { SELECTED_SCENARIO_CHANGED_EVENT } from '../lib/scenario-mutations';
 import type { Aggregate, ScenarioPayload } from '../db/types';
 
 vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
@@ -747,7 +747,7 @@ describe('ScenariosPage — reactive reads', () => {
     await waitFor(() => expect(screen.getByText('Base')).toBeInTheDocument());
   });
 
-  it('moves the Active highlight on notifySelectedScenarioChanged', async () => {
+  it('moves the Active highlight on SELECTED_SCENARIO_CHANGED_EVENT', async () => {
     await seedScenario({
       id: 'sc-base',
       name: 'Base',
@@ -778,7 +778,7 @@ describe('ScenariosPage — reactive reads', () => {
       updatedAt: new Date().toISOString(),
     });
     await act(async () => {
-      notifySelectedScenarioChanged();
+      window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
     });
 
     const childRow = (await screen.findByText('Retire at 67')).closest(

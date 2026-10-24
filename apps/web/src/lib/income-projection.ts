@@ -60,7 +60,7 @@ export interface IncomeContext {
  * `tracksInflation`, else the stream's `colaPct` (default 0). The MC kernel receives arrays with
  * this growth already embedded, so CPI sampling must not re-apply COLA.
  */
-export function resolveIncomeColaPct(
+function resolveIncomeColaPct(
   payload: Pick<IncomeStreamPayload, 'tracksInflation' | 'colaPct'>,
   scenarioInflationPct: number,
 ): number {

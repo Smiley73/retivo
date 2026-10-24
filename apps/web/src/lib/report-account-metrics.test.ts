@@ -1,6 +1,3 @@
-/**
- * Focused contract tests for PDF report account metrics.
- */
 import { describe, expect, it } from 'vitest';
 import type {
   AccountBalancePayload,

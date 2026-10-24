@@ -1,6 +1,6 @@
 // Shared client retry policy: full-jitter delay, `Retry-After` parsing and the rule that a served wait wins. `POST /auth/refresh` keeps its own cooldown.
 
-export const RETRY_BASE_MS = 15_000;
+const RETRY_BASE_MS = 15_000;
 
 /** Cap on every computed delay, and the cutoff above which a served `Retry-After` is ignored. */
 export const RETRY_CAP_MS = 120_000;
@@ -11,7 +11,7 @@ const RETRY_AFTER_JITTER_RATIO = 0.2;
 const RETRY_AFTER_FLOOR_MS = 1_000;
 
 /** Full-jitter delay `random() × min(cap, base × 2^attempt)` for a zero-based attempt. */
-export function nextRetryDelayMs(attempt: number): number {
+function nextRetryDelayMs(attempt: number): number {
   const exponent = Math.max(0, attempt);
   const ceiling = Math.min(RETRY_CAP_MS, RETRY_BASE_MS * 2 ** exponent);
   return Math.random() * ceiling;

@@ -26,7 +26,6 @@ describe('release notes', () => {
     for (const note of RELEASE_NOTES) {
       expect(note.date).toMatch(ISO_DATE);
       expect(Number.isNaN(Date.parse(note.date))).toBe(false);
-      // Strict calendar validation: year/month/day must round-trip
       const [year, month, day] = note.date.split('-').map(Number);
       const utc = new Date(Date.UTC(year!, month! - 1, day!));
       expect(utc.getUTCFullYear()).toBe(year!);
@@ -37,15 +36,11 @@ describe('release notes', () => {
 
   it('is maintained newest-first: dates are non-increasing (ties allowed)', () => {
     for (let i = 0; i < RELEASE_NOTES.length - 1; i += 1) {
-      // Array order is the display order — no runtime sort masks a slip.
       expect(RELEASE_NOTES[i]!.date >= RELEASE_NOTES[i + 1]!.date).toBe(true);
     }
   });
 
   it('the first (most recent) entry is no older than the newest backfilled entry', () => {
-    // The ship-stamped first entry's date must be >= the next entry's date,
-    // derived from the array itself so the invariant self-maintains (no literal
-    // ship-date constant to drift).
     if (RELEASE_NOTES.length >= 2) {
       expect(RELEASE_NOTES[0]!.date >= RELEASE_NOTES[1]!.date).toBe(true);
     }
@@ -94,8 +89,7 @@ describe('release notes', () => {
   });
 
   it('no note characterises an inherited Roth IRA’s five-year clock', () => {
-    // The What’s New page renders every past entry, so a historical blurb is an
-    // on-screen string like any other. Neither engine consults that clock now.
+    // The What's New page renders every past entry, so historical blurbs are on-screen strings like any other.
     for (const note of RELEASE_NOTES) {
       const text = `${note.title} ${note.blurb}`;
       if (!/inherited Roth/i.test(text)) continue;

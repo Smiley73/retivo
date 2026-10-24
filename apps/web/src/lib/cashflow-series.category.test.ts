@@ -1,19 +1,3 @@
-/**
- * Unit tests for the "by category" expense-mode of the cashflow series
- * builder (`buildCashflowSeries` with `categoryBand` present).
- *
- * The load-bearing invariant (the residual allocation): for both
- * display modes and both granularities,
- *   Σ point.byCategory === point.essential + point.discretionary (EXACT)
- * and `point.total` (incl. taxes) + `shortfallHeight` are BYTE-IDENTICAL
- * to the no-category run (they ride on the untouched
- * essential+discretionary+taxes, never re-summed from categories).
- *
- * Also covers: mixed-cadence per-category band values (continuous +
- * one-off in the same period); the zero-total / −100% guard; and the
- * two-factor MC basis case (split rides only on the displayed band, not
- * `basisDeflator`).
- */
 import { describe, expect, it } from 'vitest';
 import {
   buildCashflowSeries,
@@ -33,9 +17,7 @@ import type { SsMonthOutput } from './ss-projection';
 const FROM = 2030;
 const END = 2031;
 
-// Two categories: Housing (continuous, $18k/yr essential) + Medical
-// (continuous, $12k/yr essential, inflates faster). Their shares should
-// sum to the displayed essential+discretionary band exactly.
+// Housing $18k/yr + Medical $12k/yr, both continuous; their shares sum to the displayed band.
 const HOUSING = 'cat-housing';
 const MEDICAL = 'cat-medical';
 const ORDER = [HOUSING, MEDICAL] as const;
@@ -83,9 +65,7 @@ function expMonth(year: number, m: number): ExpenseProjectionMonthlyPoint {
   };
 }
 
-/** Per-month per-category split: Housing run-rate $18k/yr + Medical
- *  $12k/yr (both continuous) — plus a discretionary $6k spread onto
- *  Housing so Σ = 30k matches the band. */
+// Housing run-rate $18k/yr + Medical $12k/yr, plus $6k discretionary on Housing so the sum is 30k.
 function catMonth(
   year: number,
   m: number,
@@ -136,10 +116,6 @@ function catMonthly(): ExpenseCategoryMonthlyPoint[] {
   const out: ExpenseCategoryMonthlyPoint[] = [];
   for (let y = FROM; y <= END; y += 1) {
     for (let m = 0; m < 12; m += 1) {
-      // Housing carries 18k essential + 6k discretionary run-rate; Medical
-      // 12k essential → Σ run-rate 36k... but the band is 30k. The residual
-      // allocation rescales to the band, so absolute scale is irrelevant —
-      // only the 2:1-ish ratio matters. Use 18k:12k.
       out.push(catMonth(y, m, 18_000, 12_000));
     }
   }
@@ -229,7 +205,6 @@ describe('buildCashflowSeries — by-category tie-out invariant', () => {
         expect(rows.length).toBeGreaterThan(0);
         for (const r of rows) {
           expect(r.byCategory).toBeDefined();
-          // EXACT equality (===, no tolerance) by residual allocation.
           expect(sumBy(r.byCategory)).toBe(r.essential + r.discretionary);
         }
       }
@@ -249,7 +224,6 @@ describe('buildCashflowSeries — by-category tie-out invariant', () => {
         expect(a[i].essential).toBe(b[i].essential);
         expect(a[i].discretionary).toBe(b[i].discretionary);
         expect(a[i].taxes).toBe(b[i].taxes);
-        // The no-category run carries no byCategory map.
         expect(b[i].byCategory).toBeUndefined();
       }
     }
@@ -267,11 +241,7 @@ describe('buildCashflowSeries — by-category tie-out invariant', () => {
 
 describe('buildCashflowSeries — mixed-cadence per-category', () => {
   it('Monthly: a continuous category + a one-off category in the same month weight by monthlyBucket, not raw run-rate', () => {
-    // One month with Housing continuous ($18k/yr run-rate → $1,500/mo via
-    // monthlyBucket) and Medical a $12k one-off spike (literal $12k that
-    // month). monthlyBucket(recurring=12k, spike=12k) === 12k (the whole
-    // amount stays literal, NOT ÷12). So the share weights are 1,500 :
-    // 12,000 — Medical dominates the month, the correct cadence weight.
+    // Housing continuous ($1,500/mo) and Medical a $12k one-off: monthlyBucket keeps a one-off literal (not ÷12), so Medical dominates the month.
     const monthly: ExpenseCategoryMonthlyPoint[] = [];
     for (let y = FROM; y <= END; y += 1) {
       for (let m = 0; m < 12; m += 1) {
@@ -298,15 +268,11 @@ describe('buildCashflowSeries — mixed-cadence per-category', () => {
     const jun = cashflowMonthly.find(
       (r) => r.year === FROM && r.month0 === 5,
     )!;
-    // Band: essential+discretionary monthly = 30k/12 = 2,500.
     const band = jun.essential + jun.discretionary;
-    // Share weights: Housing monthlyBucket(18k,0)=1,500; Medical
-    // monthlyBucket(12k,12k)=12,000. Medical share = 12000/13500.
+    // Share weights: Housing 1,500, Medical 12,000.
     const medicalShare = (12_000 / 13_500) * band;
     expect(jun.byCategory![MEDICAL]).toBeCloseTo(medicalShare, 6);
-    // Σ still exact.
     expect(sumBy(jun.byCategory)).toBe(band);
-    // A non-spike month: Medical contributes 0 (run-rate 0).
     const jul = cashflowMonthly.find(
       (r) => r.year === FROM && r.month0 === 6,
     )!;
@@ -346,10 +312,7 @@ describe('buildCashflowSeries — orphan-category redistribution (deleted catego
   const ORPHAN = 'cat-orphan';
 
   it('redistributes spend from a category absent from categoryOrder across the present ones (Σ === band, orphan absent)', () => {
-    // A third category (catOrphan) carries real spend in the band-basis
-    // per-category maps, but `categoryOrder` lists only the two present
-    // categories — simulating an expense whose category was deleted, so
-    // `assembleCategoryMeta` dropped it from categoryMeta/categoryOrder.
+    // An orphan category (deleted, so dropped from categoryOrder) still carries spend in the band maps.
     const yearly: ExpenseCategoryYearPoint[] = [];
     for (let y = FROM; y <= END; y += 1) {
       yearly.push({
@@ -374,18 +337,14 @@ describe('buildCashflowSeries — orphan-category redistribution (deleted catego
       }
     }
     const input = makeInput({
-      // categoryOrder EXCLUDES the orphan id (only HOUSING + MEDICAL present).
       categoryBand: { monthly, yearly, categoryOrder: [...ORDER] },
     });
     const { cashflowYearly } = buildCashflowSeries(input);
     expect(cashflowYearly.length).toBeGreaterThan(0);
     for (const r of cashflowYearly) {
       const band = r.essential + r.discretionary;
-      // The FULL band is still allocated across the present categories
-      // (Σ === band exactly) — the orphan's 10k share is silently
-      // redistributed across Housing + Medical, overstating them.
+      // The orphan's 10k share is redistributed across the present categories, overstating them.
       expect(sumBy(r.byCategory)).toBe(band);
-      // The orphan id never appears as a result key.
       expect(r.byCategory).toBeDefined();
       expect(Object.keys(r.byCategory!)).toEqual([HOUSING, MEDICAL]);
       expect(r.byCategory![ORPHAN]).toBeUndefined();
@@ -395,13 +354,11 @@ describe('buildCashflowSeries — orphan-category redistribution (deleted catego
 
 describe('buildCashflowSeries — two-factor MC basis', () => {
   it('the category split rides on the displayed band, not basisDeflator', () => {
-    // viewDeflator (earned band) ≠ basisDeflator (MC withdrawal/taxes).
     const viewDeflator = buildViewDeflator('today', {
       nowYear: FROM,
       nowMonthIndex: 0,
       inflationPct: 0,
     });
-    // A path CPI that diverges from the flat view deflator.
     const basisDeflator = (year: number): number =>
       1 / Math.pow(1.07, year - FROM);
     const input = makeInput({
@@ -411,7 +368,6 @@ describe('buildCashflowSeries — two-factor MC basis', () => {
     });
     const { cashflowYearly } = buildCashflowSeries(input);
     for (const r of cashflowYearly) {
-      // Tie-out holds regardless of the divergent basisDeflator.
       expect(sumBy(r.byCategory)).toBe(r.essential + r.discretionary);
     }
   });
