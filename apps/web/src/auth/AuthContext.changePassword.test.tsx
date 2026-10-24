@@ -290,7 +290,12 @@ describe('AuthContext — atomic password change', () => {
     );
   });
 
-  it('a post-commit rollback-pin failure retries once, then fails CLOSED: locks the workspace and reports the known-committed outcome, never an unknown server outcome', async () => {
+  // Whether or not the localStorage floor persists, the outcome is the same: never a silent success.
+  it.each([
+    ['the floor persists', true],
+    ['the floor ALSO fails to persist', false],
+  ])('a post-commit rollback-pin failure where %s retries once, then fails CLOSED: locks the workspace and reports the known-committed outcome, never an unknown server outcome', async (_name, floorPersisted) => {
+    raiseEnvelopeSetPinFloor.mockReturnValue(floorPersisted);
     await renderAuth();
     await loginUnlocked();
 
