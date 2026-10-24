@@ -2,9 +2,23 @@
 import 'fake-indexeddb/auto';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TierEditor, moveAccountAcrossTiers } from './scenario-withdrawal-strategy-tier-editor';
+import type { DragAndDropOptions } from 'react-aria-components';
+import { TierEditor } from './scenario-withdrawal-strategy-tier-editor';
 import { expectNoA11yViolations } from '../test/a11y';
 import type { AccountPayload, Aggregate } from '../db/types';
+
+// React Aria DnD does not function in jsdom, so the hook's options are captured and the drop handlers driven directly.
+const dndOptions = vi.hoisted(() => [] as DragAndDropOptions[]);
+vi.mock('react-aria-components', async () => {
+  const actual = await vi.importActual<typeof import('react-aria-components')>('react-aria-components');
+  return {
+    ...actual,
+    useDragAndDrop: (options: DragAndDropOptions) => {
+      dndOptions.push(options);
+      return actual.useDragAndDrop(options);
+    },
+  };
+});
 
 function makeAccount(id: string, name: string): Aggregate<AccountPayload> {
   return {
@@ -154,29 +168,52 @@ describe('TierEditor — Remove tier', () => {
   });
 });
 
-// React Aria DnD (useDragAndDrop) does not function in jsdom, so the exported `moveAccountAcrossTiers` pure function (the logic the DnD handlers call) is tested directly.
-
 describe('TierEditor — cross-tier move logic', () => {
-  it('moving account from tier 1 to tier 2 produces correct tier arrays', () => {
-    const { tiers: nextTiers, excludedAccountIds: nextExcluded } =
-      moveAccountAcrossTiers([['a1'], ['a2']], [], 'a2', 'tier-0', 'a1');
-    expect(nextTiers[0]).toEqual(['a2', 'a1']);
-    expect(nextTiers[1]).toEqual([]);
-    expect(nextExcluded).toEqual([]);
+  const dragItem = (id: string) => ({
+    kind: 'text',
+    types: new Set(['application/x-tier-account-id']),
+    getText: async () => id,
+  }) as never;
+
+  function renderTiers(tiers: string[][], onChange: (tiers: string[][], excluded: string[]) => void) {
+    dndOptions.length = 0;
+    render(
+      <TierEditor
+        tiers={tiers}
+        excludedAccountIds={[]}
+        accounts={ACCOUNTS}
+        cbpInfoRows={[]}
+        onChange={onChange}
+        onElectPayout={vi.fn()}
+        onReviewPensions={vi.fn()}
+      />,
+    );
+    // One option set per TierList on the first render: tier-0..tier-N, then Excluded.
+    return dndOptions.slice(0, tiers.length + 1);
+  }
+
+  it('moving account from tier 1 to tier 2 produces correct tier arrays', async () => {
+    const onChange = vi.fn();
+    const [tier0] = renderTiers([['a1'], ['a2']], onChange);
+    await tier0.onInsert!({
+      items: [dragItem('a2')],
+      target: { type: 'item', key: 'a1', dropPosition: 'before' },
+    } as never);
+    expect(onChange).toHaveBeenCalledWith([['a2', 'a1'], []], []);
   });
 
-  it('moving account to Excluded removes it from tiers', () => {
-    const { tiers: nextTiers, excludedAccountIds: nextExcluded } =
-      moveAccountAcrossTiers([['a1', 'a2']], [], 'a1', 'excluded');
-    expect(nextTiers[0]).toEqual(['a2']);
-    expect(nextExcluded).toEqual(['a1']);
+  it('moving account to Excluded removes it from tiers', async () => {
+    const onChange = vi.fn();
+    const [, excluded] = renderTiers([['a1', 'a2']], onChange);
+    await excluded.onRootDrop!({ items: [dragItem('a1')] } as never);
+    expect(onChange).toHaveBeenCalledWith([['a2']], ['a1']);
   });
 
-  it('moving account to end of a tier (no beforeId) appends correctly', () => {
-    const { tiers: nextTiers } =
-      moveAccountAcrossTiers([['a1', 'a2'], []], [], 'a1', 'tier-1');
-    expect(nextTiers[0]).toEqual(['a2']);
-    expect(nextTiers[1]).toEqual(['a1']);
+  it('moving account to end of a tier (no beforeId) appends correctly', async () => {
+    const onChange = vi.fn();
+    const [, tier1] = renderTiers([['a1', 'a2'], []], onChange);
+    await tier1.onRootDrop!({ items: [dragItem('a1')] } as never);
+    expect(onChange).toHaveBeenCalledWith([['a2'], ['a1']], []);
   });
 });
 
