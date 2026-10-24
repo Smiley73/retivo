@@ -1,53 +1,18 @@
-/**
- * Feature flags — the beta-feature registry and the build-time config that
- * decides which beta features a given build OFFERS.
- *
- * Two independent switches gate every beta feature:
- *   1. **Build config** (`VITE_BETA_FEATURES`, resolved at build time by Vite):
- *      which beta features this bundle offers at all. `all` (the default when
- *      unset/blank) offers every registered feature, `none` offers none, and a
- *      comma-separated id list offers exactly those. Deployed stacks thread it
- *      from the `retivo:betaFeatures` Pulumi stack config (deploy scripts).
- *   2. **User preference** ("Show beta features", Settings → Preferences, held
- *      in `BetaFeaturesContext`): whether this person wants to see the offered
- *      beta features. Off by default.
- *
- * A feature is VISIBLE only when both say yes. Hidden features drop out of the
- * sidebar, their routes render a gate notice, and their PDF sections are
- * omitted from the export.
- *
- * Promoting a feature out of beta = delete its registry entry (and the
- * `betaFeature` reference on its sidebar item / route gate). Nothing else
- * changes: the feature simply stops being flag-gated. Each entry records who
- * owns the flag, the date it entered beta, and the date by which the owner
- * must decide to promote or retire it (CODING_STANDARDS.md Definition of
- * Done: a feature flag carries an owner + a removal date). The registry test
- * fails once a `reviewBy` date is in the past, so a forgotten flag cannot
- * linger silently.
- *
- * Framework-free: pure data + parsing. The React side lives in
- * `contexts/BetaFeaturesContext.tsx`.
- */
+// Beta-feature registry and the build config deciding which features a build offers; a feature shows only when the build offers it and the user's preference is on.
+// Promoting a feature out of beta means deleting its entry and its `betaFeature` references.
 
-/** Stable ids — referenced by sidebar items, route gates, and the config list. */
 export type BetaFeatureId = 'projected-withdrawals' | 'guardrails' | 'ai-assistants';
 
 export interface BetaFeature {
   readonly id: BetaFeatureId;
-  /** Plain-language name — the sidebar label and the gate notice's page title. */
   readonly label: string;
-  /** PDF export sections (manifest ids) that belong to this feature. */
   readonly pdfSectionIds: readonly string[];
-  /** Who decides when the flag goes (GitHub handle). */
   readonly owner: string;
-  /** ISO date the feature entered beta. */
   readonly since: string;
-  /** ISO date by which the owner promotes or retires the feature; the
-   *  registry test turns red once it has passed. */
+  /** ISO date by which the owner promotes or retires the feature; the registry test fails once it has passed. */
   readonly reviewBy: string;
 }
 
-/** Every feature currently marked Beta, in display order. */
 export const BETA_FEATURES: readonly BetaFeature[] = [
   {
     id: 'projected-withdrawals',
@@ -81,7 +46,6 @@ function isBetaFeatureId(value: string): value is BetaFeatureId {
   return KNOWN_IDS.has(value);
 }
 
-/** Registry lookup by id — the single source for a feature's label. */
 export function betaFeature(id: BetaFeatureId): BetaFeature {
   const found = BETA_FEATURES.find((f) => f.id === id);
   if (!found) throw new Error(`Unknown beta feature: ${id}`);
@@ -89,13 +53,11 @@ export function betaFeature(id: BetaFeatureId): BetaFeature {
 }
 
 /**
- * Parse the `VITE_BETA_FEATURES` value into the set of OFFERED feature ids.
- * Unset / blank / `all` → every registered feature; `none` → empty; otherwise
- * a comma-separated id list (whitespace-tolerant, case-insensitive). Unknown
- * ids are reported through `onUnknownId` and otherwise ignored, so a typo in a
- * local `.env` degrades to "that feature is not offered" rather than a broken
- * app. (Deploys never get this far with a typo: `build_spa` validates the
- * stack config against this registry and fails the deploy loud.)
+ * Parses `VITE_BETA_FEATURES` into the offered ids: unset, blank or `all` offers
+ * every feature, `none` offers none, else a comma-separated id list
+ * (case-insensitive). Unknown ids go to `onUnknownId` and are ignored, so a typo
+ * in a local `.env` hides that feature rather than breaking the app; deploys fail
+ * loud on one in `build_spa`.
  */
 export function parseBetaFeatureConfig(
   raw: string | undefined,
@@ -114,21 +76,13 @@ export function parseBetaFeatureConfig(
   return offered;
 }
 
-/**
- * The beta features this build offers — resolved once at module load from the
- * Vite-baked `VITE_BETA_FEATURES`. An unknown id is a config mistake worth a
- * console warning (never a throw: the app must still boot).
- */
+/** The beta features this build offers, resolved once at load; an unknown id warns, never throws, so the app still boots. */
 export const OFFERED_BETA_FEATURE_IDS: ReadonlySet<BetaFeatureId> = parseBetaFeatureConfig(
   import.meta.env.VITE_BETA_FEATURES as string | undefined,
   (id) => console.warn(`[feature-flags] VITE_BETA_FEATURES names an unknown beta feature: "${id}"`),
 );
 
-/**
- * PDF export sections to omit — the sections of every beta feature that is
- * NOT visible under `isVisible`. The export's section manifest is fixed in
- * order; this is the filter the Report page hands to the builder.
- */
+/** PDF sections of every beta feature not visible under `isVisible`; the Report page hands this filter to the builder. */
 export function hiddenBetaPdfSectionIds(
   isVisible: (id: BetaFeatureId) => boolean,
 ): ReadonlySet<string> {

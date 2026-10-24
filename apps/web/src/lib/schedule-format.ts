@@ -1,15 +1,6 @@
-/**
- * Display helpers for `ScheduleStart` / `ScheduleEnd` anchors. Pure
- * functions — no React, no DOM. Used by the expense list, income
- * schedule formatter, scenario-overrides UI, and any future feature
- * that needs to render a schedule anchor as user-facing copy.
- *
- * Naming: prefer the household member's `firstName` for any human-
- * readable copy. Fall back to capitalised `Primary` / `Secondary` (or
- * lowercase variants in mid-sentence positions) only when the members
- * list is unavailable or the matching member has no first name set.
- * See AGENTS.md → "UI coding standards" for the rule.
- */
+// Display helpers for `ScheduleStart` / `ScheduleEnd` anchors. Copy prefers the member's `firstName`, falling back to
+// `Primary` / `Secondary` (see AGENTS.md "UI coding standards").
+
 import type {
   Aggregate,
   GlideAnchor,
@@ -20,13 +11,6 @@ import type {
 } from '../db/types';
 import { formatAgeYearsMonths } from './format-age';
 
-/**
- * Resolve a `HouseholdRole` reference to a display label, preferring the
- * household member's `firstName`. If `members` is omitted, or the
- * matching member has no first name set, returns `fallback` so the
- * caller can supply the right casing for its sentence position
- * (`'Primary'` for sentence-start, `'primary'` for mid-sentence).
- */
 function resolveMemberLabel(
   role: HouseholdRole,
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>> | undefined,
@@ -39,9 +23,6 @@ function resolveMemberLabel(
   return first || fallback;
 }
 
-/** Render a `ScheduleStart` as a sentence-start phrase
- *  ("Start of retirement", "Christopher age 65", "Year 2034",
- *  "age 65" when memberId is absent). */
 export function describeStart(
   start: ScheduleStart,
   members?: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
@@ -52,9 +33,7 @@ export function describeStart(
       return 'Start of retirement';
     case 'age': {
       const agePhrase = `age ${formatAgeYearsMonths({ years: start.years, months: start.months })}`;
-      // memberId absent → owner-implicit usage (income). Render the
-      // age without a member prefix; the caller (e.g. owner-grouped
-      // income list) supplies its own owner context.
+      // No `memberId` means owner-implicit (income): the caller's owner-grouped list supplies the owner.
       if (!start.memberId) return agePhrase;
       const fallback =
         ownerFallback === 'capitalised'
@@ -72,9 +51,6 @@ export function describeStart(
   }
 }
 
-/** Render a `ScheduleEnd` as a mid-sentence phrase ("until death of
- *  Christopher", "primary age 70", "year 2034"). `undefined` →
- *  `(no end set)`. */
 export function describeEnd(
   end: ScheduleEnd | undefined,
   members?: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
@@ -105,8 +81,7 @@ export function describeEnd(
       return `until death of ${whose}`;
     }
     case 'endOfRetirementYear': {
-      // Storage `offsetYears` is 0-indexed (0 = first year only); the
-      // human reading is `offsetYears + 1` retirement years covered.
+      // `offsetYears` is 0-indexed, so the reading is `offsetYears + 1` retirement years.
       const n = end.offsetYears + 1;
       return n === 1
         ? 'for the first retirement year'
@@ -120,12 +95,7 @@ export function describeEnd(
   }
 }
 
-/** Render a `GlideAnchor` as a sentence-start summary phrase for the
- *  anchor-card collapsed view ("Start of retirement", "Christopher age
- *  65", "Year 2034", "3 years after it begins", "When this expense
- *  ends"). The shared `retirementStart` / `age` / `year` kinds reuse
- *  `describeStart` (the glide `age` is years-only, so months render as
- *  0); the two glide-only kinds are formatted here. */
+/** Sentence-start summary for the anchor card ("3 years after it begins", "When this expense ends"); the shared kinds reuse `describeStart`. */
 export function describeGlideAnchor(
   anchor: GlideAnchor,
   members?: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
@@ -134,7 +104,6 @@ export function describeGlideAnchor(
     case 'retirementStart':
     case 'age':
     case 'year':
-      // Structural subset of `ScheduleStart` — same display vocabulary.
       return describeStart(anchor, members);
     case 'durationFromExpenseStart': {
       const years = Math.floor(anchor.months / 12);

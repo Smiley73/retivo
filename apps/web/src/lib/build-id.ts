@@ -1,52 +1,16 @@
-/**
- * Build id propagation for the "new version available" banner.
- *
- * The SPA bakes a build id at compile time (vite.config.ts → `define`
- * substitutes `__BUILD_ID__` from `process.env.VITE_BUILD_ID`). The
- * API echoes its own build id on every response via `X-Build-Id` (set
- * by `BuildIdMiddleware`). The api/client.ts layer feeds every observed
- * server build id through `recordServerBuildId` below.
- *
- * Two-step gate (so the banner doesn't fire while a deploy is mid-flight):
- *
- *   1. **API mismatch** — `X-Build-Id !== CLIENT_BUILD_ID`. The api
- *      Lambda's env var flips first during `pulumi up`; this signal
- *      arrives ~30–90s before the new SPA bundle is actually live on
- *      CloudFront. Acting on this alone caused the "reload → same
- *      banner reappears" loop the user reported.
- *
- *   2. **Bundle live** — verify by fetching `/build-id.json` (a tiny
- *      asset Vite emits into the bundle, served with `no-cache` + an
- *      explicit CF invalidation on every deploy). Only when that file's
- *      `buildId` matches the server's `X-Build-Id` do we surface the
- *      banner — at that point a reload will *actually* fetch the new
- *      bundle.
- *
- * If the verification says the deployed bundle is still the client's
- * own id (CF hasn't caught up yet), we stay quiet and re-check on the
- * next API response. A 5s throttle prevents hammering `/build-id.json`
- * while many requests fan out during a deploy window.
- *
- * Local-dev short-circuit: when either side is `dev` (vite-dev, vitest,
- * or a Lambda without `BUILD_ID` set) we never raise a mismatch — both
- * sides churn independently and a banner would just be noise.
- *
- * Only one stale build id is ever surfaced at a time; the banner shows
- * the *latest* server build id, and `dismissCurrentMismatch()`
- * suppresses re-prompting for that exact id within the session.
- *
- * The surfaced mismatch carries a `reason` (`'build-mismatch'` |
- * `'schema-ahead'`) so `<VersionBanner>` can
- * pick copy that matches what actually happened: a routine deploy vs. a
- * pulled row this bundle's migration registry cannot read yet
- * (`recordSchemaAhead`, called from `SyncContext`'s schema-ahead guard).
- */
+// Detects a newer deployed build and raises the `<VersionBanner>` update prompt.
+// The rules sit on `CLIENT_BUILD_ID`, `recordServerBuildId` and `recordSchemaAhead`.
 
 declare global {
-  /** Injected by Vite at build time via `define` in vite.config.ts. */
+  /** Injected by Vite's `define`. */
   const __BUILD_ID__: string | undefined;
 }
 
+/**
+ * Build id baked in at compile time. `dev` (vite-dev, vitest, or a Lambda
+ * without `BUILD_ID`) never raises a mismatch, so do not rename or special-case
+ * it without updating the detector.
+ */
 export const CLIENT_BUILD_ID: string =
   typeof __BUILD_ID__ === 'string' && __BUILD_ID__.length > 0 ? __BUILD_ID__ : 'dev';
 
@@ -54,11 +18,7 @@ const DISMISS_KEY = 'retivo.versionBanner.dismissedBuildId';
 const VERIFY_THROTTLE_MS = 5_000;
 const VERIFY_TIMEOUT_MS = 3_000;
 
-/**
- * Why the banner is being raised, so `<VersionBanner>` can pick its copy
- *: a plain deploy vs. a schema-ahead row the
- * current bundle truly cannot read.
- */
+/** `schema-ahead` is a synced row this bundle cannot read; `build-mismatch` is a routine deploy. */
 export type MismatchReason = 'build-mismatch' | 'schema-ahead';
 
 export interface VersionMismatch {
@@ -68,33 +28,17 @@ export interface VersionMismatch {
 
 type Listener = (mismatch: VersionMismatch | null) => void;
 
-/**
- * Result of a `/build-id.json` lookup against an observed server build id.
- *  - `live`    — deployed bundle matches the server id; safe to prompt.
- *  - `old`     — deployed bundle is still the client's own id; CF behind.
- *  - `unknown` — fetch failed, parsed nothing useful, or some third id;
- *                stay quiet, retry on next API response.
- */
 type BundleVerification = 'live' | 'old' | 'unknown';
 
 export type BundleVerifier = (serverBuildId: string) => Promise<BundleVerification>;
 
 let currentMismatch: VersionMismatch | null = null;
 let pendingServerBuildId: string | null = null;
-// The reason tag for `pendingServerBuildId`'s in-flight verification.
-// Read fresh (not captured at call time) when a verification resolves,
-// so a `recordSchemaAhead` that arrives while a `recordServerBuildId`
-// verification is already in flight still tags the eventual mismatch
-// with the stronger 'schema-ahead' reason.
 let pendingReason: MismatchReason = 'build-mismatch';
 let lastSeenServerBuildId: string | null = null;
 let lastVerifyAt = 0;
 let verifyInFlight = false;
 const listeners = new Set<Listener>();
-// Test override for the compile-time client id. Production code goes
-// through `recordServerBuildId`, which uses CLIENT_BUILD_ID; tests can
-// flip this via `__setClientBuildIdForTest` to exercise the mismatch
-// path without rebuilding the module.
 let activeClientId: string = CLIENT_BUILD_ID;
 
 const defaultVerifier: BundleVerifier = async (serverBuildId) => {
@@ -134,15 +78,11 @@ function writeDismissed(id: string): void {
   try {
     window.sessionStorage.setItem(DISMISS_KEY, id);
   } catch {
-    // Storage may be unavailable (private mode, quota); banner just
-    // re-shows next time, which is acceptable.
+        // Storage may be unavailable; the banner just re-shows.
   }
 }
 
-/**
- * Pure comparator. Exported for tests so the banner logic can be
- * verified without touching window state.
- */
+/** Pure comparator; a `dev` id on either side never mismatches. */
 export function isMismatch(clientId: string, serverId: string | null | undefined): boolean {
   if (!serverId) return false;
   if (clientId === 'dev' || serverId === 'dev') return false;
@@ -150,18 +90,22 @@ export function isMismatch(clientId: string, serverId: string | null | undefined
 }
 
 /**
- * Called by the API client on every response. Compares the server's
- * build id against the compile-time client id; on a real mismatch
- * (and not the one the user already dismissed) records it as pending
- * and kicks off a bundle-live verification. Listeners are notified
- * only after verification confirms the new bundle is fetchable.
+ * Fed the `X-Build-Id` of every API response. The banner needs two steps, so
+ * it does not fire while a deploy is mid-flight:
+ * 1. The server id differs from the client id and was not dismissed this
+ *    session. The API flips first, so this alone prompts a reload that still
+ *    loads the old bundle.
+ * 2. `/build-id.json` (emitted into the bundle, served `no-cache`, invalidated
+ *    on every deploy) reports the server's id, so a reload fetches the new bundle.
+ *
+ * Until step 2 passes it stays quiet and retries on the next response, at most
+ * every 5s. Listeners are notified only after step 2.
  */
 export function recordServerBuildId(serverBuildId: string | null | undefined): void {
   if (typeof serverBuildId === 'string' && serverBuildId.length > 0) {
     lastSeenServerBuildId = serverBuildId;
   }
   if (!isMismatch(activeClientId, serverBuildId)) return;
-  // Safe non-null after isMismatch.
   const id = serverBuildId as string;
   if (currentMismatch?.buildId === id) return;
   if (readDismissed() === id) return;
@@ -171,25 +115,14 @@ export function recordServerBuildId(serverBuildId: string | null | undefined): v
 }
 
 /**
- * Called by the sync layer when an apply step encounters a payload at a
- * `schemaVersion` higher than the local migration registry can handle.
- * The current bundle truly cannot read the row — sync has already been
- * halted (no IDB write, no cursor advance) — and the user needs to
- * reload to pick up the newer bundle that ships the migration.
- *
- * Reuses the same VersionBanner surface as a normal build-id mismatch:
- * the response that delivered the schema-ahead row carried `X-Build-Id`
- * which `recordServerBuildId` already captured into `lastSeenServerBuildId`.
- * A previously-dismissed banner for that id is forced back on, since the
- * user may have suppressed an "update available" prompt before this
- * stronger signal arrived.
+ * Raises the banner with reason `schema-ahead`: sync met a row newer than this
+ * bundle's migration registry and halted, so only a reload helps. Forces the
+ * banner back on if it was dismissed for the latest server build id.
  */
 export function recordSchemaAhead(): void {
   const id = lastSeenServerBuildId;
   if (!id) {
-    // Should be unreachable: schema-ahead is only detected on apply of
-    // a sync response, which always carries `X-Build-Id`. Log so the
-    // gap is observable rather than silent.
+        // Unreachable in practice (a sync response always carries `X-Build-Id`); logged so a gap is visible.
     console.warn('[build-id] schema-ahead reported before any server build id observed');
     return;
   }
@@ -198,8 +131,7 @@ export function recordSchemaAhead(): void {
     try {
       window.sessionStorage.removeItem(DISMISS_KEY);
     } catch {
-      // Storage may be unavailable; banner just won't suppress on the
-      // next round, which is fine.
+            // Storage may be unavailable; the banner just won't suppress next round.
     }
   }
   if (currentMismatch?.buildId === id) return;
@@ -215,8 +147,6 @@ async function runVerification(): Promise<void> {
   if (now - lastVerifyAt < VERIFY_THROTTLE_MS) return;
   const id = pendingServerBuildId;
   if (id === null) return;
-  // Re-check guards — state may have shifted between caller invocation
-  // and this microtask running.
   if (currentMismatch?.buildId === id) return;
   if (readDismissed() === id) return;
 
@@ -225,24 +155,17 @@ async function runVerification(): Promise<void> {
   try {
     const result = await verifier(id);
     if (result !== 'live') {
-      // 'old' (CF still serving the previous bundle) or 'unknown'
-      // (fetch failed / unexpected payload) — leave pendingServerBuildId
-      // set so the next recordServerBuildId after the throttle window
-      // re-runs verification.
+            // 'old' or 'unknown': leave pendingServerBuildId set so the next response after the throttle retries.
       return;
     }
-    // Verification was for `id`. If a newer server build id arrived
-    // mid-flight, discard this result; the newer id will trigger its
-    // own verification.
+        // A newer server id arrived mid-flight: drop this result, the newer id verifies itself.
     if (pendingServerBuildId !== id) return;
     if (readDismissed() === id) {
       pendingServerBuildId = null;
       return;
     }
     pendingServerBuildId = null;
-    // Read `pendingReason` fresh (not captured at the top of this
-    // function) so a `recordSchemaAhead` that arrived after this
-    // verification started still wins.
+        // Read fresh, so a `recordSchemaAhead` that arrived during verification still wins.
     currentMismatch = { buildId: id, reason: pendingReason };
     for (const l of listeners) l(currentMismatch);
   } finally {

@@ -1,102 +1,38 @@
-/**
- * The app's single toast queue. Backs the
- * ONE bottom-anchored toast region the app renders
- * (`components/AppToastRegion.tsx`) — `VersionBanner.tsx` used to own its own
- * `ToastQueue` + `ToastRegion` pair; that queue is now this shared one
- * (`VersionBanner` still enqueues into it, it just no longer renders the
- * region itself), and the wait-notice raisers below feed the same queue with
- * a second content kind. Standing up a second queue/region for the wait
- * notice would place two absolutely-positioned stacks at the same screen
- * coordinates — they would overlap, not stack.
- *
- * Lives under `lib/` (not `components/`) so `lib/account-export-client.ts`
- * and `lib/server-data-export.ts` can import `raiseWaitNotice` without
- * tripping `.dependency-cruiser.cjs`'s `lib-independent-of-ui` rule: that
- * rule bans `lib/**` from importing `components/`/`pages/` MODULE paths, not
- * the `react-aria-components` package itself.
- *
- * Nothing UI-framework-shaped lives here beyond the queue: no React, no
- * rendering — just the union content type, the singleton queue, and the
- * wait-notice raise entry point.
- */
+// The app's single toast queue, behind the one region `components/AppToastRegion.tsx` renders: a second region
+// would overlap this one at the same screen position. In `lib/` so non-UI modules can raise a wait notice.
+
 import { UNSTABLE_ToastQueue as ToastQueue } from 'react-aria-components';
 import type { MismatchReason } from './build-id';
 
-/** The build-mismatch reload prompt (relocated from `VersionBanner.tsx`,
- *  copy/behaviour unchanged). Not exported — nothing outside this module
- *  needs it standalone; consumers use it through the `AppToastContent`
- *  union. */
 interface VersionToastContent {
   kind: 'version';
-  /** The server build id that triggered the prompt (toast identity). */
   mismatch: string;
-  /** Which copy variant to render — see `descriptionFor` in
-   *  `AppToastRegion.tsx`. */
   reason: MismatchReason;
 }
 
-/** The "please wait" notice a non-sync `Retry-After` observation raises. */
 export interface WaitToastContent {
   kind: 'wait';
-  /** Epoch-ms the wait ends. The region ticks its own visible countdown
-   *  from this; the queue module never runs a timer itself. */
+  /** Epoch-ms the wait ends; the region ticks its own countdown, this module runs no timer. */
   deadlineAt: number;
 }
 
 export type AppToastContent = VersionToastContent | WaitToastContent;
 
-/** The one app-wide toast queue. Default `maxVisibleToasts` (Infinity) is
- *  intentional — the version prompt and the wait notice must both be able
- *  to show at once, stacked in the one region. */
+// Default `maxVisibleToasts` (Infinity) is intended: the version prompt and the wait notice must show together.
 export const appToastQueue = new ToastQueue<AppToastContent>();
 
-/** Key + deadline of the currently-live wait toast, or `null` when none is
- *  live. Module-level (not component state): the raisers below are called
- *  from plain modules (`api/client.ts`, `lib/server-data-export.ts`,
- *  `lib/account-export-client.ts`), never from a React component. */
+// Module-level, not component state: the raisers run in plain modules, not React components.
 let currentWaitKey: string | null = null;
 let currentWaitDeadlineAt: number | null = null;
 
-/**
- * How much LATER than the live notice's deadline a further observation must
- * land before it counts as an extension (3.experience.1). The region renders
- * the countdown at one-second granularity and `Retry-After` itself is
- * whole seconds, so a deadline inside this window is indistinguishable on
- * screen from the one already showing. Without it, N concurrent requests
- * all served the SAME `Retry-After` — the normal case under a shared
- * concurrency ceiling — arrive a few ms apart, compute deadlines that differ
- * by those few ms, and each one would close-and-re-add the toast: a fresh
- * `role="alert"` per response (re-announced in full N times), the visible
- * digits jumping back up a second, and a keyboard user mid-region losing
- * the Close button they were on.
- */
+// A further deadline within this tolerance counts as the live notice's own. Concurrent requests served the same `Retry-After`
+// differ by a few ms, and replacing the toast each time would re-announce its `role="alert"` and move focus off a keyboard user's Close button.
 const WAIT_EXTEND_TOLERANCE_MS = 1_000;
 
 /**
- * Raise the "please wait" notice for a `Retry-After` the caller is about to
- * honor — everywhere except the sync loop (badge-only) and
- * `POST /auth/refresh` (both excluded at their own call sites, not
- * here). `waitMs` is the raw wait the server asked for.
- *
- * - A non-finite or non-positive wait (absent, unparseable, or already
- *   elapsed) raises nothing — there is nothing to wait for.
- * - There is NO upper ceiling: every non-sync
- *   observation raises with no cutoff, and this API's own
- *   hour-window throttles (MFA/step-up/change-email `ttl: 3_600_000`)
- *   really do serve `Retry-After` in the thousands of seconds on a
- *   required sign-in path — dropping those would leave the user with no
- *   notice at all exactly when the wait is longest. Whether the client
- *   RETRIES on a long wait is a separate, per-caller decision
- *   (`account-export-client.ts` only raises for a served wait it is about
- *   to honor; `retry-backoff.ts` owns that cap); this module only reports
- *   the wait the server asked for.
- * - While a wait notice is already live, a further observation only
- *   EXTENDS it to the LATER of the two deadlines rather than stacking a
- *   second toast: concurrent throttled requests are the normal case under
- *   a shared concurrency ceiling, and N stacked identical notices would be
- *   noise. A deadline that is earlier, equal, or later by no more than
- *   `WAIT_EXTEND_TOLERANCE_MS` is a no-op — the live notice already covers
- *   it, and replacing it would re-announce the whole toast.
+ * Raises the "please wait" notice for a `Retry-After` the caller is about to honor; the sync loop and `POST /auth/refresh` exclude themselves at their call sites.
+ * A non-finite or non-positive wait raises nothing. No upper ceiling: the hour-window MFA and step-up throttles serve waits in the thousands of seconds on a required sign-in path.
+ * A live notice is extended to a later deadline instead of stacking a second toast; an earlier or tolerance-close one is a no-op.
  */
 export function raiseWaitNotice(waitMs: number): void {
   if (!Number.isFinite(waitMs) || waitMs <= 0) return;
@@ -113,10 +49,7 @@ export function raiseWaitNotice(waitMs: number): void {
   const key = appToastQueue.add(
     { kind: 'wait', deadlineAt },
     {
-      // Fires whether the toast closes by the region's own zero-countdown
-      // close, the user's Dismiss, or the coalescing replace above — every
-      // path must clear this module's notion of "which toast is live" so
-      // the next raise doesn't try to extend an already-gone toast.
+      // Every close path (countdown, Dismiss, coalescing replace) must clear which toast is live.
       onClose: () => {
         if (currentWaitKey === key) {
           currentWaitKey = null;

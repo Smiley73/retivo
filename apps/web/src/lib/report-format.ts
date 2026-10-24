@@ -1,12 +1,5 @@
-/**
- * Pure display formatters for the CFP Report page, extracted from
- * `report-data.ts` so the aggregator file stays under the shape limit.
- * These are orthogonal to `buildReportData`: each is a
- * stateless string/number formatter (member names, retirement dates,
- * scenario age/strategy knobs, the plain-English discretionary-glide
- * summary, the report header timestamp, and the expense label/amount
- * helpers). `buildReportData` imports them; no logic changed in the move.
- */
+// Pure display formatters for the report page: member names, retirement dates, scenario knobs, the glide summary, the header timestamp and expense labels.
+
 import type {
   Aggregate,
   ExpensePayload,
@@ -18,20 +11,10 @@ import { describeGlideAnchor, describeStart } from './schedule-format';
 import { hasEffectiveFloor, NEUTRAL_END_PCT } from './expense-glide-format';
 import type { AgeYearsMonths } from './format-age';
 
-/** Default Social Security claim age (years) when no scenario override
- *  sets one — mirrors the SS UI / `buildSsContext` fallback. */
 export const DEFAULT_SS_CLAIM_AGE_YEARS = 67;
-/** Default retirement age (years) used only as an overview fallback when
- *  the scenario sets no `retirementAge` override at all. */
 export const DEFAULT_RETIREMENT_AGE_YEARS = 65;
 
-// ---------- Timestamp helper ----------
-
-/**
- * Render the report header timestamp, e.g. "Generated June 6, 2026 at
- * 2:34 PM". The `Date` is injected so tests can freeze the clock; the
- * page passes `new Date()` captured at mount.
- */
+/** Renders "Generated June 6, 2026 at 2:34 PM"; `now` is injected so tests can freeze the clock. */
 export function buildReportTimestamp(now: Date): string {
   const date = new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
@@ -45,22 +28,10 @@ export function buildReportTimestamp(now: Date): string {
   return `Generated ${date} at ${time}`;
 }
 
-// ---------- Glide summary ----------
-
-// Floor/ceiling effectiveness is the ONE shared direction-aware predicate
-// from `expense-glide-format.ts` so the summary and `isNeutralGlide`
-// can never diverge on the ceiling case: a *ceiling* above the glide end
-// (rising glide) is effective; a *floor* below it (falling glide) is too.
-
-/** "100%" / "70%" — the curve endpoints read as plain percentages. */
 function pct(n: number): string {
   return `${Math.round(n)}%`;
 }
 
-/** Glide anchor as a mid-sentence phrase ("the start of retirement",
- *  "Ada age 65", "the expense end", "3 years after it begins"). Reuses
- *  the shared label helpers; only the kinds whose label is safe to
- *  lower-case mid-sentence are lower-cased. */
 function anchorPhrase(
   anchor: GlideAnchor,
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
@@ -71,14 +42,10 @@ function anchorPhrase(
     case 'expenseEnd':
       return 'the expense end';
     case 'age':
-      // `describeGlideAnchor` returns "Ada age 65" (member first name) or
-      // "age 65" (no memberId). Lower-casing the first char would mangle a
-      // proper name ("ada age 65"), so build the age phrase directly via
-      // the shared describer without any case mangling.
+      // `describeStart` keeps a member's name intact; lower-casing "Ada age 65" would mangle it.
       return describeStart(anchor, members);
     default: {
-      // year / durationFromExpenseStart don't start with a name, so the
-      // first-character lower-case reads correctly mid-sentence.
+      // These do not start with a name, so lower-casing the first character reads correctly mid-sentence.
       const label = describeGlideAnchor(anchor, members);
       return label.charAt(0).toLowerCase() + label.slice(1);
     }
@@ -86,22 +53,9 @@ function anchorPhrase(
 }
 
 /**
- * Build the plain-English spending-glide summary for an expense, or
- * `null` when the expense has no meaningful glide to describe.
- * The glide is classification-agnostic (essentials too) and
- * direction-aware: it can describe a rise as well as a fall. `null`
- * cases: no `discretionaryGlide`, a one-off (never glided), or a no-op
- * glide (`endMultiplierPct === 100` and no effective floor/ceiling).
- *
- * Shapes produced (examples):
- *  - decline only:          "declines to 70% by the expense end"
- *  - decline + floor:       "declines from 100% to 40% between the start
- *                            of retirement and Ada age 80, then holds at
- *                            25% after Ada age 85"
- *  - increase only:         "rises to 150% by the expense end"
- *  - increase + ceiling:    "rises from 100% to 150% between the start of
- *                            retirement and Ada age 80, then holds at
- *                            180% after Ada age 85"
+ * Plain-English spending-glide summary, e.g. "declines from 100% to 40% between
+ * the start of retirement and Ada age 80, then holds at 25% after Ada age 85".
+ * It handles rises and ceilings too. Null for no glide, a one-off, or a no-op glide.
  */
 export function buildGlideSummary(
   payload: ExpensePayload,
@@ -122,9 +76,7 @@ export function buildGlideSummary(
   let core: string;
   if (moves) {
     const endPct = pct(g.endMultiplierPct);
-    // When the glide simply runs from the start of retirement the
-    // single-anchor read is clearest ("declines to 70% by lifetime
-    // end"); otherwise spell out the from/to window with both anchors.
+    // A glide from the start of retirement reads best as a single anchor.
     if (g.glideStart.kind === 'retirementStart') {
       core = `${verb} to ${endPct} by ${endPhrase}`;
     } else {
@@ -132,9 +84,7 @@ export function buildGlideSummary(
       core = `${verb} from ${pct(NEUTRAL_END_PCT)} to ${endPct} between ${startPhrase} and ${endPhrase}`;
     }
   } else {
-    // Flat end (100%) but an effective floor — the curve holds at 100%
-    // then steps down at the floor anchor (a ceiling can't be effective
-    // at a flat end, so this branch is always a floor step-down).
+    // A flat end with an effective floor holds at 100%, then steps down at the floor anchor.
     core = `holds at 100% until ${endPhrase}`;
   }
 
@@ -145,17 +95,12 @@ export function buildGlideSummary(
   return core;
 }
 
-// ---------- Scenario override summaries ----------
-
-/** Resolved override "knobs" surfaced per scenario. A field is present
- *  only when the scenario chain actually sets it (an unset knob is
- *  `undefined` ⇒ the page renders no row for it). */
+/** Resolved override knobs; a field is present only when the scenario chain sets it. */
 export interface ReportScenarioKnobs {
   inflationRatePct?: number;
   lifeExpectancyPrimary?: number;
   lifeExpectancySecondary?: number;
   discretionarySpendingBumpPct?: number;
-  /** `null` ⇒ whole retirement; a positive integer ⇒ first N years. */
   discretionarySpendingDurationYears?: number | null;
 }
 
@@ -180,10 +125,7 @@ export function resolvedKnobs(resolved: ScenarioOverrides): ReportScenarioKnobs 
   return knobs;
 }
 
-// ---------- Resolution helpers ----------
-
-// Local fallback helper; uses role strings ('Primary' / 'Secondary') as defaults
-// which differ from memberDisplayName's fallback — that's why we don't reuse it.
+// Not `memberDisplayName`: its fallback differs ('Primary' / 'Secondary' here).
 export function memberName(
   member: Aggregate<HouseholdMemberPayload> | undefined,
   fallback: string,
@@ -228,10 +170,7 @@ export function ssClaimAges(
   };
 }
 
-// ---------- Expense label/amount helpers (local to the report) ----------
-
-/** Normalise an expense's entered amount to a yearly figure (today's
- *  dollars). One-offs report their nominal single amount. */
+/** Entered amount as a yearly figure in today's dollars; one-offs report their single amount. */
 export function annualExpenseAmount(p: ExpensePayload): number {
   switch (p.frequency) {
     case 'weekly':
@@ -246,15 +185,10 @@ export function annualExpenseAmount(p: ExpensePayload): number {
   }
 }
 
-/** Start label for an expense, reusing the shared schedule describer via
- *  the glide-anchor-compatible kinds. Falls back through the shared
- *  helpers so wording matches the rest of the app. */
 export function describeGlideAnchorFreeStart(
   p: ExpensePayload,
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
 ): string {
-  // `start` is a ScheduleStart (subset of GlideAnchor's shared kinds) —
-  // reuse the shared describer for consistent wording.
   switch (p.start.kind) {
     case 'retirementStart':
       return 'Start of retirement';
@@ -264,8 +198,6 @@ export function describeGlideAnchorFreeStart(
   }
 }
 
-/** End label for an expense — "(one-off)" for single events, else the
- *  shared end describer. */
 export function describeExpenseEndLabel(
   p: ExpensePayload,
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,

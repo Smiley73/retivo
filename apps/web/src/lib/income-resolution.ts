@@ -1,10 +1,4 @@
-/**
- * Resolves the active IncomeStream list for a given scenario.
- *
- * Thin wrapper that delegates to the per-id sparse resolver in
- * [income-override-resolution.ts]. Public name preserved for planning-engine
- * callers.
- */
+// Public name for the active IncomeStream list; delegates to `income-override-resolution.ts`.
 import {
   resolveIncomeForScenarioSparse,
   type ResolvedIncomeStream as SparseResolvedIncomeStream,

@@ -1,35 +1,16 @@
-/**
- * Shared per-expense-category palette + the `CategoryMeta` contract.
- *
- * Both the Expenses-by-Category chart and the Balance Projection
- * "Expected cashflow" category-mode band assign per-category hues from
- * this single palette so a given category lands on the same colour on
- * both pages. Pure; no React.
- *
- * Categories are assigned in alphabetical order so a given category name
- * lands on the same colour across reloads. Falls back to cycling when
- * there are more categories than palette slots.
- */
+// Per-expense-category palette and `CategoryMeta`, shared by the Expenses-by-Category chart and the cashflow category band so a category keeps one colour.
+// Categories take colours in alphabetical order (stable across reloads), cycling past the palette length.
+
 import { CHART_COLORS } from './tokens';
 
-/** Named contract for one rendered category band: stable id, display
- *  name, and the assigned palette colour. Shared by both inner charts
- *  (the Expenses-by-Category chart and the cashflow category band). */
+/** One rendered category band: id, display name and assigned colour. */
 export interface CategoryMeta {
   id: string;
   name: string;
   color: string;
 }
 
-/**
- * Assemble the active-category `CategoryMeta[]` shared by both per-category
- * surfaces: filter to the active ids, sort alphabetical-by-name (stable
- * across reloads), and assign palette colours in that order so a given
- * category lands on the SAME hue on the Expenses page and the cashflow
- * band. Pure. The caller decides the active set (the Expenses page
- * from non-zero category-chart totals; the cashflow band from the
- * display-basis-independent nominal signal).
- */
+/** `CategoryMeta` for the active categories, sorted by name so colours are stable across reloads; the caller decides the active set. */
 export function assembleCategoryMeta(
   categories: ReadonlyArray<{ id: string; name: string }>,
   activeIds: ReadonlySet<string>,
@@ -48,10 +29,7 @@ export function assembleCategoryMeta(
     }));
 }
 
-/**
- * Stacked-area palette for the per-category charts, resolved for a theme.
- * Reuses the chart-color map so the user's theme palette flows through.
- */
+/** Stacked-area palette for a theme, from the chart-color map. */
 export function categoryPaletteFor(theme: 'light' | 'dark'): readonly string[] {
   const c = CHART_COLORS[theme];
   return [

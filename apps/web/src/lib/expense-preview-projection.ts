@@ -1,25 +1,6 @@
-/**
- * Pure projection logic for the live single-expense form preview.
- *
- * Extracted from `<ExpenseProjectionPreview>` so the component stays a
- * thin `React.memo` wrapper: everything here is pure (no React, no
- * IndexedDB), each function is independently testable, and the file/
- * function shape limits hold. `buildPreview` is the single entry point
- * the component calls; it returns the `PreviewResult` discriminant the
- * component renders verbatim.
- *
- * form". The projection context comes from the shared
- * `buildExpenseProjectionContext` (same builder the Expenses page uses),
- * resolved under the form's TARGET scenario so the preview matches what
- * Save produces: scenario-patch → `scenarioForPatch`; scenario-only add
- * → `scenarioForAdd`; otherwise the primary scenario.
- *
- * The date→fractional-year helpers use arithmetic identical to
- * ExpensesPage's `buildProjection` so the preview's markers land on the
- * same x as the page chart's. Kept local: ExpensesPage's marker
- * derivation is deliberately not extracted (only the ctx builder is
- * shared).
- */
+// Pure projection logic for the live single-expense form preview; `buildPreview` is the entry point.
+// The context comes from `buildExpenseProjectionContext` under the form's target scenario, so the preview matches what Save produces.
+
 import {
   buildExpenseProjectionContext,
   findEarliestExpenseStartMonth,
@@ -46,15 +27,7 @@ const SHORT_MONTHS = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-/**
- * Projected death year (integer `deathYear = birthYear + ageYears`).
- *
- * Death is modelled as Dec 31 of `deathYear`, so the birth
- * month/day no longer shift the result — only the birth *year* matters.
- * The ISO regex + `month < 1 || month > 12` guard are preserved so an
- * invalid birthdate still returns `null` (the null contract must not
- * change). Pure.
- */
+/** Projected death year (`birthYear + ageYears`, Dec 31); an invalid birthdate returns `null`. */
 export function projectedDeathFractionalYear(
   birthdate: string,
   ageYears: number,
@@ -67,8 +40,7 @@ export function projectedDeathFractionalYear(
   return year + ageYears;
 }
 
-/** ISO `YYYY-MM-DD` → fractional year, same arithmetic as
- *  `projectedDeathFractionalYear` minus the age offset. Pure. */
+/** ISO `YYYY-MM-DD` to fractional year; same arithmetic as ExpensesPage's `buildProjection`, so the markers land on the same x. */
 export function isoToFractionalYear(iso: string): number | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!match) return null;
@@ -81,7 +53,6 @@ export function isoToFractionalYear(iso: string): number | null {
   return year + (monthIndex + (day - 1) / dim) / 12;
 }
 
-/** ISO date/month → `MMM YYYY` (e.g. `Apr 2031`). Pure. */
 export function formatShortIsoMonth(iso: string): string {
   const match = /^(\d{4})-(\d{2})/.exec(iso);
   if (!match) return iso;
@@ -110,8 +81,6 @@ export interface ResolvedCtx {
   retirementYear: number;
 }
 
-/** Pick the effective scenario id: the passed target if it exists in
- *  the list, else the primary scenario's id, else null. Pure. */
 function resolveEffectiveScenarioId(
   scenarios: ScenarioAggregate[],
   targetScenarioId: string | null,
@@ -122,8 +91,6 @@ function resolveEffectiveScenarioId(
     : (baseScenario?.id ?? null);
 }
 
-/** Resolve the primary member's retirement date (ISO) for the resolved
- *  scenario, or null when it can't resolve. Pure. */
 function resolvePrimaryRetirementIso(
   resolved: ReturnType<typeof resolveScenario>,
   members: Aggregate<HouseholdMemberPayload>[],
@@ -140,12 +107,6 @@ function resolvePrimaryRetirementIso(
   return retirementMap.get(primary.id) ?? null;
 }
 
-/**
- * Resolve the draft's target scenario and build the projection
- * context. Returns the resolved bundle, or an `unresolvable`
- * discriminant when the scenario / retirement / birthdate context
- * can't resolve. Pure.
- */
 export function resolveTargetCtx(
   members: Aggregate<HouseholdMemberPayload>[],
   scenarios: ScenarioAggregate[],
@@ -185,36 +146,11 @@ export function resolveTargetCtx(
 }
 
 /**
- * Surface an invalid glide configuration in plain language BEFORE
- * projecting — an *actually-moving* (rise or fall) invalid glide otherwise
- * renders a misleading flat / non-updating curve, which the preview
- * pre-empts. Same `glideProblem` validator the form's Save path uses,
- * against this expense's own resolved start + resolved `end`.
- *
- * Suppressed (returns null) in **all** modes — canonical, scenario-patch,
- * scenario-only-add — when the glide is a value-equivalent no-op
- * (`isNeutralGlide`: `endMultiplierPct === 100`, no effective
- * floor/ceiling): it
- * multiplies by 1 every month, so the preview renders a non-misleading
- * flat curve with nothing to warn about. Preview-only and deliberate —
- * Save still structurally validates a stored glide config (so a stored
- * no-op mis-config, e.g. glide-end before glide-start at the default
- * 100% End, cannot silently become an active decline if End% is later
- * lowered), except the scenario-patch *off* sentinel where the neutral
- * object means "cleared", not "an enabled no-op glide".
- *
- * Net invariant: for a **non-neutral / actually-moving (rise or fall)**
- * glide the
- * preview warning and the Save block can never disagree in any mode (the
- * Save path threads the add-target, matching this function's target
- * resolution). The no-op divergence — preview-suppressed but
- * Save-validated — is by design, not a contradiction.
- *
- * A one-off is never glided: the engine early-returns multiplier 1 for
- * `frequency === 'oneOff'` (stored/inherited glide ignored) and the form
- * hides the glide section for one-offs; validating that hidden, ignored
- * glide would surface an unfixable preview warning, so it is skipped
- * here — one rule across Save + preview + engine.
+ * Plain-language warning for an invalid glide, shown before projecting (an invalid
+ * moving glide would render a misleading flat curve). It uses the Save path's
+ * `glideProblem` validator, except that a neutral no-op glide (`isNeutralGlide`)
+ * and one-off expenses (never glided; their glide section is hidden) return null,
+ * so for a moving glide the preview and the Save block agree.
  */
 export function glideProblemForDraft(
   draft: ExpensePayload,
@@ -229,20 +165,14 @@ export function glideProblemForDraft(
   }
   const probe = resolveStartMonth(draft.start, rc.ctx) ?? {
     year: Number.isFinite(rc.retirementYear) ? rc.retirementYear : 0,
-    // Keep the resolved retirement *month* in the fallback so the
-    // month-precise before-expense rule is evaluated correctly for a
-    // mid-year retiree; only drop to 0 when the retirement date itself
-    // can't resolve / month0 is absent.
+    // Keeps the retirement month so a mid-year retiree's month-precise rule evaluates correctly.
     month0: rc.ctx.retirementMonth0 ?? 0,
   };
   return glideProblem(draft.discretionaryGlide, rc.ctx, probe, draft.end);
 }
 
-/** Life-expectancy markers (one per member with a usable birthdate).
- *  Pure. `theme` is passed explicitly so a live theme toggle
- *  re-flips the marker colors — the prior `currentChartTheme()` read
- *  inside this pure builder was invisible to the component's `useMemo`
- *  + `React.memo`, leaving stale colors on a theme switch. */
+// `theme` is a parameter so a live theme toggle re-flips the colors; reading it inside this pure
+// builder was invisible to the component's `useMemo`.
 function lifeExpectancyMarkers(
   rc: ResolvedCtx,
   theme: ChartTheme,
@@ -260,11 +190,7 @@ function lifeExpectancyMarkers(
     if (deathYear === null) return;
     const fallback = slot === 'primary' ? 'Primary' : 'Secondary';
     const firstName = member.payload.firstName.trim() || fallback;
-    // Death markers carry the integer `deathYear` + `kind: 'death'`; the
-    // always-monthly expenses chart maps them to the December sample
-    // (`deathYear + 11/12`) so the marker hugs the last monthly data point.
-    // Emitting the integer here keeps `lastFullYear` (`floor(max)`)
-    // equal to `deathYear`.
+    // Integer `deathYear`: the monthly chart maps it to December, so the marker hugs the last data point.
     markers.push({
       fractionalYear: deathYear,
       label: `${firstName} life expectancy ${age}`,
@@ -278,12 +204,8 @@ function lifeExpectancyMarkers(
 }
 
 /**
- * Life-expectancy markers (one per member with a usable birthdate) plus
- * the canonical teal retirement marker, rendered unconditionally
- * whenever retirement falls within the chart's x-domain (mirrors
- * ExpensesPage's `buildProjection` so the preview and the list page
- * agree). Returns null when no life-expectancy marker can be computed or
- * the window ends before retirement (both `unresolvable`).
+ * Life-expectancy markers plus the retirement marker. Null when no life-expectancy
+ * marker computes or the window ends before retirement (both `unresolvable`).
  */
 function buildMarkers(
   rc: ResolvedCtx,
@@ -311,16 +233,8 @@ function buildMarkers(
   const fromYear = earliestStart
     ? Math.min(earliestStart.year, retirementYear)
     : retirementYear;
-  // Surface the canonical teal retirement marker whenever the retirement
-  // boundary falls within the chart's x-domain. The domain is
-  // [fromYear, lastFullYear]; `fromYear <= retirementYear` (min with it
-  // above) and `lastFullYear >= retirementYear` (guarded above), so the
-  // boundary is always in range here — including the common
-  // `fromYear === retirementYear` case where the chart starts at
-  // retirement. Mirrors ExpensesPage's `buildProjection` so the form
-  // preview and the list page render the marker identically. The SVG
-  // engine clamps a left-edge marker into view so a marker at the very
-  // start of the domain stays visible.
+  // The retirement boundary is always inside [fromYear, lastFullYear] here; the SVG engine
+  // clamps a left-edge marker into view.
   const retirementFractional = isoToFractionalYear(rc.primaryRetirementIso);
   if (retirementFractional !== null) {
     markers.push({
@@ -332,10 +246,6 @@ function buildMarkers(
   return { markers, lastFullYear, fromYear };
 }
 
-/** Trim trailing zero-`total` months so the single line ends at the
- *  last active month. Under Dec-31 death the line stays active through
- *  December of `deathYear`, and the death marker hugs that last data
- *  point (no floating gap). Pure. */
 function trimTrailingZeroMonths(
   projected: ExpenseProjectionMonthlyPoint[],
 ): ExpenseProjectionMonthlyPoint[] {
@@ -346,8 +256,6 @@ function trimTrailingZeroMonths(
   return projected.slice(0, lastNonZero >= 0 ? lastNonZero + 1 : 0);
 }
 
-/** Tooltip member rows (name + birth year) for each member with a
- *  usable birthdate. Pure. */
 function buildTooltipMembers(rc: ResolvedCtx): TooltipMember[] {
   const out: TooltipMember[] = [];
   const pushMember = (
@@ -367,16 +275,9 @@ function buildTooltipMembers(rc: ResolvedCtx): TooltipMember[] {
 }
 
 /**
- * Resolve the draft under the target scenario and project it in
- * isolation. Returns a guard discriminant when there is no amount or
- * the retirement / birthdate context cannot resolve, else the chart
- * inputs. Pure — no React, no IndexedDB.
- *
- * `theme` is passed explicitly so the component can recompute
- * the marker colors when `useTheme()`'s `resolvedTheme` flips — the
- * builder no longer reads the `.dark` class itself, which was
- * invisible to the component's `useMemo` + `React.memo` and left stale
- * colors on a live theme toggle.
+ * Resolves the draft under the target scenario and projects it in isolation: a
+ * guard result when there is no amount or the context cannot resolve, else the
+ * chart inputs. `theme` is a parameter so the marker colors follow a live toggle.
  */
 export function buildPreview(
   draft: ExpensePayload | null,

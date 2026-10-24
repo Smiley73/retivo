@@ -1,15 +1,6 @@
-/**
- * Per-balance + portfolio-level math, ported from the legacy
- * `apps/api/src/account-balances/account-balances.service.ts` +
- * `portfolio-stats.ts`. The Modified-Dietz return method is explained in
- * `docs/math-income-expenses-and-returns.md`, "Measuring a past return".
- *
- * Inputs are payloads from the IndexedDB `accountBalance` aggregate
- * (apps/web/src/db/types.ts → AccountBalancePayload). The functions
- * here own the derived fields the legacy server attached to API
- * responses (gainLoss, returnPct, totalContributions, portfolio TWR /
- * GainLoss).
- */
+// Per-balance and portfolio-level balance math: gain/loss, Modified-Dietz return, TWR, tax buckets.
+// The return method is in `docs/math-income-expenses-and-returns.md`, "Measuring a past return".
+
 import type {
   AccountBalancePayload,
   AccountPayload,
@@ -18,11 +9,8 @@ import type {
 } from '../db/types';
 
 /**
- * Retirement account types whose MIXED post-tax sub-bucket is a
- * Roth-designated (and therefore tax-free) slice. These are exactly the
- * non-OTHER types that `TAX_TREATMENT_RULES` (apps/web/src/api/types.ts)
- * allows to be MIXED: a MIXED OTHER account's post-tax sub-bucket is plain
- * taxable money, NOT Roth, so it must stay out of the tax-free bucket.
+ * The non-OTHER account types that may be MIXED, whose post-tax sub-bucket is
+ * Roth. A MIXED OTHER account's post-tax sub-bucket is plain taxable money.
  */
 export function isRothDesignatedRetirementType(type: AccountType): boolean {
   return (
@@ -34,18 +22,10 @@ export function isRothDesignatedRetirementType(type: AccountType): boolean {
 }
 
 /**
- * True when a draw from this account's POST sub-bucket realises as tax-free
- * Roth: either the account is purely Roth (`taxTreatment === 'ROTH'`) or it is
- * a MIXED Roth-designated retirement type (401k/403b/457b/TSP — the post-tax
- * sub-bucket is Roth-designated money).
- *
- * Used at every post-bucket tax-classification site
- * (`splitWithdrawalsByTaxTreatment`, `isMagiNeutralPostBucket`,
- * `classifyAccountDraw`, `classifyMcWithdrawal`, `applyRothBasisOrdering`).
- *
- * NOT applied to `isRothAccount` (which guards the pre-tranche penalty
- * builder) or to the §408A basis derivation (`roth-basis-derivation.ts`),
- * which is scoped to a Roth-IRA pool by its caller.
+ * True when a draw from the post sub-bucket is tax-free Roth: a `ROTH` account
+ * or a MIXED Roth-designated retirement type. Not applied to `isRothAccount`
+ * (the pre-tranche penalty builder) or the basis derivation, which its caller
+ * scopes to a Roth-IRA pool.
  */
 export function isRothDesignatedPostBucket(
   taxTreatment: AccountPayload['taxTreatment'],
@@ -55,15 +35,9 @@ export function isRothDesignatedPostBucket(
 }
 
 /**
- * Pure designated-Roth employer-plan account types (locked to `taxTreatment:
- * 'ROTH'`). These are modeled with §408A basis ordering + the §72(t) early-
- * withdrawal penalty (at-retirement balance = recoverable basis; pre-59½
- * growth past basis is taxable + penalized). Unlike MIXED designated-Roth
- * accounts, the full account balance is Roth — there is no pre-tax sub-bucket.
- *
- * Consumed by the §408A gather, the MC classifier, and the basis derivation.
- * Note: `RETIREMENT_ROTH_IRA` is NOT included here — it has a separate
- * basis derivation path (contribution history vs at-retirement balance).
+ * Pure designated-Roth employer-plan types (`taxTreatment: 'ROTH'`), modeled
+ * with basis ordering and the early-withdrawal penalty; the whole balance is
+ * Roth. Excludes `RETIREMENT_ROTH_IRA`, which has its own basis derivation.
  */
 export function isPureRothEmployerType(type: AccountType): boolean {
   return (
@@ -81,33 +55,23 @@ export interface BalanceDerived {
   returnPct: number;
 }
 
-/**
- * Total contributions = personal + company. The payload stores the
- * components (or splits, for MIXED); we recompute on read so the
- * invariant holds even if stale data slips through sync.
- */
+/** Personal plus company contributions: the splits drive MIXED rows, the stored total the rest. */
 export function totalContributions(p: AccountBalancePayload): number {
   if (p.contributionsPreTax !== null || p.contributionsPostTax !== null) {
-    // MIXED — splits drive the total.
     const pre = p.contributionsPreTax ?? 0;
     const post = p.contributionsPostTax ?? 0;
     const compPre = p.companyContributionsPreTax ?? 0;
     const compPost = p.companyContributionsPostTax ?? 0;
     return pre + post + compPre + compPost;
   }
-  // Non-MIXED — totalContributions includes personal + company.
-  // We don't store personal directly; back it out of the totalContributions
-  // field if present, else from endingBalance — startingBalance — companyContributions.
-  // Easiest: trust whatever `totalContributions` already holds. The form
-  // recomputes it on save, and the server (legacy) likewise.
+  // Non-MIXED: the stored total already holds personal plus company.
   return p.totalContributions;
 }
 
 /**
- * Gain/Loss = endingBalance − startingBalance − totalContributions
- * − rollover + distributions. Distributions are spent capital
- * (withdrawals taken from any account type) — adding them back recovers
- * the gain hidden by the lower endingBalance.
+ * endingBalance − startingBalance − contributions − rollover + distributions.
+ * Distributions are spent capital, added back to recover the gain the lower
+ * ending balance hides.
  */
 export function gainLoss(p: AccountBalancePayload): number {
   const tc = totalContributions(p);
@@ -115,14 +79,9 @@ export function gainLoss(p: AccountBalancePayload): number {
 }
 
 /**
- * Modified-Dietz return %, rounded to 2 decimals.
- * - Contribution weight: 0.5 normally; 1.0 when startingBalance === 0
- *   (new-account year — contributions ARE the basis, not mid-year tops
- *   on an existing base).
- * - Distribution weight: always 0.5 (outflows of already-deployed
- *   capital trickle through the year).
- * - Rollovers excluded — they're transfers of existing assets, not
- *   new capital.
+ * Modified-Dietz return %, 2 decimals. Contributions weigh 1.0 in a new-account
+ * year (starting balance 0), else 0.5; distributions 0.5; rollovers are
+ * excluded as transfers of existing assets.
  */
 export function returnPct(p: AccountBalancePayload): number {
   const tc = totalContributions(p);
@@ -145,28 +104,10 @@ export function deriveAll(p: AccountBalancePayload): BalanceDerived {
 }
 
 /**
- * Does a balance row carry any time-weighted-return information?
- *
- * Excludes the **narrow** degenerate shape — a row whose `startingBalance`,
- * `endingBalance`, `totalContributions`, `rollover`, and `distributions` are
- * ALL zero. That is exactly the auto-$0 seed an account picks up at creation
- * (so a new account "just works": it projects + is a valid Roth-conversion
- * target without a hand-entered balance). A seed
- * row has no capital and no flow, so it contributes no empirical return; folding
- * it into a TWR would fabricate a 0% year and flip a one-real-year account to
- * "has empirical history" (a 2-row diluted geometric mean).
- *
- * Deliberately NOT the broad `avgCapital === 0` test: a real **rollover-funded**
- * zero-capital row (`startingBalance == 0`, `rollover > 0`, `endingBalance > 0`)
- * has `avgCapital == 0` under Modified-Dietz (rollovers are excluded from the
- * denominator) yet DOES carry return information, so it must stay in. The five
- * explicit fields keep that row in while dropping only the genuine seed/no-flow
- * row.
- *
- * Applied before the `< 2`-row count + geometric product in all three TWR
- * surfaces (`accountReturns`, `listAccountTwr`, the `computePortfolioSummary`
- * portfolio loop) so a seed-$0 account stays `twr === null` / shows `—`
- * everywhere and never dilutes the portfolio return.
+ * False for the auto-$0 seed row (starting, ending, contributions, rollover and
+ * distributions all zero): it carries no return, and folding it into a TWR would
+ * fabricate a 0% year. Not the broader `avgCapital === 0`, which would drop a
+ * rollover-funded zero-capital row that does carry a return.
  */
 export function isReturnBearingRow(p: AccountBalancePayload): boolean {
   return !(
@@ -178,8 +119,6 @@ export function isReturnBearingRow(p: AccountBalancePayload): boolean {
   );
 }
 
-// ---------- Portfolio-level (account-balances list page) ----------
-
 export interface AccountWithCurrentBalance {
   id: string;
   name: string;
@@ -187,51 +126,33 @@ export interface AccountWithCurrentBalance {
   type: AccountPayload['type'];
   taxTreatment: AccountPayload['taxTreatment'];
   active: boolean;
-  /** Free-form notes from the account's canonical payload — surfaced on
-   *  list rows via the shared `<NotesIndicator>`. */
   notes: string;
   currentBalance: number | null;
   /** For MIXED accounts: the Roth-designated (post-tax) sub-balance. Null for non-MIXED or no-balance accounts. */
   currentBalancePostTax: number | null;
   currentBalanceYear: number | null;
-  /** `lastUpdated` of the latest-year balance entry — the date the
-   *  current balance was recorded, surfaced as the list-page "As of"
-   *  column. null when the account has no balance rows. */
+  /** `lastUpdated` of the latest-year balance row: the list page's "As of" column. */
   currentBalanceAsOf: string | null;
-  /** Account's own annualized TWR (geometric mean of its yearly
-   *  Modified-Dietz returns), surfaced as the list-page table column.
-   *  null when the account has no balance rows — renders "—". Matches
-   *  the per-account "Ann. Return (TWR)" stat on the detail page. */
+  /** Annualized TWR (geometric mean of yearly returns); null with no balance rows. */
   twr: number | null;
 }
 
 export interface PortfolioSummary {
   totalCurrentBalance: number;
-  /** Latest-year balances bucketed by tax treatment (PRE_TAX accounts
-   *  + the pre-tax split of MIXED accounts; POST_TAX likewise). The
-   *  list page surfaces these as the same tax-diversification cards a
-   *  MIXED account detail view shows — always rendered, $0 when empty. */
+  /** Latest-year balances by tax treatment (pre-tax plus the pre-tax split of MIXED accounts; post-tax likewise). */
   totalPreTaxBalance: number;
   totalPostTaxBalance: number;
   /** Pre/post-tax balance as a % of totalCurrentBalance (0 when no balance). */
   preTaxPct: number;
   postTaxPct: number;
-  /** Latest-year balances of accounts that are **tax-free by account type**
-   *  (Roth IRA + HSA, regardless of their stored `taxTreatment`). A
-   *  dashboard-only display field. HSA accounts now carry `taxTreatment:
-   *  'HSA'`, whose by-`taxTreatment` balance arm is a no-op, so an HSA lands
-   *  in `totalTaxFreeBalance` only — never also in `totalPreTaxBalance` /
-   *  `totalPostTaxBalance`. `deriveTaxTreatmentAllocation` still derives the
-   *  dashboard's pre-tax slice by subtraction (subtracting only the MIXED
-   *  Roth-designated post-tax sub-bucket out of the taxable slice). */
+  /** Latest-year tax-free balance: Roth and HSA accounts by treatment plus the
+     *  Roth-designated post-tax sub-bucket of MIXED retirement accounts. Never also
+     *  in the pre/post totals. */
   totalTaxFreeBalance: number;
-  /** Tax-free balance as a % of totalCurrentBalance (0–100; 0 when no
-   *  balance) — same scale as `preTaxPct` / `postTaxPct`. */
+  /** 0–100, like `preTaxPct`. */
   taxFreePct: number;
   totalContributions: number;
   totalCompanyContributions: number;
-  /** All-years contributions bucketed by tax treatment, same rule as
-   *  the balance buckets above. */
   totalPreTaxContributions: number;
   totalPostTaxContributions: number;
   totalDistributions: number;
@@ -260,17 +181,7 @@ function balanceGainLoss(p: AccountBalancePayload): number {
   return gainLoss(p);
 }
 
-/**
- * Per-account TWR, computed from the account's own yearly
- * Modified-Dietz returns. Mirrors the portfolio algorithm in
- * `computePortfolioSummary` scoped to one account. Returns null
- * when the account has fewer than two yearly returns — the geometric
- * mean isn't meaningful from a single point.
- *
- * Used by the Balance Projection page to surface "what would the
- * projected balance be if this account kept compounding at the rate
- * it has actually delivered?" alongside the Planned-return number.
- */
+/** TWR of one account's yearly returns; null below two return-bearing rows, since a geometric mean needs more than one point. */
 export interface AccountReturns {
   twr: number | null;
 }
@@ -278,9 +189,7 @@ export interface AccountReturns {
 export function accountReturns(
   balances: Aggregate<AccountBalancePayload>[],
 ): AccountReturns {
-  // Drop seed/degenerate rows before the count + product so an auto-$0 seed
-  // never fabricates a return (a seed + one real year would otherwise be a
-  // 2-row diluted geometric mean flipping the account to "has history").
+  // Drop seed rows so an auto-$0 seed never fabricates a return.
   const returnBearing = balances.filter((b) => isReturnBearingRow(b.payload));
   if (returnBearing.length < 2) {
     return { twr: null };
@@ -294,19 +203,8 @@ export function accountReturns(
   return { twr };
 }
 
-/**
- * Per-account TWR for the list-page column. Geometric mean of the
- * account's own yearly Modified-Dietz returns — mirrors the detail
- * page's `calcTwr` so the column matches the "Ann. Return (TWR)" stat
- * you see when you open the account: a single year yields that year's
- * return, no rows yields null (rendered "—"). Distinct from
- * `accountReturns`, which the projection page uses and which requires
- * ≥2 years before reporting a compounded figure.
- */
+// Unlike `accountReturns`, a single year yields that year's return; no rows yields null.
 function listAccountTwr(rows: Aggregate<AccountBalancePayload>[]): number | null {
-  // Exclude seed/degenerate rows first so a seed-only account shows `—`
-  // (null), not a fabricated `0%`, in the list-page "Ann. Return (TWR)"
-  // column.
   const returnBearing = rows.filter((b) => isReturnBearingRow(b.payload));
   if (returnBearing.length === 0) return null;
   const product = returnBearing.reduce(
@@ -384,19 +282,10 @@ export function computePortfolioSummary(
     0,
   );
 
-  // Tax-diversification buckets. PRE_TAX / POST_TAX accounts roll their
-  // whole balance + contributions into the matching bucket; MIXED
-  // accounts split via their stored pre/post fields; HSA and ROTH balances
-  // are tax-free (counted in `totalTaxFreeBalance`, no-op in the pre/post
-  // split). The Roth-designated (post-tax) sub-bucket of a MIXED
-  // Roth-designated retirement account (401k/403b/457b/TSP) is tax-free too:
-  // it goes to `totalTaxFreeBalance` ONLY, never to `totalPostTaxBalance`
-  // (counting it in both would double-count it and push the percentages past
-  // 100). A MIXED OTHER account's post-tax sub-bucket is plain taxable money
-  // and stays in `totalPostTaxBalance`. Every account carries exactly one of
-  // the five treatments (PRE_TAX, POST_TAX, MIXED, HSA, ROTH), so pre + post +
-  // tax-free reconstitutes the total and the percentages always sum to 100
-  // (modulo no-balance $0).
+  // Tax-free (HSA, ROTH, and a MIXED Roth-designated post-tax sub-bucket) goes to
+  // `totalTaxFreeBalance` only: counting it in the post-tax total too would
+  // double-count it and push the percentages past 100. A MIXED OTHER post-tax
+  // sub-bucket is plain taxable money.
   let totalPreTaxBalance = 0;
   let totalPostTaxBalance = 0;
   let totalTaxFreeBalance = 0;
@@ -412,41 +301,25 @@ export function computePortfolioSummary(
     const ending = latest.payload.endingBalance;
     const mixedRothDesignated =
       tt === 'MIXED' && isRothDesignatedRetirementType(account.payload.type);
-    // Tax-free accumulation (dashboard display). Roth + HSA earnings /
-    // qualified withdrawals are both tax-free; we classify by `taxTreatment`
-    // here (treatment-based) so this stays consistent with the
-    // by-`taxTreatment` buckets below, which split strictly on treatment.
-    // Roth accounts carry `taxTreatment: 'ROTH'` and HSA accounts carry
-    // `taxTreatment: 'HSA'`; both whose pre/post arms are no-ops below, so
-    // each is counted here only (no double count).
+    // Classified by `taxTreatment`, consistent with the buckets below.
     if (tt === 'ROTH' || tt === 'HSA') {
       totalTaxFreeBalance += ending;
     } else if (mixedRothDesignated) {
-      // Roth-designated sub-bucket (endingBalancePostTax) of a MIXED
-      // Roth-designated retirement account (401k/403b/457b/TSP) is tax-free,
-      // even though the account TYPE isn't Roth/HSA. A MIXED OTHER account's
-      // post-tax sub-bucket is plain taxable money, so it is excluded here.
+      // A MIXED OTHER account's post-tax sub-bucket is plain taxable money, so it is excluded.
       totalTaxFreeBalance += latest.payload.endingBalancePostTax ?? 0;
     }
     if (tt === 'MIXED') {
       totalPreTaxBalance += latest.payload.endingBalancePreTax ?? 0;
       if (!mixedRothDesignated) {
-        // MIXED OTHER: the post-tax sub-bucket is plain taxable money.
         totalPostTaxBalance += latest.payload.endingBalancePostTax ?? 0;
       }
-      // MIXED Roth-designated: the post-tax sub-bucket is tax-free and is
-      // already counted in `totalTaxFreeBalance` above; counting it here too
-      // double-counts it and pushes the percentages past 100.
+      // MIXED Roth-designated: the post-tax sub-bucket is already in `totalTaxFreeBalance`.
     } else if (tt === 'POST_TAX') {
       totalPostTaxBalance += ending;
     } else if (tt === 'HSA') {
-      // No-op for the by-`taxTreatment` pre/post split: an HSA's balance is
-      // already counted in `totalTaxFreeBalance` by the accumulator above,
-      // so adding it to pre/post would double-count it.
+      // Already in `totalTaxFreeBalance`; adding it here would double-count it.
     } else if (tt === 'ROTH') {
-      // No-op: a Roth's balance is already counted in `totalTaxFreeBalance`
-      // above; routing it to the pre/post split would double-count it (and
-      // misclassify tax-free money as pre-tax).
+      // Already in `totalTaxFreeBalance`; adding it here would double-count it.
     } else {
       totalPreTaxBalance += ending;
     }
@@ -460,13 +333,10 @@ export function computePortfolioSummary(
       } else if (tt === 'POST_TAX') {
         totalPostTaxContributions += totalContributions(p);
       } else if (tt === 'HSA') {
-        // HSA contributions reduce taxable income (pre-tax deductible).
-        // `PortfolioSummary` has no tax-free contributions bucket, so route
-        // them to `totalPreTaxContributions` to keep the figure meaningful.
+        // HSA contributions are pre-tax deductible, and there is no tax-free contributions bucket.
         totalPreTaxContributions += totalContributions(p);
       } else if (tt === 'ROTH') {
-        // Roth contributions are post-tax funded — route them to the
-        // post-tax bucket (same as POST_TAX), not pre-tax.
+        // Roth contributions are post-tax funded.
         totalPostTaxContributions += totalContributions(p);
       } else {
         totalPreTaxContributions += totalContributions(p);
@@ -493,14 +363,11 @@ export function computePortfolioSummary(
       last.endingBalance - first.startingBalance - sumContrib - sumRollover + sumDistrib;
   }
 
-  // `yearsCovered` keeps its original meaning — distinct calendar years with
-  // any balance row (seed rows included).
+  // Seed rows count here.
   const yearsCovered = new Set(balances.map((b) => b.payload.year)).size;
 
-  // Exclude seed/degenerate rows from the portfolio TWR so a cold-start
-  // seed-only portfolio reports `null` (rendered `—`), not a fabricated 0%,
-  // and a seed-$0 account never dilutes the portfolio geometric mean. A year
-  // with no return-bearing row contributes no factor.
+  // Seed rows are excluded so a seed-only portfolio reports null, not a fabricated 0%,
+  // and a seed account never dilutes the geometric mean.
   const returnBearingBalances = balances.filter((b) =>
     isReturnBearingRow(b.payload),
   );
@@ -547,24 +414,16 @@ export function computePortfolioSummary(
 }
 
 /**
- * The dashboard's three-slice tax-treatment allocation (pre-tax / taxable /
- * tax-free). A display-only reclassification of the shared
- * `computePortfolioSummary` totals: Roth + HSA are shown as **tax-free**
- * (by account type), and the Roth-designated (post-tax) sub-bucket of a MIXED
- * Roth-designated retirement account (401k/403b/457b/TSP) is **also** tax-free,
- * independent of the ledger's by-`taxTreatment` split. A MIXED OTHER account's
- * post-tax sub-bucket is plain taxable money and stays in the taxable slice.
- * Each `*Pct` is on the 0–100 scale matching `PortfolioSummary.preTaxPct`.
+ * Dashboard pre-tax / taxable / tax-free split. Roth and HSA, plus the
+ * Roth-designated post-tax sub-bucket of MIXED retirement accounts, are
+ * tax-free. `*Pct` is 0–100.
  */
 export interface TaxTreatmentAllocation {
   pretaxBalance: number;
   taxableBalance: number;
-  /** Combined tax-free total (Roth + HSA). Kept for callers that want the
-   *  rolled-up tax-free figure; `taxFreeRoth + taxFreeHsa` equals it. */
+  /** Roth plus HSA; `taxFreeRoth + taxFreeHsa` equals it. */
   taxFreeBalance: number;
-  /** Tax-free balance from Roth-type sources: `'ROTH'`-treatment accounts
-   *  plus the Roth-designated post-tax sub-bucket of MIXED retirement
-   *  accounts (401k/403b/457b/TSP). */
+  /** `'ROTH'`-treatment accounts plus the Roth-designated post-tax sub-bucket of MIXED retirement accounts. */
   taxFreeRoth: number;
   /** Tax-free balance from `'HSA'`-treatment accounts. */
   taxFreeHsa: number;
@@ -574,36 +433,9 @@ export interface TaxTreatmentAllocation {
 }
 
 /**
- * Derive the dashboard's pre-tax / taxable / tax-free split from the shared
- * summary. Pure; unit-tested directly (the formula lives here, not in the
- * dashboard hook).
- *
- * `accounts` are the flat `AccountWithCurrentBalance` rows
- * `computePortfolioSummary` returns (`.type` / `.taxTreatment` /
- * `.currentBalance`), needed only to split the tax-free total into its Roth
- * vs HSA halves.
- *
- * Formula (canonical):
- *  1. taxFreeBalance = summary.totalTaxFreeBalance (Roth + HSA by type, plus
- *     the MIXED Roth-designated retirement `endingBalancePostTax` sub-buckets
- *     — 401k/403b/457b/TSP only, NOT MIXED OTHER).
- *  2. taxableBalance = summary.totalPostTaxBalance — no per-account
- *     subtraction. `computePortfolioSummary` already routes the MIXED
- *     Roth-designated post-tax sub-bucket to `totalTaxFreeBalance` ONLY (never
- *     into `totalPostTaxBalance`), and standalone Roth / HSA accounts carry
- *     `taxTreatment: 'ROTH'` / `'HSA'` (no longer POST_TAX) after the v2→v3
- *     migration, so they never enter `totalPostTaxBalance` either. What remains
- *     in `totalPostTaxBalance` is exactly the genuinely-taxable money
- *     (POST_TAX accounts + MIXED OTHER post-tax sub-buckets).
- *  3. pretaxBalance = total − taxFree − taxable ("whatever isn't tax-free or
- *     taxable is pre-tax") — guarantees the three sum to the total. An HSA's
- *     `'HSA'` treatment keeps it out of `totalPreTaxBalance`, so it is counted
- *     in tax-free only with no double count.
- *  4. tax-free splits Roth vs HSA: `taxFreeHsa` is the sum of `'HSA'`-treatment
- *     account current balances; `taxFreeRoth` is the remainder
- *     (`taxFreeBalance − taxFreeHsa`) so the two halves always reconstitute
- *     `taxFreeBalance` (Roth-type accounts + MIXED Roth-designated sub-buckets).
- *  5. each *Pct = balance / total * 100 (0–100); total ≤ 0 → all zero.
+ * Derives the dashboard split from the shared summary; `accounts` only splits
+ * tax-free into Roth and HSA. Taxable is `totalPostTaxBalance` unchanged, pre-tax
+ * is the remainder so the slices sum to the total, and total <= 0 gives all zeros.
  */
 export function deriveTaxTreatmentAllocation(
   summary: PortfolioSummary,
@@ -624,20 +456,12 @@ export function deriveTaxTreatmentAllocation(
   }
 
   const taxFreeBalance = summary.totalTaxFreeBalance;
-  // `summary.totalPostTaxBalance` already holds only genuinely-taxable money:
-  // `computePortfolioSummary` routes the MIXED Roth-designated post-tax
-  // sub-bucket to `totalTaxFreeBalance` ONLY, and standalone Roth / HSA
-  // accounts (now `taxTreatment: 'ROTH'` / `'HSA'`) never enter it. So the
-  // taxable slice needs no per-account subtraction.
+  // `totalPostTaxBalance` already holds only taxable money: Roth/HSA accounts and the
+  // Roth-designated sub-bucket are routed to tax-free by `computePortfolioSummary`.
   const taxableBalance = summary.totalPostTaxBalance;
   const pretaxBalance = total - taxFreeBalance - taxableBalance;
 
-  // Split the tax-free total into HSA vs Roth. HSA tax-free money is exactly
-  // the current balance of `'HSA'`-treatment accounts; the remainder of the
-  // tax-free total is Roth-type (standalone Roth accounts + the MIXED
-  // Roth-designated post-tax sub-buckets already folded into
-  // `summary.totalTaxFreeBalance`). Deriving Roth by subtraction guarantees
-  // `taxFreeRoth + taxFreeHsa === taxFreeBalance`.
+  // Roth is the remainder, so the two halves always reconstitute `taxFreeBalance`.
   const taxFreeHsa = accounts.reduce(
     (sum, a) =>
       a.taxTreatment === 'HSA' ? sum + (a.currentBalance ?? 0) : sum,

@@ -1,25 +1,8 @@
-/**
- * useChartZoom — drag-to-select zoom for the bespoke SVG chart engine.
- *
- * Manages x/y domain, the drag-selection marquee, and a reset fn. The
- * hook lives in the section component (not the lazy Inner) so the Reset
- * button can read `isZoomed` during the Inner's Suspense fallback.
- *
- * Engine-agnostic: the SVG `ChartFrame` converts a pointer event to a
- * data-space x and calls `pointerHandlers.onPointer{Down,Move,Up,Leave}`
- * (it no longer forwards Recharts `activeLabel` callbacks). Behaviour:
- *
- *   - Marquee via pointerDown/Move/Up/Leave on the chart surface.
- *   - Pointer-driven (mouse + pen); the engine ignores touch.
- *   - Whole-year snap: [ceil(min), floor(max)]; <1 yr → no-op.
- *   - Y auto-fits via computeY when zoomed; null falls back to chart default.
- *   - Auto-reset on xDomainFull content change (not row reference).
- */
+// `useChartZoom`: drag-to-select whole-year zoom for the SVG chart engine, with y auto-fit via `computeY`, reset on a full-domain
+// change, and pointer-only (mouse and pen) input. It lives in the section component so Reset can read `isZoomed` during the Inner's Suspense fallback.
 
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-/** Engine-agnostic pointer handlers bound to the chart surface. The
- *  data-space x is computed by the engine and passed in. */
 interface ChartPointerHandlers {
   onPointerDown: (dataX: number) => void;
   onPointerMove: (dataX: number) => void;
@@ -27,27 +10,23 @@ interface ChartPointerHandlers {
   onPointerLeave: () => void;
 }
 
-/** Back-compat alias for the old name used by chart `*Inner` props. */
 export type ChartMouseHandlers = ChartPointerHandlers;
 
 export interface ChartZoomState {
-  /** Narrowed x-domain when zoomed; null when unzoomed (let the Inner use its own xMax math). */
+  /** Narrowed x-domain when zoomed; null when unzoomed. */
   xDomain: [number, number] | null;
   yDomain: [number, number] | null;
   isZoomed: boolean;
   isDragging: boolean;
   dragSelection: [number, number] | null;
-  /** Engine-agnostic pointer handlers, spread onto the SVG ChartFrame.
-   *  Field name kept as `mouseHandlers` so the existing section
-   *  wrappers (`pages/*-section.tsx`) that forward it to the Inner do
-   *  not need to change. */
+  /** Spread onto the SVG ChartFrame; the name is kept so `pages/*-section.tsx` wrappers need no change. */
   mouseHandlers: ChartPointerHandlers;
   reset: () => void;
 }
 
 export interface UseChartZoomArgs {
   xDomainFull: [number, number];
-  /** null = empty / not yet loaded — hook locks immediately */
+  /** Null means empty or not yet loaded: the hook locks. */
   rowsForY: readonly { x: number }[] | null;
   computeY?: (visibleRows: readonly { x: number }[]) => [number, number] | null;
 }
@@ -62,11 +41,7 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-/**
- * Snap both ends to whole years; return null when the snapped range is
- * narrower than 1 year (min-range no-op, inside-out rounding).
- * Pure helper extracted from hook body.
- */
+/** Snaps both ends to whole years; null when the range is under a year. */
 export function snapAndCommit(
   a: number,
   b: number,
@@ -79,11 +54,7 @@ export function snapAndCommit(
   return [lo, hi];
 }
 
-/**
- * Compute visible-window y-domain from rows + computeY.
- * Returns null when computeY is absent, rows is empty, or the domain collapses.
- * Pure helper extracted from hook body.
- */
+/** Visible-window y-domain from `computeY`; null when it is absent, no rows are visible, or the domain collapses. */
 export function computeYDomain(
   rowsForY: readonly { x: number }[] | null,
   newMin: number,
@@ -96,7 +67,6 @@ export function computeYDomain(
   return computeY(visible);
 }
 
-// Sub-hook — owns drag-selection state; exposes clearDrag() to reset both fields atomically.
 function useDragSelectionState(): {
   dragSelection: [number, number] | null;
   isDragging: boolean;
@@ -113,7 +83,6 @@ function useDragSelectionState(): {
   return { dragSelection, isDragging, setDragSelection, setIsDragging, clearDrag };
 }
 
-// Sub-hook — owns x/y zoom domain state; exposes reset() and isZoomed.
 function useZoomState(): {
   xDomain: [number, number] | null;
   yDomain: [number, number] | null;
@@ -133,19 +102,17 @@ function useZoomState(): {
   return { xDomain, yDomain, isZoomed, setXDomain: (v) => { setXDomain(v); setIsZoomed(v !== null); }, setYDomain, resetZoom };
 }
 
-// Effect-only sub-hook — resets zoom+drag when [fullMin, fullMax] pair changes.
 function useResetOnFullDomainChange(
   fullMin: number,
   fullMax: number,
   onReset: () => void,
 ): void {
-  // Stable callback ref avoids re-running the effect on every render.
+  // A ref keeps the effect from re-running every render.
   const onResetRef = useRef(onReset);
   onResetRef.current = onReset;
   useEffect(() => { onResetRef.current(); }, [fullMin, fullMax]); // Content-compare [fullMin, fullMax]; onReset is stable via ref
 }
 
-// Options for buildPointerHandlers — extracted to keep fn signature ≤40 ln.
 interface BuildPointerHandlersOptions {
   locked: boolean;
   fullMin: number;
@@ -160,7 +127,6 @@ interface BuildPointerHandlersOptions {
   setYDomain: (v: [number, number] | null) => void;
 }
 
-// Nulls both drag refs atomically; shared by onPointerUp + onPointerLeave.
 function clearDragRefs(
   dragStartRef: MutableRefObject<number | null>,
   dragEndRef: MutableRefObject<number | null>,
@@ -169,7 +135,6 @@ function clearDragRefs(
   dragEndRef.current = null;
 }
 
-// Builds the four pointer handlers; closed over stable setters and drag refs.
 function buildPointerHandlers(opts: BuildPointerHandlersOptions): ChartPointerHandlers {
   const { locked, fullMin, fullMax, rowsForY, computeY, dragStartRef, dragEndRef, setDragSelection, setIsDragging, setXDomain, setYDomain } = opts;
   return {

@@ -1,14 +1,6 @@
-/**
- * Detect scenarios the optimizer cannot compute without user action.
- *
- * With `runBalanceProjection` threading the full BPP pipeline for every
- * candidate pair, the only remaining case requiring user action *before* the
- * optimizer can run is an **unconfigured CBP** account — the user must pick a
- * lump-sum vs annuity election in Balance Projection's remediation banner
- * first. `validateCbpResolution` returns `{ ok: false }` and the runner
- * refuses; the worker pre-checks here so the page can render the Unsupported
- * callout instantly without invoking the full pipeline.
- */
+// Detects scenarios the optimizer cannot compute without user action: today only an unconfigured CBP election,
+// pre-checked here so the page can show the Unsupported callout without running the full pipeline.
+
 import { validateCbpResolution } from './cbp-resolution';
 import type { ScenarioAggregate } from './scenario-resolution';
 import type {
@@ -26,11 +18,7 @@ export interface DetectUnsupportedArgs {
   readonly incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
 }
 
-/**
- * Returns `'cbp-unconfigured'` when the scenario has an active CBP
- * account whose election is unresolved; `null` otherwise. Single literal
- * type so callers can render the one user-facing copy directly.
- */
+/** `'cbp-unconfigured'` when an active CBP account's election is unresolved, else `null`. */
 export function detectUnsupportedScenarioFeatures(
   args: DetectUnsupportedArgs,
 ): UnsupportedScenarioReason | null {
