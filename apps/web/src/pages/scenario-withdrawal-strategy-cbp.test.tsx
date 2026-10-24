@@ -1,16 +1,5 @@
-/**
- * Cash Balance Pension (CBP) handling in the custom drawdown-order editor.
- *
- * CBP accounts are never orderable — the engine pays them as monthly income
- * (annuity) or rolls them into a target account (lump sum), so they must not
- * appear as draggable tier items. They render in a read-only "not drawn down"
- * info section instead. These tests cover the seeding/prune rule, the
- * info-row builder, the save-validation split, the tier-editor info
- * section, the moved `incomeAddPath` helper, and the prune-opens-dirty flow.
- *
- * Sibling to ScenarioWithdrawalStrategyCards.editor.test.tsx (kept separate
- * because that file is already over the 800-line cap).
- */
+// CBP handling in the custom drawdown-order editor: CBP accounts are never orderable (the engine pays them as monthly income or rolls them into a target account), so they render in a read-only "not drawn down" info section instead of as draggable tier items.
+// Covers the seeding/prune rule, the info-row builder, the save-validation split, the tier-editor info section, the moved `incomeAddPath` helper and the prune-opens-dirty flow.
 import 'fake-indexeddb/auto';
 import { render } from '@testing-library/react';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
@@ -127,10 +116,7 @@ function makeMember(id: string, isPrimary: boolean, firstName: string): Aggregat
   };
 }
 
-// The discard-guard blocks below render under BrowserRouter (real
-// window.history) so the editor's useUnsavedChangesGuard pushState patch
-// actually intercepts the in-app navigation — MemoryRouter keeps its own
-// in-memory stack and would bypass the patch. Capture the path to restore.
+// The discard-guard blocks render under BrowserRouter (real window.history) so the editor's useUnsavedChangesGuard pushState patch intercepts the in-app navigation; MemoryRouter keeps its own stack and would bypass it. Capture the path to restore.
 const ROOT_PATH = window.location.pathname;
 
 beforeEach(async () => {
@@ -143,8 +129,6 @@ afterEach(async () => {
   window.history.replaceState({}, '', ROOT_PATH);
   vi.clearAllMocks();
 });
-
-// ——— seedTierState: CBP never seeded / pruned ————————————————
 
 describe('seedTierState — CBP exclusion', () => {
   it('does not seed an active CBP account into tier 0 or Excluded (fresh)', () => {
@@ -169,8 +153,6 @@ describe('seedTierState — CBP exclusion', () => {
     expect(result.excludedAccountIds).toEqual(['acct-hsa']);
   });
 });
-
-// ——— buildCbpInfoRows: descriptor per election state ————————————
 
 describe('buildCbpInfoRows', () => {
   it('produces an annuity descriptor for an annuity-elected CBP account', () => {
@@ -215,8 +197,6 @@ describe('buildCbpInfoRows', () => {
   });
 });
 
-// ——— incomeAddPath (moved to cbp-resolution) ————————————————
-
 describe('incomeAddPath', () => {
   it('builds the expected income deep-link from the account', () => {
     const path = incomeAddPath(makeAccount('acct-cbp', 'RETIREMENT_CASH_BALANCE', 'member-9'));
@@ -246,8 +226,6 @@ describe('incomeAddPath', () => {
     expect(link).not.toBeNull();
   });
 });
-
-// ——— Tier editor info section ————————————————————————————
 
 describe('WithdrawalStrategyEditor — CBP info section', () => {
   function renderModal(
@@ -287,7 +265,6 @@ describe('WithdrawalStrategyEditor — CBP info section', () => {
     await screen.findByRole('tab', { name: /Strategy/ });
     await userEvent.click(screen.getByRole('tab', { name: /Custom order/i }));
     expect(screen.getByText(/paid as monthly income/i)).toBeTruthy();
-    // CBP account is not a draggable grid row.
     expect(screen.queryByRole('row', { name: /acct-cbp/i })).toBeNull();
   });
 
@@ -312,9 +289,7 @@ describe('WithdrawalStrategyEditor — CBP info section', () => {
     await screen.findByRole('tab', { name: /Strategy/ });
     await userEvent.click(screen.getByRole('tab', { name: /Custom order/i }));
     expect(screen.getByText(/choose how this pension pays out/i)).toBeTruthy();
-    // The affordance is a <button> — the navigation routes through the
-    // page-level unsaved-changes guard when dirty (covered by the "Elect a
-    // payout discard guard" describe block below).
+    // The affordance is a `<button>`: navigation routes through the page-level unsaved-changes guard when dirty (see the "Elect a payout discard guard" block).
     expect(
       screen.getByRole('button', { name: /Elect a payout/i }),
     ).toBeTruthy();
@@ -332,8 +307,7 @@ describe('WithdrawalStrategyEditor — CBP info section', () => {
     await screen.findByRole('tab', { name: /Strategy/ });
     await userEvent.click(screen.getByRole('tab', { name: /Custom order/i }));
     expect(screen.getByText(/more than one pension income stream/i)).toBeTruthy();
-    // The conflict remediation reviews the existing pensions; it must NOT offer
-    // the create-new "Elect a payout" deep-link (that would deepen the duplication).
+    // The conflict remediation reviews the existing pensions and must not offer the create-new "Elect a payout" deep link (that would deepen the duplication).
     expect(
       screen.getByRole('button', { name: /Review pensions for acct-cbp/i }),
     ).toBeTruthy();
@@ -374,14 +348,12 @@ describe('WithdrawalStrategyEditor — CBP info section', () => {
   });
 });
 
-// ——— Save validation with CBP ————————————————————————
-
 describe('WithdrawalStrategyEditor — validation with CBP', () => {
   it('save succeeds when only non-CBP accounts are placed (CBP unplaced is fine)', async () => {
     const onSaved = vi.fn();
     const scenario = makeScenario('sc-save', {
       withdrawalStrategy: { kind: 'customOrder' },
-      // Saved order references a now-pruned CBP id → opens dirty (prune surfaced).
+      // A saved order referencing a now-pruned CBP id opens dirty (the prune is surfaced).
       customDrawdownOrder: { tiers: [['acct-401k', 'acct-cbp']], excludedAccountIds: [] },
     });
     render(
@@ -400,7 +372,6 @@ describe('WithdrawalStrategyEditor — validation with CBP', () => {
       </MemoryRouter>,
     );
     await screen.findByRole('tab', { name: /Strategy/ });
-    // Pruned CBP id makes the draft dirty → Save enabled, no validation error.
     const saveBtn = screen.getByRole('button', { name: 'Save' });
     expect(saveBtn).not.toBeDisabled();
     await act(async () => {
@@ -410,14 +381,12 @@ describe('WithdrawalStrategyEditor — validation with CBP', () => {
     const pending = await listPendingMutations();
     const mut = pending.find((p) => p.aggregateId === 'sc-save');
     const payload = mut!.payload as ScenarioPayload;
-    // Re-saving does not write the CBP id back.
     expect(payload.overrides.customDrawdownOrder?.tiers.flat()).not.toContain('acct-cbp');
   });
 
   it('still blocks save when a non-CBP account is left unplaced', async () => {
     const scenario = makeScenario('sc-block', {
       withdrawalStrategy: { kind: 'customOrder' },
-      // acct-other is active + non-CBP but not in any tier/excluded → unplaced.
       customDrawdownOrder: { tiers: [['acct-401k']], excludedAccountIds: [] },
     });
     render(
@@ -465,7 +434,6 @@ describe('WithdrawalStrategyEditor — validation with CBP', () => {
     );
     await screen.findByRole('tab', { name: /Strategy/ });
     await userEvent.click(screen.getByRole('tab', { name: /Custom order/i }));
-    // The empty-tiers message renders in the validation Alert (role="alert").
     await waitFor(() =>
       expect(
         screen
@@ -473,7 +441,6 @@ describe('WithdrawalStrategyEditor — validation with CBP', () => {
           .some((a) => /place at least one account in a drawdown tier/i.test(a.textContent ?? '')),
       ).toBe(true),
     );
-    // Not the "no accounts at all" guard — the household DOES have an account.
     expect(
       screen
         .queryAllByRole('alert')
@@ -482,16 +449,10 @@ describe('WithdrawalStrategyEditor — validation with CBP', () => {
   });
 });
 
-// ——— Elect-a-payout discard guard ————————————————————
-// The editor is an explicit-Save surface; navigating to the income-add flow
-// unmounts it and would silently drop an in-progress draft. The "Elect a
-// payout" affordance navigates directly; while dirty the page-level
-// useUnsavedChangesGuard intercepts the pathname change and prompts Stay/Leave,
-// and navigates directly when clean.
+// The editor is an explicit-Save surface, and navigating to the income-add flow unmounts it and would silently drop an in-progress draft, so while dirty the page-level useUnsavedChangesGuard intercepts the pathname change and prompts Stay/Leave; when clean it navigates directly.
 
 describe('WithdrawalStrategyEditor — Elect a payout discard guard', () => {
-  // Surfaces the current pathname so the test can assert whether the
-  // in-app navigation to /income/new actually happened.
+  // Surfaces the current pathname so the test can assert whether the in-app navigation to /income/new happened.
   function LocationProbe(): React.ReactElement {
     const location = useLocation();
     return <div data-testid="pathname">{location.pathname}</div>;
@@ -503,8 +464,7 @@ describe('WithdrawalStrategyEditor — Elect a payout discard guard', () => {
     overrides: ScenarioPayload['overrides'],
   ): ReturnType<typeof render> {
     const scenario = makeScenario('sc-elect', overrides);
-    // BrowserRouter (real window.history) so the editor's guard pushState
-    // patch can intercept the elect-a-payout navigation while dirty.
+    // BrowserRouter (real window.history) so the editor's guard pushState patch can intercept the navigation while dirty.
     window.history.replaceState({}, '', '/scenarios/sc-elect');
     return render(
       <BrowserRouter>
@@ -531,14 +491,11 @@ describe('WithdrawalStrategyEditor — Elect a payout discard guard', () => {
     );
   }
 
-  // Saved order references a now-pruned CBP id → the draft opens dirty (the
-  // prune is surfaced as an edit). No income stream → the CBP row is
-  // the unconfigured variant carrying the "Elect a payout" affordance.
+  // A saved order referencing a now-pruned CBP id opens the draft dirty (the prune is surfaced as an edit); with no income stream the CBP row is the unconfigured variant carrying "Elect a payout".
   const dirtyUnconfigured: ScenarioPayload['overrides'] = {
     withdrawalStrategy: { kind: 'customOrder' },
     customDrawdownOrder: { tiers: [['acct-401k', 'acct-cbp']], excludedAccountIds: [] },
   };
-  // Saved order already pruned → no CBP id present, draft opens clean.
   const cleanUnconfigured: ScenarioPayload['overrides'] = {
     withdrawalStrategy: { kind: 'customOrder' },
     customDrawdownOrder: { tiers: [['acct-401k']], excludedAccountIds: [] },
@@ -547,7 +504,6 @@ describe('WithdrawalStrategyEditor — Elect a payout discard guard', () => {
   async function openCustomTabAndElect(): Promise<void> {
     await screen.findByRole('tab', { name: /Strategy/ });
     await userEvent.click(screen.getByRole('tab', { name: /Custom order/i }));
-    // Wait for the unconfigured CBP info row to render before electing.
     await screen.findByText(/choose how this pension pays out/i);
     await userEvent.click(screen.getByRole('button', { name: /Elect a payout/i }));
   }
@@ -559,7 +515,6 @@ describe('WithdrawalStrategyEditor — Elect a payout discard guard', () => {
       dirtyUnconfigured,
     );
     await openCustomTabAndElect();
-    // Discard prompt is shown and navigation has NOT happened yet.
     expect(
       screen.getByRole('heading', { name: /unsaved changes/i }),
     ).toBeTruthy();
@@ -573,7 +528,6 @@ describe('WithdrawalStrategyEditor — Elect a payout discard guard', () => {
       dirtyUnconfigured,
     );
     await openCustomTabAndElect();
-    // Confirm the discard → navigation proceeds to the income form.
     await userEvent.click(screen.getByRole('button', { name: /^Leave$/i }));
     await waitFor(() =>
       expect(screen.getByTestId('pathname').textContent).toBe('/income/new'),
@@ -598,8 +552,7 @@ describe('WithdrawalStrategyEditor — Elect a payout discard guard', () => {
       cleanUnconfigured,
     );
     await openCustomTabAndElect();
-    // No Stay/Leave prompt is opened; navigation reaches the income form
-    // synchronously (the route renders its placeholder).
+    // No Stay/Leave prompt; navigation reaches the income form synchronously.
     expect(screen.queryByRole('button', { name: /^Leave$/i })).toBeNull();
     await waitFor(() =>
       expect(screen.getByTestId('pathname').textContent).toBe('/income/new'),
@@ -607,18 +560,10 @@ describe('WithdrawalStrategyEditor — Elect a payout discard guard', () => {
   });
 });
 
-// ——— Review-pensions (conflict) discard guard ————————————
-// A CBP with more than one linked pension stream renders the read-only conflict
-// info row, whose "Review pensions" control navigates to the income LIST
-// (/income) so the user can remove the extra streams — NOT the income-add deep
-// link (/income/new), which would deepen the duplication. Like the elect path
-// it unmounts the explicit-Save editor, so the page-level guard intercepts the
-// pathname change with the same Stay/Leave prompt while dirty and navigates
-// directly when clean.
+// A CBP with more than one linked pension stream renders the read-only conflict row, whose "Review pensions" control navigates to the income list (/income) so the user can remove the extra streams, not the income-add deep link (/income/new), which would deepen the duplication. Like the elect path it unmounts the editor, so the page-level guard prompts while dirty and navigates directly when clean.
 
 describe('WithdrawalStrategyEditor — Review pensions conflict discard guard', () => {
-  // Surfaces the current pathname so the test can assert whether the in-app
-  // navigation to /income actually happened (and that it is NOT /income/new).
+  // Surfaces the current pathname so the test can assert whether navigation to /income happened (and not /income/new).
   function LocationProbe(): React.ReactElement {
     const location = useLocation();
     return <div data-testid="pathname">{location.pathname}</div>;
@@ -630,8 +575,7 @@ describe('WithdrawalStrategyEditor — Review pensions conflict discard guard', 
     overrides: ScenarioPayload['overrides'],
   ): ReturnType<typeof render> {
     const scenario = makeScenario('sc-conflict', overrides);
-    // BrowserRouter (real window.history) so the editor's guard pushState
-    // patch can intercept the review-pensions navigation while dirty.
+    // BrowserRouter (real window.history) so the guard's pushState patch can intercept the navigation while dirty.
     window.history.replaceState({}, '', '/scenarios/sc-conflict');
     return render(
       <BrowserRouter>
@@ -660,19 +604,14 @@ describe('WithdrawalStrategyEditor — Review pensions conflict discard guard', 
     );
   }
 
-  // Two annuity streams link the same CBP → the conflict info row, which carries
-  // the "Review pensions" control.
   const conflictStreams = [
     makePensionStream('inc-1', 'acct-cbp', 'annuity'),
     makePensionStream('inc-2', 'acct-cbp', 'annuity'),
   ];
-  // Saved order references a now-pruned CBP id → the draft opens dirty (the
-  // prune is surfaced as an edit).
   const dirtyConflict: ScenarioPayload['overrides'] = {
     withdrawalStrategy: { kind: 'customOrder' },
     customDrawdownOrder: { tiers: [['acct-401k', 'acct-cbp']], excludedAccountIds: [] },
   };
-  // Saved order already pruned → no CBP id present, draft opens clean.
   const cleanConflict: ScenarioPayload['overrides'] = {
     withdrawalStrategy: { kind: 'customOrder' },
     customDrawdownOrder: { tiers: [['acct-401k']], excludedAccountIds: [] },
@@ -681,7 +620,6 @@ describe('WithdrawalStrategyEditor — Review pensions conflict discard guard', 
   async function openCustomTabAndReview(): Promise<void> {
     await screen.findByRole('tab', { name: /Strategy/ });
     await userEvent.click(screen.getByRole('tab', { name: /Custom order/i }));
-    // Wait for the conflict CBP info row to render before reviewing.
     await screen.findByText(/more than one pension income stream/i);
     await userEvent.click(
       screen.getByRole('button', { name: /Review pensions for acct-cbp/i }),
@@ -695,7 +633,6 @@ describe('WithdrawalStrategyEditor — Review pensions conflict discard guard', 
       dirtyConflict,
     );
     await openCustomTabAndReview();
-    // Discard prompt is shown and navigation has NOT happened yet.
     expect(
       screen.getByRole('heading', { name: /unsaved changes/i }),
     ).toBeTruthy();
@@ -709,8 +646,6 @@ describe('WithdrawalStrategyEditor — Review pensions conflict discard guard', 
       dirtyConflict,
     );
     await openCustomTabAndReview();
-    // Confirm the discard → navigation proceeds to the income LIST so the user
-    // can remove the extra streams, never the create-new income form.
     await userEvent.click(screen.getByRole('button', { name: /^Leave$/i }));
     await waitFor(() =>
       expect(screen.getByTestId('pathname').textContent).toBe('/income'),
@@ -736,8 +671,6 @@ describe('WithdrawalStrategyEditor — Review pensions conflict discard guard', 
       cleanConflict,
     );
     await openCustomTabAndReview();
-    // No Stay/Leave prompt is opened; navigation reaches the income list
-    // synchronously, and never the create-new form.
     expect(screen.queryByRole('button', { name: /^Leave$/i })).toBeNull();
     await waitFor(() =>
       expect(screen.getByTestId('pathname').textContent).toBe('/income'),

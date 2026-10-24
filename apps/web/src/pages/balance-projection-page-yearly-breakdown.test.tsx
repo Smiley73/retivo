@@ -1,13 +1,4 @@
-/**
- * BalanceProjectionYearlyBreakdown — per-account breakdown sub-section
- * render + a11y smoke.
- *
- * Covers the show/hide disclosure button, the per-account grid + totals
- * row, the insufficient-history warning gating, and the hidden-account
- * footer counts. The method tab strip was removed (Graphite Spectrum —
- * the page-header "Basis" select is now the sole method control). A11y
- * assertion per the project shared-component rule.
- */
+// BalanceProjectionYearlyBreakdown: the show/hide disclosure, the per-account grid and totals row, insufficient-history warning gating and hidden-account footer counts. The page-header "Basis" select is the sole method control.
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -71,10 +62,7 @@ function row(
     ownerDisplay: 'Alex',
     ownerRetirementDate: '2030-01-01',
     latestBalance: total * 0.5,
-    // A short-history account keeps its planned-rate
-    // projection on `outputs.twr` (no longer nulled) so it is INCLUDED in
-    // the Historical surfaces at the planned rate; `hasInsufficientHistory`
-    // drives the ⚠ marker + disclosure, not exclusion.
+    // A short-history account keeps its planned-rate projection on `outputs.twr`, so it stays in the Historical surfaces at the planned rate; `hasInsufficientHistory` drives the warning marker and disclosure, not exclusion.
     outputs: { planned: projOut(total), twr: projOut(total) },
     hasInsufficientHistory,
     ratePctByMethod: { planned: 5, twr: hasInsufficientHistory ? null : 5 },
@@ -101,9 +89,6 @@ const baseProps = {
 describe('BalanceProjectionYearlyBreakdown', () => {
   it('renders the disclosure button + per-account grid with a totals row when open', () => {
     render(<BalanceProjectionYearlyBreakdown {...baseProps} />);
-    // The method tab strip is gone — the page-header "Basis" select is
-    // now the sole method control. The disclosure button toggles the
-    // (open) table.
     expect(
       screen.getByRole('button', { name: 'Hide account-by-account projection' }),
     ).toBeInTheDocument();
@@ -121,10 +106,7 @@ describe('BalanceProjectionYearlyBreakdown', () => {
     expect(
       screen.getByRole('button', { name: 'Show account-by-account projection' }),
     ).toBeInTheDocument();
-    // Always mounted inside a `<div hidden>` wrapper → both the grid
-    // and the TableScroll scroll-region landmark must drop out of the a11y tree
-    // when collapsed (the landmark check catches a regression that strips
-    // `hidden` from the wrapper).
+    // The table is always mounted inside a `<div hidden>` wrapper, so collapsed, both the grid and the TableScroll landmark must drop out of the a11y tree (the landmark check catches a regression that strips `hidden`).
     expect(
       screen.queryByRole('grid', { name: /Projected at retirement/ }),
     ).not.toBeInTheDocument();
@@ -177,7 +159,6 @@ describe('BalanceProjectionYearlyBreakdown', () => {
     expect(
       screen.getByText(/2 accounts use their planned return here/),
     ).toBeInTheDocument();
-    // The reworded copy no longer says "excluded".
     expect(screen.queryByText(/excluded/i)).not.toBeInTheDocument();
   });
 
@@ -192,13 +173,9 @@ describe('BalanceProjectionYearlyBreakdown', () => {
         ]}
       />,
     );
-    // The ⚠ marker is present (its accessible label) on the short-history row.
-    // Only the short-history account carries it.
     expect(
       screen.getByLabelText('Insufficient history for this method'),
     ).toBeInTheDocument();
-    // The account is still INCLUDED at its planned rate — its Total
-    // cell renders a dollar value, not an em-dash.
     const grid = screen.getByRole('grid', { name: /Projected at retirement/ });
     const rothRow = within(grid).getByText('New Roth').closest('tr');
     expect(rothRow).not.toBeNull();
@@ -212,7 +189,6 @@ describe('BalanceProjectionYearlyBreakdown', () => {
         /Per-account breakdown is not available for Monte Carlo scenarios/,
       ),
     ).toBeInTheDocument();
-    // The table + its expand/collapse toggle are both hidden.
     expect(
       screen.queryByRole('grid', { name: /Projected at retirement/ }),
     ).not.toBeInTheDocument();

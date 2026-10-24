@@ -37,7 +37,6 @@ describe('WhatsNewPage', () => {
       .getAllByRole('heading', { level: 2 })
       .map((h) => h.textContent);
     expect(dateHeadings).toEqual(['June 21, 2026', 'June 20, 2026']);
-    // All three entries still render (as level-3 headings).
     expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(3);
   });
 
@@ -104,7 +103,6 @@ describe('WhatsNewPage', () => {
     render(<WhatsNewPage notes={notes} />);
     const heading = screen.getByRole('heading', { level: 3, name: 'No date entry' });
     expect(heading).toBeInTheDocument();
-    // formattedDate is '' for an empty date, so no date <h2> should render.
     expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0);
   });
 

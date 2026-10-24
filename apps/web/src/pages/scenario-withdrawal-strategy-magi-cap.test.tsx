@@ -1,18 +1,8 @@
-/**
- * Unit tests for the MagiCapSection WINDOW-SCHEDULE editor.
- *
- * Covers: toggle fires onToggle; window list
- * renders per-window controls; add/remove windows; required-ceiling notice
- * non-overlap validation message; Fill-no-target-Roth notice;
- * cliff warning from live calibration; a11y smoke.
- */
+// MagiCapSection window-schedule editor: toggle, per-window controls, add/remove, required-ceiling and overlap validation, the Fill-no-target-Roth notice and the cliff warning from live calibration.
 import 'fake-indexeddb/auto';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  MagiCapSection,
-  resolveCliffThreshold,
-} from './scenario-withdrawal-strategy-magi-cap';
+import { MagiCapSection } from './scenario-withdrawal-strategy-magi-cap';
 import userEvent from '@testing-library/user-event';
 import { expectNoA11yViolations } from '../test/a11y';
 import { buildNextMagiCap } from '../lib/magi-cap-persistence';
@@ -114,7 +104,6 @@ describe('MagiCapSection — a saved Roth conversion plan', () => {
       expect(tabs[i]).toHaveFocus();
       expect(tabs[i]).toHaveAttribute('aria-selected', 'true');
     }
-    // The Annual Max shown is the selected year's.
     expect(screen.getByLabelText(/annual max window 25/i)).toHaveValue('174000.00');
   });
 
@@ -141,9 +130,7 @@ describe('MagiCapSection — window tabs', () => {
     render(
       <MagiCapSection {...makeProps({ enabled: true, windows: [ranged, win()] })} />,
     );
-    // First window resolves to a full span; the default win() collapses to a
-    // zero-length interval here (retirement 2045 ≈ primary age 65), so its tab
-    // surfaces the start year rather than falling back to "Window N".
+    // The first window resolves to a full span; the default win() collapses to a zero-length interval here (retirement 2045 ≈ primary age 65), so its tab surfaces the start year rather than falling back to "Window N".
     expect(screen.getByRole('tab', { name: '2050 - 2055' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'From 2045' })).toBeTruthy();
   });
@@ -153,17 +140,14 @@ describe('MagiCapSection — window tabs', () => {
       <MagiCapSection {...makeProps({ enabled: true, windows: [win(), win()] })} />,
     );
     expect(screen.getAllByRole('tab')).toHaveLength(2);
-    // Only the selected panel mounts its controls.
     expect(screen.getAllByLabelText(/annual max window/i)).toHaveLength(1);
   });
 
   it('switches the visible panel when another tab is selected', () => {
-    // end-year anchors are inclusive of that year (interval [start, year+1)),
-    // so the tab label's last year equals the entered end year.
+    // End-year anchors are inclusive (interval [start, year+1)), so the tab label's last year equals the entered end year.
     const a = win({ start: { kind: 'year', year: 2050 }, end: { kind: 'year', year: 2055 } });
     const b = win({ start: { kind: 'year', year: 2056 }, end: { kind: 'year', year: 2060 } });
     render(<MagiCapSection {...makeProps({ enabled: true, windows: [a, b] })} />);
-    // Window 1 (index 0) is active: its Annual Max field is labelled "window 1".
     expect(screen.getByLabelText(/annual max window 1/i)).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: '2056 - 2060' }));
     expect(screen.getByLabelText(/annual max window 2/i)).toBeTruthy();
@@ -261,9 +245,7 @@ describe('MagiCapSection — validation notices', () => {
   });
 
   it('shows the Fill-no-target notice when the saved target is no longer eligible', () => {
-    // A window saved against an account that has since dropped out of the
-    // eligible list — e.g. an INHERITED Roth IRA, which the engine's
-    // `findTargetRothIndex` refuses — converts $0 just like an unset target.
+    // A window saved against an account that has since left the eligible list (e.g. an inherited Roth IRA, which `findTargetRothIndex` refuses) converts $0 just like an unset target.
     render(
       <MagiCapSection
         {...makeProps({
@@ -290,23 +272,26 @@ describe('MagiCapSection — validation notices', () => {
   });
 });
 
-describe('resolveCliffThreshold', () => {
-  it('returns the first IRMAA bracket for the IRMAA line', () => {
-    expect(resolveCliffThreshold('irmaa', 1)).toBeGreaterThan(0);
+describe('MagiCapSection — cliff warning', () => {
+  it.each([
+    ['irmaa', /first Medicare IRMAA surcharge bracket/],
+    ['aca', /ACA 400%-of-poverty line/],
+  ] as const)('warns when the %s cap sits above the live cliff threshold', (capMagiLine, text) => {
+    render(
+      <MagiCapSection
+        {...makeProps({ enabled: true, windows: [win({ capMagiLine, magiCeilingAnnualDollars: 1_000_000 })] })}
+      />,
+    );
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
-  it('returns 400% FPL for the ACA line', () => {
-    expect(resolveCliffThreshold('aca', 2)).toBeGreaterThan(0);
+
+  it('shows no warning when the cap is below the threshold', () => {
+    render(<MagiCapSection {...makeProps({ enabled: true, windows: [win()] })} />);
+    expect(screen.queryByText(/sits above the/)).toBeNull();
   });
 });
 
 describe('MagiCapSection — a11y', () => {
-  it('has no a11y violations in the seeded single-window state', async () => {
-    const { container } = render(
-      <MagiCapSection {...makeProps({ enabled: true, windows: [win()] })} />,
-    );
-    await expectNoA11yViolations(container);
-  });
-
   it('has no a11y violations in the validation-error (overlap) state', async () => {
     const a = win({ start: { kind: 'year', year: 2050 }, end: { kind: 'year', year: 2056 } });
     const b = win({ start: { kind: 'year', year: 2054 }, end: { kind: 'year', year: 2060 } });

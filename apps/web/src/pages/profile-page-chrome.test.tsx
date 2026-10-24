@@ -1,22 +1,5 @@
-/**
- * Focused contract tests for the shared re-auth `PasswordPromptModal`
- * (profile-page-chrome.tsx), which now renders through the containment-free
- * `PasswordManagerModal`. These assert the password-surface contract directly
- * on the component — driven by a small harness that owns the value + verify
- * state — rather than through a whole settings page:
- *
- *  - native form tokens + hidden username survive the overlay swap;
- *  - DOM injected outside the panel (a Keeper-like popup) is not inert /
- *    aria-hidden, so the autofill popup stays clickable;
- *  - the scrim swallows outside clicks (no dismiss);
- *  - Esc closes when not verifying and is suppressed while verifying;
- *  - submit calls `onContinue` only when enabled, a wrong password keeps the
- *    inline error with no advance and no double-submit;
- *  - axe smoke passes.
- *
- * Esc is driven via `userEvent.keyboard('{Escape}')` with focus inside the
- * panel, never a synthetic `fireEvent` keydown.
- */
+// The shared re-auth `PasswordPromptModal` (profile-page-chrome.tsx), rendered through the containment-free `PasswordManagerModal` and driven by a small harness that owns the value and verify state: native form tokens and hidden username, outside DOM (a Keeper-like popup) not inert, the scrim swallowing outside clicks, Esc suppressed while verifying, and submit gating.
+// Esc is driven via `userEvent.keyboard('{Escape}')` with focus inside the panel, never a synthetic keydown.
 import React, { useState } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -27,20 +10,12 @@ import { expectNoA11yViolations } from '../test/a11y';
 interface HarnessProps {
   onClose?: () => void;
   onContinue?: () => void;
-  /** Simulates the in-flight verify state (disables Continue + Esc). */
   verifying?: boolean;
-  /** Inline error to surface (wrong password). */
   error?: string | null;
-  /** Owner-supplied field(s) rendered after the password field. */
   children?: React.ReactNode;
 }
 
-/**
- * Minimal stand-in for the page that owns the prompt: holds the password value
- * locally and wires the disabled/verifying expressions exactly as the real
- * callers do (Continue disabled while empty or verifying; Cancel + Esc disabled
- * while verifying).
- */
+// Minimal stand-in for the owning page: holds the password locally and wires the disabled/verifying expressions as the real callers do (Continue disabled while empty or verifying; Cancel and Esc disabled while verifying).
 const Harness: React.FC<HarnessProps> = ({
   onClose = () => {},
   onContinue = () => {},
@@ -82,7 +57,6 @@ describe('PasswordPromptModal (through PasswordManagerModal)', () => {
     );
     const password = screen.getByLabelText('Current password');
     const extra = screen.getByLabelText('Extra field');
-    // Same form → one submit carries both; after the password → typed last.
     expect(extra.closest('form')).toBe(password.closest('form'));
     expect(
       password.compareDocumentPosition(extra) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -105,8 +79,7 @@ describe('PasswordPromptModal (through PasswordManagerModal)', () => {
   it('autofocuses the visible password field on open, not the hidden username', async () => {
     render(<Harness />);
     const password = screen.getByLabelText('Current password');
-    // The `HiddenUsernameField` (tabIndex={-1}, aria-hidden) is the first
-    // `<input>` in the DOM; autofocus must skip it and land on the password.
+    // The `HiddenUsernameField` (tabIndex -1, aria-hidden) is the first input in the DOM; autofocus must skip it and land on the password.
     await waitFor(() => expect(password).toHaveFocus());
     const username = password.closest('form')!.querySelector('input[name="username"]');
     expect(document.activeElement).not.toBe(username);
@@ -158,7 +131,6 @@ describe('PasswordPromptModal (through PasswordManagerModal)', () => {
     render(<Harness onContinue={onContinue} />);
     const form = screen.getByLabelText('Current password').closest('form')!;
 
-    // Empty → submit is gated off.
     form.requestSubmit?.();
     expect(onContinue).not.toHaveBeenCalled();
 
@@ -170,17 +142,14 @@ describe('PasswordPromptModal (through PasswordManagerModal)', () => {
   it('a wrong password keeps the inline error and does not advance or double-submit', async () => {
     const user = userEvent.setup();
     const onContinue = vi.fn();
-    // Mirrors the page wiring: while verifying, Continue + the form gate are
-    // disabled, so a second submit during the in-flight window is dropped.
+    // While verifying, Continue and the form gate are disabled, so a second submit during the in-flight window is dropped.
     render(<Harness onContinue={onContinue} verifying error="Current password is incorrect." />);
 
     expect(screen.getByRole('alert')).toHaveTextContent(/current password is incorrect/i);
-    // The disabled (Verifying…) action cannot re-fire.
     const form = screen.getByLabelText('Current password').closest('form')!;
     form.requestSubmit?.();
     await user.click(screen.getByRole('button', { name: 'Verifying…' }));
     expect(onContinue).not.toHaveBeenCalled();
-    // The prompt stays open (no destructive/import/export advance).
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 

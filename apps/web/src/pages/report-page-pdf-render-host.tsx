@@ -44,7 +44,7 @@ import type { ExpenseCategoryMonthlyPoint } from '../lib/expense-projection';
 
 /** Account metadata the account-balance bands group by (mirrors
  *  `AccountBalanceStackBandProps.accounts`). */
-export interface RenderHostAccount {
+interface RenderHostAccount {
   readonly id: string;
   readonly name: string;
   readonly ownerDisplayName: string;

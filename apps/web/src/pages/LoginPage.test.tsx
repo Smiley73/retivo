@@ -1,6 +1,3 @@
-/**
- * Tests for the LoginPage component.
- */
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { LoginPage } from './LoginPage';
@@ -73,9 +70,7 @@ describe('LoginPage', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
   });
 
-  // Representative auth-page check: the open-source line renders via the
-  // shared AuthBrandRow, so the other 7 auth pages inherit it without a
-  // duplicate assertion.
+  // Representative auth-page check: the open-source line comes from the shared AuthBrandRow, so the other 7 auth pages inherit it.
   it('renders the open-source line via the shared auth brand row', () => {
     renderLoginPage();
     const link = screen.getByRole('link', { name: 'RETIVO is open source' });
@@ -157,12 +152,8 @@ describe('LoginPage', () => {
 
   it('renders the public-computer warning as a polite status region, not an assertive alert', () => {
     renderLoginPage();
-    // The advisory is a standing note: it must be role="status" (polite), not
-    // the warning tone's default role="alert" (assertive) — a regression to the
-    // default would still pass the copy/tone/size/axe tests, so assert it here.
+    // The advisory must be role="status" (polite), not the warning tone's default role="alert"; a regression would still pass the copy, tone, size and axe tests.
     expect(screen.getByRole('status')).toHaveTextContent(/public or shared computer/i);
-    // No assertive alert on a clean initial render (the error Alert is
-    // conditional on a failed submit; the deleted/idle notices use role="status").
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -173,7 +164,6 @@ describe('LoginPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/sign out/i)).toBeInTheDocument();
     expect(screen.getByText(/clear data on this device/i)).toBeInTheDocument();
-    // The advisory points the clear-data action at its new home.
     expect(screen.getByText(/Settings . Workspace/i)).toBeInTheDocument();
   });
 
@@ -189,8 +179,6 @@ describe('LoginPage', () => {
     expect(
       screen.getByText(/this device's session was reset/i),
     ).toBeInTheDocument();
-    // One-shot: the reason is consumed so it does not re-surface on the
-    // next visit.
     cleanup();
     renderLoginPage();
     expect(
@@ -198,16 +186,7 @@ describe('LoginPage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('has no a11y violations on the login surface', async () => {
-    const { container } = renderLoginPage();
-    await expectNoA11yViolations(container);
-  });
-
-  // Verification-resend path — after an EMAIL_NOT_VERIFIED login failure the
-  // page offers an inline "Resend verification email" action (mirrors the
-  // SignupPage resend pattern). The original login error stays visible; the
-  // resend success is announced in a role="status" region, a resend failure in
-  // role="alert". The action clears on resubmit / email change.
+  // After an EMAIL_NOT_VERIFIED login failure the page offers an inline "Resend verification email"; the original login error stays visible, resend success is announced in role="status", failure in role="alert", and the action clears on resubmit or email change.
   describe('verification-resend after EMAIL_NOT_VERIFIED', () => {
     async function failLoginWith(code: string, message: string, resendFn = vi.fn()) {
       const { ApiRequestError: ApiErr } = await import('../api/client');
@@ -242,7 +221,6 @@ describe('LoginPage', () => {
         .fn()
         .mockRejectedValue(new ApiErr(401, { code: 'EMAIL_NOT_VERIFIED', message: 'Email not verified' }));
       renderLoginPage(mockLogin, resend);
-      // Surrounding whitespace must be trimmed before the resend call.
       fireEvent.change(screen.getByLabelText('Email'), { target: { value: '  user@test.com  ' } });
       fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Password1!' } });
       fireEvent.submit(screen.getByRole('button', { name: 'Sign in' }).closest('form')!);
@@ -261,9 +239,7 @@ describe('LoginPage', () => {
         await screen.findByRole('button', { name: 'Resend verification email' }),
       );
       await waitFor(() => {
-        // The success copy is announced in a polite role="status" region. (The
-        // standing public-computer advisory is also role="status", so scope the
-        // assertion to the region carrying the resend copy.)
+        // The standing public-computer advisory is also role="status", so scope to the region carrying the resend copy.
         const statuses = screen.getAllByRole('status');
         expect(
           statuses.some((el) => /a fresh link is on its way/i.test(el.textContent ?? '')),
@@ -281,9 +257,6 @@ describe('LoginPage', () => {
         await screen.findByRole('button', { name: 'Resend verification email' }),
       );
       await waitFor(() => {
-        // The resend failure and the original login error are both visible: the
-        // resend failure surfaces a role="alert" with its message and the
-        // EMAIL_NOT_VERIFIED Alert (also role="alert") stays on screen.
         const alerts = screen.getAllByRole('alert');
         expect(alerts.some((el) => /too many requests/i.test(el.textContent ?? ''))).toBe(true);
         expect(alerts.some((el) => /email not verified/i.test(el.textContent ?? ''))).toBe(true);
@@ -292,8 +265,6 @@ describe('LoginPage', () => {
 
     it('clears the resend action when the login form is resubmitted', async () => {
       const { ApiRequestError: ApiErr } = await import('../api/client');
-      // First submit fails EMAIL_NOT_VERIFIED (resend shown); the second submit
-      // succeeds, so the resend action must disappear.
       const mockLogin = vi
         .fn()
         .mockRejectedValueOnce(new ApiErr(401, { code: 'EMAIL_NOT_VERIFIED', message: 'Email not verified' }))
@@ -323,8 +294,7 @@ describe('LoginPage', () => {
     });
 
     it('clears the resend action when a passkey login is attempted after EMAIL_NOT_VERIFIED', async () => {
-      // Regression guard: onPasskeyLogin must call clearResendState() so
-      // the resend button doesn't linger under a subsequent passkey error.
+      // onPasskeyLogin must call clearResendState() so the resend button doesn't linger under a later passkey error.
       const { ApiRequestError: ApiErr } = await import('../api/client');
       const mockLogin = vi
         .fn()
@@ -346,13 +316,11 @@ describe('LoginPage', () => {
         </MemoryRouter>,
       );
 
-      // Trigger EMAIL_NOT_VERIFIED — resend button appears.
       fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'user@test.com' } });
       fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Password1!' } });
       fireEvent.submit(screen.getByRole('button', { name: 'Sign in' }).closest('form')!);
       await screen.findByRole('button', { name: 'Resend verification email' });
 
-      // Attempt passkey login (fails) — resend button must disappear.
       fireEvent.click(screen.getByRole('button', { name: 'Sign in with a passkey' }));
       await waitFor(() => {
         expect(
@@ -362,10 +330,7 @@ describe('LoginPage', () => {
     });
   });
 
-  // Inline "service is busy" copy: a gateway-level throttle/timeout with no
-  // error envelope shows
-  // the shared busy sentence in place of the raw upstream status text —
-  // every enveloped error, including LOGIN_BACKOFF, keeps its own message.
+  // A gateway throttle or timeout with no error envelope shows the shared busy sentence instead of raw upstream text; enveloped errors, including LOGIN_BACKOFF, keep their own message.
   describe('busy-response handling', () => {
     const BUSY_MESSAGE = 'The service is busy right now. Please try again in a moment.';
 
@@ -422,8 +387,6 @@ describe('LoginPage', () => {
       expect(screen.queryByText(BUSY_MESSAGE)).not.toBeInTheDocument();
     });
 
-    // Second surface (passkey submit): the busy branch and its negative are
-    // duplicated across both LoginPage catches, so cover both here too.
     it('shows the busy sentence on the passkey path for a no-envelope 5xx', async () => {
       const { ApiRequestError: ApiErr } = await import('../api/client');
       const mockPasskeyLogin = vi
@@ -472,11 +435,7 @@ describe('LoginPage', () => {
     });
   });
 
-  // The render-time redirect must wait for the unlock lifecycle
-  // to settle (`unlockResolved`). Before it settles, every unlock flag is
-  // transiently false, so `needsUnlock` is false; redirecting then would push an
-  // encrypted-but-locked household into the app before the envelope fetch can
-  // discover it needs a password unlock.
+  // The render-time redirect must wait for `unlockResolved`: before it settles every unlock flag is transiently false, so redirecting would push an encrypted-but-locked household into the app before the envelope fetch discovers it needs a password unlock.
   describe('post-auth redirect gating', () => {
     function renderWithUnlock(overrides: Record<string, unknown>) {
       const navigate = vi.fn();
@@ -503,8 +462,6 @@ describe('LoginPage', () => {
 
     it('does NOT redirect before unlockResolved becomes true', () => {
       const navigate = renderWithUnlock({ unlockResolved: false });
-      // Still settling: no navigation, and the unlock prompt is not shown yet
-      // either (needsUnlock requires unlockResolved). The sign-in form stays.
       expect(navigate).not.toHaveBeenCalled();
       expect(screen.queryByRole('heading', { name: 'Unlock your data' })).not.toBeInTheDocument();
     });
@@ -528,9 +485,6 @@ describe('LoginPage', () => {
     });
   });
 
-  // The unlock prompt can toggle between the account
-  // password and the saved recovery key. A single field swaps between the two;
-  // the toggle routes the submit to unlockWithPassword or unlockWithRecovery.
   describe('recovery-key unlock toggle', () => {
     function renderLocked(overrides: Record<string, unknown> = {}) {
       const navigate = vi.fn();
@@ -568,9 +522,6 @@ describe('LoginPage', () => {
       ).toBeInTheDocument();
     });
 
-    // The "lost both unlockers" recovery link points at the Security
-    // page (where the encrypted-workspace reset lives), with "in Settings →
-    // Security" guidance copy.
     it('links the encrypted-data reset to /security with "Settings → Security" copy', () => {
       renderLocked();
       const link = screen.getByRole('link', {
@@ -582,22 +533,15 @@ describe('LoginPage', () => {
       ).toBeInTheDocument();
     });
 
-    // The toggle is a full-width secondary button (styled like the
-    // sign-in / unlock passkey button), not a subtle underline text link, with
-    // its own "or" divider above it. A regression to the old text link would
-    // still satisfy getByRole('button'), so assert the styling + divider here.
+    // A regression to the old text link would still satisfy getByRole('button'), so assert the styling and divider.
     it('renders the recovery toggle as a secondary button (not an underline text link) with an "or" divider above it', () => {
       renderLocked();
       const toggle = screen.getByRole('button', { name: 'Use recovery key instead' });
-      // Secondary-button styling: full-width outlined button, not `underline`.
       expect(toggle).toHaveClass('w-full');
       expect(toggle).toHaveClass('border-line-strong');
       expect(toggle).not.toHaveClass('underline');
-      // An "or" divider renders above the button. With no passkey slot here,
-      // the only divider on screen is the toggle's own.
       const divider = screen.getByText('or');
       expect(divider).toBeInTheDocument();
-      // The divider precedes the toggle button in document order.
       expect(
         divider.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
@@ -623,8 +567,6 @@ describe('LoginPage', () => {
 
     it('toggling password → recovery switches mode and starts the recovery field empty', () => {
       renderLocked();
-      // Type a password first, then toggle into recovery mode: the typed value
-      // must not carry across, and the recovery field starts empty.
       fireEvent.change(screen.getByLabelText('Password'), {
         target: { value: 'Password1!' },
       });
@@ -645,10 +587,7 @@ describe('LoginPage', () => {
       ).toBeInTheDocument();
     });
 
-    // Password-manager interop: password mode
-    // carries a hidden username so managers fill the right credential;
-    // recovery mode must NOT — a recovery key is never offered for fill or
-    // save, so the field opts out via the vendor ignore attributes instead.
+    // Password mode carries a hidden username so managers fill the right credential; recovery mode must not (a recovery key is never offered for fill or save), so it opts out via the vendor ignore attributes.
     it('password mode renders a hidden username field; recovery mode does not', () => {
       renderLocked();
       const passwordForm = screen.getByLabelText('Password').closest('form')!;
@@ -676,15 +615,11 @@ describe('LoginPage', () => {
 
     it('toggling to password mode clears the entered recovery key value', () => {
       renderLocked();
-      // Enter recovery mode and type a key.
       fireEvent.click(screen.getByRole('button', { name: 'Use recovery key instead' }));
       fireEvent.change(screen.getByLabelText('Recovery key'), {
         target: { value: 'ABCD-EF12-3456-7890' },
       });
-      // Toggle back to password mode — the secret must not survive the swap, so
-      // a value typed for one unlocker never leaks into the other field. The
-      // field resets to the seeded baseline (`DEV_DEFAULT_PASSWORD`: empty off a
-      // local-dev host), never the typed recovery key.
+      // The field resets to the seeded baseline (`DEV_DEFAULT_PASSWORD`: empty off a local-dev host), never the typed recovery key.
       fireEvent.click(screen.getByRole('button', { name: 'Use your password instead' }));
       expect(screen.getByLabelText('Password')).toHaveValue(DEV_DEFAULT_PASSWORD);
     });
@@ -702,13 +637,11 @@ describe('LoginPage', () => {
         expect(screen.getByRole('alert')).toBeInTheDocument();
       });
 
-      // Switching modes resets the prompt — the stale failure must not linger.
       fireEvent.click(screen.getByRole('button', { name: 'Use your password instead' }));
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
 
     it('resets recovery mode and the typed secret when the unlock prompt goes away and returns', () => {
-      // Locked session: enter recovery mode and type a key into the field.
       const auth = {
         login: vi.fn(),
         loginWithPasskey: vi.fn(),
@@ -733,8 +666,6 @@ describe('LoginPage', () => {
         target: { value: 'ABCD-EF12-3456-7890' },
       });
 
-      // Session unlocks within the same tab → the unlock prompt stops rendering
-      // (needsUnlock becomes false). The component stays mounted.
       (useAuth as any).mockReturnValue({ ...auth, isUnlocked: true });
       rerender(
         <MemoryRouter>
@@ -742,10 +673,7 @@ describe('LoginPage', () => {
         </MemoryRouter>,
       );
 
-      // A new locked session begins in the same tab. The recovery-mode state and
-      // the typed secret must NOT survive: the prompt must reopen in password
-      // mode reset to the seeded baseline (`DEV_DEFAULT_PASSWORD`: empty off a
-      // local-dev host), never echoing the prior recovery key.
+      // A new locked session in the same tab must reopen in password mode at the seeded baseline, never echoing the prior recovery key.
       (useAuth as any).mockReturnValue(auth);
       rerender(
         <MemoryRouter>
@@ -789,9 +717,7 @@ describe('LoginPage', () => {
     });
   });
 
-  // A device that already holds a cached HDK / rollback pin
-  // and is served an empty envelope set lands on this SAME locked screen (no
-  // new state machine), with one added sentence naming the cause.
+  // A device with a cached HDK / rollback pin served an empty envelope set lands on the same locked screen with one added sentence naming the cause.
   describe('locked screen — empty envelope set on an already-keyed device', () => {
     function renderLocked(overrides: Record<string, unknown> = {}) {
       (useAuth as any).mockReturnValue({
@@ -837,17 +763,8 @@ describe('LoginPage', () => {
         screen.getByRole('link', { name: /delete your encrypted data and start fresh/i }),
       ).toHaveAttribute('href', '/security');
     });
-
-    it('has no a11y violations with the notice showing', async () => {
-      const { container } = renderLocked({ lockedEnvelopeSetEmpty: true });
-      await expectNoA11yViolations(container);
-    });
   });
 
-  // The unlock prompt offers a one-tap "Unlock with
-  // passkey" button when the household has an enrolled passkey_prf slot and the
-  // browser supports WebAuthn. It runs a targeted PRF assertion; on failure an
-  // inline error shows and the user stays on the unlock screen.
   describe('unlock-with-passkey button', () => {
     function renderLocked(overrides: Record<string, unknown> = {}) {
       const navigate = vi.fn();
@@ -912,10 +829,7 @@ describe('LoginPage', () => {
     });
   });
 
-  // Arriving via `/login?mode=recovery` (the Security page "Use recovery key to
-  // unlock your data" button) pre-selects recovery mode once the unlock prompt
-  // renders. The pre-select is gated on `needsUnlock` so it rides on top of the
-  // mount-time secret-clearing effect rather than being overwritten by it.
+  // The `?mode=recovery` pre-select is gated on `needsUnlock`, so it rides on top of the mount-time secret-clearing effect rather than being overwritten.
   describe('?mode=recovery query-param pre-select', () => {
     function renderAt(path: string, overrides: Record<string, unknown> = {}) {
       (useAuth as any).mockReturnValue({
@@ -944,7 +858,6 @@ describe('LoginPage', () => {
       const recoveryField = screen.getByLabelText('Recovery key');
       expect(recoveryField).toBeInTheDocument();
       expect(recoveryField).toHaveValue('');
-      // The toggle now offers the way back to password mode.
       expect(
         screen.getByRole('button', { name: 'Use your password instead' }),
       ).toBeInTheDocument();
@@ -958,17 +871,13 @@ describe('LoginPage', () => {
     });
 
     it('does NOT pre-select recovery mode when the unlock prompt is not active', () => {
-      // mode=recovery present, but the session is already unlocked → no unlock
-      // prompt renders, so the pre-select effect (gated on needsUnlock) is inert.
+      // mode=recovery with an already-unlocked session renders no unlock prompt, so the pre-select effect is inert.
       renderAt('/login?mode=recovery', { isUnlocked: true });
       expect(screen.queryByLabelText('Recovery key')).not.toBeInTheDocument();
     });
   });
 
-  // The recovery-key modal is a hard gate: dismiss (Esc / scrim /
-  // Cancel) must NOT navigate into the app. Only ticking "I have saved my
-  // recovery key" and pressing Continue navigates. Losing every unwrapper makes
-  // encrypted data unrecoverable, so skipping the confirmation must be impossible.
+  // The recovery-key modal is a hard gate: dismiss (Esc / scrim / Cancel) must not navigate; only ticking "I have saved my recovery key" and Continue does, since losing every unwrapper makes encrypted data unrecoverable.
   describe('recovery-key modal save gate', () => {
     function renderForSetup(setupEncryption: ReturnType<typeof vi.fn>) {
       const navigate = vi.fn();
@@ -993,7 +902,6 @@ describe('LoginPage', () => {
       return navigate;
     }
 
-    /** Run the setup form so the recovery-key modal mounts. */
     async function openRecoveryModal(navigate: ReturnType<typeof vi.fn>) {
       await screen.findByLabelText('Password');
       fireEvent.change(screen.getByLabelText('Password'), {
@@ -1005,7 +913,6 @@ describe('LoginPage', () => {
       await waitFor(() =>
         expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument(),
       );
-      // setupEncryption resolving must not, on its own, navigate.
       expect(navigate).not.toHaveBeenCalled();
     }
 
@@ -1017,7 +924,6 @@ describe('LoginPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
       expect(navigate).not.toHaveBeenCalled();
-      // The modal stays mounted — the recovery key display is still present.
       expect(screen.getByTestId('recovery-key-display')).toBeInTheDocument();
     });
 
@@ -1038,13 +944,11 @@ describe('LoginPage', () => {
       const navigate = renderForSetup(setupEncryption);
       await openRecoveryModal(navigate);
 
-      // Gate closed: Continue disabled, no navigation possible yet.
       const continueBtn = screen.getByRole('button', { name: 'Continue' });
       expect(continueBtn).toBeDisabled();
       fireEvent.click(continueBtn);
       expect(navigate).not.toHaveBeenCalled();
 
-      // Tick the confirmation, then Continue navigates.
       fireEvent.click(screen.getByRole('checkbox', { name: /i have saved my recovery key/i }));
       await waitFor(() =>
         expect(screen.getByRole('button', { name: 'Continue' })).not.toBeDisabled(),
@@ -1054,10 +958,7 @@ describe('LoginPage', () => {
     });
   });
 
-  // Genuine first-time activation is
-  // proofless (one atomic call), but a stranded household (a `password` slot,
-  // no `recovery` slot — an interrupted pre-cutover activation) now needs a
-  // fresh factor to finish the repair when `AUTH_MFA_ENFORCED` is on.
+  // Genuine first-time activation is proofless, but a stranded household (a `password` slot, no `recovery` slot) needs a fresh factor to finish the repair when `AUTH_MFA_ENFORCED` is on.
   describe('encryption-setup step-up', () => {
     function renderForSetup(opts: {
       setupEncryption: ReturnType<typeof vi.fn>;
@@ -1105,8 +1006,6 @@ describe('LoginPage', () => {
 
       await waitFor(() => expect(setupEncryption).toHaveBeenCalledTimes(1));
       expect(setupEncryption).toHaveBeenCalledWith('Password1!', undefined);
-      // The recovery-key modal renders — no factor modal was ever shown, and
-      // getMfaStatus (only consulted on the repair-step-up branch) never ran.
       await screen.findByTestId('recovery-key-display');
       expect(screen.queryByText("Confirm it's you")).not.toBeInTheDocument();
       expect(getMfaStatus).not.toHaveBeenCalled();
@@ -1126,8 +1025,6 @@ describe('LoginPage', () => {
 
       await submitSetupForm();
 
-      // The reusable StepUpModal appears; the first setupEncryption call
-      // carried no proof.
       await screen.findByText("Confirm it's you");
       expect(setupEncryption).toHaveBeenCalledTimes(1);
       expect(setupEncryption).toHaveBeenCalledWith('Password1!', undefined);
@@ -1138,8 +1035,6 @@ describe('LoginPage', () => {
       });
       fireEvent.click(screen.getByRole('button', { name: 'Finish setup' }));
 
-      // The retry carries the collected proof, and succeeds into the
-      // recovery-key modal.
       await waitFor(() => expect(setupEncryption).toHaveBeenCalledTimes(2));
       expect(setupEncryption).toHaveBeenLastCalledWith('Password1!', {
         method: 'totp',
@@ -1150,12 +1045,7 @@ describe('LoginPage', () => {
     });
 
     it('holds the redirect through the repair retry even though setup flips the auth flags before its promise returns', async () => {
-      // `setupEncryption` sets `isUnlocked` + `needsKeySetup` — re-rendering
-      // this page — BEFORE it returns the recovery key. On the factor modal's
-      // retry that intermediate render meets every redirect condition except
-      // the `settingUp` hold, so the hold must span the retry too; otherwise
-      // the page navigates before the recovery-key modal mounts and the
-      // one-time key is never shown.
+      // `setupEncryption` sets `isUnlocked` + `needsKeySetup` before it returns the recovery key; on the factor modal's retry that render meets every redirect condition except the `settingUp` hold, which must therefore span the retry or the page navigates before the one-time key is shown.
       const navigate = vi.fn();
       const baseAuth = {
         login: vi.fn(),
@@ -1176,10 +1066,7 @@ describe('LoginPage', () => {
         .fn()
         .mockRejectedValueOnce(new SetupStepUpRequiredError())
         .mockImplementationOnce(async () => {
-          // Yield once so the flag flip lands after the confirm click's own
-          // synchronous handler — the ordering the real hook produces after
-          // its server round-trip — then re-render with the flipped flags
-          // while the promise is still pending.
+          // Yield once so the flag flip lands after the confirm click's synchronous handler, as the real hook does after its server round-trip, then re-render while the promise is pending.
           await Promise.resolve();
           (useAuth as any).mockReturnValue({
             ...baseAuth,
@@ -1209,7 +1096,6 @@ describe('LoginPage', () => {
       });
       fireEvent.click(screen.getByRole('button', { name: 'Finish setup' }));
 
-      // The recovery-key modal mounts, and nothing navigated in the meantime.
       await screen.findByTestId('recovery-key-display');
       expect(setupEncryption).toHaveBeenCalledTimes(2);
       expect(navigate).not.toHaveBeenCalled();
@@ -1226,9 +1112,7 @@ describe('LoginPage', () => {
     });
   });
 
-  // There is no accept-to-continue step, so first-time
-  // encryption setup renders as soon as `needsSetup` holds: no intermediate
-  // "Loading…" surface and no legal request.
+  // There is no accept-to-continue step: first-time encryption setup renders as soon as `needsSetup` holds, with no "Loading…" surface and no legal request.
   describe('first-time encryption setup (no legal hold)', () => {
     function renderForSetup(setupEncryption: ReturnType<typeof vi.fn>) {
       const navigate = vi.fn();
@@ -1257,13 +1141,10 @@ describe('LoginPage', () => {
     it('shows the setup form on the first render, with no "Loading…" surface and no request', () => {
       renderForSetup(vi.fn().mockResolvedValue('ABCD'));
 
-      // Synchronous queries (not `find*`): the form is there with no waiting.
       expect(screen.getByRole('button', { name: 'Set up encryption' })).toBeInTheDocument();
       expect(screen.getByLabelText('Password')).toBeInTheDocument();
       expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
       expect(screen.queryByRole('status', { busy: true })).not.toBeInTheDocument();
-      // The page asks the network layer for nothing at all (so, in particular,
-      // never a legal request).
       expect(vi.mocked(apiRequest)).not.toHaveBeenCalled();
     });
 

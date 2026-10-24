@@ -1,11 +1,4 @@
-/**
- * ScenarioAssetMixPage — RA Table migration smoke.
- * Asserts the grid landmark, the per-cell PercentInput pattern, and
- * the sticky-top utility class wiring on Columns (PercentInput
- * variant="cell" inside Cell).
- *
- * Full arrow-key row navigation deferred to a manual keyboard check.
- */
+// ScenarioAssetMixPage grid landmark, per-cell PercentInput pattern and sticky-top class wiring; full arrow-key navigation is covered by a manual keyboard check.
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -146,15 +139,10 @@ describe('ScenarioAssetMixPage', () => {
         { timeout: 5000 },
       ),
     ).toBeInTheDocument();
-    // a11y smoke (jest-axe WCAG 2.1 AA) — rolls the shared-component smoke
-    // into the new page-level RA Table tests too.
     await expectNoA11yViolations(container);
   });
 
   it('renders a plain-English PageHeader subtitle with no "Monte Carlo" jargon', async () => {
-    // Scenario sub-screen copy convention: the
-    // PageHeader subtitle uses plain English — the prior "Monte Carlo" jargon
-    // is replaced with an everyday description of the override.
     await seed();
     renderPage();
     await waitFor(() =>
@@ -172,9 +160,7 @@ describe('ScenarioAssetMixPage', () => {
     await waitFor(() =>
       expect(screen.getByText('My 401k')).toBeInTheDocument(),
     );
-    // Sticky utility class wired via thStickyClass / thStickyNumClass
-    // (jsdom-safe className check — paint behavior is covered by the
-    // manual visual check).
+    // jsdom-safe className check: paint behaviour is covered by the manual visual check.
     const accountHeader = screen.getByRole('columnheader', { name: 'Account' });
     expect(accountHeader.className).toContain('sticky');
     expect(accountHeader.className).toContain('top-0');
@@ -189,24 +175,14 @@ describe('ScenarioAssetMixPage', () => {
     await waitFor(() =>
       expect(screen.getByText('My 401k')).toBeInTheDocument(),
     );
-    // <PercentInput variant="cell"> inside <Cell> — the AGENTS
-    // editable-cell pattern. ariaLabel comes from the column key.
     expect(screen.getByLabelText('My 401k stocks')).toBeInTheDocument();
     expect(screen.getByLabelText('My 401k bonds')).toBeInTheDocument();
     expect(screen.getByLabelText('My 401k cash')).toBeInTheDocument();
   });
 
   it('keeps the editable in-row PercentInput cell mounted across consecutive edits (no-remount proxy)', async () => {
-    // Mirrors the ScenarioReturnsPage pattern: typing into the
-    // PercentInput cell must NOT trigger a mid-edit remount that
-    // evicts the pending keystroke. The jsdom-stable proxy is that
-    // consecutive input events to the same element both reach the
-    // controlled value AND the queried-by-name reference is the same
-    // object across edits (remount would replace it). Seed an existing
-    // override so the PercentInput cell starts enabled (the page
-    // disables the inputs when override?=off — the disabled-input path
-    // would let synthetic input events bypass the real editable state
-    // machine).
+    // Typing into the PercentInput cell must not remount mid-edit and evict the pending keystroke. jsdom-stable proxy: consecutive input events reach the controlled value and the queried element is the same object across edits.
+    // Seed an existing override so the cell starts enabled; a disabled input would let synthetic events bypass the real editable state machine.
     await seedWithOverride();
     renderPage();
     await waitFor(() =>
@@ -217,17 +193,13 @@ describe('ScenarioAssetMixPage', () => {
     act(() => {
       fireEvent.input(firstRef, { target: { value: '7' } });
     });
-    // PercentInput normalises display to one decimal (`7` → `7.0`); the
-    // typed digit must still be present (a mid-edit remount would clear
-    // it). Asserting the prefix instead of equality keeps the test
-    // resilient to the cell's display-format helper.
+    // PercentInput normalises display to one decimal (`7` → `7.0`); assert the prefix so the test survives the display-format helper.
     expect(firstRef.value).toMatch(/^7/);
     const secondRef = screen.getByLabelText('My 401k stocks') as HTMLInputElement;
     act(() => {
       fireEvent.input(secondRef, { target: { value: '7.5' } });
     });
     expect(secondRef.value).toMatch(/^7\.5/);
-    // The cell was not remounted — same element instance both times.
     expect(firstRef === secondRef).toBe(true);
   });
 });

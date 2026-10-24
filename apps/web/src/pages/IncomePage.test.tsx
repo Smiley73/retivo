@@ -1,12 +1,4 @@
-/**
- * IncomePage empty-state render test.
- *
- * Locks the single-CTA empty state: with an empty income store the
- * page shows the "No income sources yet" helper copy and the ONLY
- * "Add" call-to-action is the PageHeader primary action — there is no
- * in-card Add button duplicating it. Drives IndexedDB through
- * fake-indexeddb; Auth/Sync mocked at the module boundary.
- */
+// IncomePage over fake-indexeddb: the single-CTA empty state (only the PageHeader Add, no in-card Add), the populated table and focus restore.
 import 'fake-indexeddb/auto';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -91,11 +83,9 @@ describe('IncomePage — empty state', () => {
     await seedMember();
     renderPage();
 
-    // (a) Helper copy renders.
     const helper = await screen.findByText(/No income sources yet/i);
     expect(helper).toBeInTheDocument();
 
-    // (b) The PageHeader Add-income action is the ONLY "Add" CTA.
     await waitFor(() => {
       const addCtas = screen
         .getAllByRole('button')
@@ -105,7 +95,6 @@ describe('IncomePage — empty state', () => {
     const addBtn = screen.getByRole('button', { name: 'Add income source' });
     expect(addBtn).toBeInTheDocument();
 
-    // (c) No in-card Add button — the empty-state card holds no buttons.
     const card = helper.closest('div');
     expect(card).not.toBeNull();
     expect(card?.querySelectorAll('button')).toHaveLength(0);
@@ -154,15 +143,12 @@ describe('IncomePage — React Aria Table + notes indicator', () => {
     await seedIncomeStream('inc-1', 'ACME pension', 'COLA-adjusted');
     await seedIncomeStream('inc-2', 'BetaCorp pension', '');
     renderPage();
-    // Member name "Alex" anchors the per-member section.
     await waitFor(() => expect(screen.getByText('Alex')).toBeInTheDocument());
     const grid = await screen.findByRole('grid', {
       name: /Income sources for Alex/i,
     });
     expect(grid).toBeInTheDocument();
-    // RA Table wires its row landmarks a tick after the grid mounts; under
-    // parallel load the rows can lag the grid, so poll rather than read once.
-    // 1 header + 2 data rows.
+    // React Aria Table wires its row landmarks a tick after the grid mounts, so under parallel load poll rather than read once.
     await waitFor(() =>
       expect(within(grid).getAllByRole('row').length).toBeGreaterThanOrEqual(3),
     );
@@ -174,22 +160,18 @@ describe('IncomePage — React Aria Table + notes indicator', () => {
     await seedIncomeStream('inc-2', 'BetaCorp pension', '');
     renderPage();
     await waitFor(() => expect(screen.getByText('ACME pension')).toBeInTheDocument());
-    // The Notes indicator mounts with the row body, which can lag the name
-    // cell under parallel load; poll until exactly one indicator renders.
+    // The Notes indicator mounts with the row body, which can lag the name cell under parallel load.
     await waitFor(() =>
       expect(screen.getAllByRole('img', { name: 'Notes' })).toHaveLength(1),
     );
   });
 
   it('renders an in-row Edit control as keyboard-focusable', async () => {
-    // RA Table grid keyboard model exercised by Adobe upstream; here
-    // we sanity-check that an in-row Edit button can hold focus.
     await seedMember();
     await seedIncomeStream('inc-1', 'ACME pension', '');
     renderPage();
     await waitFor(() => expect(screen.getByText('ACME pension')).toBeInTheDocument());
-    // The in-row Edit control can mount a tick after the name cell under
-    // parallel load; poll until at least one Edit button is present.
+    // The in-row Edit control can mount a tick after the name cell under parallel load.
     await waitFor(() =>
       expect(
         screen.getAllByRole('button', { name: 'Edit' }).length,
@@ -201,13 +183,7 @@ describe('IncomePage — React Aria Table + notes indicator', () => {
   });
 
   it('exposes the React Aria Table grid for arrow-key navigation across rows', async () => {
-    // jsdom can't reliably synthesize RA Table's focus-manager
-    // events for grid ArrowUp/ArrowDown; the robust jsdom assertion is
-    // that the grid's accessible name is queryable AND each row's
-    // focusable Edit descendant can independently hold focus — the
-    // surface arrow-key navigation moves between. Real-DOM grid arrow
-    // nav is covered by Adobe's upstream tests + a manual
-    // walkthrough gate before merge.
+    // jsdom cannot synthesize React Aria Table's focus-manager events for grid arrow keys, so assert the grid's accessible name and that each row's Edit control can hold focus.
     await seedMember();
     await seedIncomeStream('inc-1', 'ACME pension', '');
     await seedIncomeStream('inc-2', 'BetaCorp pension', '');
@@ -216,10 +192,7 @@ describe('IncomePage — React Aria Table + notes indicator', () => {
       name: /Income sources for Alex/i,
     });
     expect(grid).toBeInTheDocument();
-    // Each row carries its own Edit button — focus must be reachable
-    // independently for AT users navigating with arrow keys. The per-row
-    // controls mount a tick after the grid landmark under parallel load, so
-    // poll until both rows' Edit buttons are present.
+    // The per-row controls mount a tick after the grid landmark under parallel load, so poll until both rows' Edit buttons are present.
     await waitFor(() =>
       expect(
         screen.getAllByRole('button', { name: 'Edit' }).length,
@@ -250,8 +223,7 @@ describe('IncomePage — reactive reads', () => {
       await screen.findByText(/No income sources yet/i),
     ).toBeInTheDocument();
 
-    // A single-row write fires only the per-store fine signal — no
-    // notifyWorkspaceChanged() — proving the useAggregates subscription wakes.
+    // A single-row write fires only the per-store signal, no notifyWorkspaceChanged(); the useAggregates subscription must still wake.
     await act(async () => {
       await seedIncomeStream('inc-1', 'ACME pension', '');
     });
@@ -261,10 +233,6 @@ describe('IncomePage — reactive reads', () => {
     );
   });
 });
-
-// ---------------------------------------------------------------------------
-// Focus-restore tests.
-// ---------------------------------------------------------------------------
 
 describe('IncomePage — focus restore', () => {
   beforeEach(() => {
@@ -289,13 +257,11 @@ describe('IncomePage — focus restore', () => {
     renderPageAt('/income?focusIncomeId=inc-focus');
     await screen.findByText('ACME pension');
 
-    // The effect fires after loading completes.
     await waitFor(() => {
       expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'instant', block: 'nearest' });
     });
 
-    // React Aria Table's grid pattern manages focus at the row (<tr>) level,
-    // so the row receives focus (not the button inside the cell).
+    // React Aria Table manages focus at the row level, so the row receives focus, not the button inside the cell.
     await waitFor(() => {
       const row = document.querySelector(`tr[data-income-id="inc-focus"]`);
       expect(document.activeElement).toBe(row);
@@ -306,10 +272,7 @@ describe('IncomePage — focus restore', () => {
     await seedMember();
     await seedIncomeStream('inc-strip', 'Strip stream', '');
 
-    // Seed the real URL with the param so the replaceState strip has
-    // something to remove — MemoryRouter keeps its history in-memory and
-    // never writes to window.location, so the assertion would otherwise
-    // pass vacuously.
+    // Seed the real URL with the param: MemoryRouter never writes to window.location, so the replaceState assertion would pass vacuously otherwise.
     window.history.replaceState(null, '', '/income?focusIncomeId=inc-strip');
 
     renderPageAt('/income?focusIncomeId=inc-strip');
@@ -327,7 +290,6 @@ describe('IncomePage — focus restore', () => {
     const scrollSpy = vi.fn();
     window.HTMLElement.prototype.scrollIntoView = scrollSpy;
 
-    // Seed the real URL so the strip assertion is meaningful.
     window.history.replaceState(null, '', '/income?focusIncomeId=inc-missing');
 
     renderPageAt('/income?focusIncomeId=inc-missing');
@@ -346,8 +308,7 @@ describe('IncomePage — focus restore', () => {
     const scrollSpy = vi.fn();
     window.HTMLElement.prototype.scrollIntoView = scrollSpy;
 
-    // `%5B` = `[` — a selector metacharacter; regex guard must reject it.
-    // Seed the real URL so the strip assertion is meaningful.
+    // `%5B` is `[`, a selector metacharacter that the regex guard must reject.
     window.history.replaceState(null, '', '/income?focusIncomeId=bad%5Bid');
 
     renderPageAt('/income?focusIncomeId=bad%5Bid');

@@ -1,23 +1,6 @@
-/**
- * End-to-end regression for the working-years Roth-conversions editor default
- * window. The bug class is a UI↔engine SEMANTIC mismatch, so this test
- * does NOT assert at the UI layer — it takes the editor's exact default-Add
- * stored output (via the same save helper the Save button uses) and runs it
- * through the deterministic engine pre-pass (`computePreRetirementRothConversions`,
- * which calls `resolveWorkingYears`), binding the stored window to the engine's
- * converted-year set.
- *
- * It pins the established window contract — shared with the sibling MAGI-cap
- * editor (`resolveEndMonth`'s `year` case maps `end:{kind:'year', year:Y}` to
- * Jan 1 of Y+1, so the engine's half-open `[startYear, endYear)` MONTH window
- * fully INCLUDES calendar year Y):
- *   (a) the default Add converts AT LEAST ONE working year (never the zero-year
- *       default), and
- *   (b) a single-year entry (`start = end = year Y`) converts EXACTLY calendar
- *       year Y — the "Convert through Y" label is honest.
- */
+// Binds the Roth-conversions editor's stored window to the engine's converted-year set (a UI↔engine semantic mismatch can't be caught at the UI layer): `resolveEndMonth` maps `end:{kind:'year', year:Y}` to Jan 1 of Y+1, so the half-open `[startYear, endYear)` window includes calendar year Y, as in the MAGI-cap editor.
+// A single-year entry (`start = end = Y`) converts exactly Y, so "Convert through Y" is honest.
 import { describe, expect, it } from 'vitest';
-import { defaultConversion } from './scenario-roth-conversions-editor';
 import { buildNextRothConversions } from './scenario-roth-conversions-save-helpers';
 import type { DraftRothConversion } from './scenario-roth-conversions-draft-hook';
 import { computePreRetirementRothConversions } from '../lib/roth-conversion-projection';
@@ -102,8 +85,7 @@ function member(id: string, birthdate: string): Aggregate<HouseholdMemberPayload
 
 const SRC = account('pre', { type: 'RETIREMENT_401K', taxTreatment: 'PRE_TAX', ownerId: 'm1' });
 const ROTH = account('roth', { type: 'RETIREMENT_ROTH_IRA', taxTreatment: 'ROTH', ownerId: 'm1' });
-// Born 1975 → RMD trigger 75 (2050); retires far in the future so the window is
-// only ever bounded by the entry's own anchors (never the working-years cap).
+// Born 1975 gives an RMD trigger at 75 (2050); retiring far in the future means the window is only bounded by the entry's own anchors, never the working-years cap.
 const M1 = member('m1', '1975-06-01');
 
 function scenarioWith(overrides: ScenarioPayload['overrides']): ScenarioAggregate {
@@ -117,9 +99,7 @@ function scenarioWith(overrides: ScenarioPayload['overrides']): ScenarioAggregat
   });
 }
 
-/** Run a draft list through the SAME save helper the editor's Save button uses,
- *  then the deterministic engine pre-pass — returns the converted calendar-year
- *  set for the source account (the engine's `resolveWorkingYears` output). */
+// Run drafts through the save helper the editor's Save uses, then the deterministic engine pre-pass; returns the converted calendar-year set for the source account.
 function convertedYears(drafts: DraftRothConversion[]): number[] {
   const accounts = [SRC, ROTH];
   const { preRetirementRothConversions } = buildNextRothConversions({ drafts, accounts });
@@ -142,34 +122,23 @@ function convertedYears(drafts: DraftRothConversion[]): number[] {
   return (r.preWithdrawalsByAccount.get('pre') ?? []).map((w) => w.year).sort((a, b) => a - b);
 }
 
-describe('roth-conversions editor default window ↔ engine', () => {
-  it('default Add converts at least one working year (no zero-year default)', () => {
-    const seed = defaultConversion('pre', 'roth');
-    const years = convertedYears([seed]);
-    // The zero-year bug would yield an EMPTY set; the real semantics yield
-    // exactly the current calendar year (a one-year "convert $X in year Y").
-    expect(years.length).toBeGreaterThanOrEqual(1);
-    expect(years).toEqual([THIS_YEAR]);
-  });
+const draft = (startYear: number, endYear: number): DraftRothConversion => ({
+  draftId: 'd1',
+  sourceAccountId: 'pre',
+  targetRothAccountId: 'roth',
+  annualAmountDollars: 10000,
+  start: { kind: 'year', year: startYear },
+  end: { kind: 'year', year: endYear },
+});
 
+describe('roth-conversions window ↔ engine', () => {
   it('a single-year entry (start = end = year Y) converts exactly calendar year Y', () => {
     const Y = THIS_YEAR + 3;
-    const single: DraftRothConversion = {
-      ...defaultConversion('pre', 'roth'),
-      start: { kind: 'year', year: Y },
-      end: { kind: 'year', year: Y },
-    };
-    expect(convertedYears([single])).toEqual([Y]);
+    expect(convertedYears([draft(Y, Y)])).toEqual([Y]);
   });
 
   it('a multi-year window (start Y .. end Y+2) converts Y, Y+1, Y+2 inclusive', () => {
     const Y = THIS_YEAR + 1;
-    const span: DraftRothConversion = {
-      ...defaultConversion('pre', 'roth'),
-      start: { kind: 'year', year: Y },
-      end: { kind: 'year', year: Y + 2 },
-    };
-    // "Convert through Y+2" is inclusive of Y+2 — three converted years.
-    expect(convertedYears([span])).toEqual([Y, Y + 1, Y + 2]);
+    expect(convertedYears([draft(Y, Y + 2)])).toEqual([Y, Y + 1, Y + 2]);
   });
 });

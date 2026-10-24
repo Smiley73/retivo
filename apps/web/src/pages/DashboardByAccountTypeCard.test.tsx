@@ -1,17 +1,10 @@
-/**
- * DashboardByAccountTypeCard render + a11y tests. The category split is
- * supplied by the caller (computed in `useDashboardProjection`); these
- * tests cover the label mapping, percentage formatting, the nonzero-bucket
- * filtering (a $0 / absent category is simply not rendered), the empty
- * state, and the a11y smoke.
- */
+// DashboardByAccountTypeCard: label mapping, percentage formatting, nonzero-category filtering and the empty state; the split is supplied by the caller.
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { DashboardByAccountTypeCard } from './DashboardByAccountTypeCard';
 import type { DashboardByTypeSlice } from './use-dashboard-projection';
 import { expectNoA11yViolations } from '../test/a11y';
 
-// Five active categories — no `other` slice (the $0 Other case).
 const SLICES: DashboardByTypeSlice[] = [
   { category: 'retirement', dollars: 500, share: 0.5 },
   { category: 'roth', dollars: 100, share: 0.1 },

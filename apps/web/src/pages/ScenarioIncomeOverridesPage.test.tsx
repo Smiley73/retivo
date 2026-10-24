@@ -1,13 +1,4 @@
-/**
- * ScenarioIncomeOverridesPage reactive-read tests.
- *
- * The page reads the `scenario` store via `useAggregates('scenario')` to
- * resolve the scenario at /scenarios/:id/income. These tests prove it
- * re-derives when the scenario lands after mount — via the coarse
- * workspace event AND a fine-signal `scenario` write — without a remount.
- * Drives IndexedDB through fake-indexeddb; AuthContext + SyncContext are
- * mocked at the module boundary like the sibling page tests.
- */
+// ScenarioIncomeOverridesPage reactive read: the page resolves /scenarios/:id/income through `useAggregates('scenario')` and must re-derive when the scenario lands after mount (coarse workspace event, then a fine-signal write) without a remount.
 import 'fake-indexeddb/auto';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -83,19 +74,17 @@ describe('ScenarioIncomeOverridesPage — reactive read layer', () => {
   it('re-reads the scenario on WORKSPACE_CHANGED_EVENT without a remount', async () => {
     await clearAllStores();
     renderPage('scn-1');
-    // Mounted before the scenario exists: the not-found error renders.
     expect(
       await screen.findByText(/Scenario scn-1 not found/i),
     ).toBeInTheDocument();
 
-    // Bulk fill lands after mount, then the coarse workspace-change event.
+    // A bulk fill lands after mount, then the coarse workspace-change event.
     await seedScenario('scn-1', 'Base');
     const { notifyWorkspaceChanged } = await import('../lib/workspace-events');
     await act(async () => {
       notifyWorkspaceChanged();
     });
 
-    // Same page instance now resolves the scenario (card header renders).
     expect(
       await screen.findByRole('heading', { name: /Income: Base/ }),
     ).toBeInTheDocument();
@@ -111,7 +100,7 @@ describe('ScenarioIncomeOverridesPage — reactive read layer', () => {
       await screen.findByText(/Scenario scn-1 not found/i),
     ).toBeInTheDocument();
 
-    // Single-row write fires only the per-store fine `scenario` signal.
+    // A single-row write fires only the per-store `scenario` signal.
     await act(async () => {
       await seedScenario('scn-1', 'Base');
     });

@@ -1,10 +1,4 @@
-/**
- * Tests for DownturnGuardrailsCard and DownturnGuardrailsModal.
- *
- * Pins the enable-toggle + band/step/cap fields, the validation rejection
- * (inverted bands / out-of-range → Save blocked), the save→IndexedDB
- * round-trip, and an axe a11y smoke on the modal.
- */
+// DownturnGuardrailsCard and Modal: the enable toggle and band/step/cap fields, validation rejection (inverted or out-of-range bands block Save) and the save→IndexedDB round trip.
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -75,8 +69,7 @@ describe('DownturnGuardrailsCard', () => {
   });
 
   it('shows the ON summary with the configured bands and the discretionary floor', () => {
-    // ON carries no discretionaryFloorPct → the summary falls back to the default
-    // (50), so the "keep 50% discretionary" clause renders.
+    // ON carries no discretionaryFloorPct, so the summary and slider fall back to the default (50).
     const s = scenario('s', ON);
     render(
       <DownturnGuardrailsCard scenario={s} scenarios={[s]} onConfigure={() => {}} onResetToInherited={() => {}} />,
@@ -137,7 +130,6 @@ describe('DownturnGuardrailsModal', () => {
     const onClose = vi.fn();
     render(<DownturnGuardrailsModal scenario={s} householdId={HH} onClose={onClose} />);
 
-    // Enable the guardrail (defaults seed the valid bands).
     await user.click(screen.getByRole('switch', { name: /Use spending guardrails/i }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -148,8 +140,7 @@ describe('DownturnGuardrailsModal', () => {
       expect(cfg?.lowerBandPct).toBe(85);
       expect(cfg?.upperBandPct).toBe(115);
     });
-    // The persist gate above does not imply the close callback has fired yet
-    // (it runs after the save resolves), so re-query rather than assert once.
+    // The persist gate does not imply the close callback has fired (it runs after the save resolves), so re-query rather than assert once.
     await waitFor(() => expect(onClose).toHaveBeenCalledWith(true));
   });
 
@@ -173,14 +164,11 @@ describe('DownturnGuardrailsModal', () => {
       expect(cfg?.lowerBandPct).toBe(88); // ON.lowerBandPct (85) + 3 ArrowRight steps of 1
       expect(cfg?.upperBandPct).toBe(ON.upperBandPct); // untouched
     });
-    // The persist gate above does not imply the close callback has fired yet
-    // (it runs after the save resolves), so re-query rather than assert once.
+    // Re-query: the close callback fires after the save resolves.
     await waitFor(() => expect(onClose).toHaveBeenCalledWith(true));
   });
 
   it('renders the discretionary-floor slider seeded from the default (50) and persists an adjusted value', async () => {
-    // ON carries no discretionaryFloorPct → the slider seeds from the default (50).
-    // Two ArrowRight steps of 5 → 60; Save persists it.
     const s = scenario('s', ON);
     await putAggregate('scenario', s);
     const user = userEvent.setup();
@@ -192,8 +180,6 @@ describe('DownturnGuardrailsModal', () => {
     });
     expect(floorSlider).toBeInTheDocument();
     floorSlider.focus();
-    // Two ArrowRight steps of 5 from the seeded default (50) → 60. The persisted
-    // value proves the slider both rendered and seeded from the default.
     await user.keyboard('{ArrowRight}{ArrowRight}');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -203,27 +189,23 @@ describe('DownturnGuardrailsModal', () => {
       expect(cfg?.discretionaryFloorPct).toBe(60); // 50 + 2 × step(5)
       expect(cfg?.maxRaisePct).toBe(ON.maxRaisePct); // untouched
     });
-    // The persist gate above does not imply the close callback has fired yet
-    // (it runs after the save resolves), so re-query rather than assert once.
+    // Re-query: the close callback fires after the save resolves.
     await waitFor(() => expect(onClose).toHaveBeenCalledWith(true));
   });
 
   it('REJECTS an inverted config (lower ≥ upper) while enabled — Save is blocked', async () => {
-    // Seed an invalid ON config: lower band above the upper band.
     const s = scenario('s', { ...ON, lowerBandPct: 130, upperBandPct: 110 });
     await putAggregate('scenario', s);
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(<DownturnGuardrailsModal scenario={s} householdId={HH} onClose={onClose} />);
 
-    // The Save button is disabled and the validation warning is shown.
     const save = screen.getByRole('button', { name: 'Save' });
     expect(save).toBeDisabled();
     expect(
       screen.getByText(/lower band must be below the upper band/i),
     ).toBeInTheDocument();
 
-    // Clicking a disabled button never closes / persists.
     await user.click(save);
     expect(onClose).not.toHaveBeenCalled();
   });

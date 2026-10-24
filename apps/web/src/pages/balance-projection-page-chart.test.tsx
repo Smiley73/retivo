@@ -1,12 +1,4 @@
-/**
- * BalanceProjectionChartSection — Reset-button visibility.
- *
- * Tests:
- *  - reset_visible_when_zoomed
- *
- * ProjectionChart is mocked to avoid Recharts / ResizeObserver in jsdom.
- * useChartZoom is mocked so isZoomed can be driven without a real drag.
- */
+// BalanceProjectionChartSection: the Reset-zoom button, y-axis scale radiogroup, inline recalculating status and historical planned-rate fallback note. ProjectionChart and useChartZoom are mocked so isZoomed can be driven without a real drag.
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -57,9 +49,7 @@ const baseProps = {
   tooltipMembers: [],
   yScale: 'linear' as const,
   onYScaleChange: vi.fn(),
-  // Required PlanStressTestVm prop — built from the shared fixture so the
-  // ~30 required fields are not duplicated (a partial literal would not
-  // typecheck). The graph-header Recalculate + inline status read this VM.
+  // Built from the shared fixture so the ~30 required PlanStressTestVm fields are not duplicated.
   stressVm: stressVmFixture(),
   activeMethod: 'twr' as const,
   fallbackAccounts: [] as ReadonlyArray<{ id: string; name: string }>,
@@ -92,13 +82,11 @@ describe('BalanceProjectionChartSection', () => {
       />,
       { wrapper: ThemeWrapper },
     );
-    // The y-axis scale is now a segmented radiogroup, not a ToggleSwitch.
     const group = screen.getByRole('radiogroup', { name: 'Y-axis scale' });
     const linear = within(group).getByRole('radio', { name: 'Linear' });
     const log = within(group).getByRole('radio', { name: 'Log' });
     expect(linear).toBeChecked();
     expect(log).not.toBeChecked();
-    // The old "Log y-axis" switch is gone.
     expect(
       screen.queryByRole('switch', { name: /Log/i }),
     ).not.toBeInTheDocument();
@@ -135,8 +123,7 @@ describe('BalanceProjectionChartSection', () => {
       />,
       { wrapper: ThemeWrapper },
     );
-    // The banner is also a role="status" region, so scope to the inline
-    // running indicator by its text.
+    // The banner is also a role="status" region, so scope to the inline running indicator by its text.
     const status = screen.getByText('Recalculating…');
     expect(status.getAttribute('role')).toBe('status');
     expect(status.getAttribute('aria-live')).toBe('polite');
@@ -155,7 +142,6 @@ describe('BalanceProjectionChartSection', () => {
     expect(alert).toHaveTextContent('Stress-test failed: worker crashed');
   });
 
-  // Historical planned-rate fallback disclosure note.
   describe('Historical planned-rate fallback note', () => {
     const fallback = [
       { id: 'a1', name: '401(k)' },

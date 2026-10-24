@@ -1,12 +1,4 @@
-/**
- * BalanceProjectionMcCard — Monte Carlo outcome card render + a11y smoke
- * (Graphite Spectrum redesign).
- *
- * Covers the scope + tier header, the formatted balance value, the
- * em-dash null path, and the funded /
- * depleted status line (age, year fallback, and bare "Depletes"). A11y
- * assertion per the project shared-component rule.
- */
+// BalanceProjectionMcCard: scope and tier header, formatted balance, the em-dash null path and the funded/depleted status line (age, year fallback, bare "Depletes").
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -44,7 +36,6 @@ describe('BalanceProjectionMcCard', () => {
       />,
     );
     expect(screen.getByText('—')).toBeInTheDocument();
-    // No status line paints when the value is null.
     expect(
       screen.queryByText(/Funds the full horizon/),
     ).not.toBeInTheDocument();

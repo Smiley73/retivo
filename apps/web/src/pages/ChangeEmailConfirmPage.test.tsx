@@ -1,8 +1,4 @@
-/**
- * Tests for ChangeEmailConfirmPage: token
- * capture from the URL fragment, fragment scrub, the confirm POST path, and the
- * success / error / missing-token outcomes.
- */
+// ChangeEmailConfirmPage: token capture from the URL fragment, fragment scrub, the confirm POST and its outcomes.
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -63,7 +59,6 @@ describe('ChangeEmailConfirmPage', () => {
     });
     expect(await screen.findByText(/new@example.test/)).toBeInTheDocument();
     expect(screen.getByText(/sign-in email is now/i)).toBeInTheDocument();
-    // The fragment is scrubbed from the URL.
     expect(window.location.hash).toBe('');
   });
 

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildReportPdfAccountLists } from '../lib/report-table-ordering';
-import type { RenderHostAccount } from './report-page-pdf-render-host';
+import type { ReportPagePdfRenderHostProps } from './report-page-pdf-render-host';
 describe('ReportPage PDF account inputs', () => {
   it('keeps the full input while filtering and sorting only by-account data', () => {
-    const accounts: RenderHostAccount[] = [
+    const accounts: ReportPagePdfRenderHostProps['accounts'][number][] = [
       { id: 'ten', name: 'Account 10', ownerDisplayName: 'Alex', type: 'RETIREMENT_401K' },
       { id: 'excluded', name: 'Account 1', ownerDisplayName: 'Alex', type: 'BROKERAGE' },
       { id: 'two', name: 'Account 2', ownerDisplayName: 'Alex', type: 'SAVINGS' },

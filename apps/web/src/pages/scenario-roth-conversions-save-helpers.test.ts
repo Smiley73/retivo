@@ -1,10 +1,4 @@
-/**
- * Unit tests for the working-years Roth-conversions Save fragments.
- *
- * Covers: sparse OMIT when the list resolves empty; orphan prune (dangling
- * source/target id dropped); amount sanitised to finite ≥ 0 whole dollars; the
- * rate clamps to [0, 100] and omits at 0.
- */
+// Working-years Roth-conversions Save fragments: sparse omit when the list resolves empty, orphan prune, amount sanitised to finite ≥ 0 whole dollars, and the rate clamped to [0, 100] and omitted at 0.
 import { describe, expect, it } from 'vitest';
 import {
   buildNextRothConversions,
@@ -18,8 +12,6 @@ import type {
 } from '../db/types';
 import type { DraftRothConversion } from './scenario-roth-conversions-draft-hook';
 
-/** Build an account aggregate. Defaults to an active pre-tax 401k; pass a type
- *  / treatment / active to exercise the source + target prune rules. */
 function acct(
   id: string,
   type: AccountType = 'RETIREMENT_401K',
@@ -51,10 +43,8 @@ function acct(
   };
 }
 
-/** A live pre-tax source. */
 const src = (id = 'src'): Aggregate<AccountPayload> =>
   acct(id, 'RETIREMENT_401K', 'PRE_TAX');
-/** A live Roth-IRA target. */
 const tgt = (id = 'tgt'): Aggregate<AccountPayload> =>
   acct(id, 'RETIREMENT_ROTH_IRA', 'ROTH');
 
@@ -105,8 +95,7 @@ describe('buildNextRothConversions', () => {
   });
 
   it('prunes an entry whose source is a live but wrong-type account (not PRE_TAX)', () => {
-    // The source id points to a live Roth account, not a pre-tax one — drop it
-    // (mirrors resolvePreRetirementRothConversions; an existing id is not enough).
+    // The source id points to a live Roth account, not a pre-tax one: drop it (mirrors resolvePreRetirementRothConversions; an existing id is not enough).
     const accts = [acct('roth-src', 'RETIREMENT_ROTH_IRA', 'ROTH'), tgt()];
     const out = buildNextRothConversions({
       drafts: [entry('roth-src', 'tgt')],
@@ -116,8 +105,7 @@ describe('buildNextRothConversions', () => {
   });
 
   it('prunes an entry whose target is a live but wrong-type account (not a Roth IRA)', () => {
-    // The target id points to a live pre-tax 401k — the §408A double-tax guard
-    // drops it even though the id resolves to a live account.
+    // The target id points to a live pre-tax 401k: the §408A double-tax guard drops it even though the id resolves to a live account.
     const accts = [src(), acct('pretax-tgt', 'RETIREMENT_401K', 'PRE_TAX')];
     const out = buildNextRothConversions({
       drafts: [entry('src', 'pretax-tgt')],
@@ -147,7 +135,6 @@ describe('buildNextRothConversions', () => {
     expect(out.preRetirementRothConversions?.[1].annualAmountDollars).toBe(0);
   });
 
-  // MIXED sources
   it('keeps a MIXED 401k source → Roth IRA target pair (Plan C widening)', () => {
     const accts = [
       acct('mixed-src', 'RETIREMENT_401K', 'MIXED'),
@@ -173,7 +160,6 @@ describe('buildNextRothConversions', () => {
   });
 
   it('prunes a MIXED source + separate dedicated-Roth 401k cross-account pair (deferral)', () => {
-    // A separate ROTH 401k account (different id) — not the same-account in-plan case.
     const accts = [
       acct('mixed-src', 'RETIREMENT_401K', 'MIXED'),
       acct('roth-401k', 'RETIREMENT_ROTH_401K', 'ROTH'),

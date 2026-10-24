@@ -1,12 +1,4 @@
-/**
- * useBalanceProjectionData — `expenseCategory` slice gating.
- *
- * The category slice is gated into `ready` (the page waits for it to
- * settle) but NOT into the page-level `error` disjunction: a category
- * read failure degrades the cashflow toggle to Total-only, it never
- * blanks the whole page. `useAggregates` is mocked here so each slice's
- * `ready` / `error` can be driven independently.
- */
+// useBalanceProjectionData `expenseCategory` slice: gated into `ready` but not into the page-level `error`, so a category read failure degrades the cashflow toggle to Total-only instead of blanking the page. `useAggregates` is mocked so each slice's `ready`/`error` can be driven independently.
 import { renderHook } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { createElement, type ReactNode } from 'react';
@@ -48,9 +40,7 @@ describe('useBalanceProjectionData — expenseCategory gating', () => {
   it('an expenseCategory read error does NOT set the page-level error', () => {
     sliceByType.set('expenseCategory', slice({ error: new Error('boom') }));
     const { result } = renderHook(() => useBalanceProjectionData(), { wrapper });
-    // Degrades to Total-only: page error stays null (page renders).
     expect(result.current.error).toBeNull();
-    // The slice surfaces (empty), and the page is ready.
     expect(result.current.expenseCategories).toEqual([]);
     expect(result.current.ready).toBe(true);
   });

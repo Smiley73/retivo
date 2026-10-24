@@ -1,9 +1,4 @@
-/**
- * DashboardAllocationCard render + a11y tests. The bucket split is
- * supplied by the caller (computed in `useDashboardProjection`); these
- * tests cover the percentage formatting, the bucket-label mapping, the
- * empty state, and the a11y smoke.
- */
+// DashboardAllocationCard: percentage formatting, bucket labels and the empty state; the split is supplied by the caller.
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { DashboardAllocationCard } from './DashboardAllocationCard';

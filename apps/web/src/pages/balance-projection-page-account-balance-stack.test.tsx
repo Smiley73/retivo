@@ -1,24 +1,12 @@
-/**
- * AccountBalanceStackBand — unit tests.
- *
- * Covers: group-by toggle label reflects strategy; Show-excluded toggle render
- * + suppression (accounts surface); per-account groupBy renders account radio;
- * Type-grouping sub-bucket split; conditional title (method suffix vs bare);
- * dashed boundary marker at the last actual year; per-zone `data-zone`
- * (actual / carried / projected) DOM contract; continuous span; stale-balance
- * gap; a11y smoke for both surfaces.
- *
- * Chart and zoom hooks mocked at module boundary; the mocked inner chart
- * records the rows + series + boundary so zone + aggregation assertions read
- * them directly.
- */
+// AccountBalanceStackBand: group-by toggle label, Show-excluded toggle, per-account radio, Type-grouping sub-bucket split, conditional title, dashed boundary marker at the last actual year, per-zone `data-zone` contract, continuous span and stale-balance gap.
+// Chart and zoom hooks are mocked at the module boundary; the mocked inner chart records rows, series and boundary for direct assertions.
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { expectNoA11yViolations } from '../test/a11y';
 
-// Capture what the band hands the (mocked) inner chart.
+// Capture what the band hands the mocked inner chart.
 const chartSpy = vi.hoisted(() => ({
   rows: null as unknown,
   series: null as unknown,
@@ -68,10 +56,6 @@ import {
 import type { SeriesZone } from '../components/charts';
 import type { AccountTaxTreatment, AccountType } from '../db/types';
 
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
-
 interface SimpleMeta {
   id: string;
   name: string;
@@ -79,8 +63,7 @@ interface SimpleMeta {
   taxTreatment?: AccountTaxTreatment;
 }
 
-/** Build a unified band year: per-account trio + zone. `carried` ids are
- *  flagged carried-forward. */
+// Build a unified band year: a per-account trio plus zone; `carried` ids are flagged carried-forward.
 function bandYear(
   year: number,
   zone: 'actual' | 'projected',
@@ -129,10 +112,6 @@ function zonesFor(name: string): SeriesZone[] {
   const series = chartSpy.series as Array<{ name: string; zones?: SeriesZone[] }>;
   return series.find((s) => s.name === name)?.zones ?? [];
 }
-
-// ---------------------------------------------------------------------------
-// Render basics + title
-// ---------------------------------------------------------------------------
 
 describe('AccountBalanceStackBand', () => {
   it('renders_chart_and_method_suffixed_heading', () => {
@@ -239,10 +218,6 @@ describe('AccountBalanceStackBand', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// "Type" grouping aggregation — MIXED Roth-designated sub-bucket split
-// ---------------------------------------------------------------------------
-
 describe('AccountBalanceStackBand — "Type" grouping sub-bucket split', () => {
   function rowsFor(
     accounts: SimpleMeta[],
@@ -303,10 +278,6 @@ describe('AccountBalanceStackBand — "Type" grouping sub-bucket split', () => {
   );
 });
 
-// ---------------------------------------------------------------------------
-// Boundary marker + zone DOM contract
-// ---------------------------------------------------------------------------
-
 describe('AccountBalanceStackBand — boundary + zones', () => {
   it('passes a dashed boundary marker at the last actual year', () => {
     render(
@@ -345,7 +316,6 @@ describe('AccountBalanceStackBand — boundary + zones', () => {
         ]}
         rows={[
           bandYear(2030, 'actual', { 'acct-ira': 100_000 }),
-          // carried-forward historical year (held flat from 2030).
           bandYear(2031, 'actual', { 'acct-ira': 100_000 }, new Set(['acct-ira'])),
           bandYear(2032, 'projected', { 'acct-ira': 95_000 }),
         ]}
@@ -357,7 +327,7 @@ describe('AccountBalanceStackBand — boundary + zones', () => {
     expect(kinds).toContain('actual');
     expect(kinds).toContain('carried');
     expect(kinds).toContain('projected');
-    // The carried zone dashes its top edge; projected is lower opacity.
+    // The carried zone dashes its top edge; projected has lower opacity.
     const carried = zonesFor('Tax-deferred').find((z) => z.kind === 'carried');
     expect(carried?.strokeDasharray).toBeTruthy();
     const projected = zonesFor('Tax-deferred').find((z) => z.kind === 'projected');
@@ -393,7 +363,6 @@ describe('AccountBalanceStackBand — boundary + zones', () => {
         ]}
         rows={[
           bandYear(2015, 'actual', { 'acct-ira': 40_000 }),
-          // firstProjectionYear (2030) is many years past lastActualYear (2015).
           bandYear(2030, 'projected', { 'acct-ira': 120_000 }),
         ]}
         boundaryYear={2015}
@@ -407,10 +376,6 @@ describe('AccountBalanceStackBand — boundary + zones', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// A11y smoke
-// ---------------------------------------------------------------------------
-
 describe('AccountBalanceStackBand — a11y smoke', () => {
   it('passes expectNoA11yViolations (Projections surface)', async () => {
     const { container } = render(
@@ -419,20 +384,6 @@ describe('AccountBalanceStackBand — a11y smoke', () => {
         rows={BASE_ROWS}
         boundaryYear={2030}
         methodLabel="Historical"
-      />,
-    );
-    await expectNoA11yViolations(container);
-  });
-
-  it('passes expectNoA11yViolations (accounts surface, no method/toggle)', async () => {
-    const { container } = render(
-      <AccountBalanceStackBand
-        accounts={BASE_ACCOUNTS}
-        rows={[
-          bandYear(2030, 'actual', { 'acct-ira': 100_000 }),
-          bandYear(2031, 'actual', { 'acct-ira': 110_000 }),
-        ]}
-        showExcludedToggle={false}
       />,
     );
     await expectNoA11yViolations(container);

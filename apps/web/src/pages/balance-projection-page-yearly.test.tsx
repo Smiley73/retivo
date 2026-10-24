@@ -1,15 +1,4 @@
-/**
- * BalanceProjectionYearlySection — Cap column + breach banner tests.
- *
- * Covers:
- *   - Cap column absent when `isMagiCapActive` is false/absent.
- *   - Cap column present when `isMagiCapActive` is true.
- *   - Breach banner rendered when `magiCapBreachYears` is non-empty.
- *   - Breach banner absent when `magiCapBreachYears` is empty/absent.
- *   - Breach banner year-range text is correct for multiple breach years.
- *
- * Chart bands and zoom mocked at module boundary.
- */
+// BalanceProjectionYearlySection Cap column (present only when `isMagiCapActive`) and breach banner (rendered when `magiCapBreachYears` is non-empty, with the right year range). Chart bands and zoom are mocked at the module boundary.
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -23,10 +12,6 @@ import {
   type BalanceProjectionYearlyProps,
   type YearlyTableRow,
 } from './balance-projection-page-yearly';
-
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
 
 function makeRow(year: number, overrides: Partial<YearlyTableRow> = {}): YearlyTableRow {
   return {
@@ -63,14 +48,9 @@ const BASE_PROPS: BalanceProjectionYearlyProps = {
   displayMode: 'future',
 };
 
-// ---------------------------------------------------------------------------
-// Cap column gating
-// ---------------------------------------------------------------------------
-
 describe('BalanceProjectionYearlySection — Cap column gating', () => {
   it('cap_column_absent_when_isMagiCapActive_not_set', () => {
     render(<BalanceProjectionYearlySection {...BASE_PROPS} />);
-    // Column header contains "Cap" text only when cap is active.
     expect(screen.queryByRole('columnheader', { name: /^Cap$/i })).not.toBeInTheDocument();
   });
 
@@ -81,14 +61,10 @@ describe('BalanceProjectionYearlySection — Cap column gating', () => {
 
   it('cap_column_present_when_isMagiCapActive_true', () => {
     render(<BalanceProjectionYearlySection {...BASE_PROPS} isMagiCapActive={true} />);
-    // The Cap column header is inside a Tooltip that renders just the text.
+    // The Cap column header sits in a Tooltip that renders just the text.
     expect(screen.getByRole('columnheader', { name: /^Cap$/i })).toBeInTheDocument();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Breach banner
-// ---------------------------------------------------------------------------
 
 describe('BalanceProjectionYearlySection — Breach banner', () => {
   it('breach_banner_absent_when_no_breach_years', () => {
@@ -117,7 +93,6 @@ describe('BalanceProjectionYearlySection — Breach banner', () => {
         magiCapBreachYears={[2031]}
       />,
     );
-    // "Cap breached in 1 year (2031) — taxable depleted…"
     const alert = screen.getByRole('alert');
     expect(within(alert).getByText(/Cap breached in 1 year/i)).toBeInTheDocument();
     expect(within(alert).getByText(/2031/)).toBeInTheDocument();
@@ -128,14 +103,12 @@ describe('BalanceProjectionYearlySection — Breach banner', () => {
       <BalanceProjectionYearlySection
         {...BASE_PROPS}
         magiCapBreachYears={[2031, 2033, 2035]}
-        // Use years NOT in the yearTableRows (2030, 2031) to avoid table-row collision.
+        // Use years not in yearTableRows (2030, 2031) to avoid a table-row collision.
         yearTableRows={[makeRow(2040), makeRow(2041)]}
       />,
     );
-    // "Cap breached in 3 years (2031–2035) — taxable depleted…"
     const alert = screen.getByRole('alert');
     expect(within(alert).getByText(/Cap breached in 3 years/i)).toBeInTheDocument();
-    // Year range: first–last (sorted) — check the alert contains both years.
     expect(within(alert).getByText(/2031/)).toBeInTheDocument();
     expect(within(alert).getByText(/2035/)).toBeInTheDocument();
   });

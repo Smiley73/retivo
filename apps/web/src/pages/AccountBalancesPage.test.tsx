@@ -1,11 +1,4 @@
-/**
- * AccountBalancesPage tests — `parseCurrencyInput` utility + render coverage.
- *
- * Render tests drive the IndexedDB code paths: empty state, populated table,
- * inactive-account banner, Pre-Tax/Post-Tax % stats, NotesIndicator row marker.
- * `findPriorYearEntry` helper unit tests live in the sibling file
- * `AccountBalancesPage.findPriorYearEntry.test.tsx`.
- */
+// AccountBalancesPage: `parseCurrencyInput` and render coverage over IndexedDB; `findPriorYearEntry` is in the sibling file.
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -79,8 +72,6 @@ function setupContexts() {
 }
 
 function renderAt(path: string) {
-  // AccountHistoryCharts (lazy) reads useChartColors() → needs a
-  // ThemeProvider ancestor, as the real app shell provides.
   return render(
     withTheme(
       'light',
@@ -141,8 +132,7 @@ async function seedAccount(active = true): Promise<void> {
   await putAggregate('account', acc);
 }
 
-/** A pure designated-Roth employer plan — the type that records IN-PLAN ROLLOVERS
- *  (§402A) rather than conversions (§408A). */
+// A pure designated-Roth employer plan records in-plan rollovers (§402A), not conversions (§408A).
 async function seedRothEmployerAccount(): Promise<void> {
   const acc: Aggregate<AccountPayload> = {
     id: 'acc-roth401k',
@@ -308,10 +298,7 @@ describe('AccountBalancesPage — Pre-Tax % / Post-Tax % stats', () => {
     vi.clearAllMocks();
   });
 
-  // The Stat tile renders <label div> immediately followed by a
-  // <value div> sibling. Resolve the value next to a given label so
-  // the assertion can't collide with the TWR / Planning-Return stats
-  // or the per-year table cells (which also render `*.0%`).
+  // Resolve the value next to a label: `*.0%` also appears in the TWR / Planning-Return stats and the per-year cells.
   function statValueFor(label: string): string {
     const labelEl = screen.getByText(label);
     const value = labelEl.nextElementSibling;
@@ -339,8 +326,6 @@ describe('AccountBalancesPage — Pre-Tax % / Post-Tax % stats', () => {
     await waitFor(() =>
       expect(screen.getByText('Pre-Tax %')).toBeInTheDocument(),
     );
-    // Both collapse to the old '0.0' fallback, now produced by
-    // formatPercent(0) === '0.0%' (the numeric-migration guard).
     expect(statValueFor('Pre-Tax %')).toBe('0.0%');
     expect(statValueFor('Post-Tax %')).toBe('0.0%');
   });
@@ -374,9 +359,7 @@ describe('AccountBalancesPage — render', () => {
     let grid!: HTMLElement;
     await waitFor(() => {
       grid = screen.getByRole('grid', { name: 'Annual balance entries' });
-      // Scope to the table cell — the SVG chart engine also paints a
-      // "2025" x-axis tick label, so a document-wide text
-      // query would match more than one node.
+      // Scoped to the table cell: the SVG chart also paints a "2025" x-axis tick.
       expect(within(grid).getByText('2025')).toBeInTheDocument();
     });
   });
@@ -404,20 +387,14 @@ describe('AccountBalancesPage — render', () => {
   });
 
   it('renders a Notes indicator only on rows whose comment is non-empty', async () => {
-    // NotesIndicator was added to annual balance rows. Asserts
-    // one indicator renders when one row has a comment and another has
-    // null — the 2024 row carries the icon; the 2025 row renders nothing.
-    // The bubble text only mounts on hover/focus (React Aria Tooltip),
-    // so the bubble-text assertion lives in the indicator's own unit
-    // test (NotesIndicator.test.tsx).
+    // The NotesIndicator bubble text mounts only on hover/focus, so it is asserted in NotesIndicator.test.tsx.
     await seedMember();
     await seedAccount();
     await seedBalance(2024, 40000, 'Adjusted for late employer match');
     await seedBalance(2025, 50000, null);
     renderAt('/accounts/acc-1/balances');
     await screen.findByRole('grid', { name: 'Annual balance entries' });
-    // The Notes indicator mounts with the row body, which can lag the grid
-    // landmark under parallel load; poll until exactly one indicator renders.
+    // The indicator mounts with the row body, which can lag the grid landmark under parallel load.
     await waitFor(() =>
       expect(screen.getAllByRole('img', { name: 'Notes' })).toHaveLength(1),
     );
@@ -454,7 +431,6 @@ describe('AccountBalancesPage — Distributions for all account types', () => {
     renderAt('/accounts/acc-1/balances');
     const addBtn = await screen.findByRole('button', { name: 'Add Year' });
     await user.click(addBtn);
-    // The MoneyInput renders a labelled control named "Distributions".
     expect(
       await screen.findByLabelText('Distributions'),
     ).toBeInTheDocument();
@@ -463,8 +439,7 @@ describe('AccountBalancesPage — Distributions for all account types', () => {
   it('persists a recorded distribution for a non-HSA account (not forced to 0)', async () => {
     await seedMember();
     await seedAccount(); // RETIREMENT_401K (non-HSA)
-    // A recorded withdrawal on a non-HSA account survives + renders in the
-    // Distributions column (previously forced to 0 on save).
+    // A recorded withdrawal on a non-HSA account survives save (it was once forced to 0).
     const bal: Aggregate<AccountBalancePayload> = {
       id: 'bal-acc-1-2025',
       householdId: HH,
@@ -518,20 +493,16 @@ describe('AccountBalancesPage — reactive read layer', () => {
     await seedMember();
     await seedAccount();
     renderAt('/accounts/acc-1/balances');
-    // Mounted against an account with no balances: empty-state copy renders.
     expect(
       await screen.findByText(/No balance entries yet/i),
     ).toBeInTheDocument();
 
-    // Simulate a bulk fill (sync bootstrap / demo load) landing after mount,
-    // then dispatching the coarse workspace-change event.
     await seedBalance(2025, 50000);
     const { notifyWorkspaceChanged } = await import('../lib/workspace-events');
     await act(async () => {
       notifyWorkspaceChanged();
     });
 
-    // Same page instance (no route change) now shows the balance row.
     await waitFor(() =>
       expect(
         screen.getByRole('grid', { name: 'Annual balance entries' }),
@@ -552,9 +523,7 @@ describe('AccountBalancesPage — reactive read layer', () => {
       await screen.findByText(/No balance entries yet/i),
     ).toBeInTheDocument();
 
-    // Single-row write via putAggregate fires only the per-store fine
-    // signal — no notifyWorkspaceChanged(). The `useAggregates('accountBalance')`
-    // subscription must still re-read.
+    // A single-row putAggregate fires only the per-store signal, no notifyWorkspaceChanged(); `useAggregates` must still re-read.
     await act(async () => {
       await seedBalance(2025, 50000);
     });
@@ -567,10 +536,6 @@ describe('AccountBalancesPage — reactive read layer', () => {
   });
 
   it('surfaces "Account not found" once the stores settle with no matching account', async () => {
-    // The reactive refactor derives `notFound` as
-    // `ready && id !== undefined && account === null`. Seed a real
-    // member + account, then navigate to a DIFFERENT account id: the
-    // settled read finds no matching account and shows the error.
     await seedMember();
     await seedAccount();
     renderAt('/accounts/unknown-id/balances');
@@ -579,15 +544,10 @@ describe('AccountBalancesPage — reactive read layer', () => {
     ).toBeInTheDocument();
   });
   it('re-adding a previously deleted year updates the tombstone instead of creating over it', async () => {
-    // Regression: `persist` resolved the target row with `getAggregate`, which
-    // filters tombstones (store.ts), so re-adding a deleted year queued a
-    // `create` at expectedVersion 0. The local optimistic write then landed the
-    // row back at version 1, regressing it below the tombstone's version and
-    // making the next edit queue against a version the server never had.
+    // `persist` once resolved the target row with `getAggregate`, which filters tombstones, so re-adding a deleted year queued a create at expectedVersion 0 and regressed the row below the tombstone's version.
     const user = userEvent.setup();
     await seedMember();
     await seedAccount();
-    // A tombstoned 2024 row at version 3 — the shape left behind by a delete.
     await putAggregate('accountBalance', {
       id: 'bal-acc-1-2024',
       householdId: HH,
@@ -622,17 +582,13 @@ describe('AccountBalancesPage — reactive read layer', () => {
     renderAt('/accounts/acc-1/balances');
     await user.click(await screen.findByRole('button', { name: 'Add Year' }));
     const yearInput = await screen.findByLabelText('Year');
-    // Set the year directly: this control is value-bound to `form.year` and its
-    // onChange ignores an empty string, so `clear`-then-type appends to the
-    // prefilled year instead of replacing it.
+    // Set the year directly: the control is value-bound to `form.year` and ignores an empty string, so clear-then-type would append.
     fireEvent.change(yearInput, { target: { value: '2024' } });
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(queueLocalMutation).toHaveBeenCalled());
     const call = vi.mocked(queueLocalMutation).mock.calls.at(-1)?.[0];
     expect(call?.aggregateId).toBe('bal-acc-1-2024');
-    // The tombstone is a real row at version 3: this is an update that
-    // continues its lineage, never a create at 0.
     expect(call?.operation).toBe('update');
     expect(call?.expectedVersion).toBe(3);
   });
@@ -649,11 +605,7 @@ describe('AccountBalancesPage — reactive read layer', () => {
     const nontaxable = screen.getByLabelText(
       'Roth Conversion (after-tax)',
     );
-    // The per-field help text was REMOVED at the owner's request (2026-08-05): it
-    // repeated under both halves and was the largest contributor to the dialog's
-    // height. Each field is identified by its label alone now. Asserted rather
-    // than dropped so re-adding it — or leaving an orphaned paragraph the label
-    // no longer points at — is a deliberate change, not a silent one.
+    // Each field is named by its label alone; asserting no description makes re-adding help text a deliberate change.
     expect(taxable).not.toHaveAccessibleDescription();
     expect(nontaxable).not.toHaveAccessibleDescription();
     expect(screen.queryByText(/records the tax history only/i)).toBeNull();
@@ -665,7 +617,6 @@ describe('AccountBalancesPage — reactive read layer', () => {
     await waitFor(() => expect(queueLocalMutation).toHaveBeenCalled());
     const payload = vi.mocked(queueLocalMutation).mock.calls.at(-1)?.[0]
       .payload as AccountBalancePayload;
-    // Cents survive: these are dollars-with-cents like every other money field.
     expect(payload.rothConversionTaxableAmount).toBe(1234.56);
     expect(payload.rothConversionNontaxableAmount).toBe(10.01);
   });
@@ -681,8 +632,7 @@ describe('AccountBalancesPage — reactive read layer', () => {
     await waitFor(() => expect(queueLocalMutation).toHaveBeenCalled());
     const payload = vi.mocked(queueLocalMutation).mock.calls.at(-1)?.[0]
       .payload as Record<string, unknown>;
-    // Sparse-optional: absent means nothing recorded, which is a weaker claim
-    // than a stored 0, so a blank field must not persist as 0.
+    // Absent means nothing recorded, a weaker claim than a stored 0, so a blank field must not persist as 0.
     expect('rothConversionTaxableAmount' in payload).toBe(false);
     expect('rothConversionNontaxableAmount' in payload).toBe(false);
   });
@@ -760,25 +710,15 @@ describe('AccountBalancesPage — reactive read layer', () => {
 
     const taxable = await screen.findByLabelText('Roth Conversion (taxable)');
     const nontaxable = screen.getByLabelText('Roth Conversion (after-tax)');
-    // The mirror of the id check in "keeps the two dated Roth pairs on their own
-    // account types": the labels are shared with the Roth-IRA pair, so the id is
-    // the only thing proving THIS account got the §402A pair and not the §408A one.
+    // The labels are shared with the Roth-IRA pair, so the id alone proves this account got the §402A pair, not the §408A one.
     expect(taxable).toHaveAttribute('id', 'balance-roth-rollover-taxable');
     expect(nontaxable).toHaveAttribute('id', 'balance-roth-rollover-nontaxable');
     expect(document.getElementById('balance-roth-conversion-taxable')).toBeNull();
-    // Help text removed here too (see the conversion test above). The
-    // "enter it under Rollover" instruction must stay absent for this pair
-    // whatever else changes: an in-plan rollover stays inside the account, and
-    // recording it under Rollover would subtract it from the year's computed
-    // gain/loss.
+    // No "enter it under Rollover" help: an in-plan rollover stays inside the account, and recording it there would subtract it from the year's gain/loss.
     expect(taxable).not.toHaveAccessibleDescription();
     expect(nontaxable).not.toHaveAccessibleDescription();
     expect(screen.queryByText(/enter the money that moved under rollover/i)).toBeNull();
 
-    // The three roll-up totals moved out of a full-width band under the amount
-    // fields into their own right-hand rail (2026-08-05), and were computed
-    // inline in two separate branches before that. Nothing covered them, so a
-    // rail that silently failed to render would not have been caught.
     const totals = screen.getByRole('complementary', {
       name: 'Totals for this year',
     });
@@ -813,20 +753,13 @@ describe('AccountBalancesPage — reactive read layer', () => {
   });
 
   it('keeps the two dated Roth pairs on their own account types', async () => {
-    // A Roth IRA takes conversions and never rollovers; an employer Roth plan the
-    // reverse. Swapping the two predicates on the persist path would show the
-    // wrong pair here.
+    // Roth IRAs take conversions and never rollovers, employer Roth plans the reverse; a swapped predicate shows the wrong pair.
     const user = userEvent.setup();
     await seedMember();
     await seedRothIraAccount();
     renderAt('/accounts/acc-roth/balances');
     await user.click(await screen.findByRole('button', { name: 'Add Year' }));
-    // Both pairs now read "Roth Conversion (taxable)" / "(after-tax)" — they are
-    // the same action from the same two money sources, and no account type shows
-    // both — so the LABEL can no longer tell them apart. Discriminate on the
-    // element id, which stays distinct, or this test silently stops proving
-    // anything: a swapped predicate would render the rollover pair under an
-    // identical label and still pass a label-based assertion.
+    // Both pairs read "Roth Conversion (taxable)" / "(after-tax)", so discriminate on the element id or a swapped predicate goes unnoticed.
     expect(await screen.findByLabelText('Roth Conversion (taxable)')).toHaveAttribute(
       'id',
       'balance-roth-conversion-taxable',
@@ -887,9 +820,7 @@ describe('AccountBalancesPage — reactive read layer', () => {
   });
 
   it('drops the conversion amounts when the account is no longer a Roth IRA', async () => {
-    // Retyping an account hides the inputs. Without gating the save on the same
-    // predicate, an edit would silently re-persist amounts the user can no
-    // longer see or clear.
+    // Retyping an account hides the inputs; save must be gated on the same predicate or it re-persists amounts the user can no longer see.
     const user = userEvent.setup();
     await seedMember();
     await seedAccount(); // RETIREMENT_401K

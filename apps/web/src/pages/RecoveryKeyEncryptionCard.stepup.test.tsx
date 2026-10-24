@@ -1,15 +1,4 @@
-/**
- * RecoveryKeyEncryptionCard — the step-up gate on "Activate new key".
- * Activating a
- * regenerated recovery key always REPLACES the live `recovery` slot, which the
- * server refuses without a fresh second factor when `AUTH_MFA_ENFORCED` is on
- * (the posture on both deployed stacks). These cases render the card with
- * `stepUpRequired: true` — the ungated flow lives in
- * SecurityPage.recovery.test.tsx — and pin the client half of that contract:
- * the modal gates the commit, the collected proof reaches `activate`, a
- * consumed proof is never resent, and cancelling the factor step leaves the
- * prepared key on screen with nothing committed.
- */
+// RecoveryKeyEncryptionCard step-up gate on "Activate new key": activating a regenerated key replaces the live `recovery` slot, which the server refuses without a fresh second factor when `AUTH_MFA_ENFORCED` is on. The ungated flow is in SecurityPage.recovery.test.tsx.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RecoveryKeyEncryptionCard } from './RecoveryKeyEncryptionCard';
@@ -61,7 +50,6 @@ function mount(activate: Activate) {
   );
 }
 
-/** Password re-auth → prepared key shown → saved-key checkbox ticked. */
 async function prepareKey(): Promise<void> {
   fireEvent.click(await screen.findByRole('button', { name: 'Generate a new recovery key' }));
   fireEvent.change(await screen.findByLabelText('Current password'), {
@@ -91,7 +79,6 @@ describe('RecoveryKeyEncryptionCard — "Activate new key" step-up gate', () => 
 
     fireEvent.click(screen.getByRole('button', { name: 'Activate new key' }));
 
-    // The factor prompt takes over the prepared-key modal; nothing committed.
     await screen.findByText("Confirm it's you");
     expect(screen.getByText(/before activating your new recovery key/i)).toBeInTheDocument();
     expect(screen.queryByTestId('recovery-key-display')).not.toBeInTheDocument();
@@ -114,7 +101,6 @@ describe('RecoveryKeyEncryptionCard — "Activate new key" step-up gate', () => 
     await screen.findByText("Confirm it's you");
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    // Back on the (un-reshowable) key with the old key still in force.
     expect(await screen.findByTestId('recovery-key-display')).toHaveTextContent(
       'NEWK-EY01-2345-6789',
     );
@@ -135,14 +121,10 @@ describe('RecoveryKeyEncryptionCard — "Activate new key" step-up gate', () => 
     await confirmWithCode('111111');
     await waitFor(() => expect(activate).toHaveBeenCalledWith({ method: 'totp', code: '111111' }));
 
-    // The key modal is back with the inline error; the old key still works.
     await screen.findByText(/Could not activate your new recovery key/i);
     expect(await screen.findByTestId('recovery-key-display')).toBeInTheDocument();
 
-    // Step-up proofs are single-use: the retry must NOT resend '111111' — it
-    // re-opens the factor prompt and commits with the freshly entered code.
-    // (The key modal re-mounted after the factor step, so its saved-key
-    // checkbox is unticked again.)
+    // Step-up proofs are single-use: the retry must not resend '111111'; it re-opens the factor prompt and commits with the fresh code (the key modal re-mounted, so its saved-key checkbox is unticked again).
     fireEvent.click(screen.getByRole('checkbox', { name: /i have saved my new recovery key/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Activate new key' }));
     await screen.findByText("Confirm it's you");

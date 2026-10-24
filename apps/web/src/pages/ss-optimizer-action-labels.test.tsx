@@ -1,18 +1,5 @@
-/**
- * Scoped action-label invariant for the Social Security claim-age comparison
- * table: on this page no action control reads `Apply` or `Applied` in ANY
- * state.
- *
- * `SsOptimizerPage.test.tsx` asserts the new labels only where a control was
- * already being queried, so a control left on the old wording is invisible to
- * it. This file drives `OptimizerResultsTable` directly and enumerates every
- * state each action control can reach — enabled, in-flight (`running === true`)
- * and already-set, on BOTH the scenario-row button and the per-method child-row
- * button, plus all four disabled row variants (both-PIAs-missing, past-window,
- * unsupported, empty-reason). Each is asserted by EXACT accessible name, never
- * a substring scan over page text; a branch added to either button later has to
- * be added here too.
- */
+// Scoped action-label invariant for the claim-age comparison table: no action control reads `Apply` or `Applied` in any state. `SsOptimizerPage.test.tsx` asserts the new labels only where a control was already queried, so a control left on the old wording is invisible to it.
+// This file drives `OptimizerResultsTable` directly through every reachable state of both action buttons and the four disabled row variants, by exact accessible name; a branch added later has to be added here too.
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -47,7 +34,6 @@ function member(id: string, firstName: string): Aggregate<HouseholdMemberPayload
   };
 }
 
-/** A scenario whose resolved primary claim age is `claimAge` (or unset). */
 function scenario(id: string, name: string, claimAge: number | null): ScenarioAggregate {
   return {
     id,
@@ -71,7 +57,6 @@ function scenario(id: string, name: string, claimAge: number | null): ScenarioAg
   };
 }
 
-/** A finished single-method result recommending `primaryAgeYears: 70`. */
 function winnerResult(scenarioId: string): OptimizerWorkerOutbound {
   return {
     kind: 'result',
@@ -89,17 +74,7 @@ function winnerResult(scenarioId: string): OptimizerWorkerOutbound {
   };
 }
 
-/**
- * One scenario per row variant, so a single render covers every branch the
- * table's action column can take:
- *   - `Enabled`        → `ApplyButton`'s default state
- *   - `Already`        → `ApplyButton`'s `alreadyAtOptimum` state
- *   - `Missing PIAs`   → `BothMissingPiaRow`
- *   - `Past window`    → `PastWindowRow`
- *   - `Unsupported`    → `UnsupportedRow`
- *   - `No retirement`  → `EmptyReasonRow`
- *   - `Methods`        → the two `MethodChildRow`s (`MethodApplyButton`)
- */
+// One scenario per row variant, so a single render covers every branch of the action column: Enabled and Already (ApplyButton's default and `alreadyAtOptimum` states), Missing PIAs, Past window, Unsupported, No retirement (the disabled row variants), and Methods (the two MethodChildRows).
 const SCENARIOS: ScenarioAggregate[] = [
   scenario('s-enabled', 'Enabled', 62),
   scenario('s-already', 'Already', 70),
@@ -183,7 +158,6 @@ function renderTable(running: boolean) {
   );
 }
 
-/** The table row whose first cell renders `label` (scenario or method name). */
 function tableRow(label: string): HTMLElement {
   const cell = screen.getByText(label);
   const found = cell.closest('[role="row"]');
@@ -191,12 +165,10 @@ function tableRow(label: string): HTMLElement {
   return found as HTMLElement;
 }
 
-/** The single action-column control in the row labelled `label`. */
 function actionButton(label: string): HTMLElement {
   return within(tableRow(label)).getByRole('button');
 }
 
-/** No control anywhere on the table reads the retired labels. */
 function expectNoRetiredActionLabels(): void {
   expect(screen.queryAllByRole('button', { name: 'Apply' })).toHaveLength(0);
   expect(screen.queryAllByRole('button', { name: 'Applied' })).toHaveLength(0);
@@ -206,20 +178,17 @@ describe('SS claim-age comparison action labels', () => {
   it('should_label_every_idle_state_save_to_scenario_or_already_set', () => {
     renderTable(false);
 
-    // `ApplyButton` — enabled, then the already-set branch.
     expect(actionButton('Enabled')).toHaveAccessibleName('Save to scenario');
     expect(actionButton('Enabled')).not.toBeDisabled();
     expect(actionButton('Already')).toHaveAccessibleName('Already set');
     expect(actionButton('Already')).toBeDisabled();
 
-    // All four disabled row variants carry the renamed label too — none of
-    // them is reachable from the page test's queries.
+    // All four disabled row variants carry the renamed label too; none is reachable from the page test's queries.
     for (const label of ['Missing PIAs', 'Past window', 'Unsupported', 'No retirement']) {
       expect(actionButton(label)).toHaveAccessibleName('Save to scenario');
       expect(actionButton(label)).toBeDisabled();
     }
 
-    // `MethodApplyButton` on both deterministic child rows.
     expect(actionButton('Planned')).toHaveAccessibleName('Save to scenario');
     expect(actionButton('Planned')).not.toBeDisabled();
     expect(actionButton('Historical')).toHaveAccessibleName('Save to scenario');
@@ -228,9 +197,7 @@ describe('SS claim-age comparison action labels', () => {
   });
 
   it('should_label_the_in_flight_state_save_to_scenario_on_both_buttons', () => {
-    // `running === true` is a third state neither the enabled nor the
-    // already-set row covers: every row reads it for the whole duration of a
-    // deterministic or Monte Carlo sweep.
+    // `running === true` is a third state neither the enabled nor the already-set row covers: every row reads it for the whole of a deterministic or Monte Carlo sweep.
     renderTable(true);
 
     expect(actionButton('Enabled')).toHaveAccessibleName('Save to scenario');
@@ -239,15 +206,13 @@ describe('SS claim-age comparison action labels', () => {
     expect(actionButton('Planned')).toBeDisabled();
     expect(actionButton('Historical')).toHaveAccessibleName('Save to scenario');
     expect(actionButton('Historical')).toBeDisabled();
-    // The already-set branch wins over `running` and keeps its own label.
     expect(actionButton('Already')).toHaveAccessibleName('Already set');
 
     expectNoRetiredActionLabels();
   });
 
   it('should_label_the_already_set_state_on_the_method_child_rows', () => {
-    // `MethodApplyButton` derives `alreadyAtOptimum` itself, so its
-    // already-set branch needs its own scenario rather than the row above.
+    // `MethodApplyButton` derives `alreadyAtOptimum` itself, so its already-set branch needs its own scenario.
     render(
       <MemoryRouter>
         <OptimizerResultsTable

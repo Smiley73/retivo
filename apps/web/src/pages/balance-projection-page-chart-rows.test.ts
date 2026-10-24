@@ -139,7 +139,6 @@ describe('deflateChartRows', () => {
       },
       twr: null,
     };
-    // Representative run: firstYear 2041 (pre-retirement), 2042 retirement year.
     const representativeRun = {
       firstYear: 2041,
       seed: 7,
@@ -149,11 +148,9 @@ describe('deflateChartRows', () => {
       ],
       depletionYear: null,
       perMonthWithdrawal: new Float64Array(),
-      // Path's own real series — deliberately different from nominal so we can
-      // prove the today-mode value comes from THESE, not `nominal * viewDeflator`.
+      // The run's own real series differs from nominal so the today-mode value must come from it, not `nominal * viewDeflator`.
       realBalanceByYear: [800, 700],
       realGrowthByYear: [42, 30],
-      // Factor = realBalance / nominal balance, the identity the engine pins.
       realFactorByYear: [800 / 1_000, 700 / 900],
     };
     const rows = deflateChartRows({
@@ -164,16 +161,14 @@ describe('deflateChartRows', () => {
       drawdownByMethod: drawdown,
       lastDeathYear: 2042,
       retirementYear: 2042,
-      // A non-identity deflator — the mc channel must NOT pick this up in today mode.
+      // A non-identity deflator: the mc channel must not pick it up in today mode.
       viewDeflator: () => 99,
       representativeRun,
       displayMode: 'today',
     });
-    // 2041 < retirementYear (2042) → mc SOLID, real-deflated (800), NOT 1000*99.
     const y2041 = rows.find((r) => r.x === 2042);
     expect(y2041?.mcSolid).toBe(800);
     expect(y2041?.mcGrowth).toBe(42);
-    // 2042 === retirementYear → mc DASHED carries the run's real balance (700).
     const y2042 = rows.find((r) => r.x === 2043);
     expect(y2042?.mcDashed).toBe(700);
   });

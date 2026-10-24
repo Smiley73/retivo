@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatAge } from './scenario-age-modal-shared';
 
-// Guards the intended user-visible age-text change: the scenario
-// summary now reads spelled-out ("65 years 6 months"), never the old
-// "65y 6m" shorthand. Exercises the `{ ageYears, ageMonths }` adapter
-// end-to-end through the canonical core.
+// The scenario summary reads spelled-out ("65 years 6 months"), never the old "65y 6m" shorthand, through the `{ ageYears, ageMonths }` adapter end-to-end.
 describe('scenario-age-modal-shared formatAge adapter', () => {
   it('emits just the number for a whole-year age', () => {
     expect(formatAge({ ageYears: 65, ageMonths: 0 })).toBe('65');

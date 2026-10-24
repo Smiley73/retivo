@@ -1,13 +1,4 @@
-/**
- * AccountHistorySection — Reset-button visibility.
- *
- * Tests:
- *  - reset_visible_when_zoomed
- *
- * AccountHistoryCharts is mocked to a simple div to avoid
- * Recharts / ResizeObserver in jsdom.
- * useChartZoom is mocked so isZoomed can be driven without a real drag.
- */
+// AccountHistorySection Reset-button visibility. AccountHistoryCharts is mocked to a div and useChartZoom is mocked so isZoomed can be driven without a real drag.
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';

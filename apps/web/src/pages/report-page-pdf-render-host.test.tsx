@@ -1,18 +1,5 @@
-/**
- * ReportPagePdfRenderHost — the off-screen chart-capture host.
- *
- * Asserts the host's contract, not pixel output:
- *  - it renders an `<svg>` for the manifest's projection-chart sections it
- *    owns (the per-year balance line, BOTH account-balance groupings; BOTH
- *    expense chart groupings when expenseRows is non-empty),
- *  - both account-balance groupings (Tier/Type and Account) are present
- *    (the two bands render distinct group-by controls),
- *  - it calls `onReady` once chart geometry has committed, keyed by the
- *    `section-manifest.ts` section ids.
- *
- * The in-house SVG chart engine renders real `<svg>` nodes under jsdom (no
- * canvas), so the readiness probe resolves; no real jsPDF is touched here.
- */
+// ReportPagePdfRenderHost, the off-screen chart-capture host: it renders an `<svg>` for each manifest projection-chart section it owns (the per-year balance line, both account-balance groupings, both expense groupings when expenseRows is non-empty) and calls `onReady` once chart geometry has committed.
+// The in-house SVG engine renders real `<svg>` nodes under jsdom (no canvas), so the readiness probe resolves; no real jsPDF is touched.
 import React from 'react';
 import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -20,14 +7,12 @@ import { PDF_SECTION_MANIFEST } from '../lib/pdf-export/section-manifest';
 import {
   ReportPagePdfRenderHost,
   type ReportPagePdfRenderHostProps,
-  type RenderHostAccount,
 } from './report-page-pdf-render-host';
 import type { ProjectionChartRow } from '../components/ProjectionChart';
 import type { PlanStressTestVm } from '../components/PlanStressTestSection';
 import type { StackBandYear } from './balance-projection-page-account-balance-stack';
 
-/** Minimal stress VM stub: `hasNoAccounts: true` keeps the stress chart from
- *  rendering, so the always-present chart set stays the three baseline ones. */
+// `hasNoAccounts: true` keeps the stress chart from rendering, so the always-present set stays the three baseline charts.
 const STRESS_VM_NO_RESULT = {
   hasNoAccounts: true,
   result: null,
@@ -58,7 +43,7 @@ function makeTimeline(): StackBandYear[] {
   }));
 }
 
-const ACCOUNTS: RenderHostAccount[] = [
+const ACCOUNTS: ReportPagePdfRenderHostProps['accounts'][number][] = [
   { id: 'acc-1', name: '401(k)', ownerDisplayName: 'Alex', type: 'RETIREMENT_401K' },
   { id: 'acc-2', name: 'Roth IRA', ownerDisplayName: 'Alex', type: 'RETIREMENT_ROTH_IRA' },
 ];
@@ -119,18 +104,13 @@ describe('ReportPagePdfRenderHost', () => {
     await waitFor(() => expect(readySvgs).not.toBeNull(), { timeout: 4000 });
 
     const ready = readySvgs as unknown as Record<string, SVGElement>;
-    // The host owns exactly these chart sections from the manifest.
-    // Expense chart sections are conditionally included only when expenseRows
-    // is non-empty. makeProps() defaults to expenseRows: [], so only the three
-    // always-present sections are expected here.
+    // The host owns exactly these manifest sections; expense sections are included only when expenseRows is non-empty, and makeProps() defaults to none.
     const ownedIds = [
       'chart-balance',
       'chart-account-balances-tier',
       'chart-account-balances-account',
     ];
     for (const id of ownedIds) {
-      // Each owned id must be a real manifest entry (identity check against the
-      // single source of truth) and resolve to an SVGElement.
       expect(PDF_SECTION_MANIFEST.some((e) => e.id === id)).toBe(true);
       expect(ready[id]).toBeDefined();
       expect(ready[id].tagName.toLowerCase()).toBe('svg');
@@ -149,9 +129,7 @@ describe('ReportPagePdfRenderHost', () => {
       />,
     );
     await waitFor(() => expect(ready).toBe(true), { timeout: 4000 });
-    // Each band renders a Type-vs-Account group-by radiogroup; two bands → two.
-    // The host is intentionally `aria-hidden` (off-screen capture surface), so
-    // query with `hidden: true` to reach the accessibility-hidden subtree.
+    // The host is `aria-hidden` (an off-screen capture surface), so query with `hidden: true` to reach the subtree.
     const groups = screen.getAllByRole('radiogroup', {
       name: /Group by: Type \| Account/i,
       hidden: true,
@@ -199,13 +177,12 @@ describe('ReportPagePdfRenderHost', () => {
 
   it('calls onError when chart geometry never commits within the timeout', { timeout: 30_000 }, async () => {
     vi.useFakeTimers();
-    // Route rAF through setTimeout so fake timers control all ticks.
+    // Route requestAnimationFrame through setTimeout so fake timers control all ticks.
     const origRAF = globalThis.requestAnimationFrame;
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback): number =>
       window.setTimeout(() => cb(0), 0) as unknown as number,
     );
-    // Force collectSvgs() to always miss: querySelectorAll('svg') returns an
-    // empty list, while every other selector keeps its real behaviour.
+    // Force collectSvgs() to always miss: querySelectorAll('svg') returns an empty list while every other selector keeps its real behaviour.
     const origQSA = Element.prototype.querySelectorAll;
     const qsSpy = vi
       .spyOn(Element.prototype, 'querySelectorAll')
@@ -225,7 +202,7 @@ describe('ReportPagePdfRenderHost', () => {
       />,
     );
 
-    // Advance past GEOMETRY_TIMEOUT_MS (10 000 ms) — each tick fires via setTimeout(0).
+    // Advance past GEOMETRY_TIMEOUT_MS (10 000 ms); each tick fires via setTimeout(0).
     await act(async () => {
       await vi.advanceTimersByTimeAsync(11_000);
     });

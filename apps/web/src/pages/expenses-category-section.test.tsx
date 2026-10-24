@@ -1,12 +1,4 @@
-/**
- * ExpensesCategorySection — Reset-button visibility.
- *
- * Tests:
- *  - reset_visible_when_zoomed
- *
- * Chart is mocked to a div; useChartZoom mocked at module boundary.
- * Section owns only the "Expenses by Category" chart body.
- */
+// ExpensesCategorySection owns only the "Expenses by Category" chart body: Reset-zoom visibility, with the chart mocked to a div and useChartZoom mocked at the module boundary.
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';

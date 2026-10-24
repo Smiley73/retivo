@@ -1,11 +1,4 @@
-/**
- * Component tests for the Security page's Delete account danger card: the
- * three-step flow (password → export-offer interstitial → confirm) including
- * the within-delete export that silently reuses the step-1 password. Renders
- * through SecurityPage, which hosts the card; the within-delete export uses the
- * shared `useProfileExport` primitive, so the export-reuse path is exercised
- * here even though the standalone Data card lives on the Workspace page.
- */
+// Security-page Delete account card: the three-step flow (password, export offer, confirm), including the within-delete export that silently reuses the step-1 password via the shared `useProfileExport`. Rendered through SecurityPage, which hosts the card.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { SecurityPage } from '../pages/SecurityPage';
@@ -22,8 +15,7 @@ vi.mock('../api/client', async () => (await import('./security-page.test-harness
 vi.mock('../auth/AuthContext', async () => (await import('./security-page.test-harness')).authContextMock());
 vi.mock('../contexts/ThemeContext', async () => (await import('./security-page.test-harness')).themeContextMock());
 vi.mock('../sync/SyncContext', async () => (await import('./security-page.test-harness')).syncContextMock());
-// The within-delete "Export my data" step runs the server-authoritative export
-// via the shared `useProfileExport` primitive. Mock its single entry point.
+// The within-delete export runs the server-authoritative export through `useProfileExport`; mock its single entry point.
 vi.mock('../lib/server-data-export', () => ({
   exportServerData: vi.fn().mockResolvedValue({ unresolvedCount: 0 }),
 }));
@@ -52,8 +44,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     await waitFor(() => expect(screen.getByLabelText('Current password')).toBeInTheDocument());
   }
 
-  // The wording is the owner's to edit, so these assert the key facts (what is
-  // deleted, what expires on its own and when) rather than whole sentences.
+  // The wording is the owner's to edit, so these assert key facts rather than whole sentences.
   function expectDeletionFacts(text: string) {
     expect(text).toMatch(/security logs.*expire.*one year/i);
     expect(text).toMatch(/backups.*expire.*90 days/i);
@@ -97,10 +88,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
   });
 
   it('Enter submits the prompt form once a password is typed, and is a no-op while empty', async () => {
-    // Native form submission (password-manager fill-and-submit relies on
-    // it); same gate as the Continue button, so an empty field can't
-    // advance. jsdom doesn't run implicit submission from a keydown, so
-    // Enter is driven as the submit event it produces in a real browser.
+    // Native form submission (password-manager fill-and-submit relies on it) shares the Continue button's gate. jsdom doesn't run implicit submission from a keydown, so drive Enter as the submit event a real browser produces.
     renderPage();
     await openDeleteModal();
     const input = screen.getByLabelText('Current password');
@@ -126,7 +114,6 @@ describe('SecurityPage Danger zone — account deletion', () => {
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
-    // Skip the export offer to reach the final confirm.
     await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
 
@@ -134,8 +121,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: /yes, delete account/i }));
 
     await waitFor(() => expect(deleteAccount).toHaveBeenCalledWith('secretpw'));
-    // Deletion preserves the deviceId (no reload) + the toast across
-    // the nuke; clear-data (separate test) passes no args.
+    // Deletion preserves the deviceId (no reload) and the toast across the wipe.
     expect(clearAllLocalData).toHaveBeenCalledWith({
       preserveLocalKeys: [DEVICE_ID_STORAGE_KEY],
       preserveSessionKeys: [DELETED_NOTICE_KEY],
@@ -144,11 +130,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/login', { replace: true });
   });
 
-  // Regression: deleteAccount calls setMe(null) internally, which causes
-  // RequireAuth to redirect to /login mid-await. The notice must already
-  // be in sessionStorage when that redirect's LoginPage useEffect runs —
-  // otherwise the flag lands too late and surfaces on a *later* /login
-  // visit (e.g., after the user signs up again).
+  // Regression: deleteAccount calls setMe(null) internally, so RequireAuth redirects to /login mid-await; the notice must already be in sessionStorage when that redirect's LoginPage effect runs, or it surfaces on a later /login visit.
   it('writes the toast flag to sessionStorage BEFORE invoking deleteAccount', async () => {
     let storedAtCallTime: string | null | undefined;
     const deleteAccount = vi.fn().mockImplementation(async () => {
@@ -186,9 +168,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     fireEvent.click(screen.getByRole('button', { name: /yes, delete account/i }));
 
     await waitFor(() => expect(deleteAccount).toHaveBeenCalledWith('wrong'));
-    // The failure drops both the confirm and the export-offer interstitial so
-    // the password modal reopens — the only step with a field to fix the wrong
-    // password — carrying the server error inline.
+    // The failure drops both the confirm and the export-offer interstitial so the password modal, the only step with a field to fix the wrong password, reopens with the server error inline.
     await waitFor(() =>
       expect(screen.getByLabelText('Current password')).toBeInTheDocument(),
     );
@@ -205,13 +185,11 @@ describe('SecurityPage Danger zone — account deletion', () => {
     await openDeleteModal();
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    // Skip past the export offer to reach the final confirm.
     await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
     await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByText('Delete account and live data?')).not.toBeInTheDocument());
-    // Cancelling the confirm returns to the offer modal (which carries a Cancel).
     await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
     expect(deleteAccount).not.toHaveBeenCalled();
   });
@@ -227,8 +205,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Export my data' }));
 
-    // The step-1 password is reused silently: the export verifies with
-    // `data_export` and runs the export, with no second password prompt.
+    // The step-1 password is reused silently: the export verifies with `data_export` and runs with no second password prompt.
     await waitFor(() =>
       expect(verifyPassword).toHaveBeenCalledWith('secretpw', { purpose: 'data_export' }),
     );
@@ -238,7 +215,6 @@ describe('SecurityPage Danger zone — account deletion', () => {
         'gzip',
       ),
     );
-    // Auto-advance to the final confirm. No standalone export gate mounted.
     await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
     expect(screen.queryByText('Export your data?')).not.toBeInTheDocument();
   });
@@ -278,7 +254,6 @@ describe('SecurityPage Danger zone — account deletion', () => {
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(/current password is incorrect/i),
     );
-    // Stays on the offer step; export never ran; confirm never opened.
     expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument();
     expect(screen.queryByText('Delete account and live data?')).not.toBeInTheDocument();
     expect(exportServerData).not.toHaveBeenCalled();
@@ -295,7 +270,6 @@ describe('SecurityPage Danger zone — account deletion', () => {
     await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    // Whole flow closed — neither the offer modal nor the password modal remain.
     await waitFor(() =>
       expect(screen.queryByText('Save a copy of your data first?')).not.toBeInTheDocument(),
     );
@@ -304,9 +278,7 @@ describe('SecurityPage Danger zone — account deletion', () => {
     expect(exportServerData).not.toHaveBeenCalled();
   });
 
-  // When AUTH_MFA_ENFORCED is on the server returns
-  // stepUpRequired via GET /auth/mfa/status; the card inserts a fresh-factor
-  // step-up between the export offer and the final confirm.
+  // With AUTH_MFA_ENFORCED on, GET /auth/mfa/status returns stepUpRequired and the card inserts a fresh-factor step-up between the export offer and the final confirm.
   const enforcedStatus = {
     totpEnabled: true,
     stepUpRequired: true,
@@ -325,12 +297,10 @@ describe('SecurityPage Danger zone — account deletion', () => {
     await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
 
-    // Step-up modal appears instead of jumping straight to the final confirm.
     await waitFor(() => expect(screen.getByText("Confirm it's you")).toBeInTheDocument());
     expect(screen.queryByText('Delete account and live data?')).not.toBeInTheDocument();
     await expectNoA11yViolations(container);
 
-    // Enter an authenticator code + confirm → advances to the final confirm.
     fireEvent.change(screen.getByLabelText('Authenticator code'), { target: { value: '123456' } });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
@@ -356,15 +326,12 @@ describe('SecurityPage Danger zone — account deletion', () => {
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'secretpw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
-    // Fail an export so the offer modal carries an inline error.
     await waitFor(() => expect(screen.getByText('Save a copy of your data first?')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Export my data' }));
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(/current password is incorrect/i),
     );
 
-    // Skip clears the stale error and opens the confirm; Cancel returns to the
-    // offer modal, which must now show no error.
     fireEvent.click(screen.getByRole('button', { name: 'Skip, delete anyway' }));
     await waitFor(() => expect(screen.getByText('Delete account and live data?')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));

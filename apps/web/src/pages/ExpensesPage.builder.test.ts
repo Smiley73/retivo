@@ -1,18 +1,5 @@
-/**
- * Unit tests for ExpensesPage's pure `buildProjection` builder — the
- * list-page counterpart to the form preview's `buildMarkers`
- * (`lib/expense-preview-projection.ts`). Both feed the same
- * `ExpensesProjectionChart`, so both must surface the teal retirement
- * marker on the SAME terms.
- *
- * Focus: the gate-removal behaviour. The teal
- * `Retires <Mon YYYY>` marker (`CHART_COLORS[theme].retirementMarker`)
- * must be EMITTED even when an expense starts AT retirement
- * (`fromYear === retirementYear`), where the prior
- * `fromYear < retirementYear` gate suppressed it. Also covers the
- * negative `lastFullYear < retirementYear` guard (retirement off the
- * chart's right edge → no marker, empty projection).
- */
+// ExpensesPage's pure `buildProjection`, the list-page counterpart to the form preview's `buildMarkers` (`lib/expense-preview-projection.ts`): both feed `ExpensesProjectionChart` and must surface the teal retirement marker on the same terms.
+// The marker is emitted even when an expense starts at retirement (`fromYear === retirementYear`), and not when retirement is off the chart's right edge (`lastFullYear < retirementYear`).
 import { describe, expect, it } from 'vitest';
 import { buildProjection } from './ExpensesPage';
 import type { ExpenseRow } from './expense-group-card';
@@ -107,18 +94,13 @@ const expenseRow = (
   },
 });
 
-// Primary scenario carrying a resolvable retirement age (60y2m on a
-// 1965-04-15 birthdate → June 2025) and a default life expectancy that
-// lands the death year well past retirement.
 const SCN = scenario('scn-primary', true, {
   retirementAge: { primary: { ageYears: 60, ageMonths: 2 } },
 });
 
 describe('ExpensesPage buildProjection — retirement marker gate removal', () => {
   it('emits the teal retirement marker when an expense starts AT retirement (fromYear === retirementYear)', () => {
-    // Only expense starts at retirementStart → earliest start == retirement,
-    // so fromYear === retirementYear. The prior `fromYear < retirementYear`
-    // gate would suppress the marker; it must now render.
+    // The only expense starts at retirementStart, so `fromYear === retirementYear`; the old `fromYear < retirementYear` gate suppressed the marker.
     const data = buildProjection(
       [expenseRow({ start: { kind: 'retirementStart' } })],
       [category()],
@@ -156,9 +138,7 @@ describe('ExpensesPage buildProjection — retirement marker gate removal', () =
   });
 
   it('omits the marker (empty projection) when retirement is off the chart right edge (lastFullYear < retirementYear)', () => {
-    // Life expectancy below the retirement age forces the last death year
-    // before retirement → the `lastFullYear < retirementYear` guard returns
-    // the empty projection (no markers at all).
+    // Life expectancy below the retirement age puts the last death year before retirement, so the `lastFullYear < retirementYear` guard returns the empty projection.
     const offEdge = scenario('scn-off', true, {
       retirementAge: { primary: { ageYears: 90, ageMonths: 0 } },
       lifeExpectancy: { primary: 70, secondary: 70 },
@@ -178,21 +158,9 @@ describe('ExpensesPage buildProjection — retirement marker gate removal', () =
   });
 });
 
-/**
- * Display-unit toggle behaviour. `displayMode='future'` resolves the
- * inflation rate from the chain-merged scenario (`resolved.inflation`),
- * so the chart's monthly run-rate compounds forward; `displayMode='today'`
- * pins inflation to 0% (flat, unchanged from the pre-toggle behaviour).
- * The rate must come from the resolved chain, not the raw selected
- * scenario, so a child inheriting its parent's rate still inflates.
- */
+// `displayMode='future'` resolves inflation from the chain-merged scenario (`resolved.inflation`) so run-rates compound; `'today'` pins inflation to 0%. The rate must come from the resolved chain, not the raw selected scenario, so a child inheriting its parent's rate still inflates.
 describe('ExpensesPage buildProjection — display-unit toggle inflation', () => {
-  // A non-glided monthly expense so the only thing varying the run-rate
-  // across years is the inflation factor. The first emitted point and a
-  // point well into the horizon are compared so the delta is the pure
-  // inflation step (the trailing zero-rate tail is trimmed by
-  // buildProjection, so sampling by explicit calendar year is fragile;
-  // sample by array index instead).
+  // A non-glided monthly expense, so only the inflation factor varies the run-rate. Sample by array index: the trailing zero-rate tail is trimmed, so sampling by calendar year is fragile.
   const flatRow = (): ExpenseRow =>
     expenseRow({
       classification: 'essential',
@@ -200,8 +168,7 @@ describe('ExpensesPage buildProjection — display-unit toggle inflation', () =>
       end: { kind: 'lifetime', whose: 'primary' },
     });
 
-  /** Index of the first non-zero run-rate point (the chart can lead with
-   *  zero months before the expense's start month). */
+  // The chart can lead with zero months before the expense's start month.
   const firstActiveIdx = (
     rows: ReturnType<typeof buildProjection>['rows'],
   ): number => {
@@ -210,15 +177,11 @@ describe('ExpensesPage buildProjection — display-unit toggle inflation', () =>
     return idx;
   };
 
-  /** First active (non-zero) run-rate point's total. */
   const firstTotal = (
     rows: ReturnType<typeof buildProjection>['rows'],
   ): number => rows[firstActiveIdx(rows)].total;
 
-  /** A run-rate point's total ~10 years (120 monthly points) past the
-   *  first active point, clamped to the last available point. Far enough
-   *  that a non-zero inflation rate is unmistakable, near enough to stay
-   *  inside the active (pre-death) window. */
+  // About 10 years (120 monthly points) past the first active point, clamped to the last point: far enough that non-zero inflation is unmistakable, near enough to stay in the pre-death window.
   const laterTotal = (
     rows: ReturnType<typeof buildProjection>['rows'],
   ): number => {
@@ -242,13 +205,9 @@ describe('ExpensesPage buildProjection — display-unit toggle inflation', () =>
       'future',
       0,
     );
-    // Strictly increasing across the horizon → inflation applied.
     expect(laterTotal(data.rows)).toBeGreaterThan(firstTotal(data.rows));
 
-    // categoryRows shares the same ctx as rows (shared-ctx invariant), so the
-    // category totals must inflate on the same terms. Assert explicitly to
-    // protect the invariant against a future ctx split. Same first/later
-    // sampling pattern as the rows helpers, applied to categoryRows.total.
+    // categoryRows shares the ctx with rows (shared-ctx invariant), so category totals must inflate on the same terms; assert it to guard a future ctx split.
     expect(data.categoryRows.length).toBeGreaterThan(0);
     const catFirstIdx = data.categoryRows.findIndex((r) => r.total > 0);
     expect(catFirstIdx).toBeGreaterThanOrEqual(0);
@@ -262,13 +221,7 @@ describe('ExpensesPage buildProjection — display-unit toggle inflation', () =>
   });
 
   it('inflates in future mode at the parent\'s inherited rate, not the 3% default (chain resolution)', () => {
-    // Parent carries a non-default 4% rate; the child overrides nothing
-    // for inflation. Reading the raw child payload would miss the parent
-    // rate and fall back to DEFAULT_INFLATION_PCT (3%) — which also
-    // produces `later > first`, so a bare growth assertion can't tell
-    // chain-resolved 4% apart from a 3% fallback. Pin the chain by
-    // comparing the inherited-4% curve against an explicit-4% scenario
-    // (must match) AND against an explicit-3% scenario (must differ).
+    // The parent carries 4% and the child overrides nothing. Reading the raw child payload would fall back to DEFAULT_INFLATION_PCT (3%), which also gives `later > first`, so pin the chain by comparing against explicit-4% (must match) and explicit-3% (must differ).
     const parent = scenario('scn-parent', true, {
       retirementAge: { primary: { ageYears: 60, ageMonths: 2 } },
       inflation: { ratePct: 4 },
@@ -291,9 +244,7 @@ describe('ExpensesPage buildProjection — display-unit toggle inflation', () =>
       0,
     );
 
-    // Explicit standalone 4% and 3% scenarios (no parent chain). Same
-    // retirement age + life expectancy as the parent → identical horizon,
-    // so the index-sampled `laterTotal` points line up across all three.
+    // Same retirement age and life expectancy as the parent, so the index-sampled points line up across all three.
     const explicit4 = scenario('scn-explicit-4', true, {
       retirementAge: { primary: { ageYears: 60, ageMonths: 2 } },
       inflation: { ratePct: 4 },
@@ -323,13 +274,10 @@ describe('ExpensesPage buildProjection — display-unit toggle inflation', () =>
       0,
     );
 
-    // Inflation applied at all (sanity).
     expect(laterTotal(inherited.rows)).toBeGreaterThan(
       firstTotal(inherited.rows),
     );
-    // Chain resolved the parent's 4%: inherited curve == explicit 4%.
     expect(laterTotal(inherited.rows)).toBe(laterTotal(at4.rows));
-    // ...and is NOT the 3% default fallback (DEFAULT_INFLATION_PCT).
     expect(laterTotal(inherited.rows)).not.toBe(laterTotal(at3.rows));
   });
 
@@ -370,9 +318,6 @@ describe('ExpensesPage buildProjection — display-unit toggle inflation', () =>
   });
 
   it('re-renders at the new scenario\'s resolved rate when switching scenarios in future mode', () => {
-    // scn-A: explicit 2% direct override. scn-B: child inheriting 5%
-    // from its parent (parent-chain). While in future mode, switching
-    // from A's id to B's id produces a steeper curve (5% > 2%).
     const scnA = scenario('scn-a', true, {
       retirementAge: { primary: { ageYears: 60, ageMonths: 2 } },
       inflation: { ratePct: 2 },
@@ -411,35 +356,16 @@ describe('ExpensesPage buildProjection — display-unit toggle inflation', () =>
       0,
     );
 
-    // Both A and B share the same horizon (same retirement age + life
-    // expectancy), so the index-sampled points align. B's later-point
-    // growth from the shared first-point base is steeper → B's resolved
-    // 5% rate is in effect, not A's 2%.
+    // A and B share the same horizon, so index-sampled points align; B's steeper growth means its resolved 5% is in effect, not A's 2%.
     const growthA = laterTotal(dataA.rows) / firstTotal(dataA.rows);
     const growthB = laterTotal(dataB.rows) / firstTotal(dataB.rows);
     expect(growthB).toBeGreaterThan(growthA);
   });
 });
 
-/**
- * Annual (headline) PDF-table sourcing. `buildProjection` exposes
- * `annualRows` / `annualCategoryRows` for the exported PDF's expense
- * overview / by-category tables. The correctness-critical contract is that
- * those rows come STRAIGHT from the headline annual engine
- * (`projectExpensesByYear` / `projectExpensesByCategoryYear`) over the same
- * resolved expenses, the same display-basis `ctx`, and the same visible
- * year window as the monthly chart — NOT a rollup of the plotted monthly
- * run-rate samples (a monthly mean-over-active-months diverges from the
- * engine's active-months × year-mean-factor in a partial / mid-year-start
- * year when inflation ≠ 0, which is the original 12×-inflation bug this
- * fix closed). These tests rebuild the exact engine call from the same
- * public context helpers `buildProjection` uses (so they are not circular)
- * and assert the builder's rows tie out to it.
- */
+// `annualRows` / `annualCategoryRows` for the PDF tables must come straight from the headline annual engine over the same resolved expenses, display-basis ctx and visible window as the monthly chart, not a rollup of the plotted samples: a monthly mean over active months diverges from the engine in a partial (mid-year start) year when inflation ≠ 0, the original 12×-inflation bug.
 describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
-  // Rebuild the resolved expenses + display-basis ctx + visible window the
-  // SAME way `buildProjection` does, so the engine call below is an
-  // independent source of truth rather than an echo of the builder.
+  // Rebuild the engine inputs from the same public context helpers `buildProjection` uses, so the engine call is an independent source of truth rather than an echo.
   const expectedEngineInputs = (
     rows: ExpenseRow[],
     members: Aggregate<HouseholdMemberPayload>[],
@@ -447,9 +373,7 @@ describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
     selectedScenarioId: string,
     displayMode: 'today' | 'future',
     todayMonthIndex: number,
-    // The visible window is read off the builder's own monthly chart rows:
-    // the head is never trimmed (so rows[0].year === fromYear) and the tail
-    // trims to the last active month (so rows.at(-1).year === lastVisibleYear).
+    // The head of the window is never trimmed and the tail trims to the last active month, so the visible window can be read off the monthly rows.
     chartRows: ReturnType<typeof buildProjection>['rows'],
   ): {
     resolvedExpenses: ResolvedExpense[];
@@ -506,9 +430,7 @@ describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
   };
 
   it('sources annualRows from projectExpensesByYear over the visible window (future dollars, mid-year start)', () => {
-    // Age-65 start for a 1965-04-15 member → April 2030: a PARTIAL year.
-    // 3% future inflation on → the engine's partial-year factor differs from
-    // a monthly mean-over-active-months rollup. This is the case the bug hid.
+    // An age-65 start for a 1965-04-15 member is April 2030, a partial year; with 3% future inflation the engine's partial-year factor differs from a monthly mean over active months.
     const scn = scenario('scn-annual-3pct', true, {
       retirementAge: { primary: { ageYears: 60, ageMonths: 2 } },
       inflation: { ratePct: 3 },
@@ -543,11 +465,7 @@ describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
     const expected = projectExpensesByYear(resolvedExpenses, ctx, window);
     expect(data.annualRows).toEqual(expected);
 
-    // The mid-year start really makes the expense's first active year partial
-    // (less than the following full year), so this is the divergence-prone
-    // case, not a trivial full-year row. The first active year is the April
-    // 2030 age-65 start — not window.from (the window opens at the earlier
-    // retirement year, with leading zero years).
+    // The first active year is the April 2030 start, not window.from (which opens at the earlier retirement year with leading zero years).
     const startYear = data.annualRows.find((r) => r.essential > 0)!.year;
     const partial = data.annualRows.find((r) => r.year === startYear)!;
     const full = data.annualRows.find((r) => r.year === startYear + 1)!;
@@ -560,11 +478,7 @@ describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
       retirementAge: { primary: { ageYears: 60, ageMonths: 2 } },
       inflation: { ratePct: 3 },
     });
-    // Two ACTIVE categories supplied OUT OF alphabetical order (Ztravel
-    // before Apparel) so the asserted A-before-Z order can only come from the
-    // builder's sort, not the input order. Plus one all-zero (inactive)
-    // category (Medical, $0/mo) that must be omitted entirely. Each expense is
-    // keyed to its own category via categoryId (how byCategoryId buckets).
+    // Active categories are supplied out of alphabetical order so the A-before-Z order can only come from the builder's sort; the all-zero Medical category must be omitted.
     const categories = [
       categoryWith('cat-z', 'Ztravel'),
       categoryWith('cat-a', 'Apparel'),
@@ -587,7 +501,6 @@ describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
         start: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
         end: { kind: 'lifetime', whose: 'primary' },
       }),
-      // Inactive: zero amount → no non-zero data in any year.
       expenseRow({
         name: 'Copays',
         amount: 0,
@@ -620,24 +533,17 @@ describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
     const expected = projectExpensesByCategoryYear(resolvedExpenses, ctx, window);
     expect(data.annualCategoryRows).toEqual(expected);
 
-    // (a) categoryMeta is the ACTIVE categories in alphabetical order —
-    // Apparel before Ztravel despite the reversed input order, and the
-    // all-zero Medical category is omitted.
     expect(data.categoryMeta.map((c) => c.name)).toEqual([
       'Apparel',
       'Ztravel',
     ]);
 
-    // (b) The rendered PDF table header row follows the same active-only,
-    // sorted order ('Year' + each active category name).
     const spec = buildExpensesByCategoryTableSpec(
       data.annualCategoryRows,
       data.categoryMeta,
     );
     expect(spec.head[0]).toEqual(['Year', 'Apparel', 'Ztravel']);
 
-    // Every category the builder kept in categoryMeta carries non-zero annual
-    // data; an all-zero category never sneaks into the table source.
     for (const meta of data.categoryMeta) {
       const anyNonZero = data.annualCategoryRows.some(
         (r) => (r.byCategoryId[meta.id] ?? 0) > 0,
@@ -647,10 +553,7 @@ describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
   });
 
   it('sources annualRows from projectExpensesByYear in today dollars (0% basis, full-year sanity)', () => {
-    // retirementStart start → the start year is a full year here; today's
-    // dollars pins inflation to 0% so the annual figures are the flat
-    // entered amounts. Confirms the basis pass-through and window for the
-    // common case.
+    // A retirementStart start is a full year here; today's dollars pin inflation to 0%, so the annual figures are the flat entered amounts.
     const scn = scenario('scn-annual-today', true, {
       retirementAge: { primary: { ageYears: 60, ageMonths: 2 } },
       inflation: { ratePct: 3 },
@@ -685,8 +588,6 @@ describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
     const expected = projectExpensesByYear(resolvedExpenses, ctx, window);
     expect(data.annualRows).toEqual(expected);
 
-    // 0% basis: a full active year is the flat entered annual amount
-    // ($1,000/mo × 12). The next full year is identical (no inflation drift).
     const fullYears = data.annualRows.filter((r) => r.essential > 0);
     expect(fullYears.length).toBeGreaterThan(1);
     expect(fullYears[1].essential).toBe(12_000);
@@ -694,8 +595,7 @@ describe('ExpensesPage buildProjection — annual PDF-table sourcing', () => {
   });
 
   it('returns empty annual rows when there are no visible chart rows', () => {
-    // Retirement off the chart's right edge → empty projection (no monthly
-    // rows), so the annual table source is empty too (the null-guard path).
+    // Retirement off the chart's right edge gives an empty projection, so the annual table source is empty too.
     const offEdge = scenario('scn-annual-offedge', true, {
       retirementAge: { primary: { ageYears: 90, ageMonths: 0 } },
       lifeExpectancy: { primary: 70, secondary: 70 },

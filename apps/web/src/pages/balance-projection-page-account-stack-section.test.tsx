@@ -1,14 +1,6 @@
-/**
- * BalanceProjectionAccountStackSection — accountStackTimeline branching
- * (moved out of `balance-projection-page-charts.test.tsx` when the Account
- * Balance Stack section split into its own component).
- */
+// BalanceProjectionAccountStackSection branching on `accountStackTimeline` (moved out of `balance-projection-page-charts.test.tsx` when the section became its own component).
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-
-// The SVG chart engine sizes itself via a ResizeObserver
-// with an 800px fallback, so the band renders its SVG content in jsdom
-// without any stub (recharts is gone).
 
 import { BalanceProjectionAccountStackSection } from './balance-projection-page-account-stack-section';
 import { ThemeProvider } from '../contexts/ThemeContext';
@@ -43,14 +35,10 @@ function account(id: string, name: string): Aggregate<AccountPayload> {
 function baseProps() {
   return {
     accounts: [account('a1', 'Brokerage')],
-    // No MC basis active by default, so the resolved label matches the method.
     resolvedLabel: 'Planned',
     isMcBasisActive: false,
     customTiers: null,
     excludedAccountIds: [],
-    // A minimal unified timeline so the Account balances over time band renders
-    // (mirrors the prior behaviour where it rendered whenever drawdown years
-    // existed). Two projected years so the stacked area has ≥ 2 points.
     accountStackTimeline: [
       {
         year: 2030,
@@ -74,15 +62,8 @@ function baseProps() {
 }
 
 describe('BalanceProjectionAccountStackSection — accountStackTimeline branching', () => {
-  // The view-model's `accountStackTimeline` useMemo produces differently
-  // shaped rows per basis — the deterministic branch emits an all-`projected`
-  // surface from `accountProjections.yearlyTotals`, while the MC branch threads
-  // historical `actual` rows ahead of the projected MC representative-run rows
-  // through a boundary year. The band consumes the precomputed prop, so these
-  // tests exercise both branch-shaped payloads render the heading without error.
+  // The view model's `accountStackTimeline` differs per basis: the deterministic branch emits all-`projected` rows, the MC branch threads historical `actual` rows ahead of the MC representative-run rows through a boundary year. The band consumes the precomputed prop, so these tests render both shapes.
   it('renders the deterministic-branch surface (all projected rows, no boundary)', () => {
-    // Deterministic basis (isMcBasisActive=false): every row is `projected`
-    // (the projection surface starts at the boundary, no historical actuals).
     render(
       <ThemeProvider>
         <BalanceProjectionAccountStackSection
@@ -108,7 +89,6 @@ describe('BalanceProjectionAccountStackSection — accountStackTimeline branchin
         />
       </ThemeProvider>,
     );
-    // baseProps passes resolvedLabel="Planned", so the band suffixes the title.
     expect(
       screen.getByRole('heading', {
         name: 'Account balances over time (Planned)',
@@ -117,8 +97,6 @@ describe('BalanceProjectionAccountStackSection — accountStackTimeline branchin
   });
 
   it('renders the MC-branch surface (historical actual rows ahead of a boundary)', () => {
-    // MC basis (isMcBasisActive=true): historical `actual` rows precede the
-    // boundary year, then the MC representative-run rows render as `projected`.
     render(
       <ThemeProvider>
         <BalanceProjectionAccountStackSection
@@ -152,13 +130,11 @@ describe('BalanceProjectionAccountStackSection — accountStackTimeline branchin
         />
       </ThemeProvider>,
     );
-    // Under an MC basis the band suffixes the resolved MC tier label.
     expect(
       screen.getByRole('heading', {
         name: 'Account balances over time (Typical)',
       }),
     ).toBeInTheDocument();
-    // The MC representative-run sub-label renders on the band under an MC basis.
     expect(
       screen.getByText('Based on one example simulated path.'),
     ).toBeInTheDocument();

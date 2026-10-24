@@ -1,11 +1,4 @@
-/**
- * BalanceProjectionYearlyTable — year-by-year table sub-section render +
- * a11y smoke.
- *
- * Covers the show/hide disclosure, the collapsible `<TableScroll>` grid,
- * the Cap column gating, and the MAGI-cap breach banner.
- * A11y assertion per the project shared-component rule.
- */
+// BalanceProjectionYearlyTable: the show/hide disclosure, the collapsible `<TableScroll>` grid, Cap column gating and the MAGI-cap breach banner.
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -43,10 +36,7 @@ describe('BalanceProjectionYearlyTable', () => {
     expect(
       screen.getByRole('button', { name: 'Show year-by-year table' }),
     ).toBeInTheDocument();
-    // The table is now always mounted inside a `<div hidden>` wrapper,
-    // so it must drop out of the a11y tree when collapsed — both the grid AND
-    // the TableScroll scroll-region landmark are absent (the landmark check
-    // catches a regression that strips `hidden` from the wrapper).
+    // The table is always mounted inside a `<div hidden>` wrapper, so collapsed, both the grid and the TableScroll landmark must be absent (the landmark check catches a regression that strips `hidden`).
     expect(
       screen.queryByRole('grid', { name: 'Year-by-year projection' }),
     ).not.toBeInTheDocument();
@@ -98,7 +88,6 @@ describe('BalanceProjectionYearlyTable', () => {
     expect(
       screen.getByRole('columnheader', { name: 'Roth converted' }),
     ).toBeInTheDocument();
-    // The converting year shows the dollar amount; the zero year shows em-dash.
     expect(screen.getByText('$12,345')).toBeInTheDocument();
   });
 

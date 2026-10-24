@@ -1,9 +1,4 @@
-/**
- * Component tests for the Preferences page: the Appearance theme picker
- * (a three-option icon SegmentedRadioGroup wired to useTheme). The page is the
- * slimmed-down former Profile page — security/account and data/workspace cards
- * moved to the Security and Workspace pages.
- */
+// PreferencesPage Appearance theme picker (a three-option icon SegmentedRadioGroup wired to useTheme).
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { PreferencesPage } from '../pages/PreferencesPage';
@@ -23,7 +18,6 @@ vi.mock('../contexts/ThemeContext', () => ({
   useTheme: () => ({ theme: 'system', setTheme: setThemeMock }),
 }));
 
-// Mutable so a test can flip the beta switch state / the offered list.
 let mockShowBeta = false;
 let mockOfferedBeta: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'projected-withdrawals', label: 'Projected withdrawals' },
@@ -135,9 +129,7 @@ describe('PreferencesPage', () => {
     renderPage();
     const group = await screen.findByRole('radiogroup', { name: 'Theme' });
     expect(group).toBeInTheDocument();
-    // Three options; the mocked theme ('system') is the checked one. The
-    // icons are decorative (aria-hidden) so each accessible name is the
-    // label text alone.
+    // The icons are decorative (aria-hidden), so each accessible name is the label alone.
     expect(screen.getByRole('radio', { name: 'Light' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Dark' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'System' })).toBeChecked();

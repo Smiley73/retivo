@@ -1,14 +1,9 @@
-/**
- * Tests for the ResetPasswordPage component.
- */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
 vi.mock('../auth/AuthContext', () => ({
   useAuth: vi.fn(),
-  // Faithful stand-in for the real helper (a localStorage read of the
-  // last-known sign-in email) — the page wires it into the hidden
-  // username field for password-manager credential association.
+  // Faithful stand-in for the helper: a localStorage read of the last-known sign-in email, wired into the hidden username field for password-manager association.
   readStoredAuthEmail: () =>
     localStorage.getItem('retivo.auth.email') ?? '',
 }));
@@ -92,8 +87,7 @@ describe('ResetPasswordPage', () => {
     await waitFor(() => {
       expect(fn).toHaveBeenCalledWith(TOKEN, 'ResetPassw0rd!New');
     });
-    // The redirect runs after that call resolves, so the gate above does not
-    // imply it has happened yet — re-query rather than assert once.
+    // The redirect runs after that call resolves, so re-query rather than assert once.
     await waitFor(() =>
       expect(navigateMock).toHaveBeenCalledWith('/login', { replace: true }),
     );
@@ -136,7 +130,6 @@ describe('ResetPasswordPage', () => {
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
-  // Inline "service is busy" copy.
   it('shows the busy sentence for a no-envelope 5xx', async () => {
     setHashToken(TOKEN);
     const { ApiRequestError } = await import('../api/client');
@@ -176,10 +169,7 @@ describe('ResetPasswordPage', () => {
     expect(screen.getByText(/missing its token/i)).toBeInTheDocument();
   });
 
-  // Password-manager interop: the form
-  // carries a best-effort hidden username from the last-known sign-in
-  // email so the manager's "update password?" prompt targets the right
-  // credential; absent when unknown.
+  // The form carries a best-effort hidden username from the last-known sign-in email so the manager's "update password?" prompt targets the right credential.
   it('renders a hidden username from the stored sign-in email', () => {
     localStorage.setItem('retivo.auth.email', 'ada@example.com');
     try {
@@ -189,8 +179,6 @@ describe('ResetPasswordPage', () => {
       expect(username).not.toBeNull();
       expect(username).toHaveAttribute('autocomplete', 'username');
       expect(username).toHaveValue('ada@example.com');
-      // Inside the same form as the password fields (managers associate
-      // per-form).
       expect(username!.closest('form')).toBe(
         screen.getByLabelText('New password').closest('form'),
       );

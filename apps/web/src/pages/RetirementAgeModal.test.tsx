@@ -1,10 +1,4 @@
-/**
- * RetirementAgeModal — intro-copy contract.
- *
- * Pins the scenario-modal copy convention: the modal opens with a plain-English
- * `<p className="m-0 text-sm">` intro paragraph before any form control, at the
- * page-baseline body-copy size (`text-sm` pinned-size rule).
- */
+// RetirementAgeModal intro copy: a plain-English `<p className="m-0 text-sm">` before any form control (the pinned body-copy size).
 import 'fake-indexeddb/auto';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';

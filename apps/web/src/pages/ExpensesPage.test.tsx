@@ -1,14 +1,4 @@
-/**
- * ExpensesPage empty-state render test.
- *
- * Locks the single-CTA empty state: with an empty expenses store the
- * page shows the "No expenses yet" helper copy and the ONLY "Add"
- * call-to-action is the PageHeader primary action — there is no
- * in-card Add button duplicating it. Drives IndexedDB through
- * fake-indexeddb; Auth/Sync mocked at the module boundary, theme
- * supplied via the shared ThemeProvider seam (the page body reads
- * `useTheme()`).
- */
+// ExpensesPage over fake-indexeddb: the single-CTA empty state (only the PageHeader Add, no in-card Add), display-mode and scenario wiring, and focus restore.
 import 'fake-indexeddb/auto';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -34,15 +24,7 @@ import { EXPENSES_DISPLAY_MODE_STORAGE_KEY } from './ExpensesPage';
 vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
 vi.mock('../sync/SyncContext', () => ({ useSync: vi.fn() }));
 
-// The real chart lazy-loads recharts into a `ResponsiveContainer`, which
-// jsdom sizes to 0×0 — so it paints no measurable geometry and the
-// projection rows never reach the DOM. Mock the "Total expenses" section
-// with a thin stand-in that keeps the heading the page tests query AND
-// renders the data the page actually fed it (the sum of every projected
-// monthly run-rate) as text in a stable testid. That sum is the pure
-// product of the resolved inflation rate, so an assertion against it
-// proves the projection engine received the active display mode — not
-// just that a radio's checked-state markup flipped.
+// The real chart is lazy-loaded; stub the "Total expenses" section with one that renders the sum of the projected monthly run-rates as text, so assertions prove the projection engine received the active display mode, not just that a radio flipped.
 vi.mock('./expenses-projection-section', () => ({
   ExpensesProjectionSection: (props: {
     rows: ReadonlyArray<{ total: number }>;
@@ -173,10 +155,6 @@ async function seedExpense(
   await putAggregate('expense', e);
 }
 
-/** Seed a full chart-renderable household: member + category + one
- *  monthly expense + a primary scenario carrying `ratePct` inflation,
- *  with that scenario selected. The chart card (and its display-unit
- *  toggle) only renders when the projection has rows. */
 async function seedChartHousehold(ratePct = 3): Promise<void> {
   await seedMember();
   await seedCategory();
@@ -191,11 +169,6 @@ async function seedChartHousehold(ratePct = 3): Promise<void> {
   });
 }
 
-/**
- * Render the page at a given path, optionally seeding the MemoryRouter
- * with `initialEntries` so focus-restore tests can land at
- * `/expenses?focusExpenseId=<id>`.
- */
 function renderPageAt(path = '/expenses'): ReturnType<typeof render> {
   return render(
     withTheme(
@@ -218,17 +191,13 @@ describe('ExpensesPage — empty state', () => {
   });
 
   it('renders the single-CTA empty state when no expenses exist', async () => {
-    // A member + category exist but zero expenses — the page must show
-    // the helper copy, never an in-card Add button.
     await seedMember();
     await seedCategory();
     renderPage();
 
-    // (a) Helper copy renders.
     const helper = await screen.findByText(/No expenses yet/i);
     expect(helper).toBeInTheDocument();
 
-    // (b) The PageHeader Add-expense action is the ONLY "Add" CTA.
     await waitFor(() => {
       const addCtas = screen
         .getAllByRole('button')
@@ -238,7 +207,6 @@ describe('ExpensesPage — empty state', () => {
     const addBtn = screen.getByRole('button', { name: 'Add expense' });
     expect(addBtn).toBeInTheDocument();
 
-    // (c) No in-card Add button — the empty-state card holds no buttons.
     const card = helper.closest('section');
     expect(card).not.toBeNull();
     expect(card?.querySelectorAll('button')).toHaveLength(0);
@@ -315,15 +283,7 @@ describe('ExpensesPage — display-unit toggle', () => {
     const future = await screen.findByRole('radio', { name: 'Future dollars' });
     expect(future).toBeChecked();
 
-    // Assert against the actual chart DATA, not whole-card markup: the
-    // mocked "Total expenses" section renders the sum of the projected
-    // monthly run-rates the page fed it. In future mode the curve
-    // compounds (sum strictly larger); in today mode it is flat (smaller
-    // sum). A radio's checked-state markup flip can't move this number —
-    // only a different inflation rate reaching the projection engine can.
-    // The exact numeric divergence is unit-tested in
-    // ExpensesPage.builder.test.ts; this locks that the restored mode
-    // actually feeds the chart.
+    // Assert on chart data, not markup: the stub renders the sum of the projected run-rates, which only a different inflation rate reaching the projection engine can move. The exact divergence is unit-tested in ExpensesPage.builder.test.ts.
     const futureSum = Number(
       (await screen.findByTestId('chart-total-sum')).textContent,
     );
@@ -338,8 +298,6 @@ describe('ExpensesPage — display-unit toggle', () => {
       const todaySum = Number(
         screen.getByTestId('chart-total-sum').textContent,
       );
-      // Flat today-dollar curve sums to strictly less than the compounded
-      // future-dollar curve → the restored mode genuinely re-fed the chart.
       expect(todaySum).toBeLessThan(futureSum);
     });
   });
@@ -368,9 +326,7 @@ describe('ExpensesPage — reactive reads', () => {
 
   afterEach(async () => {
     await clearAllStores();
-    // clearAllStores preserves the selectedScenario pointer (production keeps
-    // it across a force-bootstrap), so reset it too — otherwise the active
-    // scenario written here leaks into another mounted page's default pick.
+    // clearAllStores preserves the selectedScenario pointer (production keeps it across a force-bootstrap), so reset it too or the active scenario leaks into another page's default pick.
     await clearSelectedScenario();
     window.localStorage.clear();
     vi.clearAllMocks();
@@ -382,8 +338,7 @@ describe('ExpensesPage — reactive reads', () => {
     renderPage();
     expect(await screen.findByText(/No expenses yet/i)).toBeInTheDocument();
 
-    // A single-row write fires only the per-store fine signal — no
-    // notifyWorkspaceChanged() — proving the useAggregates subscription wakes.
+    // A single-row write fires only the per-store signal, no notifyWorkspaceChanged(); the useAggregates subscription must still wake.
     await act(async () => {
       await seedExpense();
     });
@@ -394,19 +349,15 @@ describe('ExpensesPage — reactive reads', () => {
   });
 
   it('re-projects on SELECTED_SCENARIO_CHANGED_EVENT (active scenario switch)', async () => {
-    // Future-dollar mode so the projection compounds at the SELECTED
-    // scenario's inflation rate — switching the active scenario changes the
-    // chart-sum the mocked Total section renders.
+    // Future-dollar mode, so the projection compounds at the selected scenario's inflation rate.
     window.localStorage.setItem(EXPENSES_DISPLAY_MODE_STORAGE_KEY, 'future');
     await seedMember();
     await seedCategory();
     await seedExpense();
-    // Base scenario at 3% inflation, selected.
     await seedScenario('scn-base', {
       retirementAge: { primary: { ageYears: 60, ageMonths: 0 } },
       inflation: { ratePct: 3 },
     });
-    // A non-primary alternate at a much higher inflation rate.
     const alt: Aggregate<ScenarioPayload> = {
       id: 'scn-alt',
       householdId: HH,
@@ -439,7 +390,6 @@ describe('ExpensesPage — reactive reads', () => {
     );
     expect(baseSum).toBeGreaterThan(0);
 
-    // Sidebar switches the active scenario to the higher-inflation alternate.
     await writeSelectedScenario({
       scenarioId: 'scn-alt',
       updatedAt: '2026-05-02T00:00:00Z',
@@ -448,8 +398,6 @@ describe('ExpensesPage — reactive reads', () => {
       window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
     });
 
-    // The page re-read the pointer and re-projected under the 9% rate, so the
-    // future-dollar chart-sum grows.
     await waitFor(() => {
       const altSum = Number(
         screen.getByTestId('chart-total-sum').textContent,
@@ -459,16 +407,10 @@ describe('ExpensesPage — reactive reads', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Focus-restore tests.
-// ---------------------------------------------------------------------------
-
 describe('ExpensesPage — focus restore', () => {
   beforeEach(() => {
     setupContexts();
-    // Install a global scrollIntoView no-op so jsdom doesn't throw (the
-    // real implementation is absent in jsdom). Replaced with a spy per
-    // test that asserts it was called.
+    // jsdom has no scrollIntoView; install a no-op globally and replace it with a spy per test.
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
   });
 
@@ -485,20 +427,16 @@ describe('ExpensesPage — focus restore', () => {
     await seedExpense({ name: 'Groceries' }, 'exp-focus');
 
     const scrollSpy = vi.fn();
-    // Attach the spy before render so it captures the call made during effect.
     window.HTMLElement.prototype.scrollIntoView = scrollSpy;
 
     renderPageAt('/expenses?focusExpenseId=exp-focus');
 
-    // Wait for the row to appear (confirms data loaded).
     await screen.findByText('Groceries');
 
-    // The effect fires after loading completes.
     await waitFor(() => {
       expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'instant', block: 'nearest' });
     });
 
-    // The Edit button receives focus.
     await waitFor(() => {
       const editBtn = screen.getAllByRole('button', { name: 'Edit' })[0];
       expect(document.activeElement).toBe(editBtn);
@@ -510,17 +448,13 @@ describe('ExpensesPage — focus restore', () => {
     await seedCategory();
     await seedExpense({ name: 'Groceries' }, 'exp-strip');
 
-    // Seed the real URL with the param so the replaceState strip has
-    // something to remove — MemoryRouter keeps its history in-memory and
-    // never writes to window.location, so the assertion would otherwise
-    // pass vacuously.
+    // Seed the real URL with the param: MemoryRouter never writes to window.location, so the replaceState assertion would pass vacuously otherwise.
     window.history.replaceState(null, '', '/expenses?focusExpenseId=exp-strip');
 
     renderPageAt('/expenses?focusExpenseId=exp-strip');
     await screen.findByText('Groceries');
 
     await waitFor(() => {
-      // replaceState removes the param; the URL should no longer contain focusExpenseId.
       expect(window.location.search).not.toContain('focusExpenseId');
     });
   });
@@ -533,13 +467,11 @@ describe('ExpensesPage — focus restore', () => {
     const scrollSpy = vi.fn();
     window.HTMLElement.prototype.scrollIntoView = scrollSpy;
 
-    // Seed the real URL so the strip assertion is meaningful.
     window.history.replaceState(null, '', '/expenses?focusExpenseId=exp-missing');
 
     renderPageAt('/expenses?focusExpenseId=exp-missing');
     await screen.findByText('Groceries');
 
-    // Param is stripped; no scroll (no matching DOM node).
     await waitFor(() => {
       expect(window.location.search).not.toContain('focusExpenseId');
     });
@@ -554,8 +486,7 @@ describe('ExpensesPage — focus restore', () => {
     const scrollSpy = vi.fn();
     window.HTMLElement.prototype.scrollIntoView = scrollSpy;
 
-    // `%5B` = `[` — a selector metacharacter; regex guard must reject it.
-    // Seed the real URL so the strip assertion is meaningful.
+    // `%5B` is `[`, a selector metacharacter that the regex guard must reject.
     window.history.replaceState(null, '', '/expenses?focusExpenseId=bad%5Bid');
 
     renderPageAt('/expenses?focusExpenseId=bad%5Bid');
@@ -568,8 +499,6 @@ describe('ExpensesPage — focus restore', () => {
   });
 
   it('navigates to the encoded returnTo URL when the row Edit button is clicked', async () => {
-    // Wrap in a Routes setup so navigate() has a proper router context and
-    // the resulting location can be captured.
     let capturedLocation = '';
     const LocationProbe: React.FC = () => {
       const loc = useLocation();
@@ -599,7 +528,6 @@ describe('ExpensesPage — focus restore', () => {
     const editBtn = await screen.findByRole('button', { name: 'Edit' });
     await userEvent.click(editBtn);
 
-    // The nav target must be the encoded returnTo URL.
     await waitFor(() => {
       expect(capturedLocation).toBe(
         '/expenses/exp-nav/edit?returnTo=%2Fexpenses%3FfocusExpenseId%3Dexp-nav',
@@ -608,8 +536,6 @@ describe('ExpensesPage — focus restore', () => {
   });
 
   it('scenario-link (Add expense) navigation is not affected by the restore feature', async () => {
-    // Smoke test: clicking "Add expense" still navigates to /expenses/new,
-    // not to any focus-restore URL.
     let capturedLocation = '';
     const LocationProbe: React.FC = () => {
       const loc = useLocation();
@@ -633,7 +559,6 @@ describe('ExpensesPage — focus restore', () => {
       ),
     );
 
-    // Wait for loading to finish (empty state renders).
     await screen.findByText(/No expenses yet/i);
 
     const addBtn = screen.getByRole('button', { name: 'Add expense' });
@@ -687,8 +612,7 @@ describe('ExpensesPage — Add Medicare premiums', () => {
   });
 
   it('opens the preview from the entry-point parameter and strips it from the URL', async () => {
-    // The real URL carries the parameter so the strip has something to remove;
-    // MemoryRouter never writes to window.location.
+    // The real URL carries the parameter so the strip has something to remove; MemoryRouter never writes to window.location.
     window.history.replaceState(null, '', '/expenses?medicarePremiums=1');
     renderPageAt('/expenses?medicarePremiums=1');
     expect(

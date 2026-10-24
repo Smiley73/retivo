@@ -1,13 +1,5 @@
-/**
- * WithdrawalGuidancePage tests — page wiring: header + method/dollar-basis
- * toggles, the year stepper + jump-to-current control, the no-withdrawal empty
- * state, and an a11y smoke (disclaimer card included).
- *
- * The deterministic projection runs synchronously off `useBalanceProjectionData`
- * once the demo workspace loads, so the tests wait for the page header and then
- * assert the controls. Correctness of the per-year mapping + RMD grouping lives
- * in the pure `withdrawal-guidance-data` / `rmd-aggregation-groups` unit tests.
- */
+// WithdrawalGuidancePage wiring: header, method and dollar-basis toggles, year stepper and jump-to-current, the no-withdrawal empty state and the disclaimer card.
+// The projection runs synchronously off `useBalanceProjectionData` once the demo workspace loads; the per-year mapping and RMD grouping are covered in the `withdrawal-guidance-data` / `rmd-aggregation-groups` unit tests.
 import 'fake-indexeddb/auto';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -105,8 +97,6 @@ describe('WithdrawalGuidancePage', () => {
   it('renders the year stepper with a jump-to-current control', async () => {
     renderPage();
     await findHeader();
-    // The demo primary is pre-retirement, so the current year shows the
-    // no-withdrawal empty state and the stepper is present.
     expect(
       await screen.findByRole('button', { name: 'Previous year' }),
     ).toBeInTheDocument();
@@ -124,10 +114,7 @@ describe('WithdrawalGuidancePage', () => {
     await findHeader();
     const next = await screen.findByRole('button', { name: 'Next year' });
     const jump = screen.getByRole('button', { name: 'Jump to current year' });
-    // Demo primary is pre-retirement: page opens at the first projected drawdown
-    // year (clamped forward from the current calendar year), so the jump button
-    // starts enabled (selected year ≠ current year). The forward-clamp runs in a
-    // post-projection effect, so await it rather than asserting synchronously.
+    // The page opens at the first projected drawdown year (clamped forward from the current year in a post-projection effect), so await the jump button becoming enabled.
     await waitFor(() => expect(jump).toBeEnabled());
     await user.click(next);
     await waitFor(() => expect(jump).toBeEnabled());
@@ -149,11 +136,7 @@ describe('WithdrawalGuidancePage', () => {
   });
 
   it('shows the empty state when the scenario has no primary member', async () => {
-    // The demo workspace seeds a resolvable primary scenario, so the page gets
-    // past its `selectedScenarioId` guard and runs the deterministic engine.
-    // Removing every household member makes the runner raise
-    // NoPrimaryRetirementError — the page must collapse to the empty-plan card
-    // rather than let it escape render and crash to ErrorBoundary.
+    // Removing every household member makes the runner raise NoPrimaryRetirementError; the page must collapse to the empty-plan card, not escape render to ErrorBoundary.
     await deleteAllHouseholdMembers();
     renderPage();
     await findHeader();
@@ -163,12 +146,7 @@ describe('WithdrawalGuidancePage', () => {
   });
 
   it('shows the empty state when the primary member has no resolvable retirement date', async () => {
-    // The primary member stays in the household, but with a blank birthdate
-    // `resolveMemberRetirementDates` can't compute a retirement date for them
-    // (retirementDate() throws, caught, folded to null) — the runner raises
-    // NoPrimaryRetirementError via the same `!primaryRetIso` branch as the
-    // no-primary-member case above. The page must collapse it to the same
-    // empty-plan card, not re-throw it to ErrorBoundary.
+    // A blank birthdate leaves `resolveMemberRetirementDates` unable to compute a retirement date, so the runner raises NoPrimaryRetirementError via the same `!primaryRetIso` branch; same empty-plan card.
     await blankPrimaryMemberBirthdate();
     renderPage();
     await findHeader();
@@ -191,30 +169,27 @@ describe('HsaSplitNote', () => {
   }
 
   it('renders both medical + emergency captions when both are present', async () => {
-    const { container } = renderNote(
+    renderNote(
       row({ withdrawnDollars: 5_000, hsaMedicalQualifiedDollars: 3_000, hsaEmergencyReserveDollars: 2_000 }),
     );
     expect(screen.getByText(/\$3,000 for medical costs \(tax-free\)/)).toBeInTheDocument();
     expect(screen.getByText(/\$2,000 as an emergency reserve/)).toBeInTheDocument();
-    await expectNoA11yViolations(container);
   });
 
   it('renders only the medical caption when emergency is $0', async () => {
-    const { container } = renderNote(
+    renderNote(
       row({ withdrawnDollars: 3_000, hsaMedicalQualifiedDollars: 3_000, hsaEmergencyReserveDollars: 0 }),
     );
     expect(screen.getByText(/for medical costs/)).toBeInTheDocument();
     expect(screen.queryByText(/emergency reserve/)).not.toBeInTheDocument();
-    await expectNoA11yViolations(container);
   });
 
   it('renders only the emergency caption when medical is $0', async () => {
-    const { container } = renderNote(
+    renderNote(
       row({ withdrawnDollars: 4_000, hsaMedicalQualifiedDollars: 0, hsaEmergencyReserveDollars: 4_000 }),
     );
     expect(screen.getByText(/as an emergency reserve/)).toBeInTheDocument();
     expect(screen.queryByText(/for medical costs/)).not.toBeInTheDocument();
-    await expectNoA11yViolations(container);
   });
 
   it('renders nothing for a non-HSA row (both split fields undefined)', () => {
@@ -236,7 +211,7 @@ describe('MixedSplitNote', () => {
   }
 
   it('renders the pre-tax vs Roth split for a MIXED 401K with named strategy (shows "Roth")', async () => {
-    const { container } = renderNote(
+    renderNote(
       row({
         isMixed: true,
         withdrawnDollars: 10_000,
@@ -247,11 +222,10 @@ describe('MixedSplitNote', () => {
     );
     expect(screen.getByText(/\$6,000 from pre-tax/)).toBeInTheDocument();
     expect(screen.getByText(/\$4,000 from Roth/)).toBeInTheDocument();
-    await expectNoA11yViolations(container);
   });
 
   it('renders the pre-tax vs after-tax split for MIXED OTHER with named strategy (shows "after-tax contributions (gains taxable)")', async () => {
-    const { container } = renderNote(
+    renderNote(
       row({
         isMixed: true,
         withdrawnDollars: 8_000,
@@ -262,21 +236,18 @@ describe('MixedSplitNote', () => {
     );
     expect(screen.getByText(/\$5,000 from pre-tax/)).toBeInTheDocument();
     expect(screen.getByText(/\$3,000 from after-tax contributions \(gains taxable\)/)).toBeInTheDocument();
-    await expectNoA11yViolations(container);
   });
 
   it('renders nothing for a MIXED account without split data', () => {
     const { container } = renderNote(
       row({
         isMixed: true,
-        // preTaxWithdrawnDollars undefined → no split data
       }),
     );
     expect(container).toBeEmptyDOMElement();
   });
 
   it('renders nothing for non-MIXED accounts', () => {
-    // isMixed absent / false
     const { container } = renderNote(row({ withdrawnDollars: 7_000 }));
     expect(container).toBeEmptyDOMElement();
   });

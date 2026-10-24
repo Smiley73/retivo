@@ -194,8 +194,8 @@ export const BalanceProjectionStats: React.FC<BalanceProjectionStatsProps> = ({
   );
 };
 
-/** Seed-paired with/without-guardrails callout; the delta shows as signal only when it exceeds the paired sampling standard error, else "about the same". Exported for render testing of its five branches. */
-export const GuardrailsComparisonCallout: React.FC<{
+/** Seed-paired with/without-guardrails callout; the delta shows as signal only when it exceeds the paired sampling standard error, else "about the same". */
+const GuardrailsComparisonCallout: React.FC<{
   comparison: PlanStressTestVm['guardrailComparison'];
 }> = ({ comparison }) => {
   if (comparison === undefined) return null;

@@ -1,8 +1,4 @@
-/**
- * YearlyIncomeBreakdownBand — Reset-button visibility.
- *
- * IncomeBreakdownChart mocked; useChartZoom mocked at module boundary.
- */
+// YearlyIncomeBreakdownBand: Reset-zoom visibility, with IncomeBreakdownChart and useChartZoom mocked at the module boundary.
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -86,8 +82,6 @@ describe('YearlyIncomeBreakdownBand', () => {
         onGranularityChange={onGranularityChange}
       />,
     );
-    // This card's segmented control has its own distinct aria-label, so
-    // it cannot be confused with the cashflow card's toggle.
     const group = screen.getByRole('radiogroup', {
       name: 'Income breakdown chart granularity',
     });

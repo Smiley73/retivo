@@ -1,13 +1,4 @@
-/**
- * Tests for InflationCard — base-scenario display behaviour.
- *
- * Pins the base-scenario rule:
- * on the base scenario the card shows its effective per-category
- * summary even with no local override ("General 3.0% · Medical 5.0%" when
- * no override is configured — Medical defaults to general + 2pp), and the
- * accent tint (`bg-accent-subtle`) never appears on the base scenario
- * regardless of override state (tint guard).
- */
+// InflationCard base-scenario display: the effective per-category summary with no local override (Medical defaults to general + 2pp), and no `bg-accent-subtle` tint on the base scenario.
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -50,7 +41,6 @@ describe('InflationCard — base scenario', () => {
         onResetToInherited={() => {}}
       />,
     );
-    // General 3% default; Medical = general + 2pp = 5%; no custom rows.
     expect(screen.getByText('General 3.0% · Medical 5.0%')).toBeInTheDocument();
     expect(screen.queryByText('No scenario overrides.')).not.toBeInTheDocument();
   });
@@ -68,7 +58,6 @@ describe('InflationCard — base scenario', () => {
         onResetToInherited={() => {}}
       />,
     );
-    // General 4%; Medical = general + 2pp = 6%; one custom (Food).
     expect(
       screen.getByText('General 4.0% · Medical 6.0% · +1 custom'),
     ).toBeInTheDocument();

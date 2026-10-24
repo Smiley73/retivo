@@ -1,11 +1,4 @@
-/**
- * HouseholdPage render tests.
- *
- * Drives the page through fake-indexeddb so the real `listAggregates`
- * + `queueLocalMutation` paths run end-to-end. AuthContext and
- * SyncContext are mocked at the module boundary because the page only
- * depends on a few fields off them.
- */
+// HouseholdPage over fake-indexeddb, with AuthContext and SyncContext mocked at the module boundary.
 import 'fake-indexeddb/auto';
 import { render, screen, waitFor, fireEvent, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -111,8 +104,6 @@ describe('HouseholdPage', () => {
     expect(screen.getByLabelText('First name')).toBeInTheDocument();
     expect(screen.getByLabelText('Birthdate')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save primary member' })).toBeInTheDocument();
-    // Demo data is now triggered from the AppShell first-run modal +
-    // dev-only Profile button — never from this page.
     expect(screen.queryByRole('button', { name: /load demo data/i })).not.toBeInTheDocument();
   });
 
@@ -123,9 +114,7 @@ describe('HouseholdPage', () => {
     await screen.findByText(/add yourself as the primary member/i);
     fireEvent.change(screen.getByLabelText('First name'), { target: { value: 'Sam' } });
     fireEvent.change(screen.getByLabelText('Last name'), { target: { value: 'Saver' } });
-    // Birthdate is the shared React Aria <DatePicker>: focus
-    // the first date segment and type the date (en-US MM DD YYYY); the
-    // adapter still emits the frozen YYYY-MM-DD string.
+    // Birthdate is the shared React Aria DatePicker: focus the first date segment and type the date (en-US MM DD YYYY); the adapter still emits the frozen YYYY-MM-DD string.
     const bdGroup = screen.getByRole('group', { name: 'Birthdate' });
     await user.click(within(bdGroup).getAllByRole('spinbutton')[0]);
     await user.keyboard('01011990');
@@ -202,9 +191,7 @@ describe('HouseholdPage', () => {
         screen.queryByText(/add yourself as the primary member/i),
       ).not.toBeInTheDocument();
     });
-    // Primary member's name appears in the populated card.
     expect(await screen.findByText('Alex')).toBeInTheDocument();
-    // Demo-data is no longer surfaced anywhere on this page.
     expect(screen.queryByRole('button', { name: /load demo data/i })).not.toBeInTheDocument();
   });
 
@@ -221,14 +208,12 @@ describe('HouseholdPage', () => {
     await seedPrimary();
     const { container } = renderPage();
     await screen.findByText('Alex');
-    // Persistent policy copy + the add-spouse card heading (no secondary yet).
     expect(
       screen.getByText(
         /only add a second member if they are your legal spouse\. unmarried partners must use separate plans\./i,
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Add your spouse' })).toBeInTheDocument();
-    // No relationship field / attestation checkbox is introduced.
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/relationship/i)).not.toBeInTheDocument();
     await expectNoA11yViolations(container);
@@ -239,16 +224,13 @@ describe('HouseholdPage', () => {
     await seedSecondary();
     renderPage();
     await screen.findByText('Sam');
-    // Persistent policy copy is visible even after the spouse has been added.
     expect(
       screen.getByText(
         /only add a second member if they are your legal spouse\. unmarried partners must use separate plans\./i,
       ),
     ).toBeInTheDocument();
-    // The secondary member card is titled "Spouse", not "Secondary member".
     expect(screen.getByRole('heading', { name: 'Spouse' })).toBeInTheDocument();
     expect(screen.queryByText(/secondary member/i)).not.toBeInTheDocument();
-    // The add-spouse form is gone once the one-secondary limit is reached.
     expect(screen.queryByRole('button', { name: 'Add spouse' })).not.toBeInTheDocument();
   });
 
@@ -281,7 +263,6 @@ describe('HouseholdPage', () => {
     renderPage();
     await screen.findByText('Sam');
     const editButtons = screen.getAllByRole('button', { name: 'Edit' });
-    // Every member card's Edit renders at the reliable compact size.
     for (const btn of editButtons) {
       expect(btn).toHaveClass('px-2.5', 'py-1', 'text-xs');
       expect(btn).toHaveAttribute('class', `${btnPrimarySmClass} gap-1.5`);
@@ -293,14 +274,11 @@ describe('HouseholdPage', () => {
     await seedSecondary();
     renderPage();
     await screen.findByText('Sam');
-    // Delete renders only for the non-primary member.
     const deleteBtn = screen.getByRole('button', { name: 'Delete' });
     expect(deleteBtn).toHaveClass('px-2.5', 'py-1', 'text-xs');
     expect(deleteBtn).toHaveAttribute('class', `${btnDangerSmClass} gap-1.5`);
 
     await userEvent.click(deleteBtn);
-    // Routes through useConfirm()/<ConfirmDialog> — the confirm dialog appears
-    // with a matching "Delete" confirm action.
     const dialog = await screen.findByRole('alertdialog');
     expect(
       within(dialog).getByRole('button', { name: 'Delete' }),
@@ -321,19 +299,17 @@ describe('HouseholdPage — reactive read layer', () => {
   it('re-reads on WORKSPACE_CHANGED_EVENT without a remount', async () => {
     await clearAllStores();
     renderPage();
-    // Mounted against an empty workspace: the welcome card renders.
     expect(
       await screen.findByText(/add yourself as the primary member/i),
     ).toBeInTheDocument();
 
-    // Bulk fill lands after mount, then the coarse workspace-change event.
+    // A bulk fill lands after mount, then the coarse workspace-change event.
     await seedPrimary();
     const { notifyWorkspaceChanged } = await import('../lib/workspace-events');
     await act(async () => {
       notifyWorkspaceChanged();
     });
 
-    // Same page instance now shows the member + hides the welcome card.
     expect(await screen.findByText('Alex')).toBeInTheDocument();
     expect(
       screen.queryByText(/add yourself as the primary member/i),
@@ -347,7 +323,7 @@ describe('HouseholdPage — reactive read layer', () => {
       await screen.findByText(/add yourself as the primary member/i),
     ).toBeInTheDocument();
 
-    // Single-row write via putAggregate fires only the per-store fine signal.
+    // A single-row putAggregate fires only the per-store signal.
     await act(async () => {
       await seedPrimary();
     });
@@ -366,11 +342,7 @@ describe('HouseholdPage — dirty-guard stability under reactive re-reads', () =
     vi.clearAllMocks();
   });
 
-  // The useUnsavedChangesGuard installs a `beforeunload` handler ONLY while
-  // isDirty === true, and that handler calls preventDefault(). Dispatching a
-  // cancelable beforeunload and reading `defaultPrevented` is the observable
-  // proxy for "the guard still considers the draft dirty" (the pushState patch
-  // can't be exercised under MemoryRouter's in-memory history).
+  // `useUnsavedChangesGuard` installs a `beforeunload` handler only while dirty, and it calls preventDefault(); a cancelable beforeunload's `defaultPrevented` is the observable proxy, since the pushState patch can't be exercised under MemoryRouter's in-memory history.
   function isGuardActive(): boolean {
     const evt = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(evt);
@@ -384,28 +356,21 @@ describe('HouseholdPage — dirty-guard stability under reactive re-reads', () =
     renderPage();
     await screen.findByText('Alex');
 
-    // Baseline: nothing dirty, no guard.
     expect(isGuardActive()).toBe(false);
 
-    // Open the inline edit form for the primary member; the baseline snapshot
-    // is captured here ("Alex"). The add-secondary form also has a "First name"
-    // label, so target the edit form's prefixed input id directly.
+    // Open the inline edit form so the baseline ("Alex") is captured. The add-secondary form also has a "First name" label, so target the edit form's prefixed input id.
     await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
     const firstName = (await screen.findByLabelText('First name', {
       selector: '#edit-hm-primary-fn',
     })) as HTMLInputElement;
     expect(firstName).toHaveValue('Alex');
 
-    // User types a new value — the draft now differs from the baseline, so the
-    // guard arms.
     await act(async () => {
       fireEvent.change(firstName, { target: { value: 'Alexandra' } });
     });
     await waitFor(() => expect(isGuardActive()).toBe(true));
 
-    // A background fine-signal write lands the editing member at the user's
-    // current draft values (e.g. a sync echoing the same edit). With a stable
-    // baseline this must NOT reset the dirty state.
+    // A background write lands the editing member at the user's draft values (e.g. a sync echoing the same edit); with a stable baseline this must not reset the dirty state.
     await act(async () => {
       await putAggregate('householdMember', {
         id: 'hm-primary',
@@ -425,10 +390,7 @@ describe('HouseholdPage — dirty-guard stability under reactive re-reads', () =
       } as Aggregate<HouseholdMemberPayload>);
     });
 
-    // The edit form stays mounted with the user's draft; the re-read row now
-    // equals that draft. Assert the guard is STILL active — dirty is measured
-    // against the captured baseline ("Alex"), not the re-read row. A regression
-    // (comparing against members.find) would flip this false.
+    // Dirty is measured against the captured baseline ("Alex"), not the re-read row; comparing against members.find would flip this false.
     expect(firstName).toHaveValue('Alexandra');
     expect(isGuardActive()).toBe(true);
   });
