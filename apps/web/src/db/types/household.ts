@@ -1,6 +1,4 @@
-/**
- * Household + household-member aggregate payloads.
- */
+// Household and household-member aggregate payloads.
 
 export interface HouseholdPayload extends Record<string, unknown> {
   name: string;

@@ -1,8 +1,4 @@
-/**
- * Client-side route gate. Mirrors the server's RBAC posture so the UI
- * doesn't render pages the API would reject - but is NEVER the source of
- * truth. Every protected resource is authorized on the API.
- */
+// Client-side route gate; never the source of truth, since every protected resource is authorized on the API.
 import React from 'react';
 import { Navigate, useLocation } from 'react-router';
 import { useAuth, type Role } from './AuthContext';

@@ -1,20 +1,5 @@
-/**
- * Household data key (HDK) generation, per-slot authenticated wrapping, and the
- * household-level envelope-set HMAC for the zero-knowledge encryption boundary
- * (see "Encryption" in docs/security.md).
- *
- * Wraps use AES-256-GCM (not AES-KW: WebCrypto AES-KW accepts no
- * `additionalData`, so it cannot carry the slot-metadata AAD this needs).
- * New password slots derive their wrap key with Argon2id via `hash-wasm`
- * (m=65536, t=3, p=4); legacy PBKDF2-HMAC-
- * SHA-256 slots stay unwrappable read-only (no migration). The recovery
- * slot uses a >=128-bit random key as high-entropy IKM via HKDF. The
- * envelope-set tag is an HDK-keyed HMAC so any unlock method can verify it.
- *
- * Argon2id runs as a WASM module (`hash-wasm` embeds the binary base64 in the
- * JS bundle — no runtime fetch), so the CloudFront CSP `script-src` carries
- * `'wasm-unsafe-eval'` (WASM compile only, not JS `eval`).
- */
+// HDK generation, per-slot AES-256-GCM wrapping and the envelope-set HMAC; see docs/security.md "Encryption".
+// AES-GCM, not AES-KW (no AAD); new password slots use Argon2id via WASM (CSP 'wasm-unsafe-eval'); PBKDF2 unwrap only.
 import { argon2id } from 'hash-wasm';
 import {
   base64UrlToBytes,
@@ -36,41 +21,27 @@ const AES_GCM_KEY_BITS = 256;
 const GCM_NONCE_BYTES = 12;
 const SALT_BYTES = 16;
 const RECOVERY_ENTROPY_BYTES = 16; // 128 bits — the high-entropy unlocker.
-/** OWASP 2023 baseline for PBKDF2-HMAC-SHA-256; versioned in `kdf`. */
+// OWASP 2023 PBKDF2-HMAC-SHA-256 baseline.
 const DEFAULT_PBKDF2_ITERATIONS = 600_000;
-/**
- * Upper bound on server-stored PBKDF2 iterations (10x the ~600k baseline).
- * Caps a tampered/hostile `kdf.iterations` from forcing an unbounded PBKDF2
- * that would hang the unlock; the algorithm is upgradeable via versioned `kdf`.
- */
+// Caps a hostile server-stored `kdf.iterations` (10x baseline) that would hang unlock.
 const MAX_PBKDF2_ITERATIONS = 2_000_000;
-/** OWASP 2024 interactive Argon2id baseline: 64 MiB, 3 passes, 4 lanes. */
-const DEFAULT_ARGON2ID_M = 65_536; // memory cost (KiB)
-const DEFAULT_ARGON2ID_T = 3; // time cost (passes)
-const DEFAULT_ARGON2ID_P = 4; // parallelism (lanes)
-/**
- * Upper bounds on server-stored Argon2id params. A tampered/hostile
- * server could send `m` = multiple GiB (OOM) or a huge `t`/`p` (hang) during
- * unlock; reject anything above the baseline so the work factor stays bounded.
- * Equal-to-baseline is the only accepted value here (new slots write the
- * baseline; a future raise bumps both the default and these caps together).
- */
+// OWASP 2024 interactive Argon2id baseline: 64 MiB, 3 passes, 4 lanes.
+const DEFAULT_ARGON2ID_M = 65_536;
+const DEFAULT_ARGON2ID_T = 3;
+const DEFAULT_ARGON2ID_P = 4;
+// Caps on server-stored Argon2id params: a hostile server could send a multi-GiB `m` (OOM) or a huge `t`/`p` (hang).
+// Equal to the baseline; a future raise bumps the defaults and these caps together.
 const MAX_ARGON2ID_M = 65_536;
 const MAX_ARGON2ID_T = 10;
 const MAX_ARGON2ID_P = 16;
-/** Derived AES-256 key material length in bytes. */
 const ARGON2ID_HASH_BYTES = 32;
-/** HKDF info labels — domain-separate the wrap key, MAC key, and recovery IKM. */
+// HKDF info labels: domain-separate the MAC key and the recovery IKM.
 const ENVELOPE_AUTH_LABEL = 'envelope-auth';
 const RECOVERY_WRAP_LABEL = 'recovery-wrap';
-/** Grouping for the human-readable recovery key display string. */
 const RECOVERY_GROUP_SIZE = 4;
 
-/**
- * Fill a fresh ArrayBuffer-backed view with CSPRNG bytes. `getRandomValues`
- * returns a `Uint8Array<ArrayBufferLike>`; the explicit allocation pins the
- * backing buffer type for WebCrypto's `BufferSource` (TS5.9 generics).
- */
+// Allocates the view itself: `getRandomValues` returns `Uint8Array<ArrayBufferLike>`, which WebCrypto's `BufferSource`
+// rejects (TS 5.9).
 function randomBytes(length: number): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(length);
   crypto.getRandomValues(out);
@@ -85,11 +56,7 @@ export class KeyWrappingError extends Error {
   }
 }
 
-/**
- * Generate a fresh 256-bit AES-GCM household data key. Non-extractable: the
- * cache path ({@link exportHdk}) re-generates an extractable copy on demand so
- * the in-memory working key cannot be exported by accident.
- */
+/** Generates a fresh 256-bit AES-GCM household data key. */
 export function generateHdk(): Promise<CryptoKey> {
   return crypto.subtle.generateKey({ name: 'AES-GCM', length: AES_GCM_KEY_BITS }, true, [
     'encrypt',
@@ -110,10 +77,7 @@ export function importHdk(raw: ArrayBuffer): Promise<CryptoKey> {
   ]);
 }
 
-/**
- * Canonical wrap AAD for a slot: binds `slotType`, KDF params, and version
- * so a server tampering with any of them fails the unlock closed.
- */
+// Wrap AAD: binds slotType, KDF params and version, so a tampering server fails the unlock closed.
 function canonicalSlotAad(input: {
   slotType: SlotType;
   kdf?: KdfParams;
@@ -127,10 +91,8 @@ function canonicalSlotAad(input: {
 }
 
 /**
- * Validate server-stored KDF params before they drive a derivation. The
- * server holds `kdf` opaquely, so a tampered/hostile algorithm, salt, or an
- * out-of-range iteration count must fail closed rather than feed WebCrypto an
- * unbounded or undefined work factor. Throws {@link KeyWrappingError}.
+ * Validates server-stored KDF params before they drive a derivation; a hostile algorithm, salt or out-of-range work
+ * factor throws {@link KeyWrappingError}.
  */
 export function validateKdfParams(kdf: KdfParams): void {
   if (typeof kdf.salt !== 'string' || kdf.salt.length === 0) {
@@ -147,8 +109,6 @@ export function validateKdfParams(kdf: KdfParams): void {
     return;
   }
   if (kdf.algorithm === 'Argon2id') {
-    // Reject out-of-bounds m/t/p: a hostile server could otherwise
-    // force OOM (huge m) or a hang (huge t/p) during unlock.
     if (!Number.isInteger(kdf.m) || kdf.m <= 0 || kdf.m > MAX_ARGON2ID_M) {
       throw new KeyWrappingError(`argon2id memory cost out of range ${String(kdf.m)}`);
     }
@@ -164,10 +124,8 @@ export function validateKdfParams(kdf: KdfParams): void {
 }
 
 /**
- * Derive an AES-GCM wrapping key from a password, dispatching on the slot's
- * stored KDF algorithm. New slots use Argon2id; legacy slots that
- * were written under PBKDF2-HMAC-SHA-256 stay unwrappable read-only.
- * `validateKdfParams` runs first so a tampered/hostile work factor fails closed.
+ * Derives an AES-GCM wrap key from a password, dispatching on the slot's KDF; validates params first so a hostile work
+ * factor fails closed.
  */
 export async function derivePasswordWrapKey(
   password: string,
@@ -178,9 +136,8 @@ export async function derivePasswordWrapKey(
     return deriveArgon2idWrapKey(password, kdf);
   }
   try {
-    // Decode the server-stored salt + import/derive inside the catch so a
-    // malformed base64url salt fails closed as KeyWrappingError, not a raw
-    // DOMException (validateKdfParams checks shape, not base64url validity).
+    // Inside the try so a malformed server-stored base64url value fails closed as KeyWrappingError, not a raw
+    // DOMException.
     const salt = base64UrlToBytes(kdf.salt);
     const baseKey = await crypto.subtle.importKey('raw', utf8Bytes(password), 'PBKDF2', false, [
       'deriveKey',
@@ -204,18 +161,14 @@ export async function derivePasswordWrapKey(
 }
 
 /**
- * Derive an AES-256-GCM wrapping key from a password via Argon2id,
- * using the slot's stored m/t/p + base64url salt. `hash-wasm` runs the KDF in
- * a bundled WASM module (no runtime fetch; CSP `'wasm-unsafe-eval'`). Returns
- * the raw 32-byte digest imported as a non-extractable AES-GCM key.
+ * Derives the AES-GCM wrap key from a password via Argon2id (`hash-wasm`, bundled WASM) using the slot's m/t/p and
+ * salt.
  */
 export async function deriveArgon2idWrapKey(
   password: string,
   kdf: Argon2idKdfParams,
 ): Promise<CryptoKey> {
   try {
-    // Decode the server-stored salt + derive inside the catch so a malformed
-    // base64url salt fails closed as KeyWrappingError, not a raw DOMException.
     const salt = base64UrlToBytes(kdf.salt);
     const digest = await argon2id({
       password: utf8Bytes(password),
@@ -226,9 +179,6 @@ export async function deriveArgon2idWrapKey(
       hashLength: ARGON2ID_HASH_BYTES,
       outputType: 'binary',
     });
-    // Copy into a fresh ArrayBuffer-backed view so the key material is a
-    // `BufferSource` over a plain `ArrayBuffer` (not `ArrayBufferLike`) for
-    // WebCrypto's TS5.9 generics — mirrors {@link randomBytes}.
     const keyBytes = new Uint8Array(digest.length);
     keyBytes.set(digest);
     return await crypto.subtle.importKey(
@@ -244,11 +194,7 @@ export async function deriveArgon2idWrapKey(
   }
 }
 
-/**
- * Derive the recovery wrapping key from the high-entropy recovery secret via
- * HKDF-SHA-256. The recovery key is its own >=128-bit entropy source, so no
- * PBKDF2 stretching is needed.
- */
+// The recovery key is its own >=128-bit entropy source, so HKDF suffices; no PBKDF2 stretching.
 async function deriveRecoveryWrapKey(
   recoverySecret: Uint8Array<ArrayBuffer>,
 ): Promise<CryptoKey> {
@@ -269,7 +215,6 @@ async function deriveRecoveryWrapKey(
   );
 }
 
-/** Wrap the HDK with an AES-256-GCM key, nonce-prefixing the ciphertext. */
 async function wrapHdk(
   hdk: CryptoKey,
   wrapKey: CryptoKey,
@@ -288,7 +233,6 @@ async function wrapHdk(
   return bytesToBase64Url(combined);
 }
 
-/** Unwrap a nonce-prefixed AES-256-GCM wrap back into the HDK. */
 async function unwrapHdk(
   wrappedKey: string,
   wrapKey: CryptoKey,
@@ -296,8 +240,6 @@ async function unwrapHdk(
 ): Promise<CryptoKey> {
   let rawHdk: ArrayBuffer;
   try {
-    // Decode + decrypt + import all inside the catch so a malformed server
-    // base64url `wrappedKey` surfaces as KeyWrappingError, not a raw DOMException.
     const combined = base64UrlToBytes(wrappedKey);
     const nonce = combined.subarray(0, GCM_NONCE_BYTES);
     const ciphertext = combined.subarray(GCM_NONCE_BYTES);
@@ -307,8 +249,7 @@ async function unwrapHdk(
       ciphertext,
     );
   } catch {
-    // Malformed wrappedKey, wrong secret, tampered ciphertext, or tampered slot
-    // metadata (AAD) — all fail closed as a single domain error.
+    // Every failure (malformed, wrong secret, tampered ciphertext or AAD) fails closed as one error.
     throw new KeyWrappingError('slot unwrap failed (malformed or auth tag mismatch)');
   }
   return importHdk(rawHdk);
@@ -322,7 +263,6 @@ function newPbkdf2Kdf(): KdfParams {
   };
 }
 
-/** Fresh Argon2id KDF params for a new password slot. */
 function newArgon2idKdf(): Argon2idKdfParams {
   return {
     algorithm: 'Argon2id',
@@ -333,7 +273,6 @@ function newArgon2idKdf(): Argon2idKdfParams {
   };
 }
 
-/** Encode raw recovery-key bytes as a grouped, uppercase hex display string. */
 function encodeRecoveryKey(bytes: Uint8Array): string {
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
   const groups: string[] = [];
@@ -343,7 +282,6 @@ function encodeRecoveryKey(bytes: Uint8Array): string {
   return groups.join('-');
 }
 
-/** Decode a grouped recovery display string back into its raw bytes. */
 function decodeRecoveryKey(display: string): Uint8Array<ArrayBuffer> {
   const hex = display.replace(/[^0-9a-fA-F]/g, '');
   if (hex.length === 0 || hex.length % 2 !== 0) {
@@ -356,12 +294,6 @@ function decodeRecoveryKey(display: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-/**
- * Build a password unlock slot from a fully-specified KDF: derive the wrap key,
- * AES-256-GCM-wrap the HDK with the slot metadata bound in AAD. Shared by
- * the Argon2id (default) and the now-dead PBKDF2 builders so the slot assembly
- * lives in one place.
- */
 async function buildPasswordSlot(
   householdId: string,
   slotId: string,
@@ -385,10 +317,7 @@ async function buildPasswordSlot(
   };
 }
 
-/**
- * Build a password unlock slot with an Argon2id wrap key: fresh
- * random salt + the m=65536/t=3/p=4 baseline, AES-256-GCM wrap of the HDK.
- */
+/** Password slot with an Argon2id wrap key: fresh salt and the m=65536/t=3/p=4 baseline. */
 export function generateArgon2idPasswordSlot(
   householdId: string,
   slotId: string,
@@ -398,11 +327,7 @@ export function generateArgon2idPasswordSlot(
   return buildPasswordSlot(householdId, slotId, password, hdk, newArgon2idKdf());
 }
 
-/**
- * Build a password unlock slot with a legacy PBKDF2 wrap key. Dead-code
- * — new slots use {@link generateArgon2idPasswordSlot}; retained only
- * so the PBKDF2 wrap path stays exercisable in tests for backward-compat.
- */
+/** Password slot with a legacy PBKDF2 wrap key; unused for new slots, kept so the PBKDF2 wrap path stays testable. */
 export function generatePbkdf2PasswordSlot(
   householdId: string,
   slotId: string,
@@ -412,12 +337,7 @@ export function generatePbkdf2PasswordSlot(
   return buildPasswordSlot(householdId, slotId, password, hdk, newPbkdf2Kdf());
 }
 
-/**
- * Build the default password unlock slot. Argon2id is the default for new
- * password slots (replacing the earlier PBKDF2 default); the
- * PBKDF2 generation path is dead-code but its unwrap path stays live for
- * pre-existing legacy slots.
- */
+/** Default password slot: Argon2id. */
 export function generatePasswordSlot(
   householdId: string,
   slotId: string,
@@ -428,9 +348,8 @@ export function generatePasswordSlot(
 }
 
 /**
- * Build a recovery unlock slot. Generates a >=128-bit recovery key, wraps the
- * HDK with a key derived from it, and returns the slot plus the grouped display
- * string the user must save. The raw recovery bytes are never persisted.
+ * Recovery slot: wraps the HDK under a key derived from a fresh >=128-bit recovery key. Returns the slot and the
+ * grouped display string the user must save; the raw bytes are never persisted.
  */
 export async function generateRecoverySlot(
   householdId: string,
@@ -456,16 +375,9 @@ export async function generateRecoverySlot(
 }
 
 /**
- * Build a `passkey_prf` unlock slot: wraps the HDK under a wrap key already
- * derived from the authenticator's PRF output (see crypto/passkey-prf.ts), with
- * the slot metadata bound in AAD. PRF slots carry no `kdf` — the
- * authenticator secret is the high-entropy IKM — so the wrap AAD binds only
- * `slotType` + `encryptionVersion` (mirrors the recovery slot and
- * {@link unwrapPrfSlot}). `credentialBinding` is the WebAuthn credential ID the
- * slot is bound to; it is NOT in the per-slot wrap AAD — its integrity is
- * carried by the household envelope-set tag (which canonicalizes
- * `credentialBinding`), so a server cannot silently rebind the slot to a
- * different credential without breaking the set tag.
+ * `passkey_prf` slot: wraps the HDK under a wrap key already derived from the authenticator's PRF output. The wrap AAD
+ * binds only `slotType` and `encryptionVersion` (no `kdf`, like the recovery slot). `credentialBinding` is not in the
+ * wrap AAD: the envelope-set tag canonicalises it, so a server cannot rebind the slot undetected.
  */
 export async function generatePasskeyPrfSlot(
   householdId: string,
@@ -492,9 +404,8 @@ export async function generatePasskeyPrfSlot(
 }
 
 /**
- * Unwrap a slot back to the HDK. For password slots `secret` is the password
- * string; for recovery slots it is the grouped recovery display string (or its
- * raw bytes). Throws {@link KeyWrappingError} on any failure.
+ * Unwraps a password slot (`secret` is the password) or recovery slot (display string or raw bytes) to the HDK. Throws
+ * {@link KeyWrappingError}.
  */
 export async function unwrapSlot(
   slot: KeyEnvelopeSlot,
@@ -527,13 +438,8 @@ export async function unwrapSlot(
 }
 
 /**
- * Unwrap a `passkey_prf` slot back to the HDK using a wrap key already derived
- * from the authenticator's PRF output (see crypto/passkey-prf.ts). PRF slots
- * carry no `kdf` — the authenticator secret is the high-entropy IKM — so the
- * wrap AAD binds only `slotType` + `encryptionVersion` (mirrors the recovery
- * slot). Throws {@link KeyWrappingError} on any failure so the caller can fall
- * back to password unlock. The PRF wrap-key derivation lives in passkey-prf.ts
- * so this module stays free of WebAuthn concerns.
+ * Unwraps a `passkey_prf` slot with a PRF-derived wrap key (see crypto/passkey-prf.ts); the AAD binds only `slotType`
+ * and `encryptionVersion`. Throws {@link KeyWrappingError} so the caller can fall back to password unlock.
  */
 export function unwrapPrfSlot(slot: KeyEnvelopeSlot, prfWrapKey: CryptoKey): Promise<CryptoKey> {
   if (slot.slotType !== 'passkey_prf') {
@@ -546,10 +452,7 @@ export function unwrapPrfSlot(slot: KeyEnvelopeSlot, prfWrapKey: CryptoKey): Pro
   return unwrapHdk(slot.wrappedKey, prfWrapKey, aad);
 }
 
-/**
- * Derive the envelope-set MAC key from the HDK via HKDF-SHA-256. Keyed by
- * the HDK so any unlock method that recovers the HDK can verify the full set.
- */
+// Keyed by the HDK so any unlock method that recovers it can verify the whole set.
 async function deriveEnvelopeMacKey(hdk: CryptoKey): Promise<CryptoKey> {
   const hdkBytes = await crypto.subtle.exportKey('raw', hdk);
   const baseKey = await crypto.subtle.importKey('raw', hdkBytes, 'HKDF', false, ['deriveKey']);
@@ -567,11 +470,8 @@ async function deriveEnvelopeMacKey(hdk: CryptoKey): Promise<CryptoKey> {
   );
 }
 
-/**
- * Canonical bytes over the slot set + version. Slots are sorted by
- * `slotId` and reduced to integrity-relevant fields so wire-order or volatile
- * timestamps do not change the tag, while stripping/reorder/injection do.
- */
+// Slots are sorted by `slotId` and reduced to integrity-relevant fields, so wire order and volatile timestamps do not
+// change the tag but stripping, reorder and injection do.
 function canonicalEnvelopeSet(
   slots: KeyEnvelopeSlot[],
   envelopeSetVersion: number,
@@ -591,10 +491,7 @@ function canonicalEnvelopeSet(
   return canonicalJsonBytes({ envelopeSetVersion, slots: ordered });
 }
 
-/**
- * Compute the household envelope-set tag: HMAC-SHA-256 under the
- * HDK-derived MAC key over the canonical slot set + version. base64url.
- */
+/** Envelope-set tag: base64url HMAC-SHA-256 under the HDK-derived key over the canonical slot set and version. */
 export async function computeEnvelopeSetTag(
   slots: KeyEnvelopeSlot[],
   envelopeSetVersion: number,
@@ -610,23 +507,16 @@ export async function computeEnvelopeSetTag(
 }
 
 /**
- * An envelope-set version strictly below the locally pinned value is a genuine
- * rollback (mirrors {@link isRollback} in freshness.ts). The MAC alone
- * cannot catch this: a server can replay an older slot set with its own valid
- * tag, so a device holding the newer counter must compare versions too. Equal
- * or higher is accepted; first-contact (pinned 0) accepts any non-negative
- * served version as the TOFU pin.
+ * A served version below the pinned one is a rollback. The MAC alone cannot catch it (a server can replay an older set
+ * under its own valid tag); first contact (pinned 0) accepts any non-negative version (TOFU).
  */
 export function isEnvelopeSetRollback(servedVersion: number, pinnedVersion: number): boolean {
   return servedVersion < pinnedVersion;
 }
 
-/** The wire algorithm string for an encrypted aggregate payload. */
 const ENCRYPTED_ENVELOPE_ALG = 'AES-256-GCM';
 
-/** Every key the envelope shape may carry — anything else fails the guard.
- * Mirrors the server's
- *  `ENVELOPE_KEYS` in apps/api/src/common/encrypted-envelope.ts. */
+// Every key the envelope may carry; mirrors `ENVELOPE_KEYS` in apps/api/src/common/encrypted-envelope.ts.
 const ENVELOPE_KEYS = new Set([
   'encryptionVersion',
   'keyId',
@@ -637,20 +527,10 @@ const ENVELOPE_KEYS = new Set([
 ]);
 
 /**
- * Strict structural guard for an encrypted aggregate payload. The previous loose check (`encryptionVersion !== undefined`) misfires
- * on a domain payload that happens to carry an `encryptionVersion` field and
- * would trigger a false decrypt attempt. This requires ALL of the
- * envelope's load-bearing fields and the exact `alg` byte string, so a
- * plaintext payload can never be mistaken for ciphertext. The optional
- * `aadVersion?: number` reserved field is allowed — present-and-number or
- * absent both pass; any other type fails. No key outside the documented shape
- * is allowed — this producer
- * (`encryptPayload`, payload-crypto.ts) never emits one, so the tightening
- * cannot reject anything this client has ever written.
- *
- * Shared between the client sync path (`sync/sync-client.ts`) and the API/
- * compactor encrypted-replacement logic so "is this an encrypted envelope" has
- * one definition.
+ * Strict structural guard for an encrypted payload: requires every load-bearing field and the exact `alg`, and allows
+ * no key outside the documented shape, so a plaintext payload that merely carries `encryptionVersion` is never taken
+ * for ciphertext. Shared by the client sync path and the API/compactor so "is this an encrypted envelope" has one
+ * definition.
  */
 export function isStrictEncryptedEnvelope(
   payload: unknown,
@@ -662,37 +542,19 @@ export function isStrictEncryptedEnvelope(
   if (typeof p.keyId !== 'string') return false;
   if (typeof p.nonce !== 'string') return false;
   if (typeof p.ciphertext !== 'string') return false;
-  // Optional reserved field: allow absent, reject a non-number.
   if (p.aadVersion !== undefined && typeof p.aadVersion !== 'number') return false;
   if (!Object.keys(p).every((k) => ENVELOPE_KEYS.has(k))) return false;
   return true;
 }
 
-/**
- * localStorage key for {@link readEnvelopeSetPinFloor} / {@link raiseEnvelopeSetPinFloor},
- * scoped to a single household:
- * `deviceMetadata` — and the whole IndexedDB working store — is dropped
- * wholesale on an account switch (`user-transition.ts`), but this
- * independent localStorage fallback is not touched by that drop. An
- * unscoped key would let a floor raised for one household on this device
- * survive a switch and incorrectly block a *different* household signing in
- * afterwards with a genuinely lower envelope version.
- */
+// Scoped per household: `deviceMetadata` and the IDB are dropped on an account switch but this localStorage fallback
+// is not, so an unscoped floor would block a different household with a genuinely lower version.
 function envelopeSetPinFloorKey(householdId: string): string {
   return `envelopeSetPinFloor:${householdId}`;
 }
 
-/**
- * Read the localStorage-backed rollback floor for `householdId`. This is a
- * SEPARATE, independent backstop to the `deviceMetadata` pin:
- * a caller raises it directly
- * (via {@link raiseEnvelopeSetPinFloor}) when the durable IndexedDB pin write
- * itself fails, so `readEnvelopeSetPin` still rejects a replay of the version
- * that failed write was retiring, even though `deviceMetadata` was never
- * updated. Never throws — storage can be unavailable (quota, private
- * browsing) or absent (non-DOM test environment). Returns 0 when
- * `householdId` is unknown (no session to scope the floor to).
- */
+// Independent localStorage backstop to the `deviceMetadata` pin: raised when the durable pin write fails, so a replay
+// of that version is still rejected. Never throws; 0 when unscoped or storage is unavailable.
 function readEnvelopeSetPinFloor(householdId: string | undefined): number {
   if (!householdId || typeof localStorage === 'undefined') return 0;
   try {
@@ -705,21 +567,10 @@ function readEnvelopeSetPinFloor(householdId: string | undefined): number {
 }
 
 /**
- * Best-effort, monotonic raise of the localStorage rollback floor for
- * `householdId` to at least `version` (never lowers it). Called when a
- * durable `deviceMetadata` pin write has failed but the version must still
- * be treated as the new minimum — fail closed against replay rather than
- * merely locking the current session.
- *
- * Never throws, but DOES verify: `localStorage.setItem` can return without
- * throwing yet not actually persist the value (pre-2017 Safari private
- * browsing silently no-ops; a write landing exactly on a quota boundary can
- * behave the same way in some engines), which would otherwise leave this
- * device with no durable record at all that the version advanced — while the
- * caller believes the fallback succeeded. Re-reads the key after writing and
- * returns `true` only when the stored value is confirmed to be at least
- * `version`; a `false` return means the caller must treat this as a hard
- * failure, not as a degraded-but-successful raise.
+ * Raises the localStorage rollback floor for `householdId` to at least `version` (never lowers it), for when the
+ * durable `deviceMetadata` pin write failed. Never throws, but verifies: `setItem` can return without persisting (old
+ * Safari private browsing, a write on a quota boundary), so it re-reads and returns `true` only when the stored value
+ * is confirmed. A `false` return is a hard failure for the caller.
  */
 export function raiseEnvelopeSetPinFloor(version: number, householdId: string): boolean {
   if (typeof localStorage === 'undefined') return false;
@@ -732,20 +583,14 @@ export function raiseEnvelopeSetPinFloor(version: number, householdId: string): 
     const parsed = confirmed === null ? 0 : Number.parseInt(confirmed, 10);
     return Number.isFinite(parsed) && parsed >= version;
   } catch {
-    // Storage unavailable — nothing more this device can do; the caller's
-    // own fail-closed handling (locking the session) still applies.
+    // Storage unavailable; the caller's fail-closed handling still applies.
     return false;
   }
 }
 
 /**
- * Read this device's pinned envelope-set version for `householdId` from
- * `deviceMetadata`. Returns 0 (TOFU first contact — accepts
- * any non-negative served version) when no metadata row or no pin exists
- * yet. Takes the max against {@link readEnvelopeSetPinFloor} — scoped to the
- * SAME `householdId` — so a version raised there —
- * because the `deviceMetadata` pin write itself failed — is still enforced,
- * without leaking into a different household's pin on the same device.
+ * This device's pinned envelope-set version: 0 (TOFU first contact) without metadata, else the max with the same
+ * household's localStorage floor.
  */
 export async function readEnvelopeSetPin(householdId: string | undefined): Promise<number> {
   const meta = await readDeviceMetadata();
@@ -753,19 +598,9 @@ export async function readEnvelopeSetPin(householdId: string | undefined): Promi
 }
 
 /**
- * Thrown by {@link writeEnvelopeSetPin} when the caller-supplied `isStale`
- * check reports a session/household switch AFTER this call's own internal
- * awaits (the existence probe, or `updateDeviceMetadata`'s read) but BEFORE
- * the pin write commits. `deviceMetadata` is a single
- * unscoped `'self'` row per physical IndexedDB, so a cross-household logout
- * that drops and recreates that database strictly inside one of those awaits
- * would otherwise let this write land in the NEW household's freshly-created
- * row, corrupting ITS rollback pin. This abort makes the write atomically
- * conditional on the captured session instead: the caller's write never
- * lands on a household it wasn't computed for. Callers that pass no
- * `isStale` keep the prior unconditional behaviour (e.g. this module's own
- * `readEnvelopeSetPin`-adjacent pinning of the OLD version, which is not on
- * the corruption path this guards).
+ * Thrown by {@link writeEnvelopeSetPin} when `isStale` reports a session switch before the pin write commits:
+ * `deviceMetadata` is one unscoped `'self'` row per IDB, so a cross-household logout recreating the database mid-write
+ * would otherwise land the pin on the new household's row and corrupt its rollback pin.
  */
 export class EnvelopeSetPinAbortedError extends KeyWrappingError {
   constructor(public readonly servedVersion: number) {
@@ -777,49 +612,27 @@ export class EnvelopeSetPinAbortedError extends KeyWrappingError {
 }
 
 /**
- * Advance this device's pinned envelope-set version after a successful
- * verification. Monotonic: stores `max(existingPin,
- * servedVersion)` so a later legitimate-but-lower fetch never lowers the pin.
- *
- * When there is no `deviceMetadata` row yet (the device has not synced) the pin
- * MUST still be persisted if we know the `deviceId` — otherwise setup/rotation
- * that runs before the first sync write leaves the pin at 0, and a later replay
- * of an old valid set passes the rollback check (`isEnvelopeSetRollback(N, 0)`
- * is false for all N > 0). So when `meta` is absent we seed a minimal row from
- * `deviceId` carrying the pin; the next sync round-trip fills the rest. Without
- * a `deviceId` we cannot seed a valid row (it lives alongside `deviceId`), so we
- * keep the historical no-op for callers that have no `deviceId` in scope.
- *
- * `isStale`, when supplied, is re-checked right after each of this
- * function's own internal awaits (the existence probe below, and again
- * inside the `updateDeviceMetadata` updater, which runs synchronously right
- * after that call's own internal read) so a session/household switch that
- * lands inside either await ABORTS the write — throwing
- * {@link EnvelopeSetPinAbortedError} — before anything is put to the
- * singleton row, instead of only being noticed afterward once it may already
- * have landed on the wrong household.
+ * Advances the pinned envelope-set version after a successful verification; monotonic (`max(existing, served)`). With
+ * no `deviceMetadata` row yet it seeds a minimal row from `deviceId`, since a pin left at 0 before the first sync would
+ * let a replay of an old valid set pass; without a `deviceId` it is a no-op. `isStale` is re-checked after each
+ * internal await and aborts with {@link EnvelopeSetPinAbortedError} before anything is written.
  */
 export async function writeEnvelopeSetPin(
   servedVersion: number,
   deviceId?: string,
   isStale?: () => boolean,
 ): Promise<void> {
-  // Existence probe ONLY for the historical no-op cases (no row + nothing
-  // to seed). The pin merge itself runs inside the atomic
-  // `updateDeviceMetadata` transaction: the unlock/rotation flows calling
-  // this sit OUTSIDE the SyncContext mutex, so a stale full-row spread here
-  // could revert a concurrently-persisted `syncCursor`/`freshnessCounter`
-  // (a lost-update).
+  // Probe only for the no-row, nothing-to-seed no-ops. The merge runs in the atomic `updateDeviceMetadata` transaction
+  // because the unlock and rotation callers sit outside the SyncContext mutex, so a stale full-row spread could revert
+  // a concurrent `syncCursor`/`freshnessCounter`.
   const probe = await readDeviceMetadata();
   if (isStale?.()) throw new EnvelopeSetPinAbortedError(servedVersion);
   if (!probe && (!deviceId || servedVersion <= 0)) return;
   const seedDeviceId = deviceId ?? probe?.deviceId;
   if (!seedDeviceId) return;
   await updateDeviceMetadata((current) => {
-    // Re-check immediately after `updateDeviceMetadata`'s own internal read
-    // (this updater runs synchronously right after that await resolves, with
-    // no further await before the write commits) — the last point at which
-    // the write can still be refused instead of committed.
+    // Last point the write can still be refused: this updater runs right after updateDeviceMetadata's read, with no
+    // await before the commit.
     if (isStale?.()) throw new EnvelopeSetPinAbortedError(servedVersion);
     return current
       ? {
@@ -840,10 +653,8 @@ export async function writeEnvelopeSetPin(
 }
 
 /**
- * Verify the envelope-set tag. Throws {@link KeyWrappingError} on mismatch
- * — slot stripping/reorder/injection or an envelope-set-version mismatch. A
- * replay of an older set under its own valid tag is caught by pairing this with
- * {@link isEnvelopeSetRollback} against the locally pinned version.
+ * Verifies the envelope-set tag; throws {@link KeyWrappingError} on stripping, reorder, injection or a version
+ * mismatch. Pair with {@link isEnvelopeSetRollback} to catch a replay of an older set.
  */
 export async function verifyEnvelopeSetTag(
   slots: KeyEnvelopeSlot[],
@@ -852,9 +663,6 @@ export async function verifyEnvelopeSetTag(
 ): Promise<void> {
   let ok: boolean;
   try {
-    // Decode the server-stored base64url tag + derive/verify inside the catch so
-    // a malformed envelopeSetTag fails closed as KeyWrappingError, not a raw
-    // DOMException from atob.
     const macKey = await deriveEnvelopeMacKey(hdk);
     ok = await crypto.subtle.verify(
       'HMAC',

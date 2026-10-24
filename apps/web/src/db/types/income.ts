@@ -1,44 +1,29 @@
-/**
- * Income-stream aggregate payload (pension / part-time / one-off windfall).
- * Consumes the shared `ScheduleStart` / `ScheduleEnd` vocabulary from
- * `aggregate-base.ts`.
- */
+// Income-stream payload (pension, part-time, one-off windfall), using `ScheduleStart`/`ScheduleEnd` from `aggregate-base.ts`.
 
 import type { ScheduleEnd, ScheduleStart } from './aggregate-base';
 
-/** A pension can pay out as a lifetime annuity or as a one-time
- *  lump-sum (typical Cash Balance Pension election). */
+/** A pension pays as a lifetime annuity or a one-time lump sum (a typical Cash Balance Pension election). */
 export type PensionPayoutType = 'annuity' | 'lumpSum';
 
-/** Income kinds. `pension` covers traditional + cash-balance with the
- *  payoutType discriminator. `partTime` is recurring earned income.
- *  `oneOff` is a single-year windfall (inheritance, asset sale,
- *  pension lump-sum payout — model whichever the user prefers). */
+/**
+ * Income kinds: `pension` (traditional or cash-balance, split by `payoutType`), recurring `partTime`, and single-year
+ * `oneOff` windfall (inheritance, asset sale, pension lump-sum payout).
+ */
 export type IncomeStreamKind = 'pension' | 'partTime' | 'oneOff';
 
-/** Joint-and-survivor election percentage on a pension annuity.
- *  After the pensioner dies, the surviving spouse receives this
- *  percentage of the original benefit (still COLA-adjusted) for life.
- *  `0` means single-life — pension dies with the pensioner. Federal
- *  and many private plans default to 50; 75 / 100 are upgrades the
- *  retiree elected (typically at the cost of a smaller initial
- *  benefit). */
+/**
+ * Joint-and-survivor election: the percentage of the benefit (still COLA-adjusted) the surviving spouse gets for life;
+ * `0` is single-life.
+ */
 export type JointAndSurvivorPct = 0 | 50 | 75 | 100;
 
-/** One-off / windfall sub-category — for the user's own labeling.
- *  Engine treats every oneOff identically. */
+/** Sub-category label for a one-off windfall; the engine treats every `oneOff` identically. */
 export type OneOffIncomeSource = 'inheritance' | 'assetSale' | 'other';
 
 /**
- * Income-source aggregate. One row per pension / part-time gig /
- * windfall the household expects. Attached to a single household
- * member (JOINT income isn't a thing — even a survivor benefit is
- * paid to a single surviving spouse). The drawdown engine reads
- * this list to compute per-year non-portfolio income; gross expense
- * minus that income is the net withdrawal need each year.
- *
- * Field set is conditional on `kind` (and `payoutType` when
- * `kind === 'pension'`). Form-level validation enforces the matrix:
+ * One pension, part-time gig or windfall, attached to a single household member (a survivor benefit is paid to one
+ * spouse); the drawdown engine nets these against gross expense for each year's withdrawal need. Required fields depend
+ * on `kind` (and `payoutType` for pensions), enforced at form level:
  *
  * | kind / payoutType        | Required fields |
  * | ------------------------ | --------------- |
@@ -47,13 +32,8 @@ export type OneOffIncomeSource = 'inheritance' | 'assetSale' | 'other';
  * | partTime                 | annualAmount, start, end, colaPct |
  * | oneOff                   | oneOffAmount, start, targetAccountId |
  *
- * `start` (and `end` for partTime) uses the shared `ScheduleStart` /
- * `ScheduleEnd` vocabulary. `retirementStart` on income anchors to the
- * **owner's** retirement date (asymmetric vs expense's household-level
- * anchor). `age.memberId` is omitted on
- * income because the stream's `memberId` UUID already declares the
- * implicit owner; partTime may set it explicitly to anchor to the
- * non-owner spouse.
+ * `retirementStart` anchors to the owner's retirement date (expense anchors at household level). `age.memberId` is
+ * omitted because `memberId` already names the owner; partTime may set it to anchor to the non-owner spouse.
  */
 export interface IncomeStreamPayload extends Record<string, unknown> {
   /** Required, max 60. Unique within household (case-folded, trimmed). */
@@ -62,19 +42,16 @@ export interface IncomeStreamPayload extends Record<string, unknown> {
   notes?: string;
   /** Owning HouseholdMember id. */
   memberId: string;
-  /** Top-level discriminator. */
   kind: IncomeStreamKind;
 
-  /** When the income begins (or, for single-event kinds, when the
-   *  payment / windfall is received). Annuity: payment-start anchor;
-   *  lumpSum: receipt anchor; partTime: schedule-start anchor; oneOff:
-   *  receipt anchor. */
+  /**
+   * When the income begins, or for single-event kinds when it is received (annuity payment start, lump-sum receipt,
+   * partTime schedule start, oneOff receipt).
+   */
   start?: ScheduleStart;
-  /** End of recurring window. partTime only — annuity is lifetime
-   *  (J&S governs survivor share), lumpSum + oneOff are single events. */
+  /** End of the recurring window; partTime only (an annuity is lifetime, lump sum and one-off are single events). */
   end?: ScheduleEnd;
 
-  // ---------- pension fields ----------
   /** Set on `kind === 'pension'`. */
   payoutType?: PensionPayoutType;
   /** USD/month. `kind === 'pension'` + `payoutType === 'annuity'`. */
@@ -83,43 +60,36 @@ export interface IncomeStreamPayload extends Record<string, unknown> {
   lumpSumAmount?: number;
   /** Joint-and-survivor election (annuity-only). */
   jointAndSurvivorPct?: JointAndSurvivorPct;
-  /** Link to the Cash Balance Pension (CBP) account this pension
-   *  stream is paid from. Valid on `kind === 'pension'` with either
-   *  `payoutType === 'annuity'` (zero the source account at retirement
-   *  and pay the monthly benefit from this stream) or
-   *  `payoutType === 'lumpSum'` (rollover the account balance into
-   *  `targetAccountId` at retirement). Renamed from the legacy
-   *  annuity-only `sourceAccountId`. */
+  /**
+   * The Cash Balance Pension account this pension is paid from: on an annuity it is zeroed at retirement and the stream
+   * pays the benefit; on a lump sum its balance rolls into `targetAccountId`.
+   */
   linkedCbpAccountId?: string;
-  /** Account that receives a lump-sum or one-off deposit at receipt
-   *  year. Required on `payoutType === 'lumpSum'` and `kind === 'oneOff'`. */
+  /** Account receiving a lump sum or one-off deposit; required for `lumpSum` and `oneOff`. */
   targetAccountId?: string;
 
-  // ---------- partTime fields ----------
   /** USD/year. `kind === 'partTime'`. */
   annualAmount?: number;
 
-  // ---------- oneOff fields ----------
   /** USD. `kind === 'oneOff'`. */
   oneOffAmount?: number;
   /** User-chosen sub-category label. */
   source?: OneOffIncomeSource;
 
-  // ---------- shared optional fields ----------
-  /** Annual COLA on this stream's benefit. Used by pension/annuity
-   *  and partTime. Present and meaningful only when `tracksInflation`
-   *  is absent or `false`. When `tracksInflation === true` this key
-   *  must be absent (persistence rule — never store `0` or `null`
-   *  alongside `tracksInflation: true`). SS COLA is on the scenario,
-   *  not here. */
+  /**
+   * Annual COLA for pension/annuity and partTime, meaningful only when `tracksInflation` is absent or false; when
+   * `tracksInflation === true` this key must be absent (never store `0` or `null` beside it). SS COLA is on the
+   * scenario.
+   */
   colaPct?: number;
-  /** When `true`, this stream's growth rate follows the scenario
-   *  inflation rate (`scenario.inflation.ratePct`) rather than a fixed
-   *  `colaPct`. Absent / `false` → use `colaPct ?? 0`. Present on the
-   *  initial v1 payload at creation; no migration (pre-launch v1 reset). */
+  /**
+   * When true, growth follows the scenario inflation rate (`scenario.inflation.ratePct`) instead of `colaPct`; absent
+   * or false uses `colaPct ?? 0`.
+   */
   tracksInflation?: boolean;
-  /** Future-tax-engine scaffolding: whether this income is taxable as
-   *  ordinary income. Defaults to true. Not consumed by the v1
-   *  drawdown engine (no tax modeling). */
+  /**
+   * Scaffolding for a future tax engine: taxable as ordinary income (default true); not consumed by the v1 drawdown
+   * engine.
+   */
   taxable?: boolean;
 }

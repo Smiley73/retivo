@@ -1,10 +1,5 @@
-/**
- * Wiring layer between AuthProvider and the providers that need
- * post-login state (Theme, Sync). Lives outside main.tsx so tests can
- * mount it directly to verify the prop chain — in particular, that
- * SyncProvider receives the live `refreshAccessToken` from AuthContext
- * (not a stale snapshot of api/client's module-level binding).
- */
+// Wiring between AuthProvider and the providers that need post-login state (Theme, Sync).
+// Separate from main.tsx so tests can check SyncProvider gets the live `refreshAccessToken`, not a stale snapshot.
 import React from 'react';
 import { useAuth } from './auth/AuthContext';
 import {
@@ -42,28 +37,13 @@ export const AuthAwareProviders: React.FC<{ children: React.ReactNode }> = ({ ch
     isUnlocked,
     needsKeySetup,
   } = useAuth();
-  // Gate the householdId handed to SyncProvider on the unlock check
-  // (initializeUnlockState). Sync must not start before we know whether this
-  // household is encrypted: for an activated household with no cached
-  // HDK, sync starting early gets getHdk()=null and would write encrypted pull
-  // responses to IndexedDB as-if-plaintext (data corruption). Only release the
-  // householdId once unlock has resolved AND we either hold the HDK (isUnlocked)
-  // or the household is unencrypted/awaiting setup (needsKeySetup). A resolved
-  // "encrypted, locked" state (isUnlocked=false, needsKeySetup=false) keeps
-  // householdId null → sync paused until the user unlocks.
-  //
-  // `needsKeySetup=true` deliberately
-  // still releases householdId so an unkeyed, pre-setup household can sync its
-  // plaintext bootstrap. Once the household has key envelopes (slots exist),
-  // the server-side `ENCRYPTION_REQUIRED` guard — NOT a web-side sync gate — is
-  // the enforcement boundary that rejects any plaintext push. No gating change
-  // here is correct.
+  // Hold `householdId` back until unlock resolves and the HDK is held (or the household is unencrypted or awaiting
+  // setup): starting sync earlier would write encrypted pull responses to IndexedDB as plaintext. The server's
+  // `ENCRYPTION_REQUIRED` guard, not this gate, rejects plaintext pushes.
   const syncHouseholdId =
     unlockResolved && (isUnlocked || needsKeySetup) ? householdId : null;
   return (
     <ThemeProvider userId={me?.id ?? null}>
-    {/* Per-user "Show beta features" switch — a localStorage preference keyed
-        like the theme, so it sits beside ThemeProvider. */}
     <BetaFeaturesProvider userId={me?.id ?? null}>
       <SyncProvider
         householdId={syncHouseholdId}
@@ -73,19 +53,15 @@ export const AuthAwareProviders: React.FC<{ children: React.ReactNode }> = ({ ch
         getCsrfToken={getCsrfToken}
         refreshAccessToken={refreshAccessToken}
         getHdk={getHdk}
-        // DEVICE_MISMATCH recovery: the sole auth↔sync bridge, so
-        // the host supplies the forced re-login. Set the one-shot signout
-        // reason (LoginPage renders the "session reset" notice) then log
-        // out; the next mount lands on a clean /login that re-binds the
-        // device id.
+        // DEVICE_MISMATCH recovery, the sole auth-sync bridge: set the one-shot signout reason (LoginPage shows
+        // the notice), then log out so the next /login re-binds the device id.
         onDeviceMismatch={async () => {
           setSignoutReason(SIGNOUT_REASON_DEVICE_MISMATCH);
           await logout();
         }}
         mock={SYNC_MOCK}
       >
-        {/* The AI assistant session: inside SyncProvider so it outlives route
-            changes and the tool handlers can read useSync() and useAuth(). */}
+        {/* Inside SyncProvider so it outlives route changes and its tool handlers can read useSync() and useAuth(). */}
         <AssistantProvider>{children}</AssistantProvider>
       </SyncProvider>
     </BetaFeaturesProvider>

@@ -1,7 +1,4 @@
-/**
- * Social Security benefit aggregate payload. Per-scenario Social Security
- * claim-age / COLA overrides live on `ScenarioOverrides` (scenario-overrides.ts).
- */
+// Social Security benefit aggregate payload; per-scenario claim-age and COLA overrides live on `ScenarioOverrides`.
 
 export interface SocialSecurityBenefitPayload extends Record<string, unknown> {
   householdMemberId: string;

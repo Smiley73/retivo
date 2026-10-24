@@ -1,19 +1,11 @@
-/**
- * Pure JWT claim decoding for the auth layer (no storage, no React).
- *
- * Extracted from `AuthContext.tsx`. The
- * decoder only reads the token payload's claim fields; it never verifies the
- * signature — the API is the trust boundary. `atob` + base64url normalization
- * keeps it dependency-free.
- */
+// JWT claim decoding for the auth layer. It never verifies the signature: the API is the trust boundary.
 
 export interface JwtClaims {
   userId: string;
   householdId: string;
   deviceId: string;
   email?: string;
-  /** Unix seconds (`exp` claim), when present, so callers can check
-   *  remaining token life without a second decode. */
+  /** Unix seconds (`exp`), so callers can check remaining token life without a second decode. */
   exp?: number;
 }
 

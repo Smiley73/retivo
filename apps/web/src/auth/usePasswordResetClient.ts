@@ -1,30 +1,18 @@
-/**
- * Password-reset client surface, extracted from AuthContext so that file stays
- * under the shape limit. Owns the `requestPasswordReset` + `resetPassword`
- * API calls (the opaque-202 request and the 204 consume).
- *
- * No `sessionStorage` marker is dropped on consume: whether a re-wrap is
- * owed is DERIVED from two server-authored revisions on every unlock-state
- * transition (`useDerivedRewrap.ts`), so nothing durable needs to remember
- * that a reset happened. `resetPassword` is the bare API call.
- *
- * See "Password change, password reset" in docs/security.md.
- */
+// Password-reset client (opaque-202 request, 204 consume); docs/security.md "Password change, password reset".
+// No marker is kept: whether a re-wrap is owed is derived from server revisions at each unlock (`useDerivedRewrap.ts`).
 import { useCallback } from 'react';
 import { apiRequest } from '../api/client';
 
 export interface RequestPasswordResetResponse {
   accepted: true;
-  /** Returned in dev/test only, and only on a real send, so the developer
-   * can click the reset link without a real SES delivery. */
+  /** Dev/test only, on a real send: lets the developer click the reset link without SES. */
   resetToken?: string;
 }
 
 export interface PasswordResetClient {
-  /** Request a password-reset link (opaque 202 — never reveals whether the
-   * email exists; dev/test builds may echo the raw token). */
+  /** Request a reset link (opaque 202: never reveals whether the email exists). */
   requestPasswordReset(email: string): Promise<RequestPasswordResetResponse>;
-  /** Consume a password-reset token: set a new password (204). */
+  /** Consume a reset token to set a new password (204). */
   resetPassword(token: string, newPassword: string): Promise<void>;
 }
 

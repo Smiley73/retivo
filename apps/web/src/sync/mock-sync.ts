@@ -1,8 +1,4 @@
-/**
- * In-process sync transport for Scenario 1 (browser-only). Returns
- * synthetic responses so the sync state machine can be exercised
- * without a backend. Cycles through pending → syncing → synced.
- */
+// In-process sync transport for browser-only mode: synthetic responses, no backend.
 import type { SyncTransport } from './sync-client.js';
 import type {
   BootstrapResponseBody,

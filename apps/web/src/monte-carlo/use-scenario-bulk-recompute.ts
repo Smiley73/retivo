@@ -1,37 +1,5 @@
-/**
- * Scenarios-scoped hook that runs the "Recalculate all" bulk Monte Carlo
- * recompute CONCURRENTLY across a {@link createMcPool} worker pool, instead
- * of the provider's one-worker-at-a-time `runToCompletion` loop. Each
- * scenario's `MonteCarloInput` (built by the page via the shared
- * `buildMcInput` seam — same deterministic seed the serial path used) runs
- * on the pool; every reply is handled as it lands:
- *
- *  - `{ kind: 'result' }` → the card is patched DIRECTLY from the in-hand
- *    summary (via `onResult`, which calls the page's `applyPlanSuccess`) AND
- *    the summary is write-cached via `putCached` (warm-cache for the next
- *    page visit / the BPP page). Patching from the returned summary — not a
- *    cache re-read — means a freshly-computed card can never be blanked by a
- *    concurrent IDB-cache eviction (the LRU cap is 20; >20 in-flight writes
- *    can evict a sibling's just-written entry before a re-read).
- *  - `{ kind: 'error' }` → no patch, no write (the card keeps its prior
- *    value), but the coarse done counter still advances and siblings finish.
- *  - `{ kind: 'aborted' }` → stop (Cancel / dispose). The card keeps its
- *    prior value.
- *
- * Progress: a coarse `done / total` counter (incremented on each terminal
- * reply) plus a per-card `scenarioId → { done, total }` fine progress map
- * fed by each `pool.run(..., onProgress)` and CLEARED per scenario on its
- * terminal reply (so a cancelled card doesn't keep a frozen partial bar).
- *
- * Pool lifecycle: the pool is created per "Recalculate all" press, held by a
- * ref, and disposed on (a) Cancel, (b) natural batch completion (don't hold
- * idle workers), and (c) hook unmount. A run-token guards against a stale
- * batch's replies landing after a newer start / dispose, which also makes
- * the create/dispose StrictMode double-mount safe.
- *
- * The provider's single-worker contract (Plan Stress Test, per-card recalc,
- * Report) is 100% untouched.
- */
+// Scenarios "Recalculate all": the bulk Monte Carlo recompute runs concurrently across a {@link createMcPool}, not one
+// at a time; each input comes from the page's `buildMcInput` seam (same deterministic seed as the serial path).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MonteCarloInput, MonteCarloSummary } from '../lib/monte-carlo';
 import { putCached, mcCacheKey } from '../db/monte-carlo-cache';
@@ -41,27 +9,19 @@ import {
   type McPool,
   type MinimalMcWorker,
 } from './mc-worker-pool';
-// Vite `?worker` import — same pattern as `MonteCarloProvider.tsx` /
-// `optimizer-mc-runner.ts`.
 import MCWorker from '../workers/monte-carlo.worker.ts?worker';
 
-/** Per-card fine progress (path units), keyed by scenario id. An entry is
- *  present only while that scenario's run is in flight. */
 type BulkProgressById = ReadonlyMap<string, { done: number; total: number }>;
 
 interface BulkRecomputeState {
-  /** Coarse "X of N scenarios" — completed (result/error/aborted) / queued.
-   *  `null` while no bulk run is active. */
+  /** Completed (result, error or aborted) of queued scenarios; null while idle. */
   readonly coarse: { done: number; total: number } | null;
-  /** Per-card fine path-progress for in-flight scenarios. Empty when idle. */
   readonly progressById: BulkProgressById;
-  /** True while a bulk run is in flight. */
   readonly isRunning: boolean;
 }
 
 export interface UseScenarioBulkRecomputeArgs {
-  /** Build the deterministic `MonteCarloInput` for a scenario (the page's
-   *  `buildMcInput` seam — same seed the serial path used). */
+  /** The page's `buildMcInput` seam (same seed as the serial path). */
   readonly buildMcInput: (scenarioId: string) => MonteCarloInput | null;
   /** Patch the card DIRECTLY from the in-hand summary (no cache re-read). */
   readonly onResult: (scenarioId: string, summary: MonteCarloSummary) => void;
@@ -72,11 +32,12 @@ export interface UseScenarioBulkRecomputeArgs {
 }
 
 export interface UseScenarioBulkRecomputeResult extends BulkRecomputeState {
-  /** Start a bulk recompute for the given scenario ids. No-op (and no pool
-   *  spin-up) when the list is empty or a run is already active. */
+  /**
+   * Starts a bulk recompute for the given ids; a no-op (no pool spin-up) when the list is empty or a run is already
+   * active.
+   */
   readonly recalcAll: (scenarioIds: ReadonlyArray<string>) => void;
-  /** Cancel the active bulk run: dispose the pool, settling pending +
-   *  queued runs as aborted. */
+  /** Disposes the pool, settling pending and queued runs as aborted. */
   readonly cancel: () => void;
 }
 
@@ -84,6 +45,10 @@ function defaultWorker(): MinimalMcWorker {
   return new MCWorker() as unknown as MinimalMcWorker;
 }
 
+// A result patches the card from the in-hand summary (never a cache re-read, which a concurrent LRU eviction past the
+// cap of 20 could blank) and is write-cached; an error leaves the card as it was but still advances the counter; an
+// abort stops. The pool lives per press and is disposed on cancel, completion and unmount; a run token ignores stale
+// replies (also StrictMode-safe). The provider's single-worker contract is untouched.
 export function useScenarioBulkRecompute(
   args: UseScenarioBulkRecomputeArgs,
 ): UseScenarioBulkRecomputeResult {
@@ -93,13 +58,11 @@ export function useScenarioBulkRecompute(
   >(new Map());
 
   const poolRef = useRef<McPool | null>(null);
-  // Monotonic token: only replies from the current batch mutate state. A
-  // dispose (cancel / completion / unmount / a fresh start) bumps it so a
-  // late reply from a torn-down pool is ignored — also StrictMode-safe.
+  // Only replies from the current batch mutate state: any dispose bumps the token, so a late reply from a torn-down
+  // pool is ignored.
   const runTokenRef = useRef(0);
 
-  // Keep the latest callbacks in a ref so the run closure never goes stale
-  // and `recalcAll` keeps a stable identity.
+  // Latest callbacks in a ref so the run closure stays fresh and `recalcAll` keeps a stable identity.
   const argsRef = useRef(args);
   argsRef.current = args;
 
@@ -121,14 +84,12 @@ export function useScenarioBulkRecompute(
   const recalcAll = useCallback(
     (scenarioIds: ReadonlyArray<string>): void => {
       if (poolRef.current) return; // a run is already active
-      // Resolve every runnable input up front; scenarios whose input can't
-      // build are dropped (nothing to run).
+      // Resolve inputs up front; scenarios whose input can't build are dropped.
       const work = scenarioIds
         .map((id) => ({ id, input: argsRef.current.buildMcInput(id) }))
         .filter((w): w is { id: string; input: MonteCarloInput } => w.input != null);
       if (work.length === 0) return;
 
-      // Dispose any prior pool + bump the token before creating the new one.
       disposePool();
       const token = runTokenRef.current;
       const pool = createMcPool({
@@ -175,17 +136,13 @@ export function useScenarioBulkRecompute(
                 });
               onTerminal(id);
             } else if (reply.kind === 'error') {
-              // No patch / no write — the card keeps its prior value, but
-              // the batch still advances and siblings finish.
+              // No patch or write: the card keeps its prior value, but the batch advances and siblings finish.
               onTerminal(id);
             }
-            // `aborted` → the pool was disposed; the token guard above
-            // already suppressed it, so nothing to do.
+            // `aborted`: the pool was disposed and the token guard above already suppressed it.
           })
           .catch((e) => {
-            // A throw in `onResult` (or anywhere in the .then) must not leave
-            // the batch hung: advance the terminal counter so it can still
-            // reach natural completion.
+            // A throw in `onResult` must not hang the batch: advance the counter so it can still complete.
             if (runTokenRef.current !== token) return;
             console.warn('[scenarios-bulk] reply handler failed', e);
             onTerminal(id);

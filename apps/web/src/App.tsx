@@ -1,21 +1,4 @@
-/**
- * Application shell + route table.
- *
- * Layout:
- * - Left-hand sidebar (collapsible sections) + main content area.
- * - On narrow viewports the sidebar collapses behind a toggle button in a
- *   secondary top bar. A backdrop scrim dismisses it on outside click.
- * - A skip link jumps keyboard users straight to main content
- *   (WCAG 2.2 AA - bypass blocks).
- *
- * Auth flow:
- *   /signup            → email + password → verification mail
- *   /auth/verify-email → consumes the verification token
- *   /login             → email + password (verified accounts only)
- *
- * The legacy setup wizard is gone — any user can sign up; there's no
- * "first user becomes admin" flow because there are no roles.
- */
+// Application shell and route table: sidebar plus content, a skip link, and the auth routes outside RequireAuth.
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { textLinkClass } from './components/TextLink';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router';
@@ -57,11 +40,7 @@ import {
 import { reconcileScenarios } from './lib/scenario-mutations';
 import type { ScenarioAggregate } from './lib/scenario-resolution';
 
-// Route components are lazy-loaded so each page lands in its own chunk
-// (declarations in ./app-lazy-routes — extracted to keep this file
-// under the shape limit). Cuts the initial
-// bundle to shell + current route; ChunkLoadError handling lives in
-// ErrorBoundary, the Suspense fallback below covers the in-flight gap.
+// Lazy route components (./app-lazy-routes): one chunk per page, the Suspense fallback covers the load gap.
 import {
   LoginPage,
   SignupPage,
@@ -108,8 +87,6 @@ import {
   WhatsNewPage,
 } from './app-lazy-routes';
 
-// Centered main-column content frame (legacy `.main__content`): a
-// readable max-width column with responsive horizontal padding.
 const MAIN_CONTENT_CLASS = 'mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8';
 
 const RouteFallback: React.FC = () => (
@@ -118,12 +95,7 @@ const RouteFallback: React.FC = () => (
   </main>
 );
 
-/**
- * Root-path redirect. Authenticated -> /dashboard. Otherwise probes
- * /auth/setup-status: empty backend -> /signup (first-run UX), else
- * /login. Network failure falls through to /login (fail-safe — login
- * page exposes a Sign up footer link).
- */
+// A failed setup-status probe falls through to /login, which links to sign-up.
 const RootRedirect: React.FC = () => {
   const { isAuthenticated } = useAuth();
   const [hasUsers, setHasUsers] = useState<boolean | null>(null);
@@ -167,14 +139,8 @@ export const App: React.FC = () => {
 
   return (
     <>
-      {/* The one shared toast region,
-          mounted as a sibling of the routed subtree — not inside AppShell —
-          so every route below, including the signed-out auth routes, has a
-          toast surface. A sibling of <Routes>, outside the Suspense
-          boundary: a lazy-chunk load must not hide an already-showing
-          notice behind the route fallback. Deliberately does NOT render
-          during the isBooting early return above — the only request in
-          flight there is POST /auth/refresh, which never raises a wait notice. */}
+      {/* Sibling of <Routes>, outside Suspense: a lazy-chunk load must not hide a showing notice.
+          Not rendered while booting: the only request then is the refresh, which raises no wait notice. */}
       <AppToastRegion />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
@@ -186,9 +152,7 @@ export const App: React.FC = () => {
           <Route path="/auth/change-email/confirm" element={<ChangeEmailConfirmPage />} />
           <Route path="/auth/request-password-reset" element={<RequestPasswordResetPage />} />
           <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
-          {/* Factor-change undo: reached from a mail
-              link, usually signed out everywhere — outside RequireAuth like
-              the other unauthenticated auth pages. */}
+          {/* Reached from a mail link, usually signed out everywhere, so outside RequireAuth. */}
           <Route path="/auth/factor-undo" element={<FactorUndoPage />} />
           <Route path="/" element={<RootRedirect />} />
           <Route
@@ -207,13 +171,7 @@ export const App: React.FC = () => {
   );
 };
 
-/**
- * The authenticated shell: sidebar + routed content. Mobile state is local
- * since nothing else needs to know whether the sidebar is open.
- *
- * Exported for the first-run/bootstrap effect tests (App.test.tsx); the app
- * itself only ever renders it through the `*` route in `App` above.
- */
+/** The authenticated shell: sidebar plus routed content. */
 export const AppShell: React.FC = () => {
   const { logout, householdId, me, fetchAccountRecord } = useAuth();
   const { state: syncState, notifyPending, runDestructive } = useSync();
@@ -223,50 +181,27 @@ export const AppShell: React.FC = () => {
   const [firstRunModalOpen, setFirstRunModalOpen] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(false);
   const firstRunCheckedRef = useRef(false);
-  // The one in-flight `GET /auth/me` for the first-run check, shared by every
-  // run of the effect below (StrictMode double mount, token refresh mid-request).
+  // One in-flight `GET /auth/me` shared by every run of the first-run effect (StrictMode double mount, token refresh).
   const accountRecordRef = useRef<Promise<AccountRecord> | null>(null);
-  const scenarioBootstrapCheckedRef = useRef(false); // ensures base-scenario auto-create + reconcile run once per shell mount.
+  const scenarioBootstrapCheckedRef = useRef(false);
 
-  // `lastSyncedAt` lives only on the `synced` variant of the SyncBadgeState
-  // union, so narrow it once into a stable primitive. Both effects below guard
-  // on it AND list it as a dependency: a bare `syncState.lastSyncedAt` in a dep
-  // array does not type-check (TS2339 off the non-`synced` variants), and
-  // depending on `syncState.kind` alone missed the null→timestamp transition
-  // that completes the first real round-trip while `kind` stays `synced` — the
-  // bug where the first-login demo prompt only appeared after a manual refresh.
+  // Narrowed once into a primitive: a bare `syncState.lastSyncedAt` in a dep array does not type-check, and depending
+  // on `kind` alone missed the null-to-timestamp transition (the first-login prompt only appeared after a refresh).
   const syncedAt = syncState.kind === 'synced' ? syncState.lastSyncedAt : null;
 
-  // Close the mobile sidebar on navigation so tapping a link doesn't leave
-  // the drawer floating over the page.
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
 
-  // First-login demo prompt: once sync has settled in `synced` **and**
-  // lastSyncedAt is non-null (= a real server round-trip completed),
-  // check whether the local IndexedDB still has no household members.
-  // If so, this is the user's first session on this browser — seed the
-  // primary member from the account record (`GET /auth/me`) when it carries
-  // first name, last name and birthdate, else offer the demo dataset.
-  // Skipping it leaves the Household welcome card as the fallback path.
-  //
-  // The `lastSyncedAt` guard prevents a race where the SyncProvider's
-  // initial `useState` seeds `kind: 'synced'` before `initialSync`
-  // fires — without it the modal could open while bootstrap is still
-  // in flight, re-creating all demo aggregates under new UUIDs and
-  // producing duplicates.
-  //
-  // `firstRunCheckedRef` is latched only on a terminal outcome. A failed
-  // account fetch is not one: nothing is shown or written and the check runs
-  // again at the effect's next natural re-run (token refresh, sync, next open).
+  // First-login prompt: once a real server round-trip completed (`synced` with non-null lastSyncedAt), an empty local
+  // household means a first session on this browser. Seed the primary member from `GET /auth/me` when it carries name
+  // and birthdate, else offer the demo dataset. The lastSyncedAt guard matters: the provider seeds `kind: 'synced'`
+  // before initialSync fires, and opening the modal mid-bootstrap would create duplicate demo aggregates.
+  // `firstRunCheckedRef` latches on a terminal outcome only; a failed account fetch re-runs at the next natural re-run.
   useEffect(() => {
     if (firstRunCheckedRef.current) return;
     if (!householdId || !me) return;
-    // Reload-visibility check (runs before the zero-members guard): the
-    // primary member was already seeded on a prior mount (pending key written
-    // only after a successful queueLocalMutation) and the user hasn't
-    // dismissed the banner → just reshow it, do NOT re-seed or open the modal.
+    // Seeded on a prior mount and the banner not dismissed: reshow it; do not re-seed or open the modal.
     if (shouldShowReadyBanner(householdId)) {
       firstRunCheckedRef.current = true;
       markPrimaryMemberSeeded(householdId);
@@ -284,18 +219,9 @@ export const AppShell: React.FC = () => {
           firstRunCheckedRef.current = true;
           return;
         }
-        // Post-reset suppression: a deliberate "Delete workspace data" reset
-        // (Workspace page) leaves the workspace with zero members — the exact
-        // trigger this effect watches for — but the user just chose an empty
-        // workspace, so neither re-offering the demo dataset nor re-seeding a
-        // primary member is wanted. The reset handler sets `suppressDemoModal`
-        // in sessionStorage before its hard reload; consume it here (clear +
-        // skip) so the offer fires once at most and never resurfaces on a later
-        // reload. Gating at the source (App, not FirstRunDemoModal) prevents
-        // the shell from ever setting firstRunModalOpen=true — a
-        // mounted-but-hidden modal could otherwise resurface. A consumed flag
-        // proves a deliberate wipe, so the per-browser seeded flag is written
-        // too: the wipe sticks on later opens.
+        // `suppressDemoModal` is set before a "Delete workspace data" reset's hard reload: the user chose an empty
+        // workspace, so skip the demo offer and seeding. Consume it once and write the seeded flag so the wipe sticks.
+        // Gated here, not in FirstRunDemoModal, so a mounted-but-hidden modal can never resurface.
         if (sessionStorage.getItem('suppressDemoModal')) {
           sessionStorage.removeItem('suppressDemoModal');
           markPrimaryMemberSeeded(householdId);
@@ -309,9 +235,7 @@ export const AppShell: React.FC = () => {
           setFirstRunModalOpen(true);
           return;
         }
-        // Zero members, never seeded here: a brand-new workspace. A failed
-        // fetch is handled here and never reaches the catch below (which
-        // latches and prompts) — it is not latched, so a later run retries.
+        // Brand-new workspace. A failed fetch is not latched, so a later run retries.
         let record: AccountRecord;
         try {
           record = await fetchRecordOnce(accountRecordRef, () =>
@@ -334,33 +258,24 @@ export const AppShell: React.FC = () => {
         // creating anything (and writes the flag before the queue call).
         const seed = await seedPrimaryMemberOnce(householdId, me.email, profile);
         if (seed === 'already-populated') {
-          // Another tab seeded or populated the workspace: nothing to create.
           markPrimaryMemberSeeded(householdId);
           return;
         }
         if (seed === 'already-seeded') {
-          // Flag set with no members: a wipe elsewhere; same as the check above.
           if (!cancelled) setFirstRunModalOpen(true);
           return;
         }
         if (cancelled) return;
-        // Seed succeeded: arm the banner (pending key survives reloads until
-        // dismissed).
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem(bannerPendingKey(householdId), '1');
         }
         setBannerVisible(true);
-        // Notify mounted routes (those subscribed to the `useAggregates` store
-        // fine-signals + the coarse workspace channel) so they re-read IDB
-        // after the seed — every other IDB bulk writer (demo-data-loader,
-        // expense-categories-bootstrap, SyncContext) does the same. Fire
-        // before notifyPending so re-reads see the new member.
+        // Notify mounted routes so they re-read IDB after the seed; before notifyPending so re-reads see the new
+        // member.
         notifyWorkspaceChanged();
         notifyPending();
       } catch (e) {
-        // The check failed (IDB read or the seed's write threw), so latch to
-        // avoid retrying against a bad store; fall back to the demo modal so
-        // the user is never stranded with neither banner nor modal.
+        // Latch to avoid retrying against a bad store; fall back to the demo modal so the user is never stranded.
         firstRunCheckedRef.current = true;
         console.warn('[first-run] primary-member seed failed', e);
         if (!cancelled) setFirstRunModalOpen(true);
@@ -371,11 +286,7 @@ export const AppShell: React.FC = () => {
     };
   }, [householdId, me, syncedAt, notifyPending, fetchAccountRecord]);
 
-  // Scenarios bootstrap: after the first real sync round-trip, make
-  // sure a base scenario exists, then run the reconciliation pass
-  // against any state left behind by an interrupted promotion. Both
-  // helpers are idempotent and safe to call repeatedly. Runs once per
-  // shell mount; subsequent edits flow through the page-level reload.
+  // After the first real sync round-trip: ensure a base scenario exists, then reconcile any interrupted promotion.
   useEffect(() => {
     if (scenarioBootstrapCheckedRef.current) return;
     if (!householdId) return;
@@ -383,21 +294,13 @@ export const AppShell: React.FC = () => {
     let cancelled = false;
     (async () => {
       try {
-        // Run the re-seed inside the sync fence. ensureDefaultExpenseCategories
-        // reads the tombstone set then queues `update @ tombstone.version` (or
-        // `create @ 0`); a background poll `pull` interleaving between that read
-        // and the flush can lift the tombstone's version, stranding the queued
-        // mutation at a stale `expectedVersion` → the server rejects it →
-        // exactly one `failed-conflict` row → the badge sticks on "Refresh
-        // needed". This is the post-reload sibling of the reset/demo
-        // enumeration race; fence the read+enqueue so the poll can't race it.
-        // `notifyPending()` flushes AFTER the fence clears (it needs the mutex).
+        // Inside the sync fence: a background `pull` between the tombstone read and the flush can lift the tombstone's
+        // version, stranding the queued mutation at a stale `expectedVersion` (one `failed-conflict` row, badge stuck
+        // on "Refresh needed"). `notifyPending()` flushes after the fence clears because it needs the mutex.
         await runDestructive(async () => {
           await ensureBaseScenario(householdId);
           await ensureDefaultExpenseCategories(householdId);
-          // Flip an existing seeded `cat-medical` row that predates the
-          // generic-medical-flag feature so it keeps its +2pp default on
-          // deploy. Idempotent + tombstone-safe; runs inside the same fence.
+          // Idempotent and tombstone-safe: gives a pre-existing seeded `cat-medical` row the medical flag.
           await backfillSeededMedicalFlag(householdId);
           if (cancelled) return;
           const scenarios = (await listAggregates('scenario')) as ScenarioAggregate[];
@@ -422,28 +325,18 @@ export const AppShell: React.FC = () => {
 
   return (
     <MonteCarloProvider>
-      {/* Skip link — first focusable element (WCAG 2.4.1 bypass blocks).
-          `sr-only` until focused, then revealed top-left for sighted keyboard
-          users (WCAG 2.4.7 — the affordance must be visible when it has focus).
-          The reveal is instant (no transition) and fixed-positioned, so it
-          appears only while the link itself holds focus and cannot slide in
-          over the page mid-edit (the prior transition-based reveal's bug). */}
+      {/* First focusable element (WCAG 2.4.1). Revealed instantly and fixed-positioned on focus, so it cannot
+          slide in over the page mid-edit. */}
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-surface-raised focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-ink focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
       >
         Skip to main content
       </a>
-      {/* App shell: flex row. Desktop renders the static <Sidebar>
-          column (hidden < lg). Mobile uses the React Aria
-          <MobileNavDrawer> overlay (focus trap + Esc + scrim +
-          scroll-lock + focus-restore — the a11y gap the old
-          CSS-transform scrim lacked). */}
-      {/* Symptom: a document-level horizontal scrollbar appeared after
-          the React Aria migration (body portals / wide fluid
-          descendants). Exact origin not isolated; `overflow-x-clip`
-          contains it at the shell. Inner scrollers (`<TableScroll>`
-          `overflow-x:auto`) and `fixed` modals/drawers are unaffected. */}
+      {/* Desktop: static <Sidebar>. Mobile: React Aria <MobileNavDrawer> (focus trap, Esc, scrim, scroll-lock, focus
+          restore). */}
+      {/* `overflow-x-clip` contains a document-level horizontal scrollbar that appeared with body portals and wide
+          fluid descendants (origin not isolated). */}
       <div className="flex min-h-screen overflow-x-clip">
         <Sidebar
           onItemClick={() => setSidebarOpen(false)}
@@ -535,8 +428,7 @@ export const AppShell: React.FC = () => {
                   element={<ScenarioFloorsPage />}
                 />
                 <Route path="/balance-projection" element={<BalanceProjectionPage />} />
-                {/* Beta pages: the gate renders a "turn it on in Preferences"
-                    notice while the feature is hidden (lib/feature-flags.ts). */}
+                {/* Beta pages: the gate shows a "turn it on in Preferences" notice while the feature is hidden. */}
                 <Route
                   path="/withdrawal-guidance"
                   element={
@@ -577,8 +469,7 @@ export const AppShell: React.FC = () => {
         </div>
       </div>
       <VersionBanner />
-      {/* The AI assistant consent dialog: here, not on the Settings page, so it opens on whatever
-          route the person is on when the bridge proves itself. */}
+      {/* Here, not on Settings, so it opens on whatever route the person is on when the bridge proves itself. */}
       <AssistantConsentHost />
       {/* The one screen-reader announcement for the assistant session (the badges above exist twice). */}
       <AssistantStatusAnnouncer />
@@ -605,12 +496,8 @@ export const AppShell: React.FC = () => {
           onLoaded={() => {
             setFirstRunModalOpen(false);
             notifyPending();
-            // Hard reload so every mounted page re-reads aggregates the
-            // loader just queued — multi-page subscriptions to a
-            // single workspaceChanged event were missing edges in
-            // practice (sidebar picker not refreshing, projection
-            // page sticking on stale rows). Reloading is heavy-handed
-            // but it's a one-shot, user-initiated action.
+            // Hard reload: multi-page subscriptions to one workspaceChanged event missed edges (stale sidebar picker
+            // and projections).
             window.location.reload();
           }}
           onSkip={() => setFirstRunModalOpen(false)}
