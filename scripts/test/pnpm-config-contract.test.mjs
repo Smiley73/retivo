@@ -66,12 +66,13 @@ const ALLOWED_WAIVERS = Object.freeze(['GHSA-ch52-4w7c-c8xp', 'GHSA-hp3w-g68c-fv
 const EXPECTED_OVERRIDES = new Map(
   Object.entries(
     Object.freeze({
-      'fast-uri': '>=4.1.5',
+      'fast-uri': '>=4.2.3',
       'brace-expansion@>=5.0.0 <5.0.6': '>=5.0.6',
       protobufjs: '>=7.5.8 <8',
       qs: '>=6.15.2',
       '@grpc/grpc-js': '>=1.14.5',
       'undici@>=7.0.0 <7.29.1': '>=7.29.1 <8',
+      'undici@>=8.0.0 <8.12.2': '>=8.12.2 <9',
       'undici@<6.29.1': '>=6.29.1 <7',
       'form-data@>=4.0.0 <4.0.6': '>=4.0.6',
       'multer@>=1.0.0 <2.5.0': '>=2.5.0',

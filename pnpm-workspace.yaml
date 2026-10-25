@@ -26,10 +26,10 @@ minimumReleaseAge: 4320
 # new pin also needs its floor added to EXPECTED_OVERRIDES in
 # scripts/test/pnpm-config-contract.test.mjs.
 overrides:
-  # Two advisories in fast-uri: inconsistent host-name case handling and mailto
-  # header injection. Reached through @nestjs/cli > @angular-devkit/core > ajv
+  # Advisories in fast-uri: host-name case handling, mailto header injection,
+  # scheme spoofing and host confusion (fixed in 4.2.3). Reached through @nestjs/cli > @angular-devkit/core > ajv
   # (build tooling only).
-  fast-uri: ">=4.1.5"
+  fast-uri: ">=4.2.3"
   # CVE-2026-45149 / GHSA-jxxr-4gwj-5jf2: denial of service from unbounded
   # numeric brace-range allocation. Reached through the ESLint toolchain >
   # minimatch (dev tooling only).
@@ -48,6 +48,10 @@ overrides:
   # Published undici advisories fixed in 7.29.1, within the 7.x line. Reached
   # through jsdom > vitest (test tooling only).
   "undici@>=7.0.0 <7.29.1": ">=7.29.1 <8"
+  # Published undici advisories (denial of service, Subresource Integrity
+  # bypass) fixed in 8.12.2, within the 8.x line. Reached through apps/web >
+  # jsdom (test tooling only).
+  "undici@>=8.0.0 <8.12.2": ">=8.12.2 <9"
   # Published undici advisories fixed in 6.29.1, within the 6.x line. Reached
   # through node-gyp > infrastructure / Pulumi (deploy tooling only).
   "undici@<6.29.1": ">=6.29.1 <7"
