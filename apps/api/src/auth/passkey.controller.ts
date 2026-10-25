@@ -1,18 +1,5 @@
-/**
- * Passkey controller: WebAuthn enroll + assert flow.
- *
- * Endpoints:
- *   POST /passkey/register/start      (auth) → registration options
- *   POST /passkey/register/finish     (auth) → verifies attestation, stores credential
- *   POST /passkey/authenticate/start  (public, body { email }) → authentication options
- *   POST /passkey/authenticate/finish (public, body { deviceId, response }) → tokens + cookies
- *   GET  /passkey/list                (auth) → user's enrolled passkeys
- *   DELETE /passkey/:credentialId     (auth) → remove a passkey
- *
- * UV is required end-to-end. Counter monotonicity is enforced
- * on assertion. Challenges are single-use, 5-minute TTL. CSRF is exempt
- * for the two authenticate-* endpoints; they set the cookie themselves.
- */
+// Passkey controller: WebAuthn register, authenticate, list, remove. User verification is required and counters are monotonic; the two
+// authenticate endpoints are CSRF-exempt and set the cookie themselves.
 import {
   Body,
   Controller,
@@ -69,16 +56,9 @@ import { ConfirmRestrictedFactorDto } from './dto/step-up.dto.js';
 
 const RP_NAME = 'Retivo';
 
-/**
- * WebAuthn PRF extension input at credential creation (WebAuthn L3 — not yet in
- * the `@simplewebauthn/server` / DOM `AuthenticationExtensionsClientInputs`
- * type). Requesting `prf: {}` on register enables PRF for the new credential so
- * the authenticator returns PRF results at later assertions; strict third-party
- * managers (Keeper, 1Password) only return PRF when it was enabled here. No
- * eval is supplied at creation — that happens at assertion time. Applied with a
- * narrow cast at the single extension boundary, mirroring the client-side
- * pattern in apps/web/src/crypto/passkey-prf.ts.
- */
+// WebAuthn PRF extension input at creation (WebAuthn L3, not yet in the `@simplewebauthn/server` types). `prf: {}` is
+// needed here because strict managers (Keeper, 1Password) return PRF only when enabled at creation; applied with a
+// narrow cast at the one boundary.
 interface RegistrationPrfInput {
   prf: Record<string, never>;
 }
@@ -109,8 +89,6 @@ export class PasskeyController {
     this.mfaEnforced = config.get('AUTH_MFA_ENFORCED', { infer: true }) === 'true';
   }
 
-  // ---------- Registration ----------
-
   @Post('register/start')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { ttl: 60_000, limit: 10 } })
@@ -130,23 +108,21 @@ export class PasskeyController {
       userName: user.email,
       userDisplayName: user.email,
       attestationType: 'none',
-      // Omit `transports` when we don't have any recorded — Safari's
-      // WebAuthn picker has tripped on `transports: []` in the past.
+      // Omit `transports` when none are recorded: Safari WebAuthn picker has tripped on `transports: []`.
       excludeCredentials: existing.map((p) =>
         p.transports && p.transports.length > 0
           ? { id: p.credentialId, transports: p.transports as never }
           : { id: p.credentialId },
       ),
       authenticatorSelection: {
-        // Required so the passkey is discoverable — username-less login
-        // depends on the authenticator returning a userHandle.
+        // Required so the passkey is discoverable; username-less login depends on the authenticator returning a
+        // userHandle.
         residentKey: 'required',
         requireResidentKey: true,
         userVerification: 'required',
       },
-      // Enable the PRF extension on the new credential so it is PRF-capable for
-      // zero-knowledge encryption enrollment. WebAuthn L3 `prf` is not in the
-      // simplewebauthn `extensions` type, so narrow-cast at this one boundary.
+      // Enable PRF for zero-knowledge encryption enrollment; narrow-cast because `prf` is not in the simplewebauthn
+      // `extensions` type.
       extensions: { prf: {} } satisfies RegistrationPrfInput as AuthenticationExtensionsClientInputs,
     });
     await this.challenges.set(`reg:${me.userId}`, options.challenge, me.userId);
@@ -170,10 +146,8 @@ export class PasskeyController {
     }
     const ip = req.ip ?? null;
     const userAgent = (req.headers['user-agent'] as string | undefined) ?? null;
-    // Fresh-proof gate on the WRITE, not merely the /start challenge
-    // a `finish` replayed against a
-    // challenge minted earlier must still carry a verified proof. No
-    // AUTH_MFA_ENFORCED early-out — see the guard's own doc.
+    // The fresh-proof gate is on the write, not just the /start challenge, so a `finish` replayed against an
+    // earlier challenge still needs a verified proof. No `AUTH_MFA_ENFORCED` early-out.
     await this.factorEnrollmentGuard.enforce({
       userId: me.userId,
       purpose: 'passkey_enroll',
@@ -203,9 +177,8 @@ export class PasskeyController {
     const info = verification.registrationInfo;
     const cred = info.credential;
     const now = new Date().toISOString();
-    // Reset-window restriction: resolve whether
-    // this write lands inside an open password-reset window and, if so, stamp
-    // the passkey restricted in the SAME write that creates it.
+    // Resolve whether this write lands in an open password-reset window and stamp the passkey restricted in the
+    // same write that creates it.
     const user = await this.users.findById(me.userId);
     const openWindow = user ? resolveOpenResetWindow(user, Date.now()) : null;
     const row: PasskeyRow = {
@@ -239,11 +212,8 @@ export class PasskeyController {
         metadata: { credentialId: cred.id, factorType: 'passkey' },
       });
     }
-    // Factor-change notice + undo: post-commit,
-    // best-effort — `notify` never rejects, so it can never fail the
-    // enrollment; `noticeSent` tells the card whether the mail actually went
-    // out. The address comes from the User row (the access-token claims
-    // carry no email).
+    // Post-commit and best-effort: `notify` never rejects; `noticeSent` tells the card whether the mail went out.
+    // The address comes from the User row, since the claims carry no email.
     const noticeSent = user
       ? await this.factorNotice.notify({
           userId: me.userId,
@@ -255,19 +225,13 @@ export class PasskeyController {
     return { ...toPasskeyInfo(row), noticeSent };
   }
 
-  // ---------- Authentication ----------
-
   @Public()
   @Post('authenticate/start')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { ttl: 60_000, limit: 20 } })
   async authenticateStart() {
-    // Discoverable / username-less flow: the browser shows the picker,
-    // the user identifies themselves with the passkey itself, and we
-    // look up the user from the assertion's userHandle on /finish. The
-    // `auth:`-namespace challenge + WebAuthn primitives live in the shared
-    // PasskeyAssertionService so this controller holds no @simplewebauthn deps
-    // for the authentication path.
+    // Discoverable, username-less flow: the user is found from the assertion `userHandle` on /finish; the challenge
+    // and WebAuthn primitives live in PasskeyAssertionService.
     return this.assertions.generateLoginStartOptions();
   }
 
@@ -297,12 +261,9 @@ export class PasskeyController {
       });
     }
     const userId = Buffer.from(userHandle, 'base64url').toString('utf8');
-    // Strongly consistent: this is the ONE read of the User row this sign-in
-    // takes, and the session generation it carries is what the session below
-    // is stamped with. A default replica read here could lag a generation
-    // bump that committed BEFORE this sign-in even started (a password reset
-    // seconds earlier), and the stale value would then fail issuance's
-    // generation ConditionCheck — a spurious 401 for a legitimate sign-in.
+    // The one User read this sign-in takes, strongly consistent: its session generation stamps the session, and a
+    // replica lagging a bump committed before this sign-in (a reset seconds earlier) would fail the issuance
+    // ConditionCheck as a spurious 401.
     const user = await this.users.findByIdConsistent(userId);
     if (!user) {
       throw new UnauthorizedException({
@@ -318,11 +279,8 @@ export class PasskeyController {
       });
     }
 
-    // Verify + advance the counter via the shared assertion service (the same
-    // UV-required / counter-monotonic / conditional-write posture as the MFA
-    // passkey factor). The discoverable-login user resolution above
-    // (via the assertion userHandle) is distinct from the MFA path's
-    // token-scoped lookup.
+    // Verify and advance the counter via the shared assertion service (UV required, monotonic counter, conditional
+    // write), as the MFA passkey factor does.
     const { verified } = await this.assertions.verifyLoginAssertion({
       userId: user.userId,
       response: body.response as unknown as AuthenticationResponseJSON,
@@ -335,13 +293,9 @@ export class PasskeyController {
         message: 'Could not verify the passkey.',
       });
     }
-    // Restricted-factor refusal: AFTER the
-    // assertion verifies (so a wrong/forged assertion still surfaces the
-    // generic INVALID_CREDENTIALS above, not this factor-specific one) but
-    // BEFORE a session is issued. A distinct code + message is safe here —
-    // unlike the step-up/login-MFA paths, the caller has already proven
-    // physical possession of THIS exact credential, so naming it back is not
-    // a new existence oracle.
+    // Restricted-factor refusal comes after the assertion verifies (a forged one still yields the generic
+    // INVALID_CREDENTIALS) and before a session is issued. A distinct code is safe because the caller proved
+    // possession of this exact credential, so naming it is no new oracle.
     if (passkey.restrictedPostReset) {
       throw new UnauthorizedException({
         code: 'PASSKEY_RESTRICTED_POST_RESET',
@@ -354,13 +308,8 @@ export class PasskeyController {
       userId: user.userId,
       householdId: user.householdId,
       deviceId: body.deviceId,
-      // The generation observed by the read above — taken BEFORE the
-      // assertion was verified, never re-read afterwards. This sign-in's proof is the
-      // assertion; an account-wide revoke committing after that proof was
-      // gathered must fail issuance's generation ConditionCheck closed, not
-      // be silently adopted by a later read that happens to see the NEW
-      // generation and mints a session surviving the very boundary the
-      // revoke drew — the same invariant the password login pins.
+      // The generation observed before the assertion was verified, never re-read: a revoke committing after the proof
+      // must fail issuance ConditionCheck closed, as in the password login.
       sessionGeneration: resolveSessionGeneration(user),
       ip: req.ip ?? null,
       userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
@@ -388,8 +337,6 @@ export class PasskeyController {
     };
   }
 
-  // ---------- Management ----------
-
   @Get('list')
   async list(@CurrentUser() me: AccessTokenClaims) {
     const rows = await this.passkeys.listForUser(me.userId);
@@ -397,17 +344,10 @@ export class PasskeyController {
   }
 
   /**
-   * Remove a passkey. Removal was session-only;
-   * it now carries a body-bearing `POST … /remove` (not `DELETE`-with-body, which
-   * is discouraged) so the required proof is well-formed. Gate:
-   *   - a password re-verify BASELINE, present regardless of the flag — the
-   *     one op whose baseline changes, since passkey removal had no gate before;
-   *   - PLUS a fresh step-up factor when `AUTH_MFA_ENFORCED` is on. Email-OTP
-   *     is the no-lockout floor, so removal stays completable even when the passkey
-   *     being removed is the only routine factor.
-   * Explicit `@Throttle` bounds password + factor brute force.
-   * Responds `200 { noticeSent }` (was a bodiless `204`) so the card can tell
-   * whether the factor-change notice mail actually went out; still idempotent — an unknown credentialId is `{ noticeSent: false }`.
+   * Removes a passkey via `POST .../remove` (a body-bearing request, so the proof is well-formed). Gate: a password
+   * re-verify baseline regardless of the flag, plus a fresh step-up factor when `AUTH_MFA_ENFORCED` is on (Email-OTP
+   * is the no-lockout floor). Explicit `@Throttle` bounds brute force. Responds `200 { noticeSent }`; idempotent, an
+   * unknown credentialId is `{ noticeSent: false }`.
    */
   @Post(':credentialId/remove')
   @HttpCode(HttpStatus.OK)
@@ -420,10 +360,8 @@ export class PasskeyController {
   ): Promise<{ noticeSent: boolean }> {
     const ip = req.ip ?? null;
     const userAgent = (req.headers['user-agent'] as string | undefined) ?? null;
-    // Password baseline — always, independent of the MFA flag. A wrong
-    // password throws 401 INVALID_CREDENTIALS before any factor work or removal.
-    // Device identity: a trusted device's
-    // password re-verify bypasses the per-address backoff here too.
+    // Password baseline always, independent of the MFA flag; a wrong password throws 401 before any factor work. A
+    // trusted device bypasses the per-address backoff here too.
     const cookies = parseCookies(req.headers.cookie ?? '');
     await this.verifyPasswordSvc.verify({
       userId: me.userId,
@@ -433,9 +371,7 @@ export class PasskeyController {
       deviceId: me.deviceId,
       deviceTrustToken: cookies[DEVICE_TRUST_COOKIE_NAME],
     });
-    // Fresh second-factor step-up layered on the password baseline when the flag
-    // is on. A missing factor is a 400 before any side effect; a bad factor
-    // throws via StepUpService (emitting the `step_up_*` audit) before removal.
+    // Step-up layered on the baseline when the flag is on; a missing factor is 400 before any side effect.
     if (this.mfaEnforced) {
       if (!dto.method) {
         await this.stepUpSvc.recordMissingProofFailure({
@@ -467,15 +403,9 @@ export class PasskeyController {
       userAgent,
       metadata: { credentialId },
     });
-    // Factor-change notice + undo: only on an ACTUAL
-    // removal. The endpoint stays idempotent (200 regardless), but a no-op
-    // delete of an unknown/already-removed credential must never mint a
-    // factor-change notice — it would overwrite a still-live pending undo
-    // for a genuine earlier change (e.g. a real passkey_add) with a
-    // passkey_remove token that only ends sessions, permanently losing the
-    // ability to undo that earlier change. A
-    // removal's undo link only ends every session — it can never restore the
-    // credential. `notify` never rejects (the removal has already committed).
+    // Notify only on an actual removal: a no-op delete must not mint a notice, which would overwrite a live pending
+    // undo for an earlier change (such as a real passkey_add) with a remove token that only ends sessions. A
+    // removal undo link never restores the credential.
     if (!removed) return { noticeSent: false };
     const removedBy = await this.users.findById(me.userId);
     const noticeSent = removedBy
@@ -490,12 +420,9 @@ export class PasskeyController {
   }
 
   /**
-   * Lift a passkey's post-reset restriction. The
-   * proof must come from a DIFFERENT, already-enrolled factor whose own
-   * enrollment predates the reset request that opened the window — the
-   * server resolves and checks this, never the client. When nothing predates
-   * the reset, the escape hatch is removal (already step-up-gated above),
-   * not this endpoint.
+   * Lifts a passkey post-reset restriction. The proof must come from a different, already-enrolled factor whose
+   * enrollment predates the reset request that opened the window, checked server-side. When nothing predates it,
+   * removal is the escape hatch.
    */
   @Post(':credentialId/confirm-restriction')
   @HttpCode(HttpStatus.OK)
@@ -527,8 +454,7 @@ interface PasskeyInfoView {
   transports: string[] | null;
   createdAt: string;
   lastUsedAt: string | null;
-  /** True while this passkey is restricted post-reset — omitted (not `false`) when not restricted,
-   * matching the row's own optional-attribute shape. */
+  /** True while restricted post-reset; omitted (not false) otherwise. */
   restrictedPostReset?: boolean;
 }
 

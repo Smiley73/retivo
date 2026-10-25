@@ -1,14 +1,5 @@
-/**
- * `DeviceRegistry` row access. PK `householdId`, SK `deviceId`. Audit /
- * display-name row per device that has ever pushed (single-device v1).
- *
- * The only path that touches this table outside the sync hot loop is the
- * shared household-data sweep (`HouseholdSweepService`), whose four
- * authorised consumers are `DELETE /auth/account`,
- * `POST /auth/encrypted-workspace-reset`, `POST /sync/restore`, and
- * `POST /sync/workspace/clear` — it deletes every device row for a
- * household.
- */
+// DeviceRegistry row access (PK householdId, SK deviceId): an audit and display-name row per device. Outside the sync loop only the
+// household sweep touches it.
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -33,14 +24,8 @@ export class DeviceRegistryRepository extends BaseRepository {
   }
 
   /**
-   * Hard-delete every device-registry row for a household. Used only by
-   * the shared household-data sweep (`HouseholdSweepService`) — the four
-   * authorised consumers: account deletion (`DELETE /auth/account`),
-   * encrypted-workspace reset (`POST /auth/encrypted-workspace-reset`),
-   * self-service restore (`POST /sync/restore`), and the
-   * server-authoritative workspace clear (`POST /sync/workspace/clear`).
-   * The api-role IAM policy permits `BatchWriteItem` on this table for
-   * that sweep.
+   * Hard-deletes every device-registry row for a household, for the shared household sweep only
+   * (`HouseholdSweepService`; see AGENTS.md, "Project-specific security").
    */
   async deleteAllForHousehold(householdId: string): Promise<void> {
     let lastKey: Record<string, unknown> | undefined;
@@ -71,9 +56,8 @@ export class DeviceRegistryRepository extends BaseRepository {
   }
 
   /**
-   * Every device-registry row for a household, WHOLE —
-   * unlike {@link deleteAllForHousehold}'s key-only projection, used for the
-   * account-export builder.
+   * Every device-registry row for a household, whole (not the key-only projection of the sweep), for the account
+   * export.
    */
   async listForHousehold(householdId: string): Promise<DeviceRegistryRow[]> {
     const out: DeviceRegistryRow[] = [];

@@ -21,9 +21,8 @@ export class EmailVerificationsRepository extends BaseRepository {
   }
 
   /**
-   * Look up a verification row by its PK. The caller passes the SHA-256 hash of the raw token, not
-   * the raw token: the table stores the hash (hashed at the service boundary). This repo performs
-   * no hashing.
+   * Looks up a verification row by PK; the caller passes the SHA-256 hash of the raw token, and this repo performs no
+   * hashing.
    */
   async findByToken(token: string): Promise<EmailVerificationRow | null> {
     const r = await this.doc.send(
@@ -35,7 +34,6 @@ export class EmailVerificationsRepository extends BaseRepository {
     return (r.Item as EmailVerificationRow | undefined) ?? null;
   }
 
-  /** Delete by PK. Caller passes the stored SHA-256 hash. */
   async deleteToken(token: string): Promise<void> {
     await this.doc.send(
       new DeleteCommand({
@@ -46,11 +44,8 @@ export class EmailVerificationsRepository extends BaseRepository {
   }
 
   /**
-   * Delete every verification row for a user. The table PK is the
-   * verification token (no GSI on userId), so this scans with a filter.
-   * Volume is small per user — the email-verification flow keeps at most
-   * one active token + a short TTL — and this only runs in the account-
-   * deletion cascade.
+   * Deletes every verification row for a user in the account-deletion cascade; the PK is the token (no GSI on
+   * userId), so this scans with a filter.
    */
   async deleteAllForUser(userId: string): Promise<void> {
     let lastKey: Record<string, unknown> | undefined;
@@ -72,12 +67,7 @@ export class EmailVerificationsRepository extends BaseRepository {
     } while (lastKey);
   }
 
-  /**
-   * Every verification row for a user, WHOLE — the
-   * table PK is the hashed token (no GSI on userId), so this Scans with a
-   * filter, mirroring {@link deleteAllForUser}. Volume is small per user (at
-   * most one active token + a short TTL).
-   */
+  /** Every verification row for a user, whole, by the same filtered scan as `deleteAllForUser`. */
   async listForUser(userId: string): Promise<EmailVerificationRow[]> {
     const out: EmailVerificationRow[] = [];
     let lastKey: Record<string, unknown> | undefined;

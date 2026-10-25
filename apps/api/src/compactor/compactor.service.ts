@@ -1,20 +1,5 @@
-/**
- * Scheduled snapshot compactor (docs/architecture.md, "Background Lambdas").
- *
- * For each household:
- *   1. Read latestSnapshotCursor from WorkspaceMeta.
- *   2. Take cutoff = max(sequenceId) in MutationLog at job start.
- *   3. Load the latest snapshot from S3 (or empty if none) and replay
- *      mutations with latestSnapshotCursor < sequenceId <= cutoff.
- *   4. Serialize + gzip + upload to s3://<bucket>/<householdId>/<snapshotId>.json.gz.
- *   5. Atomically update WorkspaceMeta (conditional on cursor unchanged
- *      since job start). On race → abort and let the next hour retry.
- *   6. Cursor-bounded delete on MutationLog where sequenceId <= cutoff.
- *      In-flight pushes (sequenceId > cutoff) are preserved.
- *
- * Runs in the compactor Lambda's IAM context — it has no access to any
- * auth table.
- */
+// Scheduled snapshot compactor (docs/architecture.md, "Background Lambdas"): replay MutationLog into a new S3 snapshot,
+// advance the WorkspaceMeta cursor, then delete the covered rows. It runs with no access to any auth table.
 import fs from 'node:fs';
 
 import {
@@ -61,11 +46,8 @@ export interface CompactorRunSummary {
   totalSnapshotBytes: number;
   durationMs: number;
   /**
-   * Household ids whose compaction this run was bounded by a safety budget —
-   * either a partial-prefix compaction or a true skip.
-   * Distinct from `householdsSkipped`, which also counts the ordinary no-op
-   * outcomes (nothing to compact, everything inside the safety margin, a lost
-   * cursor race) that are not budget-related.
+   * Households whose compaction a safety budget bounded (a partial prefix or a true skip); unlike
+   * `householdsSkipped`, ordinary no-ops are not counted.
    */
   budgetLimitedHouseholdIds: string[];
 }
@@ -75,119 +57,62 @@ export interface CompactorHouseholdMetric {
   mutationsCompacted: number;
   snapshotBytes: number;
   durationMs: number;
-  /** Set when a safety budget bounded this household to a prefix — see
-   *  {@link CompactorRunSummary.budgetLimitedHouseholdIds}. */
+  /** Set when a safety budget bounded this household to a prefix. */
   budgetLimited?: boolean;
 }
 
 /**
- * Compaction safety budgets. The byte caps were
- * originally sized at 100 MB each against the compactor Lambda's DECLARED
- * 1024 MB memory (`infrastructure/src/lambda.ts`) — a raw-byte-count
- * argument that ignored what those bytes cost once parsed: a household
- * sitting just under all three caps simultaneously (the mutation-log page,
- * the decompressed baseline, and the merged result all live in one pass) can
- * exceed 1024 MB from JSON.parse/JSON.stringify expansion alone, well before
- * the AWS-SDK/Node baseline. They are now sized in the single-digit-MB class
- * instead, with the bootstrap ceiling as the floor for the WRITE cap:
- * `MAX_RESPONSE_BYTES` caps a bootstrap response at 5 MiB *gzipped*
- * (`bootstrap.service.ts`), and payloads are base64 ciphertext
- * that deflate shrinks only to ~0.75x (6 bits of entropy per character), so
- * the largest aggregate set bootstrap can still serve is ~6.7 MiB
- * uncompressed. `maxMergedBytes` (8 MiB, uncompressed) sits above that:
- * everything still servable is still compacted, and what it refuses
- * (> 8 MiB, i.e. > ~6 MiB gzipped) is already undeliverable. The gap
- * matters because a merged-size refusal is PERMANENT — merged = baseline +
- * prefix only grows — so a write cap below the ceiling would turn a
- * large-but-servable household into a `merged_oversized` skip every hour
- * whose log never drains, the starvation shape these budgets exist to
- * close. At these caps, worst-case live heap for one household — the log
- * page (8 MiB plus row overhead), the baseline's decompress + parse (12 MiB,
- * ~3-5x its byte count in V8 heap), and the merged stringify + gzip (≤ 8 MiB
- * plus zlib buffers) — is on the order of 100 MB, comfortably below 1024 MB
- * with the Node/AWS-SDK baseline included. These are internal safety bounds, not
- * stack config — deliberately NOT wired through
- * `infrastructure/src/config.ts`. The owner should still sanity-check the
- * numbers below against real household sizes before this ships.
- *
- * `CompactorService.budgets` is a public, mutable instance field (not a
- * constructor default) so a test can trip a budget with a handful of rows
- * instead of a gigabyte; production code never reassigns it.
+ * Compaction safety budgets: internal bounds, deliberately not stack config. A household just under all three byte
+ * caps could exceed the 1024 MB Lambda heap from JSON expansion alone, so they are single-digit MB. `maxMergedBytes`
+ * (8 MiB uncompressed) sits above the ~6.7 MiB uncompressed equivalent of the 5 MiB gzipped bootstrap ceiling
+ * (`MAX_RESPONSE_BYTES`; base64 ciphertext deflates only to ~0.75x): a merged-size refusal is permanent (merged only
+ * grows), so a lower cap would starve a servable household every hour. `CompactorService.budgets` is public and
+ * mutable so a test can trip a budget with a few rows; production never reassigns it.
  */
 export interface CompactorBudgets {
-  /** Mutation-log page-read row cap per household — paging stops once
-   *  tripped (row count, byte count, or the household deadline below). */
+  /** Mutation-log page-read row cap per household; paging stops once any read budget trips. */
   maxLogRows: number;
-  /** Mutation-log page-read accumulated payload-byte cap per household. */
   maxLogBytes: number;
-  /** Decompressed baseline-snapshot byte cap, enforced at `gunzipSync` via
-   *  node:zlib's `maxOutputLength` rather than trusting the S3 object's
-   *  compressed size. */
+  /**
+   * Decompressed baseline byte cap, enforced at `gunzipSync` via `maxOutputLength` rather than trusting the S3
+   * compressed size.
+   */
   maxSnapshotBytes: number;
-  /** Serialized merged-snapshot byte cap, checked before gzip + S3 write.
-   *  Bounded on BOTH sides. Floor: at or above the uncompressed equivalent
-   *  of the bootstrap ceiling (`MAX_RESPONSE_BYTES`, 5 MiB gzipped —
-   *  ~6.7 MiB uncompressed for base64 ciphertext, see the interface doc). A
-   *  merged set bootstrap can still serve MUST still be written: refusing it
-   *  is a PERMANENT `merged_oversized` skip (merged = baseline + prefix only
-   *  grows) for a household whose log then never drains. Ceiling: strictly
-   *  BELOW `maxSnapshotBytes`, with headroom for the envelope bytes
-   *  (`householdId`/`generatedAt`/`cutoff`) that wrap the aggregates on
-   *  read: `fetchSnapshot` re-decompresses whatever this compactor writes
-   *  against `maxSnapshotBytes`, and the read cap applies to the WHOLE
-   *  decompressed envelope while this write cap is an estimate over the
-   *  aggregates alone. A merged size this cap lets through but
-   *  `maxSnapshotBytes` then refuses to read back is the same permanent
-   *  skip, as `baseline_oversized`. */
+  /**
+   * Serialized merged-snapshot byte cap, checked before gzip and the S3 write. At or above the bootstrap ceiling
+   * equivalent, so anything bootstrap can serve is written; strictly below `maxSnapshotBytes`, because the read cap
+   * covers the whole decompressed envelope while this estimate covers aggregates only, and a merge the read cap then
+   * refuses is the same permanent skip.
+   */
   maxMergedBytes: number;
-  /** Wall-clock budget for one household's whole compaction pass. */
   householdDeadlineMs: number;
-  /** Fallback whole-run wall-clock budget used when `runOnce` isn't given
-   *  the Lambda's actual remaining time (local/test invocations). */
   runDeadlineMs: number;
-  /** Reserve subtracted from the run deadline so the summary log still
-   *  writes before Lambda freezes/kills the process. MUST be >=
-   *  `householdDeadlineMs`: a household can start just before the run
-   *  deadline and is then entitled to run up to `householdDeadlineMs`
-   *  longer (every phase of `compactHousehold` now enforces that budget,
-   *  not just the mutation-log read) — a smaller reserve would let that
-   *  last household blow past the real Lambda timeout before the summary
-   *  log writes. */
+  /**
+   * Reserve subtracted from the run deadline so the summary log still writes before Lambda freezes. Must be at least
+   * `householdDeadlineMs`: a household starting just before the run deadline may run that long.
+   */
   runDeadlineReserveMs: number;
 }
 
 const DEFAULT_COMPACTOR_BUDGETS: CompactorBudgets = {
   maxLogRows: 20_000,
-  // Single-digit-MB class (see the doc comment above) rather than the
-  // previous 100 MB: sized so JSON.parse/JSON.stringify expansion of a
-  // household right at these caps stays well under the Lambda's 1024 MB
-  // heap. A log page above this compacts as a prefix and resumes next run,
-  // so it needs no relation to the bootstrap ceiling.
+  // Single-digit-MB class: JSON expansion of a household at these caps stays well under the 1024 MB heap; an
+  // over-cap page compacts as a prefix and resumes next run.
   maxLogBytes: 8 * 1024 * 1024,
-  // Above maxMergedBytes with headroom (see that field's doc): a snapshot
-  // this compactor writes must still be re-readable by the next run's
-  // fetchSnapshot, which enforces this cap against the whole decompressed
-  // envelope, not just the aggregates the write-side estimate covers.
+  // Above maxMergedBytes with headroom: the next run fetchSnapshot enforces this cap against the whole envelope,
+  // not just the aggregates.
   maxSnapshotBytes: 12 * 1024 * 1024,
-  // Above the ~6.7 MiB uncompressed equivalent of the 5 MiB gzipped
-  // bootstrap ceiling (MAX_RESPONSE_BYTES ÷ the ~0.75 deflate ratio on
-  // base64 ciphertext), so nothing bootstrap can still serve is ever refused
-  // here — that refusal would be permanent — and below maxSnapshotBytes.
+  // Above the ~6.7 MiB uncompressed equivalent of the bootstrap ceiling, so nothing bootstrap can serve is refused
+  // (a permanent skip), and below maxSnapshotBytes.
   maxMergedBytes: 8 * 1024 * 1024,
   householdDeadlineMs: 90_000,
   runDeadlineMs: 270_000,
-  // >= householdDeadlineMs (see that field's doc) plus slack for the S3/
-  // Dynamo call in flight at the moment the deadline trips.
+  // At least householdDeadlineMs plus slack for the call in flight when the deadline trips.
   runDeadlineReserveMs: 100_000,
 };
 
-/**
- * Thrown by `fetchSnapshot` when the decompressed baseline exceeds
- * `budgets.maxSnapshotBytes` (node:zlib `ERR_BUFFER_TOO_LARGE`). A TRUE skip
- * — no correct snapshot can be written this run, and no amount of prefix
- * work fixes it — distinct from `fetchSnapshot`'s other errors, which stay
- * on the existing fail-closed "unreadable" path.
- */
+// Thrown by `fetchSnapshot` when the decompressed baseline exceeds `maxSnapshotBytes`: a true skip, since no prefix
+// work fixes it, unlike its other errors which take the fail-closed path.
 class SnapshotOversizedError extends Error {
   constructor(householdId: string, snapshotId: string, maxBytes: number) {
     super(
@@ -197,50 +122,31 @@ class SnapshotOversizedError extends Error {
 }
 
 /**
- * Thrown by `compactHousehold` for a TRUE skip forced by a safety budget —
- * an oversized baseline/merged result, or a read/time budget that left
- * nothing usable below the safety boundary. Distinct from the ordinary
- * `null` "nothing to compact" / lost-cursor-race outcomes, which are not
- * budget-related. `runOnce` catches this specifically to record the
- * household + cause in the run summary and continue — never an uncaught
- * throw that aborts the whole run. Exported so a test can assert on the
- * cause of a direct `compactHousehold` call without going through `runOnce`.
+ * Thrown by `compactHousehold` for a true skip forced by a safety budget; `runOnce` catches it to record the
+ * household and cause and continue. Exported so a test can assert the cause of a direct call.
  */
 export class CompactorBudgetSkipError extends Error {
   constructor(
     readonly householdId: string,
-    /** The budget cause (e.g. `baseline_oversized`) — named `budgetCause`,
-     *  not `cause`, to avoid colliding with `Error.prototype.cause`
-     *  (`ErrorOptions.cause`, TS lib es2022). */
+    /** The budget cause; named `budgetCause` to avoid colliding with `Error.prototype.cause`. */
     readonly budgetCause: string,
   ) {
     super(`Compactor budget skip for household ${householdId}: ${budgetCause}`);
   }
 }
 
-/**
- * Outcome of the verify-then-delete coverage sweep. `verified` is
- * the number of `sequenceId <= cutoff` rows inspected, `deleted` those the
- * snapshot covered (safe to reclaim), and `kept` the uncovered rows preserved
- * (a KSUID-disorder strand or a pre-existing latent orphan) — `kept > 0` drives
- * the `CompactorCoverageViolation` metric.
- */
+// Outcome of the verify-then-delete sweep: rows inspected, covered rows deleted, and uncovered rows kept (a
+// KSUID-disorder strand or a latent orphan); `kept > 0` drives the CompactorCoverageViolation metric.
 interface CoverageSweepResult {
   verified: number;
   deleted: number;
   kept: number;
 }
 
-// Safety margin for the compaction cutoff. KSUIDs are minted BEFORE
-// the push transaction commits and carry only 1-second timestamp
-// precision plus a random payload, so a racing in-flight push can commit
-// with a `sequenceId` BELOW rows that committed earlier. If such a row
-// landed below the cutoff it would be permanently excluded from
-// snapshots/pull/bootstrap and never deleted — an acknowledged write lost.
-// We therefore exclude from this run every row at or above a boundary
-// KSUID derived from `now - this margin`: rows OLDER than the margin
-// cannot have an uncommitted, lower-KSUID sibling still in flight (the
-// margin exceeds max plausible clock skew + transaction latency).
+// Safety margin for the cutoff: KSUIDs are minted before the push transaction commits with 1-second precision, so an
+// in-flight push can commit below rows that committed earlier. A row landing below the cutoff would be excluded from
+// snapshots, pull and bootstrap forever. Rows older than the margin (above clock skew plus transaction latency)
+// cannot have a lower-KSUID sibling still in flight, so every row at or above `now - margin` is excluded.
 const COMPACTION_SAFETY_MARGIN_MS = 60_000;
 
 @Injectable()
@@ -249,16 +155,11 @@ export class CompactorService {
   private readonly workspaceMetaTable: string;
   private readonly mutationLogTable: string;
   private readonly snapshotsBucket: string;
-  /**
-   * Deployment stack (`local` when unset), mirroring AuthEventsRepository.
-   * Drives the per-stack compactor EMF namespace
-   * (`Retivo/${stack}/Compactor`) so a dev compaction event can never
-   * trip a prod compactor alarm.
-   */
+  // Deployment stack (`local` when unset); scopes the EMF namespace so a dev compaction event cannot trip a prod
+  // alarm.
   private readonly stack: string;
 
-  /** Compaction safety budgets — see {@link CompactorBudgets}. Public and
-   *  mutable so a test can trip a budget with a handful of rows. */
+  /** Compaction safety budgets; public and mutable so a test can trip one with a few rows. */
   budgets: CompactorBudgets = DEFAULT_COMPACTOR_BUDGETS;
 
   constructor(
@@ -273,22 +174,15 @@ export class CompactorService {
   }
 
   /**
-   * @param remainingTimeMs The Lambda handler's `context.getRemainingTimeInMillis()`
-   *   at invocation, when running under Lambda (`compactor-lambda.ts`) — used
-   *   to derive the whole-run deadline. Falls back to
-   *   `budgets.runDeadlineMs` for local/test invocations that have no
-   *   Lambda context.
+   * @param remainingTimeMs The Lambda `getRemainingTimeInMillis()` at invocation, used to derive the run deadline;
+   * local and test invocations fall back to `budgets.runDeadlineMs`.
    */
   async runOnce(remainingTimeMs?: number): Promise<CompactorRunSummary> {
     const runStart = Date.now();
     const households = await this.listHouseholdIds();
-    // Fairness: a run-level deadline that cuts the loop short
-    // would otherwise always starve the same tail of households, because
-    // Scan order is stable. Start at a pseudo-random offset into the list
-    // and wrap. Chosen over a persisted least-recently-compacted ordering,
-    // which would cost a new WorkspaceMeta attribute plus one extra write
-    // per household per run for a property rotation already gives at this
-    // household count.
+    // Start at a pseudo-random offset and wrap: a run deadline cutting the loop short would otherwise always starve
+    // the same tail, since Scan order is stable. Rotation beats a persisted least-recently-compacted order, which
+    // would cost an attribute and a write per household per run.
     const offset =
       households.length > 0 ? Math.floor(Math.random() * households.length) : 0;
     const rotated = households.slice(offset).concat(households.slice(0, offset));
@@ -307,10 +201,8 @@ export class CompactorService {
       budgetLimitedHouseholdIds: [],
     };
     for (const householdId of rotated) {
-      // Run-level deadline: stop starting new households so the summary log
-      // still writes before Lambda freezes/kills the process. The remaining
-      // households are untouched (cursor unchanged) and are picked up by
-      // the rotation on a later run.
+      // Run deadline: stop starting households so the summary log writes before Lambda freezes; the rest are picked
+      // up by the rotation next run.
       if (Date.now() >= runDeadlineAt) break;
       try {
         const result = await this.compactHousehold(householdId);
@@ -323,8 +215,7 @@ export class CompactorService {
         }
       } catch (err) {
         if (err instanceof CompactorBudgetSkipError) {
-          // Already logged + metric-emitted inside compactHousehold — this
-          // is an intentional bounded skip, not a failure.
+          // Already logged and metric-emitted: an intentional bounded skip, not a failure.
           summary.householdsSkipped += 1;
           summary.budgetLimitedHouseholdIds.push(householdId);
           continue;
@@ -344,20 +235,7 @@ export class CompactorService {
     return summary;
   }
 
-  /**
-   * Returns the per-household metric (mutationsCompacted, snapshotBytes,
-   * durationMs) on success, or null when there is nothing to compact.
-   *
-   * Shape-limit exception (~200 lines vs the 60-line guidance, grown by the
-   * safety-budget and restore-epoch checks): the body
-   * is one read-meta → query-log(budgeted) → margin-filter → fetch-baseline
-   * (budgeted) → apply → write-snapshot(budgeted) → advance-cursor
-   * (epoch-pinned) → delete sequence whose steps are only correct as a unit
-   * — splitting it would fragment the consistency boundary the inline
-   * comments walk through without making any step independently reusable or
-   * testable. Each new budget check is a short, early-return/throw guard
-   * rather than added branching depth.
-   */
+  /** Returns the per-household metric on success, or null when there is nothing to compact. */
   async compactHousehold(
     householdId: string,
   ): Promise<CompactorHouseholdMetric | null> {
@@ -374,10 +252,8 @@ export class CompactorService {
     );
     if (allRecent.length === 0) return null;
 
-    // Safety margin: drop every row at or above the boundary KSUID
-    // (now - margin, zero payload) so an in-flight push that commits with
-    // a lower KSUID than an already-committed sibling can never land below
-    // the cutoff. Rows older than the margin are safe to compact.
+    // Drop every row at or above the boundary KSUID (now - margin) so a racing in-flight push with a lower KSUID
+    // cannot land below the cutoff.
     const boundary = KSUID.fromParts(
       Date.now() - COMPACTION_SAFETY_MARGIN_MS,
       Buffer.alloc(16),
@@ -385,9 +261,8 @@ export class CompactorService {
     const recent = allRecent.filter((r) => r.sequenceId < boundary);
     if (recent.length === 0) {
       if (budgetTripped) {
-        // A read/time budget cut the page short AND nothing it read survived
-        // the safety margin — no correct partial snapshot can be written this
-        // run (a true skip, not the ordinary "nothing new yet" no-op below).
+        // A read or time budget cut the page short and nothing survived the margin: a true skip, not the ordinary no-op
+        // below.
         this.emitBudgetLimitedMetric();
         this.logger.log({
           'metric.kind': 'compactor_budget',
@@ -398,19 +273,14 @@ export class CompactorService {
         });
         throw new CompactorBudgetSkipError(householdId, 'read_budget_no_usable_rows');
       }
-      // Nothing safely outside the margin yet — skip this run; the next
-      // hourly run picks these rows up once they age past the boundary.
+      // Nothing safely outside the margin yet; the next hourly run picks these rows up.
       return null;
     }
 
     const cutoff = recent[recent.length - 1].sequenceId;
 
-    // Household deadline, checked again here: `queryAllSince`
-    // only bounds the read phase above. A household whose read alone filled
-    // the whole budget must not go on to fetchSnapshot/merge/write/delete —
-    // none of that is deadline-aware, so it could otherwise run the process
-    // past the run deadline's reserve and starve every later household.
-    // Nothing has been written yet, so this is a clean TRUE skip.
+    // Re-check the household deadline: `queryAllSince` only bounds the read phase, and none of fetch, merge, write
+    // or delete is deadline-aware. Nothing has been written yet, so this is a clean true skip.
     if (Date.now() >= householdDeadlineAt) {
       this.emitBudgetLimitedMetric();
       this.logger.log({
@@ -423,10 +293,8 @@ export class CompactorService {
       throw new CompactorBudgetSkipError(householdId, 'household_deadline_before_write');
     }
 
-    // Load existing snapshot (if any), apply the recent mutations. An
-    // oversized baseline is a TRUE skip — no correct snapshot can be written
-    // this run, and no amount of prefix work fixes it (unlike a read-budget
-    // trip, which compacts what it has).
+    // An oversized baseline is a true skip: no prefix work fixes it, unlike a read-budget trip, which compacts what
+    // it has.
     let baseline: SnapshotAggregate[];
     try {
       baseline = await this.fetchSnapshot(
@@ -450,20 +318,14 @@ export class CompactorService {
     }
     const merged = this.applyMutations(baseline, recent);
 
-    // Estimate the merged snapshot's byte size from its parts BEFORE paying
-    // for one giant JSON.stringify of the whole envelope: an oversized merge
-    // is then a TRUE skip that never materializes the full body string in
-    // the first place, rather than allocating it only to discover the cap
-    // was already blown. Slightly under-counts the envelope's own
-    // boilerplate (householdId/generatedAt/cutoff), which is negligible next
-    // to the aggregate payloads it's dominated by.
+    // Estimate the merged size from its parts before one giant JSON.stringify, so an oversized merge is a true skip
+    // that never materializes the full string. It under-counts the envelope boilerplate, which is negligible.
     let estimatedMergedBytes = 0;
     for (const a of merged) {
       estimatedMergedBytes += Buffer.byteLength(JSON.stringify(a), 'utf8');
     }
     if (estimatedMergedBytes > this.budgets.maxMergedBytes) {
-      // Also a TRUE skip: writing an over-cap snapshot would only move the
-      // problem into S3 and the next bootstrap read.
+      // Also a true skip: writing an over-cap snapshot would only move the problem into S3 and the next bootstrap read.
       this.emitBudgetLimitedMetric();
       this.logger.log({
         'metric.kind': 'compactor_budget',
@@ -475,12 +337,9 @@ export class CompactorService {
       throw new CompactorBudgetSkipError(householdId, 'merged_oversized');
     }
 
-    // Household deadline, checked again here: fetchSnapshot's
-    // S3 read + gunzip and the in-memory merge above are not themselves
-    // deadline-aware, so a slow baseline could otherwise carry this pass
-    // straight through the S3 write / cursor flip with no budget left for
-    // the delete sweep (or for the households still waiting behind this
-    // one). Nothing has been written yet, so this is a clean TRUE skip.
+    // Re-check the household deadline: the S3 read, gunzip and merge are not deadline-aware, and a slow baseline
+    // could otherwise carry this pass through the write and cursor flip with no budget left for the delete sweep.
+    // Nothing has been written yet.
     if (Date.now() >= householdDeadlineAt) {
       this.emitBudgetLimitedMetric();
       this.logger.log({
@@ -493,7 +352,6 @@ export class CompactorService {
       throw new CompactorBudgetSkipError(householdId, 'household_deadline_before_upload');
     }
 
-    // Write the new snapshot.
     const newSnapshotId = new Date().toISOString().replace(/[:.]/g, '-');
     const body = JSON.stringify({
       householdId,
@@ -512,14 +370,9 @@ export class CompactorService {
       }),
     );
 
-    // Atomically advance the cursor; abort if someone else moved it
-    // (another compactor run, or a concurrent migration) OR if the restore
-    // epoch observed at the top of this pass has since changed — a
-    // restore/clear bumps it BEFORE its sweep, so a same-cutoff restore that
-    // lands mid-pass (the cursor alone would look unchanged) still aborts
-    // this update. `attribute_not_exists(restoreEpoch)` is a distinct pinned
-    // state (legacy rows, or rows never restored) mirrored from the existing
-    // cursor condition's absent-value handling.
+    // Advance the cursor atomically, aborting if another run moved it or the restore epoch observed at the top of the
+    // pass changed: a restore bumps it before its sweep, so a same-cutoff restore mid-pass (cursor unchanged) still
+    // aborts. An absent `restoreEpoch` is a distinct pinned state (legacy or never restored).
     const epochCondition =
       meta.restoreEpoch === undefined
         ? 'attribute_not_exists(restoreEpoch)'
@@ -556,15 +409,10 @@ export class CompactorService {
       throw err;
     }
 
-    // Verify-then-delete of consumed + stray mutation log entries.
-    // The coverage map is the max version durably reachable per aggregate in
-    // the snapshot just written; the sweep deletes a row only when its
-    // aggregate's snapshot version covers the row's version, so an uncovered
-    // strand/orphan is kept rather than lost. This needs no NEW guard for the
-    // restore race: it deletes only rows the snapshot just written
-    // covers, and that snapshot could only be written because the cursor
-    // UpdateCommand above already passed its epoch-pinned condition — a
-    // post-restore interleaving is already caught there, before this runs.
+    // Verify-then-delete: the coverage map is the max version durably reachable per aggregate in the snapshot just
+    // written, and a row is deleted only when that covers its version, so an uncovered strand or orphan is kept. No
+    // extra restore guard is needed: the snapshot could only be written because the cursor update already passed its
+    // epoch-pinned condition.
     const coverageByAggregate = new Map(merged.map((a) => [a.id, a.version]));
     const sweep = await this.deleteUpToCutoff(
       householdId,
@@ -617,13 +465,8 @@ export class CompactorService {
   }
 
   private async listHouseholdIds(): Promise<string[]> {
-    // WorkspaceMeta holds one row per household and this Scan projects only
-    // the key, so the hourly enumeration reads one 1 MB page per ~thousands of
-    // rows and its cost tracks that row count, nothing else.
-    // Who revisits: the operator. Revisit trigger: the enumeration needs more
-    // than a page or two, or it shows up in the compactor's run time — a
-    // per-active-household trigger (DynamoDB Streams → EventBridge) is the
-    // natural next step.
+    // One key-only Scan page per few thousand households; the cost tracks that row count only. Revisit if the
+    // enumeration needs more than a page or two (a per-active-household DynamoDB Streams trigger is the next step).
     const out: string[] = [];
     let key: Record<string, unknown> | undefined;
     do {
@@ -643,14 +486,9 @@ export class CompactorService {
     return out;
   }
 
-  /**
-   * Pages `MutationLog` since `since`, stopping — mid-page, not after a full
-   * read — once either the row count or the accumulated payload-byte count
-   * trips `budgets`, or the household's wall-clock deadline passes. Trimming
-   * after a full read would defeat the purpose: the unbounded
-   * version of this loop is what let one household's oversized log OOM the
-   * process and starve every household after it in stable Scan order.
-   */
+  // Pages MutationLog since `since`, stopping mid-page once the row count or payload-byte budget trips or the
+  // household deadline passes. Trimming after a full read would defeat the purpose: the unbounded loop let one
+  // oversized log OOM the process and starve every later household.
   private async queryAllSince(
     householdId: string,
     since: string,
@@ -705,23 +543,15 @@ export class CompactorService {
       ) as { aggregates: SnapshotAggregate[] };
       return parsed.aggregates ?? [];
     } catch (err) {
-      // Size budget: the decompressed baseline exceeds the safety cap (node:zlib
-      // throws ERR_BUFFER_TOO_LARGE at maxOutputLength). Distinct from every
-      // branch below — an oversized baseline is not "unreadable", it's a
-      // TRUE skip the caller decides on, so propagate a distinguishable
-      // error rather than the fail-closed path.
+      // The decompressed baseline exceeds the safety cap: a true skip the caller decides on, so propagate a
+      // distinguishable error rather than the fail-closed path.
       if ((err as { code?: string })?.code === 'ERR_BUFFER_TOO_LARGE') {
         throw new SnapshotOversizedError(householdId, snapshotId, maxDecompressedBytes);
       }
-      // Fail-closed snapshot read. Only a genuine object-miss
-      // (`NoSuchKey`) is the soft case → empty baseline; the WorkspaceMeta
-      // pointer can legitimately reference a key the janitor already swept
-      // (the next compaction rewrites it). Any OTHER error (S3 5xx,
-      // `NoSuchBucket`, truncated body, gunzip / JSON failure) means the
-      // baseline is unreadable, NOT empty — compacting against an empty
-      // baseline would silently drop every aggregate the snapshot held. Log
-      // with structured context, emit a CloudWatch metric, and re-throw so the
-      // outer per-household try-catch skips this household and continues.
+      // Fail-closed read: only NoSuchKey is soft (the pointer can reference a key the janitor already swept; the next
+      // compaction rewrites it). Any other error means the baseline is unreadable, not empty, and compacting against an
+      // empty one would drop every aggregate it held. Log, emit a metric and rethrow so the per-household catch skips
+      // this household.
       const name = (err as { name?: string })?.name;
       if (name === 'NoSuchKey') return [];
       this.logger.error({
@@ -738,15 +568,8 @@ export class CompactorService {
     }
   }
 
-  /**
-   * Emit a `CompactorSnapshotReadError` CloudWatch metric via Embedded Metric
-   * Format: write a single EMF JSON line to stdout; CloudWatch Logs
-   * auto-extracts the metric (zero IAM / infra change). `householdId` is a
-   * high-cardinality field — it stays in the structured log record above, NOT
-   * as a metric dimension, so the metric carries no custom dimensions.
-   * Namespace is per-stack (`Retivo/${stack}/Compactor`) so a dev
-   * compaction event cannot trip a prod alarm.
-   */
+  // `householdId` stays in the structured log, not a metric dimension. The namespace is per-stack, so a dev event cannot
+  // trip a prod alarm.
   private emitSnapshotReadErrorMetric(): void {
     const emf = {
       _aws: {
@@ -764,18 +587,7 @@ export class CompactorService {
     this.writeEmfLine(emf, 'CompactorSnapshotReadError');
   }
 
-  /**
-   * Emit a `CompactorCoverageViolation` CloudWatch metric via EMF,
-   * mirroring {@link emitSnapshotReadErrorMetric}: a single EMF JSON line to
-   * stdout, auto-extracted by CloudWatch Logs — zero IAM / infra change. The
-   * metric VALUE is the count of uncovered rows KEPT this run (rows the
-   * just-written snapshot does not cover at their version). `householdId` stays
-   * a high-cardinality field in the structured `compactor_coverage` log record,
-   * NOT a metric dimension, so the metric carries no custom dimensions.
-   * Namespace is per-stack (`Retivo/${stack}/Compactor`) so a dev
-   * coverage violation cannot trip a prod alarm. Alarmed in
-   * `infrastructure/src/monitoring.ts`.
-   */
+  // The value is the count of uncovered rows kept this run. Alarmed in `infrastructure/src/monitoring.ts`.
   private emitCoverageViolationMetric(keptCount: number): void {
     const emf = {
       _aws: {
@@ -793,18 +605,8 @@ export class CompactorService {
     this.writeEmfLine(emf, 'CompactorCoverageViolation');
   }
 
-  /**
-   * Emit a `CompactorBudgetLimited` CloudWatch metric via EMF,
-   * mirroring {@link emitSnapshotReadErrorMetric}: a single EMF JSON line to
-   * stdout, auto-extracted by CloudWatch Logs. Covers every budget outcome
-   * (a bounded prefix compaction or a true skip) — the cause distinguishing
-   * them stays in the structured `compactor_budget` log line, NOT a metric
-   * dimension, so a repeat occurrence for the SAME household across
-   * runs (the alarm's real signal — a household not draining) is visible
-   * regardless of which specific budget tripped. Namespace is per-stack
-   * (`Retivo/${stack}/Compactor`). Alarmed in
-   * `infrastructure/src/monitoring.ts`.
-   */
+  // The cause stays in the `compactor_budget` log, so a household that repeatedly fails to drain shows whichever budget
+  // tripped. Alarmed in `infrastructure/src/monitoring.ts`.
   private emitBudgetLimitedMetric(): void {
     const emf = {
       _aws: {
@@ -822,15 +624,8 @@ export class CompactorService {
     this.writeEmfLine(emf, 'CompactorBudgetLimited');
   }
 
-  /**
-   * Write one EMF JSON line to stdout with a synchronous fd-1 write
-   * (`fs.writeSync`), NOT `process.stdout.write`. Under Lambda's
-   * freeze-after-return model an async stdout write issued near the end of an
-   * invocation can sit unflushed in Node's userland pipe buffer and vanish on
-   * freeze — the exact loss the operational-metrics.ts writer avoids.
-   * `writeSync` hands the bytes to the OS before returning; a failed write must
-   * never abort compaction, so it is swallowed with a PII-free breadcrumb.
-   */
+  // Writes one EMF line with a synchronous fd-1 write, not `process.stdout.write`: under Lambda freeze an async write
+  // can sit unflushed and vanish. A failed write never aborts compaction.
   private writeEmfLine(emf: unknown, metricName: string): void {
     try {
       fs.writeSync(1, `${JSON.stringify(emf)}\n`);
@@ -855,11 +650,8 @@ export class CompactorService {
         updatedAt: new Date(m.timestamp).toISOString(),
         deviceId: m.deviceId,
         aggregateType: m.aggregateType,
-        // An encrypted payload is a COMPLETE aggregate payload,
-        // not a patch — REPLACE the snapshot payload entirely.
-        // Spread-merging an opaque envelope would blend old + new ciphertext/
-        // nonce/keyId fields and corrupt it. Legacy plaintext payloads keep the
-        // historical spread-merge (mutation patches over the snapshot).
+        // An encrypted payload is a complete aggregate, not a patch: replace the snapshot payload, since spreading an
+        // opaque envelope would blend old and new ciphertext fields. Legacy plaintext payloads keep the spread-merge.
         payload: isStrictEncryptedEnvelope(payload)
           ? payload
           : { ...(existing?.payload ?? {}), ...payload },
@@ -876,33 +668,17 @@ export class CompactorService {
     coverageByAggregate: Map<string, number>,
     householdDeadlineAt: number,
   ): Promise<CoverageSweepResult> {
-    // Verify-then-delete coverage enforcement. Query EVERY row
-    // with `sequenceId <= cutoff` from the start of the partition (both the
-    // rows folded into this snapshot AND any stray a crash between the cursor
-    // bump and the delete left behind), then delete ONLY the rows the snapshot
-    // just written COVERS — its merged version for that aggregate is >= the
-    // row's version. The previous delete-on-sight assumed every `<= cutoff` row
-    // was already invisible/covered; that is FALSE for a KSUID-disorder strand
-    // (a row that committed below an already-taken cutoff and was never read
-    // into any snapshot) or a pre-existing latent orphan. An uncovered row is
-    // KEPT — never deleted, so an acknowledged-but-unsnapshotted write can
-    // never be destroyed — and reported via the `CompactorCoverageViolation`
-    // metric + the per-run summary, then re-checked next run (no auto-repair).
-    // The already-covered strays a healthy self-heal used to sweep are still
-    // deleted, so a healthy run is byte-identical. Projection now includes
-    // `aggregateId` + `version` (aliased — `version` is a DynamoDB reserved
-    // word) so the in-memory comparison has its inputs.
+    // Query every row with `sequenceId <= cutoff` (the folded rows and any stray a crash left after the cursor bump),
+    // and delete only rows the snapshot covers: a KSUID-disorder strand or latent orphan was never read into any
+    // snapshot, so it is kept, reported through the CompactorCoverageViolation metric and re-checked next run. The
+    // projection includes `aggregateId` and `version` (aliased: a reserved word).
     let lastKey: Record<string, unknown> | undefined;
     let verified = 0;
     let deleted = 0;
     let kept = 0;
     do {
-      // Household deadline: the cursor already advanced above,
-      // so stopping the sweep early here is safe — the not-yet-verified
-      // covered rows are strays that stay in MutationLog and get re-verified
-      // (and deleted) by the next run, not lost data. Without this check a
-      // household with a large pre-cursor backlog (e.g. left by an earlier
-      // crash) can page through hundreds of BatchWrites with no time bound.
+      // The cursor already advanced, so stopping early is safe: unverified covered rows stay and are re-verified next
+      // run.
       if (Date.now() >= householdDeadlineAt) break;
       const page = await this.doc.send(
         new QueryCommand({
@@ -924,14 +700,8 @@ export class CompactorService {
         return snapshotVersion !== undefined && snapshotVersion >= row.version;
       });
       kept += items.length - covered.length;
-      // Household deadline, re-checked between batches: a page
-      // can hold far more than 25 covered rows (the projection is key-only,
-      // so a single ~1 MB page can carry thousands), and none of those
-      // BatchWriteCommand round trips were previously deadline-aware. `deleted`
-      // is counted per batch as it actually sends, not for the whole `covered`
-      // set up front, so a mid-page break never over-reports rows this run
-      // didn't get to delete — those rows are still `<= cutoff` and covered,
-      // so the next run's verify-then-delete pass finds and deletes them.
+      // Re-check the deadline between batches (a key-only page can carry thousands of rows). `deleted` counts per
+      // batch actually sent, so a mid-page break never over-reports.
       let deadlineHit = false;
       for (let i = 0; i < covered.length; i += 25) {
         if (Date.now() >= householdDeadlineAt) {
@@ -965,7 +735,3 @@ function safeParse(s: string): Record<string, unknown> {
     return {};
   }
 }
-
-// Surface the AggregateVersion type so a future per-household reset
-// (e.g. delete-then-recreate from snapshot) has access to it without
-// re-declaring.

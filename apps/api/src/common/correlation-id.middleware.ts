@@ -1,12 +1,5 @@
-/**
- * Correlation ID middleware.
- *
- * Generates a unique `x-correlation-id` on every request and propagates it
- * to the response headers so that logs can be correlated across services.
- * If the client already sent one (e.g. from a gateway), we reuse it — but
- * only when it matches the canonical UUID v1-5 shape. An unsanitised value
- * would flow into Pino logs (log forging) and echo back on every response.
- */
+// Sets `x-correlation-id` on every request and response. A client-sent id is reused only if it is a canonical UUID, since an
+// unsanitised value would flow into the logs (log forging) and echo back.
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';

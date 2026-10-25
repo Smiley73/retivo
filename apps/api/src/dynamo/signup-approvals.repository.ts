@@ -1,16 +1,5 @@
-/**
- * Read/write surface for the SignupApproval table. Mirrors the
- * EmailVerificationsRepository shape — the PK is the key, no GSI; the
- * cleanup paths (DELETE /auth/account, the cascade Lambda, and the
- * lazy signup-recycle in SignupService) read by primary key.
- *
- * Hashed key at rest: the
- * `approvalToken` PK is the SHA-256 digest of the raw approval token, never the
- * raw token itself — `SignupApprovalService` hashes at its boundary before
- * insert/lookup/delete, so this repository only ever handles digests (a raw
- * token never reaches it or its logs). Every `token` parameter below is that
- * already-hashed key.
- */
+// Read/write surface for the SignupApproval table (PK is the approval token, no GSI). The PK is the SHA-256 digest of the raw token,
+// hashed by SignupApprovalService, so a raw token never reaches this repo or its logs.
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -61,10 +50,8 @@ export class SignupApprovalsRepository extends BaseRepository {
   }
 
   /**
-   * Sweep every approval row for a user. Used by the account-deletion
-   * cascade and the signup-recycle path so a stale row doesn't outlive
-   * the user it gates. Volume is small (one active row per pending user)
-   * and this only runs on cleanup paths.
+   * Sweeps every approval row for a user on cleanup paths (account-deletion cascade, signup recycle), so a stale row
+   * does not outlive the user it gates.
    */
   async deleteAllForUser(userId: string): Promise<void> {
     let lastKey: Record<string, unknown> | undefined;
@@ -88,10 +75,7 @@ export class SignupApprovalsRepository extends BaseRepository {
   }
 
   /**
-   * Every approval row for a user, WHOLE — the table
-   * PK is the hashed approval token (no GSI on userId), so this Scans with a
-   * filter, mirroring {@link deleteAllForUser}. Volume is small (one active
-   * row per pending user).
+   * Every approval row for a user, whole; the PK is the hashed token (no GSI on userId), so this Scans with a filter.
    */
   async listForUser(userId: string): Promise<SignupApprovalRow[]> {
     const out: SignupApprovalRow[] = [];

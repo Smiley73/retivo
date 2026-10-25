@@ -1,15 +1,5 @@
-/**
- * Sync pull. Range-queries MutationLog from the supplied cursor and
- * returns at most 100 mutations per page. Cursor is the last
- * sequenceId returned (KSUID); next call passes that as `since`.
- *
- * Cursor expiry: the compactor stamps `mutationLogCursorBase` on
- * WorkspaceMeta after every cursor-bound delete sweep — anything ≤ that
- * KSUID has been rolled into a snapshot and purged from MutationLog.
- * If the caller's `since` predates that watermark, an incremental pull
- * would silently miss data, so we throw `CURSOR_EXPIRED` (409) and let
- * the client auto-bootstrap to recover.
- */
+// Sync pull: range-queries MutationLog from the cursor, 100 per page. A `since` below `mutationLogCursorBase` throws
+// CURSOR_EXPIRED (409), since an incremental pull would silently miss compacted data.
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import type { PullResponseBody } from '@retirement/contracts';
 import { MutationLogRepository } from '../dynamo/mutation-log.repository.js';
@@ -43,10 +33,7 @@ export class PullService {
     const meta = await this.workspaceMeta.find(householdId);
     const watermark = meta?.mutationLogCursorBase ?? null;
     if (watermark && since < watermark) {
-      // KSUID strings are lexicographically sortable, so a string `<`
-      // is a valid sequence compare. A `null` watermark means no
-      // compaction has happened yet — the full log is still live, so
-      // any cursor (including '0') is in range.
+      // KSUID strings sort lexically, so string `<` compares them. A null watermark means nothing was compacted, so any cursor is in range.
       throw new ConflictException({
         code: 'CURSOR_EXPIRED',
         message:
@@ -54,9 +41,7 @@ export class PullService {
       });
     }
     const result = await this.log.pageSince(householdId, since, PAGE_LIMIT);
-    // Egress filter for retired aggregate types (see aggregate-types.ts).
-    // Cursor still advances on filtered rows so a retired-type backlog
-    // doesn't stall sync; we just don't ship the rows.
+    // The cursor advances past retired-type rows so a backlog of them cannot stall sync.
     const changes: PulledMutation[] = [];
     for (const row of result.items) {
       if (!isActiveAggregateType(row.aggregateType)) {
@@ -71,7 +56,6 @@ export class PullService {
       changes,
       newCursor: result.lastSequenceId ?? since,
       hasMore: result.hasMore,
-      // Echo the opaque freshness head when one is stored.
       ...(meta?.freshnessCounter !== undefined
         ? {
             freshnessHead: {

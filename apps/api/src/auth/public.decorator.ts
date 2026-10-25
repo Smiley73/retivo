@@ -1,8 +1,4 @@
-/**
- * Marks a handler (or controller) as publicly reachable - both the global
- * JwtAuthGuard and RolesGuard bypass it. Use sparingly; every non-public
- * route must be protected by default.
- */
+// Marks a handler or controller as publicly reachable (bypassing JwtAuthGuard); use sparingly, since every route is protected by default.
 import { SetMetadata } from '@nestjs/common';
 
 export const IS_PUBLIC_KEY = 'isPublic';

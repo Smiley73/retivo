@@ -1,12 +1,5 @@
-/**
- * Janitor module. Source of truth for the daily snapshot retention
- * pass. Imported by `AppModule` (tests / ad-hoc invocation) and by
- * `JanitorLambdaModule` (the standalone Lambda boot).
- *
- * Stays lean: no `ConfigModule.forRoot` here — the standalone-bootstrap
- * concern lives in `JanitorLambdaModule` so AppModule's existing
- * global ConfigModule registration isn't double-loaded.
- */
+// Janitor module, the source of truth for the daily snapshot retention pass, imported by AppModule and JanitorLambdaModule; it has
+// no ConfigModule.forRoot.
 import { Module } from '@nestjs/common';
 import { AwsModule } from '../aws/aws.module.js';
 import { JanitorService } from './janitor.service.js';

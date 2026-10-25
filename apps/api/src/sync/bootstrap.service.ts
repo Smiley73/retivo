@@ -1,12 +1,5 @@
-/**
- * Bootstrap returns the latest workspace snapshot from S3 plus all
- * post-snapshot mutations from MutationLog, merged into a single
- * round-trip.
- *
- * Until the compactor has written a snapshot to S3, `latestSnapshotId` is
- * null and bootstrap returns an empty snapshot + the entire mutation
- * log (which is fine at single-household scale during development).
- */
+// Bootstrap: the latest S3 snapshot plus every later MutationLog mutation in one round-trip.
+// Before the compactor writes a snapshot it returns an empty snapshot and the whole log.
 import {
   Injectable,
   Logger,
@@ -34,11 +27,7 @@ interface BootstrapResponse {
   postSnapshotMutations: PulledMutation[];
   syncCursor: string;
   timestamp: string;
-  /**
-   * The stored zero-knowledge freshness head, echoed
-   * opaquely so the client can verify the MAC + set its initial pin.
-   * Omitted when no head has been stored yet.
-   */
+  /** The stored freshness head, echoed opaquely; omitted until one has been stored. */
   freshnessHead?: { freshnessCounter: number; cursorTag: string } | null;
 }
 
@@ -65,9 +54,7 @@ export class BootstrapService {
       meta.latestSnapshotId,
     );
     const snapshotRaw = fetched?.aggregates ?? [];
-    // Drop snapshot rows for retired aggregate types — see aggregate-types.ts.
-    // The snapshot is a frozen JSON in S3, so a retired type can survive
-    // there until the next compaction even after MutationLog is purged.
+    // A frozen snapshot can still carry a retired aggregate type until the next compaction.
     const snapshot = snapshotRaw.filter((a) => {
       if (isActiveAggregateType(a.aggregateType)) return true;
       this.logger.warn(
@@ -90,7 +77,6 @@ export class BootstrapService {
       postSnapshotMutations: changes,
       syncCursor,
       timestamp: new Date().toISOString(),
-      // Echo the opaque freshness head when one is stored.
       ...(meta.freshnessCounter !== undefined
         ? {
             freshnessHead: {
@@ -105,23 +91,12 @@ export class BootstrapService {
     return response;
   }
 
-  /**
-   * Incident-context log (householdId only — safe) for an explicit client
-   * `force=true`, so forced bootstraps still show up in the logs. Extracted
-   * from `bootstrap()` to keep it within the function-shape limit.
-   */
+  // Logs householdId only, so forced bootstraps stay visible in the logs.
   private logForcedRequest(householdId: string): void {
     this.logger.log('Forced bootstrap requested', { householdId });
   }
 
-  /**
-   * Replay every mutation since the snapshot's cursor. The cursor advances
-   * past filtered rows so retired-type rows don't get refetched on every
-   * bootstrap; only the row body is suppressed. Returns the replayed changes
-   * plus the cursor the client should resume from. Extracted from
-   * `bootstrap()` to keep it within the function-shape limit; behavior is
-   * unchanged.
-   */
+  // The cursor advances past filtered retired-type rows so they are not refetched on every bootstrap.
   private async collectPostSnapshotMutations(
     householdId: string,
     latestSnapshotCursor: string | null | undefined,
@@ -157,15 +132,7 @@ export class BootstrapService {
     return { changes, syncCursor: sawAnyRow ? cursor : since };
   }
 
-  /**
-   * Enforce the 5 MB compressed cap on the ACTUAL gzipped size, not an
-   * uncompressed-byte estimate. Every payload is incompressible
-   * ciphertext, so the old `uncompressed > 5MB × 4` allowance
-   * (which assumed ~4:1 gzip on JSON) silently raised the 5 MB
-   * compressed cap to ~20 MB. Bootstrap is throttled at 30/hr, so the gzip
-   * CPU cost here is acceptable. Extracted from `bootstrap()` to keep it
-   * within the function-shape limit; behavior is unchanged.
-   */
+  // Measures the actual gzipped size: payloads are incompressible ciphertext, so an uncompressed-size allowance would let ~20 MB through the 5 MB cap.
   private assertWithinResponseCap(response: BootstrapResponse): void {
     const gzippedBytes = gzipSync(
       Buffer.from(JSON.stringify(response), 'utf8'),

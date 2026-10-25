@@ -15,10 +15,7 @@ import { BaseRepository } from './base.repository.js';
 import { runTransactWrite, type TransactItem } from './transact-write.js';
 import type { UserRow } from './types.js';
 
-/**
- * Thrown inside `consumeFactorUndo`'s transaction callback when the
- * single-use condition fails, and caught there — never escapes the method.
- */
+// Thrown inside consumeFactorUndo transaction callback when the single-use condition fails; caught there.
 class FactorUndoConditionFailed extends Error {
   constructor() {
     super('Factor-undo token is no longer the active one');
@@ -26,14 +23,8 @@ class FactorUndoConditionFailed extends Error {
   }
 }
 
-/**
- * The account session-generation write-authority condition — mirrors `credentials.repository.ts`'s
- * `REVISION_CONDITION_EXPRESSION` shape: `expectedGeneration` must equal the
- * row's CURRENT `sessionGeneration`, or the row must carry none AND
- * `expectedGeneration` be `0` (no revocation has ever happened for this
- * account). Shared by the ConditionCheck-only variant (issuance/rotation)
- * and the bump (account-wide revoke) below.
- */
+// Session-generation write-authority condition: `expectedGeneration` must equal the row current `sessionGeneration`,
+// or the row must carry none and `expectedGeneration` be 0.
 const SESSION_GENERATION_CONDITION_EXPRESSION =
   '(attribute_exists(sessionGeneration) AND sessionGeneration = :expectedGeneration) OR ' +
   '(attribute_not_exists(sessionGeneration) AND :expectedGeneration = :zeroGeneration)';
@@ -55,21 +46,10 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Strongly-consistent variant of {@link findById}. Callers that treat
-   * a null result as an authoritative "user is gone" decision must not act on
-   * an eventually-consistent replica's stale miss: `SignupApprovalService.decline`
-   * early-exits (deleting the approval token OUTSIDE the atomic cascade) when the
-   * user reads null, so a stale null there would strand the pending
-   * User/Credential/EmailReservation rows with no approval row left to retry
-   * decline/approve through and no TTL-cascade trigger — a permanent orphan. A
-   * `ConsistentRead` GetItem closes that window; the ~2x RCU cost is negligible
-   * at this table's traffic. Also the read that PINS a session generation at
-   * sign-in (`LoginService.login`, `PasskeyController.authenticateFinish`): the
-   * `EmailIndex` GSI image and a default replica read can both still hold a
-   * generation an account-wide revoke seconds earlier already retired, and
-   * stamping that stale value fails issuance's generation `ConditionCheck`
-   * for a legitimate sign-in. Every other {@link findById} caller stays on
-   * the cheaper default read.
+   * Strongly consistent `findById`. Needed where a stale null would be acted on: `SignupApprovalService.decline`
+   * early-exits on a null user and would strand the pending rows with no retry path, and sign-in pins the session
+   * generation, which a replica or the EmailIndex GSI can still hold after an account-wide revoke retired it, failing
+   * the issuance ConditionCheck for a legitimate sign-in.
    */
   async findByIdConsistent(userId: string): Promise<UserRow | null> {
     const r = await this.doc.send(
@@ -83,10 +63,8 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * True iff the user table has at least one row. Drives the first-run
-   * "no users yet -> /signup" redirect on the web root. Scan with Limit 1
-   * is O(1) for the empty case and bounded by Scan's per-segment work
-   * for the populated case; rate-limited at the controller.
+   * True iff the user table has at least one row; drives the first-run redirect to /signup. Scan with Limit 1,
+   * rate-limited at the controller.
    */
   async hasAnyUser(): Promise<boolean> {
     const r = await this.doc.send(
@@ -112,12 +90,7 @@ export class UsersRepository extends BaseRepository {
     return ((r.Items?.[0] as UserRow | undefined) ?? null);
   }
 
-  /**
-   * Mark a user as email-verified. Idempotent: setting `emailVerifiedAt`
-   * on an already-verified user just updates the timestamp. Clears every
-   * unverified-signup tracking field in the same call so a verified row
-   * carries no resend / expiry state.
-   */
+  /** Marks a user email-verified (idempotent) and clears every unverified-signup tracking field in the same call. */
   async markEmailVerified(userId: string, at: string): Promise<void> {
     await this.doc.send(
       new UpdateCommand({
@@ -132,23 +105,13 @@ export class UsersRepository extends BaseRepository {
     );
   }
 
-  /**
-   * Persist resend bookkeeping in a single update: rotates the active
-   * verification token, advances the cooldown anchor + daily counter,
-   * and extends the signup-expiry window. Caller has already validated
-   * that the cooldown / cap permits a new send.
-   */
   async deleteByUserId(userId: string): Promise<void> {
     await this.doc.send(
       new DeleteCommand({ TableName: this.tableName, Key: { userId } }),
     );
   }
 
-  /**
-   * Flip the approval gate. Used by the owner-approval endpoint and the
-   * cascade Lambda's idempotency check. Idempotent: re-applying the same
-   * status is a no-op other than the `updatedAt` bump.
-   */
+  /** Flips the approval gate; idempotent apart from the `updatedAt` bump. */
   async setApprovalStatus(
     userId: string,
     status: 'auto_approved' | 'pending' | 'approved' | 'declined',
@@ -167,9 +130,8 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Stamp the rotated verification-token handle + resend bookkeeping on the
-   * User row. `newToken` is the SHA-256 hash of the raw token — the
-   * caller hashes at the service boundary; this repo stores the value verbatim.
+   * Stamps the rotated verification-token handle and resend bookkeeping. `newToken` is the SHA-256 hash; the caller
+   * hashes at the service boundary and this repo stores it verbatim.
    */
   async applyVerificationSend(args: {
     userId: string;
@@ -202,28 +164,11 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Persist password-reset request bookkeeping in a single update:
-   * stamps the active reset token (so the consume can pin
-   * `currentResetToken == :presentedToken` and so account deletion can
-   * sweep the row), advances the cooldown anchor + daily counter. Mirrors
-   * {@link applyVerificationSend}. `newToken` is the SHA-256 hash of the raw
-   * token — the caller hashes at the service boundary; this repo
-   * stores it verbatim, so the consume-side `currentResetToken == :tok`
-   * compares hash-to-hash. The request transaction in
-   * PasswordResetService bundles the new PasswordReset Put with this
-   * User update so the mail only fires after the write commits.
-   *
-   * Concurrency (CODING_STANDARDS "Check-and-mutate requires a
-   * transaction"): the handler reads the rate-limit state
-   * (`lastResetSentAt` / `resetsSentDayKey` / `resetsSentToday`) before
-   * deciding to send. To close the read-then-write TOCTOU — two concurrent
-   * requests both passing the cooldown / daily-cap pre-check and both
-   * committing — `observed` carries the exact rate-limit values the handler
-   * read, and we condition the write on those still being current. A losing
-   * concurrent request fails the condition, aborts the whole transaction
-   * (`TransactionCanceledException`), and the service maps it to the same
-   * opaque no-op `202` (no token, no audit), so at most one real send wins
-   * the cooldown window.
+   * Persists password-reset request bookkeeping: the active reset token hash (so the consume can pin it and account
+   * deletion can sweep the row) and the cooldown and daily counters. The write is conditioned on the rate-limit
+   * values the handler read (`observed`), closing the read-then-write TOCTOU (CODING_STANDARDS "Check-and-mutate
+   * requires a transaction"): a losing concurrent request aborts the transaction and the service maps it to the
+   * opaque no-op 202, so at most one send wins the cooldown window.
    */
   resetSendUpdate(args: {
     userId: string;
@@ -241,10 +186,8 @@ export class UsersRepository extends BaseRepository {
     ConditionExpression: string;
     ExpressionAttributeValues: Record<string, unknown>;
   } } {
-    // Build a guard term per rate-limit field: an absent observed value must
-    // still be absent (attribute_not_exists); a present one must still equal
-    // what the handler read. Any drift = a concurrent send already advanced
-    // the state, so this losing write must abort.
+    // A guard term per rate-limit field: an absent observed value must still be absent, a present one must still
+    // equal what the handler read.
     const values: Record<string, unknown> = {
       ':tok': args.newToken,
       ':sent': args.sentAtIso,
@@ -271,11 +214,8 @@ export class UsersRepository extends BaseRepository {
         UpdateExpression:
           'SET currentResetToken = :tok, ' +
           'lastResetSentAt = :sent, ' +
-          // Durable request-time stamp — same
-          // value as `lastResetSentAt`, but NOT removed by `resetConsumeUpdate`
-          // below, so `factor-restriction.ts` can still resolve the request
-          // instant after the reset completes. Overwritten (not appended) by
-          // the next request.
+          // Same value as `lastResetSentAt` but not removed by `resetConsumeUpdate`, so `factor-restriction.ts` can still
+          // resolve the request instant after the reset completes.
           'passwordResetRequestOpenedAt = :sent, ' +
           'resetsSentDayKey = :day, ' +
           'resetsSentToday = :count, ' +
@@ -287,29 +227,11 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Build the Email-OTP MFA send bookkeeping update,
-   * analogous to {@link resetSendUpdate}: advance the per-User daily-cap +
-   * cooldown counters (`mfaEmailOtpSentDayKey` / `mfaEmailOtpSentToday` /
-   * `mfaEmailOtpLastSentAt`) under a TOCTOU `ConditionExpression` pinned to the
-   * rate-limit state the handler read. These counters live on the `User` row
-   * (not the ~10-min-TTL `MfaEmailOtp` row, whose TTL would wipe them and defeat
-   * the daily cap).
-   *
-   * Returned as a self-contained composite `{ TableName, Key, UpdateExpression,
-   * ConditionExpression, ExpressionAttributeNames, ExpressionAttributeValues }`.
-   *
-   * NOTE: the Email-OTP code Put is NOT bundled into a cross-table transaction with this User
-   * update by deliberate design — a simplicity/cost choice matching `PasswordResetService`, not an
-   * IAM limitation. DynamoDB has no `TransactWriteItems`-named IAM action to withhold; a
-   * transaction is authorized by the per-item `PutItem`/`UpdateItem` actions already granted on
-   * each table. The real boundary on these secret tables is the narrow point-ops action set (no
-   * `Query`/`Scan`) plus api-role-only access. The service runs this conditional `UpdateItem` first
-   * (the TOCTOU guard wins the cooldown race for at most one concurrent sender), then Puts the
-   * `MfaEmailOtp` row only after the guard commits — the same "advance counters under condition,
-   * then side effect" ordering `PasswordResetService` uses.
-   *
-   * `attempts` invalidation and the code hash itself live on the `MfaEmailOtp`
-   * row, not here.
+   * Builds the Email-OTP send bookkeeping update (daily-cap and cooldown counters) under a TOCTOU condition pinned to
+   * the rate-limit state the handler read. The counters live on the User row because the MfaEmailOtp TTL would wipe
+   * them. The code Put is deliberately not bundled into a cross-table transaction (a simplicity choice, not an IAM
+   * limit): the service runs this conditional update first and Puts the code only after the guard commits, as
+   * PasswordResetService does.
    */
   mfaEmailOtpSendUpdate(args: {
     userId: string;
@@ -365,14 +287,8 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Build the step-up Email-OTP send bookkeeping update — a SEPARATE budget from {@link
-   * mfaEmailOtpSendUpdate}, on the additive `stepUpEmailOtp*` `User` fields, so a step-up user's
-   * code allowance is never drained by (nor drains) the login Email-OTP budget. Same TOCTOU
-   * `ConditionExpression` posture as {@link mfaEmailOtpSendUpdate}: pin the rate-limit state the
-   * handler read so at most one concurrent sender wins the cooldown window. The code Put (to the
-   * namespaced `<userId>#stepup` row) follows this conditional `UpdateItem` — same point-op
-   * ordering. The absence of a cross-table transaction is a deliberate simplicity/cost choice, not
-   * an IAM limitation (see {@link mfaEmailOtpSendUpdate}).
+   * Builds the step-up Email-OTP send update: a separate budget on the `stepUpEmailOtp*` fields, so login and step-up
+   * allowances never drain each other. Same TOCTOU condition and send ordering as `mfaEmailOtpSendUpdate`.
    */
   stepUpMfaEmailOtpSendUpdate(args: {
     userId: string;
@@ -428,14 +344,9 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Build the consume-side User update: clear the active reset
-   * token + request counters, condition on the presented token still
-   * being the authoritative one. Returned as parts so the caller can fold
-   * it into the single consume `TransactWriteItems` (a stale/superseded
-   * token fails this condition and aborts the whole transaction, so a
-   * superseded link can never rotate the password). `presentedToken` is the
-   * SHA-256 hash of the raw URL token; the stored `currentResetToken`
-   * is the same hash, so the condition compares hash-to-hash.
+   * Builds the consume-side User update: clears the reset token and counters, conditioned on the presented token hash
+   * still being current. Returned as parts for the single consume TransactWriteItems, so a superseded link can never
+   * rotate the password.
    */
   resetConsumeUpdate(args: {
     userId: string;
@@ -452,19 +363,10 @@ export class UsersRepository extends BaseRepository {
       key: { userId: args.userId },
       update: {
         UpdateExpression:
-          // `lastPasswordResetCompletedAt` is the
-          // durable "a reset completed" trace `factor-restriction.ts` needs —
-          // nothing else records this once `currentResetToken` is cleared
-          // below. `lastPasswordResetCompletedRequestedAt` is `args.requestedAt` —
-          // the consumed PasswordReset row's OWN `createdAt`, paired with the
-          // completion so a later, never-consumed reset request (which
-          // overwrites `passwordResetRequestOpenedAt` below) can never cancel
-          // this still-open post-completion window; `factor-restriction.ts`
-          // resolves the completed branch from this pair, never from the
-          // mutable `passwordResetRequestOpenedAt`. `passwordResetRequestOpenedAt`
-          // (SET by `resetSendUpdate`, above) is deliberately NOT removed here —
-          // it must survive consume so a still-pending request can still
-          // resolve its own branch.
+          // `lastPasswordResetCompletedAt` and `lastPasswordResetCompletedRequestedAt` (the consumed row own `createdAt`)
+          // are the durable completion trace `factor-restriction.ts` resolves the completed branch from; a later
+          // unconsumed request overwrites `passwordResetRequestOpenedAt`, which is deliberately not removed here, so it
+          // cannot cancel the window.
           'SET updatedAt = :now, lastPasswordResetCompletedAt = :now, ' +
           'lastPasswordResetCompletedRequestedAt = :reqAt ' +
           'REMOVE currentResetToken, lastResetSentAt, ' +
@@ -482,14 +384,9 @@ export class UsersRepository extends BaseRepository {
   // ---------- Self-service email change ----------
 
   /**
-   * Persist the pending email-change intent: set `pendingEmail` /
-   * `pendingEmailLowercase` and stamp the ~15-min logical
-   * `pendingEmailExpiresAt`. Written by `change-email/request` AFTER the
-   * password re-auth + uniqueness pre-check pass, BEFORE the step-up factor.
-   * Overwrites any prior pending intent (a fresh request supersedes the old
-   * one); the change-email token itself is minted only once the step-up
-   * completes (or directly when `AUTH_MFA_ENFORCED` is off), so a re-request
-   * before completion just re-stamps the intent. `updatedAt` is bumped.
+   * Persists the pending email-change intent (`pendingEmail`, `pendingEmailLowercase`, a ~15-minute
+   * `pendingEmailExpiresAt`) after the password re-auth and uniqueness pre-check; a fresh request overwrites any
+   * prior intent. The change-email token is minted only once step-up completes.
    */
   async setPendingEmail(args: {
     userId: string;
@@ -517,15 +414,8 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Stamp the active change-email verification-token handle + send
-   * bookkeeping on the User row (mirrors {@link applyVerificationSend}):
-   * rotate `currentPendingEmailToken` to the new `sha256(rawToken)` (so the
-   * confirm can pin `currentPendingEmailToken == sha256(presented)` for the
-   * single-valid-link invariant), advance the per-user cooldown anchor +
-   * daily counter. Conditioned on the pending intent still being the one the
-   * handler read (`pendingEmailLowercase == :pel`) so a superseded request
-   * (a newer `setPendingEmail` for a different address) aborts this stale
-   * send. `newToken` is the SHA-256 hash (the caller hashes at the boundary).
+   * Stamps the active change-email token hash and send bookkeeping. Conditioned on `pendingEmailLowercase == :pel`,
+   * so a send superseded by a newer `setPendingEmail` aborts.
    */
   pendingEmailSendUpdate(args: {
     userId: string;
@@ -548,11 +438,8 @@ export class UsersRepository extends BaseRepository {
       ExpressionAttributeValues: Record<string, unknown>;
     };
   } {
-    // Pin the pending intent (still the address the handler read) AND the
-    // rate-limit state (still what the handler read) so two concurrent sends
-    // that both passed the cooldown / daily-cap pre-check can't both commit —
-    // the loser fails the condition and aborts the transaction (TOCTOU guard,
-    // mirroring resetSendUpdate).
+    // Pin the pending intent and the rate-limit state, so two concurrent sends that passed the pre-check cannot both
+    // commit.
     const values: Record<string, unknown> = {
       ':tok': args.newToken,
       ':sent': args.sentAtIso,
@@ -591,16 +478,9 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Clear the pending password-reset handle + request counters on the User row.
-   * Called after a committed email swap drops
-   * the `PasswordReset` row so the dangling `currentResetToken` handle can't
-   * survive — a reset link must not mail the now-old address. Bumps `updatedAt`.
-   *
-   * When `expectedToken` is supplied the clear is conditioned on
-   * `currentResetToken == expectedToken` so a fresh reset minted AFTER the swap
-   * (but before this post-commit cleanup runs) isn't wiped — a
-   * `ConditionalCheckFailedException` in that case is benign and swallowed. When
-   * omitted (no handle was present pre-swap) the clear is unconditional.
+   * Clears the pending password-reset handle and counters after a committed email swap drops the PasswordReset row,
+   * so a reset link cannot mail the old address. With `expectedToken`, the clear is conditioned on it so a reset
+   * minted after the swap is not wiped; that ConditionalCheckFailed is benign and swallowed.
    */
   async clearPendingResetHandle(userId: string, expectedToken?: string): Promise<void> {
     const eav: Record<string, unknown> = { ':now': new Date().toISOString() };
@@ -628,17 +508,9 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Build the confirm-time swap parts for the User row: move the live
-   * `email` / `emailLowercase` to the pending address and clear every pending
-   * field + the cooldown counters. Returned as parts so the caller folds it
-   * into the single confirm `TransactWriteItems` alongside the
-   * `EmailReservation` move. The single-valid-link invariant is enforced by
-   * the `ConditionExpression`: `currentPendingEmailToken == :presentedToken`
-   * AND `pendingEmailLowercase == :newEmailLower` — a superseded/stale token
-   * (or a pending intent that moved) fails the condition and aborts the WHOLE
-   * transaction, so `email` / `emailLowercase` never move and the reservation
-   * is not touched. `presentedToken` is the SHA-256 hash of the raw URL token
-   * (the stored handle is the same hash → hash-to-hash compare).
+   * Builds the confirm-time swap for the User row: moves the live email to the pending address and clears the pending
+   * fields and counters. Conditioned on `currentPendingEmailToken == :presentedToken` and `pendingEmailLowercase ==
+   * :newEmailLower`, so a stale token or moved intent aborts the whole transaction before email or reservation move.
    */
   swapEmailUpdate(args: {
     userId: string;
@@ -677,11 +549,8 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Build the approve-time User update parts: flip `approvalStatus` pending → approved, conditioned
-   * on the user still existing AND still being pending. Returned as parts so the caller folds it
-   * into the single approval `TransactWriteItems` alongside the conditional delete of the presented
-   * approval row — both commit or neither does. A no-longer-pending user (raced with a decline /
-   * already approved) fails the condition and aborts the whole transaction.
+   * Builds the approve-time update: pending to approved, conditioned on the user existing and still pending, so a
+   * user raced by a decline aborts the whole approval transaction.
    */
   approveSignupUpdate(userId: string): {
     tableName: string;
@@ -708,13 +577,8 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Build the email-verification User update parts: mark verified + clear the unverified-signup
-   * tracking fields (mirrors {@link markEmailVerified}), conditioned on the user still existing AND
-   * its `currentVerificationToken` still equalling the presented digest. Returned as parts so the
-   * caller folds it into the single verification `TransactWriteItems` alongside the conditional
-   * delete of the hashed token row — both commit or neither does. A stale/superseded token (the
-   * handle already rotated or removed) fails the condition and aborts the whole transaction, so no
-   * write occurs.
+   * Builds the email-verification update (mirrors `markEmailVerified`), conditioned on the user existing and
+   * `currentVerificationToken` still equalling the presented digest, so a rotated token aborts the whole transaction.
    */
   markEmailVerifiedUpdate(
     userId: string,
@@ -745,13 +609,8 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Correct the account-record fields.
-   * Narrow purpose-built writer, mirroring this repository's other single-row
-   * updates: writes exactly `firstName`/`lastName`/`birthdate` + `updatedAt`,
-   * conditioned on the row still existing. The caller (`AuthController.updateMe`)
-   * already confirmed existence via `findById` moments earlier — the condition
-   * here is defense-in-depth against an exceedingly rare concurrent deletion
-   * mid-request, not the primary existence check.
+   * Corrects `firstName`, `lastName` and `birthdate`, conditioned on the row existing as a guard against a concurrent
+   * deletion.
    */
   async updateProfile(args: {
     userId: string;
@@ -779,24 +638,10 @@ export class UsersRepository extends BaseRepository {
   // ---------- Session revocation generation ----------
 
   /**
-   * Build a `ConditionCheck`-only transact item asserting the account's
-   * CURRENT session generation still equals `expectedGeneration` — the
-   * generation the caller stamped onto the refresh-token row it is about to
-   * Put in the SAME transaction. A revoked (moved-on) generation fails this
-   * condition and aborts the whole transaction, so an issuance or rotation
-   * racing an account-wide revoke can never commit a session under the
-   * retired value. See `RefreshTokenService.issue`.
-   *
-   * Prefixed with `attribute_exists(userId)`, mirroring
-   * `bumpSessionGenerationTransactItem`: against an ABSENT item, DynamoDB
-   * evaluates `attribute_not_exists(sessionGeneration)` as true, so the bare
-   * condition below would SUCCEED whenever `expectedGeneration` is `0` — the
-   * common case, since 0 is what every account that has never had an
-   * account-wide revoke carries. Without this guard, a session issuance or
-   * rotation racing account deletion could commit a brand-new refresh-token
-   * row for a user whose row no longer exists, the opposite of the "a
-   * missing user row fails closed" rule this generation gate exists to
-   * enforce.
+   * Builds a ConditionCheck-only item asserting the current session generation equals `expectedGeneration`, so an
+   * issuance or rotation racing an account-wide revoke cannot commit under the retired value (see
+   * `RefreshTokenService.issue`). Prefixed with `attribute_exists(userId)`: against an absent item
+   * `attribute_not_exists(sessionGeneration)` is true, so generation 0 would pass for a deleted account.
    */
   conditionCheckSessionGenerationTransactItem(
     userId: string,
@@ -816,20 +661,11 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Build the transact item that atomically retires `expectedGeneration` and
-   * advances the account to a fresh one — the single linearization point
-   * account-wide revocation rests on (`SessionRevocationService.revokeAll`).
-   * MUST be committed in the SAME `TransactWriteItems` as
-   * `RevokedTokensRepository.tombstoneGenerationTransactItem`'s matching row
-   * for `expectedGeneration`: every generation that stops being current gets
-   * its tombstone in the same atomic write that retires it, or a token
-   * minted under it could pass `JwtAuthGuard` forever.
-   *
-   * Requires the row to still exist (`attribute_exists(userId)`): a plain
-   * `UpdateItem` whose condition would otherwise pass against an absent key
-   * CREATES a fresh item, which would silently manufacture a phantom `User`
-   * row for a concurrently deleted account — the revoke path must fail
-   * closed there instead.
+   * Builds the item that retires `expectedGeneration` and advances to a fresh one, the linearization point of
+   * account-wide revocation (`SessionRevocationService.revokeAll`). Must commit in the same transaction as the
+   * matching `RevokedTokensRepository.tombstoneGenerationTransactItem`, or a token minted under the retired
+   * generation would pass JwtAuthGuard forever. Requires `attribute_exists(userId)`, or the UpdateItem would create a
+   * phantom User row for a deleted account.
    */
   bumpSessionGenerationTransactItem(userId: string, expectedGeneration: number): TransactItem {
     return {
@@ -850,11 +686,8 @@ export class UsersRepository extends BaseRepository {
   // ---------- Factor-change undo ----------
 
   /**
-   * Persist a fresh factor-change undo token, unconditionally overwriting any
-   * pending token from an earlier change — ONE outstanding undo per account
-   * is the intended behaviour (the newest factor change is the one worth
-   * undoing, and its undo still ends every session). `tokenHash` is the
-   * SHA-256 hash of the raw URL token; only the hash is stored.
+   * Persists a fresh factor-change undo token, overwriting any pending one: one outstanding undo per account is
+   * intended. Only the SHA-256 hash is stored.
    */
   async setPendingFactorUndo(args: {
     userId: string;
@@ -887,20 +720,9 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Re-validate a presented factor-undo token (hash, kind, not expired) and
-   * hand back the `(kind, credentialId)` it names, in one conditional
-   * `UpdateItem` with `ReturnValues: 'ALL_OLD'` that only re-stamps
-   * `updatedAt` — the pending fields are left in place. This is the
-   * pre-flight gate of `FactorNoticeService.consume`: an unknown, expired,
-   * superseded, or kind-mismatched token returns `null` here and never gets
-   * as far as ending sessions, and the returned descriptor is what the
-   * caller builds the undo action from. It is a validation at one instant,
-   * NOT a lock: `setPendingFactorUndo` can still overwrite the pending token
-   * after this returns (ONE outstanding undo per account by design — see
-   * that method's doc comment). What makes the destructive action safe
-   * against that is `consumeFactorUndo`, which commits the action and the
-   * single-use clear in one transaction conditioned on the token STILL being
-   * the active one at commit time.
+   * Re-validates a presented undo token (hash, kind, not expired) in one conditional UpdateItem with `ALL_OLD` and
+   * returns the `(kind, credentialId)` it names; the pre-flight gate of `FactorNoticeService.consume`. It is a check
+   * at one instant, not a lock: `consumeFactorUndo` is what stays safe against a superseding token.
    */
   async claimFactorUndo(args: {
     userId: string;
@@ -944,22 +766,10 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
-   * Consume the pending factor-undo token AND perform the undo action it
-   * gates, in ONE `TransactWriteItems`: clear the pending-undo state,
-   * conditioned on the presented token hash still being the active one AND
-   * not yet expired, together with the caller's optional `action` item — the
-   * passkey `Delete` (`PasskeysRepository.removeTransactItem`) or the TOTP
-   * cleared-row `Put` (`UserMfaRepository.clearTotpTransactItem`); absent
-   * for the `_remove` kinds, which undo nothing. Single-use is enforced by
-   * this condition, not by a preceding read, and because the action commits
-   * in the same transaction it can never run for a token that was superseded
-   * by a newer factor change, or consumed by a concurrent click, between the
-   * caller's earlier `claimFactorUndo` and this write: the condition fails
-   * and the WHOLE transaction aborts, action included. Returns `false` on
-   * that condition failure (the caller maps it to the opaque failure
-   * response); a transient cancellation that survives the shared bounded
-   * retry propagates as `TransientTransactionError`. `presentedTokenHash` is
-   * the SHA-256 hash of the raw URL token.
+   * Consumes the pending undo token and performs the undo action it gates in one TransactWriteItems, conditioned on
+   * the presented hash still being active and unexpired, so a superseded or concurrently consumed token aborts the
+   * action too. Returns false on that condition failure; a transient cancellation that survives the retry propagates
+   * as `TransientTransactionError`.
    */
   async consumeFactorUndo(args: {
     userId: string;
@@ -990,8 +800,7 @@ export class UsersRepository extends BaseRepository {
     ];
     try {
       await runTransactWrite(this.doc, items, () => {
-        // Only item 0 (this User update) carries a condition, so any
-        // ConditionalCheckFailed reason is the single-use gate losing.
+        // Only item 0 carries a condition, so any ConditionalCheckFailed is the single-use gate losing.
         throw new FactorUndoConditionFailed();
       });
       return true;

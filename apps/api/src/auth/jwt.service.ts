@@ -1,11 +1,5 @@
-/**
- * Issue + verify access-token JWTs with kid-rotated RS256 keys
- * (replaces the previous HS256 implementation).
- * Kept as a thin wrapper over `jsonwebtoken` semantics so we can rotate
- * keys without touching consumers.
- *
- * See docs/security.md, "Sessions".
- */
+// Issues and verifies access-token JWTs with kid-rotated RS256 keys, so keys rotate without touching consumers. See docs/security.md,
+// "Sessions".
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
@@ -17,34 +11,24 @@ export interface AccessTokenClaims {
   userId: string;
   householdId: string;
   deviceId: string;
-  /** Canonical user email. Surfaced so the SPA's `me.email` is
-   *  populated regardless of which login path (password / passkey /
-   *  silent refresh) issued the token. Empty string when the user row
-   *  has somehow been wiped between sign + verify (shouldn't happen
-   *  in practice; defensive `?? ''` keeps the JWT shape stable). */
+  /**
+   * Canonical user email, so the SPA `me.email` is populated on every login path. Empty string if the user row was
+   * wiped between sign and verify.
+   */
   email: string;
   jti: string;
   kid: string;
   iat: number;
   exp: number;
   /**
-   * Token-purpose discriminator. A normal access
-   * token has NO `purpose` claim. The MFA challenge token (mfa-challenge.service)
-   * carries `purpose: 'mfa_challenge'`; `JwtAuthGuard` rejects any verified token
-   * that carries a `purpose` so a challenge token can never be used as a session
-   * bearer. Surfaced here as optional so the guard can read it after verify.
+   * Token-purpose discriminator: a normal access token has none; the MFA challenge token carries `mfa_challenge`, and
+   * `JwtAuthGuard` rejects any token with a `purpose` so a challenge can never be a session bearer.
    */
   purpose?: string;
   /**
-   * The account session generation this token was minted under.
-   * Every session-bearing access token
-   * signed after this shipped carries the value the signing caller read at
-   * issuance/rotation time; `JwtAuthGuard` rejects a token whose generation
-   * has since been retired. Surfaced as optional (not required by
-   * `verify()` itself) so a token that predates this claim decodes normally —
-   * the guard, not `verify`, is where a missing claim is rejected,
-   * mapped to the SAME `ACCESS_TOKEN_REVOKED` outcome as a tombstoned
-   * generation (no legacy no-generation path stays trusted).
+   * The session generation this token was minted under; `JwtAuthGuard` rejects one that has since been retired.
+   * Optional so a token predating the claim decodes; the guard rejects a missing claim with the same
+   * ACCESS_TOKEN_REVOKED outcome as a tombstoned generation.
    */
   sessionGeneration?: number;
 }
@@ -54,15 +38,12 @@ interface SignArgs {
   householdId: string;
   deviceId: string;
   email: string;
-  /** Optional: caller-supplied jti so it can be matched to RefreshToken row. */
+  /** Optional caller-supplied jti, matched to the RefreshToken row. */
   jti?: string;
   /**
-   * The account session generation to stamp onto this token — optional here ONLY so the many
-   * pre-existing unit tests that mint a bare token without a session-revocation concern keep
-   * compiling; every REAL session-issuing caller (`LoginService.issueSession`, the `/auth/refresh`
-   * handler) resolves and passes a concrete value. A token signed without one is treated by
-   * `JwtAuthGuard` exactly like a tombstoned generation — never trusted as an implicit "generation
-   * 0".
+   * The session generation to stamp; optional only so older unit tests keep compiling, since every real
+   * session-issuing caller passes it. A token signed without one is treated by `JwtAuthGuard` like a tombstoned
+   * generation, never as generation 0.
    */
   sessionGeneration?: number;
 }
@@ -70,8 +51,6 @@ interface SignArgs {
 @Injectable()
 export class AccessTokenService {
   private readonly ttlSec: number;
-  /** Token-domain claims signed onto and strictly required by every access
-   *  token. */
   private readonly issuer: string;
   private readonly audience: string;
 
@@ -93,8 +72,7 @@ export class AccessTokenService {
         householdId: args.householdId,
         deviceId: args.deviceId,
         email: args.email,
-        // Omitted entirely (never a literal `undefined`) when the caller has
-        // no generation to stamp — see `SignArgs.sessionGeneration`.
+        // Omitted entirely (never a literal undefined) when there is no generation to stamp.
         ...(args.sessionGeneration !== undefined
           ? { sessionGeneration: args.sessionGeneration }
           : {}),
@@ -113,9 +91,7 @@ export class AccessTokenService {
   }
 
   /**
-   * Verify signature + decode. Throws on any failure (expired, bad
-   * signature, unknown kid). Caller is responsible for checking the
-   * RevokedToken denylist after this returns successfully.
+   * Verifies signature and decodes; throws on any failure. The caller checks the RevokedToken denylist afterwards.
    */
   verify(token: string): AccessTokenClaims {
     const decoded = jwt.decode(token, { complete: true });
@@ -130,10 +106,8 @@ export class AccessTokenService {
     if (!publicKey) {
       throw new Error(`Unknown kid: ${kid}`);
     }
-    // Strictly require the environment-specific issuer/audience: a token
-    // missing either claim, or carrying a wrong value, throws here and is
-    // rejected by the guard — closing the cross-environment/service
-    // token-confusion boundary.
+    // Strictly require the environment-specific issuer and audience, closing the cross-environment token-confusion
+    // boundary.
     const payload = jwt.verify(token, publicKey, {
       algorithms: ['RS256'],
       issuer: this.issuer,
@@ -153,24 +127,18 @@ export class AccessTokenService {
       userId: payload.userId,
       householdId: payload.householdId,
       deviceId: payload.deviceId,
-      // `email` was added after the initial token issuance — existing
-      // sessions whose access token predates this change still verify;
-      // the FE falls back to its stored email value when the claim is
-      // absent so the regression window is one token refresh wide.
+      // The `email` claim is absent on tokens issued before it existed; the frontend falls back to its stored value.
       email: typeof payload.email === 'string' ? payload.email : '',
       jti: payload.jti,
       kid,
       iat: payload.iat,
       exp: payload.exp,
-      // Surface a `purpose` claim if present (MFA challenge tokens
-      // carry one); JwtAuthGuard rejects any token that does. A normal access
-      // token has no `purpose`, leaving this undefined.
+      // Surface a `purpose` claim if present; `JwtAuthGuard` rejects any token that has one.
       ...(typeof payload.purpose === 'string'
         ? { purpose: payload.purpose }
         : {}),
-      // Surface a `sessionGeneration` claim if present. Deliberately NOT required here — a missing
-      // claim is rejected by JwtAuthGuard (mapped to the same ACCESS_TOKEN_REVOKED outcome as a
-      // tombstoned generation), not by `verify` throwing a generic UNAUTHENTICATED error.
+      // Not required here: a missing claim is rejected by `JwtAuthGuard` as ACCESS_TOKEN_REVOKED, not by `verify`
+      // throwing a generic error.
       ...(typeof payload.sessionGeneration === 'number'
         ? { sessionGeneration: payload.sessionGeneration }
         : {}),
@@ -178,10 +146,8 @@ export class AccessTokenService {
   }
 
   /**
-   * RFC 7517 JWKS view of the active public-key set. Surfaced by the
-   * `GET /auth/.well-known/jwks.json` endpoint so external verifiers
-   * (Lambda@Edge, mobile clients, future microservices) can validate
-   * tokens without contacting the api or holding any shared secret.
+   * RFC 7517 JWKS view of the active public keys, served at `GET /auth/.well-known/jwks.json` so external verifiers
+   * need no shared secret.
    */
   publicJwks(): JwksKey[] {
     return this.keys.jwks();

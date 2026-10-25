@@ -1,13 +1,5 @@
-/**
- * Repository for the `TrustedDevice` table (PK `userId`, SK `deviceId`, TTL on `expiresAt` ~30
- * days) — per-device MFA-skip trust. Stores the SHA-256 hash of the opaque device-trust secret
- * (never the raw secret, mirroring RefreshToken).
- *
- * The api-role grant on this table is the point-ops set (Get/Put/Update/
- * Delete) PLUS `dynamodb:Query` — `listByUser` scans by the `userId` PK only
- * (no Scan) to back the "manage trusted devices" listing and the
- * account-deletion cascade deleting every SK row under the `userId` PK.
- */
+// Repository for the TrustedDevice table (PK userId, SK deviceId, TTL ~30 days): per-device MFA-skip trust, storing only the SHA-256
+// hash of the device-trust secret.
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -52,10 +44,8 @@ export class TrustedDeviceRepository extends BaseRepository {
   }
 
   /**
-   * Best-effort keyed stamp of `lastUsedAt` on a successful cookie
-   * verification. A targeted `UpdateItem` — never a
-   * `put` of the whole row — so it can't race `set()`'s full-row replace
-   * (which rotates the trust secret on a fresh remember-this-device).
+   * Best-effort stamp of `lastUsedAt`; a targeted UpdateItem, so it cannot race the full-row replace that rotates the
+   * trust secret.
    */
   async stampLastUsed(userId: string, deviceId: string): Promise<void> {
     await this.doc.send(
@@ -78,12 +68,7 @@ export class TrustedDeviceRepository extends BaseRepository {
     );
   }
 
-  /**
-   * Every trusted device for a user, by `userId` PK Query (no Scan). Backs
-   * the "manage trusted devices" listing and the account-deletion cascade
-   * deleting all of a user's trust rows. Paginates on
-   * `LastEvaluatedKey` for completeness; the per-user count is tiny.
-   */
+  /** Every trusted device for a user, by Query on the `userId` PK (the grant includes Query, not Scan). */
   async listByUser(userId: string): Promise<TrustedDeviceRow[]> {
     const out: TrustedDeviceRow[] = [];
     let lastKey: Record<string, unknown> | undefined;
@@ -105,14 +90,9 @@ export class TrustedDeviceRepository extends BaseRepository {
   }
 
   /**
-   * Atomically record one failed password attempt from this trusted device.
-   * Conditioned on the row actually existing
-   * (`attribute_exists(tokenHash)`) — a bare `ADD` on an absent row would mint
-   * one with no `tokenHash`/`expiresAt`, which would then never TTL-expire.
-   * Mirrors `FailedLoginAttemptsRepository.increment`'s monotonic-timestamp
-   * primary/fallback shape. Returns `null` when the row is already gone (the
-   * device isn't trusted — nothing to increment); the caller treats that the
-   * same as "not trusted".
+   * Atomically records one failed password attempt from this trusted device, conditioned on
+   * `attribute_exists(tokenHash)`: a bare ADD on an absent row would mint one with no `tokenHash` or `expiresAt` that
+   * never expires. Returns null when the row is gone (untrusted).
    */
   async incrementFailure(userId: string, deviceId: string): Promise<TrustedDeviceRow | null> {
     const ts = new Date().toISOString();
@@ -134,9 +114,8 @@ export class TrustedDeviceRepository extends BaseRepository {
       return r.Attributes as TrustedDeviceRow;
     } catch (err) {
       if (!(err instanceof ConditionalCheckFailedException)) throw err;
-      // Either the row is gone (untrusted — nothing to do) or a newer failure
-      // already stamped a later `lastFailedAt`. Retry the increment alone,
-      // still gated on existence, without touching the timestamp.
+      // The row is gone or a newer failure stamped a later `lastFailedAt`: retry the increment alone, still gated on
+      // existence.
       try {
         const r = await this.doc.send(
           new UpdateCommand({
@@ -157,10 +136,8 @@ export class TrustedDeviceRepository extends BaseRepository {
   }
 
   /**
-   * Clear the per-device failure counter on a successful password
-   * verification from this device. Conditioned on the
-   * row existing — an unconditioned `UpdateItem` would create a bare
-   * key-only row for a device that was never trusted.
+   * Clears the per-device failure counter after a successful password verification; conditioned on existence, since
+   * an unconditioned UpdateItem would create a bare key-only row.
    */
   async clearFailure(userId: string, deviceId: string): Promise<void> {
     try {

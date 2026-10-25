@@ -1,12 +1,5 @@
-/**
- * Session-preserving password re-verification. Used by destructive
- * client-only flows (e.g. Profile-page data import) that need explicit
- * knowledge-factor proof without rotating tokens, cookies, or sessions.
- * It is NOT side-effect-free: `verify()` shares the centralized per-account
- * login backoff (reads + increments the `FailedLoginAttempt` counter on a
- * wrong password, clears it on success) so a stolen session cannot use this
- * endpoint as an unthrottled password oracle.
- */
+// Session-preserving password re-verification for destructive client-only flows. Not side-effect-free: it shares the per-account login
+// backoff, so a stolen session cannot use it as an unthrottled password oracle.
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { CredentialsRepository } from '../dynamo/credentials.repository.js';
@@ -23,33 +16,19 @@ export interface VerifyPasswordArgs {
   ip: string | null;
   userAgent: string | null;
   /**
-   * Re-auth purpose. When `'data_export'`, the recorded audit event is
-   * `data_export` / `data_export_failed` instead of the generic
-   * `password_verify` / `password_verify_failed`. `'change_password'` and
-   * `'password_slot_rewrap'` are accepted and keep the generic audit event;
-   * the web sends them with the change-password session-authority repair call
-   * and the derived
-   * post-reset re-wrap prompt's answer.
-   * Omitted by import/demo/reset.
+   * Re-auth purpose. `data_export` records `data_export` audit events instead of the generic `password_verify` pair;
+   * `change_password` and `password_slot_rewrap` keep the generic events. Omitted by import, demo and reset.
    */
   purpose?: 'data_export' | 'change_password' | 'password_slot_rewrap';
   /**
-   * The CURRENT session's refresh-token hash,
-   * resolved by the `POST /auth/verify-password` controller from the refresh
-   * cookie. When present, a successful verification updates that session's
-   * recorded write authority IN PLACE — no token exchange, no new session, no
-   * cookie — granting it the same authority a fresh login records. Every
-   * other caller of this shared service (change-email, TOTP disable, passkey
-   * removal, encrypted-workspace reset) omits it and is unaffected.
+   * The current session refresh-token hash, resolved by the controller. When present, a successful verification
+   * updates that session recorded write authority in place (no new session or cookie), granting what a fresh login
+   * records. Other callers omit it.
    */
   sessionTokenHash?: string;
   /**
-   * The caller's device id + device-trust cookie value —
-   * when both are present, a valid trust bypasses the backoff block and a
-   * miss counts against that device's ceiling instead of the per-address
-   * counter (see `FailedLoginService`). Omitted by callers that don't thread
-   * device identity through (change-email, TOTP disable, passkey removal,
-   * encrypted-workspace reset) — they keep today's per-address-only behavior.
+   * Caller device id and trust cookie: a valid trust bypasses the backoff block and a miss counts against that device
+   * ceiling. Callers that do not thread device identity keep per-address-only behaviour.
    */
   deviceId?: string;
   deviceTrustToken?: string;
@@ -69,29 +48,16 @@ export class VerifyPasswordService {
   ) {}
 
   /**
-   * Re-verify the caller's current password. Backoff is now centralized HERE:
-   * every sensitive password-proof
-   * endpoint that calls `verify()` inherits the same per-account backoff as the
-   * login path — a stolen session can no longer use these endpoints as an
-   * unthrottled password oracle. The EXTERNAL contract is unchanged: `verify()`
-   * still resolves on a match and still throws `401 INVALID_CREDENTIALS` on a
-   * wrong password (now backoff-counted first) or the raw fault on a
-   * backend/Argon2 error (never counted), so its callers need no code change.
-   *
-   * The Argon2 comparison is wrapped in `FailedLoginService.verifyWithBackoff`,
-   * whose callback must RETURN `false` on a wrong password (a THROWN error is
-   * treated as a transient fault and skips recording a failure). The
-   * `password_verify_failed` / `data_export_failed` audit is emitted inside the
-   * callback immediately before returning `false`, preserving today's audit
-   * behavior. The backoff counter is keyed by the caller's `emailLowercase`,
-   * resolved from the User row (mirroring the destructive-op services).
+   * Re-verifies the caller current password with the centralized backoff: resolves on a match, throws 401
+   * INVALID_CREDENTIALS on a wrong password (backoff-counted), or the raw fault on a backend or Argon2 error (never
+   * counted). The callback passed to `verifyWithBackoff` must return false on a wrong password, since a thrown error
+   * counts as a transient fault; the failed audit is emitted just before returning false. The counter is keyed by the
+   * `emailLowercase` resolved from the User row.
    */
   async verify(args: VerifyPasswordArgs): Promise<void> {
     const isExport = args.purpose === 'data_export';
 
-    // Captured by `check()` on a match, so the session-authority update below
-    // reads the SAME row the verification just matched against, with no
-    // second read.
+    // Captured on a match so the session-authority update reads the same row, with no second read.
     let matchedCredential: CredentialRow | null = null;
 
     const check = async (): Promise<boolean> => {
@@ -114,10 +80,8 @@ export class VerifyPasswordService {
 
     const user = await this.users.findById(args.userId);
     if (!user) {
-      // No account row to key backoff against (a JWT-valid claim whose User row
-      // is gone). Run the check directly — it will fail closed (no credential)
-      // and emit the failed audit — and throw INVALID_CREDENTIALS without a
-      // counter to touch. Matches today's behavior for a missing user.
+      // No account row (a JWT-valid claim whose User row is gone): run the check directly, which fails closed with
+      // the failed audit, and throw INVALID_CREDENTIALS.
       if (!(await check())) {
         throw new UnauthorizedException({
           code: 'INVALID_CREDENTIALS',
@@ -125,11 +89,8 @@ export class VerifyPasswordService {
         });
       }
     } else {
-      // Already-authenticated caller: `userId` is real, so — unlike login —
-      // there is no unknown-identity branch to keep timing-equivalent with.
-      // Resolve trust directly when the controller threaded a device id;
-      // omitted callers get `undefined`, i.e. today's
-      // unchanged per-address-only behavior.
+      // The caller is authenticated, so there is no unknown-identity branch to keep timing-equivalent; resolve trust
+      // directly when a device id was threaded.
       const trust = args.deviceId
         ? {
             trusted: await this.trustedDevices.verify(
@@ -141,9 +102,8 @@ export class VerifyPasswordService {
             deviceId: args.deviceId,
           }
         : undefined;
-      // verifyWithBackoff throws 429 LOGIN_BACKOFF when locked out, records one
-      // failure + throws 401 INVALID_CREDENTIALS on a `false`, and clears the
-      // counter on a match. A thrown backend fault propagates uncounted.
+      // `verifyWithBackoff` throws 429 LOGIN_BACKOFF when locked out, records one failure and throws 401 on false,
+      // clears the counter on a match; a backend fault propagates uncounted.
       await this.failed.verifyWithBackoff({
         emailLowercase: user.emailLowercase,
         verify: check,
@@ -153,22 +113,10 @@ export class VerifyPasswordService {
       });
     }
 
-    // Grant the current session the write authority a fresh login records —
-    // updated IN PLACE, no token exchange, no
-    // new session, no cookie. Only runs when the controller resolved a
-    // session to update; every other purpose/caller is unaffected.
-    //
-    // Best-effort: this is a purely additive side write
-    // whose only consumer is a LATER key-envelope password write, which
-    // re-derives and re-checks the session's authority independently at that
-    // point. A transient DynamoDB fault here (throttling, a network blip)
-    // must never fail the whole `verify()` call — the argon2 comparison
-    // already succeeded and the caller's actual purpose (data export, TOTP
-    // disable, workspace clear, import, …) has nothing to do with password-
-    // slot write authority. `updateCredentialRevision` already swallows a
-    // `ConditionalCheckFailedException` (a concurrent logout raced this
-    // update); swallow anything else here too, logging it so a persistent
-    // failure is still visible.
+    // Grant the session the write authority a login records, in place. Best-effort: it is an additive side write
+    // whose only consumer re-checks the authority independently later, so a transient DynamoDB fault must not fail
+    // a verification whose argon2 comparison already succeeded. Swallow and log so a persistent failure stays
+    // visible.
     if (args.sessionTokenHash !== undefined) {
       try {
         await this.refreshTokens.updateCredentialRevision(

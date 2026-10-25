@@ -1,15 +1,5 @@
-/**
- * Cold-start SSM secret loader for the Lambda runtime.
- *
- * The api Lambda IAM role grants `ssm:GetParameter` on a narrow set of
- * `/retivo/<stack>/...` ARNs. At cold start we fetch the secret
- * values and copy them into `process.env` before Nest's
- * `validateEnv()` runs — so the same Zod schema that validates the
- * local-dev `.env` also validates the production secrets.
- *
- * Local dev (Scenarios 1–3) skips this entirely: when `STACK` is unset
- * or `DYNAMODB_ENDPOINT` is set, we read everything from `.env`.
- */
+// Cold-start SSM secret loader: copies narrow `/retivo/<stack>/...` parameters into process.env before validateEnv(). Skipped when
+// STACK is unset or DYNAMODB_ENDPOINT is set.
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
 const PARAMETER_TO_ENV: ReadonlyArray<{
@@ -25,10 +15,7 @@ const PARAMETER_TO_ENV: ReadonlyArray<{
     required: true,
   },
   {
-    // Public counterpart to AUTH_JWT_PRIVATE_KEYS. Stored as SecureString
-    // for uniformity (the public key is technically not secret) so the
-    // SSM IAM grant + decrypt-via-aws/ssm condition cover both lookups
-    // identically.
+    // Stored as SecureString like the private keys, so the SSM IAM grant covers both lookups identically.
     path: (base) => `${base}/auth/jwt-public-keys`,
     envVar: 'AUTH_JWT_PUBLIC_KEYS',
     decrypt: true,
@@ -47,14 +34,8 @@ const PARAMETER_TO_ENV: ReadonlyArray<{
     required: false,
   },
   {
-    // Shared secret CloudFront sets as `X-Origin-Verify` on every
-    // request it forwards to API Gateway. EdgeAuthMiddleware enforces it —
-    // and, per env.config.ts's deployed-stack superRefine, refuses to boot
-    // without it. Required: a throttled/denied/absent GetParameter
-    // must fail this cold start loudly, not degrade EdgeAuthMiddleware to a
-    // pass-through for the life of the warm Lambda. Only reached when
-    // STACK is set and DYNAMODB_ENDPOINT is unset (see the module doc
-    // above) — local dev and the emulator suite never hit this loader.
+    // Required: a throttled, denied or absent read must fail the cold start loudly, not degrade EdgeAuthMiddleware
+    // to a pass-through for the life of the warm Lambda.
     path: (base) => `${base}/edge/shared-secret`,
     envVar: 'EDGE_SHARED_SECRET',
     decrypt: true,
@@ -64,8 +45,6 @@ const PARAMETER_TO_ENV: ReadonlyArray<{
 
 export async function loadSecretsFromSsm(): Promise<void> {
   const stack = process.env.STACK;
-  // Local emulator runs and `pnpm dev` set DYNAMODB_ENDPOINT; in those
-  // environments we honor the .env-supplied secrets and skip SSM.
   if (!stack || process.env.DYNAMODB_ENDPOINT) return;
 
   const region = process.env.AWS_REGION ?? 'us-east-1';
@@ -87,8 +66,7 @@ export async function loadSecretsFromSsm(): Promise<void> {
       }
     } catch (err) {
       if (entry.required) throw err;
-      // Best-effort for optional parameters — log via console so the
-      // failure is captured even before Nest's logger is alive.
+      // Optional parameters are best-effort; log via console so the failure is captured before Nest logger exists.
       console.warn(
         `[ssm-bootstrap] optional parameter ${entry.path(base)} failed:`,
         err instanceof Error ? err.message : err,

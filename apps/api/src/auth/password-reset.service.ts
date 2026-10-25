@@ -1,30 +1,5 @@
-/**
- * Self-service password reset. Two responsibilities, mirroring the
- * email-verification + resend posture:
- *
- *   - `request`: opaque-202 anti-enumeration. Only an existing, verified
- *     account that is past the per-email cooldown and under the daily cap
- *     gets a fresh single-use token mailed as a URL-fragment link. Unknown
- *     / unverified / cooled-down / capped emails are silent no-ops with the
- *     identical response shape (no token, no audit) so the endpoint is not
- *     a user-existence oracle.
- *   - `consume`: token-gated credential rotation. One `TransactWriteItems`
- *     conditionally deletes the PasswordReset row, writes the new argon2id
- *     credential, and clears the User reset state under
- *     `currentResetToken == :presentedToken` — so a reused or
- *     superseded token can never rotate the password twice. After the
- *     transaction commits we revoke every session, clear the
- *     per-email failed-login backoff, audit (`password_reset`), and
- *     send a best-effort completion notice.
- *
- * Zero-knowledge note: a reset rotates only the login
- * credential. It cannot unwrap the `password` key-envelope slot, so the
- * user regains *login*, not *decryption* — they re-key the slot client-side
- * after a recovery-key / passkey unlock. This service touches no key
- * material.
- *
- * See docs/security.md, "Password change, password reset".
- */
+// Self-service password reset: `request` is an opaque-202 no-op unless the account is eligible; `consume` rotates the credential
+// under the single-use token. See docs/security.md, "Password change, password reset".
 import { formatMailSource } from './mail-source.js';
 import {
   BadRequestException,
@@ -57,37 +32,28 @@ import { escapeHtml } from '../common/escape-html.js';
 import { SessionRevocationService } from './session-revocation.service.js';
 
 /**
- * Reset-link validity. Mirrors the verification-token TTL. Exported so
- * `factor-restriction.ts` can bound how long a pending, unconsumed reset request keeps the
- * post-reset factor-restriction window open — the same TTL this token itself uses.
+ * Reset-link validity; exported so `factor-restriction.ts` bounds how long an unconsumed request keeps the post-reset
+ * restriction window open.
  */
 export const RESET_TTL_SEC = 15 * 60;
-/** Minimum spacing between two reset mails for the same email. */
 const RESET_COOLDOWN_SEC = 60;
-/** Hard cap on reset mails per UTC day per email. */
 export const RESET_DAILY_LIMIT = 5;
 /**
- * Constant minimum elapsed time for the request-reset handler. `request` returns early on several branches (unknown email,
- * unverified, cooldown, daily-cap) whose work is far cheaper than a real send
- * + SES dispatch — leaving the response time a user-existence oracle. Holding
- * every branch to a fixed floor measured from handler start (not random
- * jitter, which averages out over repeated probes) makes the timing identical
- * regardless of account state, complementing the already-opaque 202 shape.
+ * Constant minimum elapsed time for the request handler: early-return branches are far cheaper than a real send, so
+ * the timing would be a user-existence oracle. A fixed floor (not jitter, which averages out over repeated probes)
+ * makes timing identical for every account state.
  */
 export const RESPONSE_TIME_FLOOR_MS = 200;
 
 export interface RequestResetResult {
-  /** Always set so the response shape is identical for hit + no-op. */
+  /** Always set, so the response shape is identical for a hit and a no-op. */
   accepted: true;
-  /** Returned in dev/test only, and only on a real send. */
+  /** Dev and test only, and only on a real send. */
   resetToken?: string;
 }
 
-/**
- * The computed send plan for an eligible reset request: the fresh token, the
- * PasswordReset row to Put, and the conditional User update pinned to the
- * observed rate-limit state. Produced by `planSend`, consumed by `commitSend`.
- */
+// Send plan for an eligible request: the fresh token, the PasswordReset row, and the User update pinned to the
+// observed rate-limit state.
 interface ResetSendPlan {
   newToken: string;
   resetRow: PasswordResetRow;
@@ -121,26 +87,19 @@ export class PasswordResetService {
     this.passwordResetTable = config.get('TABLE_PASSWORD_RESET', { infer: true });
     this.credentialTable = config.get('TABLE_CREDENTIAL', { infer: true });
     const node = config.get('NODE_ENV', { infer: true });
-    // SES posture mirrors EmailVerificationService: a local endpoint
-    // signals the emulator; otherwise production sends for real.
+    // A local endpoint signals the emulator; otherwise production sends for real.
     this.sesEnabled = node === 'production' || !!config.get('SES_ENDPOINT', { infer: true });
-    // Same dev trapdoor gate as signup / resend-verification — local
-    // development only, hard-refused at boot on any deployed stack.
-    // The opaque-202 anti-oracle holds: the raw token is returned only on a
-    // real send, never on a no-op branch and never on a deployed stack.
+    // Same dev trapdoor gate as signup: local development only, hard-refused at boot on a deployed stack. The raw
+    // token is returned only on a real send, never on a no-op.
     this.returnResetToken =
       node !== 'production' ||
       config.get('EXPOSE_VERIFICATION_TOKEN', { infer: true }) === 'true';
   }
 
   /**
-   * Attempt to issue a reset link. Always returns the same opaque shape —
-   * every internal branch logs + skips silently so the response leaks no
-   * account state. A real send (and only a real send) appends a
-   * `password_reset_requested` AuthEvent and, in non-prod, the raw token.
-   * Wrapped in a constant minimum elapsed time so every
-   * early-return branch takes as long as a real send and the response timing
-   * is not a user-existence oracle.
+   * Attempts to issue a reset link. Always returns the same opaque shape: every branch skips silently, and only a
+   * real send appends `password_reset_requested` and, in non-prod, the raw token. A minimum elapsed time holds every
+   * branch to a real send timing.
    */
   async request(args: {
     email: string;
@@ -155,12 +114,8 @@ export class PasswordResetService {
     }
   }
 
-  /**
-   * Await until the handler has run for at least RESPONSE_TIME_FLOOR_MS,
-   * measured from `startMs`. A fixed deadline (not random jitter) so the floor
-   * is constant across every branch and probe — jitter averages out
-   * statistically and would still leak the underlying timing.
-   */
+  // Awaits the response-time floor from `startMs`; a fixed deadline, since jitter averages out and would still leak
+  // timing.
   private async enforceResponseFloor(startMs: number): Promise<void> {
     const remainingMs = RESPONSE_TIME_FLOOR_MS - (Date.now() - startMs);
     if (remainingMs > 0) {
@@ -174,19 +129,16 @@ export class PasswordResetService {
     userAgent?: string | null;
   }): Promise<RequestResetResult> {
     const user = await this.users.findByEmail(args.email.toLowerCase());
-    // Eligibility / rate-limit gate. Any miss is a silent no-op with the
-    // identical opaque shape so the endpoint is not a user-existence oracle.
+    // Any miss is a silent no-op with the identical opaque shape.
     const plan = user ? this.planSend(user) : null;
     if (!plan) return { accepted: true };
 
-    // Atomically Put the new PasswordReset row + advance the User counters.
-    // A lost cooldown race aborts the transaction → same opaque no-op 202.
+    // A lost cooldown race aborts the transaction: the same opaque no-op 202.
     const committed = await this.commitSend(user!, plan);
     if (!committed) return { accepted: true };
 
-    // Post-commit side effects (real send only): prior-token hygiene delete,
-    // audit, and the SES mail. The mail is sent only after the commit so a
-    // send failure never strands a token the consume would honor.
+    // Post-commit side effects of a real send: the mail is sent only after commit, so a failure never strands a
+    // token the consume would honour.
     await this.afterSend(user!, plan.newToken, args.ip, args.userAgent);
 
     return {
@@ -195,15 +147,11 @@ export class PasswordResetService {
     };
   }
 
-  /**
-   * Evaluate reset eligibility + the per-email cooldown / daily cap and, when
-   * the user is eligible, return the send plan (fresh token, timestamps, and
-   * the conditional User update pinned to the observed rate-limit state for
-   * the TOCTOU guard). Returns `null` for every silent-no-op branch.
-   */
+  // Evaluates eligibility and the per-email cooldown and daily cap, returning the send plan (with the TOCTOU-pinned
+  // User update) or null for every silent no-op.
   private planSend(user: UserRow): ResetSendPlan | null {
     if (!user.emailVerifiedAt) {
-      // Unverified accounts use resend-verification, not reset. Silent.
+      // Unverified accounts use resend-verification. Silent.
       return null;
     }
     const nowMs = Date.now();
@@ -219,9 +167,7 @@ export class PasswordResetService {
     if (countToday >= RESET_DAILY_LIMIT) return null; // Daily cap hit. Silent.
 
     const newToken = randomBytes(32).toString('base64url');
-    // Hash at the service boundary: only the SHA-256 hash is stored
-    // (PasswordReset PK + User.currentResetToken); the raw token rides the
-    // email link (and, in dev/test, the API response).
+    // Hash at the service boundary: only the SHA-256 hash is stored; the raw token rides the email link.
     const newTokenHash = sha256(newToken);
     const sentAtIso = new Date(nowMs).toISOString();
     const resetRow: PasswordResetRow = {
@@ -237,10 +183,8 @@ export class PasswordResetService {
       sentAtIso,
       dayKey,
       countToday: countToday + 1,
-      // Pin the write to the rate-limit state we read above so a concurrent
-      // request can't pass the same cooldown / daily-cap pre-check and commit
-      // a second send (TOCTOU — CODING_STANDARDS "Check-and-mutate requires a
-      // transaction").
+      // Pin the write to the rate-limit state read above, so a concurrent request cannot pass the same pre-check and
+      // commit a second send (CODING_STANDARDS "Check-and-mutate requires a transaction").
       observed: {
         lastResetSentAt: user.lastResetSentAt,
         resetsSentDayKey: user.resetsSentDayKey,
@@ -250,19 +194,9 @@ export class PasswordResetService {
     return { newToken, resetRow, userUpdate };
   }
 
-  /**
-   * Commit the single-valid-link transaction: Put the new PasswordReset
-   * row + conditionally Update the User counters + (when a prior token
-   * exists) Delete the prior PasswordReset row, all atomically. Folding the
-   * prior-row delete into this same `TransactWriteItems` (rather than a
-   * separate best-effort `DeleteCommand` after commit — the previous
-   * behaviour, whose failure silently stranded the prior row for the rest of
-   * its TTL, unreachable by the export's `currentResetToken`-only read path)
-   * guarantees the export is never incomplete because of a transient delete
-   * failure: either all three writes land, or none do. Returns `true` on
-   * commit; `false` when a concurrent request won the cooldown window and
-   * this losing write aborted (`TransactionCanceledException`).
-   */
+  // Commits the single-valid-link transaction: Put the new PasswordReset row, conditionally Update the User counters,
+  // and Delete the prior row, atomically, so a transient delete failure cannot strand a prior row the export cannot
+  // reach. Returns false when a concurrent request won the cooldown window.
   private async commitSend(user: UserRow, plan: ResetSendPlan): Promise<boolean> {
     const { resetRow, userUpdate } = plan;
     const priorToken =
@@ -303,20 +237,15 @@ export class PasswordResetService {
     return true;
   }
 
-  /**
-   * Post-commit side effects of a real send: append the
-   * `password_reset_requested` audit and dispatch the SES mail (a send
-   * failure is logged, not raised). Dropping the prior dangling reset row is
-   * now handled atomically inside `commitSend`'s transaction, not here — see
-   * that method's doc comment.
-   */
+  // Post-commit side effects of a real send: the `password_reset_requested` audit and the SES mail (a failure is
+  // logged, not raised).
   private async afterSend(
     user: UserRow,
     newToken: string,
     ip?: string | null,
     userAgent?: string | null,
   ): Promise<void> {
-    // Real send → audit. Always a real, verified userId.
+    // A real send is audited with a real, verified userId.
     await this.auth.record({
       userId: user.userId,
       eventType: 'password_reset_requested',
@@ -331,9 +260,7 @@ export class PasswordResetService {
         {
           userId: user.userId,
           emailFingerprint: emailFingerprint(user.email),
-          // Error class only, never `err.message`: an SES rejection embeds the
-          // raw recipient address in its message, which `redact` cannot scrub
-          // inside a string value.
+          // Error class only, never `err.message`: an SES rejection embeds the recipient address.
           reason: err instanceof Error ? err.name : 'unknown',
         },
         'Password-reset mail dispatch failed',
@@ -342,11 +269,9 @@ export class PasswordResetService {
   }
 
   /**
-   * Consume a reset token: rotate the credential and clear reset state in
-   * one atomic transaction, then revoke sessions, clear backoff, audit,
-   * and notify. Throws `RESET_TOKEN_EXPIRED` (410) for an expired token
-   * and `RESET_TOKEN_INVALID` (400) for an unknown / already-consumed /
-   * superseded token.
+   * Consumes a reset token: rotates the credential and clears reset state in one transaction, then revokes sessions,
+   * clears backoff, audits and notifies. 410 RESET_TOKEN_EXPIRED for an expired token, 400 RESET_TOKEN_INVALID for an
+   * unknown, consumed or superseded one.
    */
   async consume(args: {
     token: string;
@@ -354,14 +279,12 @@ export class PasswordResetService {
     ip?: string | null;
     userAgent?: string | null;
   }): Promise<void> {
-    // The URL carries the raw token; the table stores its SHA-256 hash. Hash once at the boundary
-    // and use the hash for every DynamoDB key (lookup, expiry cleanup, the consume Delete, and the
-    // `currentResetToken == :tok` condition).
+    // The URL carries the raw token; hash once and use the hash for every DynamoDB key and the `currentResetToken
+    // == :tok` condition.
     const tokenHash = sha256(args.token);
 
-    // Validate the token (existence + expiry) and the new password against the
-    // policy BEFORE the transaction so a policy failure surfaces as the policy
-    // error code and leaves the token consumable for a retry.
+    // Validate the token and the new password against the policy before the transaction, so a policy failure leaves
+    // the token consumable for a retry.
     const { row } = await this.loadValidResetRow(tokenHash);
     await this.passwords.validate(args.newPassword);
 
@@ -371,13 +294,8 @@ export class PasswordResetService {
     await this.afterConsume(row, args.ip, args.userAgent);
   }
 
-  /**
-   * Look up the PasswordReset row and enforce existence + expiry. `tokenHash`
-   * is the SHA-256 of the raw URL token — the table PK stores the
-   * hash. Throws `RESET_TOKEN_INVALID` (400) for an unknown / already-consumed
-   * token and `RESET_TOKEN_EXPIRED` (410) for an expired one (best-effort
-   * cleanup of the expired row; TTL handles eventual consistency too).
-   */
+  // Looks up the PasswordReset row by token hash and enforces existence and expiry; best-effort cleanup of an expired
+  // row.
   private async loadValidResetRow(
     tokenHash: string,
   ): Promise<{ row: PasswordResetRow; nowSec: number }> {
@@ -399,18 +317,9 @@ export class PasswordResetService {
     return { row, nowSec };
   }
 
-  /**
-   * The single-use consume transaction: conditional Delete on the
-   * PasswordReset row (a reused token → row gone → cond fails), Put the new
-   * argon2id credential, and clear the User reset state under
-   * `currentResetToken == :presentedToken` (a superseded token → cond fails).
-   * Either failure aborts the whole transaction, so the password can never
-   * rotate twice; a `TransactionCanceledException` surfaces as
-   * `RESET_TOKEN_INVALID` (400). `tokenHash` is the SHA-256 of the raw URL
-   * token: the PasswordReset PK and the stored `currentResetToken`
-   * are both hashes, so the Delete key and the `currentResetToken == :tok`
-   * condition compare hash-to-hash.
-   */
+  // The single-use consume transaction: conditional Delete of the PasswordReset row (a reused token fails), Put the new
+  // credential, and clear the User reset state under `currentResetToken == :presentedToken` (a superseded token fails).
+  // Either failure aborts it, so the password cannot rotate twice; the cancel surfaces as RESET_TOKEN_INVALID.
   private async commitConsume(
     row: PasswordResetRow,
     tokenHash: string,
@@ -422,18 +331,15 @@ export class PasswordResetService {
       userId: row.userId,
       argon2Hash: newHash,
       updatedAt: now,
-      // Fresh opaque revision (the one narrow
-      // exception): every credential write mints one. Nothing else about the
-      // reset consume changes and nothing observable reflects this.
+      // A fresh opaque revision: every credential write mints one.
       credentialRevision: randomUUID(),
     };
     const userUpdate = this.users.resetConsumeUpdate({
       userId: row.userId,
       presentedToken: tokenHash,
-      // The consumed PasswordReset row's own request instant — the transaction's `currentResetToken
-      // == :tok` condition guarantees `row` is still the User's active reset, so this is the
-      // correct request instant to pair with the completion even though a newer request could
-      // overwrite `passwordResetRequestOpenedAt` later.
+      // The consumed row own request instant; the `currentResetToken` condition guarantees it is the active reset, so
+      // it pairs correctly with the completion even if a newer request later overwrites
+      // `passwordResetRequestOpenedAt`.
       requestedAt: row.createdAt,
       now,
     });
@@ -472,13 +378,8 @@ export class PasswordResetService {
     }
   }
 
-  /**
-   * Post-commit side effects of a successful consume (variable-size work
-   * that can exceed the 100-item transaction limit, so it runs separately,
-   * mirroring change-password): nuke all sessions, clear the per-email
-   * failed-login backoff, audit (`password_reset`), and send a
-   * best-effort completion notice (a send failure is logged, not raised).
-   */
+  // Post-commit work (it can exceed the 100-item transaction limit): revoke all sessions, clear the failed-login
+  // backoff, audit `password_reset`, and send a best-effort completion notice.
   private async afterConsume(
     row: PasswordResetRow,
     ip?: string | null,
@@ -501,9 +402,7 @@ export class PasswordResetService {
         {
           userId: row.userId,
           emailFingerprint: emailFingerprint(row.email),
-          // Error class only, never `err.message`: an SES rejection embeds the
-          // raw recipient address in its message, which `redact` cannot scrub
-          // inside a string value.
+          // Error class only, never `err.message`: an SES rejection embeds the recipient address.
           reason: err instanceof Error ? err.name : 'unknown',
         },
         'Password-reset completion mail dispatch failed',
@@ -513,20 +412,15 @@ export class PasswordResetService {
 
   private async sendResetMail(toAddress: string, token: string): Promise<void> {
     if (!this.sesEnabled) {
-      // Local dev: do NOT log the token-bearing link or the raw recipient
-      // email (CODING_STANDARDS "Never log secrets, tokens, or PII"). The dev
-      // shortcut is already served by the `returnResetToken` API response
-      // (EXPOSE_VERIFICATION_TOKEN), so the link log was redundant. Log only a
-      // non-reversible email fingerprint and no token/link.
+      // Local dev: log only a non-reversible email fingerprint, never the token-bearing link or recipient
+      // (CODING_STANDARDS "Never log secrets, tokens, or PII"); the dev shortcut is the `returnResetToken` response.
       this.logger.log(
         { emailFingerprint: emailFingerprint(toAddress) },
         'Password-reset link generated (local dev — token in API response)',
       );
       return;
     }
-    // URL fragment (#) so the token never reaches the server, never lands
-    // in API-GW / CloudFront access logs, and never leaks via Referer on
-    // subsequent navigation.
+    // URL fragment, so the token never reaches the server, access logs or Referer.
     const link = `${this.webOrigin}/auth/reset-password#token=${encodeURIComponent(token)}`;
     await this.ses.send(
       new SendEmailCommand({
@@ -564,8 +458,8 @@ export class PasswordResetService {
 
   private async sendCompletionMail(toAddress: string): Promise<void> {
     if (!this.sesEnabled) {
-      // Local dev: log only a non-reversible email fingerprint, never the raw
-      // recipient address (CODING_STANDARDS "Never log secrets, tokens, or PII").
+      // Local dev: log only a non-reversible email fingerprint (CODING_STANDARDS "Never log secrets, tokens, or
+      // PII").
       this.logger.log(
         { emailFingerprint: emailFingerprint(toAddress) },
         'Password-reset completion notice generated (local dev)',

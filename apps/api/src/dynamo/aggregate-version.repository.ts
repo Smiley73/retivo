@@ -1,9 +1,5 @@
-/**
- * `AggregateVersion` row access. The table's primary writer is
- * `sync/push.service.ts` (conditional version puts inside a
- * `TransactWriteItems`) — this repo only exposes the read + sweep
- * paths used outside the hot push loop.
- */
+// AggregateVersion row access. The primary writer is sync/push.service.ts; this repo only exposes the read and sweep paths outside
+// the push loop.
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -29,12 +25,8 @@ export class AggregateVersionRepository extends BaseRepository {
   }
 
   /**
-   * Single-item unconditional PutItem. Used by `RestoreService` to
-   * repopulate `AggregateVersion` rows from a restored snapshot after
-   * the sweep cleared them, so the first post-restore push asserts
-   * against the correct version instead of hitting a spurious CONFLICT
-   * on a missing row. Unconditional (overwrite) keeps the restore
-   * idempotent — a retry re-seeds the same rows.
+   * Unconditional PutItem, used by `RestoreService` to reseed rows from a restored snapshot so the first post-restore
+   * push does not hit a spurious CONFLICT; overwriting keeps a retry idempotent.
    */
   async put(row: AggregateVersionRow): Promise<void> {
     await this.doc.send(
@@ -43,14 +35,8 @@ export class AggregateVersionRepository extends BaseRepository {
   }
 
   /**
-   * Hard-delete every aggregate-version row for a household. Used only by
-   * the shared household-data sweep (`HouseholdSweepService`) — the four
-   * authorised consumers: account deletion (`DELETE /auth/account`),
-   * encrypted-workspace reset (`POST /auth/encrypted-workspace-reset`),
-   * self-service restore (`POST /sync/restore`), and the
-   * server-authoritative workspace clear (`POST /sync/workspace/clear`).
-   * The api-role IAM policy permits `BatchWriteItem` on this table for
-   * that sweep.
+   * Hard-deletes every aggregate-version row for a household, for the shared household sweep only
+   * (`HouseholdSweepService`; see AGENTS.md, "Project-specific security").
    */
   async deleteAllForHousehold(householdId: string): Promise<void> {
     let lastKey: Record<string, unknown> | undefined;
@@ -78,9 +64,8 @@ export class AggregateVersionRepository extends BaseRepository {
   }
 
   /**
-   * Every aggregate-version row for a household, WHOLE —
-   * unlike {@link deleteAllForHousehold}'s key-only projection, used for the
-   * account-export builder.
+   * Every aggregate-version row for a household, whole (not the key-only projection of the sweep), for the account
+   * export.
    */
   async listForHousehold(householdId: string): Promise<AggregateVersionRow[]> {
     const out: AggregateVersionRow[] = [];

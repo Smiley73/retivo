@@ -1,42 +1,5 @@
-/**
- * Factor-change notice + single-use undo. The notification half of the
- * defence against a hijacked session enrolling its own permanent factor:
- * whenever a passkey or authenticator app is added or removed, the account's
- * email address gets a one-link, 24-hour, single-use notice that can undo the
- * change and end every session — the detection-and-recovery path for a
- * session that is *already* hijacked (`FactorEnrollmentGuardService` is the
- * gate half).
- *
- * The pending undo lives on the `User` row (only the token's SHA-256 hash is
- * stored) rather than in a dedicated table, so an account has ONE outstanding
- * undo: a newer factor change overwrites the pending token for an older one.
- * The consume endpoint's response is opaque (`{ ok }`), so it reveals nothing
- * about whether a `userId` / `token` pair is real. Consuming runs in three
- * steps, in this order:
- *
- *   1. `UsersRepository.claimFactorUndo` re-validates the presented token
- *      (hash, kind, not expired) and captures the `(kind, credentialId)` it
- *      names in one conditional write — the gate that keeps an unknown,
- *      expired, superseded or mismatched token from ending any session.
- *   2. `SessionRevocationService.revokeAll` ends every session. Idempotent,
- *      and deliberately BEFORE the single-use gate: a failure here (a
- *      transient DynamoDB error, a Lambda timeout mid-sweep) leaves the token
- *      still valid, so the same link, clicked again, safely re-runs the sweep
- *      and completes. Burning the token first would strand the account with
- *      neither the recovery applied nor any way to retry it.
- *   3. `UsersRepository.consumeFactorUndo` commits the kind's action (delete
- *      the passkey / clear TOTP) and the single-use clear in ONE
- *      `TransactWriteItems`, conditioned on the token STILL being the active
- *      one. The claim in step 1 is validation at one instant, not a lock: a
- *      newer factor change can overwrite the pending token at any moment
- *      (ONE outstanding undo per account by design), and an action performed
- *      as a separate write after the claim could land on a factor that token
- *      was never about — e.g. clear an authenticator re-enrolled after the
- *      clicked link's TOTP was already turned off. Committing the action
- *      inside the conditioned transaction means a superseded or already-
- *      consumed token aborts the whole write, action included, and reports
- *      `{ ok: false }` with the factor untouched.
- */
+// Factor-change notice and single-use undo, the detection-and-recovery half of the defence against a hijacked session enrolling its own factor
+// (`FactorEnrollmentGuardService` is the gate half).
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SendEmailCommand, SESClient } from '@aws-sdk/client-ses';
@@ -60,16 +23,16 @@ import {
 } from './factor-notice-mail.js';
 import { escapeHtml } from '../common/escape-html.js';
 
-/** Undo-link validity (the notice says "expires in 24 hours"). */
+// Undo-link validity; the notice says it expires in 24 hours.
 const FACTOR_UNDO_TTL_SEC = 24 * 60 * 60;
 
 export interface FactorNoticeArgs {
   userId: string;
   email: string;
   kind: FactorUndoKind;
-  /** The passkey this change concerns. Present for both passkey kinds (the
-   *  `_add` consume needs it to know which credential to delete; `_remove`
-   *  carries it for the audit trail only — the removal is never reversed). */
+  /**
+   * The passkey this change concerns: the `_add` consume deletes it; `_remove` carries it for the audit trail only.
+   */
   credentialId?: string;
 }
 
@@ -100,21 +63,12 @@ export class FactorNoticeService {
   }
 
   /**
-   * Mint the single-use undo token, persist it on the `User` row
-   * (overwrites any earlier pending undo), then send the
-   * best-effort notice mail. Returns whether the notice mail was actually
-   * handed off — the call sites surface that as `noticeSent` so the UI never
-   * tells the person an email went out when it did not.
-   *
-   * Every call site runs this AFTER its factor change has committed, so
-   * nothing here may reject into that response: the persist and the send
-   * both sit inside the try/catch. A persist failure (a throttled/transient
-   * DynamoDB error on the `User` row) is logged and returns `false` WITHOUT
-   * attempting the send — mailing a link whose token was never stored would
-   * be worse than no mail. A send failure after a successful persist also
-   * returns `false` but leaves the persisted token in place: the undo
-   * capability itself is not lost, only the mail. Only the error class is logged, never `err.message` —
-   * an SES rejection embeds the raw recipient address in its message.
+   * Mints the single-use undo token, persists it on the User row (overwriting any pending one: one outstanding undo
+   * per account), then sends the notice mail best-effort. Returns whether the mail was handed off, so the UI never
+   * says an email went out when it did not. Called after the factor change committed, so nothing may reject into that
+   * response: a persist failure returns false without sending (a link for an unstored token is worse than no mail),
+   * and a send failure keeps the stored token. Only the error class is logged; an SES rejection embeds the recipient
+   * address.
    */
   async notify(args: FactorNoticeArgs): Promise<boolean> {
     const rawToken = randomBytes(32).toString('base64url');
@@ -156,9 +110,8 @@ export class FactorNoticeService {
     token: string,
   ): Promise<void> {
     if (!this.sesEnabled) {
-      // Local dev: log only a non-reversible email fingerprint, never the
-      // raw recipient, token, or link (CODING_STANDARDS "Never log secrets,
-      // tokens, or PII").
+      // Local dev: log only a non-reversible email fingerprint, never the recipient, token or link (CODING_STANDARDS
+      // "Never log secrets, tokens, or PII").
       this.logger.log(
         { emailFingerprint: emailFingerprint(toAddress) },
         'Factor-change notice generated (local dev)',
@@ -175,10 +128,8 @@ export class FactorNoticeService {
           Subject: { Data: mail.subject },
           Body: {
             Text: { Data: mail.text },
-            // Composed INLINE here (not via `mail.html`) so the repo's HTML
-            // mail-body escaping regression guard can see this
-            // interpolation — a value assigned from a separate builder is
-            // invisible to it.
+            // Composed inline, not via `mail.html`, so the HTML mail-body escaping regression guard can see the
+            // interpolation.
             Html: {
               Data: `<p>${escapeHtml(bodyIntro(kind))}</p><p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
             },
@@ -189,24 +140,16 @@ export class FactorNoticeService {
   }
 
   /**
-   * Consume an undo token: opaque `{ ok }` regardless of the token's state,
-   * so the response reveals nothing about whether a given `userId` /
-   * `token` pair is real. `kind` must match the token's
-   * stored kind: the landing page's copy — which action it describes to the
-   * person and which button it shows — is chosen from an unauthenticated
-   * URL-fragment field the server never saw before, so the server requires
-   * it back and refuses to act when it disagrees with the stored kind,
-   * rather than silently performing whatever the stored kind says. On a
-   * genuine, unexpired, still-active, kind-matching token: revokes every
-   * session, then commits the kind's action (an `_add` kind deletes the
-   * passkey / disables TOTP; a `_remove` kind does nothing here — it is not
-   * reversible) together with the pending-undo clear (the single-use gate)
-   * in one transaction, and records `factor_undo_consumed`. See the file
-   * header for why the three steps run in that order. Any other token state
-   * — unknown user, wrong/expired/superseded token, mismatched kind — is
-   * `{ ok: false }` with no side effects; a token superseded between the
-   * claim and the commit is `{ ok: false }` with the sessions already ended
-   * but the factor untouched.
+   * Consumes an undo token with an opaque `{ ok }` regardless of state, so it reveals nothing about whether a
+   * `userId` and token pair is real. `kind` must match the stored kind: the landing page copy comes from an
+   * unauthenticated URL-fragment field, so the server refuses to act on a disagreement. Steps, in this order: (1)
+   * `claimFactorUndo` re-validates the token and captures `(kind, credentialId)`, keeping an unknown, expired or
+   * superseded token from ending any session; (2) `SessionRevocationService.revokeAll`, idempotent and before the
+   * single-use gate, so a failure leaves the token valid and the same link safely re-runs; (3) `consumeFactorUndo`
+   * commits the action (an `_add` kind deletes the passkey or disables TOTP; `_remove` does nothing) and the
+   * single-use clear in one conditioned transaction. The claim is validation at one instant, not a lock, so a token
+   * superseded in between yields `{ ok: false }` with sessions ended but the factor untouched. Records
+   * `factor_undo_consumed`.
    */
   async consume(args: {
     userId: string;
@@ -239,8 +182,7 @@ export class FactorNoticeService {
     if (!consumed) return { ok: false };
 
     if (kind === 'totp_add') {
-      // Parity with `MfaService.disable`, which the direct disable path
-      // audits through — the undo's clear is the same factor change.
+      // Parity with `MfaService.disable`: the undo clear is the same factor change.
       await this.auth.record({ userId: args.userId, eventType: 'mfa_totp_disabled' });
     }
     await this.auth.record({
@@ -251,13 +193,8 @@ export class FactorNoticeService {
     return { ok: true };
   }
 
-  /**
-   * The kind's undo action as a `TransactWriteItems` item, for
-   * `UsersRepository.consumeFactorUndo` to commit alongside the single-use
-   * clear (see the file header). `undefined` for the `_remove` kinds — the
-   * removed factor cannot be restored; only the session
-   * revoke applies to those.
-   */
+  // The kind undo action as a transact item for `consumeFactorUndo`; undefined for `_remove`, which cannot restore the
+  // factor.
   private undoActionItem(
     userId: string,
     kind: FactorUndoKind,
