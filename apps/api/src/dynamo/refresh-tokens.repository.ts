@@ -15,12 +15,7 @@ import { BaseRepository } from './base.repository.js';
 import type { TransactItem } from './transact-write.js';
 import type { RefreshTokenRow } from './types.js';
 
-/**
- * The single-row revoke condition shared by {@link RefreshTokensRepository.markRevoked}
- * and {@link RefreshTokensRepository.revokeTransactItem}: the row must still
- * exist AND not already be revoked. See `markRevoked` for why the existence
- * guard is load-bearing.
- */
+// Revoke condition shared by markRevoked and revokeTransactItem: the row must exist and not already be revoked.
 const REVOKE_CONDITION_EXPRESSION =
   'attribute_exists(userId) AND (attribute_not_exists(revokedAt) OR revokedAt = :null)';
 
@@ -40,27 +35,17 @@ export class RefreshTokensRepository extends BaseRepository {
   }
 
   /**
-   * Build the Put transact item for a fresh refresh-token row — used by `RefreshTokenService.issue`
-   * alongside the generation and family-barrier `ConditionCheck`s in the
-   * same `TransactWriteItems`, replacing the bare {@link insert} Put on
-   * every issuance/rotation path. No `ConditionExpression` of its own: the
-   * key (`userId`, `tokenHash`) is derived from 48 random bytes, so a
-   * collision is not a case this repository guards against.
+   * Builds the Put for a fresh refresh-token row, used by `RefreshTokenService.issue` alongside the generation and
+   * family-barrier ConditionChecks in one transaction. No condition of its own: the key derives from 48 random bytes.
    */
   insertTransactItem(row: RefreshTokenRow): TransactItem {
     return { Put: { TableName: this.tableName, Item: row } };
   }
 
   /**
-   * `opts.consistentRead`:
-   * `RefreshTokenService.revokeOne` treats a null result here as "no such
-   * row, nothing to revoke" and returns without planting the family barrier
-   * or revoking anything. A plain `GetCommand` is served by any replica, so
-   * a row inserted by a rotation moments earlier (the SPA's
-   * refresh-then-sign-out ordering) can appear missing here purely from
-   * replica lag, silently skipping the whole revocation. `revokeOne` passes
-   * `ConsistentRead: true` so the early return can only fire for a row that
-   * genuinely does not exist. Every other caller keeps the cheaper default.
+   * `opts.consistentRead`: `RefreshTokenService.revokeOne` returns without planting the family barrier when this is
+   * null, so a row inserted by a rotation moments earlier must not read as missing from replica lag. `revokeOne`
+   * passes it; other callers keep the cheaper default read.
    */
   async find(
     userId: string,
@@ -78,14 +63,8 @@ export class RefreshTokensRepository extends BaseRepository {
   }
 
   /**
-   * Update the CURRENT session's recorded write authority in place —
-   * no new row, no token exchange, no
-   * cookie. Called by `POST /auth/verify-password` after a successful
-   * verification (and by the key-setup flow, which reuses that same route):
-   * a session that just proved the current password is granted the authority
-   * to write a password slot, the same way a fresh login records it. A
-   * missing row (e.g. a concurrent logout) is a silent no-op — there is no
-   * session left to grant authority to.
+   * Updates the current session recorded write authority in place (no new row, token or cookie), after `POST
+   * /auth/verify-password` succeeds. A missing row (a concurrent logout) is a silent no-op.
    */
   async updateCredentialRevision(
     userId: string,
@@ -111,22 +90,10 @@ export class RefreshTokensRepository extends BaseRepository {
   }
 
   /**
-   * Mark a single refresh-token row revoked. Used by
-   * `RefreshTokenService.revokeOne` (single-session logout).
-   *
-   * Requires the row to still exist — `attribute_exists(userId)`, the same
-   * guard {@link revokeFamily} and {@link updateCredentialRevision} already
-   * carry. Without it, an
-   * `UpdateItem` whose only condition is `attribute_not_exists(revokedAt)`
-   * SUCCEEDS against an absent key (that attribute does not exist on a
-   * missing item either) and CREATES a partial row holding nothing but the
-   * keys and `revokedAt`: no `expiresAt`, so TTL never removes it, and no
-   * `tokenFamilyId`, so no family sweep ever sees it. A logout whose lookup
-   * of the presented row completed just before the account-deletion
-   * cascade's `deleteAllForUser` sweep would otherwise leave that row behind
-   * permanently for a deleted account. The caller treats the resulting
-   * `ConditionalCheckFailedException` as the same no-op as an already-revoked
-   * row.
+   * Marks one refresh-token row revoked (single-session logout). Requires `attribute_exists(userId)`: a condition on
+   * `attribute_not_exists(revokedAt)` alone succeeds against an absent key and would create a partial row with no
+   * `expiresAt` or `tokenFamilyId`, which TTL and family sweeps never see, leaving it behind after account deletion.
+   * The caller treats the resulting ConditionalCheckFailedException as an already-revoked no-op.
    */
   async markRevoked(userId: string, tokenHash: string, at: string): Promise<void> {
     await this.doc.send(
@@ -141,21 +108,10 @@ export class RefreshTokensRepository extends BaseRepository {
   }
 
   /**
-   * Build the Update transact item that conditionally revokes a single row —
-   * the same condition as {@link markRevoked} (including its existence
-   * guard, so a presented row deleted mid-rotation fails the whole
-   * transaction closed instead of being recreated as a partial row), as a
-   * transact item so `RefreshTokenService.rotate` can commit the presented
-   * row's revoke in the SAME `TransactWriteItems` as its descendant's Put
-   * and the generation / family-barrier `ConditionCheck`s.
-   * Before this
-   * existed, rotation committed the revoke FIRST and the descendant's
-   * issuance as a SEPARATE transaction: a transient cancellation of the
-   * second transaction left the presented row revoked with no successor, and
-   * the client's own retry of that revoked cookie was then classified as
-   * reuse. Folding both into one transaction means either both commit or
-   * neither does, so a transient cancellation leaves the presented token
-   * genuinely unchanged and retryable.
+   * Builds the conditional single-row revoke (same condition as `markRevoked`, existence guard included) as a
+   * transact item, so `RefreshTokenService.rotate` commits the revoke with the successor Put and the ConditionChecks
+   * in one transaction. A separate revoke-first transaction left the presented row revoked with no successor after a
+   * transient cancellation, and the client retry then read as reuse.
    */
   revokeTransactItem(userId: string, tokenHash: string, at: string): TransactItem {
     return {
@@ -170,18 +126,11 @@ export class RefreshTokensRepository extends BaseRepository {
   }
 
   /**
-   * List every refresh-token row for a user (active + revoked, all
-   * families). Used by password-change to revoke all sessions at once and by
-   * the account-data export. Fully paginated (see the loop below) — a user's
-   * partition can exceed DynamoDB's 1 MB `Query` response limit once enough
-   * sessions/rotations have accumulated, so nothing here assumes a small row
-   * count.
+   * Lists every refresh-token row for a user (active and revoked, all families), fully paginated: the partition can
+   * exceed the 1 MB Query limit.
    */
   async listAllForUser(userId: string): Promise<RefreshTokenRow[]> {
-    // Loops on `LastEvaluatedKey` — a user's partition can exceed DynamoDB's 1 MB `Query`
-    // response limit if enough sessions/rotations have accumulated, and a
-    // single-page read would silently truncate both password-change's
-    // revoke-all-sessions sweep and the account export.
+    // A single page would silently truncate password-change revoke-all and the account export.
     const out: RefreshTokenRow[] = [];
     let lastKey: Record<string, unknown> | undefined;
     do {
@@ -200,25 +149,10 @@ export class RefreshTokensRepository extends BaseRepository {
   }
 
   /**
-   * List every row of a token family in a user's partition. Used by reuse
-   * detection (`RefreshTokenService`) to find the full family to revoke.
-   * Fully paginated (see the loop below, same shape as `listAllForUser`
-   * above): DynamoDB
-   * applies `FilterExpression` *after* reading up to 1 MB of the partition,
-   * so pagination is driven by the size of the whole `userId` partition
-   * (every family, every rotation, revoked rows included), not by the size
-   * of the one family being filtered for. A page whose filtered `Items` is
-   * empty can still carry a `LastEvaluatedKey`, so an empty page must not
-   * end enumeration — only an absent continuation key does.
-   *
-   * `opts.consistentRead`: reuse detection
-   * writes the family's revocation barrier and THEN calls this with
-   * `ConsistentRead: true` — a descendant row inserted in the brief window
-   * between that Put and this enumeration must be seen, or it survives
-   * detection. DynamoDB Local is more consistent than production, so this
-   * property cannot be proven by an emulator-backed test; the strongly
-   * consistent read is the reason it holds regardless. Every other caller
-   * keeps the cheaper default.
+   * Lists every row of a token family, for reuse detection. Paginates on the whole `userId` partition because the
+   * FilterExpression applies after the 1 MB read, so an empty page can still carry a LastEvaluatedKey.
+   * `opts.consistentRead`: reuse detection writes the barrier then enumerates, and must see a descendant inserted in
+   * between; DynamoDB Local is more consistent than production, so only ConsistentRead guarantees it.
    */
   async listFamily(
     userId: string,
@@ -244,23 +178,12 @@ export class RefreshTokensRepository extends BaseRepository {
     return out;
   }
 
-  /**
-   * DynamoDB's hard per-call cap on `TransactWriteItems` (applies across every
-   * table in the request; this repository only ever puts rows from its own
-   * table in one). `revokeFamily` chunks against it below.
-   */
+  // DynamoDB hard per-call cap on TransactWriteItems.
   private static readonly TRANSACT_WRITE_LIMIT = 100;
 
   /**
-   * Revoke every row in a given set of refresh-token rows, chunked into
-   * transactions of at most `TRANSACT_WRITE_LIMIT` items. Caller passes the
-   * full list (e.g. from `listFamily`, or every active row for a user from
-   * `SessionRevocationService.revokeAll`) to avoid double round-trips. A
-   * single unchunked transaction would fail outright once a caller passes
-   * more than 100 rows (e.g. a user with many devices/rotations whose
-   * session-revocation sweep denylists ALL of their active rows) —
-   * chunking keeps every row's revoke recoverable instead of failing the
-   * whole sweep on that one caller.
+   * Revokes the given rows in transactions of at most `TRANSACT_WRITE_LIMIT`; a single transaction would fail
+   * outright past 100 rows.
    */
   async revokeFamily(rows: RefreshTokenRow[], at: string): Promise<void> {
     if (rows.length === 0) return;
@@ -283,12 +206,8 @@ export class RefreshTokensRepository extends BaseRepository {
   }
 
   /**
-   * Hard-delete every refresh-token row for a user, regardless of family
-   * or revoked state. Used by `DeleteAccountService` after the family has
-   * already been revoked + access-token jtis denylisted. Issues
-   * single-item DeleteItem calls (rather than BatchWriteItem) so the api
-   * role's narrow IAM scope does not need widening for this table. Volume per user is tiny
-   * (one chain of rotations per device).
+   * Hard-deletes every refresh-token row for a user, used by `DeleteAccountService`. Single DeleteItem calls, so the
+   * api-role IAM scope needs no BatchWriteItem on this table.
    */
   async deleteAllForUser(userId: string): Promise<void> {
     const rows = await this.listAllForUser(userId);

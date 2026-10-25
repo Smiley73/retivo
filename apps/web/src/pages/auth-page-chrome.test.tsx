@@ -1,7 +1,4 @@
-/**
- * AuthBrandRow — the brand lockup every auth card mounts: RETIVO wordmark,
- * product tagline, open-source line, and the a11y smoke scan.
- */
+// AuthBrandRow: the brand lockup every auth card mounts (wordmark, tagline, open-source line).
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';

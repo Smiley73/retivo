@@ -1,9 +1,5 @@
-/**
- * Claim-age optimizer engine — barrel. Re-exports the four engine
- * modules (`build-grid`, `simulate-candidate`, `pick-winner`,
- * `merge-ss-override`) and provides the top-level
- * `optimiseClaimAgesForScenario` orchestrator the page + worker call.
- */
+// Claim-age optimizer engine barrel: re-exports the engine modules and provides `optimiseClaimAgesForScenario`, the orchestrator the page and worker call.
+
 import type { ScenarioAggregate } from './scenario-resolution';
 import { resolveScenario } from './scenario-resolution';
 import type {
@@ -50,39 +46,24 @@ export interface OptimiseClaimAgesArgs {
   readonly ssBenefits: ReadonlyArray<Aggregate<SocialSecurityBenefitPayload>>;
   readonly expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
   readonly incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
-  /** Flag-derived medical category ids — threaded into each candidate's
-   *  projection so the +2pp medical-inflation default follows the flag. */
+  /** Threaded into each candidate's projection so the +2pp medical-inflation default follows the flag. */
   readonly medicalCategoryIds?: ReadonlyArray<string>;
   readonly metric: OptimizerMetric;
   readonly today: Date;
   readonly mcRunner?: OptimizerMcRunner;
-  /** Defaults to `'planned'` — every existing caller continues to read
-   *  planned. The deterministic optimizer page passes `'twr'` for the
-   *  TWR child row; the runner uses empirical per-account rates. */
+  /** Defaults to `'planned'`; the deterministic optimizer page passes `'twr'` for the TWR child row. */
   readonly projectionMethod?: ProjectionMethod;
 }
 
 export interface OptimizerResult {
   readonly winner: Winner | null;
-  /** True when the search was forced to skip part of the joint grid —
-   *  e.g. one member's PIA missing (1-D fallback) or past the claim-age
-   *  window. The page surfaces this on the row. */
+  /** True when part of the joint grid was skipped (a member's PIA missing, or past the claim-age window); the page surfaces it on the row. */
   readonly partial: boolean;
-  /** Members whose PIA is unset — surfaces a per-row callout linking to
-   *  /social-security. */
+  /** Members with no PIA set; the row links to /social-security. */
   readonly missingPiaMembers: ReadonlyArray<string>;
-  /** The metric value (at-horizon balance / MC success) at the scenario's
-   *  CURRENT resolved claim ages — the baseline the page renders as
-   *  "current → recommended". `undefined` when the current pair isn't a
-   *  candidate (e.g. no stored claim ages to compare against — so there's
-   *  no exact baseline to show). */
+  /** The metric at the scenario's current claim ages, shown as "current → recommended"; undefined when the current pair is not a candidate. */
   readonly baselineMetricValue?: number;
-  /** True when `projectionMethod === 'twr'` and at least one active
-   *  non-CBP account has insufficient (< 2 yr) balance history. The
-   *  orchestrator detects this on the first candidate (the answer
-   *  doesn't depend on the SS overlay) and short-circuits the rest of
-   *  the grid. The page reads this to render the TWR child row's
-   *  "Insufficient history" message. */
+  /** `'twr'` with an active non-CBP account under two years of history; detected on the first candidate, which short-circuits the grid. */
   readonly twrInsufficient?: boolean;
 }
 
@@ -104,11 +85,7 @@ export async function optimiseClaimAgesForScenario(
     resolved.socialSecurity,
     secondary !== undefined && grids.secondary.length > 0,
   );
-  // The independent survivor claim-age dimension for supported
-  // two-spouse scenarios (death order from resolved life expectancies —
-  // either spouse can be the survivor). Individual own-claim grids stay
-  // unchanged; an inert dimension leaves candidates survivor-free so the
-  // simulation runs the withheld-survivor state.
+  // The independent survivor claim-age dimension for supported two-spouse scenarios; an inert one leaves candidates survivor-free.
   const survivorDimension = buildSurvivorDimension({
     primary,
     secondary,
@@ -178,11 +155,8 @@ async function runCandidates(args: {
       mcRunner: args.args.mcRunner,
       projectionMethod: args.args.projectionMethod,
     });
-    // `TWR_METHOD_UNAVAILABLE === Number.NaN`. NaN compares unequal to
-    // itself, so this is the right discriminator — only the runner's
-    // short-circuit ever emits NaN here.
+    // `TWR_METHOD_UNAVAILABLE` is NaN, which only the runner's short-circuit emits.
     if (Number.isNaN(value)) {
-      // TWR insufficient — same answer for every candidate, abort grid.
       return { results, twrInsufficient: true };
     }
     results.push({
@@ -199,6 +173,3 @@ async function runCandidates(args: {
   }
   return { results, twrInsufficient: false };
 }
-
-// Re-exported names — keep alphabetical with the imports so adding a
-// new export is a one-line change.

@@ -12,7 +12,6 @@ import { hasPrimaryMemberSeeded } from './first-run-seed-flag';
 
 const PROFILE = { firstName: 'Ada', lastName: 'Lovelace', birthdate: '1985-12-10' };
 
-/** A minimal in-process stand-in for `navigator.locks`: one holder at a time per name. */
 function installFakeLocks() {
   let tail: Promise<unknown> = Promise.resolve();
   const request = vi.fn((_name: string, fn: () => Promise<unknown>) => {

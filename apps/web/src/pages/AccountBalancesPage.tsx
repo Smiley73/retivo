@@ -1,18 +1,4 @@
-/**
- * Annual balance entries for a single account.
- *
- * Reads `account` + `accountBalance` aggregates from IndexedDB; saves
- * via `queueLocalMutation`. Per-row gain/loss + return % are computed
- * client-side via `apps/web/src/lib/balance-calc.ts` (Modified-Dietz,
- * ported verbatim from the legacy server math).
- *
- * Aggregate id for an `accountBalance` is deterministic — `bal-<accountId>-<year>` —
- * so the pre-aggregate version-condition naturally enforces "one row per
- * (account, year)" without a duplicate scan.
- *
- * MIXED accounts split startingBalance / contributions / endingBalance
- * across pre-tax + post-tax columns; non-MIXED use the totals directly.
- */
+/** Annual balance entries for one account. The accountBalance aggregate id is deterministic (bal-<accountId>-<year>), so the version condition enforces one row per (account, year). Gain/loss and return % are Modified-Dietz via lib/balance-calc.ts. */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { PlusIcon } from '../components/icons';
 import { textLinkClass } from '../components/TextLink';
@@ -65,8 +51,6 @@ export function findPriorYearEntry(rows: BalanceRow[], year: number): BalanceRow
 function balanceAggregateId(accountId: string, year: number): string {
   return `bal-${accountId}-${year}`;
 }
-
-// -- Form state --
 
 interface BalanceFormState {
   year: number;
@@ -122,11 +106,7 @@ export const AccountBalancesPage: React.FC = () => {
   const { householdId } = useAuth();
   const { notifyPending } = useSync();
   const { confirm, dialog } = useConfirm();
-  // Reactive reads: the account row + its balance entries re-read on any write
-  // to their store — single saves/deletes via the fine signal, bulk fills via
-  // the coarse workspace event. The open add/edit modal's draft is seeded only
-  // in the click handlers, never from a load effect, so an auto-re-read updates
-  // the table without clobbering an in-progress balance entry.
+  // The add/edit modal's draft is seeded only in the click handlers, never from a load effect, so an auto-re-read can't clobber an in-progress entry.
   const accountQuery = useAggregates('account');
   const balanceQuery = useAggregates('accountBalance');
 
@@ -151,9 +131,6 @@ export const AccountBalancesPage: React.FC = () => {
     );
   }, [accountQuery.aggregates, id]);
 
-  // Once the stores have settled: `null` while loading, then the decorated
-  // (Modified-Dietz) balance rows for this account, sorted newest-first.
-  // A settled read with a missing account surfaces "Account not found".
   const rows = useMemo<BalanceRow[] | null>(() => {
     if (!ready) return null;
     if (!id) return [];
@@ -178,12 +155,9 @@ export const AccountBalancesPage: React.FC = () => {
   const error = queryError ?? (notFound ? 'Account not found' : null) ?? deleteError;
 
   const isMixed = account?.payload.taxTreatment === 'MIXED';
-  // Roth IRA only: the per-year conversion amounts are §408A tax history, so
-  // both the inputs and the persisted keys hang off this one predicate.
+  // Roth IRA only: per-year conversion amounts are §408A tax history; the inputs and persisted keys both hang off this predicate.
   const showsRoth = showsRothIraFields(account?.payload.type ?? '');
-  // Employer plans record the same dated fact under a different Code section: an
-  // in-plan Roth rollover (§402A) rather than a conversion (§408A). Same shape,
-  // same per-year clock, so it hangs off its own predicate the same way.
+  // Employer plans record the same fact as an in-plan Roth rollover (§402A), with its own predicate.
   const showsRollover = showsDesignatedRothFields(
     account?.payload.type ?? '',
     account?.payload.taxTreatment ?? '',
@@ -345,16 +319,8 @@ export const AccountBalancesPage: React.FC = () => {
         endingBalancePostTax: isMixed ? state.endingBalancePostTax : null,
         totalContributions,
         comment: state.comment.trim() === '' ? null : state.comment.trim(),
-        // Sparse-optional: absent means nothing was recorded, which is a weaker
-        // claim than a stored 0. A blank field must therefore omit the key
-        // rather than persist a 0 that asserts "no conversion this year".
-        //
-        // Gated on the account type as well as the value, and deliberately so:
-        // the same predicate hides the inputs, so an account retyped away from
-        // a Roth IRA would otherwise keep re-persisting amounts the user can no
-        // longer see or clear — invisible data no reader could ever justify
-        // applying §408A ordering to. Dropping the keys here is what makes the
-        // hidden state actually go away on the next save.
+        // Sparse-optional: a blank field omits the key, since absent is a weaker claim than a stored 0 ("no conversion this year").
+        // Gated on account type too: an account retyped away from a Roth IRA would otherwise keep re-persisting amounts the user can no longer see or clear.
         ...(showsRoth && state.rothConversionTaxable > 0
           ? { rothConversionTaxableAmount: state.rothConversionTaxable }
           : {}),
@@ -376,12 +342,7 @@ export const AccountBalancesPage: React.FC = () => {
     async (state: BalanceFormState): Promise<void> => {
       if (!id || !householdId) return;
       const aggId = balanceAggregateId(id, state.year);
-      // Tombstones count here. `getAggregate` hides a soft-deleted row, so
-      // re-adding a year the user had deleted used to resolve to "absent" and
-      // queue a `create` at expectedVersion 0 — landing the optimistic local
-      // row back at version 1, below the tombstone's own version, so the next
-      // edit queued against a version the server never had. Re-adding a year is
-      // a revival of that aggregate, which is an update continuing its lineage.
+      // Tombstones count: re-adding a deleted year must be an update continuing the lineage, or a create at expectedVersion 0 would land below the tombstone's version.
       const existing = (await getAggregateIncludingDeleted(
         'accountBalance',
         aggId,
@@ -430,8 +391,6 @@ export const AccountBalancesPage: React.FC = () => {
     try {
       await persist(workingForm);
       setShowForm(false);
-      // The reactive `useAggregates('accountBalance')` read re-runs on the
-      // write's fine signal, so the table refreshes without a manual token.
 
       const currentYear = new Date().getUTCFullYear();
       if (workingForm.year < currentYear) {
@@ -478,9 +437,7 @@ export const AccountBalancesPage: React.FC = () => {
               endingBalancePreTax: workingForm.endingBalancePreTax,
               endingBalancePostTax: workingForm.endingBalancePostTax,
               comment: '',
-              // Per-year tax facts: a conversion or in-plan rollover belongs to
-              // the year it happened in and never carries into the seeded next
-              // year.
+              // Per-year tax facts belong to the year they happened in and never carry into the seeded next year.
               rothConversionTaxable: 0,
               rothConversionNontaxable: 0,
               rothInPlanRolloverTaxable: 0,
@@ -567,8 +524,6 @@ export const AccountBalancesPage: React.FC = () => {
           },
         });
         notifyPending();
-        // The delete tombstone is an `accountBalance` write, so the reactive
-        // read re-runs and drops the row — no manual reload token needed.
       } catch {
         setDeleteError('Failed to delete');
       }

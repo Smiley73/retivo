@@ -1,14 +1,4 @@
-/**
- * MAGI-cap WINDOW SCHEDULE editor for the withdrawal strategy editor.
- *
- * Renders the cap toggle + an ordered list of non-overlapping cap WINDOWS. Each
- * window carries its own start anchor (`retirementStart | age | year`), end
- * anchor (`age | year` — the shared `ScheduleAnchorPicker` reaches
- * `MAX_AGE`), annual ceiling, Fill/Minimize mode, MAGI line, and target
- * Roth. Add/remove windows; inline
- * non-overlap + required-ceiling validation (blocks save); per-window
- * broken-anchor + Fill-no-target-Roth notices.
- */
+/** MAGI-cap window schedule editor: the cap toggle and an ordered list of non-overlapping windows (anchors, ceiling, Fill/Minimize mode, MAGI line, target Roth), with inline overlap and required-ceiling validation (blocks save) and broken-anchor and Fill-no-target notices. */
 import React, { useState } from 'react';
 import {
   Input,
@@ -51,8 +41,7 @@ import type {
   MagiCapMode,
 } from '../db/types';
 
-// Mirrors MoneyInput's INPUT_CLASS so the unset-state placeholder input is
-// visually identical to MoneyInput's text field (incl. the font-mono rule).
+// Mirrors MoneyInput's INPUT_CLASS so the unset-state placeholder input looks identical.
 const MONEY_INPUT_CLASS =
   'block w-full min-w-0 rounded-md border border-input-line bg-surface px-3 py-2 ' +
   'text-right text-sm font-mono tabular-nums text-ink placeholder:text-muted ' +
@@ -60,10 +49,6 @@ const MONEY_INPUT_CLASS =
   'disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-muted';
 const GRID_LABEL_CLASS = 'text-sm font-medium text-ink';
 
-// Stacked cap-mode card: a bordered Radio whose accent border/wash fills on
-// select (same accent convention as SegmentedRadioGroup / RadioOption).
-// `items-start` pins the circle to the title row so the helper line
-// can wrap underneath without pushing the indicator off-centre.
 const CAP_MODE_CARD_CLASS =
   'flex cursor-pointer items-start gap-3 rounded-md border border-input-line p-3 ' +
   'text-sm text-ink transition-colors hover:border-accent/60 ' +
@@ -88,17 +73,12 @@ const CAP_LINE_OPTIONS: { value: MagiCapLine; label: string }[] = [
   { value: 'aca', label: 'ACA marketplace income' },
 ];
 
-/** Latest calibration year present in a snapshot's `values` map. */
 function latestSnapshotYear(values: Readonly<Record<number, unknown>>): number {
   return Math.max(...Object.keys(values).map((y) => Number(y)));
 }
 
-/**
- * Resolve the cliff threshold (whole dollars) the entered ceiling is compared
- * against, from the LIVE calibration snapshots (not a hard-coded constant).
- * Returns `null` when no table is available.
- */
-export function resolveCliffThreshold(
+/** The cliff threshold (whole dollars) the entered ceiling is compared against, from the live calibration snapshots; null when no table is available. */
+function resolveCliffThreshold(
   line: MagiCapLine,
   memberCount: number,
 ): number | null {
@@ -121,21 +101,15 @@ export interface MagiCapSectionProps {
   enabled: boolean;
   windows: DraftMagiCapWindow[];
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
-  /** Scenario's real primary retirement year/month for cap-window anchor
-   *  resolution — overlap math must use the same baseline the engine
-   *  does for a mixed `retirementStart` + absolute ladder. */
+  /** The same baseline the engine uses, so overlap math is correct for a mixed retirementStart + absolute ladder. */
   retirementAnchor: MagiCapRetirementAnchor;
-  /** Active Roth accounts eligible as a conversion target. */
   rothAccounts: ReadonlyArray<{ id: string; name: string }>;
-  /** Inherited-cap override hint. */
   inheritedFromName?: string | null;
   onToggle: (v: boolean) => void;
   onWindowsChange: (v: DraftMagiCapWindow[]) => void;
 }
 
-/** Ceiling input: an empty React Aria field while the value is `null` (so the
- *  user sees it needs entry, not "$0.00"), switching to MoneyInput once a value
- *  is committed (mirrors the legacy single-cap field). */
+// An empty React Aria field while null, so the user sees it needs entry rather than "$0.00"; MoneyInput once committed.
 const CeilingInput: React.FC<{
   index: number;
   value: number | null;
@@ -174,10 +148,6 @@ const CeilingInput: React.FC<{
   );
 };
 
-/** Left column: every per-window input EXCEPT the start/end anchors (those are
- *  the right column). Annual Max, behavior mode, MAGI line, target Roth, and the
- *  over-cliff warning. Extracted to keep the editor within the function shape
- *  limit and to mirror the Expenses form's left/right split. */
 const WindowFields: React.FC<{
   index: number;
   window: DraftMagiCapWindow;
@@ -191,13 +161,7 @@ const WindowFields: React.FC<{
     w.magiCeilingAnnualDollars !== null &&
     cliffThreshold !== null &&
     w.magiCeilingAnnualDollars > cliffThreshold;
-  // A Fill window with no target Roth converts $0 — surface the same
-  // per-window notice the engine degrades to. A window saved earlier against an
-  // account that is no longer eligible (deleted, deactivated, or an INHERITED
-  // Roth IRA) is the same $0 case: `rothAccounts` is the eligible list, so
-  // its id is absent, the Select renders no selection, and the engine's
-  // `findTargetRothIndex` refuses it. Match on the eligible list rather than on
-  // "an id is set" so those windows say so instead of silently converting $0.
+  // A Fill window with no eligible target Roth converts $0: match on the eligible list, not on "an id is set", so a window saved against a since-deleted, deactivated or inherited Roth IRA says so (the engine's findTargetRothIndex refuses it).
   const fillNoTarget =
     w.capMode === 'fill' &&
     !rothAccounts.some((a) => a.id === w.targetRothAccountId);
@@ -303,9 +267,6 @@ const WindowFields: React.FC<{
   );
 };
 
-/** One window editor: a two-column split mirroring the Expenses form — the
- *  cap parameters on the left, the start/end anchors stacked on the right — with
- *  a per-window delete control. */
 const WindowEditor: React.FC<{
   index: number;
   window: DraftMagiCapWindow;
@@ -361,8 +322,7 @@ export const MagiCapSection: React.FC<MagiCapSectionProps> = ({
   const timeframeError = magiCapWindowTimeframeError(windows, members, retirementAnchor);
   const overlapError = magiCapWindowOverlapError(windows, members, retirementAnchor);
   const tabLabels = magiCapWindowTabLabels(windows, members, retirementAnchor);
-  // Selected tab key (window index as string). Clamped on render so an external
-  // window reset (toggle-on seed, inheritance) never leaves a dangling key.
+  // Clamped on render so an external window reset never leaves a dangling key.
   const [selectedKey, setSelectedKey] = useState('0');
   const activeKey = String(Math.min(Math.max(0, Number(selectedKey)), windows.length - 1));
 
@@ -371,7 +331,6 @@ export const MagiCapSection: React.FC<MagiCapSectionProps> = ({
   };
   const removeWindow = (index: number): void => {
     onWindowsChange(windows.filter((_, i) => i !== index));
-    // Indices shift left after `index`; keep the selection on a real window.
     setSelectedKey((prev) => {
       const p = Number(prev);
       if (p > index) return String(p - 1);

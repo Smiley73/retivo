@@ -1,8 +1,4 @@
-/**
- * YearlyPortfolioFlowsBand — Reset-button visibility.
- *
- * PortfolioFlowsChart mocked; useChartZoom mocked at module boundary.
- */
+// YearlyPortfolioFlowsBand: Reset-zoom visibility, with PortfolioFlowsChart and useChartZoom mocked at the module boundary.
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -61,14 +57,12 @@ describe('YearlyPortfolioFlowsBand', () => {
   it('the info popover explains the flow-vs-budget difference: activate reveals, Esc dismisses', async () => {
     const user = userEvent.setup();
     render(<YearlyPortfolioFlowsBand {...baseProps} />);
-    // Hidden until the info-icon trigger is activated.
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await user.tab();
     await user.keyboard('{Enter}');
     const popover = await screen.findByRole('dialog');
     expect(popover).toHaveTextContent(/actual cash drawn from your invested accounts/i);
     expect(popover).toHaveTextContent(/budgeted need for the year/i);
-    // Esc dismisses the revealed popover.
     await user.keyboard('{Escape}');
     await waitFor(() =>
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),

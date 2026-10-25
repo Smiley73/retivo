@@ -1,12 +1,4 @@
-/**
- * RothConversionsBand — render + tile + popover + null-gate + a11y smoke.
- *
- * Covers the card's own surface: the basis-suffixed heading that owns
- * `roth-conversions-heading`, the "Total Roth converted" tile, the per-year
- * bars, the `(i)` popover carrying the per-bar caption + the federal-only
- * disclosure (planned working-years AND Fill-mode conversions), the MC
- * sub-label, and the null gate when nothing was converted.
- */
+// RothConversionsBand: the basis-suffixed heading that owns `roth-conversions-heading`, the "Total Roth converted" tile, per-year bars, the (i) popover with the per-bar caption and federal-only disclosure (planned working-years and Fill conversions), the MC sub-label and the null gate.
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -40,7 +32,6 @@ function renderBand(overrides: Partial<RothConversionsBandProps> = {}) {
   );
 }
 
-/** Open the card's `(i)` info popover and return the opened dialog. */
 async function openInfo(): Promise<HTMLElement> {
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: INFO }));
@@ -54,7 +45,6 @@ describe('RothConversionsBand', () => {
       screen.getByRole('heading', { name: 'Roth conversions (Planned)' }),
     ).toBeInTheDocument();
     expect(screen.getByText('Total Roth converted')).toBeInTheDocument();
-    // $27,992 + $18,500 = $46,492 → "$46k" (the tile ties out to the bars).
     expect(screen.getByText('$46k')).toBeInTheDocument();
     await waitFor(() =>
       expect(container.querySelectorAll(BAR)).toHaveLength(2),
@@ -97,12 +87,10 @@ describe('RothConversionsBand', () => {
     expect(dialog).toHaveTextContent(
       /Total Roth converted is the lifetime amount moved from your pre-tax accounts/i,
     );
-    // Names BOTH sources of conversions — planned working-years and Fill mode.
     expect(dialog).toHaveTextContent(
       /conversions you planned during your working years/i,
     );
     expect(dialog).toHaveTextContent(/income cap's Fill mode/i);
-    // Federal-only state-tax disclosure.
     expect(dialog).toHaveTextContent(
       /state taxes may also apply and are not modeled here/i,
     );

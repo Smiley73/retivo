@@ -1,16 +1,6 @@
 /**
- * The shell's "Assistant connected" indicator: a status pill that opens the activity viewer, and a
- * Disconnect button beside it that ends the session in one activation, with no confirmation (the
- * person loses nothing and pairs again in a minute; `useConfirm` is for erasing data).
- *
- * Mounted twice by the shell, never in the drawer: `desktop` in the sidebar's status slot and
- * `banner` in the mobile top bar, so no width shows two. It renders `null` unless a session is
- * connected, which is also the whole story on a build without the bridge port. The screen-reader
- * announcement is not made here but by the one `AssistantStatusAnnouncer`.
- *
- * Disconnect unmounts the control that has focus and React Aria's focus restore has nothing to
- * return to once the opener is gone, so focus moves explicitly first: to the Menu button in the
- * banner, to the first navigation button in the sidebar.
+ * The shell's "Assistant connected" pill (`desktop` and `banner` variants) with a no-confirm Disconnect. Disconnect
+ * moves focus first, since React Aria's focus restore has nothing to return to once the opener is gone.
  */
 import React, { useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -28,7 +18,6 @@ const PILL_CLASS =
   'px-2.5 py-0.5 text-xs font-medium text-positive outline-none transition-colors ' +
   'data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring';
 
-/** The control that should hold focus once the Disconnect button that had it is gone. */
 function focusHome(root: HTMLElement | null, variant: AssistantSessionBadgeVariant): HTMLElement | null {
   if (root === null) return null;
   return variant === 'banner'

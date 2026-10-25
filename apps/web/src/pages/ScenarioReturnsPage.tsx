@@ -1,18 +1,4 @@
-/**
- * Scenario-level per-account planning-return overrides at
- * /scenarios/:id/returns.
- *
- * Each row carries an editable `planningReturnPct` for one active
- * account. "Baseline" shows the resolved-from-parent value (parent
- * chain's effective rate, falling through to `Account.payload.planningReturnPct`
- * when no ancestor overrides). "Scenario" is editable and defaults to
- * the baseline so the user only types what they want to change.
- *
- * **Scope: Planned method only.** The Balance Projection page's TWR
- * method is empirical (computed from the account's own
- * balance history) and ignores this override. Surface a callout so the
- * user isn't surprised.
- */
+/** /scenarios/:id/returns: per-account planning-return overrides (Baseline resolved from the parent chain, editable Scenario defaulting to it). Planned method only: the TWR method is empirical from balance history and ignores this override, which a callout says. */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Link, useParams } from 'react-router';
@@ -288,8 +274,6 @@ export const ScenarioReturnsPage: React.FC = () => {
                 {
                   label: 'Cancel',
                   icon: <XIcon />,
-                  // Revert edits: reload re-reads the saved overrides and
-                  // resets the drafts, flipping isDirty back off.
                   onClick: () => {
                     setError(null);
                     void reload();
@@ -340,11 +324,7 @@ export const ScenarioReturnsPage: React.FC = () => {
           </Muted>
         </Card>
       ) : (
-        // React Aria Table: keyboard row navigation + arrow keys. The
-        // editable <PercentInput variant="cell"> renders directly inside
-        // the <Cell> — RA Table's Cell child can be any
-        // focusable element, the row keyboard model still works (typing
-        // in the input does not steal row focus until blur).
+        // A Cell can hold any focusable element and the row keyboard model still works; typing in the input doesn't steal row focus until blur.
         <TableScroll label="Per-account return overrides">
         <Table className={tableClass} aria-label="Per-account return overrides">
             <TableHeader>
@@ -367,9 +347,6 @@ export const ScenarioReturnsPage: React.FC = () => {
                 const bucket = accountBucket(a.payload.type);
                 return (
                   <Row key={a.id} id={a.id}>
-                    {/* The name cell hosts the absolutely-positioned bucket
-                        bar, so it must be `relative` (same approach as
-                        AccountsPage). */}
                     <Cell className={`${tdClass} relative`}>
                       <BucketBar bucket={bucket} />
                       {a.payload.name}
@@ -386,9 +363,6 @@ export const ScenarioReturnsPage: React.FC = () => {
                       </Badge>
                     </Cell>
                     <Cell className={tdNumClass}>{formatPercentDisplay(inh)}</Cell>
-                    {/* Right-aligned (tdNumClass) so the input box sits under
-                        the right-aligned "Scenario %" header, matching the
-                        Baseline % column. */}
                     <Cell className={tdNumClass}>
                       <span className="inline-block w-20 text-left">
                         <PercentInput

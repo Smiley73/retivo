@@ -1,28 +1,5 @@
-/**
- * Step-up enforcement for the change-password + factor-management ops,
- * under AUTH_MFA_ENFORCED=true:
- *   - POST /auth/change-password
- *   - POST /auth/mfa/totp/disable
- *   - POST /auth/passkey/:credentialId/remove
- *
- * Covers the enforcement matrix: existing gate (password) + a VALID fresh factor → succeeds; + a
- * MISSING factor → 400 STEP_UP_PROOF_MISSING; + a WRONG factor → 401
- * MFA_CODE_INVALID; Email-OTP is the no-lockout floor — completes each op
- * even when the very factor being managed is the only routine one;
- * unauthenticated → CSRF 403.
- *
- * The flag-OFF degrade floor (≥ password) is exercised by the flag-off
- * suite at the bottom of THIS file ('factor-management step-up — flag-off
- * degrade floor', which boots a separate app with `AUTH_MFA_ENFORCED` unset)
- * for totp/disable, by auth.spec.ts change-password,
- * and by passkey.spec.ts remove — all running with `AUTH_MFA_ENFORCED` unset.
- * (mfa.spec.ts runs with the flag ON, so it does NOT cover the flag-off floor.)
- *
- * The top-level suite runs under AUTH_MFA_ENFORCED=true (read at service
- * construction), restored
- * after — mirrors destructive-ops-step-up.spec.ts. Each MFA op mints a fresh
- * session.
- */
+// Step-up for change-password, TOTP disable and passkey removal under AUTH_MFA_ENFORCED=true; the shared outcomes live in step-up-matrix.spec.ts, so only the missing-factor audit is here.
+// The flag-off floor for totp/disable is the second describe; auth.spec.ts and passkey.spec.ts cover change-password and passkey removal with the flag unset.
 import request from 'supertest';
 import {
   STRONG_PASSWORD,
@@ -55,7 +32,6 @@ describe('factor-management step-up enforcement', () => {
     else process.env.AUTH_MFA_ENFORCED = priorEnforced;
   });
 
-  // ---------- change-password ----------
   describe('POST /auth/change-password', () => {
     function changePassword(s: Session, body: Record<string, unknown>): request.Test {
       return authSet(s)(
@@ -81,14 +57,7 @@ describe('factor-management step-up enforcement', () => {
   });
 });
 
-/**
- * Flag-OFF degrade floor (never less safe than today): with
- * `AUTH_MFA_ENFORCED` unset, the factor-management ops must NOT demand a fresh
- * step-up factor — the `enforceStepUpFactor` early-return (`if (!this.mfaEnforced)
- * return;`) keeps the gate at password-only. Boots a SEPARATE app with the flag
- * unset (the flag is read at service construction), mirroring how
- * passkey.spec.ts covers the flag-off floor for passkey removal.
- */
+// With AUTH_MFA_ENFORCED unset the factor-management ops stay at password-only (`enforceStepUpFactor` returns early). Boots a separate app, since the flag is read at service construction.
 describe('factor-management step-up — flag-off degrade floor', () => {
   let t2: TestApp;
   let priorEnforced: string | undefined;
@@ -113,5 +82,4 @@ describe('factor-management step-up — flag-off degrade floor', () => {
     expect(res.status).toBe(200);
     expect(res.body.totpEnabled).toBe(false);
   });
-
 });

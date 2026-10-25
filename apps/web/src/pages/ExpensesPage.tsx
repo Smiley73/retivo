@@ -1,22 +1,4 @@
-/**
- * /expenses — canonical retirement expense list.
- *
- * Page renders an `<ExpensesProjectionChart>` followed by the category-
- * grouped list. The chart plots the monthly run-rate of essential and
- * discretionary expenses from the earliest start month (or the resolved
- * retirement month, whichever is earlier) through the last surviving
- * member's projected end-of-life. A "Today's dollars / Future dollars"
- * `SegmentedRadioGroup` in the shared tab strip drives the display unit:
- * in *Today's dollars* (default) inflation is pinned to 0% so values stay
- * in today's-dollar terms (flat, unadjusted); in *Future dollars* the
- * chart inflates by the scenario's resolved `inflation.ratePct` (default
- * 3%) so the curve compounds forward. Either way the horizon and death
- * markers come from the resolved scenario — so the chart's shape reflects
- * when individual expenses start/end, the discretionary adjustment window,
- * and lifetime-anchored taper.
- *
- * Per-row actions: Edit (navigates to form) + Delete (confirm dialog).
- */
+/** /expenses: the canonical expense list with a projection chart (Today's dollars pins inflation to 0%, Future dollars uses the scenario rate). */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PlusIcon } from '../components/icons';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -96,19 +78,6 @@ import {
   premiumCheckExpenses,
 } from './medicare-premium-helper';
 
-/**
- * Compute per-year canonical-expense rows + life-expectancy markers
- * for the chart. Inflation depends on `displayMode`: `'today'` pins the
- * rate to 0% (today's-dollar values, no scenario overrides on the
- * expenses themselves), `'future'` uses the resolved scenario's
- * `inflation.ratePct` (default 3%) so the curve compounds forward from
- * the `todayMonthIndex` anchor. Either way the horizon and markers come
- * from the selected scenario so the chart aligns with the household's
- * plan: retirement year from the resolved primary retirement age,
- * last-death year from each member's resolved life expectancy. Returns
- * empty rows when there is no usable primary birthdate or retirement
- * age — the chart wrapper renders an empty state then.
- */
 function emptyProjectionData(): ProjectionData {
   return {
     rows: [],
@@ -121,10 +90,7 @@ function emptyProjectionData(): ProjectionData {
   };
 }
 
-// Shape-limit note: this function is well above the ≤60-line cap. Extraction
-// into focused helpers (context build, row projection, category-stack meta,
-// tooltip-members) is orthogonal work, deferred to the next change that makes
-// a non-trivial computation change inside this function.
+/** Per-year canonical-expense rows and life-expectancy markers for the chart; empty without a usable primary birthdate or retirement age. */
 export function buildProjection(
   rows: ExpenseRow[],
   categories: Aggregate<ExpenseCategoryPayload>[],
@@ -136,11 +102,7 @@ export function buildProjection(
   todayMonthIndex: number,
 ): ProjectionData {
   if (rows.length === 0) return emptyProjectionData();
-  // Marker / category palette colors are resolved against the passed
-  // `theme` so they match the rendered chart. The page recomputes this
-  // builder whenever `useTheme()`'s `resolvedTheme` flips, so a live
-  // theme toggle re-themes the markers on the already-mounted chart
-  // (no implicit `.dark`-class read here).
+  // Colors resolve against the passed theme; the page rebuilds this when resolvedTheme flips so markers re-theme without reading the .dark class.
   const markerColors = lifeMarkerColors(theme);
   const baseScenario = scenarios.find((s) => s.payload.isPrimary) ?? null;
   const effectiveId =
@@ -178,8 +140,6 @@ export function buildProjection(
     if (deathYear === null) return null;
     const fallback = slot === 'primary' ? 'Primary' : 'Secondary';
     const firstName = member.payload.firstName.trim() || fallback;
-    // Integer `deathYear` + `kind: 'death'`; the always-monthly expenses
-    // chart maps it to the December sample so the marker hugs the data.
     markers.push({
       fractionalYear: deathYear,
       label: `${firstName} life expectancy ${age}`,
@@ -192,33 +152,14 @@ export function buildProjection(
   addDeathMarker(secondary, 'secondary');
   if (markers.length === 0) return emptyProjectionData();
 
-  // Death markers are the integer death year now (death = Dec 31 of
-  // `deathYear`); `lastDeathFractional` = the latest of them.
   const lastDeathFractional = Math.max(
     ...markers.map((m) => m.fractionalYear),
   );
-  // Loop bound is the integer death year. `Math.floor` is the identity on
-  // the integer marker — the expense data runs through December of
-  // `deathYear` (the engine keeps lifetime expenses active through then),
-  // so the last monthly sample is December and the death marker hugs it.
   const lastFullYear = Math.floor(lastDeathFractional);
   if (lastFullYear < retirementYear) return emptyProjectionData();
 
-  // Canonical expenses. Shared builder so the single-expense form
-  // preview projects under a byte-identical context. Scenario knobs
-  // (retirement / life-expectancy / discretionary-spending) shape the
-  // horizon + discretionary adjustment. The shared builder pins
-  // inflation to 0% (today's-dollar default — correct for the form
-  // preview); here the Expenses page overrides it per the display-unit
-  // toggle: `'today'` keeps 0% (flat, unadjusted), `'future'` uses the
-  // chain-resolved scenario rate (default 3%) so the curve compounds
-  // forward. The month anchor (`todayMonthIndex`, captured once per
-  // render) is threaded in too so the future-mode curve is anchored to
-  // the current month, not January. See `buildExpenseProjectionContext`.
-  // Future mode passes the resolved per-category rates (Medical = general +
-  // 2pp by default) so the medical band + the per-category chart grow
-  // faster; Today's-dollars mode pins inflation to 0% with no category
-  // rates so every category reads flat.
+  // Shares the builder with the single-expense form preview; this page overrides inflation per the display toggle
+  // (Today's pins 0%, Future uses the resolved rate and per-category rates, Medical = general + 2pp).
   const resolvedInflation =
     displayMode === 'future'
       ? resolveInflationForScenario(
@@ -244,10 +185,7 @@ export function buildProjection(
     todayMonthIndex,
   };
 
-  // Widen the chart's left edge to the earliest expense start month, so
-  // an expense that begins before retirement (e.g. a mortgage payment
-  // active today) is visible from its real start rather than clipped at
-  // retirementYear.
+  // Widen the left edge to the earliest expense start so a pre-retirement expense is visible from its real start.
   const resolvedExpenses = rows.map((r) => ({
     id: r.id,
     source: 'canonical' as const,
@@ -257,14 +195,6 @@ export function buildProjection(
   const fromYear = earliestStart
     ? Math.min(earliestStart.year, retirementYear)
     : retirementYear;
-  // Surface the canonical teal retirement marker whenever the retirement
-  // boundary falls within the chart's x-domain. The domain is
-  // [fromYear, lastFullYear]; `fromYear <= retirementYear` (min with it
-  // above) and `lastFullYear >= retirementYear` (guarded above), so the
-  // boundary is always in range here — including the common
-  // `fromYear === retirementYear` case where the chart starts at
-  // retirement. The SVG engine clamps a left-edge marker into view so a
-  // marker at the very start of the domain stays visible.
   const retirementFractional = isoToFractionalYear(primaryRetirementIso);
   if (retirementFractional !== null) {
     markers.push({
@@ -279,13 +209,7 @@ export function buildProjection(
     to: lastFullYear,
   });
 
-  // Trim the trailing zero-rate tail. The monthly loop emits all 12
-  // months of the death year, but every month past the lifetime end's
-  // exclusive boundary is zero — without trimming, the chart draws the
-  // line dropping to 0 at the death month and continuing along the
-  // X-axis. Trimming leaves the line ending at the last active month,
-  // with the dashed death marker visible just to its right rather than
-  // a misleading drop-to-zero shape.
+  // Trim the trailing zero tail: months past the lifetime end are zero and would draw a misleading drop to 0.
   let lastNonZero = projected.length - 1;
   while (lastNonZero >= 0 && projected[lastNonZero].total === 0) {
     lastNonZero--;
@@ -293,10 +217,6 @@ export function buildProjection(
   const trimmedLen = lastNonZero >= 0 ? lastNonZero + 1 : 0;
   const trimmed = projected.slice(0, trimmedLen);
 
-  // Category projection runs the same window so the stacked chart's
-  // x-axis matches "Total expenses" tick-for-tick. We slice to the
-  // total-view's trimmed length so a death-month tail doesn't appear
-  // in only the category view.
   const categoryProjected = projectExpensesByCategoryMonth(
     resolvedExpenses,
     ctx,
@@ -304,15 +224,7 @@ export function buildProjection(
   );
   const categoryRows = categoryProjected.slice(0, trimmedLen);
 
-  // Annual (headline) expense rows for the PDF report's expense tables, from
-  // the SAME annual engine the year-by-year math is the source of truth for
-  // (`projectExpensesByYear` / `projectExpensesByCategoryYear`) under this
-  // exact resolved-expense set, context, and display basis. The PDF tables read
-  // these directly rather than re-deriving annual totals from the monthly
-  // run-rate samples — a monthly rollup mean-over-active-months diverges from
-  // the engine's active-months × year-mean-factor in partial (mid-year /
-  // trimmed-death) years when inflation is non-zero. The window spans the same
-  // years the trimmed chart covers (`fromYear` through the last visible year).
+  // Annual PDF rows come from the annual engine (projectExpensesByYear), not from rolling up monthly samples, which diverge in partial years when inflation is non-zero.
   const lastVisibleYear = trimmed.length > 0 ? trimmed[trimmed.length - 1].year : null;
   const annualRows: ExpenseProjectionPoint[] =
     lastVisibleYear !== null
@@ -329,10 +241,7 @@ export function buildProjection(
         })
       : [];
 
-  // Determine which categories actually carry non-zero data in the
-  // chart window — empty categories don't need a stack layer. Order
-  // is alphabetical by category name so palette assignment is stable
-  // across reloads (and the legend reads predictably).
+  // Alphabetical by name so palette assignment is stable across reloads.
   const catTotals = new Map<string, number>();
   for (const r of categoryRows) {
     for (const [cid, v] of Object.entries(r.byCategoryId)) {
@@ -342,19 +251,12 @@ export function buildProjection(
   const activeIds = new Set(
     categories.filter((c) => (catTotals.get(c.id) ?? 0) > 0).map((c) => c.id),
   );
-  // Shared assembly (sort alphabetical-by-name + palette in that order) so
-  // a category lands on the SAME hue here and on the cashflow band.
   const categoryMeta: CategoryMeta[] = assembleCategoryMeta(
     categories.map((c) => ({ id: c.id, name: c.payload.name })),
     activeIds,
     theme,
   );
 
-  // Build the per-household-member tuple the chart's tooltip uses to
-  // render "<First> (age N)" rows. Birthdate is required (year only —
-  // the tooltip uses `pointYear - birthYear`, the "age in this calendar
-  // year" convention). Primary first so the tooltip reads consistently
-  // with the rest of the app.
   const tooltipMembers: TooltipMember[] = [];
   const pushMember = (member: Aggregate<HouseholdMemberPayload> | null): void => {
     if (!member?.payload.birthdate) return;
@@ -382,21 +284,15 @@ export function buildProjection(
 interface ProjectionData {
   rows: ExpenseProjectionMonthlyPoint[];
   categoryRows: ExpenseCategoryMonthlyPoint[];
-  /** Annual (headline) essential/discretionary totals for the PDF report's
-   *  expense-overview table — from `projectExpensesByYear` under the same
-   *  resolved expenses / context / display basis as the monthly chart rows. */
+  /** Annual essential/discretionary totals for the PDF report, from projectExpensesByYear. */
   annualRows: ExpenseProjectionPoint[];
-  /** Annual per-category totals for the PDF report's expenses-by-category
-   *  table — from `projectExpensesByCategoryYear` under the same inputs. */
+  /** Annual per-category totals for the PDF report, from projectExpensesByCategoryYear. */
   annualCategoryRows: ExpenseCategoryYearPoint[];
   categoryMeta: CategoryMeta[];
   markers: CashflowChartMarker[];
   members: TooltipMember[];
 }
 
-/** Raw, theme-independent data loaded from IndexedDB. The page derives
- *  `groups` / `householdMembers` / `projection` from this + the resolved
- *  theme so a theme toggle re-themes the chart without a reload. */
 interface LoadedData {
   rows: ExpenseRow[];
   cats: Aggregate<ExpenseCategoryPayload>[];
@@ -405,8 +301,6 @@ interface LoadedData {
   selectedScenarioId: string | null;
 }
 
-/** Group expense rows by category, alphabetical category order and
- *  alphabetical within — pure, so it can run in a render `useMemo`. */
 function groupExpenses(
   rows: ExpenseRow[],
   catName: Map<string, string>,
@@ -438,9 +332,7 @@ function groupExpenses(
   return groupArr;
 }
 
-/** localStorage key for the Expenses-page display-unit toggle. Distinct
- *  from the Balance Projection page's key so the two pages keep
- *  independent display-mode preferences. */
+/** localStorage key for the display-unit toggle; separate from the Balance Projection page's key so the preferences stay independent. */
 export const EXPENSES_DISPLAY_MODE_STORAGE_KEY = 'retivo.expenses.displayMode';
 
 export const ExpensesPage: React.FC = () => {
@@ -450,11 +342,6 @@ export const ExpensesPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { resolvedTheme } = useTheme();
-  // Reactive reads: expenses + their reference data re-read on any write to
-  // the subscribed stores (single saves/deletes via the per-store fine signal,
-  // the default-categories bootstrap / demo fill / sync via the coarse
-  // workspace event, scenario edits via the `scenario` store). The selected-
-  // scenario *pointer* is read separately on the narrow revision below.
   const expenseQuery = useAggregates('expense');
   const categoryQuery = useAggregates('expenseCategory');
   const memberQuery = useAggregates('householdMember');
@@ -472,15 +359,9 @@ export const ExpensesPage: React.FC = () => {
     scenarioQuery.error
       ? 'Failed to load expenses.'
       : null;
-  // Run-once guard: restore fires at most once per navigation.
   const focusRestoredRef = useRef(false);
-  // The "Add Medicare premiums" preview, opened by the header action or by the
-  // entry-point query parameter (read once, like the focus restore below).
   const [premiumsOpen, setPremiumsOpen] = useState(false);
   const premiumsEntryReadRef = useRef(false);
-  // Selected-scenario pointer: not a store-subscription slice, so it is read
-  // from the local pointer store and refreshed when the sidebar switches the
-  // active scenario or the scenario list changes.
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(
     null,
   );
@@ -497,14 +378,10 @@ export const ExpensesPage: React.FC = () => {
     window.localStorage.setItem(EXPENSES_DISPLAY_MODE_STORAGE_KEY, displayMode);
   }, [displayMode]);
 
-  // Single real-clock anchor captured ONCE per render so the inflation
-  // exponent can't drift across a clock-minute boundary (BPP pattern).
+  // Capture one clock anchor per render so the inflation exponent can't drift across a minute boundary.
   const renderNow = new Date();
   const todayMonthIndex = renderNow.getMonth();
 
-  // Re-read the selected-scenario pointer whenever the sidebar switches the
-  // active scenario or the scenario list changes. A stored pick that no longer
-  // names a live scenario falls back to the base inside `buildProjection`.
   const scenarios = scenarioQuery.aggregates as ReadonlyArray<ScenarioAggregate>;
   useEffect(() => {
     let active = true;
@@ -518,8 +395,6 @@ export const ExpensesPage: React.FC = () => {
     };
   }, [scenarios, selectedScenarioRevision]);
 
-  // Raw, theme-independent data assembled from the reactive hook outputs.
-  // `null` until every slice settles so the page keeps its loading skeleton.
   const loaded = useMemo<LoadedData | null>(() => {
     if (!dataReady) return null;
     const cats = categoryQuery.aggregates as ReadonlyArray<
@@ -555,9 +430,6 @@ export const ExpensesPage: React.FC = () => {
     selectedScenarioId,
   ]);
 
-  // Theme-reactive derivations. `projection` re-runs when the resolved
-  // theme flips (markers / category palette re-color on a live
-  // toggle without a data reload); `groups` is theme-independent.
   const groups = useMemo<CategoryGroup[]>(() => {
     if (!loaded) return [];
     const catName = new Map<string, string>();
@@ -581,7 +453,6 @@ export const ExpensesPage: React.FC = () => {
 
   const loading = !dataReady;
 
-  // Canonical expenses plus the selected scenario's own, for the premium check.
   const premiumExpenses = useMemo(
     () =>
       premiumCheckExpenses(
@@ -592,11 +463,7 @@ export const ExpensesPage: React.FC = () => {
     [expenseQuery.aggregates, scenarios, selectedScenarioId],
   );
 
-  // Post-load focus restoration: after the first successful data
-  // load, read `focusExpenseId` from the URL, validate it against a safe
-  // format, scroll the matching row into view, focus its Edit button,
-  // and strip the param via replaceState. A missing/invalid/unmatched
-  // id is a no-op: the param is still stripped so the URL stays clean.
+  // After load, restore focus to the row named by focusExpenseId (validated), then strip the param; an invalid id is a no-op.
   useEffect(() => {
     if (loading) return;
     if (focusRestoredRef.current) return;
@@ -616,13 +483,10 @@ export const ExpensesPage: React.FC = () => {
     if (!row) return;
     // Scroll the row into view without animation (reduced-motion safe).
     row.scrollIntoView({ behavior: 'instant', block: 'nearest' });
-    // Focus the Edit button inside the row.
     const editBtn = row.querySelector<HTMLButtonElement>('button[aria-label="Edit"]');
     editBtn?.focus({ preventScroll: true });
   }, [loading, searchParams]);
 
-  // Entry points land here with `medicarePremiums=1`: open the preview once
-  // data is ready and strip the parameter so a reload does not reopen it.
   useEffect(() => {
     if (loading || premiumsEntryReadRef.current) return;
     premiumsEntryReadRef.current = true;
@@ -651,8 +515,6 @@ export const ExpensesPage: React.FC = () => {
         payload: row.payload,
       });
       notifyPending();
-      // The delete tombstone is an `expense` write, so the reactive read
-      // re-runs and drops the row — no manual reload.
     } catch {
       setDeleteError('Failed to delete expense.');
     }
@@ -685,9 +547,6 @@ export const ExpensesPage: React.FC = () => {
       {error && <Alert tone="error">{error}</Alert>}
 
       {projection.rows.length > 0 && (() => {
-        // Plain toggle buttons — no tablist/tabpanel pair, so tablist
-        // ARIA is removed; buttons remain the toggle affordance. Tab strip
-        // lives in the chart card's header (top-right).
         const tabs = (
           <div className="flex flex-wrap items-center gap-2">
             <SegmentedRadioGroup<DisplayMode>

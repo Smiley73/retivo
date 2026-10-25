@@ -1,18 +1,9 @@
-/**
- * ExpensesCategoryChartInner — canonical retirement-marker render
- * + a11y smoke, on the SVG chart engine.
- *
- * The Expenses-by-category chart must render the same teal
- * `Retires <Mon YYYY>` retirement marker as the total-view + Balance
- * Projection charts whenever the host feeds one. Asserts the marker
- * renders as a dashed vertical line with the canonical teal stroke +
- * its label text. expectNoA11yViolations satisfies the AGENTS
- * component-test mandate.
- */
+/** ExpensesCategoryChartInner: the canonical teal retirement marker renders as a dashed vertical line with its label. */
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 
-import InnerChart, { type CategoryMeta } from './ExpensesCategoryChartInner';
+import InnerChart from './ExpensesCategoryChartInner';
+import type { CategoryMeta } from '../lib/category-palette';
 import type { ExpenseCategoryMonthlyPoint } from '../lib/expense-projection';
 import type { TooltipMember } from './tooltip-member';
 import type { CashflowChartMarker } from './CashflowProjectionChart';

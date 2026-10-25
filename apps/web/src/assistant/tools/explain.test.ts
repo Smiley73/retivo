@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXPLAIN_METRICS, type ExplainMetric } from '@retirement/assistant-protocol';
+import type { ExplainMetric } from '@retirement/assistant-protocol';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { clearMonteCarloCache, mcCacheKey, monteCarloCacheCount, putCached } from '../../db/monte-carlo-cache';
 import { clearAllStores, deleteAggregateLocally, listAggregates, putAggregate } from '../../db/store';
@@ -10,10 +10,9 @@ import type { Aggregate, ScenarioPayload } from '../../db/types';
 import type { DrawdownYear } from '../../lib/drawdown-engine';
 import { loadDemoData } from '../../lib/demo-data-loader';
 import { loadProjectionInputs } from '../../lib/projection-inputs';
-import { BASE_ID, EARLY_ID, savedSummary } from '../../test/assistant-analysis-inputs';
+import { BASE_ID, EARLY_ID, EXPLAIN_METRICS, savedSummary } from '../../test/assistant-analysis-inputs';
 import { TEST_NOW, callPlanTool, choicesWith, envelopeOf } from '../../test/assistant-tools';
 import type { ToolEnv } from './define';
-import { METRIC_DOCS, METRIC_INPUT_KEYS } from './explain';
 import { rowAssumptions } from './projection-assumptions';
 import { SCENARIO_SECTION_KEYS } from './scenario-sections';
 import { monteCarloInputFor } from './stress-cache';
@@ -60,23 +59,27 @@ afterAll(async () => {
 });
 
 describe('the metric tables', () => {
-  it('covers exactly the metrics the registry names, in both maps', () => {
-    expect(Object.keys(METRIC_INPUT_KEYS).sort()).toEqual([...EXPLAIN_METRICS].sort());
-    expect(Object.keys(METRIC_DOCS).sort()).toEqual([...EXPLAIN_METRICS].sort());
+  const inputKeys = {} as Record<ExplainMetric, readonly string[]>;
+  const docs = {} as Record<ExplainMetric, { path: string; heading: string; alsoSee?: string }>;
+
+  beforeAll(async () => {
+    for (const metric of EXPLAIN_METRICS) {
+      const { data } = await explain(metric);
+      inputKeys[metric] = Object.keys(data.inputs);
+      docs[metric] = { ...data.doc, ...(data.alsoSee !== undefined && { alsoSee: data.alsoSee.heading }) };
+    }
   });
 
-  it('names only ScenarioOverrides keys, each at most once per metric', () => {
+  it('names only ScenarioOverrides keys for each metric', () => {
     const known = new Set<string>(SCENARIO_SECTION_KEYS);
     for (const metric of EXPLAIN_METRICS) {
-      const keys: readonly string[] = METRIC_INPUT_KEYS[metric];
-      expect(keys.length, metric).toBeGreaterThan(3);
-      for (const key of keys) expect(known.has(key), `${metric}: ${key}`).toBe(true);
-      expect(new Set(keys).size, metric).toBe(keys.length);
+      expect(inputKeys[metric].length, metric).toBeGreaterThan(3);
+      for (const key of inputKeys[metric]) expect(known.has(key), `${metric}: ${key}`).toBe(true);
     }
   });
 
   it('pins what the portfolio at retirement rests on, which stops short of the withdrawal settings', () => {
-    expect([...METRIC_INPUT_KEYS.portfolio_at_retirement].sort()).toEqual(
+    expect([...inputKeys.portfolio_at_retirement].sort()).toEqual(
       [
         'retirementAge',
         'inflation',
@@ -94,10 +97,10 @@ describe('the metric tables', () => {
       ].sort(),
     );
     for (const key of ['withdrawalStrategy', 'magiCap', 'lifeExpectancy', 'socialSecurity']) {
-      expect(METRIC_INPUT_KEYS.portfolio_at_retirement as readonly string[]).not.toContain(key);
-      expect(METRIC_INPUT_KEYS.ending_balance as readonly string[]).toContain(key);
+      expect(inputKeys.portfolio_at_retirement).not.toContain(key);
+      expect(inputKeys.ending_balance).toContain(key);
     }
-    expect(METRIC_INPUT_KEYS.plan_success as readonly string[]).toContain('downturnGuardrails');
+    expect(inputKeys.plan_success).toContain('downturnGuardrails');
   });
 
   it('names the capital-gains, IRMAA, ACA, HSA and penalty settings for every metric that rests on the tax pass', () => {
@@ -113,28 +116,28 @@ describe('the metric tables', () => {
       'earlyWithdrawalPenaltyExemptAccountIds',
     ];
     for (const metric of EXPLAIN_METRICS.filter((name) => name !== 'portfolio_at_retirement')) {
-      for (const key of taxSettings) expect(METRIC_INPUT_KEYS[metric] as readonly string[], `${metric}: ${key}`).toContain(key);
+      for (const key of taxSettings) expect(inputKeys[metric], `${metric}: ${key}`).toContain(key);
     }
   });
 
   it('points every metric at a heading that exists in the named markdown file', () => {
     const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../../../..');
     for (const metric of EXPLAIN_METRICS) {
-      const doc = METRIC_DOCS[metric];
+      const doc = docs[metric];
       const lines = readFileSync(join(repoRoot, doc.path), 'utf8').split('\n');
       const headings = new Set(lines.filter((line) => /^#{1,6} /.test(line)).map((line) => line.replace(/^#{1,6} /, '').trim()));
       expect(headings.has(doc.heading), `${metric}: ${doc.heading}`).toBe(true);
-      if ('alsoSee' in doc) expect(headings.has(doc.alsoSee), `${metric}: ${doc.alsoSee}`).toBe(true);
+      if (doc.alsoSee !== undefined) expect(headings.has(doc.alsoSee), `${metric}: ${doc.alsoSee}`).toBe(true);
     }
   });
 
   it('sends deterministic metrics to the number definitions and Monte Carlo ones to reading the result', () => {
     for (const metric of ['ending_balance', 'run_out_year', 'portfolio_at_retirement'] as const) {
-      expect(METRIC_DOCS[metric].heading).toBe('What each number means');
-      expect(METRIC_DOCS[metric]).toMatchObject({ alsoSee: 'Planned and Historical' });
+      expect(docs[metric].heading).toBe('What each number means');
+      expect(docs[metric]).toMatchObject({ alsoSee: 'Planned and Historical' });
     }
     for (const metric of ['plan_success', 'typical_ending_balance', 'pessimistic_ending_balance', 'bad_luck_ending_balance'] as const) {
-      expect(METRIC_DOCS[metric].heading).toBe('Reading the result');
+      expect(docs[metric].heading).toBe('Reading the result');
     }
   });
 });
@@ -180,7 +183,6 @@ describe('deterministic metrics', () => {
   it('reports the settings behind the number with their provenance, and the defaults applied among them', async () => {
     const { data } = await explain('ending_balance');
     const inputs = data.inputs as Record<string, { source?: { kind: string } }>;
-    expect(Object.keys(inputs).sort()).toEqual([...METRIC_INPUT_KEYS.ending_balance].sort());
     expect(inputs.retirementAge!.source!.kind).toBe('scenario');
     expect(data.defaultsApplied.some((fill) => fill.setting === 'lifeExpectancy' && /DEFAULT_LIFE_EXPECTANCY_AGE/.test(fill.basis))).toBe(true);
     expect(data.defaultsApplied.some((fill) => fill.setting === 'socialSecurity' && fill.field === 'colaTracksInflation')).toBe(true);

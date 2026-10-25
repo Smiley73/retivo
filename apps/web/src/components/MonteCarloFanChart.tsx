@@ -1,11 +1,6 @@
 /**
- * Monte Carlo fan chart — renders P10/P25/P50 percentile bands
- * plus a deterministic Planned-method overlay. Band / median colors come
- * from `useChartColors()`; chrome from `useChartChrome()`.
- *
- * The fan is built as stacked-area bands: an invisible p10 baseline
- * lifts two translucent bands (p10→p25, p25→p50), with the median (p50)
- * drawn as a line on top.
+ * Monte Carlo fan chart: translucent P10→P25 and P25→P50 bands over an invisible p10 baseline, a median line, and a
+ * Planned-method overlay.
  */
 import React from 'react';
 import type { MonteCarloSummary } from '../lib/monte-carlo';
@@ -47,11 +42,7 @@ interface Row extends ChartDatum {
   band_p25_to_p50: number;
 }
 
-/**
- * Builds the fan-chart hover tooltip. A factory so it can be unit-tested
- * by direct call and so the theme-reactive chrome is injected once.
- */
-export function makeTooltipContent(
+function makeTooltipContent(
   chrome: ChartChrome,
 ): (datum: ChartDatum) => React.ReactNode {
   return (datum: ChartDatum): React.ReactNode => {
@@ -134,9 +125,6 @@ export function MonteCarloFanChart({
   const activeDomain = xDomain ?? [xDomainMin, xDomainMax];
   const xTickLo = Math.ceil(activeDomain[0]);
   const xTickHi = Math.ceil(activeDomain[1]);
-  // One integer tick per calendar year; the shared Axes renderer thins a
-  // dense year set down to multiples of 5 + endpoints so the labels don't
-  // overwrite each other.
   const xTicks: number[] = [];
   for (let t = xTickLo; t <= xTickHi; t += 1) {
     xTicks.push(t);

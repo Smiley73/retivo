@@ -1,14 +1,4 @@
-/**
- * Origin / Referer check on every state-changing request. A present `Origin`
- * must exactly match an allowed web origin (any entry in
- * `WEB_ALLOWED_ORIGINS`, which defaults to `WEB_ORIGIN`); `Referer` is only
- * consulted as a fallback when `Origin` is absent. Rejects otherwise.
- * Defense-in-depth
- * alongside CSRF; closes the gap on browsers without strict CORS-credentials
- * support and on form-encoded cross-origin POSTs.
- *
- * See docs/security.md, "Request-forgery protection".
- */
+// Origin/Referer check on every state-changing request, as defense in depth beside CSRF. See docs/security.md, "Request-forgery protection".
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response, NextFunction } from 'express';
@@ -21,9 +11,8 @@ export class OriginCheckMiddleware implements NestMiddleware {
   private readonly allowedOrigins: readonly string[];
 
   constructor(config: ConfigService<EnvConfig, true>) {
-    // The env parser already normalizes the allowlist to canonical origins
-    // (trailing slash stripped, path/query/hash rejected). Use it as the
-    // single source so this middleware can't drift from CORS/preflight.
+    // The env parser already normalizes the allowlist; use it as the single source so this cannot drift from CORS and
+    // preflight.
     this.allowedOrigins = config.get('WEB_ALLOWED_ORIGINS_PARSED', {
       infer: true,
     });
@@ -35,12 +24,9 @@ export class OriginCheckMiddleware implements NestMiddleware {
     const origin = (req.headers.origin as string | undefined) ?? '';
     const referer = (req.headers.referer as string | undefined) ?? '';
 
-    // Origin is the trustworthy signal (the browser sets it, the page can't
-    // forge it). When present it must exactly match the allowlist — we do NOT
-    // fall through to Referer, or a hostile `Origin: evil.com` would sneak in
-    // on a stale/allowed `Referer`. Referer is only the fallback for the rare
-    // request that omits Origin entirely (browsers send full Referer URLs with
-    // paths, so match the bare origin or anything sitting under it).
+    // Origin is the trustworthy signal (the browser sets it). When present it must match exactly and does not fall
+    // through to Referer, or a hostile Origin would pass on an allowed Referer. Referer is only the fallback when
+    // Origin is absent, matched as the bare origin or anything under it.
     if (origin !== '') {
       if (this.allowedOrigins.includes(origin)) return next();
     } else {

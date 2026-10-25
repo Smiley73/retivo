@@ -1,17 +1,4 @@
-/**
- * ToggleSwitch — boolean switch behaviour + a11y smoke.
- *
- * Built on React Aria's `Switch`.
- * Asserts the framework-independent contract: `role="switch"`
- * with the selected state, accessible name from a visible label OR an
- * aria-only label, click / keyboard toggles fire `onChange(next)`,
- * disabled blocks the change — plus the shared-component axe rule
- * (AGENTS mandate). The public API is frozen.
- *
- * Interaction is driven via `@testing-library/user-event`:
- * React Aria's `usePress` model cannot be replicated by `fireEvent`
- * (Space-key toggle + real `disabled` blocking).
- */
+/** ToggleSwitch: switch role with selected state, accessible name, click and keyboard toggling, and disabled blocking. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -24,7 +11,6 @@ describe('ToggleSwitch', () => {
     render(<ToggleSwitch checked label="Active" onChange={() => {}} />);
     const sw = screen.getByRole('switch', { name: 'Active' });
     expect(sw).toBeChecked();
-    // getByLabelText resolves the same switch via its child label text.
     expect(screen.getByLabelText('Active')).toBe(sw);
   });
 

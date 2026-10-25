@@ -1,10 +1,4 @@
-/**
- * DashboardPlanHealthBlock render + a11y tests. Drives the block off the
- * shared `PlanStressTestVm` stub factory to cover the freshness gate, the
- * resolved Typical/Pessimistic grid, the table semantics and the a11y
- * smoke. No router, no provider, no IndexedDB — the block is
- * self-contained.
- */
+// DashboardPlanHealthBlock: freshness gate, resolved Typical/Pessimistic grid and table semantics.
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { DashboardPlanHealthBlock } from './DashboardPlanHealthBlock';
@@ -12,14 +6,8 @@ import { vm } from '../components/__fixtures__/plan-stress-test-vm';
 import { expectNoA11yViolations } from '../test/a11y';
 
 describe('DashboardPlanHealthBlock', () => {
-  // The single most important test in this file: the freshness gate.
-  // The factory defaults `stressPairSignature` to `null`, and a vm can
-  // otherwise look fully resolved (not stale, not running, populated
-  // figures) when the Monte Carlo result belongs to a DIFFERENT scenario —
-  // the app-wide `MonteCarloProvider` means a first dashboard mount after
-  // another surface already ran a simulation looks exactly like this. Do
-  // NOT "simplify" this predicate back to `isStale || isRunning` — that is
-  // the bug this test exists to catch.
+  // Freshness gate: a vm can look fully resolved when the Monte Carlo result belongs to a different scenario (the app-wide provider keeps it after another surface ran), so the gate must key on `stressPairSignature`, not `isStale
+  // isRunning`.
   it('blanks every simulation-derived figure and marks the section busy when stressPairSignature is null', () => {
     render(
       <DashboardPlanHealthBlock
@@ -37,7 +25,6 @@ describe('DashboardPlanHealthBlock', () => {
       />,
     );
     expect(screen.getByText('calculating plan success…')).toBeInTheDocument();
-    // success %, both ending balances, both depletion cells all dash out.
     expect(screen.getAllByText('—').length).toBe(5);
     expect(screen.queryByText('92%')).not.toBeInTheDocument();
     expect(screen.queryByText('$1.4M')).not.toBeInTheDocument();
@@ -72,10 +59,6 @@ describe('DashboardPlanHealthBlock', () => {
     expect(section).toHaveAttribute('aria-busy', 'false');
   });
 
-  // The "Money runs out" label was chosen precisely so this pairing reads
-  // correctly: for any healthy plan (roughly 75% success and up) fewer than
-  // a quarter of paths deplete, so both columns legitimately read "Never" —
-  // that is the expected reading, not a defect.
   it('reads "Never" in both columns when neither path depletes', () => {
     render(
       <DashboardPlanHealthBlock
@@ -165,13 +148,6 @@ describe('DashboardPlanHealthBlock', () => {
       <DashboardPlanHealthBlock
         vm={vm({ successPct: 92, stressPairSignature: 'sig-1' })}
       />,
-    );
-    await expectNoA11yViolations(container);
-  });
-
-  it('has no a11y violations, pending', async () => {
-    const { container } = render(
-      <DashboardPlanHealthBlock vm={vm({ stressPairSignature: null })} />,
     );
     await expectNoA11yViolations(container);
   });

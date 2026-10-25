@@ -1,19 +1,5 @@
-/**
- * Monte Carlo micro-benchmark — tracks `runMonteCarlo` throughput so a
- * performance regression is measurable in CI. Runs OUTSIDE the normal test
- * suite (`vitest bench`), so it never gates correctness.
- *
- * The fixtures mirror the representative two-account household used in
- * `monte-carlo.test.ts` (equities-heavy brokerage + bonds-heavy IRA) at a
- * moderate `pathCount` so the bench finishes in a few seconds. A second bench
- * exercises the per-year tax path via a single-filer `taxContext`.
- *
- * A third describe block records the production 10k-path wall-time for both the
- * Combined-Pot kernel and a named-strategy (rothFirst) tax-aware run so the
- * named-strategy two-pass cost can be read as a RATIO against Combined-Pot (the
- * named-strategy path runs ~2× the drawdown work; the budget is
- * ≤ ~2.5× the Combined-Pot 10k bench on the same machine).
- */
+/** Monte Carlo micro-benchmark (`vitest bench`, outside the test suite): `runMonteCarlo` throughput.
+ * The named-strategy 10k-path run does ~2x the drawdown work; budget is at most ~2.5x the Combined-Pot bench. */
 import { test } from 'vitest';
 import {
   runMonteCarlo,
@@ -33,9 +19,6 @@ const SEED = 12345;
 const BASE_STEPS = (HORIZON_YEAR - FIRST_YEAR + 1) * 12;
 const BASE_RETIREMENT_STEP = (RETIREMENT_YEAR - FIRST_YEAR) * 12;
 
-// Two-account ledger: equities-heavy brokerage (70/25/5, post-tax) +
-// bonds-heavy IRA (40/55/5, pre-tax). The per-account split exercises
-// per-account sampling rather than a single household-blended return.
 function buildLedger(): MonteCarloAccountLedger[] {
   const monthlyContribPost = (20_000 * 0.6) / 12;
   const monthlyContribPre = (20_000 * 0.4) / 12;
@@ -56,9 +39,6 @@ function buildLedger(): MonteCarloAccountLedger[] {
       assetMix: { stocksPct: 70, bondsPct: 25, cashPct: 5 },
       assetMixSeries: null,
       cbpPlanningReturnPct: null,
-      // Post-tax brokerage: tax metadata so the tax-context bench actually
-      // exercises the taxable (LTCG/QDI proxy) classification path rather
-      // than falling back to the legacy all-pre-tax routing.
       taxTreatment: 'POST_TAX',
       accountType: 'BROKERAGE',
     },
@@ -72,14 +52,12 @@ function buildLedger(): MonteCarloAccountLedger[] {
       assetMix: { stocksPct: 40, bondsPct: 55, cashPct: 5 },
       assetMixSeries: null,
       cbpPlanningReturnPct: null,
-      // Pre-tax IRA: ordinary-income withdrawal classification.
       taxTreatment: 'PRE_TAX',
       accountType: 'RETIREMENT_IRA',
     },
   ];
 }
 
-/** Nominal SS/other-income year arrays (SS starts at retirement). */
 function buildYearArrays(): { ssByYear: number[]; incomeByYear: number[] } {
   const years = HORIZON_YEAR - FIRST_YEAR + 1;
   const ssByYear = Array.from({ length: years }, (_, i) =>
@@ -89,7 +67,6 @@ function buildYearArrays(): { ssByYear: number[]; incomeByYear: number[] } {
   return { ssByYear, incomeByYear };
 }
 
-/** Single-filer tax context (age 55 in 2026; Medicare at 65 = 2036). */
 function buildTaxContext(): McTaxContext {
   return {
     taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
@@ -136,9 +113,6 @@ test('runMonteCarlo', async ({ bench }) => {
   );
 });
 
-/** Production-scale 10k-path inputs (mirrors `PlanStressTestSection.tsx`). Every
- *  named strategy funds tax per path via the two-pass expense fold; benching two named
- *  strategies makes the per-strategy cost comparable. */
 const PROD_PATH_COUNT = 10_000;
 
 const taxEfficient10k: MonteCarloInput = {

@@ -1,9 +1,4 @@
-/**
- * Render + interaction test for the SVG ChartFrame engine: series nodes
- * carry the resolved color, markers render at the right place, a hover
- * shows the crosshair + tooltip body, a drag selection renders the
- * marquee, and the frame is a11y-clean.
- */
+/** ChartFrame: series colours, marker placement, hover crosshair and tooltip, drag marquee and a11y. */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent } from '@testing-library/react';
@@ -51,21 +46,15 @@ describe('ChartFrame', () => {
   });
 
   it('drops a series named in hiddenSeries and keeps the rest', () => {
-    // Hiding by `name` removes that series before the stack/domain are
-    // computed, so the legend-filter restacks + rescales for free.
     const container = renderWithTheme(
       'light',
       frame({ hiddenSeries: new Set(['Alpha']) }),
     );
     expect(container.querySelector('path[name="Alpha"]')).toBeNull();
-    // The non-hidden line still renders.
     expect(seriesColor(container, 'Beta', 'stroke')).toBe('#445566');
   });
 
   it('re-fits Y to the visible series when filtered, ignoring an explicit zoom yDomain', () => {
-    // A zoomed chart supplies an explicit yDomain computed from the
-    // UNFILTERED series. Hiding the tall Alpha area must re-fit Y to Beta's
-    // own (much smaller) extent → Beta's path geometry changes.
     const explicit: [number, number] = [0, 1_000_000];
     const betaPath = (hiddenSeries?: Set<string>): string | null =>
       renderWithTheme('light', frame({ yDomain: explicit, hiddenSeries }))
@@ -100,7 +89,6 @@ describe('ChartFrame', () => {
         xTicks={[2026, 2027, 2028]}
       />,
     );
-    // Each zone renders its own queryable `<path name=… data-zone=…>`.
     expect(
       container.querySelector('path[name="Alpha"][data-zone="actual"]'),
     ).not.toBeNull();
@@ -144,7 +132,6 @@ describe('ChartFrame', () => {
     );
     expect(container.querySelector('path[name="Alpha"]')).toBeNull();
     expect(container.querySelector('path[name="Beta"]')).toBeNull();
-    // Axes still render — the frame doesn't crash on an empty series set.
     expect(container.querySelector('svg')).not.toBeNull();
   });
 
@@ -175,9 +162,6 @@ describe('ChartFrame', () => {
     ).toBeNull();
   });
 
-  // The drag-zoom gesture is mouse + pen only (see use-chart-zoom.ts): a
-  // touch pointer must never start or continue a drag, so a finger swipe
-  // to scroll the page over the chart can't arm a zoom selection.
   it('ignores touch pointers — touch down/move never reaches the drag handlers', () => {
     const pointerHandlers = {
       onPointerDown: vi.fn(),
@@ -195,10 +179,8 @@ describe('ChartFrame', () => {
     fireEvent.pointerMove(svg, { clientX: 400, pointerType: 'touch' });
     expect(pointerHandlers.onPointerDown).not.toHaveBeenCalled();
     expect(pointerHandlers.onPointerMove).not.toHaveBeenCalled();
-    // No marquee armed by the touch swipe.
     expect(container.querySelector('[data-testid="chart-drag-marquee"]')).toBeNull();
 
-    // Mouse still drives the drag handlers.
     fireEvent.pointerDown(svg, { clientX: 200, pointerType: 'mouse' });
     fireEvent.pointerMove(svg, { clientX: 400, pointerType: 'mouse' });
     expect(pointerHandlers.onPointerDown).toHaveBeenCalledTimes(1);
@@ -215,8 +197,6 @@ describe('ChartFrame', () => {
     const container = renderWithTheme('light', frame({ pointerHandlers }));
     const svg = container.querySelector('svg') as SVGSVGElement;
     fireEvent.pointerCancel(svg);
-    // A cancelled pointer must reset drag state via the leave path so
-    // isDragging/selection can't get stranded.
     expect(pointerHandlers.onPointerLeave).toHaveBeenCalledTimes(1);
   });
 

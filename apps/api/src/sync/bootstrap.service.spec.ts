@@ -1,13 +1,5 @@
-/**
- * Unit test for the forced-bootstrap incident-context log.
- *
- * A forced bootstrap writes no metric on any stack: this test pins that no
- * EMF line reaches stdout, and that the ordinary incident log (without the old
- * `sync_bootstrap_forced` marker message) is retained.
- *
- * Pure unit test: every collaborator is stubbed, so no DynamoDB Local / Moto
- * round trip is needed (sync.spec.ts covers the wire behaviour).
- */
+// A forced bootstrap writes no metric on any stack: no EMF line reaches stdout, and the ordinary incident log (without the old sync_bootstrap_forced marker message) is retained.
+// Every collaborator is stubbed; sync.spec.ts covers the wire behaviour.
 import 'reflect-metadata';
 import fs from 'node:fs';
 import { Logger } from '@nestjs/common';
@@ -50,9 +42,7 @@ function captureEmfMetricNames(): {
   restore: () => void;
 } {
   const names: string[] = [];
-  // The writer emits EMF via `fs.writeSync(1, ...)` (synchronous fd-1 write —
-  // see common/operational-metrics.ts), so capture at that layer and pass every
-  // other fd through to the real implementation.
+  // The writer emits EMF via `fs.writeSync(1, ...)`, so capture at that layer and pass other fds through.
   const realWriteSync = fs.writeSync.bind(fs);
   const spy = jest.spyOn(fs, 'writeSync').mockImplementation(((
     fd: number,
@@ -70,7 +60,6 @@ function captureEmfMetricNames(): {
         names.push(parsed._aws.CloudWatchMetrics[0].Metrics[0].Name);
       }
     } catch {
-      // non-EMF fd-1 line — ignore.
     }
     return Buffer.byteLength(String(data));
   }) as unknown as typeof fs.writeSync);
@@ -101,7 +90,6 @@ describe('BootstrapService — forced-bootstrap incident log', () => {
       'sync_bootstrap_forced',
       expect.anything(),
     );
-    // A safe incident-context log (householdId only) is still emitted.
     expect(logSpy).toHaveBeenCalledWith('Forced bootstrap requested', {
       householdId: HOUSEHOLD_ID,
     });

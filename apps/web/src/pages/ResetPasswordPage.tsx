@@ -1,19 +1,5 @@
-/**
- * Password-reset consume page. The reset mail link points here with the
- * token in the URL fragment (`#token=…` — never sent to the server, never
- * logged at the edge). We read it once on mount,
- * scrub it from the URL via `history.replaceState` so a back-button or
- * share doesn't expose it, then let the user set a new password.
- *
- * On a successful reset the endpoint returns 204; we redirect to /login so
- * the user signs in with the new password. Because a reset cannot unwrap
- * the encrypted `password` slot, the post-reset sign-in lands on the
- * "Unlock your data" prompt where the recovery key / passkey re-keys it.
- * The up-front warning here sets that expectation.
- *
- * Layout mirrors LoginPage / VerifyEmailPage: a centered card built from
- * shared typed components + the shared auth chrome.
- */
+/** Password-reset consume page. The token arrives in the URL fragment (never sent to the server or logged at the edge); read once on mount, then scrubbed via history.replaceState.
+* A reset cannot unwrap the encrypted password slot, so the next sign-in lands on the "Unlock your data" prompt; the up-front warning sets that expectation. */
 import React, { useEffect, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Link, useNavigate } from 'react-router';
@@ -46,8 +32,7 @@ function readTokenFromFragment(): string {
 export const ResetPasswordPage: React.FC = () => {
   const { resetPassword } = useAuth();
   const navigate = useNavigate();
-  // Read once on mount; the effect below scrubs the fragment before any
-  // subsequent render so this state is the only surviving copy.
+  // Read once on mount; the effect below scrubs the fragment before any later render, so this state is the only surviving copy.
   const [token] = useState<string>(readTokenFromFragment);
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -55,8 +40,6 @@ export const ResetPasswordPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  // Scrub the fragment from the URL once we've captured the token so a
-  // back-button, share, or browser-history snapshot doesn't keep it around.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!window.location.hash) return;
@@ -78,12 +61,9 @@ export const ResetPasswordPage: React.FC = () => {
     try {
       await resetPassword(token, newPassword);
       setDone(true);
-      // 204 success: send the user to sign in with the new password. The
-      // post-login unlock prompt then re-keys their encrypted data.
       navigate('/login', { replace: true });
     } catch (err) {
-      // A gateway-level throttle/timeout with no error envelope reads
-      // the shared busy copy instead of the raw upstream status text.
+      // A gateway-level throttle or timeout with no error envelope reads the shared busy copy.
       if (err instanceof ApiRequestError) setError(isBusyResponse(err) ? BUSY_MESSAGE : err.error.message);
       else setError('Could not reset your password. The link may have expired. Request a new one.');
     } finally {
@@ -99,7 +79,6 @@ export const ResetPasswordPage: React.FC = () => {
           <h1 id="reset-password-heading" className={authHeadingClass}>
             Set a new password
           </h1>
-          {/* Up-front recovery-key warning, plain English. */}
           <Alert tone="warning" role="status" className="mb-4">
             Setting a new password lets you sign in again, but it does
             <strong> not</strong> unlock your saved financial data. Right after
@@ -115,9 +94,7 @@ export const ResetPasswordPage: React.FC = () => {
             </Alert>
           )}
           <form onSubmit={onSubmit} noValidate>
-            {/* Best-effort hidden username from the last-known sign-in email
-                (this page only has the reset token), so the manager's
-                "update password?" prompt targets the right credential. */}
+            {/* Best-effort hidden username from the last-known sign-in email (this page only has the token), so the manager's "update password?" prompt targets the right credential. */}
             <HiddenUsernameField email={readStoredAuthEmail()} />
             <AuthPasswordField
               id="new-password"

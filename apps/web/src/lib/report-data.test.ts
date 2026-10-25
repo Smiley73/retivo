@@ -1,12 +1,3 @@
-/**
- * Unit tests for the pure CFP-report aggregator (`buildReportData`) plus
- * the net-new glide-summary generator and the clock-injected timestamp
- * helper (the report's legal disclaimer moved to disclaimer-fragments.ts).
- * No projection / Monte Carlo data is
- * exercised here — those are async, component-layer concerns.
- * Fixtures follow the same hand-built-aggregate pattern as
- * `scenario-resolution.test.ts`.
- */
 import { describe, it, expect } from 'vitest';
 import {
   STRESS_CASES,
@@ -14,12 +5,8 @@ import {
   STRESS_CASE_IDS,
   STRESS_MAX_AGE,
 } from './market-stress';
-import {
-  buildGlideSummary,
-  buildReportData,
-  buildReportTimestamp,
-  type BuildReportDataInput,
-} from './report-data';
+import { buildReportData, type BuildReportDataInput } from './report-data';
+import { buildGlideSummary, buildReportTimestamp } from './report-format';
 import type {
   AccountBalancePayload,
   AccountPayload,
@@ -81,9 +68,7 @@ function account(
     deviceId: 'd1',
     aggregateType: 'account',
     payload: {
-      // Spread first, so a test can record any other field (Roth / RMD
-      // tax-profile facts) without this helper needing to know every field
-      // name; the explicit defaults below still win for anything unset.
+      // Spread first so a test can record any other field without this helper listing it; the defaults below still win for unset ones.
       ...payload,
       name: payload.name,
       type: payload.type ?? 'RETIREMENT_401K',
@@ -249,11 +234,7 @@ function baseInput(over: Partial<BuildReportDataInput> = {}): BuildReportDataInp
 }
 
 describe('buildReportData — tax-profile readiness + disclosures', () => {
-  /** A minimal inherited-account fact set that does NOT withhold the
-   *  required-withdrawal estimate (spouse beneficiary, death before the
-   *  required beginning date). Deliberately leaves the Roth-IRA
-   *  first-contribution year blank, so the account reports `partial` (the
-   *  contribution-basis totals left the completeness list with the inputs). */
+  // A spouse-beneficiary fact set that does not withhold the RMD estimate; the Roth-IRA first-contribution year is left blank so the account reports `partial`.
   const notWithheldInheritedFacts = {
     rmdInheritedAccount: true,
     rmdBeneficiaryType: 'SPOUSE',
@@ -295,7 +276,6 @@ describe('buildReportData — tax-profile readiness + disclosures', () => {
             type: 'RETIREMENT_ROTH_IRA',
             taxTreatment: 'ROTH',
             rmdInheritedAccount: true,
-            // No beneficiary facts recorded — the engine withholds.
           }),
         ],
       }),
@@ -335,8 +315,6 @@ describe('buildReportData — tax-profile readiness + disclosures', () => {
             name: 'My Roth IRA',
             type: 'RETIREMENT_ROTH_IRA',
             taxTreatment: 'ROTH',
-            // The first-contribution year is the whole Roth-IRA ask now — the
-            // basis total is derived from recorded balance history.
             rothIraFirstContributionTaxYear: 2010,
           }),
         ],
@@ -350,10 +328,6 @@ describe('buildReportData — tax-profile readiness + disclosures', () => {
     expect(data.taxProfileDisclosures.some((d) => d.includes('entirely Roth'))).toBe(false);
   });
 
-  // The standing paragraph's two Roth-basis sentences are
-  // gone; the start-year / five-year-clock sentences and the closing sentence
-  // survive verbatim (re-scoped, not rewritten — the closing sentence's
-  // antecedents narrow with the deletion, no wording change).
   it('states the standing Roth start-year/clock paragraph with no basis-default wording', () => {
     const data = buildReportData(baseInput(), NOW);
     expect(data.taxProfileDisclosures[1]).toBe(
@@ -363,15 +337,7 @@ describe('buildReportData — tax-profile readiness + disclosures', () => {
 });
 
 describe('buildReportData — rothTaxFreeAmounts wiring', () => {
-  // Pins the account-set `buildReportData` hands to `buildRothTaxFreeRows`:
-  // `liveAccounts` (every non-deleted account, active AND inactive alike),
-  // never an active-only filter. Alex's Roth-IRA pool has an ACTIVE sibling
-  // (so the pool itself is still drawable, unlike the all-inactive-pool case
-  // in report-roth-tax-free.test.ts) plus an INACTIVE Roth IRA carrying real
-  // recorded contribution history — its basis must still be folded into the
-  // person row. An active-only account filter here would silently drop that
-  // inactive sibling's basis while every direct-builder test (which
-  // hand-builds its own account list) kept passing.
+  // Pins the account set handed to `buildRothTaxFreeRows`: every non-deleted account, not an active-only filter; an inactive Roth IRA sibling's basis must still fold into the person row.
   it('resolves person + employer rows from liveAccounts, including an inactive Roth IRA sibling\'s recorded basis', () => {
     const alex = member('m1', true, 'Alex');
     const sam = member('m2', false, 'Sam');
@@ -415,9 +381,6 @@ describe('buildReportData — rothTaxFreeAmounts wiring', () => {
     const personRow = data.rothTaxFreeAmounts.find((r) => r.kind === 'person');
     expect(personRow).toBeDefined();
     expect(personRow!.label).toBe('Alex');
-    // $3k (active) + $12k (inactive sibling) — the inactive account's basis
-    // is folded in, proving `liveAccounts` (not an active-only filter) fed
-    // the pool.
     expect(personRow!.amount).toBe(15_000);
     const employerRow = data.rothTaxFreeAmounts.find((r) => r.kind === 'employer');
     expect(employerRow).toBeDefined();
@@ -438,7 +401,6 @@ describe('buildReportData — household overview + accounts', () => {
       name: 'Ada',
       retirementAge: { years: 65, months: 0 },
     });
-    // Born 1965-03-12, "now" June 2026 → age 61.
     expect(data.overview.members[0].currentAge).toBe(61);
     expect(data.accounts[0]).toMatchObject({
       name: '401k',
@@ -463,14 +425,12 @@ describe('buildReportData — household overview + accounts', () => {
     );
     const m = data.overview.members[0];
     expect(m.retirementAge).toEqual({ years: 59, months: 6 });
-    // Born October (month0 9) + 6 months → April of the following year (59 + 1).
     expect(m.retirementYear).toBe(2025);
     expect(m.retirementMonth).toBe(4);
   });
 
   it('lands both members in the same month for a "same-date" scenario despite a birthday-of-month gap', () => {
-    // Different days-of-month: recomputing each side independently from its
-    // own birthday would drift the two retirement dates ~1 month apart.
+    // Recomputing each side from its own birthday would drift the two retirement dates about a month apart.
     const primary = member('m1', true, 'Ada', '1960-01-15');
     const secondary = member('m2', false, 'Bee', '1965-03-28');
     const sc = scenario('base', {
@@ -479,8 +439,6 @@ describe('buildReportData — household overview + accounts', () => {
       overrides: {
         retirementAge: {
           primary: { ageYears: 65, ageMonths: 0 },
-          // Stored secondary age was solved to hit the primary's date; with
-          // the snap the report must show both in the SAME month regardless.
           secondary: { ageYears: 59, ageMonths: 10 },
           sameDateAnchor: 'primary',
         },
@@ -493,14 +451,12 @@ describe('buildReportData — household overview + accounts', () => {
     const [p, s] = data.overview.members;
     expect(p.retirementYear).toBe(2025);
     expect(p.retirementMonth).toBe(1);
-    // Snapped to the primary's exact date — same year AND month, not March.
     expect(s.retirementYear).toBe(p.retirementYear);
     expect(s.retirementMonth).toBe(p.retirementMonth);
   });
 
   it('surfaces pre-tax / post-tax balances from the split maps (null when unrecorded)', () => {
     const data = buildReportData(baseInput(), NOW);
-    // baseInput records a pre-tax split of 500000 and a null post-tax split.
     expect(data.accounts[0].currentBalancePreTax).toBe(500000);
     expect(data.accounts[0].currentBalancePostTax).toBeNull();
   });
@@ -538,7 +494,6 @@ describe('buildReportData — Social Security summary', () => {
     expect(data.socialSecurity).toHaveLength(1);
     const m = data.socialSecurity[0];
     expect(m).toMatchObject({ role: 'primary', name: 'Ada', pia: 2000, claimAgeYears: 67 });
-    // Born 1965 → FRA 67; claim at 67 ⇒ factor 1.0 ⇒ full PIA.
     expect(m.monthlyBenefitAtClaim).toBe(2000);
   });
 
@@ -558,7 +513,6 @@ describe('buildReportData — Social Security summary', () => {
       overrides: { socialSecurity: { primary: { ageYears: 62, ageMonths: 0 } } },
     });
     const data = buildReportData(baseInput({ scenarios: [base] }), NOW);
-    // Claim at 62 with FRA 67 ⇒ ~0.70 factor ⇒ < PIA.
     expect(data.socialSecurity[0].monthlyBenefitAtClaim).toBeLessThan(2000);
     expect(data.socialSecurity[0].monthlyBenefitAtClaim).toBeGreaterThan(0);
   });
@@ -577,7 +531,6 @@ describe('buildReportData — scenario inventory', () => {
     const child = scenario('child', {
       name: 'Child',
       parentScenarioId: 'base',
-      // No SS / withdrawal override — should inherit from base.
       overrides: { inflation: { ratePct: 4 } },
     });
     const data = buildReportData(
@@ -610,7 +563,6 @@ describe('buildReportData — scenario inventory', () => {
       discretionarySpendingBumpPct: -20,
       discretionarySpendingDurationYears: 5,
     });
-    // Base sets none of these → no knob rows.
     expect(baseScenario?.knobs).toEqual({});
   });
 
@@ -649,13 +601,11 @@ describe('buildReportData — scenario inventory', () => {
     expect(altScenario?.expenseOverrides.disabledCount).toBe(1);
     expect(altScenario?.expenseOverrides.addedCount).toBe(1);
     expect(altScenario?.expenseOverrides.patchedCount).toBe(1);
-    // Added name first, then the patched canonical name.
     expect(altScenario?.expenseOverrides.notableNames).toEqual(['New Boat', 'Dining']);
   });
 });
 
 describe('buildReportData — scenario settings (Scenario page detail)', () => {
-  /** Flatten all grouped rows into one lookup for assertions. */
   const allRows = (id: string, data: ReturnType<typeof buildReportData>) =>
     (data.scenarios.find((s) => s.id === id)?.settingGroups ?? []).flatMap((g) => g.rows);
 
@@ -681,20 +631,15 @@ describe('buildReportData — scenario settings (Scenario page detail)', () => {
     const rows = groups.flatMap((g) => g.rows);
     const val = (label: string) => rows.find((r) => r.label.startsWith(label))?.value;
 
-    // Settings are split into titled groups (one table each on the page).
     expect(groups.map((g) => g.title)).toEqual(
       expect.arrayContaining(['Retirement & longevity', 'Inflation & spending', 'Withdrawal strategy']),
     );
-    // Inherited values surface at their effective value.
     expect(val('Social Security claim age')).toBe('age 70');
     expect(val('Withdrawal strategy')).toBe('Tax-efficient');
     expect(val('Inflation rate')).toBe('4%');
   });
 
   it('surfaces effective defaults even when nothing is overridden (comprehensive)', () => {
-    // The base scenario (single member, no tax/inflation/SS overrides) must
-    // still spell out the important effective assumptions — a planner should
-    // not have to assume what is inherited or defaulted.
     const data = buildReportData(baseInput(), NOW);
     const rows = allRows('base', data);
     const val = (label: string) => rows.find((r) => r.label === label)?.value;
@@ -705,21 +650,14 @@ describe('buildReportData — scenario settings (Scenario page detail)', () => {
     expect(val('Filing status')).toBe('Single');
     expect(val('Taxable-withdrawal LTCG fraction')).toBe('50%');
     expect(val('Emergency HSA withdrawals treated as qualified')).toBe('100%');
-    // Medical inflation runs at general + the default spread (3 + 2 = 5%) even
-    // though no category rate is set.
     expect(val('Inflation — Medical')).toBe('5%');
-    // An absent withdrawal strategy resolves through report-format.ts to the
-    // default `taxEfficient` kind, which renders the human-readable label.
     expect(val('Withdrawal strategy')).toBe('Tax-efficient');
-    // The withdrawal strategy carries a plain-English explanation row.
     expect(val('How it works')).toBe(
       'Draws taxable accounts first, then tax-deferred, then Roth last — an order that tends to carry lower lifetime tax drag, though the actual result depends on your brackets and account mix.',
     );
   });
 
   it('renders a +2pp row for EVERY flag-derived medical category, with no double-print', () => {
-    // Two isMedical categories, neither rate-set on the chain → each shows the
-    // uncapped general+2pp default. cat-food is non-medical (no row, no rate).
     const data = buildReportData(
       baseInput({
         medicalCategoryIds: ['cat-medical', 'cat-dental'],
@@ -733,12 +671,9 @@ describe('buildReportData — scenario settings (Scenario page detail)', () => {
     );
     const rows = allRows('base', data);
     const inflationRows = rows.filter((r) => r.label.startsWith('Inflation — '));
-    // Exactly the two medical rows, each at general + 2pp = 5%.
     expect(inflationRows).toHaveLength(2);
     expect(rows.find((r) => r.label === 'Inflation — Medical')?.value).toBe('5%');
     expect(rows.find((r) => r.label === 'Inflation — Dental')?.value).toBe('5%');
-    // No medical id double-printed (the generic remaining-rates loop excludes
-    // every medical id).
     const labels = inflationRows.map((r) => r.label);
     expect(new Set(labels).size).toBe(labels.length);
   });
@@ -748,8 +683,7 @@ describe('buildReportData — scenario settings (Scenario page detail)', () => {
       name: 'Base',
       isPrimary: true,
       overrides: {
-        // 'm2' resolves to Grace; 'm-gone' has no live member → must be skipped,
-        // never rendered as a blank/garbage name.
+        // 'm-gone' has no live member and must be skipped, not rendered as a blank name.
         acaMarketplaceOptOutMemberIds: ['m2', 'm-gone'],
       },
     });
@@ -795,7 +729,7 @@ describe('buildReportData — scenario settings (Scenario page detail)', () => {
       baseInput({ scenarios: [base, alt], activeScenarioId: 'alt' }),
       NOW,
     );
-    // ASCII " to " (jsPDF's standard font has no → glyph).
+    // ASCII " to ": jsPDF's standard font has no → glyph.
     expect(allRows('alt', data).find((r) => r.label === 'Return — 401k')?.value).toBe('6% to 9%');
   });
 
@@ -831,7 +765,6 @@ describe('buildReportData — scenario settings (Scenario page detail)', () => {
   });
 
   it('renders working-years Roth conversion rows with source → target transfer description', () => {
-    // Standard cross-account: PRE_TAX 401k source → Roth IRA target.
     const accounts = [
       account('a-pre', { name: 'My 401k', type: 'RETIREMENT_401K', taxTreatment: 'PRE_TAX' }),
       account('a-roth', { name: 'My Roth IRA', type: 'RETIREMENT_ROTH_IRA', taxTreatment: 'ROTH' }),
@@ -860,17 +793,14 @@ describe('buildReportData — scenario settings (Scenario page detail)', () => {
     const rothGroup = groups.find((g) => g.title === 'Working-years Roth conversions');
     expect(rothGroup).toBeDefined();
     const convRow = rothGroup?.rows[0];
-    // Transfer description: source name → target name (cross-account).
     expect(convRow?.value).toContain('My 401k to My Roth IRA');
     expect(convRow?.value).toContain('$15,000/yr');
-    // The assumed-rate row follows the conversion row.
     const rateRow = rothGroup?.rows[1];
     expect(rateRow?.label).toBe('Assumed tax rate (shown, not deducted)');
     expect(rateRow?.value).toBe('22%');
   });
 
   it('renders a same-account MIXED in-plan conversion as "within <Name> (in-plan Roth conversion)"', () => {
-    // Same-account: MIXED 401k acts as both source and target.
     const accounts = [
       account('a-mixed', {
         name: 'My MIXED 401k',
@@ -902,9 +832,7 @@ describe('buildReportData — scenario settings (Scenario page detail)', () => {
     const rothGroup = groups.find((g) => g.title === 'Working-years Roth conversions');
     expect(rothGroup).toBeDefined();
     const convRow = rothGroup?.rows[0];
-    // Same-account renders as "within <Name> (in-plan Roth conversion)".
     expect(convRow?.value).toContain('within My MIXED 401k (in-plan Roth conversion)');
-    // Must NOT render the cross-account "source to target" format.
     expect(convRow?.value).not.toContain(' to ');
   });
 
@@ -943,9 +871,7 @@ describe('buildReportData — scenario settings (Scenario page detail)', () => {
   });
 
   it('omits a QCD whose source account is not an eligible household IRA', () => {
-    // The report summarizes the HARDENED resolveQcdForScenario output, so an
-    // orphan / non-household source account is DROPPED — no row is rendered (no
-    // raw-id fallback, which would leak an invalid QCD into the CFP report).
+    // The report summarizes the hardened resolveQcdForScenario output, so an orphan source account is dropped rather than shown by raw id.
     const accounts = [
       account('a-ira', {
         name: 'My Traditional IRA',
@@ -1004,7 +930,6 @@ describe('buildReportData — expense inventory + end-window labels', () => {
     expect(groceries?.endLabel).toBe('until last surviving');
     expect(tax?.annualAmount).toBe(8000);
     expect(tax?.endLabel).toMatch(/age 90/);
-    // No glide on either essential expense.
     expect(groceries?.glideSummary).toBeNull();
     expect(tax?.glideSummary).toBeNull();
   });
@@ -1021,164 +946,70 @@ describe('buildReportData — expense inventory + end-window labels', () => {
 
 describe('buildReportData — expense glide summaries', () => {
   const members = [member('m1', true, 'Ada')];
+  const retirementToExpenseEnd = { glideStart: { kind: 'retirementStart' }, glideEnd: { kind: 'expenseEnd' } } as const;
+  const age = (years: number) => ({ kind: 'age', memberId: 'primary', years, months: 0 }) as const;
+  const summaryFor = (
+    classification: ExpensePayload['classification'],
+    g: DiscretionaryGlideOverride | undefined,
+  ): string | null =>
+    buildGlideSummary(
+      expense('e1', { name: 'X', classification, discretionaryGlide: g }).payload,
+      members,
+    );
 
-  it('renders a non-empty summary for a discretionary expense with a glide', () => {
+  it('carries the glide summary onto the report expense row', () => {
     const data = buildReportData(
       baseInput({
         expenses: [
           expense('e1', {
             name: 'Travel',
             classification: 'discretionary',
-            discretionaryGlide: {
-              endMultiplierPct: 70,
-              glideStart: { kind: 'retirementStart' },
-              glideEnd: { kind: 'expenseEnd' },
-            },
+            discretionaryGlide: { endMultiplierPct: 70, ...retirementToExpenseEnd },
           }),
         ],
       }),
       NOW,
     );
-    expect(data.expenses[0].glideSummary).toBeTruthy();
+    expect(data.expenses[0].glideSummary).toBe('declines to 70% by the expense end');
   });
 
-  it('shows no glide summary for a discretionary expense without a glide', () => {
-    expect(
-      buildGlideSummary(
-        expense('e1', { name: 'Travel', classification: 'discretionary' }).payload,
-        members,
-      ),
-    ).toBeNull();
-  });
-
-  it('shows a glide summary for a glided essential expense', () => {
-    const g: DiscretionaryGlideOverride = {
-      endMultiplierPct: 50,
-      glideStart: { kind: 'retirementStart' },
-      glideEnd: { kind: 'expenseEnd' },
-    };
-    expect(
-      buildGlideSummary(
-        expense('e1', { name: 'X', classification: 'essential', discretionaryGlide: g }).payload,
-        members,
-      ),
-    ).toBe('declines to 50% by the expense end');
-  });
-
-  it('describes a rising glide with no ceiling (the silent-suppression bug)', () => {
-    const g: DiscretionaryGlideOverride = {
-      endMultiplierPct: 150,
-      glideStart: { kind: 'retirementStart' },
-      glideEnd: { kind: 'expenseEnd' },
-    };
-    expect(
-      buildGlideSummary(
-        expense('e1', { name: 'Care', classification: 'essential', discretionaryGlide: g }).payload,
-        members,
-      ),
-    ).toBe('rises to 150% by the expense end');
-  });
-
-  it('describes a rising glide with a ceiling (from/to + holds)', () => {
-    const g: DiscretionaryGlideOverride = {
-      endMultiplierPct: 150,
-      glideStart: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
-      glideEnd: { kind: 'age', memberId: 'primary', years: 80, months: 0 },
-      floor: { multiplierPct: 180, anchor: { kind: 'age', memberId: 'primary', years: 85, months: 0 } },
-    };
-    expect(
-      buildGlideSummary(
-        expense('e1', { name: 'Care', classification: 'discretionary', discretionaryGlide: g }).payload,
-        members,
-      ),
-    ).toBe(
+  it.each([
+    ['declining glide on an essential expense', 'essential', { endMultiplierPct: 50, ...retirementToExpenseEnd }, 'declines to 50% by the expense end'],
+    ['rising glide with no ceiling (was silently suppressed)', 'essential', { endMultiplierPct: 150, ...retirementToExpenseEnd }, 'rises to 150% by the expense end'],
+    [
+      'rising glide with a ceiling',
+      'discretionary',
+      { endMultiplierPct: 150, glideStart: age(65), glideEnd: age(80), floor: { multiplierPct: 180, anchor: age(85) } },
       'rises from 100% to 150% between Ada age 65 and Ada age 80, then holds at 180% after Ada age 85',
-    );
-  });
-
-  it('shows no glide summary for a no-op glide (end 100, no effective floor)', () => {
-    const g: DiscretionaryGlideOverride = {
-      endMultiplierPct: 100,
-      glideStart: { kind: 'retirementStart' },
-      glideEnd: { kind: 'expenseEnd' },
-    };
-    expect(
-      buildGlideSummary(
-        expense('e1', { name: 'X', classification: 'discretionary', discretionaryGlide: g }).payload,
-        members,
-      ),
-    ).toBeNull();
-  });
-
-  it('describes the expenseEnd ("the expense end") variant', () => {
-    const g: DiscretionaryGlideOverride = {
-      endMultiplierPct: 70,
-      glideStart: { kind: 'retirementStart' },
-      glideEnd: { kind: 'expenseEnd' },
-    };
-    const summary = buildGlideSummary(
-      expense('e1', { name: 'X', classification: 'discretionary', discretionaryGlide: g }).payload,
-      members,
-    );
-    expect(summary).toBe('declines to 70% by the expense end');
-  });
-
-  it('describes the age-anchor variant with a from/to window', () => {
-    const g: DiscretionaryGlideOverride = {
-      endMultiplierPct: 40,
-      glideStart: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
-      glideEnd: { kind: 'age', memberId: 'primary', years: 80, months: 0 },
-    };
-    const summary = buildGlideSummary(
-      expense('e1', { name: 'X', classification: 'discretionary', discretionaryGlide: g }).payload,
-      members,
-    );
-    expect(summary).toBe('declines from 100% to 40% between Ada age 65 and Ada age 80');
-  });
-
-  it('describes the floor ("no-go" step) variant', () => {
-    const g: DiscretionaryGlideOverride = {
-      endMultiplierPct: 40,
-      glideStart: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
-      glideEnd: { kind: 'age', memberId: 'primary', years: 80, months: 0 },
-      floor: { multiplierPct: 25, anchor: { kind: 'age', memberId: 'primary', years: 85, months: 0 } },
-    };
-    const summary = buildGlideSummary(
-      expense('e1', { name: 'X', classification: 'discretionary', discretionaryGlide: g }).payload,
-      members,
-    );
-    expect(summary).toBe(
+    ],
+    [
+      'age-anchored window',
+      'discretionary',
+      { endMultiplierPct: 40, glideStart: age(65), glideEnd: age(80) },
+      'declines from 100% to 40% between Ada age 65 and Ada age 80',
+    ],
+    [
+      'floor step',
+      'discretionary',
+      { endMultiplierPct: 40, glideStart: age(65), glideEnd: age(80), floor: { multiplierPct: 25, anchor: age(85) } },
       'declines from 100% to 40% between Ada age 65 and Ada age 80, then holds at 25% after Ada age 85',
-    );
+    ],
+    [
+      'floor only (end 100, effective floor below 100)',
+      'discretionary',
+      { endMultiplierPct: 100, glideStart: { kind: 'retirementStart' }, glideEnd: age(80), floor: { multiplierPct: 50, anchor: age(85) } },
+      'holds at 100% until Ada age 80, then holds at 50% after Ada age 85',
+    ],
+  ] as const)('describes a %s', (_name, classification, glide, expected) => {
+    expect(summaryFor(classification, glide)).toBe(expected);
   });
 
-  it('shows no glide summary for a no-op glide even with floor when endMultiplierPct >= 100 and floor also >= 100', () => {
-    const g: DiscretionaryGlideOverride = {
-      endMultiplierPct: 100,
-      glideStart: { kind: 'retirementStart' },
-      glideEnd: { kind: 'expenseEnd' },
-      floor: { multiplierPct: 100, anchor: { kind: 'age', memberId: 'primary', years: 85, months: 0 } },
-    };
-    expect(
-      buildGlideSummary(
-        expense('e1', { name: 'X', classification: 'discretionary', discretionaryGlide: g }).payload,
-        [member('m1', true, 'Ada')],
-      ),
-    ).toBeNull();
-  });
-
-  it('describes the floor-only variant (endMultiplierPct 100, effective floor < 100)', () => {
-    const g: DiscretionaryGlideOverride = {
-      endMultiplierPct: 100,
-      glideStart: { kind: 'retirementStart' },
-      glideEnd: { kind: 'age', memberId: 'primary', years: 80, months: 0 },
-      floor: { multiplierPct: 50, anchor: { kind: 'age', memberId: 'primary', years: 85, months: 0 } },
-    };
-    const summary = buildGlideSummary(
-      expense('e1', { name: 'X', classification: 'discretionary', discretionaryGlide: g }).payload,
-      [member('m1', true, 'Ada')],
-    );
-    expect(summary).toBe('holds at 100% until Ada age 80, then holds at 50% after Ada age 85');
+  it.each([
+    ['no glide', undefined],
+    ['a no-op glide (end 100, no floor)', { endMultiplierPct: 100, ...retirementToExpenseEnd }],
+    ['a no-op glide whose floor is also 100', { endMultiplierPct: 100, ...retirementToExpenseEnd, floor: { multiplierPct: 100, anchor: age(85) } }],
+  ] as const)('shows no summary for %s', (_name, glide) => {
+    expect(summaryFor('discretionary', glide)).toBeNull();
   });
 
   it('returns null for a member with a birthdate outside the FRA table (no throw)', () => {
@@ -1189,7 +1020,6 @@ describe('buildReportData — expense glide summaries', () => {
       }),
       NOW,
     );
-    // Should not throw; FRA-table miss degrades gracefully to null.
     expect(data.socialSecurity[0].monthlyBenefitAtClaim).toBeNull();
   });
 });
@@ -1228,7 +1058,6 @@ describe('buildReportData — income streams', () => {
       colaPct: null,
       tracksInflation: true,
     });
-    // First-year other-income estimate folds in SS + recurring income.
     expect(data.overview.estimatedAnnualOtherIncome).toBe(2000 * 12 + 36000 + 24000);
   });
 });
@@ -1278,7 +1107,6 @@ describe('buildReportData — SS benefitReductionPct', () => {
       },
     });
     const data = buildReportData(baseInput({ scenarios: [base] }), NOW);
-    // Born 1965, FRA 67, claim at 67 → full PIA = 2000; with 25% cut → 1500
     expect(data.socialSecurity[0].monthlyBenefitAtClaim).toBeCloseTo(1500);
   });
 });
@@ -1299,9 +1127,7 @@ describe('buildReportData — scenario expense/income resolution', () => {
       baseInput({ scenarios: [base, alt], activeScenarioId: 'alt', expenses }),
       NOW,
     );
-    // e1 is disabled in 'alt' → must not appear in report expenses.
     expect(data.expenses.find((e) => e.name === 'Travel')).toBeUndefined();
-    // e2 is unaffected.
     expect(data.expenses.find((e) => e.name === 'Dining')).toBeDefined();
   });
 
@@ -1333,7 +1159,6 @@ describe('buildReportData — scenario expense/income resolution', () => {
     const boat = data.expenses.find((e) => e.name === 'Yacht Club');
     expect(boat).toBeDefined();
     expect(boat?.annualAmount).toBe(6000);
-    // id should carry the local: prefix
     expect(boat?.id).toBe('local:loc-boat');
   });
 
@@ -1352,7 +1177,6 @@ describe('buildReportData — scenario expense/income resolution', () => {
       NOW,
     );
     const groceries = data.expenses.find((e) => e.name === 'Groceries');
-    // Base amount is 1000/month → 12000/year; patch reduces to 500/month → 6000/year.
     expect(groceries?.annualAmount).toBe(6000);
   });
 
@@ -1375,16 +1199,10 @@ describe('buildReportData — scenario expense/income resolution', () => {
       baseInput({ scenarios: [base, alt], activeScenarioId: 'alt', incomeStreams: streams }),
       NOW,
     );
-    // Disabled income stream must not appear in the report.
     expect(data.incomeStreams.find((s) => s.name === 'Consulting')).toBeUndefined();
-    // estimatedAnnualOtherIncome should reflect SS only (no consulting income).
-    // Base input has PIA=2000, claim age 67, FRA 67 → full benefit → 2000×12=24000.
     expect(data.overview.estimatedAnnualOtherIncome).toBe(2000 * 12);
   });
 });
-
-// REPORT_DISCLAIMER moved to disclaimer-fragments.ts; its coverage lives in
-// disclaimer-fragments.test.ts (semantic checks on the E-4 rewrite).
 
 describe('buildReportData — filing assumptions', () => {
   it('describes a one-member plan and always carries the standard-deduction-only disclosure', () => {
@@ -1429,26 +1247,22 @@ describe('buildReportData — filing assumptions', () => {
     expect(filing.whileBothAlive).toMatch(/married filing separately, 1 person on the return/i);
     expect(filing.whileBothAlive).toMatch(/head of household, 2 people on the return/i);
     expect(filing.whileBothAlive).toMatch(/lived together during the year/i);
-    // §86 caps taxable Social Security at 85% for EVERY filer — living
-    // together only removes the MFS base amounts.
+    // §86 caps taxable Social Security at 85% for every filer; living together only removes the MFS base amounts.
     expect(filing.whileBothAlive).toMatch(/up to the usual 85% cap/i);
     expect(filing.whileBothAlive).not.toMatch(/all Social Security benefits are taxable/i);
-    // A separate plan resolves TWO returns through the death year (both
-    // spouses count as alive that year); it does not collapse to a joint one.
     expect(filing.afterADeath).toMatch(/still filed on two separate returns/i);
     expect(filing.afterADeath).not.toMatch(/filed jointly/i);
-    // The residual even-split approximation is disclosed.
     expect(
       filing.disclosures.some((d) => /divided evenly between the two returns/i.test(d)),
     ).toBe(true);
+    const rows = (data.scenarios[0].settingGroups ?? []).flatMap((g) => g.rows);
+    expect(rows.find((r) => r.label === 'Filing status')?.value).toMatch(/separate returns/i);
+    expect(rows.find((r) => r.label === 'After a spouse dies')?.value).toMatch(/two separate returns/i);
+    expect(rows.some((r) => r.label === 'Separate-return estimate')).toBe(true);
   });
 
   it('the report card and the PDF settings agree for an unresolved legacy scalar', () => {
-    // The regression: a two-member `Single` scalar cannot be converted, so the
-    // ENGINE files `Single` (the legacy fallback). The on-screen card built
-    // its own prose ladder and claimed "One joint return while both spouses are
-    // alive" while the PDF settings table said "Single" — two surfaces
-    // describing the same projection differently, one of them wrong.
+    // Regression: a two-member `Single` scalar cannot be converted, so the engine files `Single`, while the card claimed "One joint return while both spouses are alive".
     const base = scenario('base', {
       name: 'Base',
       isPrimary: true,
@@ -1469,47 +1283,12 @@ describe('buildReportData — filing assumptions', () => {
     expect(filingRows[0].value).toBe('Single');
     expect(sc.filingAssumptions.whileBothAlive).toMatch(/filed as single/i);
     expect(sc.filingAssumptions.whileBothAlive).not.toMatch(/joint return/i);
-    expect(sc.filingAssumptions.unresolvedLegacyDetail).toBeDefined();
-    // The PDF discloses the same retained-older-setting fact.
+    expect(sc.filingAssumptions.unresolvedLegacyDetail).toMatch(/does not say how each spouse's tax unit/i);
+    expect(sc.filingAssumptions.disclosures.some((d) => /kept using it unchanged/i.test(d))).toBe(true);
     const kept = (sc.settingGroups ?? [])
       .flatMap((g) => g.rows)
       .find((r) => r.label === 'Older filing setting kept');
     expect(kept).toBeTruthy();
-  });
-
-  it('both surfaces report separate returns for a separate plan', () => {
-    const base = scenario('base', {
-      name: 'Base',
-      isPrimary: true,
-      overrides: {
-        taxFilingPlan: {
-          kind: 'separate',
-          units: [
-            { memberId: 'primary', filingStatus: 'MFS', householdSize: 1 },
-            { memberId: 'secondary', filingStatus: 'HoH', householdSize: 2 },
-          ],
-        },
-      },
-    });
-    const data = buildReportData(
-      baseInput({
-        members: [member('m1', true, 'Ada'), member('m2', false, 'Grace')],
-        scenarios: [base],
-      }),
-      NOW,
-    );
-    const sc = data.scenarios[0];
-    const rows = (sc.settingGroups ?? []).flatMap((g) => g.rows);
-    expect(rows.find((r) => r.label === 'Filing status')?.value).toMatch(
-      /separate returns/i,
-    );
-    expect(sc.filingAssumptions.whileBothAlive).toMatch(/two separate returns/i);
-    // The death-year line must NOT claim a joint return.
-    expect(rows.find((r) => r.label === 'After a spouse dies')?.value).toMatch(
-      /two separate returns/i,
-    );
-    // The even-split approximation is disclosed on the PDF too.
-    expect(rows.some((r) => r.label === 'Separate-return estimate')).toBe(true);
   });
 
   it('lists year-bounded exception windows on the post-death line', () => {
@@ -1541,26 +1320,6 @@ describe('buildReportData — filing assumptions', () => {
       /qualifying surviving spouse from 2041 up to \(but not including\) 2043/i,
     );
   });
-
-  it('reports an unresolved legacy scalar rather than presenting the plan as authoritative', () => {
-    const base = scenario('base', {
-      name: 'Base',
-      isPrimary: true,
-      overrides: { filingStatus: 'Single' },
-    });
-    const data = buildReportData(
-      baseInput({
-        members: [member('m1', true, 'Ada'), member('m2', false, 'Grace')],
-        scenarios: [base],
-      }),
-      NOW,
-    );
-    const filing = data.scenarios[0].filingAssumptions;
-    expect(filing.unresolvedLegacyDetail).toMatch(/does not say how each spouse's tax unit/i);
-    expect(
-      filing.disclosures.some((d) => /kept using it unchanged/i.test(d)),
-    ).toBe(true);
-  });
 });
 
 describe('buildReportTimestamp', () => {
@@ -1586,8 +1345,6 @@ describe('buildReportData — health assumptions', () => {
     expect(
       health.disclosures.some((d) => /not a quote from an exchange/i.test(d)),
     ).toBe(true);
-    // The estimate grows from its base year at the medical rate; an entered
-    // price is used as entered.
     expect(
       health.disclosures.some((d) =>
         d.includes(
@@ -1632,9 +1389,7 @@ describe('buildReportData — health assumptions', () => {
   });
 
   it('a null member entry in an IMPORTED coverage map renders as "nothing stated"', () => {
-    // Import hardening validates the aggregate envelope, not override shapes, so
-    // `{ perMember: { m1: null } }` reaches the Report page. Walking it without
-    // a year-level guard threw a TypeError that blanked the whole render.
+    // Import hardening validates the aggregate envelope, not override shapes; a null member entry used to throw a TypeError that blanked the Report render.
     const base = scenario('base', {
       name: 'Base',
       isPrimary: true,
@@ -1648,15 +1403,11 @@ describe('buildReportData — health assumptions', () => {
     );
     const health = data.scenarios[0].healthAssumptions;
     expect(health.coverageMonths).toMatch(/No coverage months were entered/i);
-    // The PDF settings build walks the same map — it must not emit a row either.
     const rows = (data.scenarios[0].settingGroups ?? []).flatMap((g) => g.rows);
     expect(rows.filter((r) => r.label === 'Coverage months entered for')).toHaveLength(0);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Health-coverage rows in the exported settings table
-// ---------------------------------------------------------------------------
 describe('buildReportData — health-coverage settings rows', () => {
   const flatRows = (id: string, data: ReturnType<typeof buildReportData>) =>
     (data.scenarios.find((s) => s.id === id)?.settingGroups ?? []).flatMap((g) => g.rows);
@@ -1688,7 +1439,6 @@ describe('buildReportData — health-coverage settings rows', () => {
       'ACA benchmark (SLCSP) 2030',
       'ACA benchmark (SLCSP) 2031',
     ]);
-    // The combined "Benchmark plan price" row is gone — one representation only.
     expect(rows.filter((r) => r.label === 'Benchmark plan price')).toHaveLength(0);
   });
 
@@ -1697,7 +1447,6 @@ describe('buildReportData — health-coverage settings rows', () => {
     expect(alaska.find((r) => r.label === 'Federal poverty guidelines')?.value).toBe('Alaska');
     const hawaii = flatRows('base', buildWith({ acaFplRegion: 'hawaii' }));
     expect(hawaii.find((r) => r.label === 'Federal poverty guidelines')?.value).toBe('Hawaii');
-    // Negative case: an explicit `contiguous` (and an absent region) emit no row.
     expect(
       flatRows('base', buildWith({ acaFplRegion: 'contiguous' })).filter(
         (r) => r.label === 'Federal poverty guidelines',
@@ -1729,9 +1478,6 @@ describe('buildReportData — health-coverage settings rows', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Untrusted stored/imported health data + proration copy
-// ---------------------------------------------------------------------------
 describe('buildReportData — imported-data hardening', () => {
   const flatRows = (data: ReturnType<typeof buildReportData>) =>
     (data.scenarios.find((s) => s.id === 'base')?.settingGroups ?? []).flatMap((g) => g.rows);
@@ -1748,9 +1494,7 @@ describe('buildReportData — imported-data hardening', () => {
     );
 
   it('a NON-ARRAY imported benchmark payload does not take down the report or the PDF build', () => {
-    // Import validation checks the aggregate envelope, never override shapes, so
-    // an object here is reachable. Spreading / iterating it threw out of both
-    // the on-screen health panel and the exported settings table.
+    // Import validation checks the envelope, never override shapes; iterating a non-array here threw out of both the health panel and the settings table.
     let data!: ReturnType<typeof buildReportData>;
     expect(() => {
       data = buildWith({ acaPtcBenchmark: { taxYear: 2030, annualSlcspDollars: 9_000 } });
@@ -1779,13 +1523,10 @@ describe('buildReportData — imported-data hardening', () => {
   });
 
   it('an imported prototype-chain region value emits no PDF row and reports the default', () => {
-    // Indexing the label map directly returned an inherited FUNCTION for
-    // `"constructor"`, which then broke the PDF settings table (and, on the
-    // on-screen panel, a non-string React child).
+    // Indexing the label map directly returned an inherited function for "constructor", which broke the settings table and the on-screen panel.
     const data = buildWith({ acaFplRegion: 'constructor' });
     expect(flatRows(data).filter((r) => r.label === 'Federal poverty guidelines')).toHaveLength(0);
     expect(data.scenarios[0].healthAssumptions.povertyGuidelines).toMatch(/48 mainland states/i);
-    // Any other unrecognised value behaves the same way.
     const unknown = buildWith({ acaFplRegion: 'puerto-rico' });
     expect(flatRows(unknown).filter((r) => r.label === 'Federal poverty guidelines')).toHaveLength(
       0,
@@ -1807,10 +1548,6 @@ describe('buildReportData — imported-data hardening', () => {
   });
 
   it('both report surfaces state that an entered annual price is prorated to coverage months', () => {
-    // The modal, the engine input contract and the BETR probe all
-    // say a stored price is a WHOLE-YEAR amount charged pro rata to the
-    // Marketplace coverage months. The report is where a user verifies
-    // the figure they typed, so it must say the same thing.
     const data = buildWith({
       acaPtcBenchmark: [{ taxYear: 2030, annualSlcspDollars: 12_000 }],
       healthCoverageMonths: {
@@ -1825,10 +1562,6 @@ describe('buildReportData — imported-data hardening', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Market stress assumptions
-// ---------------------------------------------------------------------------
-
 describe('buildReportData — market stress assumptions', () => {
   const stressFor = (overrides: Record<string, unknown>) =>
     buildReportData(
@@ -1841,8 +1574,6 @@ describe('buildReportData — market stress assumptions', () => {
     ).scenarios[0].marketStressAssumptions;
 
   it('restates every approved case with the magnitude the engine actually uses', () => {
-    // Sourced from STRESS_CASES so the printed report can never describe a
-    // stress differently from the screen it was printed from.
     const stress = stressFor({});
     expect(stress.cases.map((c) => c.name)).toEqual(
       STRESS_CASE_IDS.map((id) => STRESS_CASE_COPY[id].name),
@@ -1860,9 +1591,7 @@ describe('buildReportData — market stress assumptions', () => {
     expect(byName.get('Longer life')).toContain(
       `${STRESS_CASES.longerLife.longevityShockYears} more years`,
     );
-    // The report has no household to anchor an age on, so — unlike the
-    // on-screen row, which names the age the LAST SURVIVOR reaches — the
-    // age-105 ceiling is stated once in the disclosures rather than on the row.
+    // The report has no household to anchor an age on, so the age-105 ceiling is stated once in the disclosures, not on the row.
     expect(byName.get('Longer life')).not.toContain('age');
     expect(
       stressFor({}).disclosures.some((d) => d.includes(`age ${STRESS_MAX_AGE}`)),
@@ -1870,8 +1599,6 @@ describe('buildReportData — market stress assumptions', () => {
   });
 
   it('discloses the longer-life approximations, not just the same-paths claim', () => {
-    // The extra years are PADDED, not re-assembled: fresh draws past the
-    // original horizon, flat-nominal income, no rebuilt filing schedule.
     const { disclosures } = stressFor({});
     expect(disclosures.some((d) => /only up to the original end of the plan/i.test(d))).toBe(true);
     expect(disclosures.some((d) => /use fresh market draws/i.test(d))).toBe(true);
@@ -1885,17 +1612,11 @@ describe('buildReportData — market stress assumptions', () => {
   });
 
   it('does not promise the longer-life approximations lean one way', () => {
-    // NEGATIVE assertion: the padded extra years have NO knowable net
-    // direction. `extendHorizon` can carry joint filing and BOTH members'
-    // income through the extension, which can lower modeled tax or retain
-    // income a rebuilt survivor schedule would have dropped, and the appended
-    // fresh draws can help or hurt. Any "more cautious, not less" style
-    // reassurance is a false promise and must not come back.
+    // The padded extra years have no knowable net direction, so any "more cautious, not less" reassurance is a false promise and must not return.
     const text = stressFor({}).disclosures.join(' ');
     expect(text).not.toMatch(/more cautious,? not less/i);
     expect(text).not.toMatch(/leans? are conservative/i);
     expect(text).not.toMatch(/both leans make/i);
-    // And the honest replacement is present: an estimate, either direction.
     expect(text).toMatch(/an estimate rather than an exact re-run/i);
     expect(text).toMatch(/move the result in either direction/i);
   });
@@ -1929,7 +1650,6 @@ describe('buildReportData — Account limits (minimum-balance floors)', () => {
     );
     const group = groupsFor(data, 'base').find((g) => g.title === 'Account limits');
     expect(group).toBeDefined();
-    // Sorted by account name: Brokerage, then Health savings, then the caveat.
     expect(group?.rows.map((r) => r.label)).toEqual([
       'Minimum balance — Brokerage',
       'Minimum balance — Health savings',
@@ -1938,8 +1658,6 @@ describe('buildReportData — Account limits (minimum-balance floors)', () => {
     expect(group?.rows[0]?.value).toBe('$25,000');
     expect(group?.rows[1]?.value).toBe('$10,000; blocks all draws, including medical');
     expect(group?.rows[2]?.value).toContain('not adjusted for inflation');
-    // Reserve semantics: a floor is not an absolute hard stop — the engine
-    // drains it as a last resort — and the caveat row must say so.
     expect(group?.rows[2]?.value).toContain(
       'Protected for everyday spending; drawn only as a last resort',
     );
@@ -2004,8 +1722,7 @@ describe('buildReportData — Account limits (minimum-balance floors)', () => {
             'a-pre': { floorDollars: 15000 },
             // Inactive: excluded from the projection entirely.
             'a-off': { floorDollars: 20000 },
-            // $0: the engine's floor read point treats it as no floor, so a
-            // strict-HSA $0 row must never print a blocking claim.
+            // A strict-HSA $0 row must never print a blocking claim: the engine reads $0 as no floor.
             'a-hsa': { floorDollars: 0, hsaMode: 'strict' },
           },
         },

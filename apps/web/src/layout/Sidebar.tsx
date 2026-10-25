@@ -1,25 +1,5 @@
-/**
- * Left-hand navigation sidebar with collapsible sections.
- *
- * Design choices:
- * - Sections use React Aria's `Disclosure` so collapse is
- *   keyboard-operable and announced by
- *   screen readers (WCAG 2.2 AA — see "Accessibility" in
- *   docs/ui-conventions.md). We render
- *   our own rotating chevron driven by the `data-[expanded]` state.
- * - Each item declares the pathname patterns that count as "selected" via
- *   `matchWhen`. We compute `aria-current="page"` ourselves rather than rely
- *   on NavLink's default descendant matching, because some routes belong to
- *   a sidebar entry that isn't a prefix of their path
- *   (e.g. `/accounts/:id/balances` is owned by "Account Balances", not
- *   "Accounts"). The active row gets `aria-current="page"` and the
- *   accent-wash utility classes (`navItemClass`).
- * - Admin-only items are hidden from non-admin callers. The API still
- *   enforces the policy; hiding is purely to reduce dead-end clicks.
- * - Beta items (`betaFeature`) render only while that feature is visible
- *   (offered by the build + the user's "Show beta features" switch — see
- *   lib/feature-flags.ts) and then carry a small "Beta" badge after the label.
- */
+// Left navigation sidebar with collapsible sections (React Aria `Disclosure`: keyboard-operable, announced; WCAG 2.2 AA).
+// `aria-current="page"` comes from each item's `matchWhen` (some routes belong to an entry that isn't a path prefix).
 import React from 'react';
 import {
   Button,
@@ -63,13 +43,10 @@ interface NavItem {
   to: string;
   label: string;
   icon: React.ReactNode;
-  // Optional override: declares which pathname patterns count as "this item is selected".
-  // Used when a route logically belongs to a sidebar entry that isn't a prefix of `to`
-  // (e.g. /accounts/:id/balances belongs to "Account Balances", not "Accounts").
-  // When omitted, the item is active iff pathname === to.
+  // Patterns counting as "selected" for routes that belong to an entry which isn't a prefix of `to` (e.g.
+  // /accounts/:id/balances belongs to "Account Balances"); default: pathname === to.
   matchWhen?: string[];
-  // Marks the item as a beta feature: hidden unless that feature is visible,
-  // badged "Beta" when shown.
+  // Beta feature: hidden unless visible, badged "Beta" when shown.
   betaFeature?: BetaFeatureId;
 }
 
@@ -81,9 +58,8 @@ interface NavSection {
   items: NavItem[];
 }
 
-// Top-level link shown above the collapsible sections (no Disclosure wrapper).
-// Dashboard is the home view of every authenticated session; pinning it here
-// keeps it one click away regardless of which sections the user has collapsed.
+// Top-level link above the collapsible sections: Dashboard is every session's home view, pinned so it stays one click
+// away.
 const TOP_LEVEL_ITEM: NavItem = {
   to: '/dashboard',
   label: 'Dashboard',
@@ -101,8 +77,7 @@ const SECTIONS: NavSection[] = [
         to: '/scenarios',
         label: 'Scenarios',
         icon: <ScenariosIcon />,
-        // Detail page lives under /scenarios/:id; sub-screens under
-        // /scenarios/:id/* — all should keep the entry active.
+        // The detail page and its /scenarios/:id/* sub-screens keep the entry active.
         matchWhen: [
           '/scenarios',
           '/scenarios/:id',
@@ -122,15 +97,12 @@ const SECTIONS: NavSection[] = [
         to: '/optimizer',
         label: 'Social Security claim-age',
         icon: <TargetIcon />,
-        // Defensive: also match nested optimizer sub-routes that may
-        // appear in a future PR (none in v1).
         matchWhen: ['/optimizer', '/optimizer/*'],
       },
       {
         to: '/roth-optimizer',
         label: 'Roth conversion comparison',
         icon: <TargetIcon />,
-        // Exact match — no sub-routes.
         matchWhen: ['/roth-optimizer'],
       },
       {
@@ -162,16 +134,14 @@ const SECTIONS: NavSection[] = [
         to: '/accounts',
         label: 'Accounts',
         icon: <AssetsIcon />,
-        // /accounts/:id/balances is owned by "Account Balances" below; keep this
-        // entry's active state on the accounts list (the create/edit form is a
-        // modal on /accounts now, addressed via ?new / ?edit query params).
+        // /accounts/:id/balances belongs to "Account Balances" below; the create/edit form is a modal on /accounts
+        // (?new / ?edit).
         matchWhen: ['/accounts'],
       },
       {
         to: '/account-balances',
         label: 'Account Balances',
         icon: <BalancesIcon />,
-        // Per-account balance entries page belongs here, not under "Accounts".
         matchWhen: ['/account-balances', '/accounts/:id/balances'],
       },
       { to: '/account-contributions', label: 'Annual Contributions', icon: <PiggyBankIcon /> },
@@ -185,7 +155,6 @@ const SECTIONS: NavSection[] = [
         to: '/expenses',
         label: 'Expenses',
         icon: <ReceiptIcon />,
-        // Add and edit forms live under /expenses/*; keep the entry active there too.
         matchWhen: ['/expenses', '/expenses/new', '/expenses/:id/edit', '/expenses/scenario-entry'],
       },
       {
@@ -220,12 +189,9 @@ interface SidebarProps {
   onItemClick: () => void;
   onSignOut: () => void;
   /**
-   * Rendered inside the React Aria `<MobileNavDrawer>` overlay (mobile).
-   * In drawer mode the overlay owns positioning + the navigation
-   * landmark (`aria-label` on its Dialog), so the `<aside>` drops its
-   * fixed/slide-in/sticky classes and its duplicate landmark label and
-   * just fills the drawer panel. Desktop renders the static column
-   * (default), hidden below `lg`.
+   * Rendered inside the React Aria `<MobileNavDrawer>` (mobile), which owns positioning and the navigation landmark
+   * (the Dialog's `aria-label`): the `<aside>` drops its fixed/sticky classes and duplicate landmark label and just
+   * fills the drawer. Desktop renders the static column, hidden below `lg`.
    */
   drawer?: boolean;
 }
@@ -237,28 +203,22 @@ function isItemActive(item: NavItem, pathname: string): boolean {
   return pathname === item.to;
 }
 
-// A section starts expanded when it is flagged `defaultOpen` (Planning) OR it
-// holds the active route — so a deep-link / refresh into a default-collapsed
-// section (e.g. /security under Settings) still shows the user where they are.
+// Expanded when flagged `defaultOpen` or holding the active route, so a deep link into a collapsed section (e.g.
+// /security under Settings) still shows where the user is.
 function isSectionDefaultExpanded(section: NavSection, pathname: string): boolean {
   return section.defaultOpen || section.items.some((item) => isItemActive(item, pathname));
 }
 
-// A single nav row — rendered as a <button> (not <Link>) so the browser
-// never exposes the full URL in the status bar on hover. Active state is
-// the accent wash (lime-subtle fill + the iris accent-link ink, the
-// registered "accent link on card surface" pair — the bright lime accent
-// is a fill colour, too light to read as text); idle rows are ink text
-// with a subtle sunken hover. Dark mode rides the `.dark` variable swap.
+// A nav row is a <button>, not <Link>, so the browser never shows the full URL in the status bar on hover. Active is
+// the accent wash with the accent-link ink (the registered pair for accent link on a card surface; the bright lime
+// accent is a fill, too light as text); idle is ink text with a sunken hover. Dark mode rides the `.dark` variable
+// swap.
 const NAV_ITEM_BASE =
   'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm ' +
   'transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring';
 const NAV_ITEM_IDLE = 'text-ink hover:bg-surface-sunken';
-// Active row = the accent wash + an accent-link green label/icon (the icon
-// inherits via currentColor), matching the mock's `.nav a.on`. The accent-link
-// green on the wash is the registered "active-nav text on accent wash" pair
-// (5.36:1) — repointed from text-positive, which read a muddy green-on-green
-// once the wash itself turned green.
+// Accent-link green on the wash is the registered "active-nav text on accent wash" pair (5.36:1), repointed from
+// text-positive, which read muddy green-on-green once the wash turned green.
 const NAV_ITEM_ACTIVE = 'bg-accent-subtle font-semibold text-accent-link';
 
 function navItemClass(active: boolean): string {
@@ -275,25 +235,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { pathname } = useLocation();
   const navigate = useNavigate();
 
-  // Beta items drop out entirely while their feature is hidden — the route
-  // gate (BetaFeatureGate) covers a deep link to the hidden page.
+  // Beta items drop out while their feature is hidden; BetaFeatureGate covers a deep link to the hidden page.
   const isItemShown = (item: NavItem): boolean =>
     item.betaFeature === undefined || isBetaFeatureVisible(item.betaFeature);
 
-  // Beta items sort after every stable item in their section, in their
-  // SECTIONS array order — so a new beta feature lands at the bottom
-  // without anyone having to remember to place its entry there by hand.
-  // `Array.prototype.sort` is stable (ES2019+), so this only ever moves
-  // beta items down; it never reorders within either group.
+  // Beta items sort after every stable item in their section (a stable sort, so nothing else reorders), so a new beta
+  // feature lands at the bottom without placing it by hand.
   const byBetaLast = (a: NavItem, b: NavItem): number =>
     Number(a.betaFeature !== undefined) - Number(b.betaFeature !== undefined);
 
-  // Sidebar entries render as <button>s (not <Link>s) so the browser
-  // doesn't expose the full URL in the status bar on hover. Programmatic
-  // navigation keeps the SPA semantics intact. Tradeoff: middle-click /
-  // cmd-click "Open in new tab" no longer works from the sidebar — the
-  // user can still get there from the address bar or via the in-page
-  // links inside each surface.
+  // Entries are <button>s so the URL isn't exposed on hover; navigation stays programmatic. Tradeoff: middle-click and
+  // cmd-click "Open in new tab" don't work from the sidebar.
   const goTo = (to: string): void => {
     onItemClick();
     navigate(to);
@@ -303,22 +255,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside
       className={
         drawer
-          ? // Inside the React Aria MobileNavDrawer overlay: just fill
-            // the drawer panel (the overlay owns position + scrim +
-            // focus trap). No fixed/sticky/translate, no landmark label
-            // (the drawer Dialog provides the navigation landmark).
-            // `overflow-hidden` here (not `overflow-y-auto`) so the
-            // inner scroll region — not the whole column — scrolls; the
-            // footer stays pinned (see the scroll wrapper below).
+          ? // In the React Aria MobileNavDrawer overlay (it owns position, scrim and focus trap): just fill the panel.
+            // `overflow-hidden`, not `overflow-y-auto`, so only the inner scroll region scrolls and the footer stays
+            // pinned.
             'flex h-full flex-col border-r ' +
             'border-line bg-surface-raised p-3'
-          : // Desktop: sticky, full-height fixed-width flex column (the
-            // app shell is a flex row — App.tsx); `lg:shrink-0` keeps
-            // the `w-64` track from collapsing next to the fluid main.
-            // Hidden below `lg` — the MobileNavDrawer renders the
-            // mobile presentation. The column itself does NOT scroll
-            // (`overflow-hidden`); only the middle region does, so the
-            // footer (account + Sign out) is always in view.
+          : // Desktop: sticky full-height fixed-width column in the shell's flex row; `lg:shrink-0` keeps `w-64` from collapsing next to the fluid main.
+            // Hidden below `lg` (the drawer is the mobile presentation); only the middle region scrolls, so the footer
+            // (account, Sign out) stays in view.
             'hidden h-screen w-64 flex-col overflow-hidden border-r ' +
             'border-line bg-surface-raised p-3 lg:sticky lg:top-0 lg:flex ' +
             'lg:shrink-0'
@@ -333,12 +277,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <span>{APP_NAME}</span>
       </div>
 
-      {/* Scrollable middle: sync badge, scenario picker, and the nav
-          sections. `flex-1 min-h-0 overflow-y-auto` lets just this
-          region scroll when the link list is taller than the viewport,
-          so the brand header (above) and the account footer (below)
-          stay pinned — the footer no longer gets pushed off-screen on
-          short viewports (the migration regression this fixes). */}
+      {/* Scrollable middle (sync badge, scenario picker, nav sections): `min-h-0 overflow-y-auto` lets just this region
+          scroll, so the brand header and account footer stay pinned on short viewports. */}
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
         <div className="px-2.5 pb-2">
           <SyncBadge />
@@ -389,12 +329,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       {item.icon}
                       <span>{item.label}</span>
-                      {/* Beta status reaches screen readers as a readable
-                          suffix — "Guardrails (beta)" — while the visible pill
-                          is hidden from the name, so the two adjacent spans
-                          never fuse into "GuardrailsBeta". The bare space text
-                          node is what keeps the suffix separated: a leading
-                          space INSIDE the sr-only span would be trimmed away. */}
+                      {/* Beta reaches screen readers as a suffix, "Guardrails (beta)", while the visible pill is
+                          hidden, so the spans never fuse into "GuardrailsBeta". The bare space text node keeps them
+                          apart: a leading space inside the sr-only span would be trimmed. */}
                       {item.betaFeature !== undefined && (
                         <>
                           {' '}
@@ -436,8 +373,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
 
-      {/* Open-source line — rendered in both the desktop column and the
-          mobile drawer. */}
+      {/* Open-source line, in both the desktop column and the mobile drawer. */}
       <div className="mt-2 flex-none border-t border-line px-2.5 pb-0.5 pt-3">
         <div className="text-xs">
           <RepoLink kind="open-source" />

@@ -1,8 +1,3 @@
-/**
- * Tests for the planned/actual/remaining contribution math. Mirrors
- * the cases the legacy server-side `account-contributions.controller.spec.ts`
- * covered.
- */
 import {
   computeContributionSummary,
   isTreatmentEditablePreTax,
@@ -171,10 +166,7 @@ describe('computeContributionSummary', () => {
   });
 
   it('HSA account places totalContributions on the pre-tax side (actualPostTax = 0)', () => {
-    // HSA contributions are made pre-tax, so a recorded HSA balance's
-    // totalContributions (entered as a single "Personal Contributions" field in
-    // the balance modal) attributes to the pre-tax actual column — matching the
-    // pre-tax planned field and the Account Balances portfolio-summary card.
+    // HSA contributions are pre-tax, so a recorded HSA's totalContributions lands in the pre-tax actual column.
     const acc = accountAgg('acc-hsa', {
       type: 'HSA',
       taxTreatment: 'HSA',
@@ -194,8 +186,6 @@ describe('computeContributionSummary', () => {
   });
 
   it('ROTH account places totalContributions on the post-tax side (actualPreTax = 0)', () => {
-    // Roth is post-tax funded — actuals route to actualPostTax, identical to
-    // POST_TAX.
     const acc = accountAgg('acc-roth', {
       type: 'RETIREMENT_ROTH_IRA',
       taxTreatment: 'ROTH',

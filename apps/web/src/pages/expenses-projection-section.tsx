@@ -1,8 +1,4 @@
-/**
- * Expenses page — "Total expenses" chart section card.
- * Hosts ExpensesProjectionChart + zoom state. Tab switcher lives in
- * ExpensesPage.tsx; only the per-tab body lives here.
- */
+/** Expenses page "Total expenses" chart section: ExpensesProjectionChart plus zoom state; the tab switcher lives in ExpensesPage.tsx. */
 import React, { useCallback, useMemo } from 'react';
 import {
   ExpensesProjectionChart,
@@ -39,15 +35,12 @@ export const ExpensesProjectionSection: React.FC<ExpensesProjectionSectionProps>
     [rows],
   );
 
-  // Y-range for visible expense values so the y-axis auto-fits on zoom.
   const computeY = useCallback(
     (visibleRows: readonly { x: number }[]): [number, number] | null => {
       const xs = new Set(visibleRows.map((r) => r.x));
       const visible = rows.filter((r) => xs.has(r.fractionalYear));
       if (visible.length < 2) return null;
-      // Stacked-area: the Essential band baseline is y=0; using the series
-      // minimum as yMin would clip the bottom of the stack during zoom. Use the
-      // total (stack top) for yMax and floor at 0 for the baseline.
+      // Stacked area: the Essential baseline is y = 0, so use the stack-top total for yMax and floor at 0 to avoid clipping the bottom during zoom.
       const yMax = Math.max(...visible.map((r) => r.total));
       if (yMax === 0) return null;
       return [0, yMax];

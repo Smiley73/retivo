@@ -1,29 +1,16 @@
 /**
- * Dated filename builder for the unified PDF export. The scenario
- * component is user-entered, so it goes through a STRICT allowlist sanitizer
- * before it ever lands in a download filename: only `[A-Za-z0-9-_]` survive,
- * everything else (control chars, RTL-override marks, path separators,
- * unicode) collapses to `-`, leading dots are stripped, and the result is
- * capped so a pathological name can't produce an unusable filename.
- *
- * Framework-free: pure string functions, no React / DOM / jsPDF import.
+ * Dated filename builder for the PDF export. The user-entered scenario name goes through an allowlist sanitizer before it reaches a download filename.
  */
 import { pad2 } from './format';
 
 const MAX_COMPONENT_LENGTH = 40;
 
 /**
- * Sanitize a user-entered name to a strict filename-safe component:
- *   - keep only `[A-Za-z0-9-_]`; collapse every other character (including
- *     control chars, the RTL-override (U+202E), `/`, spaces, unicode) to `-`;
- *   - collapse runs of `-` to a single `-`;
- *   - strip leading dots (a leading `.` would make a hidden file) and any
- *     leading/trailing `-`;
- *   - cap at 40 characters.
- * Returns `'untitled'` when nothing usable remains.
+ * Reduce a user-entered name to `[A-Za-z0-9-_]` (runs collapsed, no leading dots, max 40 chars);
+ * `'untitled'` when nothing usable remains.
  */
-export function sanitizeFilenameComponent(name: string): string {
-  // Strip leading dots first so `.hidden` does not become `-hidden`.
+function sanitizeFilenameComponent(name: string): string {
+  // A leading dot would make a hidden file.
   const noLeadingDots = name.replace(/^\.+/, '');
   const collapsed = noLeadingDots
     .replace(/[^A-Za-z0-9\-_]+/g, '-') // non-allowlist → single dash
@@ -35,19 +22,11 @@ export function sanitizeFilenameComponent(name: string): string {
 
 export interface BuildPdfFilenameParams {
   readonly scenarioName: string;
-  /** A fixed basis label key (already from a controlled set — sanitized
-   *  defensively all the same). */
   readonly basisKey: string;
-  /** Render-clock "now" as parts (month 1-12, day 1-31). */
   readonly date: { year: number; month: number; day: number };
 }
 
-/**
- * Build the PDF download filename:
- *   `retivo-<scenario>-<basis>-<YYYY-MM-DD>.pdf`
- * The scenario + basis components both pass through `sanitizeFilenameComponent`
- * (the basis is from a fixed set, sanitized defensively).
- */
+/** Build `retivo-<scenario>-<basis>-<YYYY-MM-DD>.pdf`; both name parts are sanitized. */
 export function buildPdfFilename(params: BuildPdfFilenameParams): string {
   const scenario = sanitizeFilenameComponent(params.scenarioName);
   const basis = sanitizeFilenameComponent(params.basisKey);

@@ -1,12 +1,6 @@
 /**
- * Inner SVG-engine impl for the Portfolio flows chart.
- *
- * Stacked-bar view of per-year portfolio inflows and outflows:
- *   - Positive bars (stacked): contributions + investment gains +
- *     lump-sum deposits.
- *   - Negative bar: portfolio withdrawals (negative value → below zero).
- *   - Overlay line: net change, solid green above zero / red below — split
- *     into sign-coloured segments (`signSplit`) so it survives PDF export.
+ * Inner SVG-engine chart for portfolio flows: inflows stacked above zero, withdrawals below, and a sign-split
+ * net-change line (`signSplit`, so it survives PDF export).
  */
 import React from 'react';
 import type { CashflowChartMarker } from './CashflowProjectionChart';
@@ -90,8 +84,8 @@ function makeTooltip(
         {qcdAbs > 0 && !hidden.has('Charitable (QCD)') && (
           <Row label="Charitable (QCD)" value={-qcdAbs} color={colors.qcd} />
         )}
-        {/* Net change is the summary total of the visible flows — it stays
-            even when its line is hidden (matches the Total/Net-cost rows). */}
+        {/* Net change is the summary total of the visible flows, so it stays when its line is
+            hidden. */}
         <div
           className="mt-1 flex justify-between gap-4 pt-1"
           // eslint-disable-next-line no-restricted-syntax -- runtime theme-reactive tooltip divider color from tokens.ts
@@ -131,26 +125,20 @@ const InnerChart: React.FC<InnerProps> = ({
   const colors = useChartColors();
   const chrome = useChartChrome();
   const { hidden, toggle } = useSeriesVisibility();
-  // Bars map by `x` = their integer `year`. Death = Dec 31 of `deathYear`
-  // (the terminal year), so the death-year bar is a full-value bar sitting
-  // on its integer year — no fractional/prorated terminal bar. (`r.year`
-  // is always set; `fractionalYear` is retained but never populated.)
+  // Bars sit on their integer `year`; death is Dec 31 of the terminal year, so there is no prorated
+  // terminal bar.
   const data: ChartDatum[] = React.useMemo(
     () => rows.map((r) => ({ ...r, x: r.fractionalYear ?? r.year })),
     [rows],
   );
   const xs = rows.map((r) => r.year);
   const xMin = xs[0];
-  // Markers are integer `deathYear`; the rightmost lands on the last
-  // bar (centered at `deathYear`). Drives the `xMax` so the bar stays
-  // un-clipped.
+  // The rightmost marker lands on the last bar and drives `xMax` so it is not clipped.
   const lastDeathFractional = markers.length
     ? Math.max(...markers.map((m) => m.fractionalYear))
     : null;
-  // Inset the first/last bars from the plot edges: bars are centered on
-  // their x, so without padding the first bar lands on the Y-axis and the
-  // last on the right border. ~0.6yr is wider than a half bar at any zoom;
-  // the right edge still reaches the death marker when it falls later.
+  // Bars are centred on x, so inset the edges or the first bar lands on the Y-axis; the right edge
+  // still reaches a later death marker.
   const BAR_EDGE_PAD = 0.6;
   const xMinPadded = Math.floor(xMin) - BAR_EDGE_PAD;
   const xMax = Math.max(
@@ -188,8 +176,6 @@ const InnerChart: React.FC<InnerProps> = ({
     { kind: 'bar', dataKey: 'qcd', name: 'Charitable (QCD)', color: colors.qcd, stackId: 'flows' },
     { kind: 'line', dataKey: 'netChange', name: 'Net change', color: colors.netChangePositive, signSplit: { positiveColor: colors.netChangePositive, negativeColor: colors.netChangeNegative }, strokeWidth: 3 },
   ];
-  // Apply the same edge padding when zoomed (xDomain set) so the first/last
-  // bars of a zoomed view don't clip on the plot border either.
   const activeDomain: [number, number] = xDomain
     ? [xDomain[0] - BAR_EDGE_PAD, xDomain[1] + BAR_EDGE_PAD]
     : [xMinPadded, xMax];

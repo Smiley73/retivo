@@ -1,8 +1,3 @@
-/**
- * Display-helper tests for Expense aggregates. Locks the user-facing
- * copy for each timepoint kind so future refactors don't silently
- * change what the list page renders.
- */
 import { describe, expect, it } from 'vitest';
 import {
   describeExpenseEnd,
@@ -48,8 +43,6 @@ describe('frequencyToAnnual', () => {
 
 describe('formatExpenseAmount', () => {
   it('renders a per-frequency suffix in whole dollars', () => {
-    // Routed through the app-wide `formatCurrency` (whole-dollar) —
-    // amounts no longer carry the always-`.00` cents.
     expect(formatExpenseAmount(400, 'monthly')).toBe('$400/mo');
     expect(formatExpenseAmount(8000, 'yearly')).toBe('$8,000/yr');
     expect(formatExpenseAmount(40000, 'oneOff')).toBe('$40,000 once');

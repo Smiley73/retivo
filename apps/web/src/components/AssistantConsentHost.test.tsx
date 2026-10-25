@@ -1,9 +1,4 @@
-/**
- * The consent dialog end to end: the real provider and session on a scripted
- * socket, with the shell host rendering the dialog. Covers the session gate
- * (nothing leaves before Allow, decline closes with `consent-declined`), and
- * that the keep-signed-in choice lives in the session only.
- */
+/** The consent dialog end to end on a scripted socket: the session gate, decline, and the keep-signed-in choice living in the session only. */
 import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -49,7 +44,7 @@ function setup() {
   return { sockets };
 }
 
-/** Starts a pairing and plays the bridge up to `paired`; the dialog is due when this returns. */
+// Starts a pairing and plays the bridge up to `paired`; the dialog is due when this returns.
 async function pairUntilDialog(sockets: ScriptedSocket[], clientName = 'Claude Code'): Promise<ScriptedSocket> {
   act(() => {
     expect(assistant().connect(CODE)).toBe('started');
@@ -84,7 +79,6 @@ describe('AssistantConsentHost', () => {
     expect(await screen.findByRole('dialog', { name: /Let this assistant read your plan/ })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: KEEP_SIGNED_IN_LABEL })).not.toBeChecked();
     expect(screen.getByText(/Claude Code wants to read your plan/)).toBeInTheDocument();
-    // Only the pair frame has left; no ready, and the session holds no record.
     expect(socket.frames.map((frame) => frame.type)).toEqual(['pair']);
     expect(assistant().consent).toBeNull();
   });
@@ -130,7 +124,6 @@ describe('AssistantConsentHost', () => {
     expect(assistant().consent).toBeNull();
     expect(socket.frames.map((frame) => frame.type)).toEqual(['pair']);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    // A call the bridge still tried to relay reaches nothing: the session has ended.
     socket.receive({ type: 'call', id: 'late', tool: 'retivo_status', args: {} });
     expect(socket.frames.some((frame) => frame.type === 'result')).toBe(false);
   });
@@ -163,7 +156,6 @@ describe('AssistantConsentHost', () => {
     expect(assistant().consent).toBeNull();
     expect(storageKeys()).toEqual(before);
 
-    // A new pairing opens the dialog again with every switch at its default, keep-signed-in included.
     await pairUntilDialog(sockets);
     expect(await screen.findByRole('switch', { name: KEEP_SIGNED_IN_LABEL })).not.toBeChecked();
     expect(screen.getByRole('switch', { name: 'Exact dollar figures' })).toBeChecked();

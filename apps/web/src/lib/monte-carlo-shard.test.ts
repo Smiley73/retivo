@@ -1,18 +1,4 @@
-/**
- * Sharding primitives.
- *
- * - The in-process determinism proof: the full 4-step
- *   `runPathRange` → `mergePathRanges` → `assembleAccumulationFromTyped` →
- *   `assembleMonteCarloSummary` pipeline, for shard splits {1, 3} of a
- *   200-path run, deep-equals a plain `runMonteCarlo` (no workers, no
- *   `postMessage` — proving the reconstruction itself is correct independent
- *   of the transfer mechanics). 3 does not divide 200 → the remainder case.
- * - `shardBounds` chunking (equal + remainder + shardCount > pathCount).
- * - `mergePathRanges` typed merge (offset placement, histogram/successes sum,
- *   −1 sentinel preserved).
- * - `assembleAccumulationFromTyped` reconstruction (depletion push-order, −1 ↔
- *   null mapping, tax-matrix rebuild).
- */
+/** Sharding primitives: bounds, typed merge and reconstruction, and sharded-equals-serial in process. */
 import { describe, expect, it } from 'vitest';
 import {
   buildRunContext,
@@ -94,9 +80,7 @@ function buildTaxContext(): McTaxContext {
   };
 }
 
-/** A tax-bearing two-account household with a non-zero scenario inflation and a
- *  mid-year as-of month, and high enough spending that some paths deplete (so
- *  the depletion / histogram / sentinel reconstruction is exercised). */
+// High spending so some paths deplete and the depletion and sentinel reconstruction runs.
 function buildInput(overrides?: Partial<MonteCarloInput>): MonteCarloInput {
   const years = HORIZON_YEAR - FIRST_YEAR + 1;
   return {
@@ -128,23 +112,19 @@ describe('shardBounds', () => {
       { start: 0, end: 250 },
       { start: 250, end: 500 },
     ]);
-    // 500 / 3 = 166 rem 2 → last chunk absorbs the remainder.
     expect(shardBounds(500, 3)).toEqual([
       { start: 0, end: 166 },
       { start: 166, end: 332 },
       { start: 332, end: 500 },
     ]);
-    // 500 / 7 = 71 rem 3 → six chunks of 71, last of 74.
     const seven = shardBounds(500, 7);
     expect(seven).toHaveLength(7);
     expect(seven[0]).toEqual({ start: 0, end: 71 });
     expect(seven[6]).toEqual({ start: 426, end: 500 });
-    // Contiguous, gap-free, full coverage.
     for (let i = 1; i < seven.length; i += 1) expect(seven[i].start).toBe(seven[i - 1].end);
   });
 
   it('clamps shardCount to [1, pathCount]', () => {
-    // More shards than paths → pathCount chunks of 1.
     expect(shardBounds(3, 8)).toEqual([
       { start: 0, end: 1 },
       { start: 1, end: 2 },
@@ -188,9 +168,7 @@ describe('mergePathRanges', () => {
     expect(Array.from(merged.endingNominal)).toEqual([10, 10, 20, 20]);
     expect(Array.from(merged.balancesByYearNominal[0])).toEqual([10, 10, 20, 20]);
     expect(Array.from(merged.balancesByYearNominal[1])).toEqual([20, 20, 40, 40]);
-    // −1 sentinel survives the merge unchanged.
     expect(Array.from(merged.depletionYearByPath)).toEqual([-1, 1, 0, -1]);
-    // Histograms + successes sum across ranges.
     expect(Array.from(merged.failureYearHistogram)).toEqual([1, 1]);
     expect(merged.successes).toBe(2);
     expect(merged.tax).toBeNull();
@@ -238,7 +216,6 @@ describe('assembleAccumulationFromTyped', () => {
       },
       endingNominal: Float64Array.from([4, 3, 2, 1]),
       endingReal: Float64Array.from([1, 1, 1, 1]),
-      // path 0 survives, path 1 depletes 2030, path 2 survives, path 3 depletes 2028
       depletionYearByPath: Int32Array.from([-1, 2030, -1, 2028]),
       failureYearHistogram: Int32Array.from([1, 1]),
       successes: 2,
@@ -295,8 +272,6 @@ describe('in-process sharded ≡ serial determinism', () => {
   }
 
   it('exercises depletion in the fixture (some paths fail, some succeed)', () => {
-    // Guards the determinism proof against a degenerate all-survive fixture
-    // that would never touch the sentinel / histogram reconstruction.
     expect(serial.successProbability).toBeGreaterThan(0);
     expect(serial.successProbability).toBeLessThan(1);
   });

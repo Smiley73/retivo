@@ -1,25 +1,10 @@
-// Live-amount + slider + save + COLA-toggle + survivor-claim-age tests share the
-// same modal render setup; splitting would duplicate the helper.
-/**
- * SocialSecurityModal — claim-age slider behavior + live-amount
- * display:
- *  - Whole-year-only entry, bounded by SSA's legal range (62 to 70).
- *  - `ageMonths` always 0 on save.
- *  - On first paint, pre-existing stored months collapse to the
- *    nearest whole year via half-away-from-zero rounding + clamp.
- *  - Secondary slider renders only when a secondary member exists.
- *  - Live monthly benefit shown under slider; null PIA → link prompt.
- */
+// SocialSecurityModal claim-age slider (whole years, 62 to 70, `ageMonths` 0 on save), first-paint month collapse, secondary slider only with a secondary member, live monthly benefit and the null-PIA link prompt.
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  SocialSecurityModal,
-  claimAgeToSliderYear,
-  survivorAgeToSliderYear,
-} from './SocialSecurityModal';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { SocialSecurityModal } from './SocialSecurityModal';
 import { clearAllStores, listAggregates, listPendingMutations } from '../db/store';
 import { expectNoA11yViolations } from '../test/a11y';
 import type {
@@ -28,70 +13,6 @@ import type {
   ScenarioPayload,
 } from '../db/types';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
-
-describe('claimAgeToSliderYear (first-paint formula)', () => {
-  it('rounds 65 years 6 months to 66 (half-away-from-zero)', () => {
-    expect(claimAgeToSliderYear(65, 6)).toBe(66);
-  });
-
-  it('rounds 64 years 6 months to 65', () => {
-    expect(claimAgeToSliderYear(64, 6)).toBe(65);
-  });
-
-  it('rounds 68 years 6 months to 69', () => {
-    expect(claimAgeToSliderYear(68, 6)).toBe(69);
-  });
-
-  it('clamps 61 years 0 months up to 62 (lower bound)', () => {
-    expect(claimAgeToSliderYear(61, 0)).toBe(62);
-  });
-
-  it('clamps 71 years 0 months down to 70 (upper bound)', () => {
-    expect(claimAgeToSliderYear(71, 0)).toBe(70);
-  });
-
-  it('clamps a deep low (50 years 0 months) up to 62', () => {
-    expect(claimAgeToSliderYear(50, 0)).toBe(62);
-  });
-
-  it('clamps a deep high (90 years 6 months) down to 70', () => {
-    expect(claimAgeToSliderYear(90, 6)).toBe(70);
-  });
-
-  it('passes a whole-year value through unchanged within range', () => {
-    expect(claimAgeToSliderYear(67, 0)).toBe(67);
-  });
-
-  it('rounds zero months to a no-op', () => {
-    expect(claimAgeToSliderYear(65, 0)).toBe(65);
-  });
-
-  it('rounds 65 years 5 months down to 65 (half-away rule does not apply at < .5)', () => {
-    expect(claimAgeToSliderYear(65, 5)).toBe(65);
-  });
-
-  it('rounds 65 years 7 months up to 66', () => {
-    expect(claimAgeToSliderYear(65, 7)).toBe(66);
-  });
-});
-
-describe('survivorAgeToSliderYear (survivor window collapse)', () => {
-  it('passes a whole-year value through unchanged within [60, 70]', () => {
-    expect(survivorAgeToSliderYear(64, 0)).toBe(64);
-  });
-
-  it('rounds months half-away-from-zero (62 years 6 months → 63)', () => {
-    expect(survivorAgeToSliderYear(62, 6)).toBe(63);
-  });
-
-  it('clamps below the widow(er) floor (58 → 60)', () => {
-    expect(survivorAgeToSliderYear(58, 0)).toBe(60);
-  });
-
-  it('clamps above the window (72 → 70)', () => {
-    expect(survivorAgeToSliderYear(72, 0)).toBe(70);
-  });
-});
 
 const HH = 'hh-test';
 
@@ -148,6 +69,22 @@ function makeScenario(seed: {
   };
 }
 
+// Saves after an edit that leaves the claim ages alone, so the persisted ages are the seeded draft rather than the slider's own clamped value.
+async function saveAfterUnrelatedEdit(onClose: Mock) {
+  await userEvent.click(screen.getByRole('switch', { name: /Track inflation/i }));
+  const saveBtn = screen.getByRole('button', { name: 'Save' });
+  await waitFor(() => expect(saveBtn).not.toBeDisabled());
+  await act(async () => {
+    fireEvent.click(saveBtn);
+  });
+  await waitFor(() => expect(onClose).toHaveBeenCalledWith(true));
+  const pending = await listPendingMutations();
+  const scenarioMut = pending.find(
+    (p) => p.aggregateType === 'scenario' && p.aggregateId === 'sc-base',
+  );
+  return (scenarioMut!.payload as ScenarioPayload).overrides.socialSecurity!;
+}
+
 describe('SocialSecurityModal — Save persists ageMonths: 0', () => {
   beforeEach(async () => {
     await clearAllStores();
@@ -159,12 +96,7 @@ describe('SocialSecurityModal — Save persists ageMonths: 0', () => {
   });
 
   it('seeds the slider at the rounded year, then persists ageMonths: 0 on Save', async () => {
-    // Baseline stores `65 years 6 months` for the primary. The modal rounds
-    // that to 66 on the modal's first paint (half-away-from-zero, then
-    // clamp into [62, 70]). The slider's seeded value badge therefore
-    // reads "66 years" — proving the first-paint collapse, even before
-    // any user edit. It must also hold that whatever year the user lands
-    // on Save persists with `ageMonths: 0`.
+    // Baseline 65y 6m collapses to 66 on first paint, so the seeded badge reads "66 years" before any edit; whatever year the user lands on, Save persists `ageMonths: 0`.
     const scenario = makeScenario({ ageYears: 65, ageMonths: 6 });
     const primary = makeMember('hm-primary', true, 'Alex');
     const onClose = vi.fn();
@@ -183,16 +115,12 @@ describe('SocialSecurityModal — Save persists ageMonths: 0', () => {
       </MemoryRouter>,
     );
 
-    // Rounding: baseline 65y 6m → 66. The slider surfaces the
-    // formatted year in two places — the visible badge + the sr-only
-    // value description — so both nodes carry "66 years".
+    // The slider surfaces the year in the visible badge and the sr-only value description, so both nodes carry "66 years".
     await waitFor(() =>
       expect(screen.getAllByText('66 years').length).toBeGreaterThan(0),
     );
 
-    // Drive the slider one step UP via the RA Slider's keyboard
-    // contract: the thumb has role="slider" and responds to ArrowRight.
-    // Step = 1, so 66 → 67. This dirty-fies the modal so Save enables.
+    // Drive the slider one step up through the React Aria Slider keyboard contract (thumb role="slider", ArrowRight, step 1); the edit enables Save.
     const thumb = screen.getByRole('slider', {
       name: /Alex Social Security claim age/i,
     });
@@ -208,17 +136,10 @@ describe('SocialSecurityModal — Save persists ageMonths: 0', () => {
       fireEvent.click(saveBtn);
     });
 
-    // Save fires onClose(true) when the mutation queues successfully.
-    // Wait on that signal before reading IndexedDB so we know the
-    // mutation persisted.
+    // Save fires onClose(true) once the mutation queues; wait on it before reading IndexedDB.
     await waitFor(() => expect(onClose).toHaveBeenCalledWith(true));
 
-    // Save routes through `saveScenario` → `queueLocalMutation`, which
-    // (a) writes the optimistic aggregate via `putAggregate` AND (b)
-    // queues the mutation. The mutation queue is the relevant
-    // contract surface (downstream sync sees what gets pushed), and the
-    // aggregate is the inspection surface for the local read path.
-    // Assert on both to make the contract clear.
+    // Save routes through `saveScenario` → `queueLocalMutation`, which writes the optimistic aggregate and queues the mutation; assert on both (the queue is what sync pushes, the aggregate the local read path).
     const pending = await listPendingMutations();
     const scenarioMut = pending.find(
       (p) => p.aggregateType === 'scenario' && p.aggregateId === 'sc-base',
@@ -238,6 +159,48 @@ describe('SocialSecurityModal — Save persists ageMonths: 0', () => {
   });
 });
 
+describe('SocialSecurityModal — first-paint claim-age collapse', () => {
+  beforeEach(async () => {
+    await clearAllStores();
+  });
+
+  afterEach(async () => {
+    await clearAllStores();
+    vi.clearAllMocks();
+  });
+
+  // Stored months round half-away-from-zero to a whole year, then clamp into [62, 70].
+  it.each([
+    [65, 6, 66],
+    [65, 5, 65],
+    [65, 7, 66],
+    [67, 0, 67],
+    [61, 0, 62],
+    [90, 6, 70],
+  ])('seeds a stored %iy %im claim age at %i', async (ageYears, ageMonths, expected) => {
+    const scenario = makeScenario({ ageYears, ageMonths });
+    const onClose = vi.fn();
+    render(
+      <MemoryRouter>
+        <SocialSecurityModal
+          open
+          scenario={scenario}
+          scenarios={[scenario]}
+          primaryMember={makeMember('hm-primary', true, 'Alex')}
+          secondaryMember={null}
+          benefitsByMemberId={{}}
+          householdId={HH}
+          onClose={onClose}
+        />
+      </MemoryRouter>,
+    );
+    const slider = screen.getByRole('slider', { name: /Alex Social Security claim age/i }) as HTMLInputElement;
+    expect(slider.value).toBe(String(expected));
+    const ss = await saveAfterUnrelatedEdit(onClose);
+    expect(ss.primary).toEqual({ ageYears: expected, ageMonths: 0 });
+  });
+});
+
 describe('SocialSecurityModal — live amount display', () => {
   beforeEach(async () => {
     await clearAllStores();
@@ -249,8 +212,7 @@ describe('SocialSecurityModal — live amount display', () => {
   });
 
   it('renders the live monthly benefit when PIA is provided and slider at 70', async () => {
-    // Primary: born 1960-04-15 (FRA 67), PIA $3,000, slider at 70.
-    // monthlyBenefitAtAge(3000, 804, 840) = 3000 * 1.24 = $3,720.
+    // Born 1960-04-15 (FRA 67), PIA $3,000, slider at 70: monthlyBenefitAtAge(3000, 804, 840) = 3000 × 1.24 = $3,720.
     const scenario = makeScenario({ ageYears: 70, ageMonths: 0 });
     const primary = makeMember('hm-primary', true, 'Alex');
     render(
@@ -267,7 +229,6 @@ describe('SocialSecurityModal — live amount display', () => {
         />
       </MemoryRouter>,
     );
-    // Live-amount line should show age 70 benefit (PIA $3,000 × 1.24 = $3,720).
     await waitFor(() =>
       expect(screen.getByText(/Monthly benefit at age 70/i)).toBeInTheDocument(),
     );
@@ -275,7 +236,6 @@ describe('SocialSecurityModal — live amount display', () => {
   });
 
   it('updates the live amount when slider moves from 62 to 70', async () => {
-    // Primary: born 1960-04-15 (FRA 67), PIA $3,000, slider starts at 65.
     const scenario = makeScenario({ ageYears: 65, ageMonths: 0 });
     const primary = makeMember('hm-primary', true, 'Alex');
     render(
@@ -292,11 +252,9 @@ describe('SocialSecurityModal — live amount display', () => {
         />
       </MemoryRouter>,
     );
-    // Slider starts at 65 — live line should show age 65.
     await waitFor(() =>
       expect(screen.getByText(/Monthly benefit at age 65/i)).toBeInTheDocument(),
     );
-    // Move slider to 70 via keyboard.
     const thumb = screen.getByRole('slider', {
       name: /Alex Social Security claim age/i,
     });
@@ -331,13 +289,11 @@ describe('SocialSecurityModal — live amount display', () => {
         screen.getByText(/Enter your monthly benefit at full retirement age/i),
       ).toBeInTheDocument(),
     );
-    // Changed from <Link> to <button> so clicking fires the dirty-modal guard.
+    // A button rather than a Link, so clicking fires the dirty-modal guard.
     expect(screen.getByRole('button', { name: /Social Security page/i })).toBeInTheDocument();
   });
 
   it('navigates to /social-security when the null-PIA button is clicked (clean state)', async () => {
-    // Modal is clean (no user edits) — clicking the button must close the
-    // modal and navigate without opening any confirm dialog.
     const scenario = makeScenario({ ageYears: 67, ageMonths: 0 });
     const primary = makeMember('hm-primary', true, 'Alex');
     const onClose = vi.fn();
@@ -375,7 +331,6 @@ describe('SocialSecurityModal — live amount display', () => {
       fireEvent.click(screen.getByRole('button', { name: /Social Security page/i }));
     });
 
-    // Clean path: no confirm dialog, modal closes immediately, router lands on sentinel.
     await waitFor(() =>
       expect(screen.getByTestId('ss-page-sentinel')).toBeInTheDocument(),
     );
@@ -383,8 +338,6 @@ describe('SocialSecurityModal — live amount display', () => {
   });
 
   it('opens the dirty guard when the null-PIA button is clicked while dirty', async () => {
-    // Slider is moved first so the modal becomes dirty. Clicking the button
-    // must open the unsaved-changes confirm (not navigate immediately).
     const scenario = makeScenario({ ageYears: 67, ageMonths: 0 });
     const primary = makeMember('hm-primary', true, 'Alex');
     render(
@@ -413,7 +366,6 @@ describe('SocialSecurityModal — live amount display', () => {
       </MemoryRouter>,
     );
 
-    // Make the modal dirty by moving the slider.
     await waitFor(() =>
       expect(screen.getByRole('slider', { name: /Alex Social Security claim age/i })).toBeInTheDocument(),
     );
@@ -421,7 +373,6 @@ describe('SocialSecurityModal — live amount display', () => {
     thumb.focus();
     await userEvent.keyboard('{ArrowRight}');
 
-    // Confirm dirty: Save button is now enabled.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled(),
     );
@@ -430,7 +381,6 @@ describe('SocialSecurityModal — live amount display', () => {
       fireEvent.click(screen.getByRole('button', { name: /Social Security page/i }));
     });
 
-    // Dirty path: confirm dialog appears; sentinel page must NOT be visible yet.
     await waitFor(() =>
       expect(screen.getByRole('dialog', { name: /unsaved changes/i })).toBeInTheDocument(),
     );
@@ -449,9 +399,7 @@ describe('SocialSecurityModal — COLA inflation-tracking toggle', () => {
   });
 
   it('defaults the track-inflation switch on and disables the COLA slider', async () => {
-    // makeScenario stores a fixed colaPct but no colaTracksInflation flag.
-    // Default-on: the switch reads checked and the manual COLA slider is
-    // disabled until the user opts out.
+    // makeScenario stores a fixed colaPct but no colaTracksInflation flag; default-on means the switch reads checked and the manual COLA slider is disabled until the user opts out.
     const scenario = makeScenario({ ageYears: 67, ageMonths: 0 });
     const primary = makeMember('hm-primary', true, 'Alex');
     render(
@@ -518,10 +466,7 @@ describe('SocialSecurityModal — COLA inflation-tracking toggle', () => {
   });
 
   it('describes the fixed COLA as anchored to the SSA statement date, not the claim age', async () => {
-    // The engine compounds a fixed COLA for years after each member's
-    // piaAsOfDate statement anchor (age-62 eligibility-year fallback),
-    // NOT after the claim age; the helper copy must say so. The fixed-rate
-    // description shows only once inflation-tracking is switched off.
+    // The engine compounds a fixed COLA for years after each member's piaAsOfDate anchor (age-62 eligibility-year fallback), not after the claim age; the helper copy must say so, shown only once inflation-tracking is off.
     const scenario = makeScenario({ ageYears: 67, ageMonths: 0 });
     const primary = makeMember('hm-primary', true, 'Alex');
     render(
@@ -547,7 +492,6 @@ describe('SocialSecurityModal — COLA inflation-tracking toggle', () => {
         /applied annually for years after each member's SSA statement date \(or after the year they turn 62 when no statement date is on file\)/i,
       ),
     ).toBeDefined();
-    // Negative control: the stale claim-age anchor description must not return.
     expect(screen.queryByText(/after the claim age/i)).toBeNull();
   });
 });
@@ -563,9 +507,6 @@ describe('SocialSecurityModal — intro copy', () => {
   });
 
   it('renders a plain-English intro paragraph at text-sm before the controls', () => {
-    // Scenario-modal copy convention: the modal
-    // opens with a `<p className="m-0 text-sm">` plain-English intro before any
-    // form control (pinned body-copy size).
     const scenario = makeScenario({ ageYears: 67, ageMonths: 0 });
     const primary = makeMember('hm-primary', true, 'Alex');
     render(
@@ -632,18 +573,15 @@ describe('SocialSecurityModal — survivor claim age', () => {
 
   it('shows the withheld-results note and no slider while a survivor age is unset', () => {
     renderTwoMember();
-    // One toggle per member, both off.
     const toggles = screen.getAllByRole('switch', {
       name: /Set survivor claim age for/i,
     });
     expect(toggles).toHaveLength(2);
     for (const t of toggles) expect(t).not.toBeChecked();
-    // The withheld state names the missing input and the consequence.
     const notes = screen.getAllByText(
       /the projection leaves out the survivor benefit/i,
     );
     expect(notes).toHaveLength(2);
-    // No survivor sliders while unset.
     expect(
       screen.queryByRole('slider', { name: /survivor benefit claim age/i }),
     ).toBeNull();
@@ -656,15 +594,13 @@ describe('SocialSecurityModal — survivor claim age', () => {
       name: 'Set survivor claim age for Blair',
     });
     await userEvent.click(toggle);
-    // Slider appears seeded at the FRA-typical 67, range 60–70. React Aria
-    // renders the thumb as a native range input — assert on its value/min/max.
+    // The slider seeds at the FRA-typical 67 over 60–70; React Aria renders a native range input, so assert value/min/max.
     const slider = screen.getByRole('slider', {
       name: 'Blair survivor benefit claim age',
     }) as HTMLInputElement;
     expect(slider.min).toBe('60');
     expect(slider.max).toBe('70');
     expect(slider.value).toBe('67');
-    // Step down to 62 via the RA Slider keyboard contract.
     slider.focus();
     await userEvent.keyboard(
       '{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}{ArrowLeft}',
@@ -685,8 +621,7 @@ describe('SocialSecurityModal — survivor claim age', () => {
     const persisted = scenarioMut!.payload as ScenarioPayload;
     const survivor = persisted.overrides.socialSecurity!.survivor;
     expect(survivor?.secondary).toEqual({ ageYears: 62, ageMonths: 0 });
-    // Primary's survivor age stays unset — absence is preserved, never
-    // silently defaulted.
+    // Absence is preserved, never silently defaulted.
     expect(survivor && 'primary' in survivor).toBe(false);
   });
 
@@ -706,7 +641,6 @@ describe('SocialSecurityModal — survivor claim age', () => {
       name: 'Alex survivor benefit claim age',
     }) as HTMLInputElement;
     expect(slider.value).toBe('64');
-    // Toggle it off — the withheld note returns and Save persists absence.
     const toggle = screen.getByRole('switch', {
       name: 'Set survivor claim age for Alex',
     });
@@ -726,6 +660,26 @@ describe('SocialSecurityModal — survivor claim age', () => {
     );
     const persisted = scenarioMut!.payload as ScenarioPayload;
     expect(persisted.overrides.socialSecurity!.survivor).toBeUndefined();
+  });
+
+  // Same collapse as the member's own claim age, clamped into the survivor window [60, 70].
+  it.each([
+    [64, 0, 64],
+    [62, 6, 63],
+    [58, 0, 60],
+    [72, 0, 70],
+  ])('seeds a stored survivor age of %iy %im at %i', async (ageYears, ageMonths, expected) => {
+    const { onClose } = renderTwoMember({
+      socialSecurity: {
+        primary: { ageYears: 67, ageMonths: 0 },
+        secondary: { ageYears: 67, ageMonths: 0 },
+        survivor: { primary: { ageYears, ageMonths } },
+      },
+    });
+    const slider = screen.getByRole('slider', { name: 'Alex survivor benefit claim age' }) as HTMLInputElement;
+    expect(slider.value).toBe(String(expected));
+    const ss = await saveAfterUnrelatedEdit(onClose);
+    expect(ss.survivor?.primary).toEqual({ ageYears: expected, ageMonths: 0 });
   });
 
   it('shows no survivor control for single-member plans', () => {
@@ -761,7 +715,7 @@ describe('SocialSecurityModal — survivor claim age', () => {
         },
       },
     });
-    // The modal renders through a React Aria portal — scan the document body.
+    // The modal renders through a React Aria portal, so scan the document body.
     await expectNoA11yViolations(document.body);
   });
 });

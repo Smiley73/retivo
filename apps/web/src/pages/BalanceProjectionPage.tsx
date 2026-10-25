@@ -1,39 +1,12 @@
-/**
- * Balance Projection page — projected per-account balances at each
- * household member's retirement date under the sidebar-selected
- * scenario.
- *
- * Surface: a pinned controls strip (Basis select + reroll, Recalculate /
- * progress, Today's/Future dollars toggle, methodology explainer) and a
- * "Projection views" tab row (Overview / Cash flow / Accounts / Taxes &
- * distributions / Safe withdrawal rate / Compare, `?view=`-driven) sitting
- * above six force-mounted panels that each compose named section
- * components. Page-owned state
- * (`yScale`, `displayMode`, `activeMethod`, `activeMcBasis`) is read across
- * views and threaded down as props, not re-scoped per panel. One data-load
- * hook (`useBalanceProjectionData`) keeps this file a presentation +
- * orchestration layer. The pure pipeline helpers live in
- * `balance-projection-page-pipeline.ts`.
- *
- * BPP's deterministic chart, year-by-year table, portfolio-flow, and
- * account-balance-stack surfaces all come from the shared projection
- * runner (`runBalanceProjectionForPage`, via `loadPageData`) — the same
- * engine the stress test and optimizer use, so the page can't silently
- * disagree with them. The at-horizon stat card shares the
- * `computePlannedAtHorizonToday` helper with the runner. The Plan Stress
- * Test card builds its `MonteCarloInput` via `runBalanceProjectionMc` from
- * the same runner module. The income/expense cashflow chart is a distinct
- * non-drawdown surface and stays on its own page-side series builder
- * (`buildPageCashflowSeries`).
- */
+/** Balance Projection page: per-account balances at each member's retirement date under the selected scenario, with a pinned controls strip and six tabbed views. */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Button, Tab, TabList, TabPanel, Tabs, type Key } from 'react-aria-components';
 import {
   PlanStressTestStatusRow,
   PlanStressTestRecalcButton,
-  PlanStressTestSuccessCard,
 } from '../components/PlanStressTestSection';
+import { PlanStressTestSuccessCard } from '../components/PlanStressTestCards';
 import { TAB_CLASS } from '../components/tab-chrome';
 import {
   CASHFLOW_GRANULARITY_STORAGE_KEY,
@@ -72,11 +45,8 @@ import {
   resolvedBasisLabel,
   type BalanceProjectionViewId,
 } from './balance-projection-page-constants';
-import {
-  loadPageData,
-  type PipelineData,
-  type McBasis,
-} from './balance-projection-page-pipeline';
+import { loadPageData, type PipelineData } from './balance-projection-page-data';
+import type { McBasis } from '../lib/monte-carlo';
 import { TaxIntegrationInvalidInputError } from '../lib/balance-projection-runner-tax';
 import { friendlyProjectionErrorMessage } from '../lib/tax-integration';
 import { buildReportTimestamp } from '../lib/report-format';
@@ -113,21 +83,9 @@ export const BalanceProjectionPage: React.FC = () => {
 
   const [data, setData] = useState<PipelineData | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
-  // `activeMethod` is the deterministic series the per-account tables +
-  // account-balance chart render (planned / twr only). The header
-  // `<select>` ("Basis") is the single control that drives it — the old
-  // buried tablist is removed. The view model can also re-point it (e.g.
-  // when TWR is unavailable it falls back to planned), so the select
-  // binds straight to `activeMethod` and its label tracks any such
-  // fallback automatically.
+  // activeMethod is the deterministic series the per-account tables and balance chart render; the Basis select drives it and the view model may re-point it (TWR unavailable falls back to planned).
   const [activeMethod, setActiveMethod] = useState<ProjectionMethod>('twr');
-  // `activeMcBasis` is the Monte Carlo tier (Typical / Pessimistic / Bad-luck)
-  // selected from the header Basis select's "Monte Carlo" optgroup, or null for
-  // a deterministic basis. When set it drives every per-year surface that
-  // varies with market/inflation luck; `activeMethod` is held for the
-  // deterministic-only surfaces (per-account table, Account Balance Stack,
-  // income breakdown). The view model resets this to null if the stress result
-  // disappears.
+  // activeMcBasis is the Monte Carlo tier, or null for a deterministic basis; activeMethod is held for the deterministic-only surfaces.
   const [activeMcBasis, setActiveMcBasis] = useState<McBasis | null>(null);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
     if (typeof window === 'undefined') return 'today';
@@ -137,8 +95,6 @@ export const BalanceProjectionPage: React.FC = () => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(DISPLAY_MODE_STORAGE_KEY, displayMode);
   }, [displayMode]);
-  // Captured once per mount so the print header timestamp is stable across
-  // the page's lifetime (mirrors the Report-page generated-at pattern).
   const [generatedAt] = useState(() => new Date());
   const [cashflowGranularity, setCashflowGranularity] =
     useState<CashflowGranularity>(() => {
@@ -154,8 +110,6 @@ export const BalanceProjectionPage: React.FC = () => {
       cashflowGranularity,
     );
   }, [cashflowGranularity]);
-  // The income-breakdown card owns an independent granularity toggle
-  // ("one toggle per card"); the two may drift out of sync.
   const [incomeBreakdownGranularity, setIncomeBreakdownGranularity] =
     useState<CashflowGranularity>(() => {
       if (typeof window === 'undefined') return 'yearly';
@@ -175,15 +129,9 @@ export const BalanceProjectionPage: React.FC = () => {
   const [stressTableOpen, setStressTableOpen] = useState(false);
   const [yScale, setYScale] = useState<'linear' | 'log'>('linear');
 
-  // The selected view lives only in `?view=` — an absent or unrecognised
-  // value renders Overview, and the page never writes the URL on mount to
-  // normalise it (a mount-time write would add a replace entry on every load
-  // and make deep-link behavior depend on render timing). `scrollAnchorRef`
-  // wraps the pinned strip + the panels: a sticky element can't scroll itself
-  // into view, so a user-initiated switch scrolls this plain ancestor instead.
-  // `stripRef` is the sticky container: while stuck it paints over the panel
-  // beneath, so keyboard focus inside a panel is scrolled clear of its measured
-  // bottom edge (WCAG 2.2 AA 2.4.11).
+  // The view lives only in ?view=: an absent or unknown value renders Overview, and mount never writes the URL (it would add a replace entry per load).
+  // scrollAnchorRef wraps the strip and panels because a sticky element can't scroll itself into view; stripRef is the sticky container,
+  // so focus inside a panel is scrolled clear of its bottom edge (WCAG 2.2 AA 2.4.11).
   const [searchParams, setSearchParams] = useSearchParams();
   const view = parseBalanceProjectionView(searchParams.get('view'));
   // Above the early returns: it must see a switch through a scenario that renders no panel.
@@ -191,23 +139,14 @@ export const BalanceProjectionPage: React.FC = () => {
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   useFocusClearOfPinnedStrip(scrollAnchorRef, stripRef);
-  // Set by a user-initiated switch, consumed by the layout effect below. The
-  // switch scroll has to be measured against the INCOMING view: done inside
-  // the handler it measures the outgoing one, and from a short view the
-  // document cannot scroll far enough — the strip stops short of the top and
-  // the taller view then renders beneath it as a visible jump.
+  // Set by a user-initiated switch, consumed by the layout effect: measuring in the handler measures the outgoing view and the taller incoming view would jump beneath the strip.
   const switchScrollPendingRef = useRef(false);
   const handleViewChange = (key: Key): void => {
     const next = String(key) as BalanceProjectionViewId;
-    // React Aria re-fires onSelectionChange for the already-selected key;
-    // re-clicking the current tab must not scroll the reader back to the
-    // strip or rewrite the URL.
+    // React Aria re-fires onSelectionChange for the already-selected key; re-clicking the current tab must not scroll or rewrite the URL.
     if (next === view) return;
     switchScrollPendingRef.current = true;
-    // Always write the param explicitly, including for Overview — one
-    // code path rather than a delete-vs-set branch, so a copied URL always
-    // lands where the sender was. The functional updater preserves any other
-    // future param; `replace: true` means Back leaves the page.
+    // Always write the param, including for Overview, so a copied URL lands where the sender was; replace: true so Back leaves the page.
     setSearchParams(
       (prev) => {
         const nextParams = new URLSearchParams(prev);
@@ -217,14 +156,7 @@ export const BalanceProjectionPage: React.FC = () => {
       { replace: true },
     );
   };
-  // Fires only for a genuine switch (click, or Enter/Space with
-  // keyboardActivation="manual") — never for the initial mount, a deep-linked
-  // load or Back/Forward, none of which set the flag. A layout effect
-  // runs once the new view is in the DOM and before paint, so the strip lands
-  // at the viewport top against the layout that is actually shown. Only when
-  // the strip has scrolled out of view above, though: near the top of the
-  // page the new view already starts beneath the visible strip, and scrolling
-  // would push the page title away for nothing.
+  // Only for a genuine switch (never mount, deep link or Back/Forward). Scrolls only when the strip is out of view above, so the title isn't pushed away needlessly.
   useLayoutEffect(() => {
     if (!switchScrollPendingRef.current) return;
     switchScrollPendingRef.current = false;
@@ -234,8 +166,6 @@ export const BalanceProjectionPage: React.FC = () => {
     }
   }, [view]);
 
-  // Single real-clock anchor captured ONCE per render so the engines +
-  // view-deflator can't drift apart across a clock-minute boundary.
   const renderNow = new Date();
   const nowYear = renderNow.getFullYear();
   const nowMonthIndex = renderNow.getMonth();
@@ -251,10 +181,7 @@ export const BalanceProjectionPage: React.FC = () => {
       setData(null);
       return;
     }
-    // nowYear/nowMonthIndex are captured per render but are stable
-    // within a month; including them in the deps array (below) re-fires
-    // only on a month boundary, not on every paint. The other deps gate
-    // freshness on aggregate edits.
+    // nowYear and nowMonthIndex are stable within a month, so the deps re-fire only on a month boundary.
     try {
       setConfigError(null);
       setData(
@@ -298,9 +225,6 @@ export const BalanceProjectionPage: React.FC = () => {
     nowMonthIndex,
   ]);
 
-  // Kept as one object (rather than destructured straight off the hook call)
-  // so the new SWR panel can take the SAME already-resolved view model every
-  // other tab reads, never a second `useBalanceProjectionViewModel()` call.
   const vm = useBalanceProjectionViewModel({
     data,
     selectedScenarioId,
@@ -358,35 +282,16 @@ export const BalanceProjectionPage: React.FC = () => {
     categoryMeta,
   } = vm;
 
-  // Primary member's birth year drives the MC "Depletes — age N" line.
-  // `tooltipMembers` is ordered primary-first; fall back to null when no
-  // member has a usable birthdate (the MC card then shows the year).
   const primaryBirthYear = tooltipMembers[0]?.birthYear ?? null;
 
-  // Label for the active deterministic method (Planned / TWR). Suffixed onto
-  // the per-account breakdown table heading + the Income-breakdown chart (whose
-  // sources are market-independent plan inputs).
   const activeMethodLabel = METHOD_LABELS[activeMethod];
-  // The Account Balance Stack + RMD charts + the breakdown-table note key
-  // off the RESOLVED basis — truthy only when an MC tier is selected AND its
-  // representative run is non-null (the VM auto-swaps `activeMcBasis` to null
-  // when a tier's run disappears, so `activeRepresentativeRun` is the precise
-  // resolved-to-MC signal).
+  // Truthy only when an MC tier is selected and its representative run is non-null (the VM resets activeMcBasis when the run disappears).
   const isMcBasisActive = activeRepresentativeRun !== null;
-  // Label for the basis the resolved-drawdown surfaces actually reflect: the
-  // active MC tier (Typical / Pessimistic / Bad-luck) when an MC basis is
-  // selected, else the deterministic method label. Suffixed onto the
-  // MC-driven titles (Expected cashflow, Income breakdown, Annual Portfolio
-  // Flow, Tax & Health-Cost Burden) so each names the basis driving it.
   const activeBasisLabel = resolvedBasisLabel(activeMcBasis, activeMethod);
 
-  // A Monte Carlo basis option is disabled until its representative run is
-  // available (no stress result → every tier null → all three disabled).
   const mcDisabled = (basis: McBasis): boolean =>
     !representativeByBasis || representativeByBasis[basis] == null;
 
-  // Ring the Stress-test outcomes card while a Monte Carlo basis drives the
-  // screen, foregrounding the card that explains the scenario.
   const mcActive = activeMcBasis !== null;
 
   const scenarioName =
@@ -434,12 +339,7 @@ export const BalanceProjectionPage: React.FC = () => {
     return <BalanceProjectionNoAccountState heading={heading} />;
   }
 
-  // Onboarding empty state. Persist the "enter a balance" prompt until a real
-  // (non-zero) balance exists anywhere in the active portfolio. An auto-$0
-  // seed account projects, so `data.rows.length === 0` is now false for a
-  // seed-only portfolio — the empty-state signal is `!data.hasAnyRealBalance`,
-  // not the row count. A mixed portfolio (≥1 real balance + new $0 accounts)
-  // falls through to the projection as normal.
+  // An auto-$0 seed account projects, so the empty-state signal is !hasAnyRealBalance, not the row count.
   if (!data.hasAnyRealBalance) {
     return <BalanceProjectionNoHistoryState heading={heading} />;
   }
@@ -450,13 +350,6 @@ export const BalanceProjectionPage: React.FC = () => {
       className="print-projection"
     >
       <header className="mb-4 flex flex-col gap-3">
-        {/* Row 1: the page title + the Print button. The report metadata
-            block (Generated / Created-with / dollar-mode note) sits below it
-            and is PRINT-ONLY — hidden on screen, revealed in `@media print`
-            (see styles.css `@layer base` reveal). The controls strip
-            (Basis + reroll, Recalculate / progress, display unit, explainer)
-            plus the view tabs live below the disclaimer/CBP-banner block, in
-            their own pinned group — see the `role="group"` container below. */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className={pageTitleClass}>{heading}</h1>
           <Button
@@ -468,10 +361,7 @@ export const BalanceProjectionPage: React.FC = () => {
             Print / Save as PDF
           </Button>
         </div>
-        {/* Print-only metadata block — hidden on screen via `hidden`, revealed
-            only in `@media print`. Carries generated-at + provenance lines
-            so a printed/saved copy is self-describing; the dollar-mode note is page-specific (the Report
-            page has no display-unit toggle). */}
+        {/* Print-only: hidden on screen, revealed in @media print so a printed copy is self-describing. */}
         <div hidden className="bp-print-header">
           <p className="m-0 text-sm text-muted">
             {buildReportTimestamp(generatedAt)}
@@ -479,7 +369,6 @@ export const BalanceProjectionPage: React.FC = () => {
           <p className="m-0 text-xs text-muted">
             Created with {APP_NAME_PROSE} &middot; {REPO_URL}
           </p>
-          {/* Open-source line — print-only, so a plain link. */}
           <p className="m-0 text-xs text-muted">
             <a href={REPO_URL}>{OPEN_SOURCE_TEXT}</a>
           </p>
@@ -488,8 +377,7 @@ export const BalanceProjectionPage: React.FC = () => {
               ? "Values in today's dollars (inflation-adjusted)"
               : 'Values in future nominal dollars'}
           </p>
-          {/* Per-page legal line so a printed schedule (pages 2+ detach from
-              the on-screen disclaimer card) still carries the notice. */}
+          {/* Per-page legal line: printed pages 2+ detach from the on-screen disclaimer card. */}
           <p className="m-0 text-xs text-muted">{ONE_LINE_DISCLAIMER}</p>
         </div>
       </header>
@@ -517,8 +405,6 @@ export const BalanceProjectionPage: React.FC = () => {
         onSelectionChange={handleViewChange}
         keyboardActivation="manual"
       >
-        {/* Scroll target of a user-initiated view switch (`handleViewChange`)
-            and the container `useFocusClearOfPinnedStrip` watches. */}
         <div ref={scrollAnchorRef}>
           <div
             ref={stripRef}
@@ -541,9 +427,6 @@ export const BalanceProjectionPage: React.FC = () => {
                   className="w-auto min-w-44"
                   value={activeMcBasis ?? activeMethod}
                   onChange={(next) => {
-                    // A Monte Carlo pick selects a representative-run tier (and
-                    // holds the last deterministic method for the surfaces that
-                    // can't go MC); a deterministic pick clears the MC basis.
                     if (
                       next === 'mc-typical' ||
                       next === 'mc-pessimistic' ||
@@ -585,23 +468,13 @@ export const BalanceProjectionPage: React.FC = () => {
                     },
                   ]}
                 />
-                {/* Reroll the basis line to a different card-consistent path from
-                    the current sample — beside the basis selector since it only
-                    changes the MC line, not the cards. Disabled (aria-only,
-                    stays focusable) when no MC basis is active or the active tier
-                    has <2 card-consistent paths. */}
                 <ShowAnotherPathButton
                   enabled={canShowAnotherPath}
                   onShowAnotherPath={showAnotherPath}
                 />
               </div>
               <span className="hidden h-5 w-px bg-line sm:block" aria-hidden="true" />
-              {/* While a stress run is in flight OR has errored, the
-                  controls strip shows PlanStressTestStatusRow (progress + Cancel
-                  when running; error toast when errored); idle/done shows
-                  Recalculate. This status lives here — outside every tabbed
-                  view — because a `role="status"`/`role="alert"` region inside a
-                  non-selected force-mounted panel is not announced. */}
+              {/* Rendered outside every tabbed view because a role="status"/"alert" region inside a non-selected force-mounted panel is not announced. */}
               {(stressVm.isRunning || stressVm.error) ? (
                 <PlanStressTestStatusRow vm={stressVm} />
               ) : (
@@ -634,11 +507,7 @@ export const BalanceProjectionPage: React.FC = () => {
               <span className="hidden h-5 w-px bg-line sm:block" aria-hidden="true" />
               <ProjectionMethodExplainer />
             </div>
-            {/* View tabs: arrow keys move focus along the row without
-                switching; Enter/Space switches (`keyboardActivation="manual"`
-                on the <Tabs> root above). Picking a Monte Carlo basis above
-                leaves the person on whichever tab they're on — nothing
-                here reacts to `activeMcBasis`. */}
+            {/* Arrow keys move focus without switching; Enter/Space switches (keyboardActivation="manual" on <Tabs>). */}
             <TabList
               aria-label="Projection views"
               className="flex flex-wrap gap-1 border-t border-line pt-2"
@@ -651,15 +520,8 @@ export const BalanceProjectionPage: React.FC = () => {
             </TabList>
           </div>
 
-          {/* Every panel force-mounts: print is pure CSS with no
-              `beforeprint` hook anywhere in this app, so a panel React Aria
-              unmounted would simply be absent from the printout. A
-              non-selected panel is hidden on screen by the `[data-inert]`-
-              keyed screen-only rule in styles.css (`.bp-view-panel`) —
-              preserving layout width so its charts never measure 0 and print
-              stretched. A force-mounted, non-selected panel carries no
-              `role="tabpanel"` / `id` / `aria-labelledby` / `tabIndex`; do not
-              look one up by role or id. */}
+          {/* Every panel force-mounts because print is pure CSS with no beforeprint hook; a non-selected panel is hidden by the [data-inert] screen-only rule in styles.css, keeping layout width. */}
+          {/* A force-mounted, non-selected panel carries no role="tabpanel", id, aria-labelledby or tabIndex; do not look one up by role or id. */}
           <TabPanel id="overview" shouldForceMount className="bp-view-panel outline-none">
             <BalanceProjectionStats
               methodOrder={METHOD_ORDER}

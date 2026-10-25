@@ -1,30 +1,19 @@
 /**
- * Roth conversions chart on the Balance Projection page.
- * Plots, per conversion year, the amount moved from pre-tax savings into
- * a Roth account under the income cap's Fill mode (one bar per year). A
- * conversion is an internal pre-tax → Roth transfer, not income or a
- * portfolio flow, so it is shown only here — never as a
- * Portfolio-Flow / Income-Breakdown series. The series is already
- * deflated to the page's display-dollars basis by the caller, so the
- * bars sum to the adjacent "Total Roth converted" tile.
- *
- * Lazy-imported SVG-engine impl. See `RothConversionsChartInner.tsx`.
+ * Per-year bar of the amount converted from pre-tax to Roth, shown only here since a conversion is neither income nor
+ * a portfolio flow. Rows are deflated by the caller; lazy-loads the Inner chart.
  */
 import React, { Suspense, lazy } from 'react';
 import type { TooltipMember } from './tooltip-member';
 
-/** Per-year converted-dollars row consumed by the Roth conversions chart.
- *  `dollars` is already deflated to the page's display-dollars basis. */
+/** Per-year converted-dollars row, already deflated to the display basis. */
 export interface RothConversionsChartRow {
   readonly year: number;
-  /** Amount converted from pre-tax to Roth that year (dollars, > 0),
-   *  already deflated to the page basis by the caller. */
+  /** Amount converted from pre-tax to Roth that year (dollars, > 0). */
   readonly dollars: number;
 }
 
 interface Props {
   rows: ReadonlyArray<RothConversionsChartRow>;
-  /** Household members shown in tooltip header — "<First> (age N)". */
   members?: ReadonlyArray<TooltipMember>;
 }
 

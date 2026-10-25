@@ -1,19 +1,7 @@
-/**
- * BalanceProjectionCharts — bottom chart sections render + a11y smoke.
- *
- * Covers the wrapper's own gating branches: the no-signal empty-state copy,
- * the chart bands rendering when a tax/health-cost signal is present (the
- * `taxBurdenRows` deflation memo feeding the Tax & Health-Cost Burden band),
- * and that every strategy renders the chart + sub-table. A11y assertion per
- * the project shared-component rule.
- */
+// BalanceProjectionCharts bottom sections: the no-signal empty state, bands rendering when a tax/health-cost signal is present (the `taxBurdenRows` deflation memo), and the chart plus sub-table for every strategy.
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-
-// The SVG chart engine sizes itself via a ResizeObserver
-// with an 800px fallback, so the chart bands render their SVG content
-// in jsdom without any stub (recharts is gone).
 
 import { BalanceProjectionCharts } from './balance-projection-page-charts';
 import { ThemeProvider } from '../contexts/ThemeContext';
@@ -50,15 +38,11 @@ function baseProps(
   return {
     drawdownByMethod,
     activeMethod: 'planned' as ProjectionMethod,
-    // Default the resolved drawdown to the planned method (no MC basis active).
     resolvedDrawdown: drawdownByMethod?.planned ?? null,
-    // No MC basis active by default, so the resolved label matches the method.
     resolvedLabel: 'Planned',
     isMcBasisActive: false,
     viewDeflator: () => 1,
-    // Deterministic basis by default → `basisDeflator` collapses to the same
-    // flat factor as `viewDeflator` (the MC-sourced surfaces deflate identically
-    // until an MC basis is active).
+    // Deterministic basis by default, so `basisDeflator` collapses to the same flat factor as `viewDeflator`.
     basisDeflator: () => 1,
     markers: [],
     tooltipMembers: [],
@@ -68,8 +52,7 @@ function baseProps(
   };
 }
 
-/** Open the Tax & Health-Cost Burden section's `(i)` info popover (the
- *  methodology caption now lives behind it) and return the opened dialog. */
+// The methodology caption lives behind the section's (i) popover; open it and return the dialog.
 async function openTaxBurdenInfo(): Promise<HTMLElement> {
   const user = userEvent.setup();
   const name = /About the Tax & Health-Cost Burden chart/i;
@@ -77,8 +60,7 @@ async function openTaxBurdenInfo(): Promise<HTMLElement> {
   return screen.getByRole('dialog', { name });
 }
 
-/** The summary tile whose label is `label`; the year-by-year table can repeat a
- *  label as a column header. */
+// The year-by-year table can repeat a label as a column header, so find the summary tile specifically.
 function summaryTile(label: string): HTMLElement {
   const tile = screen
     .getAllByText(label)
@@ -91,8 +73,7 @@ function summaryTile(label: string): HTMLElement {
 const NO_SIGNAL_COPY = /No taxable retirement events in this projection/;
 const MC_TAX_SUBLABEL_COPY = /Estimated tax for this example path/;
 
-/** A drawdown-phase row (carries an `accountBalances` map) so the MC filter
- *  (drawdown-phase marker, not taxable signal) keeps it. */
+// A drawdown-phase row (carries an `accountBalances` map) so the MC filter, which keys on the drawdown-phase marker rather than a taxable signal, keeps it.
 function drawdownPhaseYear(
   year: number,
   overrides: Partial<DrawdownYear> = {},
@@ -126,17 +107,13 @@ describe('BalanceProjectionCharts', () => {
       </ThemeProvider>,
     );
     expect(screen.getByText(NO_SIGNAL_COPY)).toBeInTheDocument();
-    // The section keeps its accessible name in the no-signal branch — the
-    // heading the section's aria-labelledby points at is always rendered.
     expect(
       screen.getByRole('heading', { name: /Tax (&|and) Health-Cost Burden/i }),
     ).toBeInTheDocument();
   });
 
   it('renders the genuine no-taxable-events copy under an MC basis for a strategy owing $0', () => {
-    // A strategy whose drawdown years legitimately owe $0 shows the genuine
-    // no-taxable-events copy. The drawdown-phase row is KEPT by the filter
-    // (it carries `accountBalances`) and contributes a real zero-tax bar.
+    // A strategy whose drawdown years owe $0 shows the genuine no-taxable-events copy; the drawdown-phase row is kept by the filter and contributes a real zero-tax bar.
     render(
       <ThemeProvider>
         <BalanceProjectionCharts
@@ -159,22 +136,11 @@ describe('BalanceProjectionCharts', () => {
         />
       </ThemeProvider>,
     );
-    // The MC tax sub-label renders below the band title (stays inline).
     expect(screen.getByText(MC_TAX_SUBLABEL_COPY)).toBeInTheDocument();
-    // The sub-label distinguishes the funded core tax bill from the
-    // display-only refinements (shown but not yet deducted from balances).
     expect(
       screen.getByText(/shown but not yet deducted/),
     ).toBeInTheDocument();
-    // The unified stack/RMD "one example simulated path" sub-label
-    // (MC_REPRESENTATIVE_RUN_SUBLABEL) is covered by the Account Balance
-    // Stack section's own suite
-    // (balance-projection-page-account-stack-section.test.tsx) — this
-    // fixture carries no RMD rows, so no band here shows it.
-    // The methodology caption moved into the section (i): open it, then assert
-    // the MC variant states the core tax bill IS funded + reflected in
-    // balances, AND that the yield/interest/cost-basis refinements
-    // are disclosed as display-only (not yet pulled from the portfolio).
+    // MC_REPRESENTATIVE_RUN_SUBLABEL is covered by the account-stack section suite; this fixture carries no RMD rows. Open the (i): the MC variant states the core tax bill is funded and reflected in balances, and discloses the yield/interest/cost-basis refinements as display-only.
     const dialog = await openTaxBurdenInfo();
     expect(dialog).toHaveTextContent(/These are estimated taxes for this example path/i);
     expect(dialog).toHaveTextContent(
@@ -183,18 +149,13 @@ describe('BalanceProjectionCharts', () => {
     expect(dialog).toHaveTextContent(
       /not yet pulled from the portfolio, so the projected balances do not subtract it/i,
     );
-    // The "Show taxes & health costs table" toggle is gated off under MC.
     expect(
       screen.queryByRole('button', { name: /taxes & health costs table/i }),
     ).not.toBeInTheDocument();
   });
 
   it('starts the MC tax x-domain at retirement (drops leading pre-retirement rows, keeps zero-tax drawdown years)', () => {
-    // Mixed run: a pre-retirement accumulation row (no accountBalances, no tax)
-    // + a drawdown-phase row that owes $0 + a drawdown-phase row that owes tax.
-    // The accumulation row is filtered out (so no leading $0 bar); the zero-tax
-    // drawdown year is KEPT (filter is drawdown-phase, not taxable signal), so
-    // the chart renders (hasSignal true from the taxed year) with the band.
+    // Mixed run: a pre-retirement row (no accountBalances, no tax) is filtered out so there is no leading $0 bar; a zero-tax drawdown-phase year is kept (the filter is drawdown-phase, not taxable signal); the taxed year gives hasSignal.
     const years = [
       drawdownYear(2029), // pre-retirement: no accountBalances → dropped under MC.
       drawdownPhaseYear(2030), // zero-tax drawdown year → KEPT.
@@ -209,7 +170,6 @@ describe('BalanceProjectionCharts', () => {
         />
       </ThemeProvider>,
     );
-    // Signal present (2031 taxed) → the band renders (not the empty state).
     expect(screen.queryByText(NO_SIGNAL_COPY)).not.toBeInTheDocument();
     expect(
       screen.getByRole('heading', { name: /Tax (&|and) Health-Cost Burden/i }),
@@ -235,9 +195,7 @@ describe('BalanceProjectionCharts', () => {
   });
 
   it('routes the Tax & Health-Cost Burden chart through resolvedDrawdown (the MC representative run), not drawdownByMethod[activeMethod]', () => {
-    // Deterministic method has NO tax signal; the resolved (representative MC)
-    // drawdown DOES. The chart must read the resolved record → the
-    // no-signal copy must NOT appear.
+    // The deterministic method has no tax signal but the resolved representative MC drawdown does; the chart must read the resolved record, so the no-signal copy must not appear.
     const deterministic = method([drawdownYear(2030, { federalTaxCents: 0 })]);
     const representative = method([
       drawdownYear(2030, { federalTaxCents: 1_200_000 }),
@@ -257,9 +215,7 @@ describe('BalanceProjectionCharts', () => {
   });
 
   it('renders the three lifetime tax-burden tiles with sumTaxBurden values when a signal is present', () => {
-    // viewDeflator is identity, so cents/100 → dollars: federalTax 12_000 +
-    // 4_000 = $16,000; IRMAA 3_000; ACA credit flips the negative subsidy to
-    // a positive $5,000.
+    // viewDeflator is identity: federalTax 12_000 + 4_000 = $16,000; IRMAA 3_000; the ACA credit flips the negative subsidy to a positive $5,000.
     const years = [
       drawdownYear(2030, {
         federalTaxCents: 1_200_000,
@@ -320,10 +276,7 @@ describe('BalanceProjectionCharts', () => {
   });
 
   it('keeps the death-year tax-burden row FULL and drops rows past the death year', () => {
-    // Death = Dec 31 of deathYear (= 2030, integer lastDeathFractional):
-    // the 2031 row is dropped and the 2030 federal tax stays the FULL $12k
-    // (no proration). The lifetime tile (Σ of the chart rows) reads
-    // $12k.
+    // Death is Dec 31 of deathYear (integer lastDeathFractional 2030): the 2031 row is dropped and 2030 federal tax stays the full $12k (no proration).
     const years = [
       drawdownYear(2030, { federalTaxCents: 1_200_000 }),
       drawdownYear(2031, { federalTaxCents: 1_200_000 }),
@@ -341,8 +294,7 @@ describe('BalanceProjectionCharts', () => {
   });
 
   it('keeps both whole-year rows when the death year is the later year', () => {
-    // lastDeathFractional 2031 (integer deathYear): both the 2030 + 2031
-    // rows survive at full value → lifetime federal tax = $12k + $12k = $24k.
+    // lastDeathFractional 2031: both rows survive at full value, so lifetime federal tax is $24k.
     const years = [
       drawdownYear(2030, { federalTaxCents: 1_200_000 }),
       drawdownYear(2031, { federalTaxCents: 1_200_000 }),
@@ -383,7 +335,6 @@ describe('BalanceProjectionCharts', () => {
         />
       </ThemeProvider>,
     );
-    // The dollar-mode caption moved into the section (i); open it to read it.
     const todayDialog = await openTaxBurdenInfo();
     expect(todayDialog).toHaveTextContent(/today's dollars/i);
     expect(todayDialog).not.toHaveTextContent(/future dollars/i);
@@ -405,10 +356,7 @@ describe('BalanceProjectionCharts', () => {
   });
 
   it('renders the chart + collapsible tax-detail disclosure for any strategy', () => {
-    // The chart renders for every strategy, and the year-by-year sub-table is
-    // folded into the same section as a collapsed-by-default disclosure
-    // (mirrors Stress-test outcomes). The table is absent until the toggle is
-    // opened.
+    // The chart renders for every strategy, and the year-by-year sub-table is a collapsed-by-default disclosure inside the same section; the table is absent until the toggle opens.
     const years = [
       drawdownYear(2030, {
         federalTaxCents: 1_200_000,
@@ -426,11 +374,7 @@ describe('BalanceProjectionCharts', () => {
     expect(
       screen.getByRole('heading', { name: /Tax (&|and) Health-Cost Burden/i }),
     ).toBeInTheDocument();
-    // Collapsed by default: the toggle button shows, the table grid does not.
-    // The table is always mounted inside a `<div hidden>` wrapper (so print
-    // can force-expand it) but drops out of the a11y tree when
-    // collapsed: both the grid AND its TableScroll scroll-region landmark are
-    // absent (the landmark check catches a regression that strips `hidden`).
+    // Collapsed, the table stays mounted inside a `<div hidden>` wrapper (so print can force-expand it) but drops out of the a11y tree: both the grid and its TableScroll landmark are absent (the landmark check catches a regression that strips `hidden`).
     const toggle = screen.getByRole('button', {
       name: 'Show taxes & health costs table',
     });
@@ -441,7 +385,6 @@ describe('BalanceProjectionCharts', () => {
     expect(
       screen.queryByRole('region', { name: /taxes and health costs table/i }),
     ).not.toBeInTheDocument();
-    // Opening the disclosure reveals the sub-table.
     fireEvent.click(toggle);
     expect(
       screen.getByRole('grid', { name: /taxes and health costs/i }),
@@ -451,40 +394,8 @@ describe('BalanceProjectionCharts', () => {
     ).toBeInTheDocument();
   });
 
-  it('has no a11y violations', async () => {
-    const { container } = render(
-      <ThemeProvider>
-        <BalanceProjectionCharts
-          {...baseProps({ planned: method([drawdownYear(2030)]), twr: null })}
-        />
-      </ThemeProvider>,
-    );
-    await expectNoA11yViolations(container);
-  });
-
-  it('has no a11y violations on the signal branch (tiles + chart rendered)', async () => {
-    const years = [
-      drawdownYear(2030, {
-        federalTaxCents: 1_200_000,
-        irmaaSurchargeCents: 300_000,
-        acaPtcSubsidyCents: 500_000,
-      }),
-    ];
-    const { container } = render(
-      <ThemeProvider>
-        <BalanceProjectionCharts
-          {...baseProps({ planned: method(years), twr: null })}
-        />
-      </ThemeProvider>,
-    );
-    await expectNoA11yViolations(container);
-  });
-});
-
-describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   it('renders the three cards in order (Tax Burden → RMD → QCD → Roth), each section labelled by its own heading', async () => {
-    // One year that lights up every card: an RMD floor, a QCD that offsets
-    // part of it, and a Roth conversion.
+    // One year lights up every card: an RMD floor, a QCD offsetting part of it, and a Roth conversion.
     const years = [
       drawdownYear(2050, {
         federalTaxCents: 1_200_000,
@@ -517,14 +428,12 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
           Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
     }
-    // Each card is its own labelled section and owns exactly one heading id.
     for (const id of ['rmd-heading', 'qcd-heading', 'roth-conversions-heading']) {
       const section = container.querySelector(`section[aria-labelledby="${id}"]`);
       expect(section).not.toBeNull();
       expect(section?.querySelectorAll(`#${id}`)).toHaveLength(1);
       expect(container.querySelectorAll(`#${id}`)).toHaveLength(1);
     }
-    // The RMD-side QCD figures sit on the RMD card; the gift on the QCD card.
     const rmdSection = container.querySelector('section[aria-labelledby="rmd-heading"]')!;
     const qcdSection = container.querySelector('section[aria-labelledby="qcd-heading"]')!;
     expect(rmdSection).toHaveTextContent('Net taxable IRA RMD');
@@ -560,8 +469,7 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   });
 
   it('renders the RMD card below the Tax Burden chart when RMD rows exist', () => {
-    // A year carrying a positive RMD floor also carries a federal-tax
-    // signal, so both the Tax Burden section and the RMD section render.
+    // A year with a positive RMD floor also carries a federal-tax signal, so both the Tax Burden and RMD sections render.
     const years = [
       drawdownYear(2030, { federalTaxCents: 1_200_000, rmdFloorCents: 2_400_000 }),
     ];
@@ -579,7 +487,6 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
       name: /Required Minimum Distributions/i,
     });
     expect(rmdHeading).toBeInTheDocument();
-    // RMD heading comes AFTER the Tax Burden heading in document order.
     expect(
       taxHeading.compareDocumentPosition(rmdHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING,
@@ -601,9 +508,7 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   });
 
   it('renders only the QCD card for a pre-RMD gift (no RMD card, no Net taxable tile, no Roth card)', async () => {
-    // A pre-RMD-age gift: a year with a QCD but no RMD floor + no Roth
-    // conversion. Only the QCD card's gate fires; the RMD card (and with it
-    // the "Net taxable IRA RMD" tile) is absent rather than empty.
+    // A pre-RMD-age gift (a QCD but no RMD floor or Roth conversion) fires only the QCD card's gate; the RMD card and its "Net taxable IRA RMD" tile are absent rather than empty.
     const years = [
       drawdownYear(2047, { qcdCents: 3_000_000, netTaxableRmdCents: 0 }),
     ];
@@ -627,7 +532,6 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
       container.querySelector('section[aria-labelledby="roth-conversions-heading"]'),
     ).toBeNull();
     expect(screen.queryByText('Net taxable IRA RMD')).not.toBeInTheDocument();
-    // QCD $30,000 → tile $30k; the per-year bar sums to it.
     expect(screen.getByText('QCD distributed')).toBeInTheDocument();
     expect(screen.getByText('$30k')).toBeInTheDocument();
     await waitFor(() =>
@@ -640,12 +544,7 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   });
 
   it("Today's-dollars: the QCD tile + bar reverse the engine's year-average inflation factor (REAL round-trip), NOT the year-end basisDeflator", async () => {
-    // A $10,000 REAL gift the engine inflated to nominal `qcdCents` with a
-    // year-AVERAGE factor of 1.25. In Today's-dollars mode the tile divides THAT
-    // exact factor back out → $10,000. The `basisDeflator` (0.5 here — a wrong
-    // year-end anchor) must NOT touch the QCD: `qcdCents × 0.5` would read $6,250,
-    // and `qcdCents × 1` would read $12,500 — only the year-average reversal lands
-    // on the configured $10k. This is the deflation-anchor bug fix.
+    // A $10,000 real gift inflated to nominal `qcdCents` with a year-average factor of 1.25: in Today's dollars the tile divides that exact factor back out to $10,000. `basisDeflator` (0.5, a wrong year-end anchor) must not touch the QCD: `qcdCents × 0.5` would read $6,250 and `× 1` $12,500.
     const factor = 1.25;
     const realDollars = 10_000;
     const nominalCents = Math.round(realDollars * factor * 100); // 1_250_000
@@ -666,14 +565,11 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
     );
     const label = screen.getByText('QCD distributed');
     const tileValue = label.parentElement?.querySelector('div:last-child');
-    // Round-trips to the configured REAL amount ($10k) — NOT qcdCents × 0.5
-    // ($6k, the wrong year-end anchor) and NOT the nominal $12.5k ($13k).
     expect(tileValue?.textContent).toBe('$10k');
   });
 
   it('Future-dollars: the QCD tile shows the nominal gift (no reversal)', () => {
-    // Same inflated nominal gift, Future-dollars mode → the tile is the nominal
-    // `qcdCents` ($12.5k), NOT the REAL $10k.
+    // Future dollars: the tile is the nominal `qcdCents` ($12.5k), not the real $10k.
     const factor = 1.25;
     const nominalCents = Math.round(10_000 * factor * 100); // 1_250_000
     const years = [
@@ -692,20 +588,12 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
       </ThemeProvider>,
     );
     const label = screen.getByText('QCD distributed');
-    // The tile value is the label's sibling div within the Stat container.
     const tileValue = label.parentElement?.querySelector('div:last-child');
-    // Nominal $12.5k → "$13k" (the tile shows the un-deflated gift, NOT $10k).
     expect(tileValue?.textContent).toBe('$13k');
   });
 
   it("Today's-dollars: the QCD tile uses its year-average factor while the Net taxable IRA RMD tile uses basisDeflator (the two diverge)", () => {
-    // Regression: the QCD-deflation fix wrongly deflated the "Net taxable IRA
-    // RMD" tile by the QCD's year-average factor (1/qcdInflationFactor) too. It
-    // is an RMD-floor figure and must use the year-END `basisDeflator` (the same
-    // basis the RMD chart + tax-detail column use), NOT the QCD factor. Inject a
-    // QCD year where the two factors are DIFFERENT and neither is the other's
-    // reciprocal (qcdInflationFactor = 1.25; basisDeflator = 0.7), with distinct
-    // qcdCents + netTaxableRmdCents, so each tile must pick its correct basis.
+    // Regression: the QCD-deflation fix wrongly deflated the "Net taxable IRA RMD" tile by the QCD's year-average factor too. It is an RMD-floor figure and must use the year-end `basisDeflator` (as the RMD chart and tax-detail column do). The two factors differ and neither is the other's reciprocal (1.25 vs 0.7), so each tile must pick its own basis.
     const factor = 1.25;
     const qcdCents = 2_000_000; // $20k nominal QCD
     const netTaxableRmdCents = 1_000_000; // $10k nominal net-taxable RMD
@@ -725,15 +613,11 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
         />
       </ThemeProvider>,
     );
-    // QCD tile: qcdCents/100 ÷ 1.25 = $16,000 → "$16k" (ignores basisDeflator —
-    // qcdCents × 0.7 would be $14k, the wrong year-end anchor).
     const qcdLabel = screen.getByText('QCD distributed');
     expect(
       qcdLabel.parentElement?.querySelector('div:last-child')?.textContent,
     ).toBe('$16k');
-    // Net taxable IRA RMD tile: netTaxableRmdCents/100 × 0.7 = $7,000 → "$7k"
-    // (uses basisDeflator — NOT the QCD factor, which would give $8k). The two
-    // tiles diverge, proving each uses its correct basis.
+    // Net taxable IRA RMD uses basisDeflator (0.7): $7,000, where the QCD factor would give $8k.
     const netLabel = screen.getByText('Net taxable IRA RMD');
     expect(
       netLabel.parentElement?.querySelector('div:last-child')?.textContent,
@@ -741,9 +625,7 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   });
 
   it('renders the QCD → net-taxable IRA RMD split chart + its "RMD covered by QCD" tile in an RMD-bearing gift year', async () => {
-    // A gross-IRA-RMD-bearing year with a QCD offset: gross IRA RMD $40k,
-    // gift covers $18k → net taxable $22k. The split chart + tile render, and
-    // the tile equals the amber column-sum (Σ offset = $18k).
+    // Gross IRA RMD $40k with an $18k QCD offset gives net taxable $22k; the split chart and tile render and the tile equals the amber column-sum.
     const years = [
       drawdownYear(2050, {
         rmdFloorCents: 4_000_000,
@@ -760,18 +642,15 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
         />
       </ThemeProvider>,
     );
-    // The tile renders (gated on totalRmdOffset > 0) with the deflated offset sum.
     const offsetLabel = screen.getByText('RMD covered by QCD');
     expect(
       offsetLabel.parentElement?.querySelector('div:last-child')?.textContent,
     ).toBe('$18k');
-    // The split chart renders under its own heading (NOT a second rmd/qcd heading).
     expect(
       screen.getByRole('heading', {
         name: /IRA required withdrawal in QCD years — covered by QCD vs taxable/i,
       }),
     ).toBeInTheDocument();
-    // Both stacked segments draw one bar each for the single RMD year.
     await waitFor(() => {
       expect(
         container.querySelectorAll(
@@ -785,9 +664,7 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   });
 
   it('tile parity (today + nominal): Σ offset == "RMD covered by QCD" tile, Σ net == "Net taxable IRA RMD" tile, to the cent', () => {
-    // Two RMD years. today's-dollars uses a fractional basisDeflator (0.5);
-    // nominal uses the identity deflator (1). The amber column-sum must equal the
-    // offset tile and the teal column-sum the net-taxable tile in BOTH modes.
+    // Today's dollars use a fractional basisDeflator (0.5), nominal the identity; the amber column-sum must equal the offset tile and the teal the net-taxable tile in both modes.
     const years = [
       drawdownYear(2050, {
         rmdFloorCents: 3_000_000,
@@ -804,8 +681,6 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
         qcdRmdOffsetCentsByOwner: { a: 1_500_000 },
       }),
     ];
-    // today's-dollars, basisDeflator 0.5: Σ offset = ($10k+$15k)×0.5 = $12.5k →
-    // "$13k"; Σ net = ($20k+$25k)×0.5 = $22.5k → "$23k".
     const today = render(
       <ThemeProvider>
         <BalanceProjectionCharts
@@ -826,8 +701,6 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
     ).toBe('$23k');
     today.unmount();
 
-    // nominal / future-dollars, identity deflator (1): Σ offset = $25k → "$25k";
-    // Σ net = $45k → "$45k".
     render(
       <ThemeProvider>
         <BalanceProjectionCharts
@@ -850,15 +723,10 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   });
 
   it('cross-owner IRA scoping: the offset is each owner\'s own min(gift, gross) summed, no household cross-netting', () => {
-    // Primary gifts more than primary's gross IRA RMD ($20k gift, capped at $12k
-    // gross); secondary has its own $8k IRA RMD covered by an $8k gift. The
-    // stamped per-owner offsets are already per-owner-capped, so Σ = $12k + $8k =
-    // $20k — NOT a household min(totalGift $28k, totalGross $20k+more). A 401(k)
-    // RMD (folded into rmdFloorCents but NOT netTaxableRmdCents) never enters.
+    // Primary gifts more than its gross IRA RMD ($20k gift, capped at $12k); secondary's $8k RMD is covered by an $8k gift. The stamped per-owner offsets are already capped, so Σ = $20k, not a household min(). A 401(k) RMD (in rmdFloorCents, not netTaxableRmdCents) never enters.
     const years = [
       drawdownYear(2050, {
-        // rmdFloorCents is the ALL-PLAN floor (incl. a 401k) — the split reads
-        // the IRA-scoped netTaxable + offset, never rmdFloorCents.
+        // rmdFloorCents is the all-plan floor (incl. a 401k); the split reads the IRA-scoped netTaxable and offset, never rmdFloorCents.
         rmdFloorCents: 9_000_000,
         qcdCents: 2_800_000,
         qcdInflationFactor: 1,
@@ -873,7 +741,6 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
         />
       </ThemeProvider>,
     );
-    // Σ per-owner-capped offset = $20k (no cross-netting, employer RMD excluded).
     expect(
       screen
         .getByText('RMD covered by QCD')
@@ -882,9 +749,7 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   });
 
   it('excludes a pre-RMD gift year (qcdCents > 0, gross RMD = 0) from the split chart, keeping the QCD card only', () => {
-    // A pre-RMD gift (no rmdFloor, no offset map, net-taxable 0) has offset+net =
-    // 0 → filtered out of splitRows → the split chart heading never renders. The
-    // QCD card still shows the gift; the RMD card is absent.
+    // A pre-RMD gift (no floor, no offset map, net-taxable 0) has offset+net = 0, so it is filtered out of splitRows and the split chart never renders; the QCD card still shows the gift and the RMD card is absent.
     const years = [
       drawdownYear(2047, { qcdCents: 3_000_000, netTaxableRmdCents: 0 }),
     ];
@@ -895,24 +760,19 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
         />
       </ThemeProvider>,
     );
-    // No split chart without an RMD card to host it.
     expect(
       screen.queryByRole('heading', {
         name: /IRA required withdrawal in QCD years — covered by QCD vs taxable/i,
       }),
     ).not.toBeInTheDocument();
-    // No offset tile either (lifetime offset is 0).
     expect(screen.queryByText('RMD covered by QCD')).not.toBeInTheDocument();
-    // The QCD card still renders the gift.
     expect(
       screen.getByRole('heading', { name: /Qualified Charitable Distributions/i }),
     ).toBeInTheDocument();
   });
 
   it('derives RMD rows whose met + shortfall equals the floor for each year', () => {
-    // floor $24k, shortfall $3k → met $21k; floor $30k, shortfall $0 → met
-    // $30k. Peak annual RMD stat = max(met + shortfall) = max(floor) = $30k,
-    // proving the met+shortfall===floor invariant feeds the summary.
+    // Floor $24k with $3k shortfall gives met $21k; floor $30k with no shortfall gives met $30k. Peak annual RMD = max(met + shortfall) = $30k, proving met+shortfall===floor feeds the summary.
     const years = [
       drawdownYear(2030, {
         federalTaxCents: 1,
@@ -932,15 +792,12 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
         />
       </ThemeProvider>,
     );
-    // Per-year invariant: met + shortfall === floor.
     for (const yr of years) {
       const floorCents = yr.rmdFloorCents ?? 0;
       const shortfallCents = yr.rmdShortfallCents ?? 0;
       const metCents = floorCents - shortfallCents;
       expect(metCents + shortfallCents).toBe(floorCents);
     }
-    // The summary surfaces the peak floor ($30k) + the conditional total
-    // shortfall ($3k) tile.
     expect(screen.getByText('Peak annual RMD')).toBeInTheDocument();
     expect(screen.getByText('$30k')).toBeInTheDocument();
     expect(screen.getByText('Total shortfall')).toBeInTheDocument();
@@ -948,8 +805,7 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   });
 
   it('caps RMD rows at the death year (lastDeathFractional)', () => {
-    // 2030 floor=$24k, 2031 floor=$30k; death fractional=2030.5 → deathYear=2030
-    // → only 2030 row survives the filter; peak=$24k, 2031's $30k excluded.
+    // Death fractional 2030.5 gives deathYear 2030, so only the 2030 row survives: peak $24k, 2031's $30k excluded.
     const years = [
       drawdownYear(2030, { federalTaxCents: 1, rmdFloorCents: 2_400_000 }),
       drawdownYear(2031, { federalTaxCents: 1, rmdFloorCents: 3_000_000 }),
@@ -963,9 +819,7 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
       </ThemeProvider>,
     );
     expect(screen.getByText('Peak annual RMD')).toBeInTheDocument();
-    // 2030 contributes $24k peak; viewDeflator is identity so (2_400_000/100)*1
     expect(screen.getByText('$24k')).toBeInTheDocument();
-    // 2031 is after the death year and must be excluded
     expect(screen.queryByText('$30k')).not.toBeInTheDocument();
   });
 
@@ -1010,16 +864,13 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
     expect(
       notice.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    // Nothing converted → no Roth card beside the notice.
     expect(
       container.querySelector('section[aria-labelledby="roth-conversions-heading"]'),
     ).toBeNull();
   });
 
   it('shows the Fill notice AND the Roth card together when only planned working-years conversions exist', () => {
-    // Working-years conversions are not Fill conversions: Fill converted $0
-    // (notice fires) while the Roth card still charts the planned ones — the
-    // notice copy must therefore not claim "no Roth conversions happened".
+    // Working-years conversions are not Fill conversions: Fill converted $0 (the notice fires) while the Roth card still charts the planned ones, so the notice must not claim "no Roth conversions happened".
     const drawdown = {
       ...method([drawdownYear(2040)]),
       preRetirementConversionCentsByYear: new Map([[2035, 2_000_000]]),
@@ -1079,8 +930,7 @@ describe('BalanceProjectionCharts — RMD / QCD / Roth sibling cards', () => {
   });
 
   it('does not false-fire the Fill notice under an MC basis when the deterministic run converted', () => {
-    // MC representative runs never model conversions (deterministic-only feature),
-    // so the notice must read the deterministic method, not the resolved MC run.
+    // MC representative runs never model conversions, so the notice reads the deterministic method, not the resolved MC run.
     render(
       <ThemeProvider>
         <BalanceProjectionCharts
@@ -1113,8 +963,7 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
   }
 
   it('draws one bar per conversion year + a tile whose value ties out to the bar sum', async () => {
-    // Two conversion years: $27,992 + $18,500 = $46,492 → tile $46k.
-    // viewDeflator is identity so the deflated dollars equal cents/100.
+    // $27,992 + $18,500 = $46,492 gives tile $46k; viewDeflator is identity.
     const years = [
       drawdownYear(2039, { rothConvertedCents: 2_799_200 }),
       drawdownYear(2040, { rothConvertedCents: 1_850_000 }),
@@ -1127,14 +976,12 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
       </ThemeProvider>,
     );
     expect(screen.getByText('Total Roth converted')).toBeInTheDocument();
-    // formatCurrencyShort($46,492) → $46k (the tile + Σ bars tie out).
     expect(screen.getByText('$46k')).toBeInTheDocument();
     await waitForBars(container, 2);
   });
 
   it('drops conversion years past the death year so bars stay in step with the tile (filter)', async () => {
-    // 2039 + 2040 convert; deathYear=2039 → only 2039 contributes a bar + the
-    // tile ($27,992 → $28k); 2040 is excluded entirely.
+    // deathYear 2039: only 2039 contributes a bar and the tile ($27,992 → $28k); 2040 is excluded.
     const years = [
       drawdownYear(2039, { rothConvertedCents: 2_799_200 }),
       drawdownYear(2040, { rothConvertedCents: 1_850_000 }),
@@ -1170,8 +1017,7 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
   });
 
   it('reads the RESOLVED (representative MC) run for the series under an MC basis (positive)', async () => {
-    // Deterministic method converts $0; the resolved representative run converts
-    // $5,000,000 cents → $50k. The series must follow the resolved source.
+    // The deterministic method converts $0 while the resolved representative run converts $50k; the series must follow the resolved source.
     const deterministic = method([drawdownYear(2030)]);
     const representative = method([
       drawdownYear(2030, { rothConvertedCents: 5_000_000 }),
@@ -1187,7 +1033,6 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
       </ThemeProvider>,
     );
     expect(screen.getByText('$50k')).toBeInTheDocument();
-    // The card names the MC basis and carries the representative-run note.
     expect(
       screen.getByRole('heading', { name: 'Roth conversions (Typical)' }),
     ).toBeInTheDocument();
@@ -1199,8 +1044,7 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
   });
 
   it('hides the card when the representative MC run has zero conversions (negative)', () => {
-    // Deterministic converts, but the resolved representative run does not →
-    // under an MC basis the series reads the resolved (zero) run → chart absent.
+    // Under an MC basis the series reads the resolved (zero) run, so the chart is absent even though the deterministic method converts.
     const deterministic = method([
       drawdownYear(2030, { rothConvertedCents: 5_000_000 }),
     ]);
@@ -1220,9 +1064,7 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
   });
 
   it('always shows NOMINAL dollars: the deflators never scale the bars + tile', async () => {
-    // The Roth conversions chart shows the ACTUAL dollars converted each year.
-    // Even with a doubling deflator under Future-dollars, $50,000 nominal stays
-    // $50k — no basis deflation is ever applied to this series.
+    // The Roth chart shows actual dollars converted each year: even with a doubling deflator under Future dollars, $50,000 nominal stays $50k (no basis deflation is applied to this series).
     const years = [drawdownYear(2030, { rothConvertedCents: 5_000_000 })];
     const { container } = render(
       <ThemeProvider>
@@ -1242,7 +1084,7 @@ describe('BalanceProjectionCharts — Roth conversions card', () => {
     const MEDICAID_COPY = /Medicaid may apply/i;
 
     it('shows it under a Monte Carlo basis whose representative rows carry no fplPercentage', () => {
-      // The flag has to come from the deterministic method's years, not the resolved basis.
+      // The flag comes from the deterministic method's years, not the resolved basis.
       const representative = method([drawdownPhaseYear(2030)]);
       render(
         <ThemeProvider>

@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_FRAME_BYTES, PROTOCOL_VERSION } from './constants.js';
-import {
-  bridgeFrameSchema,
-  decodeFrame,
-  encodeFrame,
-  readyFrameSchema,
-  type BridgeFrame,
-  type TabFrame,
-} from './frames.js';
+import { decodeFrame, encodeFrame, type BridgeFrame, type TabFrame } from './frames.js';
 import { notPairedAwaitingConsent, toolNotSupported } from './result.js';
 
 const nonce = 'ab'.repeat(32);
@@ -73,12 +66,12 @@ describe('frames', () => {
   });
 
   it('strips unknown keys instead of rejecting them', () => {
-    const parsed = bridgeFrameSchema.parse({ ...bridgeFrames[2], addedLater: true });
-    expect(parsed).toEqual(bridgeFrames[2]);
+    const decoded = decodeFrame('bridge', JSON.stringify({ ...bridgeFrames[2], addedLater: true }));
+    expect(decoded).toEqual({ ok: true, frame: bridgeFrames[2] });
   });
 
   it('defaults keepSignedInWhileActive to false when absent', () => {
-    expect(readyFrameSchema.parse({ type: 'ready' }).keepSignedInWhileActive).toBe(false);
+    expect(decodeFrame('tab', JSON.stringify({ type: 'ready' }))).toEqual({ ok: true, frame: { type: 'ready', keepSignedInWhileActive: false } });
   });
 
   it('versions the protocol with an integer', () => {

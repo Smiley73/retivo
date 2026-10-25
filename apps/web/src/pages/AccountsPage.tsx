@@ -1,11 +1,4 @@
-/**
- * Accounts list.
- *
- * Reads `account` + `householdMember` + `accountBalance` aggregates from
- * IndexedDB. Owner display name is derived from the local household-member
- * store; the per-account balance count drives the double-confirm copy on
- * delete. Mutations flow through `queueLocalMutation`.
- */
+/** Accounts list: reads account, householdMember and accountBalance aggregates; mutations go through queueLocalMutation. */
 import React, { useMemo, useState } from 'react';
 import { PlusIcon } from '../components/icons';
 import { Link, useSearchParams } from 'react-router';
@@ -71,26 +64,15 @@ interface AccountRow {
   ownerDisplayName: string;
 }
 
-/** Selectable Owner filter values. Combines ownership type (joint)
- *  with member-role (primary / secondary), since "owner" maps to one
- *  of three states in this codebase: JOINT, the primary member, or
- *  the secondary member. */
+// Owner maps to JOINT, the primary member or the secondary member.
 type OwnerFilter = '' | 'JOINT' | 'PRIMARY' | 'SECONDARY';
 
 export const AccountsPage: React.FC = () => {
   const { householdId } = useAuth();
   const { notifyPending } = useSync();
-  // The create/edit form is a modal driven by the URL: `?new` opens it in
-  // create mode, `?edit=<id>` in edit mode. Keeping it in the query string
-  // (not local state) means the cross-page "Add account" / "Edit account"
-  // links from the Dashboard, balances ledger, scenario pages, etc. all
-  // deep-link straight into the open modal, and Back closes it.
+  // The form modal is driven by the URL (?new, ?edit=<id>) so cross-page links deep-link into it and Back closes it.
   const [searchParams, setSearchParams] = useSearchParams();
   const { confirm, dialog } = useConfirm();
-  // Reactive reads: each store re-reads on any write to its type (single
-  // writes via the per-store fine signal, bulk fills via the coarse
-  // workspace event), so the list refreshes after a delete, an in-modal
-  // save, a sync bootstrap, or a demo fill without a manual reload dep.
   const accountQuery = useAggregates('account');
   const memberQuery = useAggregates('householdMember');
   const balanceQuery = useAggregates('accountBalance');
@@ -112,8 +94,6 @@ export const AccountsPage: React.FC = () => {
     Aggregate<AccountBalancePayload>
   >;
 
-  // True once every slice has settled its first read — drives the loading
-  // skeleton vs. the empty-state distinction.
   const ready = accountQuery.ready && memberQuery.ready && balanceQuery.ready;
   const loadError =
     accountQuery.error || memberQuery.error || balanceQuery.error
@@ -121,11 +101,7 @@ export const AccountsPage: React.FC = () => {
       : null;
   const error = loadError ?? deleteError;
 
-  // First-name labels for the Owner dropdown. Resolved from the
-  // household-member records so the dropdown reads "Alex" / "Sam"
-  // instead of "Primary" / "Secondary" when first names are set
-  // (project rule: prefer firstName in user-facing copy; fall back to
-  // role label only when the name is missing).
+  // Prefer firstName in user-facing copy; fall back to the role label only when the name is missing.
   const primary = members.find((m) => m.payload.isPrimary === true);
   const secondary = members.find((m) => m.payload.isPrimary !== true);
   const primaryFirst = primary?.payload.firstName?.trim() ?? '';
@@ -133,12 +109,7 @@ export const AccountsPage: React.FC = () => {
   const primaryLabel = primaryFirst.length > 0 ? primaryFirst : 'Primary';
   const secondaryLabel = secondaryFirst.length > 0 ? secondaryFirst : 'Secondary';
 
-  // Join accounts to owner display name, then apply the type / owner
-  // filters and sort — derived from the reactive hook outputs.
-  // `null` until the first read settles, so the page keeps its loading
-  // skeleton on first paint. (Whether an account HAS balance rows is not
-  // derived here: `onDelete` decides that from a click-time read, so the
-  // page-load snapshot never picks which delete confirmation is shown.)
+  // null until the first read settles, so the page keeps its loading skeleton. Balance-row presence is decided by a click-time read in onDelete, not this snapshot.
   const rows = useMemo<AccountRow[] | null>(() => {
     if (!ready) return null;
     const memberById = new Map<string, HouseholdMemberPayload>();
@@ -170,16 +141,8 @@ export const AccountsPage: React.FC = () => {
 
   const onDelete = async (row: AccountRow) => {
     if (!householdId) return;
-    // Block-on-reference runs first: never prompt to confirm a delete
-    // that will be refused. Re-read income + scenarios fresh at
-    // click-time (not the page-load snapshot) so a reference added by
-    // sync or another tab after render is still caught — mirrors the
-    // submit-time disable guard in AccountFormModal. Accounts and balance
-    // rows are re-read in the same batch: the Roth-deletion predicate and the
-    // balance-data confirmation must see what IS stored at click time — a
-    // balance row written by another tab lands in IndexedDB without moving
-    // this row's account version or firing a cross-tab signal, so the
-    // captured `accounts` / `balances` arrays can be stale.
+    // Block-on-reference runs first so a refused delete is never confirmed. Re-read income, scenarios, accounts and balances at click time:
+    // a balance row written by another tab lands in IndexedDB without moving this account's version or firing a cross-tab signal.
     const [incomeStreams, scenarios, freshAccounts, freshBalances] = await Promise.all([
       listAggregates('incomeStream') as Promise<Aggregate<IncomeStreamPayload>[]>,
       listAggregates('scenario') as Promise<Aggregate<ScenarioPayload>[]>,
@@ -191,13 +154,7 @@ export const AccountsPage: React.FC = () => {
       setBlockState({ accountName: row.payload.name, labels: refs });
       return;
     }
-    // A Roth IRA's tax-free figure is derived from the accounts that
-    // REMAIN, so deleting one that consumed its owner's pool leaves the household
-    // with MORE tax-free money than before. Resolved by running the household's
-    // §408A pool both ways over the FULL non-deleted account set (the pool counts
-    // inactive accounts too, so the active-only list handed to the form modal
-    // must never be used here). An account with no balance rows can never move
-    // the figure, so this only ever reaches the two-step branch below.
+    // Deleting a Roth IRA that consumed its owner's pool leaves more tax-free money. Run the §408A pool both ways over the full non-deleted set (inactive accounts count, so never the form modal's active-only list).
     const raisesPooledTaxFree = deletingRothIraRaisesPooledTaxFree(
       row.id,
       freshAccounts,
@@ -241,16 +198,11 @@ export const AccountsPage: React.FC = () => {
         payload: row.payload,
       });
       notifyPending();
-      // The delete tombstone is a `putAggregate('account', …)` write, so the
-      // reactive `useAggregates('account')` read re-runs and drops the row —
-      // no manual reload bump needed.
     } catch {
       setDeleteError('Failed to delete account');
     }
   };
 
-  // Derive the form-modal state from the query string. `?new` → create
-  // mode; `?edit=<id>` → edit that account; neither → closed.
   const editId = searchParams.get('edit');
   const formMode: { accountId: string | null } | null = searchParams.has('new')
     ? { accountId: null }
@@ -259,9 +211,6 @@ export const AccountsPage: React.FC = () => {
       : null;
   const openCreateForm = () => setSearchParams({ new: '' });
   const closeForm = () => {
-    // Drop the modal's query params; preserve nothing else (the page has no
-    // other query state). A save writes through `putAggregate`, so the
-    // reactive list re-reads on its own — no manual reload bump needed.
     setSearchParams({});
   };
 
@@ -338,12 +287,7 @@ export const AccountsPage: React.FC = () => {
           start projecting how long your money lasts.
         </EmptyState>
       ) : (
-        // React Aria Table — renders native table markup (role="grid"),
-        // gains arrow-key row navigation and the typed Cell / Row /
-        // Column primitives. Framed by the canonical
-        // TableScroll card; `scroll={false}` because the rows use the
-        // hover-revealed `.row-actions` cluster (WebKit stuck-`:hover` bug
-        // — see TableScroll).
+        // scroll={false}: the rows use the hover-revealed .row-actions cluster (WebKit stuck-:hover bug, see TableScroll).
         <TableScroll label="Retirement and savings accounts" scroll={false}>
           <Table aria-label="Retirement and savings accounts" className={tableClass}>
           <TableHeader>
@@ -365,15 +309,11 @@ export const AccountsPage: React.FC = () => {
               const bucket = accountBucket(r.payload.type);
               return (
                 <Row key={r.id} id={r.id} className="group/row">
-                  {/* The name cell hosts the absolutely-positioned bucket
-                      bar, so it must be `relative`. */}
                   <Cell className={`${cell} relative`}>
                     <BucketBar bucket={bucket} />
                     <span className="inline-flex items-center gap-1.5">
                       {r.payload.name}
                       <NotesIndicator notes={r.payload.notes} />
-                      {/* Only blocked inherited accounts need list-level attention;
-                          accepted safe assumptions are disclosed in the report. */}
                       <TaxDetailsBadge
                         payload={r.payload}
                         name={r.payload.name}
@@ -406,11 +346,7 @@ export const AccountsPage: React.FC = () => {
                   </Cell>
                   <Cell className={cell}>
                     <div className="row-actions items-center">
-                      {/* Edit opens the form modal via `?edit=<id>`; the
-                          icon carries its accessible name via aria-label
-                          (the visible-text equivalent of the old "Edit"
-                          button — a11y requirement). A real `<Link>` keeps
-                          middle-click / open-in-new-tab working. */}
+                      {/* A real <Link> keeps middle-click and open-in-new-tab working; the icon carries its accessible name via aria-label. */}
                       <Link
                         to={`/accounts?edit=${r.id}`}
                         className={iactEditClass}
@@ -464,27 +400,15 @@ export const AccountsPage: React.FC = () => {
   );
 };
 
-/**
- * The compact tax-detail badge beside an account's name.
- *
- * Rendered only when a legacy/imported inherited account is blocked. Accepted safe
- * assumptions show no badge; the exported report names those defaults precisely.
- */
+// Rendered only for a blocked legacy/imported inherited account; accepted safe assumptions show no badge.
 const TaxDetailsBadge: React.FC<{
   readonly payload: AccountPayload;
   readonly name: string;
   readonly ownerBirthdate?: string;
 }> = ({ payload, name, ownerBirthdate }) => {
   const state: TaxProfileCompleteness = taxProfileCompleteness(payload, ownerBirthdate);
-  // The badge flags withheld work only, never an accepted safe assumption.
   if (state !== 'blocked') return null;
-  // The badge text alone ("On hold") is ambiguous read out of its row, so each badge
-  // is paired with a visually-hidden sibling naming the account. `Badge` renders a
-  // plain styled `<span>` and forwards no ARIA props. An `aria-label` on a plain
-  // wrapper `<span>` would be INERT (ARIA forbids naming a role-less generic), so the
-  // account name goes in an `sr-only` sibling — the same pattern `RangeSlider` and
-  // `RepoLink` use — and the visible badge text is hidden from the
-  // accessibility tree so the row is not read twice.
+  // The badge text alone ("On hold") is ambiguous out of its row, so an sr-only sibling names the account (aria-label on a role-less span is inert) and the visible text is hidden from the accessibility tree.
   const tone = 'negative' as const;
   const label = 'On hold';
   const description = `${name}: required-withdrawal estimate on hold`;

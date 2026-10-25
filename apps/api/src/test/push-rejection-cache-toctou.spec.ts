@@ -1,19 +1,5 @@
-/**
- * TOCTOU-safe rejection-cache replay, the corner
- * cases the local DynamoDB emulator cannot deterministically race:
- *   - a concurrent corrected retry that already applied while THIS request's
- *     conditional delete was in flight must be told "replay the applied
- *     result", never a fabricated CONFLICT;
- *   - a conditional-delete failure that finds a FRESH rejection underneath
- *     replays that fresh rejection, not the stale one;
- *   - the exact `idem.delete(key, expectedVersion)` wiring, including the
- *     `undefined` case for a legacy cached row.
- *
- * Focused unit test (mirrors `push-strand-reappend.spec.ts`'s harness):
- * stub the document client + `IdempotencyKeyRepository` so the interleaving
- * is fully controlled, which the emulator's real concurrency cannot
- * guarantee deterministically.
- */
+// TOCTOU-safe rejection-cache replay corner cases the emulator cannot race deterministically: a concurrent corrected retry that applied while this conditional delete was in flight replays the applied result
+// (never a fabricated CONFLICT), a delete failure that finds a fresh rejection replays that one, and idem.delete(key, expectedVersion) is wired exactly. Stubbed document client and repository control the interleaving.
 import { TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { ConfigService } from '@nestjs/config';
@@ -22,11 +8,8 @@ import { PushService } from '../sync/push.service.js';
 import { IdempotencyKeyRepository } from '../dynamo/idempotency-key.repository.js';
 import { WorkspaceMetaRepository } from '../dynamo/workspace-meta.repository.js';
 import type { PushMutationDto } from '../sync/dto/push.dto.js';
-import type {
-  AppliedMutationResult,
-  IdempotencyKeyRow,
-  RejectedMutationResult,
-} from '../dynamo/types.js';
+import type { PushedMutationApplied, PushedMutationRejected } from '@retirement/contracts';
+import type { IdempotencyKeyRow } from '../dynamo/types.js';
 
 function encryptedEnvelope(): Record<string, unknown> {
   return {
@@ -54,7 +37,7 @@ function mutation(overrides: Partial<PushMutationDto> = {}): PushMutationDto {
 }
 
 function rejectionRow(expectedVersion: number | undefined): IdempotencyKeyRow {
-  const response: RejectedMutationResult = {
+  const response: PushedMutationRejected = {
     status: 'rejected',
     mutationId: randomUUID(),
     aggregateId: randomUUID(),
@@ -73,7 +56,7 @@ function rejectionRow(expectedVersion: number | undefined): IdempotencyKeyRow {
 }
 
 function appliedRow(newVersion: number): IdempotencyKeyRow {
-  const response: AppliedMutationResult = {
+  const response: PushedMutationApplied = {
     status: 'applied',
     mutationId: randomUUID(),
     aggregateId: randomUUID(),
@@ -83,7 +66,6 @@ function appliedRow(newVersion: number): IdempotencyKeyRow {
   return { key: 'k', response, createdAt: new Date().toISOString(), expiresAt: 0 };
 }
 
-// Valid 43-char base64url cursorTag.
 const FRESHNESS = { freshnessCounter: 1, cursorTag: 'a'.repeat(43) };
 
 interface Harness {
@@ -153,11 +135,9 @@ describe('PushService — rejection-cache TOCTOU', () => {
     expect(res.rejected).toHaveLength(0);
     expect(res.applied).toHaveLength(1);
     expect(res.applied[0].newVersion).toBe(7);
-    // The delete was attempted with the RECORDED (stale) expectedVersion,
-    // not the incoming one.
+    // The delete used the recorded (stale) expectedVersion, not the incoming one.
     expect(del).toHaveBeenCalledWith(expect.any(String), 0);
-    // No fresh TransactWriteItems attempt — this is a pure replay, not a
-    // re-apply, so nothing new was written.
+    // A pure replay re-applies nothing, so no fresh TransactWriteItems was attempted.
     expect(transactCommands).toHaveLength(0);
   });
 

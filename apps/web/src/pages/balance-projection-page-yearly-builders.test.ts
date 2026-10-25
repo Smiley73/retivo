@@ -1,16 +1,4 @@
-/**
- * Pure year-by-year builders — branch-logic unit tests.
- *
- * `buildUnifiedYearTableRows` and `buildPortfolioFlowsByYear` carry the
- * page's cashflow-year gating + pre/post-retirement gains-source crossover
- * logic. These exercise the two boundaries directly (no React, no DOM):
- *   (a) cashflow-year gating — only years in `[retirementYear, chartEndYear]`
- *       are flagged `isCashflowYear` and pull cashflow figures; years outside
- *       the window carry null cashflow fields;
- *   (b) gains crossover — pre-retirement years read per-account accumulation
- *       `yearlyTotals.growth`; the retirement year and after read the runner
- *       drawdown `growth` + withdrawals.
- */
+// Pure year-by-year builders: `buildUnifiedYearTableRows` and `buildPortfolioFlowsByYear` carry the cashflow-year gating (only years in `[retirementYear, chartEndYear]` are cashflow years, others carry null cashflow fields) and the gains crossover (pre-retirement years read accumulation `yearlyTotals.growth`, the retirement year onward the runner drawdown `growth` and withdrawals).
 import { describe, expect, it } from 'vitest';
 import {
   buildIncomeView,
@@ -102,15 +90,11 @@ function drawdownYear(opts: {
   };
 }
 
-/** Minimal cashflow series carrying only the fields the two builders read
- *  (`fromYear`, `chartEndYear`, `depositsByYear`). */
 function cashflowSeries(opts: {
   fromYear: number;
   chartEndYear: number;
   depositsByYear?: Map<number, number>;
 }): CashflowSeriesPipelineResult {
-  // Builders read only fromYear / chartEndYear / depositsByYear; the rest of
-  // the assembled series is irrelevant to the gating + crossover branches.
   return {
     fromYear: opts.fromYear,
     chartEndYear: opts.chartEndYear,
@@ -120,7 +104,6 @@ function cashflowSeries(opts: {
 
 describe('buildUnifiedYearTableRows — cashflow-year gating', () => {
   it('flags only years inside [retirementYear, chartEndYear] as cashflow years', () => {
-    // Arrange: window is 2031–2032; 2030 is pre-retirement, 2033 is post.
     const displayRows = [
       chartRow({ year: 2030, planned: 500_000, plannedGrowth: 25_000 }),
       chartRow({ year: 2031, planned: 480_000, plannedGrowth: null }),
@@ -146,7 +129,6 @@ describe('buildUnifiedYearTableRows — cashflow-year gating', () => {
       depletionYear: null,
     };
 
-    // Act
     const rows = buildUnifiedYearTableRows({
       displayRows,
       cashflowSeries: cashflowSeries({ fromYear: 2031, chartEndYear: 2032 }),
@@ -159,7 +141,6 @@ describe('buildUnifiedYearTableRows — cashflow-year gating', () => {
       basisDeflator: IDENTITY_DEFLATOR,
     });
 
-    // Assert: 2030 + 2033 outside window → null cashflow fields; 2031/2032 inside.
     const byYear = new Map(rows.map((r) => [r.year, r]));
     expect(byYear.get(2030)?.isCashflowYear).toBe(false);
     expect(byYear.get(2030)?.withdrawal).toBeNull();
@@ -174,8 +155,6 @@ describe('buildUnifiedYearTableRows — cashflow-year gating', () => {
   });
 
   it('sources gains from accumulation pre-retirement and from drawdown growth in-window', () => {
-    // Arrange: 2030 pre-retirement reads chart plannedGrowth; 2031 in-window
-    // reads incomeView.growthByYear (drawdown growth).
     const displayRows = [
       chartRow({ year: 2030, planned: 500_000, plannedGrowth: 25_000 }),
       chartRow({ year: 2031, planned: 480_000, plannedGrowth: null }),
@@ -195,7 +174,6 @@ describe('buildUnifiedYearTableRows — cashflow-year gating', () => {
       depletionYear: null,
     };
 
-    // Act
     const rows = buildUnifiedYearTableRows({
       displayRows,
       cashflowSeries: cashflowSeries({ fromYear: 2031, chartEndYear: 2031 }),
@@ -208,17 +186,13 @@ describe('buildUnifiedYearTableRows — cashflow-year gating', () => {
       basisDeflator: IDENTITY_DEFLATOR,
     });
 
-    // Assert: pre-retirement gains = chart plannedGrowth; in-window = drawdown growth.
     const byYear = new Map(rows.map((r) => [r.year, r]));
     expect(byYear.get(2030)?.gains).toBe(25_000);
     expect(byYear.get(2031)?.gains).toBe(12_000);
   });
 
   it('reads the Balance column + pre-ret Gains from the mc channel when a Monte Carlo basis is active', () => {
-    // Two pre-retirement rows carrying BOTH a deterministic balance and a
-    // distinct `mc` channel. With an MC basis active the table must read the
-    // mc channel (so the table reconciles with the representative line), not
-    // the deterministic `plannedSolid`.
+    // Two pre-retirement rows carry both a deterministic balance and a distinct `mc` channel; with an MC basis active the table must read the mc channel so it reconciles with the representative line, not `plannedSolid`.
     const displayRows: ProjectionChartRow[] = [
       {
         year: 2030,
@@ -251,10 +225,8 @@ describe('buildUnifiedYearTableRows — cashflow-year gating', () => {
       basisDeflator: IDENTITY_DEFLATOR,
     });
     const row2030 = rows.find((r) => r.year === 2030);
-    // Balance column reads `balanceByMethod[activeMethod]`; the builder routes
-    // the mc balance into both deterministic slots while a basis is active.
+    // The builder routes the mc balance into both deterministic slots while a basis is active.
     expect(row2030?.balanceByMethod.planned).toBe(640_000);
-    // Pre-retirement Gains read the mc channel, not plannedGrowth.
     expect(row2030?.gains).toBe(31_000);
   });
 
@@ -266,7 +238,6 @@ describe('buildUnifiedYearTableRows — cashflow-year gating', () => {
     const resolvedDrawdown: DrawdownByMethodResult = {
       years: [
         drawdownYear({ year: 2031, growth: 0, withdrawn: 0, rothConvertedCents: 1_500_000 }),
-        // 2032 has no conversion → column value 0.
         drawdownYear({ year: 2032, growth: 0, withdrawn: 0 }),
       ],
       depletionYear: null,
@@ -281,13 +252,10 @@ describe('buildUnifiedYearTableRows — cashflow-year gating', () => {
       activeMcBasis: null,
       resolvedDrawdown,
       lastDeathFractional: null,
-      // Deflate 2031 to 90% of nominal so the test proves the column is deflated.
-      // Deterministic basis (activeMcBasis null) → the Roth column routes through
-      // `basisDeflator` (path CPI matches flat rate on a deterministic basis).
+      // Deflate 2031 to 90% of nominal so the column is proven deflated. A deterministic basis routes the Roth column through `basisDeflator`.
       basisDeflator: (year) => (year === 2031 ? 0.9 : 1),
     });
     const byYear = new Map(rows.map((r) => [r.year, r]));
-    // $15,000 nominal × 0.9 deflator = $13,500.
     expect(byYear.get(2031)?.rothConverted).toBe(13_500);
     expect(byYear.get(2032)?.rothConverted).toBe(0);
   });
@@ -310,16 +278,12 @@ describe('buildPortfolioFlowsByYear — pre/post-retirement gains crossover', ()
         contributions: t.contributions,
       })),
     };
-    // Only `data.rows[].outputs[method].yearlyTotals` is read by the builder.
     return {
       rows: [{ outputs: { [opts.activeMethod]: out } }],
     } as unknown as PipelineData;
   }
 
   it('reads accumulation growth before retirement and drawdown growth after', () => {
-    // Arrange: retirement window 2031–2032; 2030 pre-retirement reads the
-    // per-account accumulation (growth 25k, contributions 10k); 2031/2032 read
-    // the drawdown years (growth + withdrawals).
     const data = pipelineData({
       activeMethod: 'planned',
       yearlyTotals: [
@@ -346,7 +310,6 @@ describe('buildPortfolioFlowsByYear — pre/post-retirement gains crossover', ()
       chartRow({ year: 2032, planned: 460_000, plannedGrowth: null }),
     ];
 
-    // Act
     const rows = buildPortfolioFlowsByYear({
       data,
       cashflowSeries: cashflowSeries({ fromYear: 2031, chartEndYear: 2032 }),
@@ -360,15 +323,11 @@ describe('buildPortfolioFlowsByYear — pre/post-retirement gains crossover', ()
       displayMode: 'future',
     });
 
-    // Assert
     expect(rows).not.toBeNull();
     const byYear = new Map(rows!.map((r) => [r.year, r]));
-    // 2030 pre-retirement: accumulation growth + contributions, no withdrawals.
     expect(byYear.get(2030)?.contributions).toBe(10_000);
     expect(byYear.get(2030)?.gains).toBe(25_000);
     expect(byYear.get(2030)?.withdrawals).toBeCloseTo(0, 10);
-    // 2031/2032 in-window: drawdown growth supersedes accumulation; withdrawals
-    // surface negative.
     expect(byYear.get(2031)?.gains).toBe(12_000);
     expect(byYear.get(2031)?.withdrawals).toBe(-30_000);
     expect(byYear.get(2032)?.gains).toBe(11_000);
@@ -387,10 +346,7 @@ describe('buildPortfolioFlowsByYear — net spending withdrawal excludes RMD sur
     return { rows: [{ outputs: { planned: out } }] } as unknown as PipelineData;
   }
 
-  /** Build the single in-window flow row for a one-year drawdown carrying the
-   *  given surplus disposition, then return it. The gross withdrawal is the
-   *  full forced RMD; the surplus round-trips back into the portfolio
-   *  (reinvested or held as cash), so the bar shows only the net spend. */
+  // Build the single in-window flow row for a one-year drawdown with the given surplus disposition. The gross withdrawal is the full forced RMD; the surplus round-trips back into the portfolio (reinvested or held as cash), so the bar shows only the net spend.
   function flowRow(surplus: { reinvestedCents?: number; overflowCents?: number }) {
     const drawdown: DrawdownByMethodResult = {
       years: [
@@ -422,13 +378,9 @@ describe('buildPortfolioFlowsByYear — net spending withdrawal excludes RMD sur
   }
 
   it('reinvest-disposition household: bar shows net spend, surplus excluded', () => {
-    // Forced RMD 50k, spending 30k → 20k reinvested surplus stays in-portfolio.
     const r = flowRow({ reinvestedCents: 20_000 * 100 });
-    // The withdrawal bar is the spending portion only (matches the income
-    // breakdown); the 20k forced-RMD excess never appears.
+    // The withdrawal bar is the spending portion only (matches the income breakdown); the 20k forced-RMD excess never appears.
     expect(r.withdrawals).toBe(-30_000);
-    // netChange = contributions + gains + deposits + withdrawals
-    //           = 0 + 0 + 0 − 30_000 = −30_000 (the actual spend).
     expect(r.netChange).toBe(-30_000);
     expect(r.netChange).toBe(
       r.contributions + r.gains + r.deposits + r.withdrawals,
@@ -451,8 +403,7 @@ describe('buildPortfolioFlowsByYear — net spending withdrawal excludes RMD sur
   });
 
   it('a Roth conversion is NOT a Portfolio Flow inflow and does not move netChange', () => {
-    // Internal transfer (pre-tax → Roth): it must not appear as an inflow nor
-    // shift netChange. A converting year reconciles identically to one without.
+    // Internal transfer (pre-tax → Roth): it must not appear as an inflow or shift netChange.
     const withConv: DrawdownByMethodResult = {
       years: [
         drawdownYear({
@@ -478,8 +429,6 @@ describe('buildPortfolioFlowsByYear — net spending withdrawal excludes RMD sur
       displayMode: 'future',
     });
     const r = rows!.find((row) => row.year === 2031)!;
-    // No rothConverted field on the flow row at all; netChange is the spend-only
-    // figure (no surplus, no conversion inflow).
     expect((r as unknown as Record<string, unknown>).rothConverted).toBeUndefined();
     expect(r.withdrawals).toBe(-50_000);
     expect(r.netChange).toBe(-50_000);
@@ -549,9 +498,7 @@ describe('buildPortfolioFlowsByYear — full death-year terminal bar (no prorati
   }
 
   it('the death-year bar carries full annual flows (no proration) at its integer year', () => {
-    // Death = Dec 31 of `deathYear` (= 2032). `lastDeathFractional` is the
-    // integer death year; the death-year bar is a FULL bar — no scaling,
-    // no fractional terminal x.
+    // Death is Dec 31 of `deathYear`; `lastDeathFractional` is the integer death year, so the death-year bar is a full bar: no scaling and no fractional terminal x.
     const rows = setup(2032)!;
     expect(rows.map((r) => r.year)).toEqual([2030, 2031, 2032]);
     const death = rows.find((r) => r.year === 2032)!;
@@ -563,14 +510,12 @@ describe('buildPortfolioFlowsByYear — full death-year terminal bar (no prorati
       death.contributions + death.gains + death.deposits + death.withdrawals,
       6,
     );
-    // Earlier years untouched (no fractionalYear, full magnitude).
     const y2031 = rows.find((r) => r.year === 2031)!;
     expect(y2031.fractionalYear).toBeUndefined();
     expect(y2031.gains).toBe(12_000);
   });
 
   it('drops rows past the death year (clip at the integer death year)', () => {
-    // deathYear 2031 → the 2032 bar is dropped, the 2031 bar is full.
     const rows = setup(2031)!;
     expect(rows.map((r) => r.year)).toEqual([2030, 2031]);
     const death = rows.find((r) => r.year === 2031)!;
@@ -587,17 +532,7 @@ describe('buildPortfolioFlowsByYear — full death-year terminal bar (no prorati
 });
 
 describe('buildPortfolioFlowsByYear — MC full-horizon alignment', () => {
-  /**
-   * When an MC basis is active, `use-balance-projection-view-model.ts` slices
-   * `RepresentativeRun.years` so that `resolvedDrawdown.years[0]` corresponds
-   * to `fromYear` (the retirement/cashflow start year). Without that slice,
-   * `buildPortfolioFlowsByYear` indexes with `y - retirementYear`, hitting the
-   * wrong (pre-retirement) row when `run.firstYear < retirementYear`.
-   *
-   * These tests verify the builder's alignment requirement at the seam the
-   * view model adapts: the builder indexes `drawdown.years[y - retirementYear]`
-   * where `retirementYear = cashflowSeries.fromYear`.
-   */
+  // With an MC basis active, `use-balance-projection-view-model.ts` slices `RepresentativeRun.years` so `resolvedDrawdown.years[0]` corresponds to `fromYear`. Without the slice, `buildPortfolioFlowsByYear` indexes with `y - retirementYear` and hits the wrong (pre-retirement) row when `run.firstYear < retirementYear`.
   function pipelineData(opts: {
     activeMethod: ProjectionMethod;
     yearlyTotals: ReadonlyArray<{ year: number; growth: number; contributions: number }>;
@@ -620,9 +555,7 @@ describe('buildPortfolioFlowsByYear — MC full-horizon alignment', () => {
   }
 
   it('reads correct drawdown row when years[0] aligns with retirementYear', () => {
-    // Arrange: retirement is 2031; simulation started in 2026 (pre-retirement),
-    // but we pass the ADAPTED drawdown (sliced to start from 2031) as the
-    // view model would produce. displayRows span the rendered window (2028–2032).
+    // Retirement is 2031 and the simulation started in 2026, but the adapted drawdown (sliced to start from 2031) is passed, as the view model produces.
     const data = pipelineData({
       activeMethod: 'planned',
       yearlyTotals: [
@@ -633,8 +566,6 @@ describe('buildPortfolioFlowsByYear — MC full-horizon alignment', () => {
         { year: 2032, growth: 99_999, contributions: 0 }, // overridden by drawdown
       ],
     });
-    // Adapted drawdown: years[0] is the 2031 (retirement) row — as the view
-    // model produces after slicing run.years from `firstYear=2026` offset.
     const drawdown: DrawdownByMethodResult = {
       years: [
         drawdownYear({ year: 2031, growth: 12_000, withdrawn: 30_000 }),
@@ -664,27 +595,19 @@ describe('buildPortfolioFlowsByYear — MC full-horizon alignment', () => {
     });
     expect(rows).not.toBeNull();
     const byYear = new Map(rows!.map((r) => [r.year, r]));
-    // Pre-retirement years: accumulation growth
     expect(byYear.get(2028)?.gains).toBe(10_000);
-    // Retirement year 2031: drawdown growth (12_000), not accumulation (99_999)
     expect(byYear.get(2031)?.gains).toBe(12_000);
     expect(byYear.get(2031)?.withdrawals).toBe(-30_000);
-    // Post-retirement year 2032: drawdown growth (11_000), not accumulation (99_999)
     expect(byYear.get(2032)?.gains).toBe(11_000);
     expect(byYear.get(2032)?.withdrawals).toBe(-28_000);
   });
 
   it('would read wrong row if full-horizon unadapted drawdown were passed (regression characterization)', () => {
-    // This test characterizes the pre-fix behavior: if the unadapted
-    // RepresentativeRun (firstYear=2026) were passed directly without slicing,
-    // years[0] corresponds to 2026 but the builder reads years[0] for
-    // retirementYear=2031, getting the 2026 row's data instead.
+    // Characterizes the pre-fix behaviour: the unadapted RepresentativeRun (firstYear=2026) passed without slicing makes years[0] the 2026 row, which the builder reads for retirementYear=2031.
     const data = pipelineData({
       activeMethod: 'planned',
       yearlyTotals: [{ year: 2031, growth: 99_999, contributions: 0 }],
     });
-    // Unadapted: years[0] is for 2026 (firstYear), not 2031 (fromYear).
-    // The builder indexes years[y - retirementYear] = years[0] for y=2031.
     const unadaptedDrawdown: DrawdownByMethodResult = {
       years: [
         drawdownYear({ year: 2026, growth: 5_000, withdrawn: 0 }), // pre-retirement
@@ -711,8 +634,7 @@ describe('buildPortfolioFlowsByYear — MC full-horizon alignment', () => {
       displayMode: 'future',
     });
     const byYear = new Map(rows!.map((r) => [r.year, r]));
-    // BUG: reads years[0] (2026 row, growth=5_000) instead of years[5]
-    // (2031 row, growth=12_000). The fix (slice at fromYear) removes this misread.
+    // BUG: reads years[0] (2026 row, growth=5_000) instead of years[5] (2031 row, growth=12_000); slicing at fromYear removes the misread.
     expect(byYear.get(2031)?.gains).toBe(5_000); // Wrong! This is the 2026 pre-retirement row.
     expect(byYear.get(2031)?.gains).not.toBe(12_000); // The correct 2031 value is NOT read.
   });
@@ -729,9 +651,7 @@ describe('buildPortfolioFlowsByYear — display deflator (Today\'s vs Future dol
     return { rows: [{ outputs: { planned: out } }] } as unknown as PipelineData;
   }
 
-  /** One in-window flow row carrying gains + a deposit + a gross withdrawal
-   *  whose forced-RMD surplus round-trips back in, built under the supplied
-   *  view deflator (so the bar reflects the net spend in the display basis). */
+  // One in-window flow row with gains, a deposit and a gross withdrawal whose forced-RMD surplus round-trips back in, built under the supplied view deflator.
   function flowRow(
     viewDeflator: (year: number, monthIndex?: number) => number,
     displayMode: 'today' | 'future' = 'future',
@@ -761,8 +681,7 @@ describe('buildPortfolioFlowsByYear — display deflator (Today\'s vs Future dol
       displayRows: [chartRow({ year: 2031, planned: 470_000, plannedGrowth: null })],
       lastDeathFractional: null,
       viewDeflator,
-      // Deterministic basis: `basisDeflator` collapses to `viewDeflator` (the
-      // drawdown-phase gains + net spend deflate by the same flat factor).
+      // Deterministic basis: `basisDeflator` collapses to `viewDeflator`, so drawdown gains and net spend deflate by the same flat factor.
       basisDeflator: (year) => viewDeflator(year, 11),
       displayMode,
     });
@@ -774,22 +693,16 @@ describe('buildPortfolioFlowsByYear — display deflator (Today\'s vs Future dol
     const r = flowRow(() => 1);
     expect(r.gains).toBe(40_000);
     expect(r.deposits).toBe(8_000);
-    // Gross 50k draw less the 20k forced-RMD surplus = 30k net spend; nominal.
     expect(r.withdrawals).toBe(-30_000);
     expect(r.netChange).toBe(40_000 + 8_000 - 30_000);
   });
 
   it("Today's dollars deflates every series by viewDeflator(y, 11)", () => {
-    // 2031 deflated to 50% of nominal — every flow halves, signs preserved, so
-    // the withdrawal bar reads in today's dollars (was nominal) and ties out
-    // with the year-by-year table's deflated Withdrawal column.
+    // 2031 deflated to 50%: every flow halves with signs preserved, so the withdrawal bar reads in today's dollars and ties out with the year-by-year table's deflated Withdrawal column.
     const r = flowRow((year) => (year === 2031 ? 0.5 : 1), 'today');
     expect(r.gains).toBe(20_000);
     expect(r.deposits).toBe(4_000);
-    // 30k net spend halved by the 0.5 factor.
     expect(r.withdrawals).toBe(-15_000);
-    // netChange in the display basis == nominal netChange × the factor, and
-    // still reconciles from the deflated components.
     expect(r.netChange).toBe((40_000 + 8_000 - 30_000) * 0.5);
     expect(r.netChange).toBe(
       r.contributions + r.gains + r.deposits + r.withdrawals,
@@ -798,10 +711,7 @@ describe('buildPortfolioFlowsByYear — display deflator (Today\'s vs Future dol
 });
 
 describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
-  /** Per-year essential-only expense row so the cashflow row carries a
-   *  nonzero `total` and survives the trailing-zero trim — the Taxes band
-   *  value is then assertable on the surviving row. `'future'` mode reads
-   *  the nominal fields × deflator (= 1 here), so `essential` shows verbatim. */
+  // An essential-only expense row gives the cashflow row a nonzero `total` so it survives the trailing-zero trim; 'future' mode reads nominal fields times a deflator of 1.
   function expenseRow(year: number, essential: number): ExpenseProjectionPoint {
     return {
       year,
@@ -814,9 +724,7 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
     };
   }
 
-  /** Minimal cashflow series carrying exactly the fields `buildIncomeView`
-   *  destructures: the year window, the (empty) income split + deposits, the
-   *  per-year expense rows, and a null `monthlySeries` (Yearly path only). */
+  // Minimal cashflow series with exactly the fields `buildIncomeView` destructures: the year window, empty income split and deposits, per-year expense rows, and a null `monthlySeries` (Yearly path only).
   function incomeViewCashflowSeries(opts: {
     fromYear: number;
     drawdownEndYear: number;
@@ -866,8 +774,7 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
   }
 
   it('(a) funds the Taxes band for a named-strategy MC run (suppression guard removed)', () => {
-    // Named-strategy MC funds tax per path, so the band lights up from the
-    // resolved representative row's tax cents.
+    // Named-strategy MC funds tax per path, so the band lights up from the resolved representative row's tax cents.
     const drawdown: DrawdownByMethodResult = {
       years: [
         drawdownYear({
@@ -890,13 +797,10 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
     });
     expect(view).not.toBeNull();
     const row = view!.cashflowChartRows.find((r) => r.year === 2031);
-    // (5_000_00 + 1_000_00 − 0) / 100 = 6_000.
     expect(row?.taxes).toBe(6_000);
   });
 
   it('(b) funds the Taxes band from any tax-funded MC representative row', () => {
-    // The band reflects (federalTax + irmaa − aca) / 100 from the resolved
-    // representative row's tax cents.
     const drawdown: DrawdownByMethodResult = {
       years: [
         drawdownYear({
@@ -918,12 +822,10 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
       drawdownEndYear: 2031,
     });
     const row = view!.cashflowChartRows.find((r) => r.year === 2031);
-    // (5_000_00 + 1_000_00 − 0) / 100 = 6_000.
     expect(row?.taxes).toBe(6_000);
   });
 
   it('(c) funds the Taxes band on a deterministic basis', () => {
-    // Deterministic basis funds tax per year as it always has.
     const drawdown: DrawdownByMethodResult = {
       years: [
         drawdownYear({
@@ -945,13 +847,11 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
       drawdownEndYear: 2031,
     });
     const row = view!.cashflowChartRows.find((r) => r.year === 2031);
-    // (4_000_00 + 500_00 − 0) / 100 = 4_500.
     expect(row?.taxes).toBe(4_500);
   });
 
   it('(d) clamps the Taxes band to 0 when the ACA subsidy exceeds tax + IRMAA', () => {
-    // acaPtcSubsidy > federalTax + irmaa → the raw value is negative; the
-    // builder's Math.max(0, …) clamps the band to 0.
+    // acaPtcSubsidy > federalTax + irmaa makes the raw value negative; the builder's Math.max(0, …) clamps the band to 0.
     const drawdown: DrawdownByMethodResult = {
       years: [
         drawdownYear({
@@ -973,15 +873,11 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
       drawdownEndYear: 2031,
     });
     const row = view!.cashflowChartRows.find((r) => r.year === 2031);
-    // (1_000_00 + 0 − 3_000_00) / 100 = −2_000 → clamped to 0.
     expect(row?.taxes).toBe(0);
   });
 
   it('(e) a year that applies credit to premiums shows the lowered draw and still ties out', () => {
-    // $71,200 of spending, $31,300 of Social Security, no federal tax and a
-    // $5,134.20 credit that all goes to premiums: the engine draws 34,765.80
-    // (39,900 less the line). The band shows that draw, with the line netted in
-    // the Taxes band, so income meets expenses and no shortfall appears.
+    // $71,200 of spending, $31,300 of Social Security, no federal tax and a $5,134.20 credit that all goes to premiums: the engine draws 34,765.80 (39,900 less the line). The band shows that draw, with the line netted in the Taxes band, so income meets expenses and no shortfall appears.
     const drawdown: DrawdownByMethodResult = {
       years: [
         drawdownYear({
@@ -1013,18 +909,12 @@ describe('buildIncomeView — Taxes band cash (funded for every basis)', () => {
 });
 
 describe('buildIncomeView — category band-basis branch (today→*Base vs future→*Nominal)', () => {
-  // Two categories whose share ratios DIFFER between the *Base maps and the
-  // *Nominal maps, so the `displayMode === 'today' ? *Base : *Nominal`
-  // selection inside `buildIncomeView` is observable in the per-category
-  // split. Swapping the two branches would change which ratio surfaces.
+  // Two categories whose share ratios differ between the *Base and *Nominal maps make the `displayMode === 'today' ? *Base : *Nominal` selection in `buildIncomeView` observable; swapping the branches would change which ratio surfaces.
   const CAT_A = 'cat-a';
   const CAT_B = 'cat-b';
   const ESSENTIAL = 30_000;
 
-  /** Per-year expense row. `essentialBase === essential` so the displayed
-   *  band total (essential + discretionary) is the SAME 30k in both display
-   *  modes — only the per-category RATIOS differ between the maps, isolating
-   *  the band-basis branch under test. */
+  // `essentialBase === essential`, so the displayed band total is the same 30k in both modes; only the per-category ratios differ, isolating the band-basis branch.
   function expenseRow(year: number): ExpenseProjectionPoint {
     return {
       year,
@@ -1049,11 +939,7 @@ describe('buildIncomeView — category band-basis branch (today→*Base vs futur
     };
   }
 
-  /** Cashflow series carrying the four band-basis category maps with
-   *  DISTINCT *Base vs *Nominal ratios:
-   *    - *Base   → A:B = 3:1 (A weighted heavier)
-   *    - *Nominal → A:B = 1:3 (B weighted heavier)
-   *  Only the yearly maps are read (monthlySeries is null → Yearly path). */
+  // Category maps with distinct ratios: *Base A:B = 3:1, *Nominal A:B = 1:3. Only the yearly maps are read (monthlySeries is null, so the Yearly path).
   function categoryCashflowSeries(opts: {
     fromYear: number;
     drawdownEndYear: number;
@@ -1103,7 +989,6 @@ describe('buildIncomeView — category band-basis branch (today→*Base vs futur
       lastDeathFractional: null,
       viewDeflator: IDENTITY_DEFLATOR,
       basisDeflator: IDENTITY_DEFLATOR,
-      // Non-empty categoryMeta → categoryBand is threaded into the series.
       categoryMeta: [
         { id: CAT_A, name: 'A', color: '#000' },
         { id: CAT_B, name: 'B', color: '#111' },
@@ -1115,8 +1000,6 @@ describe('buildIncomeView — category band-basis branch (today→*Base vs futur
     const view = run('today');
     expect(view).not.toBeNull();
     const row = view!.cashflowChartRows.find((r) => r.year === 2031);
-    // Band = essential + discretionary = 30k. *Base ratio A:B = 3:1 →
-    // A = 22_500, B = 7_500.
     expect(row?.byCategory?.[CAT_A]).toBe(22_500);
     expect(row?.byCategory?.[CAT_B]).toBe(7_500);
   });
@@ -1125,7 +1008,6 @@ describe('buildIncomeView — category band-basis branch (today→*Base vs futur
     const view = run('future');
     expect(view).not.toBeNull();
     const row = view!.cashflowChartRows.find((r) => r.year === 2031);
-    // Band = 30k. *Nominal ratio A:B = 1:3 → A = 7_500, B = 22_500.
     expect(row?.byCategory?.[CAT_A]).toBe(7_500);
     expect(row?.byCategory?.[CAT_B]).toBe(22_500);
   });

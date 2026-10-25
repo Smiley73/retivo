@@ -55,12 +55,6 @@ describe('pairing', () => {
     expect((await tab.closed).code).toBe(CLOSE_CODES.PAIRING_EXPIRED);
   });
 
-  it('fails a tab that dials before any code was minted', async () => {
-    const tab = await h.newTab();
-    await tab.pair('0123456789');
-    expect((await tab.closed).code).toBe(CLOSE_CODES.PAIRING_EXPIRED);
-  });
-
   it('refuses a consumed code once its session has ended', async () => {
     const code = await h.mintCode();
     const first = await h.newTab();

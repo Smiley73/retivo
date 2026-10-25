@@ -1,23 +1,5 @@
-/**
- * "Show beta features" preference — the per-user half of the feature-flag
- * gate (the build-time half is `lib/feature-flags.ts`).
- *
- * Persisted in localStorage per user, exactly like the theme preference
- * (`ThemeContext`): read synchronously so the sidebar renders the right
- * entries on first paint, keyed by userId after login. Off by default — a
- * person opts INTO beta features from Settings → Preferences.
- *
- * The stored value is re-read SYNCHRONOUSLY when `userId` changes (state is
- * keyed by the userId it was read for, and re-derived during render on a
- * mismatch) rather than in an effect — an effect would let one frame paint
- * with the anonymous default before an opted-in user's preference lands, and
- * that frame would briefly hide the beta sidebar entries / flash the gate
- * notice.
- *
- * `isBetaFeatureVisible(id)` is the single question every gated surface asks
- * (sidebar item, route gate, PDF export): offered by this build AND switched
- * on by this user.
- */
+// Per-user "Show beta features" preference; `isBetaFeatureVisible(id)` = offered by the build and switched on.
+// Stored like the theme preference (localStorage, keyed by userId, off by default).
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import {
   BETA_FEATURES,
@@ -61,14 +43,10 @@ interface BetaFeaturesProviderProps {
   children: React.ReactNode;
   /** Switches the storage key after login. Pass null when logged out. */
   userId?: string | null;
-  /**
-   * Overrides the build's offered set — for tests only (production always
-   * reads the Vite-baked `OFFERED_BETA_FEATURE_IDS`).
-   */
+  /** Overrides the build's offered set; tests only. */
   offeredIds?: ReadonlySet<BetaFeatureId>;
 }
 
-/** The preference together with the userId it was read for. */
 interface PreferenceState {
   readonly forUserId: string | null;
   readonly show: boolean;
@@ -84,10 +62,8 @@ export const BetaFeaturesProvider: React.FC<BetaFeaturesProviderProps> = ({
     show: readPreference(userId),
   }));
 
-  // Identity changed (login / logout) → re-read for the new key during THIS
-  // render, so the first paint under the new identity is already correct.
-  // React's documented "adjusting state when a prop changes" pattern: the
-  // setState during render schedules an immediate re-render before commit.
+  // Re-read during render on an identity change: an effect would paint one frame with the anonymous default
+  // and flash the beta gate notice.
   if (stored.forUserId !== userId) {
     setStored({ forUserId: userId, show: readPreference(userId) });
   }

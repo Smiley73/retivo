@@ -1,14 +1,5 @@
-/**
- * Repository for the PasswordReset table (PK `resetToken`, 15-min TTL).
- * Mirrors EmailVerificationsRepository: a token lookup + a keyed delete.
- *
- * The single-use consume runs as one `TransactWriteItems` driven from
- * PasswordResetService, so the conditional delete lives there, not
- * here. The account-deletion cascade deletes the user's row by the
- * `User.currentResetToken` handle — a single keyed delete, no Scan —
- * so this repo deliberately exposes no `deleteAllForUser`/Scan path and
- * the api role needs no Scan grant on this table.
- */
+// Repository for the PasswordReset table (PK resetToken, 15-min TTL): lookup and keyed delete. The single-use consume is a
+// conditional delete in PasswordResetService transaction, and no Scan path exists here.
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -31,9 +22,8 @@ export class PasswordResetsRepository extends BaseRepository {
   }
 
   /**
-   * Look up a reset row by its PK. The caller passes the SHA-256 hash of the
-   * raw token, not the raw token: the table stores the hash (hashed
-   * at the service boundary). This repo performs no hashing.
+   * Looks up a reset row by PK; the caller passes the SHA-256 hash of the raw token, and this repo performs no
+   * hashing.
    */
   async findByToken(token: string): Promise<PasswordResetRow | null> {
     const r = await this.doc.send(
@@ -46,11 +36,8 @@ export class PasswordResetsRepository extends BaseRepository {
   }
 
   /**
-   * Best-effort keyed delete by token. Used to drop a now-superseded
-   * prior reset row on re-request and to sweep the user's dangling row on
-   * account deletion. The consume path deletes conditionally inside
-   * its own transaction instead. Caller passes the stored SHA-256 hash, not
-   * the raw token.
+   * Best-effort keyed delete of a superseded or dangling reset row; the consume path deletes conditionally in its own
+   * transaction instead.
    */
   async deleteToken(token: string): Promise<void> {
     await this.doc.send(

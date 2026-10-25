@@ -1,12 +1,4 @@
-/**
- * Projected withdrawals page — pure data mapping. Turns the deterministic
- * `runBalanceProjectionForPage` per-method output into the page's per-year /
- * per-account guidance rows + the selected-year hero figures.
- *
- * READ-ONLY presentation: every dollar field comes straight off the engine's
- * `DrawdownYear` (nominal); the page deflates at the display boundary via
- * `realDeflatorAt`. No new engine math.
- */
+/** Projected withdrawals page data mapping: deterministic per-method drawdown into per-year, per-account guidance rows and hero figures. */
 import type { DrawdownYear } from '../lib/drawdown-engine-types';
 import { rmdEligibleWithdrawnCents } from '../lib/drawdown-engine-types';
 import { isRothDesignatedPostBucket } from '../lib/balance-calc';
@@ -17,105 +9,51 @@ import {
   type RmdGroupingAccount,
 } from '../lib/rmd-aggregation-groups';
 
-/**
- * Extended account metadata for the Projected withdrawals page. Carries
- * `taxTreatment` in addition to the RMD-grouping fields so the data layer can
- * gate the MIXED sub-bucket split on the correct account type.
- *
- * Structural subtyping: `ReadonlyMap<string, GuidanceAccountMeta>` satisfies
- * `ReadonlyMap<string, RmdGroupingAccount>` wherever the RMD helpers expect it.
- */
+/** Account metadata with `taxTreatment`, so the MIXED sub-bucket split can gate on the account type. */
 export interface GuidanceAccountMeta extends RmdGroupingAccount {
   readonly taxTreatment: AccountPayload['taxTreatment'];
 }
 
-/** One account's withdrawal line within a guidance year (nominal cents/dollars). */
 export interface GuidanceAccountRow {
   readonly accountId: string;
   readonly accountName: string;
-  /** Gross withdrawal pulled from the account this year (nominal dollars). */
   readonly withdrawnDollars: number;
-  /** Ending balance after the withdrawal (nominal dollars). */
   readonly endingBalanceDollars: number;
-  /** Required RMD attributed to this account this year (nominal dollars); 0
-   *  when the account carries no RMD (or below trigger age). */
   readonly rmdDollars: number;
-  /** HSA accounts only: the medical-qualified portion of this year's HSA
-   *  withdrawal (nominal dollars) — funded against modeled medical costs,
-   *  tax-free. `undefined` for non-HSA accounts. */
+  /** HSA only: the medical-qualified portion of the withdrawal, tax-free. */
   readonly hsaMedicalQualifiedDollars?: number;
-  /** HSA accounts only: the emergency-reserve portion of this year's HSA
-   *  withdrawal (nominal dollars) — the residual `withdrawn − medicalQualified`,
-   *  tapped only after every non-HSA account is exhausted. `undefined` for
-   *  non-HSA accounts. */
+  /** HSA only: the residual emergency-reserve portion, tapped after every non-HSA account is exhausted. */
   readonly hsaEmergencyReserveDollars?: number;
-  /** True for MIXED accounts. Enables the MixedSplitNote. */
   readonly isMixed?: boolean;
-  /** MIXED accounts only, named strategy: the pre-tax portion of this
-   *  year's withdrawal (nominal dollars). Gated on `preWithdrawnCents !==
-   *  undefined` — i.e. field presence, NOT truthiness. `undefined` when no
-   *  per-sub-account split data is available. */
+  /** MIXED, named strategy: pre-tax portion. Gated on field presence (preWithdrawnCents !== undefined), not truthiness. */
   readonly preTaxWithdrawnDollars?: number;
-  /** MIXED accounts only, named strategy: the post-tax / Roth portion of
-   *  this year's withdrawal (nominal dollars). Residual rule: `postWithdrawnDollars
-   *  = withdrawnDollars − preTaxWithdrawnDollars`, guaranteeing pre + post ===
-   *  total (the same pattern as HSA). `undefined` when no split data is available. */
+  /** MIXED, named strategy: the residual (withdrawn minus pre-tax), so pre + post equals the total. */
   readonly postWithdrawnDollars?: number;
-  /** MIXED accounts only, named strategy: label for the post-tax bucket.
-   *  `'Roth'` for Roth-designated MIXED types (401K/403B/457B/TSP);
-   *  `'after-tax contributions (gains taxable)'` for OTHER MIXED. `undefined`
-   *  when no split data is available. */
+  /** MIXED, named strategy: label of the post-tax bucket ('Roth' for Roth-designated types). */
   readonly postLabel?: string;
 }
 
-/** Per-year guidance row — totals + per-account lines + RMD groups + tax pair. */
 export interface GuidanceYearRow {
   readonly year: number;
-  /** Total gross portfolio withdrawal this year (nominal dollars). */
   readonly totalWithdrawnDollars: number;
-  /** Income tax + Medicare for the year, nominal dollars:
-   *  `federalTaxCents + irmaaSurchargeCents`. */
+  /** federalTaxCents + irmaaSurchargeCents. */
   readonly taxAndMedicareDollars: number;
-  /** After-tax spendable for the year, nominal dollars. */
   readonly spendableDollars: number;
-  /** True when the household has any portfolio withdrawal this year. */
   readonly hasWithdrawal: boolean;
-  /** RMD presented by legal aggregation group; `[]` below trigger age
-   *  or when no account carries a qualifying-balance RMD. */
   readonly rmdGroups: ReadonlyArray<RmdAggregationGroup>;
-  /** True when any legal aggregation group's combined withdrawals fall short of
-   *  its required minimum. Derived from the IRS-aggregation-aware groups,
-   *  NOT the per-account engine `rmdShortfallCents`, so a compliant uneven draw
-   *  within an aggregatable group (e.g. one IRA covering the group) is not a
-   *  false shortfall. */
+  /** From the IRS-aggregation-aware groups, not per-account rmdShortfallCents, so a compliant uneven draw within a group is not a false shortfall. */
   readonly hasRmdShortfall: boolean;
-  /**
-   * Plain-English notes built from the ENGINE's own required-withdrawal
-   * disclosures for the year (`DrawdownYear.rmdWithheldAccountIds` /
-   * `rmdStillWorkingDeferredAccountIds` / `rmdFirstYearDeferredAccountIds` /
-   * `rmdDeferredCatchUpCents`). Empty for a year with nothing to disclose, which
-   * is every year of a household that records no inherited / still-working /
-   * deferral facts.
-   */
+  /** Plain-English notes from the engine's own required-withdrawal disclosures; empty when there is nothing to disclose. */
   readonly rmdDisclosures: ReadonlyArray<string>;
   readonly accounts: ReadonlyArray<GuidanceAccountRow>;
 }
 
-/** cents → dollars. */
 function c2d(cents: number | undefined): number {
   return (cents ?? 0) / 100;
 }
 
-/**
- * After-tax spendable (nominal dollars). Of the gross dollars pulled from
- * the portfolio (`withdrawn`, which INCLUDES Roth), what's left after the
- * taxes/Medicare funded FROM the portfolio and after any forced-RMD surplus the
- * engine immediately reinvested / held as cash (NOT spent this year), with the
- * ACA credit added back. Withheld IRMAA is NOT subtracted (it comes out of
- * Social Security, not the portfolio). `rmdReinvestedCents` /
- * `rmdOverflowToCashCents` are 0 on the bucket-allocation path, so the formula
- * degrades.
- */
+// Gross withdrawn (includes Roth) less portfolio-funded tax/Medicare and the reinvested or cash-held RMD surplus, plus the ACA credit.
+// Withheld IRMAA comes out of Social Security, so it is not subtracted.
 function spendableDollars(year: DrawdownYear): number {
   const cents =
     Math.round(year.withdrawn * 100) -
@@ -127,13 +65,6 @@ function spendableDollars(year: DrawdownYear): number {
   return Math.max(0, cents) / 100;
 }
 
-/**
- * Turn one year's ENGINE required-withdrawal disclosures into plain
- * English, naming the accounts. This is the user-facing consumer of the shared
- * RMD engine's authoritative withheld / deferred truth: the page never re-derives
- * its own looser version of "is this account ready", it states what the engine
- * actually did. Returns `[]` when the year has nothing to disclose.
- */
 function buildRmdDisclosures(
   year: DrawdownYear,
   accountsById: ReadonlyMap<string, GuidanceAccountMeta>,
@@ -143,11 +74,7 @@ function buildRmdDisclosures(
   const out: string[] = [];
   const withheld = year.rmdWithheldAccountIds ?? [];
   if (withheld.length > 0) {
-    // Reason-agnostic on purpose: the engine withholds for owner-path reasons too (an
-    // unknown separation year, a first-year catch-up whose base predates the
-    // projection) and for two rules it does not model at all, where nothing is
-    // "missing". The account editor names the exact ask per account; this line only
-    // states that the year's figure was withheld rather than guessed.
+    // Reason-agnostic: the engine also withholds for owner-path reasons and for rules it does not model, so this line states only that the figure was withheld rather than guessed.
     out.push(
       `No required withdrawal is included for ${list(withheld)} — the details this account's rule needs are not all available, so the estimate is on hold rather than guessed. Open the account to see exactly what is needed.`,
     );
@@ -177,7 +104,6 @@ function buildRmdDisclosures(
   return out;
 }
 
-/** Build the per-year guidance rows from one method's raw drawdown `years`. */
 export function buildGuidanceYearRows(
   years: ReadonlyArray<DrawdownYear>,
   accountsById: ReadonlyMap<string, GuidanceAccountMeta>,
@@ -189,22 +115,12 @@ export function buildGuidanceYearRows(
       for (const [accountId, row] of year.accountBalances) {
         const withdrawnDollars = row.withdrawn;
         const rmdDollars = c2d(perAccountRmd[accountId]);
-        // Skip accounts that neither paid out nor carry an RMD this year — the
-        // guidance lines should show only accounts the retiree acts on.
         if (withdrawnDollars <= 0 && rmdDollars <= 0) continue;
-        // HSA: split an HSA withdrawal into its medical-qualified portion
-        // (funded against modeled medical costs, tax-free) and the
-        // emergency-reserve residual (`withdrawn − medicalQualified`). The
-        // residual rule keeps the two summing to the committed withdrawal. Only
-        // HSA accounts surface the split — non-HSA rows leave both undefined.
         const meta = accountsById.get(accountId);
         const isHsa = meta?.type === 'HSA';
         const medicalQualifiedDollars = isHsa ? c2d(row.medicalQualifiedWithdrawnCents) : 0;
 
-        // MIXED: gate the pre/post split on field PRESENCE, not
-        // truthiness — `preWithdrawnCents: 0` is a valid named-strategy year
-        // where the entire draw is from the post (Roth/after-tax) bucket and
-        // must render the split note, not the unavailable note.
+        // Gate on field presence, not truthiness: preWithdrawnCents 0 is a valid year whose whole draw is from the post-tax bucket.
         const isMixed = meta?.taxTreatment === 'MIXED';
         const hasSplitData = isMixed && row.preWithdrawnCents !== undefined;
         let mixedFields: Partial<GuidanceAccountRow> = {};
@@ -212,8 +128,6 @@ export function buildGuidanceYearRows(
           mixedFields = { isMixed: true };
           if (hasSplitData) {
             const preTaxWithdrawnDollars = c2d(row.preWithdrawnCents);
-            // Residual rule: derive post from total to guarantee
-            // preTax + post === withdrawnDollars (matches HSA pattern).
             const postWithdrawnDollars = withdrawnDollars - preTaxWithdrawnDollars;
             const isRothPost = isRothDesignatedPostBucket(
               meta!.taxTreatment,
@@ -266,24 +180,12 @@ export function buildGuidanceYearRows(
       hasRmdShortfall:
         groups.length > 0 &&
         groups.some((group) => {
-          // For per-plan groups the withdrawal must come from the one specific
-          // account, so only that account's withdrawal counts. For aggregatable
-          // groups (IRA / 403(b)) the RMD may be satisfied by ANY same-type /
-          // same-owner account — including ones with zero individual required
-          // share that are therefore absent from `group.accounts`. Sum
-          // withdrawals from ALL matching accounts in accountsById.
+          // Per-plan groups count only that account's withdrawal; aggregatable groups (IRA / 403(b)) can be satisfied by any same-type, same-owner account, including ones absent from group.accounts.
           let withdrawnCents: number;
           if (group.kind === 'per-plan') {
             const accId = group.accounts[0]?.id ?? '';
             const row = year.accountBalances?.get(accId);
-            // Count the withdrawn cents that actually satisfy this
-            // account's requirement — the shared `rmdEligibleWithdrawnCents` rule
-            // (full `withdrawn` for PRE_TAX and for a pure Roth account whose
-            // beneficiary distribution satisfies §401(a)(9)(B) untaxed; the
-            // pre-tax tranche only for MIXED; 0 for HSA). When
-            // `accountsById.get(...)` is undefined (stale cache) treat as
-            // PRE_TAX — full `withdrawn` is conservative (never hides a shortfall
-            // for a PRE_TAX account). `row` undefined → 0 withdrawn.
+            // Stale cache (no meta) is treated as PRE_TAX: the full withdrawn is conservative and never hides a shortfall.
             const meta = accountsById.get(accId);
             const taxTreatment = meta?.taxTreatment ?? 'PRE_TAX';
             withdrawnCents = row
@@ -299,19 +201,12 @@ export function buildGuidanceYearRows(
                   meta.ownerId === group.ownerId &&
                   meta.type === group.accountType
                 ) {
-                  // Same shared satisfying-withdrawal rule as above.
                   withdrawnCents += rmdEligibleWithdrawnCents(row, meta.taxTreatment);
                 }
               }
             }
           }
-          // QCD offset (§408(d)(8)): a QCD satisfies the directing owner's
-          // IRA-pool RMD. `qcdRmdOffsetCentsByOwner` is the per-owner IRA-pool
-          // offset, so credit it as withdrawn-equivalent ONLY toward that owner's
-          // traditional-IRA aggregation group (`RETIREMENT_IRA`) — never a 403(b)
-          // aggregatable group nor any per-plan 401(k)/457/TSP/CBP group (those
-          // keep the unchanged gross comparison). One IRA aggregation group per
-          // owner, so no double-credit. Mirrors balance-projection-runner-tax.ts.
+          // §408(d)(8): a QCD offsets only the owner's traditional-IRA aggregation group (RETIREMENT_IRA), never a 403(b) or per-plan group; one IRA group per owner, so no double-credit.
           const qcdOffsetCents =
             group.kind === 'aggregatable' && group.accountType === 'RETIREMENT_IRA'
               ? Math.max(0, year.qcdRmdOffsetCentsByOwner?.[group.ownerId] ?? 0)
@@ -323,22 +218,7 @@ export function buildGuidanceYearRows(
   });
 }
 
-/**
- * Scale every dollar field of a set of nominal `GuidanceYearRow`s into a
- * DISPLAY-basis copy, multiplying each year's figures by `deflate(year)` (the
- * caller's `basisDeflator`). Pure — returns a fresh array; the input is never
- * mutated. The PDF builder (`buildWithdrawalGuidanceTableSpec`) consumes the
- * result and only formats, never deflates (the PDF "never deflate in the table
- * adapter" invariant).
- *
- * Scaled fields: the summary (`totalWithdrawnDollars` / `taxAndMedicareDollars`
- * / `spendableDollars`), every per-account withdrawn / ending / RMD / HSA-split
- * / MIXED-split dollar field, and each `rmdGroups` group + account
- * `requiredCents` (cents scale by the same factor). Presence-gated optional
- * fields (HSA / MIXED splits) are scaled only when present, so an absent field
- * stays absent (the builder reads the same presence gate). Booleans, ids,
- * names, labels, and the residual-rule structure are preserved verbatim.
- */
+/** Scales every dollar field into a display-basis copy by `deflate(year)`; optional HSA/MIXED fields scale only when present, and the input is not mutated (the PDF adapter never deflates). */
 export function deflateGuidanceRows(
   rows: ReadonlyArray<GuidanceYearRow>,
   deflate: (year: number) => number,
@@ -384,12 +264,7 @@ export function deflateGuidanceRows(
   });
 }
 
-/**
- * Index of the row matching `year`, or the nearest in range. Returns `-1` both
- * when `rows` is empty AND when `year` is before the first row's year (so the
- * caller can render a distinct "before the projected range" state rather than
- * silently labelling the first drawdown year as the selected year).
- */
+/** Index of the row for `year`, nearest in range; `-1` when rows are empty or the year precedes the first row, so the caller can show a "before range" state. */
 export function indexForYear(
   rows: ReadonlyArray<GuidanceYearRow>,
   year: number,
@@ -397,8 +272,6 @@ export function indexForYear(
   if (rows.length === 0) return -1;
   const exact = rows.findIndex((r) => r.year === year);
   if (exact >= 0) return exact;
-  // Before the first projected year → -1 (caller handles "before range");
-  // after the last → clamp to the last row. (The stepper never lands here.)
   if (year < rows[0].year) return -1;
   return rows.length - 1;
 }

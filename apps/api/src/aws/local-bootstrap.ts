@@ -1,14 +1,5 @@
-/**
- * Dev-only bootstrap for the local emulator stack (DynamoDB Local + Moto).
- * Creates tables + the snapshots bucket if missing so a fresh `pnpm emu:up`
- * + `pnpm dev` Just Works without a parallel infra script.
- *
- * Mirrors the schema in infrastructure/src/dynamo.ts. When that file
- * changes, update both. Idempotent: re-running is a no-op.
- *
- * Runs only when DYNAMODB_ENDPOINT is set (i.e. Scenario 2/3). Real AWS
- * (Scenario 4) is provisioned by Pulumi; this code is a no-op there.
- */
+// Dev-only bootstrap for the local emulator stack: creates the tables and snapshots bucket if missing, idempotently, when
+// DYNAMODB_ENDPOINT is set. It mirrors infrastructure/src/dynamo.ts.
 import {
   DynamoDBClient,
   CreateTableCommand,
@@ -136,7 +127,6 @@ function buildTableSpecs(env: EnvConfig): TableSpec[] {
       ...hashRange(env.TABLE_HOUSEHOLD_KEY_ENVELOPE, 'householdId', 'slotId'),
       ttlAttribute: 'expiresAt',
     },
-    // Enforced second-factor (MFA) tables.
     hashOnly(env.TABLE_USER_MFA, 'userId'),
     {
       ...hashOnly(env.TABLE_MFA_EMAIL_OTP, 'userId'),
@@ -146,7 +136,6 @@ function buildTableSpecs(env: EnvConfig): TableSpec[] {
       ...hashRange(env.TABLE_TRUSTED_DEVICE, 'userId', 'deviceId'),
       ttlAttribute: 'expiresAt',
     },
-    // Shared, single-use WebAuthn challenge storage.
     {
       ...hashOnly(env.TABLE_PASSKEY_CHALLENGE, 'key'),
       ttlAttribute: 'expiresAt',
@@ -171,7 +160,6 @@ async function ensureTable(
     throw err;
   }
   if (spec.ttlAttribute) {
-    // DynamoDB Local accepts UpdateTimeToLive immediately after create.
     await ddb.send(
       new UpdateTimeToLiveCommand({
         TableName: spec.tableName,
@@ -214,13 +202,11 @@ export async function ensureLocalAwsResources(
 
   const tablesCreated: string[] = [];
   for (const spec of buildTableSpecs(env)) {
-    // Some envs already have the table; DescribeTable short-circuits the
-    // CreateTable round-trip and avoids the ResourceInUseException churn.
+    // DescribeTable short-circuits CreateTable and avoids ResourceInUseException churn.
     try {
       await ddb.send(new DescribeTableCommand({ TableName: spec.tableName }));
       continue;
     } catch {
-      // fall through to create
     }
     const result = await ensureTable(ddb, spec);
     if (result === 'created') tablesCreated.push(spec.tableName);

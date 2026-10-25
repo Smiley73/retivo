@@ -1,12 +1,4 @@
-/**
- * Tests for the wait-notice raiser at the shared `apiRequest` seam:
- * every non-sync `Retry-After` this
- * client observes funnels through here, right beside the header
- * parse. `raiseWaitNotice` itself is mocked at the module boundary — its
- * own drop/coalesce behaviour is covered by `lib/toast-queue.test.ts`; this
- * file proves only that `apiRequest` calls it (or doesn't) at the right
- * times.
- */
+// `apiRequest` raises the wait notice for every non-sync Retry-After it observes; `raiseWaitNotice` is mocked (see lib/toast-queue.test.ts) so this file proves only when it is called.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const raiseWaitNotice = vi.fn();
@@ -64,11 +56,7 @@ describe('apiRequest — wait-notice raiser', () => {
     expect(raiseWaitNotice).not.toHaveBeenCalled();
   });
 
-  // The raise is gated on a throttling 429, not on the header
-  // alone. A 503 CAN carry Retry-After (the S3-bootstrap path; "429 or 503 +
-  // Retry-After" backpressure) — but the rule is "a genuine enveloped 5xx
-  // raises nothing", and the
-  // request has failed outright, so "please wait" would be misleading.
+  // The raise is gated on a throttling 429, not the header alone: a 503 can carry Retry-After, but a genuine enveloped 5xx has failed outright and "please wait" would mislead.
   it('a genuine enveloped 503 that DOES carry Retry-After still raises nothing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(serverError(503, '30')));
     await expect(apiRequest('/api/v1/whatever', { auth: false })).rejects.toMatchObject({

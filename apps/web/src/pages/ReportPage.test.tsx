@@ -1,19 +1,5 @@
-/**
- * ReportPage — the Export PDF page.
- *
- * Asserts the page-level control + export wiring, not chart pixels:
- *  - the scenario / basis / display-mode pickers render,
- *  - the display-mode default reads the `retivo.balanceProjection.displayMode`
- *    localStorage key (fallback `'today'`),
- *  - un-projectable Monte Carlo bases are disabled in the basis picker,
- *  - the Export button disables (and a progress bar shows) while exporting,
- *  - a build-stage throw re-enables Export and surfaces an error with no
- *    partial download; a cancel-during-build aborts cleanly,
- *  - no axe violations on the rendered page.
- *
- * The PDF lazy-loader is injected as a MOCK via the page's `pdfLibLoader` prop
- * (the `lazy-load.ts` injectable seam) so jsdom never imports real jsPDF.
- */
+// ReportPage page-level control and export wiring (not chart pixels): pickers, display-mode default from `retivo.balanceProjection.displayMode`, disabled un-projectable MC bases, Export disabled with progress while building, build-stage errors and cancel.
+// The PDF lazy-loader is injected as a mock via `pdfLibLoader` so jsdom never imports real jsPDF.
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { act, render, screen, waitFor, cleanup, within } from '@testing-library/react';
@@ -25,16 +11,18 @@ import {
   clearSelectedScenario,
   writeSelectedScenario,
 } from '../db/store';
-import { notifySelectedScenarioChanged } from '../lib/scenario-mutations';
+import { SELECTED_SCENARIO_CHANGED_EVENT } from '../lib/scenario-mutations';
 import { loadDemoData } from '../lib/demo-data-loader';
 import { expectNoA11yViolations } from '../test/a11y';
 import { ROUGH_BENCHMARK_ASSUMPTIONS } from '../lib/aca-ptc';
 import { ThemeProvider } from '../contexts/ThemeContext';
 import { BetaFeaturesProvider } from '../contexts/BetaFeaturesContext';
 import { ReportPage } from './ReportPage';
-import type { PdfLibs, PdfLibLoader } from '../lib/pdf-export/lazy-load';
+import type { PdfLibLoader } from '../lib/pdf-export/lazy-load';
 import { buildReportData } from '../lib/report-data';
 import { buildPdfSectionModel } from '../lib/pdf-export/build-pdf';
+
+type PdfLibs = Awaited<ReturnType<PdfLibLoader>>;
 
 vi.mock('../lib/report-data', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/report-data')>();
@@ -44,9 +32,7 @@ vi.mock('../lib/report-data', async (importOriginal) => {
   };
 });
 
-// Spy on the pure section-model assembly so the beta-feature tests can assert
-// what the page actually asks the builder to leave out (the wiring one layer
-// above the builder's own unit test).
+// Spy on the section-model assembly so the beta-feature tests can assert what the page asks the builder to leave out.
 vi.mock('../lib/pdf-export/build-pdf', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/pdf-export/build-pdf')>();
   return {
@@ -55,9 +41,7 @@ vi.mock('../lib/pdf-export/build-pdf', async (importOriginal) => {
   };
 });
 
-/** A mock PDF lib trio: a jsPDF stub whose `svg2pdf` + `autoTable` are no-ops
- *  and whose `save` records the download. `throwAt` forces a build-stage
- *  failure (the negative path). */
+// A jsPDF stub whose `svg2pdf` and `autoTable` are no-ops and whose `save` records the download; `throwInSvg2pdf` forces a build-stage failure.
 function makeMockLoader(opts: { throwInSvg2pdf?: boolean } = {}): {
   loader: PdfLibLoader;
   saves: string[];
@@ -114,9 +98,7 @@ async function seedProjectableWorkspace(): Promise<void> {
 describe('ReportPage (Export PDF page)', () => {
   beforeEach(async () => {
     await clearAllStores();
-    // clearAllStores preserves the selectedScenario pointer (production keeps
-    // it across a force-bootstrap), so reset it too — otherwise a pointer
-    // written in one test leaks the active scenario into the next.
+    // clearAllStores preserves the selectedScenario pointer (production keeps it across a force-bootstrap), so reset it too or a pointer written in one test leaks into the next.
     await clearSelectedScenario();
     window.localStorage.clear();
     vi.clearAllMocks();
@@ -135,8 +117,7 @@ describe('ReportPage (Export PDF page)', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Export PDF' }),
     ).toBeInTheDocument();
-    // Scenario + basis are React Aria Selects (button triggers with the field
-    // label); the display unit is a radiogroup.
+    // Scenario and basis are React Aria Selects (button triggers with the field label); the display unit is a radiogroup.
     await waitFor(() =>
       expect(screen.getByLabelText('Scenario')).toBeInTheDocument(),
     );
@@ -144,8 +125,7 @@ describe('ReportPage (Export PDF page)', () => {
     expect(
       screen.getByRole('radiogroup', { name: 'Display unit' }),
     ).toBeInTheDocument();
-    // The Filing assumptions and Health coverage assumptions panels are
-    // both part of the accessibility scan.
+    // Wait for both assumptions panels: they are part of the accessibility scan.
     await screen.findByRole('heading', { name: 'Filing assumptions' });
     await screen.findByRole('heading', { name: 'Health coverage assumptions' });
     await expectNoA11yViolations(container);
@@ -180,7 +160,6 @@ describe('ReportPage (Export PDF page)', () => {
     await seedProjectableWorkspace();
     renderPage();
     const group = await screen.findByRole('radiogroup', { name: 'Display unit' });
-    // The stored "future" preference is the checked option, not the "today" fallback.
     const future = within(group).getByRole('radio', { name: 'Future dollars' });
     await waitFor(() => expect(future).toBeChecked());
   });
@@ -199,8 +178,7 @@ describe('ReportPage (Export PDF page)', () => {
     renderPage();
     const basis = await screen.findByLabelText('Basis');
     await user.click(basis);
-    // The MC tier options render in the open listbox; with no MC run their
-    // representative runs are null → each option is disabled.
+    // With no MC run the representative runs are null, so each MC option is disabled.
     const typical = await screen.findByRole('option', { name: 'Typical' });
     expect(typical).toHaveAttribute('aria-disabled', 'true');
     const pessimistic = screen.getByRole('option', { name: 'Pessimistic' });
@@ -210,15 +188,12 @@ describe('ReportPage (Export PDF page)', () => {
   it('disables the Export button and shows a progress bar while a build is in progress', async () => {
     await seedProjectableWorkspace();
     const user = userEvent.setup();
-    // A loader that never resolves keeps the build "in progress" so we can
-    // observe the disabled/progress state.
+    // A loader that never resolves keeps the build in progress so the disabled/progress state can be observed.
     const neverResolves: PdfLibLoader = () => new Promise<PdfLibs>(() => undefined);
     renderPage(neverResolves);
     const exportBtn = await screen.findByRole('button', { name: 'Export PDF' });
     await waitFor(() => expect(exportBtn).not.toBeDisabled());
     await user.click(exportBtn);
-    // Export button stays visible but disabled, with the progress bar + Cancel
-    // to its right while building.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Export PDF' })).toBeDisabled(),
     );
@@ -247,8 +222,7 @@ describe('ReportPage (Export PDF page)', () => {
   });
 
   it('includes the Projected withdrawals PDF section once the beta feature is switched on', async () => {
-    // The page is rendered with userId=null, so the anonymous preference key
-    // is the one the provider reads.
+    // The page renders with userId=null, so the anonymous preference key is the one the provider reads.
     window.localStorage.setItem('retivo.betaFeatures.anonymous', 'on');
     await seedProjectableWorkspace();
     const user = userEvent.setup();
@@ -274,8 +248,7 @@ describe('ReportPage (Export PDF page)', () => {
     const exportBtn = await screen.findByRole('button', { name: 'Export PDF' });
     await waitFor(() => expect(exportBtn).not.toBeDisabled());
     await user.click(exportBtn);
-    // The build throws inside svg2pdf → an error alert appears and Export is
-    // back, with no `save()` ever called (no partial download).
+    // A build throw inside svg2pdf shows an error alert and brings Export back, with no `save()` call (no partial download).
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(/svg2pdf boom/i),
     );
@@ -295,8 +268,7 @@ describe('ReportPage (Export PDF page)', () => {
     await user.click(exportBtn);
     const cancel = await screen.findByRole('button', { name: 'Cancel' });
     await user.click(cancel);
-    // Cancel tears the in-flight export down and brings Export back; no error
-    // surfaces (a user cancel is not a failure).
+    // A user cancel tears the export down without surfacing an error.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Export PDF' })).toBeInTheDocument(),
     );
@@ -320,18 +292,15 @@ describe('ReportPage (Export PDF page)', () => {
     renderPage();
     await screen.findByRole('heading', { level: 1, name: 'Export PDF' });
     const panel = await screen.findByRole('note', { name: 'Health coverage assumptions' });
-    // All four rows are present…
     expect(within(panel).getByText('Marketplace coverage')).toBeInTheDocument();
     expect(within(panel).getByText('Federal poverty guidelines')).toBeInTheDocument();
     expect(within(panel).getByText('Benchmark plan price')).toBeInTheDocument();
     expect(within(panel).getByText('Months of coverage')).toBeInTheDocument();
-    // …and all three standing disclosures.
     expect(panel).toHaveTextContent(/rough estimate/i);
     expect(panel).toHaveTextContent(/not a quote from an exchange/i);
     expect(panel).toHaveTextContent(/base Medicare premium/i);
     expect(panel).toHaveTextContent(/not an eligibility determination/i);
-    // The rough-benchmark disclosure quotes the CONSTANT the engine prices from,
-    // so a recalibration cannot leave this text stale.
+    // The disclosure quotes the constant the engine prices from, so a recalibration cannot leave the text stale.
     expect(panel).toHaveTextContent(
       new RegExp(
         `\\$${ROUGH_BENCHMARK_ASSUMPTIONS.baseMonthlyDollars.toLocaleString('en-US')} a month for a ${ROUGH_BENCHMARK_ASSUMPTIONS.baseAge}-year-old`,
@@ -353,25 +322,19 @@ describe('ReportPage (Export PDF page)', () => {
     const panel = await screen.findByRole('note', {
       name: 'Market stress assumptions',
     });
-    // Each named stress restates the assumption it changes, so a printed
-    // report is self-describing.
     expect(within(panel).getByText('Higher fees')).toBeInTheDocument();
     expect(within(panel).getByText('Lower returns')).toBeInTheDocument();
     expect(within(panel).getByText('Higher inflation')).toBeInTheDocument();
     expect(within(panel).getByText('Longer life')).toBeInTheDocument();
     expect(panel).toHaveTextContent(/investment cost 0\.5% a year higher/i);
     expect(panel).toHaveTextContent(/up to age 105/i);
-    // Standing disclosures: same-path comparison, no forecast, and the
-    // retained medical-inflation approximation.
     expect(panel).toHaveTextContent(/the same simulated market histories/i);
     expect(panel).toHaveTextContent(/illustrations, not forecasts/i);
     expect(panel).toHaveTextContent(/never move independently of it/i);
   });
 
   it('defaults the scenario pick from the selected-scenario pointer (narrow channel)', async () => {
-    // The sidebar's active-scenario pointer drives the page's default pick.
-    // Pre-seed it to a non-base scenario before mount so the default reflects
-    // the pointer (read via useSelectedScenarioRevision), not the base.
+    // The sidebar's active-scenario pointer drives the default pick; pre-seed a non-base scenario before mount.
     await seedProjectableWorkspace();
     await writeSelectedScenario({
       scenarioId: 'demo-scenario-early',
@@ -384,13 +347,8 @@ describe('ReportPage (Export PDF page)', () => {
     );
   });
 
-  it('re-runs the pointer read on notifySelectedScenarioChanged without clobbering a resolved pick', async () => {
-    // Mounted with no sidebar selection → the page resolves the default base
-    // pick. Firing the narrow selected-scenario event re-runs the pointer read
-    // via useSelectedScenarioRevision, but the page deliberately preserves an
-    // already-resolved valid pick (it must not override a user's explicit
-    // choice). So the assertion is: the event path runs and the resolved base
-    // pick is retained — the export target stays stable mid-session.
+  it('re-runs the pointer read on SELECTED_SCENARIO_CHANGED_EVENT without clobbering a resolved pick', async () => {
+    // The selected-scenario event re-runs the pointer read, but the page preserves an already-resolved valid pick rather than override a user's explicit choice, so the export target stays stable mid-session.
     await seedProjectableWorkspace();
     renderPage();
     const scenarioSelect = await screen.findByLabelText('Scenario');
@@ -401,10 +359,9 @@ describe('ReportPage (Export PDF page)', () => {
       updatedAt: new Date().toISOString(),
     });
     await act(async () => {
-      notifySelectedScenarioChanged();
+      window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
     });
 
-    // Resolved pick preserved (explicit-pick preservation).
     await waitFor(() => expect(scenarioSelect).toHaveTextContent('Base'));
     expect(scenarioSelect).not.toHaveTextContent('Retire early at 62');
   });

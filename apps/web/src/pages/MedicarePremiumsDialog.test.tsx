@@ -123,7 +123,6 @@ describe('MedicarePremiumsDialog', () => {
     expect(screen.getByRole('textbox', { name: 'Jane Medicare Part D monthly amount' })).toHaveValue(
       latest.partDNationalBaseMonthly.toFixed(2),
     );
-    // Medigap, Advantage and the actual Part D plan price stay the person's.
     expect(dialog).toHaveTextContent(/Medigap and Medicare Advantage premiums/);
     await expectNoA11yViolations(baseElement);
   });
@@ -197,7 +196,6 @@ describe('MedicarePremiumsDialog', () => {
 
     await userEvent.click(toggle);
     expect(amount).toBeDisabled();
-    // The other rows are unaffected.
     expect(screen.getByRole('textbox', { name: 'John Medicare Part B monthly amount' })).toBeEnabled();
 
     await userEvent.click(toggle);
@@ -223,7 +221,6 @@ describe('MedicarePremiumsDialog', () => {
     expect(screen.getAllByText(/Looks already entered/).length).toBeGreaterThanOrEqual(3);
     expect(screen.getAllByText(/"John Medicare Part B" in Medical/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Cannot be added/).length).toBe(2);
-    // John's Part D row is flagged by the bridge plan, so it starts off.
     expect(screen.getByRole('switch', { name: 'John Medicare Part D' })).not.toBeChecked();
     expect(screen.getByRole('switch', { name: 'Jane Medicare Part D' })).toBeChecked();
 

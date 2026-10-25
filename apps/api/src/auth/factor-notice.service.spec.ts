@@ -1,22 +1,5 @@
-/**
- * Unit tests for `FactorNoticeService`.
- *
- * `consume` — the ordering the file header is built around: the claim is the
- * pre-flight gate (nothing runs on a failed claim), the session revoke runs
- * BEFORE the single-use gate (a failure there leaves the token valid for a
- * retry), and the destructive undo action never runs as a separate write —
- * it rides INSIDE `UsersRepository.consumeFactorUndo`'s transaction, so a
- * token superseded between the claim and the commit can never act on a
- * factor it was not about. The API-integration suite
- * (`factor-notice.spec.ts`) covers the end-to-end HTTP contract against real
- * emulators and reproduces that race deterministically by injecting the
- * supersession after the claim.
- *
- * `notify` — runs after an already-committed factor change, so it must never
- * reject: a failed token persist and a failed SES send both resolve `false`,
- * and a persist failure must not send a mail
- * whose link points at a token that was never stored.
- */
+// FactorNoticeService.consume: the claim gates everything, the session revoke runs before the single-use gate (a failure leaves the token valid for a retry), and the undo action rides inside UsersRepository.consumeFactorUndo's transaction, so a token superseded between claim and commit never acts on another factor.
+// notify runs after an already-committed factor change, so a failed persist or SES send resolves false and a persist failure sends no mail.
 import 'reflect-metadata';
 import { FactorNoticeService } from './factor-notice.service.js';
 import type { UsersRepository } from '../dynamo/users.repository.js';
@@ -45,8 +28,7 @@ interface Built {
 }
 
 function buildConfig(): ConfigService<EnvConfig, true> {
-  // Every non-NODE_ENV key (incl. SES_ENDPOINT) resolves truthy, so
-  // `sesEnabled` is on and `notify` really calls `ses.send`.
+  // Every non-NODE_ENV key (incl. SES_ENDPOINT) resolves truthy, so `sesEnabled` is on and notify really calls ses.send.
   return {
     get: jest.fn((key: string) => (key === 'NODE_ENV' ? 'test' : 'https://app.example.test')),
   } as unknown as ConfigService<EnvConfig, true>;
@@ -102,7 +84,6 @@ describe('FactorNoticeService.consume — claim, revoke, then act + clear in one
     expect(users.consumeFactorUndo).toHaveBeenCalledWith(
       expect.objectContaining({ userId: USER_ID, action: PASSKEY_DELETE_ITEM }),
     );
-    // Revoke runs BEFORE the single-use gate commits (see the file header).
     expect(sessions.revokeAll).toHaveBeenCalledWith({ userId: USER_ID });
     expect(sessions.revokeAll.mock.invocationCallOrder[0]).toBeLessThan(
       users.consumeFactorUndo.mock.invocationCallOrder[0],

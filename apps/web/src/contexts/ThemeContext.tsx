@@ -1,10 +1,5 @@
-/**
- * Theme preference, persisted in localStorage (see "Theme" in
- * docs/ui-conventions.md).
- *
- * Read is synchronous on mount → no flash of incorrect theme. Storage
- * key includes the userId after login (anonymous before).
- */
+// Theme preference in localStorage, keyed per user after login (anonymous before); see docs/ui-conventions.md "Theme".
+// Read synchronously on mount so there is no flash of the wrong theme.
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 
 type ThemePreference = 'light' | 'dark' | 'system';
@@ -53,12 +48,8 @@ interface ThemeProviderProps {
   /** Switches the storage key after login. Pass null when logged out. */
   userId?: string | null;
   /**
-   * Locks the resolved palette to a fixed value for the subtree, bypassing
-   * the localStorage preference / OS-media path. Used by the PDF render host
-   * to force the print-safe LIGHT chart palette regardless of the app's active
-   * theme (the print-safe chart palette). The nested
-   * provider does NOT touch `document.documentElement` or localStorage, so the
-   * surrounding app theme is untouched.
+   * Pins the resolved palette for the subtree without touching `document` or localStorage (the PDF host forces the
+   * light chart palette).
    */
   forcedResolvedTheme?: 'light' | 'dark';
 }
@@ -71,8 +62,7 @@ export const ForcedThemeProvider: React.FC<{
     value={{
       theme: resolvedTheme,
       resolvedTheme,
-      // Locked subtree: setter is a no-op so a descendant control can't drift
-      // the forced palette (the PDF capture must stay light-only).
+      // No-op so a descendant control cannot drift the forced palette.
       setTheme: () => undefined,
     }}
   >
@@ -96,24 +86,20 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
 };
 
 const ThemeProviderInner: React.FC<{ userId: string | null; children: React.ReactNode }> = ({ children, userId }) => {
-  // Synchronous initial state — read happens before first paint, so no flash.
   const initial = readPreference(userId);
   const [theme, setThemeState] = useState<ThemePreference>(initial);
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => resolveTheme(initial));
 
-  // Apply on mount + on every theme change.
   useEffect(() => {
     applyTheme(resolvedTheme);
   }, [resolvedTheme]);
 
-  // Re-read when the user logs in / out (storage key flips).
   useEffect(() => {
     const next = readPreference(userId);
     setThemeState(next);
     setResolvedTheme(resolveTheme(next));
   }, [userId]);
 
-  // Listen to OS preference changes only when in `system` mode.
   useEffect(() => {
     if (theme !== 'system') return;
     const mql = window.matchMedia(MEDIA_QUERY);

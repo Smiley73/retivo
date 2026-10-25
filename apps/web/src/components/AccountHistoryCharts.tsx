@@ -1,11 +1,5 @@
 /**
- * Two stacked line charts rendered at the bottom of the per-account
- * Balances page: yearly ending balance and yearly return %.
- *
- * Lazy-imports the SVG chart-engine renderer (mirrors `ProjectionChart`)
- * so the bundle stays out of the auth + dashboard critical path. A single
- * point of data still renders — the engine shows the point, just no line —
- * so the user sees something the moment they enter their first year.
+ * Yearly ending balance and return % line charts for the per-account Balances page; lazy-loads the SVG renderer.
  */
 import React, { Suspense, lazy, useMemo } from 'react';
 import type { ChartMouseHandlers } from '../lib/use-chart-zoom';
@@ -18,7 +12,7 @@ export interface AccountHistoryRow {
 
 interface Props {
   rows: AccountHistoryRow[];
-  /** Zoom-state props injected by useChartZoom in the host section. */
+  /** Zoom state injected by `useChartZoom`. */
   xDomain?: [number, number] | null;
   yDomain?: [number, number] | null;
   dragSelection?: [number, number] | null;

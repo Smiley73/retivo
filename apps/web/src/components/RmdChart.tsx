@@ -1,39 +1,30 @@
 /**
- * Required Minimum Distribution chart on the Balance Projection page.
- * Plots, per RMD year, the required minimum split into the amount MET
- * (bottom segment) and any SHORTFALL (top, red accent) so problem years
- * stand out at a glance. RMD data is already computed on `DrawdownYear`
- * (`rmdFloorCents` / `rmdShortfallCents`); this chart is pure display.
- *
- * Lazy-imported SVG-engine impl. See `RmdChartInner.tsx`.
+ * Per-year required minimum distribution split into the amount met and any shortfall (red); pure display over
+ * `DrawdownYear`. Lazy-loads `RmdChartInner.tsx`.
  */
 import React, { Suspense, lazy } from 'react';
 import type { ChartMouseHandlers } from '../lib/use-chart-zoom';
 import type { CashflowChartMarker } from './CashflowProjectionChart';
 import type { TooltipMember } from './tooltip-member';
 
-/** Per-year data row consumed by the RMD chart. */
 export interface RmdChartRow {
   readonly year: number;
-  /** RMD met by the projected withdrawals (dollars, ≥ 0) — the bottom
-   *  stacked segment. Equals `rmdFloor − rmdShortfall`. */
+  /** RMD met by projected withdrawals (dollars, ≥ 0), the bottom segment. */
   readonly rmdMet: number;
-  /** Portion of the RMD the projection could not fund (dollars, ≥ 0) —
-   *  the top stacked segment, painted in the red shortfall accent. */
+  /** Portion the projection could not fund (dollars, ≥ 0), the top red segment. */
   readonly rmdShortfall: number;
-  /** Portion of the met RMD retained rather than spent (dollars, ≥ 0) —
-   *  surplus reinvested into a taxable account plus any held as cash. When
-   *  > 0 the met band splits into used-for-spending + surplus (kept). */
+  /**
+   * Portion of the met RMD retained rather than spent (dollars, ≥ 0); when > 0 the met band splits
+   * into spent and kept.
+   */
   readonly rmdRetained: number;
 }
 
 interface Props {
   rows: RmdChartRow[];
-  /** Household members shown in tooltip header — "<First> (age N)". */
   members?: ReadonlyArray<TooltipMember>;
-  /** Retirement + death markers rendered as dashed reference lines. */
   markers?: ReadonlyArray<CashflowChartMarker>;
-  /** Zoom-state props injected by useChartZoom in the host section. */
+  /** Zoom state injected by `useChartZoom`. */
   xDomain?: [number, number] | null;
   yDomain?: [number, number] | null;
   dragSelection?: [number, number] | null;

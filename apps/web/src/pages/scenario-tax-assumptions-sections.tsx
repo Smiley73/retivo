@@ -1,50 +1,4 @@
-/**
- * Tax-assumptions sections for the standalone Tax assumptions modal.
- *
- * The modal separates the two concerns into tabs (modelled after the
- * withdrawal-strategy modal), so each control lives in its own section
- * component rendered inside its own tab panel:
- *   1. `HsaQualifiedSection` — a `RangeSlider` for `hsaQualifiedMedicalExpensePct`
- *      (0–100, step 5). Projections now spend your HSA on your modeled medical
- *      costs FIRST (tax-free), and only tap it as an emergency reserve once every
- *      other account is empty. This control governs ONLY those emergency draws:
- *      the share of an emergency HSA withdrawal you can still back with qualified
- *      medical receipts (tax-free). The rest is taxed as regular income plus the
- *      20% under-65 tax. The default is 100 (fully qualified).
- *   2. `PenaltyExemptionsSection` — a per-account `ToggleSwitch` for each
- *      penalty-eligible account, writing `earlyWithdrawalPenaltyExemptAccountIds`.
- *   3. `HealthCoverageSection` — the health editor: a per-MEMBER
- *      `ToggleSwitch` (on Marketplace / other coverage) writing
- *      `acaMarketplaceOptOutMemberIds`, the federal-poverty-level region
- *      (`acaFplRegion`), the per-member/per-year Medicare Part B / Part D and
- *      Marketplace MONTHS (`healthCoverageMonths`), and the per-year benchmark
- *      plan price (`acaPtcBenchmark`) shown beside the rough estimate it
- *      replaces. Used by the standalone Health coverage modal, not the
- *      tax-assumptions tabs.
- *   4. `FilingPlanSection` — the filing editor: joint vs separate returns
- *      while both spouses are alive, the lived-together fact and each spouse's
- *      filing status + tax-household size for separate returns, and the
- *      year-bounded survivor exceptions that override the post-death default.
- *      Writes `taxFilingPlan`.
- *
- * Copy is plain English per the project layman's-terms standard.
- *
- * SHAPE-LIMIT EXCEPTION (recorded justification; CODING_STANDARDS ≤ 800 lines):
- * this file is over the 800-line limit, and three of the health-editor
- * components exceed the 60-line function cap. Why it cannot be split: every
- * section here is a presentational leaf of ONE modal family, each driven
- * entirely by props from `scenario-withdrawal-strategy-draft-hook` and each
- * writing exactly one `ScenarioOverrides` key. Splitting the health editor into
- * a sibling module would export five row/section components plus their prop
- * types across a new boundary purely to move lines, with no shared logic to
- * extract — the row components are JSX-tall (a `Select` per month field with its
- * own `Field` label + helper copy), not logic-dense. Behaviour is covered by
- * `aca-coverage-modal.test.tsx` +
- * `scenario-withdrawal-strategy-save-helpers.test.ts`. Trigger: a change adding
- * 5 or more lines here must either refactor the file back under the limit or
- * re-justify this exception in this note; a new section should extract the
- * health editor first.
- */
+/** Sections of the Tax assumptions and Health coverage modals: HSA, penalty exemptions, health coverage, filing plan. */
 import React from 'react';
 import { RadioGroup } from 'react-aria-components';
 import { RangeSlider } from '../components/RangeSlider';
@@ -129,13 +83,7 @@ export const PenaltyExemptionsSection: React.FC<PenaltyExemptionsSectionProps> =
   accounts,
   onTogglePenaltyExempt,
 }) => {
-  // Only penalty-eligible accounts can be marked exempt — those whose
-  // withdrawals can trigger the 10% early-withdrawal penalty before age 59½.
-  // This now includes Roth IRAs: a Roth IRA's contributions always come out
-  // penalty-free, but once you reach its earnings (above what you put in) before
-  // 59½, that earnings portion carries the 10% penalty. 457(b) / brokerage /
-  // savings / HSA carry no 59½ penalty (or a different rule), so a toggle there
-  // would mean nothing.
+  // Only penalty-eligible accounts (10% penalty before 59½) can be exempt; a Roth IRA's earnings, not its contributions, carry the penalty.
   const penaltyAccounts = accounts.filter(
     (a) => a.payload.active && isPenaltyEligibleAccount(a),
   );
@@ -195,22 +143,16 @@ export interface HealthCoverageSectionProps {
   onChangeBenchmarkRows: (next: readonly DraftBenchmarkRow[]) => void;
 }
 
-/** The three HHS poverty-guideline schedules, in plain English. */
 const FPL_REGION_OPTIONS: ReadonlyArray<{ value: AcaFplRegion; label: string }> = [
   { value: 'contiguous', label: 'One of the 48 mainland states or Washington, DC' },
   { value: 'alaska', label: 'Alaska' },
   { value: 'hawaii', label: 'Hawaii' },
 ];
 
-/** How many years ahead the year pickers offer. Long enough to cover a full
- *  retirement horizon without turning the list into a scroll marathon. */
 const COVERAGE_YEAR_HORIZON = 45;
 
-/** "Automatic" (leave it to the projection's own timing) vs a stated count. */
 const AUTOMATIC_MONTHS = '';
 
-/** Year options: this year through the horizon, plus any year already stored so
- *  an older saved row still shows its own value. */
 function coverageYearOptions(
   extraYears: readonly number[],
 ): ReadonlyArray<{ value: string; label: string }> {
@@ -222,7 +164,6 @@ function coverageYearOptions(
     .map((y) => ({ value: String(y), label: String(y) }));
 }
 
-/** 0–12 plus the "Automatic" default. */
 const MONTH_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: AUTOMATIC_MONTHS, label: 'Automatic' },
   ...Array.from({ length: 13 }, (_, i) => ({
@@ -231,8 +172,6 @@ const MONTH_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   })),
 ];
 
-/** One removable coverage-months row: whose year it is, and the three
- *  independent month counts. */
 const CoverageMonthsRow: React.FC<{
   rowId: string;
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
@@ -288,7 +227,6 @@ const CoverageMonthsRow: React.FC<{
   );
 };
 
-/** The per-member / per-year coverage-months table. */
 const CoverageMonthsEditor: React.FC<{
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
   rows: readonly DraftHealthCoverageRow[];
@@ -361,8 +299,6 @@ const CoverageMonthsEditor: React.FC<{
   );
 };
 
-/** The per-year benchmark-premium override table + the rough-estimate
- *  disclosure the estimate is otherwise built from. */
 const BenchmarkOverrideEditor: React.FC<{
   rows: readonly DraftBenchmarkRow[];
   onChangeRows: (next: readonly DraftBenchmarkRow[]) => void;
@@ -466,21 +402,7 @@ const BenchmarkOverrideEditor: React.FC<{
   );
 };
 
-/**
- * Health coverage editor. Four concerns in one section:
- *  1. Per-member Marketplace opt-out. ON = buying a Marketplace plan in early
- *     retirement (the default — a premium subsidy is estimated for their pre-65
- *     years); OFF = "other coverage" (retiree / COBRA / spousal plan), so no
- *     subsidy is credited. Lists ALL members: opting out a member who
- *     never retires before 65 is a harmless no-op.
- *  2. The federal poverty guidelines used to size the subsidy (Alaska and
- *     Hawaii have their own, higher, schedules).
- *  3. Per-member, per-year Medicare Part B / Part D and Marketplace MONTHS.
- *  4. The per-year benchmark-plan price override, shown beside the rough
- *     estimate it replaces (the approximation is never presented as a
- *     real exchange quote).
- * Copy is plain English per the project layman's-terms standard.
- */
+/** Health editor: per-member Marketplace opt-out, FPL region, coverage months and benchmark-premium overrides. */
 export const HealthCoverageSection: React.FC<HealthCoverageSectionProps> = ({
   acaOptOutMemberIds,
   members,
@@ -559,33 +481,17 @@ export const HealthCoverageSection: React.FC<HealthCoverageSectionProps> = ({
   );
 };
 
-// ——— Filing plan ————————————————————————————————————
-
-/** Statuses a spouse may pick for their OWN return while both are alive. A
- *  married person filing apart is either MFS or — when they maintain a home
- *  for a dependent and lived apart the last half of the year — Head of
- *  household. `Single`, `MFJ`, and `QSS` are not reachable here. */
+// Statuses for a spouse's own return while both are alive: MFS, or HoH when maintaining a home for a dependent and living apart.
 const SEPARATE_UNIT_STATUSES: readonly TaxUnitFilingStatus[] = ['MFS', 'HoH'];
 
-/** Statuses a one-person household can file every year: the `Single` default,
- *  or `HoH` when they maintain a home for a dependent (without this
- *  control an individual plan could not express a standing head-of-household
- *  filer at all, so converting the legacy `HoH` setting silently downgraded
- *  them to Single). */
+// Without the HoH option an individual plan could not express a standing head-of-household filer.
 const INDIVIDUAL_STANDING_STATUSES: readonly TaxUnitFilingStatus[] = ['Single', 'HoH'];
 
-/** Statuses a year-bounded exception window may set. Both override the
- *  post-death `Single` default; neither is available while both spouses are
- *  alive. */
 const WINDOW_STATUSES: readonly TaxUnitFilingStatus[] = ['QSS', 'HoH'];
 
-/** §2(a) — qualifying surviving spouse is available for at most the TWO tax
- *  years FOLLOWING the year of death. A longer window is surfaced as a warning
- *  rather than blocked: the projection's death year is a model assumption the
- *  user may be planning around. */
+// §2(a): QSS covers at most the two tax years after the death year; a longer window warns rather than blocks.
 const MAX_QSS_WINDOW_YEARS = 2;
 
-/** Tax-household sizes offered for one spouse's separate return. */
 const HOUSEHOLD_SIZE_OPTIONS = [1, 2, 3, 4, 5, 6] as const;
 
 const DEFAULT_SEPARATE_UNITS: readonly [FilingPlanTaxUnit, FilingPlanTaxUnit] = [
@@ -593,18 +499,10 @@ const DEFAULT_SEPARATE_UNITS: readonly [FilingPlanTaxUnit, FilingPlanTaxUnit] = 
   { memberId: 'secondary', filingStatus: 'MFS', householdSize: 1 },
 ];
 
-/**
- * Neutral local names for the shared static-anchor bridge. The exported
- * helpers are named for their FIRST consumer (a MAGI cap window's END anchor),
- * but the conversion is generic over the `age | year` static anchor subset,
- * which is exactly what a filing window's START and END both use. Aliased here
- * rather than renamed repo-wide.
- */
+// The exported helpers are named for their first consumer but convert any age|year static anchor.
 const toAnchorPickerValue = magiCapEndToGlideAnchor;
 const fromAnchorPickerValue = glideAnchorToMagiCapEnd;
 
-/** A fresh exception window: the two calendar years starting next year. The
- *  user re-anchors both ends; this only avoids an "enabled but empty" row. */
 function defaultFilingStatusWindow(): FilingStatusWindow {
   const nextYear = new Date().getFullYear() + 1;
   return {
@@ -614,26 +512,20 @@ function defaultFilingStatusWindow(): FilingStatusWindow {
   };
 }
 
-/** The plan's YEAR-BOUNDED exception windows — the standing open-ended window
- *  (an individual plan's `HoH`) is edited by its own control, not listed here. */
 function exceptionWindowsOf(plan: TaxFilingPlan): readonly FilingStatusWindow[] {
   return (plan.statusWindows ?? []).filter((w) => !isOpenEndedStatusWindow(w));
 }
 
-/** The plan's standing (open-ended) filing status, or `Single` when none. Reads
- *  it through the SHARED resolver helper, so the editor's controls and copy name
- *  the same standing status the engines and the report sentence do. */
+// Reads the shared resolver helper so the editor names the same standing status as the engines and report.
 function standingStatusOf(plan: TaxFilingPlan): TaxUnitFilingStatus {
   return standingFilingStatus(plan.statusWindows);
 }
 
-/** Mid-sentence label for a filing status ("files as head of household"). */
 function statusLabelLower(status: TaxUnitFilingStatus): string {
   return FILING_STATUS_LABELS[status].toLowerCase();
 }
 
-/** Write `statusWindows` sparse-optionally: an empty list is stored as an
- *  ABSENT key, never `[]`. */
+// An empty list is stored as an absent key, never [].
 function planWithWindows(
   plan: TaxFilingPlan,
   windows: readonly FilingStatusWindow[],
@@ -646,8 +538,6 @@ function planWithWindows(
   return { ...plan, statusWindows: windows };
 }
 
-/** The statutory problems with a window, in plain English. Empty when
- *  the window is fine. */
 function windowWarnings(w: FilingStatusWindow): string[] {
   const problems: string[] = [];
   if (w.status !== 'QSS') return problems;
@@ -662,7 +552,6 @@ function windowWarnings(w: FilingStatusWindow): string[] {
   return problems;
 }
 
-/** The standing filing status for a ONE-PERSON household. */
 const IndividualStatusPicker: React.FC<{
   plan: TaxFilingPlan;
   onChangePlan: (next: TaxFilingPlan) => void;
@@ -685,9 +574,7 @@ const IndividualStatusPicker: React.FC<{
           onChange={(v) => {
             const next = v as TaxUnitFilingStatus;
             const windows = exceptionWindowsOf(plan);
-            // The standing window is stored LAST, behind the year-bounded
-            // exceptions it is the fallback for, so the stored array reads in the
-            // same priority order the resolver applies.
+            // Store the standing window last, behind the exceptions, so the array reads in the resolver's priority order.
             onChangePlan(
               planWithWindows(
                 plan,
@@ -705,20 +592,11 @@ const IndividualStatusPicker: React.FC<{
   );
 };
 
-/** Joint vs separate returns while both spouses are alive. A plan whose kind is
- *  neither (a one-person plan that outlived its household) leaves BOTH
- *  options unselected, so the couple makes an explicit choice rather than
- *  inheriting a silent default. */
 const FilingPlanKindPicker: React.FC<{
   plan: TaxFilingPlan;
   onChangePlan: (next: TaxFilingPlan) => void;
 }> = ({ plan, onChangePlan }) => {
-  // Carry ONLY the year-bounded exception windows across. A couple's plan
-  // has no standing (open-ended) status of its own: the one-person **Files as**
-  // control is the only thing that writes one, so an open-ended entry here can
-  // only be a leftover from a spell when the spouse was removed. Copying it into
-  // the new plan would keep the survivor filing that old standing status forever
-  // after a later death, with no control on this screen able to show or clear it.
+  // Carry only year-bounded windows across: a couple's plan has no standing status, so an open-ended entry is a leftover that would bind the survivor forever.
   const windows = exceptionWindowsOf(plan);
   return (
     <div className="min-w-0">
@@ -752,7 +630,6 @@ const FilingPlanKindPicker: React.FC<{
   );
 };
 
-/** One spouse's separate return: status + tax-household size. */
 const SeparateUnitEditor: React.FC<{
   unit: FilingPlanTaxUnit;
   label: string;
@@ -791,31 +668,20 @@ const SeparateUnitEditor: React.FC<{
   </div>
 );
 
-/** Drop the sparse-optional `livedTogether` key entirely: absent means
- *  "lived apart", so an explicit `false` would only leave a dead key on every
- *  synced device. */
+// Absent means "lived apart"; an explicit false would leave a dead key on every synced device.
 function withoutLivedTogether(plan: SeparateFilingPlan): SeparateFilingPlan {
   const { livedTogether: _dropped, ...rest } = plan;
   void _dropped;
   return rest;
 }
 
-/** The separate-returns editor: the lived-together fact plus each spouse's own
- *  return. Indexes `units[0]`/`units[1]` directly, so the caller must hand it a
- *  plan that passed `isWellFormedFilingPlan` — the tax-assumptions modal
- *  validates the stored payload before the draft ever reaches these controls, which is what keeps
- *  a corrupt `separate` payload from throwing during
- *  render on the very tab that exists to repair it. */
+// Indexes units[0]/units[1] directly: the caller must pass a plan that passed isWellFormedFilingPlan, so a corrupt payload cannot throw on the tab that repairs it.
 const SeparateReturnsEditor: React.FC<{
   plan: SeparateFilingPlan;
   nameFor: (role: 'primary' | 'secondary') => string;
   onChangePlan: (next: TaxFilingPlan) => void;
 }> = ({ plan, nameFor, onChangePlan }) => {
-  // §2(c)/§7703(b): head of household requires being "considered unmarried" —
-  // the spouse must NOT have been a member of the household for the last six
-  // months of the year. So HoH and "lived together at some point" are mutually
-  // exclusive; selecting HoH clears the lived-together fact, and the
-  // toggle is unavailable while an HoH return is selected.
+  // §2(c)/§7703(b): HoH requires being considered unmarried, so HoH and lived-together are mutually exclusive.
   const anyHoH = plan.units.some((u) => u.filingStatus === 'HoH');
   const setLivedTogether = (next: boolean): void => {
     if (!next) {
@@ -828,9 +694,6 @@ const SeparateReturnsEditor: React.FC<{
     const next: [FilingPlanTaxUnit, FilingPlanTaxUnit] = [plan.units[0], plan.units[1]];
     next[index] = { ...next[index], ...patch };
     const nextPlan: SeparateFilingPlan = { ...plan, units: next };
-    // HoH requires being "considered unmarried" (§2(c)/§7703(b)), so
-    // selecting it auto-clears an already-set lived-together fact instead of
-    // saving a statutorily contradictory plan.
     onChangePlan(
       next.some((u) => u.filingStatus === 'HoH') ? withoutLivedTogether(nextPlan) : nextPlan,
     );
@@ -873,9 +736,7 @@ const SeparateReturnsEditor: React.FC<{
   );
 };
 
-/** Stable per-row keys for the removable exception rows: array indexes
- *  re-key every survivor when an earlier row is deleted, so the Select /
- *  anchor-picker state of row N+1 can follow row N. */
+// Stable row keys: array indexes would re-key every survivor when an earlier row is deleted.
 function useStableRowIds(
   count: number,
   prefix = 'filing-window',
@@ -889,9 +750,6 @@ function useStableRowIds(
   const [ids, setIds] = React.useState<string[]>(() =>
     Array.from({ length: count }, mint),
   );
-  // Re-sync when the row count changed OUTSIDE this component (e.g. switching
-  // plan kind carries the windows across). Appends / truncates at the end only;
-  // the add / remove handlers below keep identity exact for user edits.
   if (ids.length !== count) {
     const next = ids.slice(0, count);
     while (next.length < count) next.push(mint());
@@ -904,7 +762,6 @@ function useStableRowIds(
   };
 }
 
-/** One removable exception-window row. */
 const FilingExceptionWindowRow: React.FC<{
   rowId: string;
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
@@ -948,7 +805,6 @@ const FilingExceptionWindowRow: React.FC<{
   </li>
 );
 
-/** The year-bounded survivor exception windows. */
 const FilingExceptionWindowsEditor: React.FC<{
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
   windows: readonly FilingStatusWindow[];
@@ -1022,37 +878,13 @@ export interface FilingPlanSectionProps {
   /** The draft plan being edited. */
   plan: TaxFilingPlan;
   onChangePlan: (next: TaxFilingPlan) => void;
-  /**
-   * Set when this scenario's stored filing facts cannot be converted
-   * automatically: a legacy scalar filing status that does not say how both
-   * spouses file (a two-member `Single`/`HoH`, a one-member `MFJ`, or an
-   * unrecognised value), or an unusable stored plan (see
-   * `unresolvedFromStoredPlan`). Projections keep filing exactly as before until
-   * the user saves a plan here; nothing is dropped.
-   */
+  /** Set when the stored filing facts cannot be converted automatically; projections file as before until the user saves a plan. */
   unresolvedLegacyDetail?: string;
-  /**
-   * True when `unresolvedLegacyDetail` describes a stored PLAN that could
-   * not be used (a corrupt payload, or one written before a spouse joined the
-   * household) rather than an older scalar setting. The editor has opened on a
-   * safe default, so the prompt says the saved choice was reset instead of
-   * telling the user about a setting they may not have.
-   */
+  /** True when the unresolved detail is an unusable stored plan rather than an older scalar setting. */
   unresolvedFromStoredPlan?: boolean;
 }
 
-/**
- * Filing editor. Lets a household say how it files each year: together on one
- * return or separately on two while both spouses are alive, and which
- * year-bounded exception (if any) applies after a spouse dies.
- *
- * The stored plan is transition-safe by construction — a joint plan still files
- * jointly the year a spouse dies, a separate plan still files two returns that
- * year, and later years fall back to the plan's standing status (`Single` unless
- * a standing open-ended window says otherwise) except in the years a bounded
- * exception window covers — so it cannot freeze a stale "married filing jointly"
- * the way the old single filing-status setting could.
- */
+/** Filing editor: joint or separate returns while both spouses are alive, plus year-bounded survivor exceptions. */
 export const FilingPlanSection: React.FC<FilingPlanSectionProps> = ({
   members,
   plan,
@@ -1062,10 +894,6 @@ export const FilingPlanSection: React.FC<FilingPlanSectionProps> = ({
 }) => {
   const primary = members.find((m) => m.payload.isPrimary);
   const secondary = members.find((m) => !m.payload.isPrimary);
-  // What the projection files in a year no exception covers. `Single` for
-  // almost every plan, but a standing head-of-household window makes it that
-  // instead, and the copy below says whichever is true rather than hardcoding
-  // "single" (the same standing status the report sentence names).
   const standingStatus = standingStatusOf(plan);
   const standing = statusLabelLower(standingStatus);
   const nameFor = (role: 'primary' | 'secondary'): string => {
@@ -1094,10 +922,7 @@ export const FilingPlanSection: React.FC<FilingPlanSectionProps> = ({
                 save to switch over.
               </span>
             )}
-            {/* Switching over is an EXPLICIT act. Saving any other tax
-                assumption no longer converts the older setting behind the
-                user's back, so this button exists for the case where the
-                choice already shown is the one they want. */}
+            {/* Switching is explicit: saving another tax assumption does not convert the older setting. */}
             <button
               type="button"
               className={btnSecondaryClass}
@@ -1111,9 +936,6 @@ export const FilingPlanSection: React.FC<FilingPlanSectionProps> = ({
       <Muted className="text-sm">
         Tell the projection which tax return (or returns) your household files
         each year.{' '}
-        {/* The spouse-death sentence only makes sense for a household
-            that HAS a spouse. A scenario whose stored plan still says `joint` /
-            `separate` after the spouse was removed used to keep this copy. */}
         {secondary === undefined
           ? 'You are the only person in this plan, so every year is filed on one return.'
           : plan.kind === 'separate'
@@ -1121,25 +943,14 @@ export const FilingPlanSection: React.FC<FilingPlanSectionProps> = ({
             : `The year a spouse dies is still filed together, and later years fall back to filing ${standing} unless you add an exception below.`}
       </Muted>
 
-      {/* Which picker shows follows the household that exists NOW, not
-          the kind the stored plan happens to carry. Gating on `plan.kind` left a
-          couple whose scenario still held a one-person plan (saved before the
-          spouse was added) with no joint/separate control at all — the one
-          screen that can repair it. */}
+      {/* The picker follows current membership, not plan.kind, so a couple holding a one-person plan can still repair it. */}
       {secondary === undefined ? (
         <IndividualStatusPicker plan={plan} onChangePlan={onChangePlan} />
       ) : (
         <FilingPlanKindPicker plan={plan} onChangePlan={onChangePlan} />
       )}
 
-      {/* Every kind-specific control follows CURRENT membership too, not
-          just the picker above. A stored `separate` plan on a household whose
-          spouse has since been removed used to render the two-return editor
-          (two "Files as" selects, a lived-together toggle) directly beneath the
-          one-person picker: two controls contradicting each other, describing a
-          spouse who is no longer in the plan. The resolver already files that
-          household's single surviving return, so the two-return editor has
-          nothing to edit until a spouse is added back. */}
+      {/* Kind-specific controls follow current membership too: a stored separate plan with no spouse would contradict the one-person picker. */}
       {plan.kind === 'separate' && secondary !== undefined && (
         <SeparateReturnsEditor plan={plan} nameFor={nameFor} onChangePlan={onChangePlan} />
       )}
@@ -1149,11 +960,7 @@ export const FilingPlanSection: React.FC<FilingPlanSectionProps> = ({
         windows={exceptionWindowsOf(plan)}
         standingStatus={standingStatus}
         onChangeWindows={(next) =>
-          // Exceptions first, the plan's standing (open-ended) window last:
-          // the standing window covers every year, so storing it ahead of an
-          // exception used to leave that exception inert (the row rendered, the
-          // resolver never reached it). Stored in priority order, the array reads
-          // the way the resolver applies it.
+          // Exceptions first, standing window last: a standing window ahead of an exception would make it inert.
           onChangePlan(
             planWithWindows(plan, [
               ...next,

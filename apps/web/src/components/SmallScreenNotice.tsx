@@ -1,36 +1,20 @@
 /**
- * Small-screen advisory shown on the sign-in page. Retivo is laid out for tablets and computers; on a phone
- * the pages still open but do not format well, so a phone-width viewport
- * gets a one-time heads-up before signing in.
- *
- *  - Threshold: viewport width below 640px (Tailwind `sm`) — phones only;
- *    portrait tablets (768px+) never see it.
- *  - Dismissal: per tab session (`sessionStorage`). Continue, Esc, and a
- *    scrim click all count — the notice must never nag within one visit,
- *    and comes back the next time the app is opened on the phone.
- *  - Placement: a modal on the sign-in surface only, not on every page.
- *
- * Built on the shared {@link Modal} (React Aria `Dialog`) so
- * the dialog role, focus trap + restore, and Esc/scrim dismiss come from
- * there. The media query is live: rotating a phone into a wider viewport
- * closes the notice without marking it dismissed.
+ * One-time sign-in advisory for phone-width viewports (below 640px), dismissed per tab session. The media query is
+ * live, so rotating wider closes it without marking it dismissed.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Modal } from './Modal';
 import { btnPrimaryClass } from './dialog-chrome';
 
-/** Below Tailwind's `sm` breakpoint (640px) — phone-width viewports. */
-export const PHONE_VIEWPORT_QUERY = '(max-width: 639px)';
+const PHONE_VIEWPORT_QUERY = '(max-width: 639px)';
 
-/** sessionStorage key: `'1'` once the notice has been dismissed in this tab. */
-export const SMALL_SCREEN_NOTICE_DISMISSED_KEY = 'retivo:small-screen-notice-dismissed';
+const SMALL_SCREEN_NOTICE_DISMISSED_KEY = 'retivo:small-screen-notice-dismissed';
 
 function readDismissed(): boolean {
   try {
     return sessionStorage.getItem(SMALL_SCREEN_NOTICE_DISMISSED_KEY) === '1';
   } catch {
-    // Storage blocked (private mode / policy): treat as not dismissed so
-    // the advisory still shows once per mount.
+    // Storage blocked: treat as not dismissed.
     return false;
   }
 }
@@ -55,7 +39,6 @@ function useIsPhoneViewport(): boolean {
     const mql = window.matchMedia(PHONE_VIEWPORT_QUERY);
     const handler = (e: MediaQueryListEvent) => setIsPhone(e.matches);
     mql.addEventListener('change', handler);
-    // Re-sync in case the query changed before the listener attached.
     setIsPhone(mql.matches);
     return () => mql.removeEventListener('change', handler);
   }, []);

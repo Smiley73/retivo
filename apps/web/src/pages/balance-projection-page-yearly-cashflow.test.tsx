@@ -1,8 +1,4 @@
-/**
- * YearlyCashflowBand — Reset-button visibility.
- *
- * CashflowProjectionChart mocked; useChartZoom mocked at module boundary.
- */
+// YearlyCashflowBand: Reset-zoom visibility and the expense-mode control, with CashflowProjectionChart and useChartZoom mocked at the module boundary.
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -108,10 +104,8 @@ describe('YearlyCashflowBand', () => {
     const group = screen.getByRole('radiogroup', {
       name: 'Cashflow expense breakdown',
     });
-    // Distinct accessible name from the granularity group.
     expect(group).toBeInTheDocument();
     expect(group).toHaveAttribute('aria-disabled', 'true');
-    // Forced to Total (default) and passed down to the chart.
     expect(chartProps.expenseMode).toBe('total');
   });
 
@@ -121,7 +115,6 @@ describe('YearlyCashflowBand', () => {
       { id: 'cat-housing', name: 'Housing', color: '#0d9488' },
     ];
     render(<YearlyCashflowBand {...baseProps} categoryMeta={categoryMeta} />);
-    // Default Total.
     expect(chartProps.expenseMode).toBe('total');
     await user.click(screen.getByRole('radio', { name: 'By category' }));
     expect(chartProps.expenseMode).toBe('category');

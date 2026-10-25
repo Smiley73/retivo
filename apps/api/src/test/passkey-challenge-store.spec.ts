@@ -1,16 +1,5 @@
-/**
- * Cross-instance / single-use / expiry guarantees for the shared passkey
- * challenge storage.
- *
- * These guarantees rest on DynamoDB's item-level atomicity, so they are
- * proved against the real emulator (`pnpm emu:up`) with TWO INDEPENDENTLY
- * bootstrapped app instances — separate `TestingModule`/DI containers, each
- * with its own `PasskeyChallengeStore` object, sharing one table namespace
- * (the per-worker jest namespace both instances inherit from the same
- * process env). A test that reused one DI container or one
- * `PasskeyChallengeStore` object would prove nothing here — the old
- * in-memory store passed that degenerate shape too.
- */
+// Cross-instance, single-use and expiry guarantees of the shared passkey challenge storage, which rest on DynamoDB's item-level atomicity, so they run against the emulator with two independently
+// bootstrapped app instances (separate DI containers and stores over one table namespace). A test reusing one container or store would prove nothing; the old in-memory store passed that shape.
 import { randomUUID } from 'node:crypto';
 import { bootstrapTestApp, type TestApp } from './test-helpers.js';
 import { PasskeyChallengeStore } from '../auth/passkey-challenge-store.js';
@@ -23,8 +12,7 @@ describe('shared passkey challenge storage — cross-instance + single-use', () 
   let storeB: PasskeyChallengeStore;
 
   beforeAll(async () => {
-    // Two independently bootstrapped app instances — the real-world shape
-    // of two Lambda instances sharing one table.
+    // Two Lambda instances sharing one table.
     a = await bootstrapTestApp();
     b = await bootstrapTestApp();
     storeA = a.module.get(PasskeyChallengeStore);
@@ -44,7 +32,6 @@ describe('shared passkey challenge storage — cross-instance + single-use', () 
       challenge: 'challenge-cross-instance',
       userId: 'user-a',
     });
-    // Replay: neither instance can consume it again.
     await expect(storeA.consume(key)).resolves.toBeNull();
     await expect(storeB.consume(key)).resolves.toBeNull();
   });
@@ -62,10 +49,7 @@ describe('shared passkey challenge storage — cross-instance + single-use', () 
   it('an elapsed row is refused even though nothing has deleted it — reader-enforced expiry, not DynamoDB TTL', async () => {
     const key = `auth:${randomUUID()}`;
     const repo = a.module.get(PasskeyChallengeRepository);
-    // Write directly at the repository layer with an already-elapsed
-    // expiresAt — the emulator never sweeps TTL, so a TTL-only
-    // implementation would pass every other test in this file and still
-    // wrongly return this row.
+    // Written at the repository layer with an already-elapsed expiresAt: the emulator never sweeps TTL, so a TTL-only implementation would pass every other test here and still return this row.
     await repo.issue({
       key,
       challenge: 'challenge-expired',
@@ -82,10 +66,7 @@ describe('shared passkey challenge storage — cross-instance + single-use', () 
     await storeA.set(key, 'challenge-units', 'user-c');
     const after = Math.floor(Date.now() / 1000);
 
-    // Read the raw row back at the repository layer (not through the store)
-    // so the assertion is on the value `set` actually stored, before the
-    // store's own reader-side check interprets it. `set` with the `/ 1000`
-    // dropped would land ~1000x further out and miss these bounds.
+    // Reading the raw row at the repository layer asserts the value `set` stored; with the `/ 1000` dropped it would land ~1000x further out and miss these bounds.
     const row = await repo.consume(key);
     expect(row).not.toBeNull();
     expect(row?.expiresAt).toBeGreaterThanOrEqual(before + 300);
@@ -96,10 +77,7 @@ describe('shared passkey challenge storage — cross-instance + single-use', () 
     const key = `reg:${randomUUID()}`;
     await storeA.set(key, 'challenge-elapsed', 'user-d');
 
-    // The row was written with the real clock; only the reader's `Date.now`
-    // is moved 5 min + 1 s forward (same shape as lockout-scoping.spec.ts),
-    // so `consume` is exercised against the exact `expiresAt` `set`
-    // produced — not a hand-built one as in the repository-level case above.
+    // Only the reader's Date.now moves 5 min + 1 s forward, so `consume` is exercised against the exact `expiresAt` `set` produced, not a hand-built one.
     const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 5 * 60 * 1000 + 1000);
     try {
       await expect(storeB.consume(key)).resolves.toBeNull();

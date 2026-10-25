@@ -1,13 +1,5 @@
-/**
- * Unit test for the JwtAuthGuard challenge-token rejection. A real RS256 MFA challenge token
- * (minted by MfaChallengeService, which shares the access-token key store) must be rejected when
- * presented as an `Authorization: Bearer` value — it carries `purpose: 'mfa_challenge'`, and the
- * guard refuses any verified token that carries a `purpose`.
- *
- * Uses a real generated RS256 keypair + the real AccessTokenService /
- * JwtKeyStore so the verify path + claim surfacing are genuine; only the config
- * + RevokedTokens repo are stubbed.
- */
+// JwtAuthGuard refuses any verified token carrying a `purpose`, such as a real RS256 MFA challenge token (`mfa_challenge`) presented as a bearer. Uses a real
+// keypair, AccessTokenService and JwtKeyStore; only config and the RevokedTokens repo are stubbed.
 import 'reflect-metadata';
 import { UnauthorizedException } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
@@ -31,11 +23,7 @@ const { privateKey, publicKey } = generateKeyPairSync('rsa', {
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
 });
 
-/**
- * `issuer`/`audience` override the token-domain claims. Passing
- * `undefined` for either simulates a legacy token that carries no such claim
- * (or a token minted for a different environment/service).
- */
+// `undefined` for issuer or audience simulates a legacy token with no such claim, or one minted for another environment.
 function configFor(
   opts: { issuer?: string; audience?: string } = {
     issuer: 'retivo-api/test',
@@ -96,9 +84,7 @@ describe('JwtAuthGuard — challenge token cannot be a session bearer', () => {
 
   it('rejects a data-export authorization token presented as Authorization: Bearer', async () => {
     const { guard, keyStore, config } = buildGuard();
-    // The export-authorization token carries `purpose: 'data_export'`; like the
-    // MFA challenge token it must never work as a session bearer — it is only
-    // valid as the HttpOnly export cookie.
+    // The export-authorization token carries `purpose: 'data_export'` and, like the MFA challenge token, must never work as a session bearer.
     const exportAuth = new DataExportAuthorizationService(keyStore, config);
     const token = exportAuth.sign({ userId: 'u1', householdId: 'h1', jti: 'j1' });
     await expect(guard.canActivate(ctxWithBearer(token))).rejects.toBeInstanceOf(
@@ -119,9 +105,7 @@ describe('JwtAuthGuard — challenge token cannot be a session bearer', () => {
   });
 
   it('rejects an access token that carries NO issuer/audience claims', async () => {
-    // A legacy access token was signed without iss/aud. Mint one directly with
-    // the real key material but no issuer/audience options, then verify against
-    // a strict guard.
+    // A legacy token signed without iss/aud, verified against a strict guard.
     const { guard, keyStore } = buildGuard();
     const { kid, privateKey } = keyStore.current();
     const token = jwt.sign(
@@ -152,8 +136,7 @@ describe('JwtAuthGuard — challenge token cannot be a session bearer', () => {
 
   it('authenticates a token carrying legal-status claims and drops them from req.auth', async () => {
     const { guard, keyStore } = buildGuard();
-    // A token issued before legal enforcement was removed may still carry the
-    // six legal-status claims; `sign` no longer emits them, so sign one by hand.
+    // A token issued before legal enforcement was removed may still carry the six legal-status claims; `sign` no longer emits them.
     const { kid, privateKey: signingKey } = keyStore.current();
     const token = jwt.sign(
       {
@@ -203,12 +186,7 @@ describe('JwtAuthGuard — challenge token cannot be a session bearer', () => {
   });
 });
 
-/**
- * Unit coverage for the generation-based revocation check:
- * the guard's four cases — jti hit,
- * tombstone hit, both absent, claim absent — and that the two point reads
- * are issued CONCURRENTLY, never one `await`ed before the other starts.
- */
+// The guard's four cases (jti hit, tombstone hit, both absent, claim absent), and that the two point reads are issued concurrently.
 describe('JwtAuthGuard — generation-based revocation', () => {
   it('accepts a token whose jti and generation are both clean', async () => {
     const { guard, tokens } = buildGuard();
@@ -260,7 +238,6 @@ describe('JwtAuthGuard — generation-based revocation', () => {
       householdId: 'u1',
       deviceId: 'd1',
       email: 'a@b.test',
-      // sessionGeneration omitted — a pre-cutover token.
     });
     await expect(guard.canActivate(ctxWithBearer(token))).rejects.toMatchObject({
       response: { code: 'ACCESS_TOKEN_REVOKED' },
@@ -283,10 +260,7 @@ describe('JwtAuthGuard — generation-based revocation', () => {
       return false;
     });
     revoked.isGenerationRevoked.mockImplementation(async () => {
-      // If the guard sequentially awaited `isRevoked` first, this would never
-      // run until `jtiGate` resolves — proving it instead starts BEFORE the
-      // jti lookup settles closes the race a sequential implementation would
-      // otherwise hide behind identical pass/fail behaviour.
+      // If the guard awaited `isRevoked` first, this would not start until `jtiGate` resolves; starting before the jti lookup settles closes the race a sequential implementation would hide behind identical pass/fail behaviour.
       order.push('generation-start');
       return false;
     });
@@ -299,7 +273,6 @@ describe('JwtAuthGuard — generation-based revocation', () => {
     });
 
     const pending = guard.canActivate(ctxWithBearer(token));
-    // Let both mocks' synchronous prologue run before releasing the gate.
     await Promise.resolve();
     await Promise.resolve();
     expect(order).toEqual(['jti-start', 'generation-start']);

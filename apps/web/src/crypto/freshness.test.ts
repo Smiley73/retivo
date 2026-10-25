@@ -1,6 +1,4 @@
-/**
- * Unit tests for the freshness head MAC + monotonic-counter helpers.
- */
+// Unit tests for the freshness head MAC and monotonic-counter helpers.
 import { describe, it, expect } from 'vitest';
 import { generateHdk, generatePasswordSlot, unwrapSlot } from './key-wrapping';
 import {
@@ -21,7 +19,6 @@ describe('freshness', () => {
   it('throws on a tampered cursorTag', async () => {
     const hdk = await generateHdk();
     const cursorTag = await computeCursorTag(7, hdk);
-    // Tag computed for counter 7, served against counter 8.
     await expect(verifyCursorTag({ freshnessCounter: 8, cursorTag }, hdk)).rejects.toBeInstanceOf(
       FreshnessError,
     );

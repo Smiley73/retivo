@@ -1,11 +1,5 @@
-// Staging contract for the bridge file the app serves from its own origin.
-// scripts/stage-bridge-bundle.mjs (run by `build_spa` only for a stack that
-// carries the assistant bridge port) copies the built bundle and its notices into
-// the SPA's dist/ and writes bridge.json with the bundle's SHA-256, size and
-// version. The deploy scripts' catch-all sync then uploads all three. Runs the
-// real script on throwaway directories; the bundle build itself is covered by
-// bridge-artifact-contract.test.mjs, and build_spa's call to this script by
-// beta-features-build-contract.test.mjs. Runs under `pnpm test:scripts`.
+// scripts/stage-bridge-bundle.mjs copies the built bundle and notices into the SPA's dist/ and writes bridge.json (SHA-256, size, version).
+// Runs the real script on throwaway directories.
 
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';

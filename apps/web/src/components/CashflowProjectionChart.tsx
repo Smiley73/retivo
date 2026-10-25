@@ -1,24 +1,6 @@
 /**
- * Per-year stacked-area cashflow band rendered beneath the Balance
- * Projection chart. Carries three pieces of information for the
- * retirement window:
- *
- *   - **Expense stack** (Essential + Discretionary) — same data the
- *     prior expense-only band rendered.
- *   - **Total-income overlay line** — earned/promised income (SS +
- *     pension annuities + part-time + one-off) PLUS portfolio
- *     withdrawal under the user-selected method, drawn on top of the
- *     stack. In funded years the line tracks the stack top; in
- *     shortfall years it dips below.
- *   - **Shortfall ribbon** — red translucent fill between the income
- *     line and the expense stack top, populated only when total income
- *     < expenses. Combined with the dashed depletion marker, it makes
- *     the unfunded gap unmissable.
- *
- * Read-only chart; the at-retirement balance lines on the chart above
- * are still independent of these flows. The drawdown projection that
- * actually combines them lives in `drawdown-engine.ts` and surfaces in
- * the per-year table on the same page.
+ * Per-year stacked-area cashflow band: expense stack, total-income overlay line, and a shortfall ribbon where income
+ * falls below expenses. Read-only; the drawdown projection that combines these flows lives in `drawdown-engine.ts`.
  */
 import React, { Suspense, lazy } from 'react';
 import type { TooltipMember } from './tooltip-member';
@@ -34,27 +16,25 @@ export type { CashflowChartMarker, CashflowMonthlyPoint };
 interface Props {
   rows: CashflowMonthlyPoint[];
   markers?: CashflowChartMarker[];
-  /** First year withdrawal < net need under the selected method (i.e.
-   *  portfolio depleted). null when the portfolio survives the horizon
-   *  or no method has run yet. Renders as a dashed vertical reference
-   *  line + label. */
+  /**
+   * First year withdrawal falls below net need, drawing a dashed reference line; null when the
+   * portfolio survives or no method has run.
+   */
   depletionYear?: number | null;
-  /** Household members for the hover tooltip's "<First> (age N)" line. */
   members?: TooltipMember[];
-  /** Chart granularity. `'yearly'` (one Dec-anchored point/year) drops
-   *  the month from the tooltip date; `'monthly'` keeps `MMM YYYY`.
-   *  Defaults to `'monthly'` to preserve the prior behaviour for any
-   *  caller that doesn't pass it. */
+  /** `'yearly'` drops the month from the tooltip date. Defaults to `'monthly'`. */
   granularity?: 'monthly' | 'yearly';
-  /** Expense-stack mode. `'total'` (default) renders the
-   *  essential/discretionary bands; `'category'` replaces them with one
-   *  stacked band per expense category from `categoryMeta`. */
+  /**
+   * `'total'` (default) renders essential / discretionary bands; `'category'` one band per
+   * `categoryMeta` entry.
+   */
   expenseMode?: 'total' | 'category';
-  /** Active expense categories (id / name / palette colour), in the
-   *  stable alphabetical-by-name order the residual allocation follows.
-   *  Empty in Total mode. */
+  /**
+   * Active expense categories in alphabetical-by-name order, which the residual allocation follows;
+   * empty in Total mode.
+   */
   categoryMeta?: ReadonlyArray<CategoryMeta>;
-  /** Zoom-state props injected by useChartZoom in the host section. */
+  /** Zoom state injected by `useChartZoom`. */
   xDomain?: [number, number] | null;
   yDomain?: [number, number] | null;
   dragSelection?: [number, number] | null;

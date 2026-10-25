@@ -1,9 +1,4 @@
-/**
- * Unit tests for the MAGI-cap WINDOW SCHEDULE save-time validation
- * Covers: required ceilings, non-overlap, and the
- * broken-anchor exclusion (a window whose anchor can't resolve is dropped from
- * the overlap math, not treated as a false-positive overlap).
- */
+// MAGI-cap window schedule save-time validation: required ceilings, non-overlap, and the broken-anchor exclusion (a window whose anchor can't resolve is dropped from the overlap math, not treated as an overlap).
 import { describe, it, expect } from 'vitest';
 import type { Aggregate, HouseholdMemberPayload } from '../db/types';
 import {
@@ -15,8 +10,7 @@ import {
 } from './scenario-withdrawal-strategy-magi-cap-validation';
 import type { DraftMagiCapWindow } from './scenario-withdrawal-strategy-shared';
 
-// Real primary retirement anchor — windows resolve against this, not a
-// synthetic year. Primary born 1965-01 retires 2030 in these tests.
+// Real primary retirement anchor: windows resolve against it, not a synthetic year. Primary born 1965-01 retires 2030.
 const anchor: MagiCapRetirementAnchor = {
   retirementYear: 2030,
   retirementMonth0: 0,
@@ -44,8 +38,7 @@ function member(
   };
 }
 
-// Only a primary (born 1965-01) — a `secondary`-anchored age window can't
-// resolve and is excluded from the overlap check.
+// Only a primary exists, so a `secondary`-anchored age window can't resolve and is excluded from the overlap check.
 const primaryOnly = [member(true, '1965-01-01')];
 
 function yearWindow(
@@ -89,7 +82,6 @@ describe('magiCapWindowsSaveError / magiCapWindowOverlapError — non-overlap', 
   });
 
   it('adjacent windows (endYear === next.startYear) are NOT an overlap', () => {
-    // [2031,2035) then [2035,2040) — touch at 2035, no overlap.
     const windows = [yearWindow(2031, 2035), yearWindow(2035, 2040)];
     expect(magiCapWindowOverlapError(windows, primaryOnly, anchor)).toBeNull();
   });
@@ -113,7 +105,7 @@ describe('magiCapWindowTimeframeError — end must be after start', () => {
   });
 
   it('a window whose end equals its start year → invalid', () => {
-    // yearWindow(2035, 2035) resolves to [2035, 2035) — covers no whole year.
+    // yearWindow(2035, 2035) resolves to [2035, 2035), which covers no whole year.
     expect(
       magiCapWindowTimeframeError([yearWindow(2035, 2035)], primaryOnly, anchor),
     ).toMatch(/end must come after its start/i);
@@ -145,7 +137,6 @@ describe('magiCapWindowTimeframeError — end must be after start', () => {
 
 describe('magiCapWindowTabLabels — tab titles', () => {
   it('labels a resolved window with its inclusive year span (endYear - 1)', () => {
-    // yearWindow(2031, 2035) → interval [2031, 2035) → last capped year 2034.
     expect(magiCapWindowTabLabels([yearWindow(2031, 2035)], primaryOnly, anchor)).toEqual([
       '2031 - 2034',
     ]);
@@ -160,9 +151,7 @@ describe('magiCapWindowTabLabels — tab titles', () => {
   });
 
   it('shows "From <startYear>" when only the start resolves (start of retirement)', () => {
-    // Primary born 1965 retires 2030 and turns 65 the same year, so the default
-    // end collapses into the start year (no full span yet) — but the tab must
-    // still surface the retirement year the user picked, not "Window N".
+    // Primary born 1965 retires 2030 and turns 65 the same year, so the default end collapses into the start year, yet the tab must still surface the retirement year the user picked, not "Window N".
     const w: DraftMagiCapWindow = {
       start: { kind: 'retirementStart' },
       end: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
@@ -190,10 +179,7 @@ describe('magiCapWindowTabLabels — tab titles', () => {
 
 describe('magiCapWindowOverlapError — broken-anchor exclusion', () => {
   it('a window with an unresolvable anchor is excluded, not a false overlap', () => {
-    // The broken window is `age`-anchored to the SECONDARY member, but the
-    // household has no secondary → the anchor can't resolve and the window
-    // drops out of the overlap math (it must NOT manufacture an overlap with
-    // the valid window even though, if it resolved to year 0, it could).
+    // The broken window is `age`-anchored to the secondary member but the household has none, so the anchor can't resolve and the window drops out of the overlap math (it must not manufacture an overlap with the valid window even if it resolved to year 0).
     const broken: DraftMagiCapWindow = {
       start: { kind: 'age', memberId: 'secondary', years: 60, months: 0 },
       end: { kind: 'age', memberId: 'secondary', years: 70, months: 0 },

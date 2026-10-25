@@ -1,11 +1,4 @@
-/**
- * Alert — tone + live-region role render + a11y smoke.
- *
- * Tailwind-defaults replacement for the legacy `.error` class.
- * Asserts the default error tone announces via `role="alert"`,
- * polite tones use `role="status"`, an explicit role wins — plus the
- * shared-component axe rule (AGENTS mandate).
- */
+/** Alert: the default error tone announces via role="alert", polite tones use role="status", and an explicit role wins. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';

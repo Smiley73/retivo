@@ -1,21 +1,11 @@
-/**
- * Integration tests for `useBalanceProjectionSwrData`
- * Mocks only `useBalanceProjectionData` (the raw
- * IndexedDB read) — `loadPageData`, `useBalanceProjectionViewModel` and this
- * new hook all run FOR REAL over hand-built canonical fixtures, so the
- * runner, the view model's deflators/drawdown resolution, and this hook's
- * own wiring are proven together rather than assumed. `runStressTest:
- * false` keeps every test off the Monte Carlo worker path — MC-basis math
- * (the pre-drawdown instant, degenerate states 4/6) is covered directly
- * against `buildSwrComparisonData` in `balance-projection-swr-derivation.test.ts`.
- */
+// `useBalanceProjectionSwrData` integration: only `useBalanceProjectionData` (the raw IndexedDB read) is mocked; `loadPageData`, `useBalanceProjectionViewModel` and the hook run for real over hand-built fixtures. `runStressTest: false` keeps every test off the Monte Carlo worker path; MC-basis math is covered against `buildSwrComparisonData` in `balance-projection-swr-derivation.test.ts`.
 import React, { useMemo } from 'react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { ThemeProvider } from '../contexts/ThemeContext';
 import { useBalanceProjectionViewModel } from './use-balance-projection-view-model';
 import { useBalanceProjectionSwrData } from './use-balance-projection-swr-data';
-import { loadPageData } from './balance-projection-page-pipeline';
+import { loadPageData } from './balance-projection-page-data';
 import { buildTaxBurdenRows } from './balance-projection-burden-rows';
 import type {
   AccountBalancePayload,
@@ -50,10 +40,7 @@ vi.mock('./use-balance-projection-data', () => ({
   useBalanceProjectionData: () => mockData,
 }));
 
-// `usePlanStressTestVm` calls `useMonteCarlo()` on mount regardless of
-// `runStressTest` — stub the provider seam
-// so mounting the vm never needs a
-// real <MonteCarloProvider> and never reaches the worker/runner.
+// `usePlanStressTestVm` calls `useMonteCarlo()` on mount regardless of `runStressTest`; stub the provider seam so mounting never needs a real provider or reaches the worker.
 vi.mock('../monte-carlo/MonteCarloProvider', () => ({
   useMonteCarlo: () => ({
     status: 'idle' as const,
@@ -121,10 +108,7 @@ function brokerage(id: string, ownerId: string): Aggregate<AccountPayload> {
   };
 }
 
-/** A PRE_TAX traditional IRA — withdrawing from it (unlike the POST_TAX
- *  brokerage `brokerage()` builds) generates ordinary-income federal tax, so
- *  a household holding one has a genuinely non-zero tax layer to assert
- *  against. */
+// A PRE_TAX traditional IRA, unlike the POST_TAX brokerage fixture, generates ordinary-income federal tax, so the household has a non-zero tax layer to assert against.
 function preTaxIra(id: string, ownerId: string): Aggregate<AccountPayload> {
   return {
     id,
@@ -253,11 +237,7 @@ function baseScenario(id: string, name: string, inflationRatePct = 0): ScenarioA
 }
 
 function readyData(overrides: Partial<typeof mockData> = {}): typeof mockData {
-  // Retirement date = birthdate + 67y = 2027-01-01 — AFTER "today"
-  // (2026-06-15): the view model additionally nulls an already-past
-  // retirement ISO, which a birth year landing exactly on "today" (as
-  // `balance-projection-page-data.test.ts`'s lower-level `loadPageData`-only
-  // fixture uses) would trip here.
+  // Retirement at birthdate + 67y = 2027-01-01 is after "today" (2026-06-15): the view model nulls an already-past retirement ISO, which a birth year landing exactly on today (as in balance-projection-page-data.test.ts) would trip.
   const primary = member('m1', true, TODAY_YEAR - 66);
   return {
     scenarios: [baseScenario('s', 'Base')],
@@ -275,8 +255,7 @@ function readyData(overrides: Partial<typeof mockData> = {}): typeof mockData {
   };
 }
 
-/** Mirrors the shape a page would mount: one `useBalanceProjectionViewModel`
- *  call, and this hook adapting it — never a second vm call. */
+// Mirrors a page mount: one `useBalanceProjectionViewModel` call, adapted by this hook, never a second vm call.
 function useHarness(opts: {
   readonly displayMode?: 'today' | 'future';
   readonly activeMethod?: ProjectionMethod;
@@ -381,22 +360,14 @@ describe('useBalanceProjectionSwrData — end to end over the real pipeline', ()
   });
 
   it('state "historical-unavailable" on Historical when no account has usable history', () => {
-    // A single balance row (no prior-year history) leaves TWR unavailable —
-    // the same guard the Basis selector's disabled Historical option reads.
+    // A single balance row (no prior-year history) leaves TWR unavailable, the same guard the Basis selector's disabled Historical option reads.
     const { result } = renderHook(() => useHarness({ activeMethod: 'twr' }), { wrapper });
     expect(result.current.vm.enabledCalculatedMethods.has('twr')).toBe(false);
     expect(result.current.swr.state).toBe('historical-unavailable');
   });
 
   it('the tax layer matches the Taxes tab\'s OWN independent burden computation, and after-tax draw + tax sums to the SAME gross withdrawal `vm.incomeView` (the Cash flow band) reports for the anchor year', () => {
-    // A PRE_TAX IRA (unlike the base fixture's POST_TAX-only brokerage)
-    // generates real ordinary-income tax, so `row.tax` isn't plausibly 0 on
-    // both sides of the comparison.
-    // PRE_TAX-only (no brokerage): a tax-efficient withdrawal order drains
-    // POST_TAX accounts first, which would leave the anchor year's tax at 0
-    // for many years on a mixed portfolio — the IRA must fund the draw from
-    // year one for `row.tax` to be genuinely non-zero here. A larger annual
-    // draw ($72k) clears the (inflation-extrapolated) standard deduction.
+    // A PRE_TAX-only IRA (no brokerage) generates real ordinary-income tax; a tax-efficient order drains POST_TAX accounts first, which would leave the anchor year's tax at 0 for years on a mixed portfolio. A larger annual draw ($72k) clears the (inflation-extrapolated) standard deduction.
     mockData = readyData({
       accounts: [preTaxIra('a1', 'm1')],
       balances: [balanceRow('a1', TODAY_YEAR - 1, 1_800_000)],
@@ -410,12 +381,7 @@ describe('useBalanceProjectionSwrData — end to end over the real pipeline', ()
     const row = swr.bundle!.rows.find((r) => r.year === anchorYear)!;
     expect(row.afterTaxDraw + row.tax).toBeCloseTo(cfRow.withdrawal, 6);
 
-    // Independent recomputation: `buildTaxBurdenRows` derives the SAME
-    // year's tax straight from `vm.resolvedDrawdown`'s raw *Cents fields
-    // (federal + IRMAA − ACA PTC), never through the
-    // `yearlyCashflowByYear` map this hook itself reads — so this fails if
-    // the tax layer were sourced from the wrong field entirely, unlike an
-    // identity check against the same map the builder read.
+    // Independent recomputation: `buildTaxBurdenRows` derives the year's tax from `vm.resolvedDrawdown`'s raw *Cents fields (federal + IRMAA − ACA PTC), never through the `yearlyCashflowByYear` map this hook reads, so this fails if the tax layer were sourced from the wrong field.
     const burdenRow = buildTaxBurdenRows({
       resolvedDrawdown: vm.resolvedDrawdown,
       basisDeflator: vm.basisDeflator,
@@ -430,10 +396,7 @@ describe('useBalanceProjectionSwrData — end to end over the real pipeline', ()
   });
 
   it('the hook\'s OWN second buildPageCashflowSeries call (sourceSplitByYear) agrees with `vm.incomeView`\'s own earned figure for the same year — proving the wiring, not just the arithmetic', () => {
-    // pia > 0, but not so large SS alone fully covers the $2,000/mo
-    // expense — a funded year where SS covers PART of spend, guaranteed/
-    // other income no longer all-zero either way, and the portfolio still
-    // draws (afterTaxDraw > 0).
+    // pia > 0 but not enough for SS alone to cover the $2,000/mo expense: a funded year where SS covers part of spend and the portfolio still draws (afterTaxDraw > 0).
     mockData = readyData({ ssBenefits: [ssBenefit('m1', 1_000)] });
     const { result } = renderHook(() => useHarness({}), { wrapper });
     const { vm, swr } = result.current;
@@ -441,9 +404,7 @@ describe('useBalanceProjectionSwrData — end to end over the real pipeline', ()
     const anchorYear = swr.bundle!.anchorYear;
     const row = swr.bundle!.rows.find((r) => r.year === anchorYear)!;
     const cfRow = vm.incomeView!.yearlyCashflowByYear.get(anchorYear)!;
-    // Not a surplus year (draw > 0), so the coverage cap doesn't bind and the
-    // hook's own split sums exactly to the vm's independently-built `earned`
-    // stripe for the same year, at the same December-anchor deflator.
+    // Not a surplus year (draw > 0), so the coverage cap doesn't bind and the hook's split sums exactly to the vm's independently built `earned` stripe at the same December-anchor deflator.
     expect(row.afterTaxDraw).toBeGreaterThan(0);
     expect(row.guaranteedIncome + row.otherIncome).toBeCloseTo(cfRow.earned, 6);
     expect(row.guaranteedIncome).toBeGreaterThan(0);

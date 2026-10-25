@@ -1,18 +1,10 @@
-/**
- * Shared scaffolding for the `AuthContext.*.test.tsx` suites. TEST-ONLY.
- *
- * `vi.mock` is hoisted, so every test file must still declare its own
- * `vi.mock(...)` calls. Each is one line and defers to a factory exported
- * here, via a dynamic import of this module (a static import would not be
- * initialised yet when the hoisted factory runs):
- *
- *   vi.mock('../crypto/key-cache', async () => (await import('./auth-context.test-harness')).keyCacheMock());
- *
- * The `vi.fn()` stubs live on `authMocks`; test files destructure the ones
- * they drive (`const { apiRequest, loadCachedHdk } = authMocks;`). The module
- * graph is per test file, so no state leaks between suites.
- */
-import { vi } from 'vitest';
+// Shared scaffolding for the `AuthContext.*.test.tsx` suites. `vi.mock` is hoisted into each test file, so each file
+// declares its own one-line mocks that defer to a factory here via a dynamic import (a static one is not initialised yet).
+// For the same reason `AuthContext` is imported lazily in `renderAuth`: a static import would deadlock the mock factories.
+import React from 'react';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { expect, vi } from 'vitest';
+import type * as AuthContextModule from './AuthContext';
 
 type AnyFn = (...args: unknown[]) => unknown;
 // Same shape as a bare `vi.fn()`, so tests may install any implementation.
@@ -54,10 +46,19 @@ const fwd =
   (...a) =>
     pick()(...a);
 
-/** `../api/client`. `onConfigure` receives the options AuthContext passes to `configureApi`. */
-export function apiClientMock(onConfigure?: (opts: { getAccessToken: () => string | null }) => void) {
-  // Full constructor (status + error) so `new ApiRequestError(400, {...})`
-  // carries `.status`/`.error`, which the SUT branches on.
+let tokenGetter: () => string | null = () => null;
+
+/** The access-token getter AuthContext last passed to `configureApi`. */
+export function liveAccessToken(): string | null {
+  return tokenGetter();
+}
+
+export function resetLiveAccessToken(): void {
+  tokenGetter = () => null;
+}
+
+export function apiClientMock() {
+  // Carries `.status`/`.error`, which the SUT branches on.
   class ApiRequestError extends Error {
     constructor(
       public status: number,
@@ -68,12 +69,13 @@ export function apiClientMock(onConfigure?: (opts: { getAccessToken: () => strin
   }
   return {
     apiRequest: fwd(() => m.apiRequest),
-    configureApi: (opts: { getAccessToken: () => string | null }) => onConfigure?.(opts),
+    configureApi: (opts: { getAccessToken: () => string | null }) => {
+      tokenGetter = opts.getAccessToken;
+    },
     ApiRequestError,
   };
 }
 
-/** `./key-envelope-client`. */
 export function keyEnvelopeClientMock() {
   return {
     getKeyEnvelopes: fwd(() => m.getKeyEnvelopes),
@@ -82,7 +84,6 @@ export function keyEnvelopeClientMock() {
   };
 }
 
-/** `../crypto/key-cache`. */
 export function keyCacheMock() {
   return {
     loadCachedHdk: fwd(() => m.loadCachedHdk),
@@ -127,7 +128,6 @@ export function keyWrappingMock() {
   };
 }
 
-/** `./user-transition` (touches IndexedDB in production; stubbed to a no-op). */
 export function userTransitionMock() {
   return {
     clearLastUserId: vi.fn(),
@@ -136,7 +136,6 @@ export function userTransitionMock() {
   };
 }
 
-/** `@simplewebauthn/browser`. */
 export function webauthnBrowserMock() {
   return {
     browserSupportsWebAuthn: () => true,
@@ -145,7 +144,6 @@ export function webauthnBrowserMock() {
   };
 }
 
-/** `../crypto/passkey-prf`. */
 export function passkeyPrfMock() {
   return {
     addPrfEvalToOptions: fwd(() => m.addPrfEvalToOptions),
@@ -167,3 +165,65 @@ export function jwt(claims: { userId: string; householdId: string; deviceId?: st
 }
 
 export const fakeHdk = { algorithm: { name: 'AES-GCM' } } as unknown as CryptoKey;
+
+let authModule: typeof AuthContextModule;
+
+export let captured: ReturnType<typeof AuthContextModule.useAuth>;
+
+/** Mirrors the latest `useAuth()` value into `captured` and the reactive flags into the DOM. */
+export function Probe(): React.ReactElement {
+  const auth = authModule.useAuth();
+  captured = auth;
+  return (
+    <div>
+      <span data-testid="isAuthenticated">{String(auth.isAuthenticated)}</span>
+      <span data-testid="isUnlocked">{String(auth.isUnlocked)}</span>
+      <span data-testid="needsKeySetup">{String(auth.needsKeySetup)}</span>
+      <span data-testid="unlockResolved">{String(auth.unlockResolved)}</span>
+      <span data-testid="lockedEnvelopeSetEmpty">{String(auth.lockedEnvelopeSetEmpty)}</span>
+      <span data-testid="householdId">{auth.householdId ?? ''}</span>
+    </div>
+  );
+}
+
+export function flag(id: string): string {
+  return screen.getByTestId(id).textContent ?? '';
+}
+
+/** Mounts the provider without touching `apiRequest`, for tests whose boot refresh succeeds. */
+export async function mountAuth(): Promise<void> {
+  authModule = await import('./AuthContext');
+  render(
+    <authModule.AuthProvider>
+      <Probe />
+    </authModule.AuthProvider>,
+  );
+}
+
+/** Mounts the provider with the boot refresh failing, and waits until it settles signed out. */
+export async function renderAuth(): Promise<void> {
+  authMocks.apiRequest.mockImplementation(async (path: string) => {
+    if (path === '/api/v1/auth/refresh') throw new Error('no session');
+    throw new Error(`unexpected api call ${path}`);
+  });
+  await mountAuth();
+  await waitFor(() => expect(captured.isAuthenticated).toBe(false));
+}
+
+/** Sign in as a fresh user with an empty (no-encryption) key-envelope set. */
+export async function loginAsU1(): Promise<void> {
+  authMocks.apiRequest.mockImplementation(async (path: string) => {
+    if (path === '/api/v1/auth/refresh') throw new Error('no session');
+    if (path === '/api/v1/auth/login') {
+      return { accessToken: jwt({ userId: 'u1', householdId: 'hh-1' }), expiresIn: 3600 };
+    }
+    throw new Error(`unexpected api call ${path}`);
+  });
+  authMocks.loadCachedHdk.mockResolvedValue(null);
+  authMocks.getKeyEnvelopes.mockResolvedValue({ slots: [], envelopeSetVersion: 0, envelopeSetTag: '' });
+  await act(async () => {
+    await captured.login('u@test.com', 'pw');
+  });
+  await waitFor(() => expect(flag('isAuthenticated')).toBe('true'));
+  expect(liveAccessToken()).toBeTruthy();
+}

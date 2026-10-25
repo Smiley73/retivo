@@ -1,11 +1,4 @@
-/**
- * Draft state hook for the withdrawal strategy configure editor.
- *
- * Extracted from scenario-withdrawal-strategy-editor.tsx to keep each file
- * under the 400-line cap. The hook body itself stays near the
- * shape cap by delegating to pure helpers: resolution + inherited-
- * name lookup, baseline JSON, draft-vs-baseline equality.
- */
+/** Draft state hooks for the withdrawal-strategy editor, the Tax assumptions modal and the Health coverage modal. */
 import { useMemo, useState } from 'react';
 import { resolveScenario, scenarioChain } from '../lib/scenario-resolution';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
@@ -34,11 +27,6 @@ import type {
 
 type ScenarioOverrides = ScenarioAggregate['payload']['overrides'];
 
-/** Local MAGI-bootstrap presence: the single UI field is "set locally"
- *  when EITHER split lookback field is present in this scenario's own
- *  overrides. Returns the year-0 (minus2) value when set, else the year-1
- *  (minus1) value, else undefined. Drives the "Use engine default" toggle seed
- *  (local-presence only). */
 function localMagiBootstrap(localOverrides: ScenarioOverrides): number | undefined {
   return (
     localOverrides.magiBootstrapLookbackMinus2 ??
@@ -46,17 +34,10 @@ function localMagiBootstrap(localOverrides: ScenarioOverrides): number | undefin
   );
 }
 
-/** Effective MAGI-bootstrap value (parent-chain resolved): year-0
- *  (minus2) value when set, else year-1 (minus1). The two fields are written
- *  together by the UI, so they normally agree; the fallback keeps a migrated
- *  single-value scenario showing its value. */
 function effectiveMagiBootstrap(effective: ScenarioOverrides): number | undefined {
   return effective.magiBootstrapLookbackMinus2 ?? effective.magiBootstrapLookbackMinus1;
 }
 
-/** Pure: resolve the parent-chain effective overrides for the scenario.
- *  Falls back to local overrides if resolution throws (kept consistent
- *  with the previous inline behavior). */
 function resolveEffectiveOverrides(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -74,11 +55,6 @@ function resolveEffectiveOverrides(
   }
 }
 
-/** Pure: the real MAGI cap resolved from this scenario's parent chain,
- *  with the explicit-disable sentinel coerced to undefined. Drives the
- *  save matrix's "does an ancestor impose a cap?" decision and the
- *  inherited-cap seed values when the child has no real local cap.
- *  Returns undefined for the base scenario or on a resolution failure. */
 function resolveParentCap(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -97,12 +73,6 @@ function resolveParentCap(
   }
 }
 
-/** Pure: nearest ancestor that actually sets a real `magiCap`, or null when
- *  the local scenario has its own override (real cap or explicit-disable
- *  sentinel) or no ancestor sets one. Drives the "Inherited from <name>"
- *  override-hint copy in MagiCapSection. Driven by `parentCap` (the resolved
- *  real cap) so an inherited cap that the child has not yet touched is
- *  detected, regardless of the local sentinel state. */
 function resolveMagiCapInheritedName(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -113,8 +83,6 @@ function resolveMagiCapInheritedName(
   if (parentCap === undefined) return null;
   try {
     const chain = scenarioChain(scenario.id, scenarios);
-    // Skip the current scenario (index 0) — start from its parent. Find the
-    // nearest ancestor whose override is a real cap (not the disable sentinel).
     for (let i = 1; i < chain.length; i += 1) {
       const cap = chain[i].payload.overrides.magiCap;
       if (cap !== undefined && !isMagiCapDisabled(cap)) {
@@ -130,8 +98,6 @@ function resolveMagiCapInheritedName(
   return null;
 }
 
-/** Pure: baseline snapshot of every dirty-tracked field. JSON-serialised
- *  so a single string-equality check in the hook decides `isDirty`. */
 function buildBaselineSnapshot(args: {
   effective: ScenarioOverrides;
   localOverrides: ScenarioOverrides;
@@ -141,11 +107,7 @@ function buildBaselineSnapshot(args: {
   initExcluded: string[];
 }): string {
   const { effective, localOverrides, effectiveCap, parentCap, initTiers, initExcluded } = args;
-  // Seed the field values from the same source as `useMagiCap` so a no-edit
-  // session stays non-dirty. The toggle reflects the resolved real cap
-  // (`effectiveCap`, sentinel coerced away); the dollar/member/age fields
-  // fall back to the inherited parent cap so an explicitly-disabled child
-  // still shows sensible numbers when the user re-enables the toggle.
+  // Seeded from the same source as useMagiCap so a no-edit session stays non-dirty; an explicitly-disabled child falls back to the parent cap's values for re-enable.
   const seedCap = effectiveCap ?? parentCap;
   return JSON.stringify({
     strategyKind: effective.withdrawalStrategy?.kind ?? 'taxEfficient',
@@ -155,20 +117,15 @@ function buildBaselineSnapshot(args: {
         : DEFAULT_COST_BASIS_PCT,
     useEngineDefault: localMagiBootstrap(localOverrides) === undefined,
     magiDraft: effectiveMagiBootstrap(effective) ?? 0,
-    // Baseline uses raw saved tiers (pre-prune) so pruning appears
-    // as dirty; fall back to inherited / default tier state.
+    // Raw saved tiers (pre-prune), so pruning counts as dirty.
     tiers: localOverrides.customDrawdownOrder?.tiers ?? initTiers,
     excludedAccountIds:
       localOverrides.customDrawdownOrder?.excludedAccountIds ?? initExcluded,
-    // Baseline mirrors the seeding so a no-edit session leaves
-    // `isDirty` false, matching the displayed values. The
-    // whole window ladder is the dirty-tracked unit.
     magiCapEnabled: effectiveCap !== undefined,
     magiCapWindows: toDraftMagiCapWindows(seedCap),
   });
 }
 
-/** Stable-ordered copy of an id list so dirty comparison ignores order. */
 function sortedIds(ids: readonly string[]): string[] {
   return [...ids].sort();
 }
@@ -178,14 +135,8 @@ export interface DraftState {
   costBasisPct: number;
   useEngineDefault: boolean;
   magiDraft: number;
-  // Custom order — only used when strategyKind === 'customOrder'.
   tiers: string[][];
   excludedAccountIds: string[];
-  // MAGI-cap — orthogonal overlay; the ladder of
-  // non-overlapping windows. `magiCapEnabled` is the toggle; an enabled
-  // ladder always carries ≥ 1 window, each with its own
-  // start/end/ceiling/mode/line/target Roth. A draft ceiling may be `null`
-  // until entered (save blocked).
   magiCapEnabled: boolean;
   magiCapWindows: DraftMagiCapWindow[];
 }
@@ -193,20 +144,14 @@ export interface DraftState {
 interface ResolutionContext {
   localOverrides: ScenarioOverrides;
   effective: ScenarioOverrides;
-  /** Resolved real cap for this scenario (parent chain), sentinel coerced
-   *  to undefined. Seeds the toggle's enabled state. */
   effectiveCap: MagiCapOverride | undefined;
-  /** Resolved real cap from the PARENT chain only (excludes this scenario's
-   *  own override), sentinel coerced to undefined. Drives the save matrix +
-   *  seeds field values when the child has no real local cap. */
+  /** From the parent chain only, sentinel coerced to undefined; drives the save matrix and seeds fields when the child has no real local cap. */
   parentCap: MagiCapOverride | undefined;
   magiCapInheritedFromName: string | null;
   initTiers: string[][];
   initExcluded: string[];
 }
 
-/** Sub-hook: resolves effective overrides + inherited cap name +
- *  initial tier seed. Every `useMemo` is empty-dep (frozen at mount). */
 function useEffectiveResolution(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -217,8 +162,7 @@ function useEffectiveResolution(
     () => resolveEffectiveOverrides(scenario, scenarios, localOverrides),
     [], // frozen at mount
   );
-  // Coerce the explicit-disable sentinel to undefined: a disabled child
-  // resolves to "no cap" for display + dirty tracking.
+  // Coerce the explicit-disable sentinel to undefined: a disabled child resolves to "no cap" for display and dirty tracking.
   const effectiveCap = useMemo<MagiCapOverride | undefined>(
     () => (isMagiCapDisabled(effective.magiCap) ? undefined : effective.magiCap),
     [], // frozen at mount
@@ -231,8 +175,6 @@ function useEffectiveResolution(
     () => resolveMagiCapInheritedName(scenario, scenarios, localOverrides, parentCap),
     [], // frozen at mount
   );
-  // Seed from effective `customDrawdownOrder` (parent-chain resolved)
-  // so inherited layouts are honoured; fall back to local.
   const initTierState = useMemo(
     () => seedTierState(accounts, effective.customDrawdownOrder ?? localOverrides.customDrawdownOrder),
     [], // frozen at mount
@@ -290,7 +232,7 @@ function useMagiBootstrap(
   effective: ResolutionContext['effective'],
   localOverrides: ResolutionContext['localOverrides'],
 ): MagiBootstrapBag {
-  // Toggle from LOCAL-override presence only — never from `effective`.
+  // From local-override presence only, never from effective.
   const [useEngineDefault, setUseEngineDefault] = useState<boolean>(
     localMagiBootstrap(localOverrides) === undefined,
   );
@@ -311,10 +253,6 @@ function useMagiCap(
   effectiveCap: ResolutionContext['effectiveCap'],
   parentCap: ResolutionContext['parentCap'],
 ): MagiCapBag {
-  // Seed the toggle from the resolved REAL cap (sentinel coerced away) so
-  // an inherited cap shows as enabled while an explicitly-disabled child shows
-  // as off. The ladder seeds from the inherited cap so a re-enable after disable
-  // starts from sensible windows.
   const seedCap = effectiveCap ?? parentCap;
   const [magiCapEnabled, setMagiCapEnabled] = useState<boolean>(
     effectiveCap !== undefined,
@@ -331,7 +269,6 @@ function useMagiCap(
 interface TaxAssumptionsBag {
   hsaQualifiedPct: number;
   penaltyExemptIds: string[];
-  /** ACA opt-out: member ids treated as NOT on the ACA Marketplace. */
   acaOptOutMemberIds: string[];
   setHsaQualifiedPct: (v: number) => void;
   setPenaltyExemptIds: (v: string[]) => void;
@@ -339,7 +276,7 @@ interface TaxAssumptionsBag {
 }
 
 function useTaxAssumptions(effective: ResolutionContext['effective']): TaxAssumptionsBag {
-  // Seed from EFFECTIVE so an inherited assumption shows in the modal.
+  // Seed from effective so an inherited assumption shows in the modal.
   const [hsaQualifiedPct, setHsaQualifiedPct] = useState<number>(
     effective.hsaQualifiedMedicalExpensePct ?? DEFAULT_HSA_QUALIFIED_PCT,
   );
@@ -359,13 +296,6 @@ function useTaxAssumptions(effective: ResolutionContext['effective']): TaxAssump
   };
 }
 
-/** Bundles every `useState` for the draft into one bag. Split across
- *  sub-hooks (strategy+cost-basis, magi-bootstrap, custom-order tiers,
- *  magi-cap) so each piece is ≤40 lines. Hook call order is stable
- *  per React's rules. Each initial value derives from the parent-chain
- *  `effective` so the modal reflects inherited values from first paint.
- *  Tax assumptions live in their OWN modal/hook (`useTaxAssumptionsDraft`),
- *  decoupled from the withdrawal-strategy draft. */
 function useStrategyDraftState(ctx: ResolutionContext): DraftStateBag {
   const { effective, localOverrides, effectiveCap, parentCap, initTiers, initExcluded } = ctx;
   const sk = useStrategyAndCostBasis(effective);
@@ -391,10 +321,7 @@ function useStrategyDraftState(ctx: ResolutionContext): DraftStateBag {
   };
 }
 
-/**
- * Seeds modal draft. Visual seed from the resolved parent-chain effective
- * value; "Use engine default" toggle from LOCAL-override presence only.
- */
+/** Seeds the modal draft: values from the resolved parent-chain effective overrides, the "Use engine default" toggle from local-override presence only. */
 export function useWithdrawalStrategyDraft(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -403,17 +330,8 @@ export function useWithdrawalStrategyDraft(
   draft: DraftState;
   localOverrides: ScenarioAggregate['payload']['overrides'];
   effective: ScenarioAggregate['payload']['overrides'];
-  /**
-   * Name of the nearest ancestor that sets `magiCap`, when the
-   * local scenario has no `magiCap` override (so the displayed cap value
-   * is inherited rather than locally set). `null` when not inherited.
-   */
   magiCapInheritedFromName: string | null;
-  /**
-   * Resolved real cap from the PARENT chain only (sentinel coerced away).
-   * Threaded to the save helper so it can tell "off but parent imposes a
-   * cap" (write the disable sentinel) from "off, no cap anywhere".
-   */
+  /** From the parent chain only; lets the save helper tell "off but parent imposes a cap" (write the disable sentinel) from "off, no cap anywhere". */
   parentCap: MagiCapOverride | undefined;
   setStrategyKind: (v: StrategyKind) => void;
   setCostBasisPct: (v: number) => void;
@@ -446,9 +364,7 @@ export function useWithdrawalStrategyDraft(
   const setStrategyKind = (v: StrategyKind): void => {
     bag.setStrategyKindRaw(v);
   };
-  // Toggling the cap ON seeds one default window when the ladder is empty
-  // so it is never "enabled but empty"; toggling OFF leaves the windows intact
-  // (re-enabling restores them).
+  // Toggling ON seeds one default window when the ladder is empty, so it is never enabled-but-empty; toggling OFF leaves the windows for re-enable.
   const setMagiCapEnabled = (v: boolean): void => {
     bag.setMagiCapEnabled(v);
     if (v && state.magiCapWindows.length === 0) {
@@ -480,8 +396,6 @@ export function useWithdrawalStrategyDraft(
   };
 }
 
-/** Pure: snapshot the dirty-tracked fields out of the draft state. Symmetric
- *  with `buildBaselineSnapshot`; both feed the `isDirty` string equality. */
 function buildDraftSnapshot(state: DraftState): string {
   return JSON.stringify({
     strategyKind: state.strategyKind,
@@ -495,17 +409,7 @@ function buildDraftSnapshot(state: DraftState): string {
   });
 }
 
-/**
- * Draft state for the standalone Tax Assumptions modal — decoupled from the
- * withdrawal-strategy draft above. Seeds the emergency-HSA qualified % (the
- * share of EMERGENCY HSA withdrawals treated as qualified — modeled
- * medical-qualified withdrawals are always 100% qualified) + per-account
- * early-withdrawal penalty exemptions from the parent-chain `effective`
- * overrides (so inherited values show), tracks its own `isDirty`, and exposes
- * the per-account toggle helper. The modal's Save reuses `buildNextTaxAssumptions`
- * (prune-on-save included). No `accounts` arg: the seed comes from `effective`,
- * the live-account filter + prune live in the modal / save helper.
- */
+/** Draft for the standalone Tax assumptions modal, seeded from the parent-chain effective overrides; Save reuses buildNextTaxAssumptions (prune-on-save). */
 export function useTaxAssumptionsDraft(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -514,7 +418,6 @@ export function useTaxAssumptionsDraft(
   localOverrides: ScenarioOverrides;
   effective: ScenarioOverrides;
   setHsaQualifiedPct: (v: number) => void;
-  /** Flip one account's early-withdrawal penalty-exempt flag. */
   togglePenaltyExempt: (accountId: string, exempt: boolean) => void;
   isDirty: boolean;
 } {
@@ -563,17 +466,7 @@ export function useTaxAssumptionsDraft(
 }
 
 
-/**
- * Draft state for the standalone health-coverage modal. Owns four concerns, all
- * seeded from the parent-chain `effective` overrides so inherited values show:
- *   - the per-member Marketplace opt-out (`acaMarketplaceOptOutMemberIds`);
- *   - the per-member/per-year Medicare Part B / Part D + Marketplace MONTHS
- *     (`healthCoverageMonths`);
- *   - the federal-poverty-level region (`acaFplRegion`);
- *   - the per-year annual benchmark-premium override (`acaPtcBenchmark`).
- * Tracks its own `isDirty` across all four. Save reuses `buildNextAcaCoverage` +
- * `buildNextHealthCoverage` (prune-on-save against the live member-id set).
- */
+/** Draft for the standalone Health coverage modal (opt-out, coverage months, FPL region, benchmark overrides), seeded from the effective overrides; Save reuses buildNextAcaCoverage and buildNextHealthCoverage. */
 export function useAcaCoverageDraft(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -586,7 +479,6 @@ export function useAcaCoverageDraft(
   };
   localOverrides: ScenarioOverrides;
   effective: ScenarioOverrides;
-  /** Flip one member's "on Marketplace" / "other coverage" flag (true = opt out). */
   toggleAcaOptOut: (memberId: string, optOut: boolean) => void;
   setFplRegion: (v: AcaFplRegion) => void;
   setCoverageRows: (v: DraftHealthCoverageRow[]) => void;

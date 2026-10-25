@@ -1,12 +1,4 @@
-/**
- * Focused integration tests for push-boundary validation. Kept separate from sync.spec.ts so
- * that 435-line file does not grow further past the shape-limit guideline.
- *
- * Each case asserts the observable contract (HTTP status + error code +
- * per-mutation outcome) AND that no DynamoDB row was written on a
- * pre-flight rejection — proving the rejection fires before any
- * TransactWriteItems is issued.
- */
+// Push-boundary validation: status, error code and per-mutation outcome, and no row written when a pre-flight rejection fires before any TransactWriteItems.
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
@@ -22,12 +14,6 @@ import {
 } from './test-helpers.js';
 import { IdempotencyKeyRepository } from '../dynamo/idempotency-key.repository.js';
 
-/**
- * A strict encrypted-envelope payload. Every
- * `POST /sync/push` requires an encrypted payload + freshnessHead, so the
- * validation cases below that exercise post-guard logic carry both. Mirrors
- * `sync.spec.ts`'s `encryptedPayload()`.
- */
 function encryptedPayload(): Record<string, unknown> {
   return {
     encryptionVersion: 1,
@@ -38,23 +24,11 @@ function encryptedPayload(): Record<string, unknown> {
   };
 }
 
-/**
- * A valid `cursorTag`: exactly 43 base64url characters (the wire form of a
- * 32-byte HMAC, no padding). The sync controller strictly validates this
- * shape, so every push fixture must
- * carry a real 43-char tag rather than a short placeholder.
- */
+// The controller validates a 43-char base64url tag (a 32-byte HMAC), so push fixtures need a real-shaped one.
 const VALID_CURSOR_TAG = 'a'.repeat(43);
 
-/** The default freshnessHead an encrypted Strategy-A push carries. */
 const TEST_FRESHNESS_HEAD = { freshnessCounter: 1, cursorTag: VALID_CURSOR_TAG };
 
-/**
- * Push with an arbitrary extra body field (e.g. the optional
- * `freshnessHead`) merged in. The single push helper for this file —
- * every push must carry an encrypted payload + freshnessHead to clear the
- * unconditional encryption guard before the validation logic under test runs.
- */
 async function pushWithBody(
   t: TestApp,
   s: Session,
@@ -110,9 +84,7 @@ describe('sync push validation', () => {
         [makeMutation(s, { aggregateType: 'definitelyNotARealAggregateType', payload: encryptedPayload() })],
         { freshnessHead: TEST_FRESHNESS_HEAD },
       );
-      // The DTO layer rejects the unknown aggregateType (400) before the
-      // encryption guard would 403; the encrypted payload keeps the assertion
-      // pinned on the aggregateType failure.
+      // The DTO rejects the unknown aggregateType (400) before the encryption guard would 403; the encrypted payload pins the assertion on the aggregateType failure.
       expect(res.status).toBe(400);
       const after = await countMutationLogRows(t, s.householdId);
       expect(after).toBe(before);
@@ -120,8 +92,6 @@ describe('sync push validation', () => {
 
     it('accepts every active aggregate type at create v=0', async () => {
       const s = await loginAsFreshUser(t);
-      // Single happy-path probe: 'account' (cheap to spot-check; full
-      // matrix lives in sync.spec.ts).
       const res = await pushWithBody(
         t,
         s,
@@ -143,7 +113,6 @@ describe('sync push validation', () => {
         [makeMutation(s, { operation: 'create', version: 5, payload: encryptedPayload() })],
         { freshnessHead: TEST_FRESHNESS_HEAD },
       );
-      // DTO rejects version≠0 on create (400) before the encryption guard.
       expect(res.status).toBe(400);
       const after = await countMutationLogRows(t, s.householdId);
       expect(after).toBe(before);
@@ -161,8 +130,7 @@ describe('sync push validation', () => {
         [makeMutation(s, { deviceId: rogueDeviceId, payload: encryptedPayload() })],
         { freshnessHead: TEST_FRESHNESS_HEAD },
       );
-      // The encryption guard passes (encrypted payload + freshnessHead); the
-      // inner-deviceId check fires after it at the service layer.
+      // The encryption guard passes; the inner-deviceId check fires after it at the service layer.
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('INNER_DEVICE_MISMATCH');
       expect(res.body.error.details).toMatchObject({
@@ -181,7 +149,6 @@ describe('sync push validation', () => {
       const res = await pushWithBody(t, s, [good, bad], { freshnessHead: TEST_FRESHNESS_HEAD });
       expect(res.status).toBe(403);
       const after = await countMutationLogRows(t, s.householdId);
-      // Whole batch rejected before any TransactWriteItems runs.
       expect(after).toBe(before);
     });
   });
@@ -201,7 +168,6 @@ describe('sync push validation', () => {
         ],
         { freshnessHead: TEST_FRESHNESS_HEAD },
       );
-      // Encryption guard passes; NOT_FOUND fires at the apply layer.
       expect(res.status).toBe(201);
       expect(res.body.applied).toHaveLength(0);
       expect(res.body.rejected).toHaveLength(1);
@@ -277,13 +243,8 @@ describe('sync push validation', () => {
       const s = await loginAsFreshUser(t);
       const repo = t.module.get(IdempotencyKeyRepository);
 
-      // Force-null the first lookup call AND hold it past B's commit.
-      // This is what actually exercises the apply-path replay branch:
-      // if the spy returned the real (post-B) cached row, A would
-      // short-circuit at the pre-lookup hit and never reach applyOne's
-      // TransactWriteCommand. Returning null routes A through the
-      // conditional IdempotencyKey Put, which cancels (B's row already
-      // there), and handleCancel runs replayIdempotencyRow.
+      // Force-null the first lookup call and hold it past B's commit: a real post-B cached row would short-circuit A at the pre-lookup hit and never reach
+      // applyOne. Null routes A through the conditional IdempotencyKey Put, which cancels (B's row exists), and handleCancel runs replayIdempotencyRow.
       let firstCallHeld = false;
       let resolveHeld!: () => void;
       const held = new Promise<void>((resolve) => {
@@ -313,29 +274,19 @@ describe('sync push validation', () => {
         payload: encryptedPayload(),
       });
 
-      // Start A first → its lookup call is held.
       const pushA = pushWithBody(t, s, [mutationA], { freshnessHead: TEST_FRESHNESS_HEAD });
-      // Yield to the event loop so A's controller actually issues the
-      // lookup before B starts.
+      // Yield so A's controller issues its lookup before B starts.
       await new Promise((r) => setImmediate(r));
-      // B runs to completion.
       const bRes = await pushWithBody(t, s, [mutationB], { freshnessHead: TEST_FRESHNESS_HEAD });
       expect(bRes.status).toBe(201);
       expect(bRes.body.applied).toHaveLength(1);
       expect(bRes.body.applied[0].aggregateId).toBe(mutationB.aggregateId);
 
-      // Release A's lookup. lookup returns null (forced) → A enters
-      // applyOne → conditional IdempotencyKey Put cancels (B's row is
-      // there) → handleCancel classifies as 'idempotency' →
-      // replayIdempotencyRow re-queries via the same spy (which now
-      // calls origLookup since firstCallHeld is true) → returns B's
-      // cached applied row.
+      // A's forced-null lookup enters applyOne, the IdempotencyKey Put cancels, and replayIdempotencyRow re-queries through the spy (now calling the original) and returns B's cached applied row.
       resolveHeld();
       const aRes = await pushA;
       expect(aRes.status).toBe(201);
       expect(aRes.body.applied).toHaveLength(1);
-      // Transparent replay: A's response is B's cached aggregateId, not
-      // A's own — duplicate mutationId contract holds.
       expect(aRes.body.applied[0].aggregateId).toBe(mutationB.aggregateId);
 
       spy.mockRestore();
@@ -343,14 +294,9 @@ describe('sync push validation', () => {
   });
 
   describe('freshnessHead strict validation', () => {
-    // The sync controller performs 100% of freshness-head validation
-    // manually (FreshnessHeadDto carries no class-validator decorators, and
-    // PushDto.freshnessHead is `unknown` with @ValidateNested() removed), so the
-    // global ValidationPipe can never pre-empt the FRESHNESS_HEAD_INVALID
-    // discriminator. EVERY malformed-head shape — bad bounds, wrong field type,
-    // a missing field, AND a bare non-object primitive — must return the exact
-    // `400 FRESHNESS_HEAD_INVALID` code (not the pipe's generic default), and no
-    // mutation may be committed (the whole push fails).
+    // The controller validates the freshness head entirely by hand (FreshnessHeadDto has no class-validator decorators and PushDto.freshnessHead is
+    // `unknown`), so the global ValidationPipe cannot pre-empt FRESHNESS_HEAD_INVALID: every malformed shape, including a bare primitive, must return
+    // that exact code and commit no mutation.
 
     it('accepts a push with a well-formed 43-char freshnessHead', async () => {
       const s = await loginAsFreshUser(t);
@@ -361,11 +307,7 @@ describe('sync push validation', () => {
       expect(res.body.applied).toHaveLength(1);
     });
 
-    /**
-     * Every malformed freshnessHead value + the human label. `head` is the raw
-     * value placed at the `freshnessHead` key — including bare primitives, which
-     * must reach the controller untouched by the pipe.
-     */
+    // `head` is the raw value at the `freshnessHead` key, including bare primitives, which must reach the controller untouched by the pipe.
     const invalidCases: ReadonlyArray<{ label: string; head: unknown }> = [
       { label: 'a non-integer (string) freshnessCounter', head: { freshnessCounter: 'nope', cursorTag: VALID_CURSOR_TAG } },
       { label: 'a fractional freshnessCounter', head: { freshnessCounter: 1.5, cursorTag: VALID_CURSOR_TAG } },
@@ -396,8 +338,6 @@ describe('sync push validation', () => {
         expect(res.body.error.code).toBe('FRESHNESS_HEAD_INVALID');
         expect(res.body.applied).toBeUndefined();
 
-        // Nothing was committed: the mutation-log table has no row for this
-        // household. Proves the head is validated before any TransactWriteItems.
         expect(await countMutationLogRows(t, s.householdId)).toBe(0);
       });
     }

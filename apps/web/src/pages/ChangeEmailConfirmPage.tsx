@@ -1,18 +1,4 @@
-/**
- * Change-email confirmation landing route.
- * The verification mail sent to the NEW address points here with the token in
- * the URL fragment (`#token=…` — never sent to the server, never logged at the
- * edge). Mirrors VerifyEmailPage / ApproveSignupPage:
- * read the token once on mount, scrub it from the URL via
- * `history.replaceState`, then POST it to `POST /auth/change-email/confirm`.
- *
- * Public + unauthenticated landing (the link may be opened in a different
- * browser than the one that started the change). On success the sign-in email
- * has swapped; the page shows the outcome and a link back to sign in.
- *
- * Layout mirrors the other auth landing routes: centered card outside the app
- * shell.
- */
+/** Change-email confirmation landing route, public and unauthenticated (the link may open in another browser than the one that started the change). The token arrives in the URL fragment (never sent to the server or logged), is read once on mount, scrubbed via history.replaceState, then POSTed to /auth/change-email/confirm. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '../auth/AuthContext';
@@ -31,7 +17,6 @@ type Status =
   | { kind: 'success'; email: string }
   | { kind: 'error'; message: string };
 
-// Tailwind max-w-md — one-sentence outcome copy card.
 const CONFIRM_CARD_WIDTH = 'w-full max-w-md shadow-lg';
 
 function readTokenFromFragment(): string {
@@ -45,14 +30,11 @@ function readTokenFromFragment(): string {
 
 export const ChangeEmailConfirmPage: React.FC = () => {
   const { confirmEmailChange } = useAuth();
-  // Read once on mount; the effect below scrubs the fragment before any
-  // subsequent render so this state is the only surviving copy.
+  // Read once on mount; the effect below scrubs the fragment before any later render, so this state is the only surviving copy.
   const [token] = useState<string>(readTokenFromFragment);
   const [status, setStatus] = useState<Status>({ kind: 'working' });
   const consumedTokenRef = React.useRef<string | null>(null);
 
-  // Scrub the fragment so a back-button / share / history snapshot doesn't
-  // keep the raw token around. Runs once after the first render.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!window.location.hash) return;
@@ -68,8 +50,7 @@ export const ChangeEmailConfirmPage: React.FC = () => {
       setStatus({ kind: 'error', message: 'Confirmation token is missing from the link.' });
       return;
     }
-    // Guard StrictMode double-fire which would consume the token on the first
-    // call and fail the second with "already used".
+    // Guards StrictMode double-fire, which would consume the token on the first call and fail the second with "already used".
     if (consumedTokenRef.current === token) return;
     consumedTokenRef.current = token;
     setStatus({ kind: 'working' });

@@ -12,7 +12,6 @@ import {
 import { CHART_COLORS } from './tokens';
 
 // WCAG 2.x reference values (https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio).
-// Black-on-white is the canonical 21:1 extreme; identical colors are 1:1.
 describe('relativeLuminance', () => {
   it('is 0 for black and 1 for white', () => {
     expect(relativeLuminance('#000000')).toBeCloseTo(0, 5);
@@ -42,10 +41,7 @@ describe('contrastRatio', () => {
   });
 });
 
-// The locked WCAG 2.2 AA target is honored by
-// construction: the UI may only use pairs registered here, and this
-// suite proves each one clears its AA threshold in BOTH themes. jsdom's
-// disabled axe `color-contrast` rule is thus covered numerically.
+// jsdom disables axe's color-contrast rule, so every registered pair is checked numerically in both themes.
 describe('UI_CONTRAST_PAIRS — every registered pair clears WCAG 2.2 AA', () => {
   for (const theme of ['light', 'dark'] as const) {
     for (const pair of UI_CONTRAST_PAIRS[theme]) {
@@ -68,13 +64,7 @@ describe('UI_CONTRAST_PAIRS — every registered pair clears WCAG 2.2 AA', () =>
   });
 });
 
-// Chart-pair gate.
-// Every opaque chart series / marker color must clear the non-text-UI
-// threshold (WCAG 1.4.11, ≥ 3.0) against the page + card surface it
-// renders on, in BOTH themes. The registry is generated from the live
-// CHART_COLORS map, so a palette edit that drops a key below 3.0 fails
-// here — the automated replacement for the deleted CSS-var drift guard
-// on the contrast axis.
+// Chart colors must clear the non-text-UI threshold (WCAG 1.4.11, >= 3.0) in both themes; the registry is generated from CHART_COLORS.
 describe('CHART_CONTRAST_PAIRS — every chart series clears WCAG 1.4.11', () => {
   for (const theme of ['light', 'dark'] as const) {
     for (const pair of CHART_CONTRAST_PAIRS[theme]) {
@@ -92,7 +82,6 @@ describe('CHART_CONTRAST_PAIRS — every chart series clears WCAG 1.4.11', () =>
       const opaque = Object.values(CHART_COLORS[theme]).filter((v) =>
         v.startsWith('#'),
       ).length;
-      // page + card surface per opaque key.
       expect(CHART_CONTRAST_PAIRS[theme].length).toBe(opaque * 2);
     }
   });
@@ -101,7 +90,6 @@ describe('CHART_CONTRAST_PAIRS — every chart series clears WCAG 1.4.11', () =>
     const names = CHART_CONTRAST_PAIRS.light.map((p) => p.name);
     expect(names.some((n) => n.includes('mcBandOuter'))).toBe(false);
     expect(names.some((n) => n.includes('mcBandInner'))).toBe(false);
-    // …and they really are translucent in the map.
     expect(CHART_COLORS.light.mcBandOuter.startsWith('rgba')).toBe(true);
     expect(CHART_COLORS.dark.mcBandInner.startsWith('rgba')).toBe(true);
   });

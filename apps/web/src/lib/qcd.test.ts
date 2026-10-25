@@ -1,6 +1,3 @@
-/**
- * Unit tests for the pure QCD math (`qcd.ts`).
- */
 import { describe, it, expect } from 'vitest';
 import {
   qcdFirstEligibleTaxYear,
@@ -122,7 +119,6 @@ describe('computeQcdForOwnerYear', () => {
   });
 
   it('per-person limit is consumed once across two same-owner entries', () => {
-    // Two entries, each $80k, on separate IRAs; the limit ($111k) is shared.
     const r = computeQcdForOwnerYear({
       entries: [entry('iraA', 80_000), entry('iraB', 80_000)],
       year: 2026,
@@ -135,7 +131,6 @@ describe('computeQcdForOwnerYear', () => {
       qcdLimitCentsForYear: 111_000_00,
     });
     expect(r.totalQcdCents).toBe(111_000_00);
-    // First entry consumes its full $80k; the second is capped at the remainder.
     expect(r.perEntry[0].qcdCents).toBe(80_000_00);
     expect(r.perEntry[1].qcdCents).toBe(111_000_00 - 80_000_00);
   });
@@ -245,8 +240,6 @@ describe('computeQcdForOwnerYear', () => {
 
   it('depletes source IRA balance across two same-source entries', () => {
     // IRA balance: 50_000_00 cents. Two entries each wanting 40_000_00.
-    // First entry gets 40_000_00 (min of 40k, limit=115_000_00, balance=50_000_00).
-    // Second entry gets only 10_000_00 (min of 40k, limit-remainder, balance-remainder=10_000_00).
     const result = computeQcdForOwnerYear({
       entries: [
         { sourceAccountId: 'ira-a', annualAmountDollars: 40_000 },

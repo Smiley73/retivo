@@ -1,14 +1,4 @@
-/**
- * TextInput — shared React Aria text/number input.
- * Asserts the frozen, native-`<input>`-equivalent contract: a controlled
- * value reflected on the element, native change/blur events firing with
- * the typed value (call sites keep `e.target.value`), `type`/`inputMode`
- * /`pattern`/`disabled` pass-through, the optional RA `<Label>` wiring,
- * and the shared-component axe rule (AGENTS mandate). RA `<Input>` is a
- * real `<input>`, so `fireEvent` drives it faithfully (the userEvent
- * requirement is for RA press/key primitives — Switch/Select/Slider —
- * not text inputs; consistent with MoneyInput.test).
- */
+/** TextInput: the shared React Aria text input keeps a native-input-equivalent contract. */
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -63,7 +53,6 @@ describe('TextInput', () => {
     const input = screen.getByLabelText('Years');
     expect(input).toHaveAttribute('inputmode', 'numeric');
     expect(input).toHaveAttribute('pattern', '[0-9]*');
-    // No native number spinner — it is a text input by construction.
     expect(input).not.toHaveAttribute('type', 'number');
   });
 
@@ -82,9 +71,7 @@ describe('TextInput', () => {
   });
 
   it('renders at the text-sm page baseline (font-size regression guard)', () => {
-    // The original bug: the input set no `text-*` so it fell back to
-    // the 16px browser default while page text is 14px. jsdom cannot
-    // measure computed px, so the class is the contract.
+    // jsdom cannot measure computed px, so the class is the contract for matching the page text size.
     render(
       <TextInput aria-label="Sized" value="" onChange={() => undefined} />,
     );
@@ -119,9 +106,6 @@ describe('TextInput', () => {
   });
 
   it('forwards data-* attributes to the rendered input (PM_IGNORE_ATTRS contract)', () => {
-    // The password-manager opt-out attributes (PM_IGNORE_ATTRS in
-    // components/password-manager.tsx) are spread onto TextInput and must
-    // land on the real <input> — locks RA Input's data-attr passthrough.
     render(
       <TextInput
         aria-label="Secret"

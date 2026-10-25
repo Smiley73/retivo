@@ -1,21 +1,6 @@
 /**
- * Inner SVG-engine impl for the Required Minimum Distribution chart.
- * Uses the in-house SVG chart engine.
- *
- * Stacked bars per RMD year:
- *  - Bottom: RMD met (`rmdFloor − rmdShortfall`), neutral teal.
- *  - Top: RMD shortfall (`rmdShortfall`), red cost accent — the portion
- *    the projection could not fund.
- *
- * When any year retains surplus (`rmdRetained > 0`, "split mode"), the met
- * band itself splits into two segments — "Used for spending and taxes"
- * (teal) at the bottom and "Surplus (kept)" (green) above it — with the
- * red shortfall still on top. The retained segment is clamped to the met
- * figure (`retainedDisplay = min(max(0, rmdRetained), rmdMet)`,
- * `spentDisplay = rmdMet − retainedDisplay`) so the bar height stays
- * = the year's `rmdFloor` even on source/rounding drift.
- *
- * Total bar height = the year's `rmdFloor`.
+ * Inner SVG-engine chart for RMDs: bars of RMD met and red shortfall; with surplus ("split mode") the met band
+ * splits, retained clamped to the met figure so bar height stays `rmdFloor`.
  */
 import React from 'react';
 import type { RmdChartRow } from './RmdChart';
@@ -40,9 +25,6 @@ interface InnerProps {
   isDragging?: boolean;
 }
 
-/** Clamp the retained surplus to the met figure so it can never inflate the
- *  bar past the required minimum. `spentDisplay = rmdMet − retainedDisplay`
- *  so spent + retained + shortfall === required. */
 function splitDisplay(row: RmdChartRow): {
   retainedDisplay: number;
   spentDisplay: number;
@@ -141,14 +123,10 @@ const InnerChart: React.FC<InnerProps> = ({
   const colors = useChartColors();
   const chrome = useChartChrome();
   const { hidden, toggle } = useSeriesVisibility();
-  // Split mode: when any year retains surplus, the met band splits into
-  // used-for-spending (teal) + surplus-kept (green). Same gate as the
-  // "Total RMD surplus" tile.
+  // Split mode when any year retains surplus; same gate as the "Total RMD surplus" tile.
   const split = React.useMemo(() => rows.some((r) => r.rmdRetained > 0), [rows]);
-  // Bars map by `x` = their integer `year` (mirrors the Tax Burden chart's
-  // integer death-year convention — every bar is a full-value bar at its
-  // calendar year). In split mode each datum also carries the clamped
-  // spent/retained display heights the stacked series read.
+  // Bars sit on their integer `year`; in split mode each datum also carries the clamped spent /
+  // retained heights.
   const data: ChartDatum[] = React.useMemo(
     () =>
       rows.map((r) => {
@@ -162,9 +140,7 @@ const InnerChart: React.FC<InnerProps> = ({
   const lastDeathFractional = markers?.length
     ? Math.max(...markers.map((m) => m.fractionalYear))
     : null;
-  // Inset the first/last bars from the plot edges (bars are centered on
-  // their x). ~0.6yr is wider than a half bar at any zoom; mirrors the
-  // Tax Burden chart.
+  // Inset the edge bars (centred on x), as in the Tax Burden chart.
   const BAR_EDGE_PAD = 0.6;
   const xMinPadded = Math.floor(xMin) - BAR_EDGE_PAD;
   const xMax = Math.max(

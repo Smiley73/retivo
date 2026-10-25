@@ -1,8 +1,4 @@
-/**
- * Preview dialog for the Expenses page "Add Medicare premiums" helper. Confirm
- * writes one monthly Medical expense per included row through the expense form's
- * create path; the row and payload logic is in `medicare-premium-helper.ts`.
- */
+/** Preview dialog for the Expenses page "Add Medicare premiums" helper; Confirm writes one monthly Medical expense per included row through the expense form's create path (logic in medicare-premium-helper.ts). */
 import React, { useState } from 'react';
 import { Alert } from '../components/Alert';
 import { Modal } from '../components/Modal';
@@ -176,8 +172,7 @@ export const MedicarePremiumsDialog: React.FC<MedicarePremiumsDialogProps> = ({
       notifyPending();
       onClose();
     } catch {
-      // Rows already written stay; the preview now shows them as already
-      // entered, so a retry cannot add them twice.
+      // Rows already written stay and show as already entered, so a retry cannot add them twice.
       if (written > 0) notifyPending();
       setError(
         written > 0
@@ -234,7 +229,6 @@ export const MedicarePremiumsDialog: React.FC<MedicarePremiumsDialogProps> = ({
           ))
         )}
         {error && <Alert tone="error">{error}</Alert>}
-        {/* Left-aligned, primary action first — AGENTS modal-action rule. */}
         <div className="flex justify-start gap-2">
           <button
             type="button"

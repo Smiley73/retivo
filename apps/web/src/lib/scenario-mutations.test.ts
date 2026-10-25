@@ -1,7 +1,3 @@
-/**
- * Tests for scenario mutation helpers: save, create, delete cascade,
- * promote cascade, and bootstrap-time reconciliation.
- */
 import 'fake-indexeddb/auto';
 import {
   afterEach,
@@ -20,11 +16,9 @@ import {
 } from '../db/store';
 import { setRegisteredDeviceId } from '../sync/device-id';
 import {
-  clearPromotionMarker,
   createScenario,
   deleteScenarioCascade,
   promoteScenario,
-  readPromotionMarker,
   reconcileScenarios,
   saveScenario,
 } from './scenario-mutations';
@@ -32,6 +26,7 @@ import type { ScenarioPayload } from '../db/types';
 import type { ScenarioAggregate } from './scenario-resolution';
 
 const HH = 'hh-test';
+const PROMOTION_MARKER_KEY = 'retivo.scenarios.promotionInProgress';
 
 function makeScenario(
   id: string,
@@ -66,13 +61,13 @@ beforeEach(async () => {
   setRegisteredDeviceId('dev-test');
   await clearAllStores();
   await clearMutationQueue();
-  clearPromotionMarker();
+  localStorage.removeItem(PROMOTION_MARKER_KEY);
 });
 
 afterEach(async () => {
   await clearAllStores();
   await clearMutationQueue();
-  clearPromotionMarker();
+  localStorage.removeItem(PROMOTION_MARKER_KEY);
   vi.restoreAllMocks();
 });
 
@@ -130,8 +125,6 @@ describe('deleteScenarioCascade', () => {
     await deleteScenarioCascade('a', [primary, a, b, c, d], HH);
 
     const queue = await listPendingMutations();
-    // Four delete mutations (a, b, c, d), no updates — children are
-    // deleted not re-parented.
     expect(queue).toHaveLength(4);
     expect(queue.every((m) => m.operation === 'delete')).toBe(true);
     expect(new Set(queue.map((m) => m.aggregateId))).toEqual(
@@ -150,10 +143,7 @@ describe('deleteScenarioCascade', () => {
     await seed(b);
     await seed(d);
 
-    // listPendingMutations reads via an IDB index whose key order is
-    // randomised by mutation UUID, not insertion order. Mock Date.now()
-    // to give every queued mutation a distinct, monotonically-increasing
-    // timestamp so the test can recover insertion order by sorting.
+    // listPendingMutations reads via an IDB index ordered by mutation UUID, not insertion; mock Date.now() so each mutation gets a distinct increasing timestamp.
     let now = 1_700_000_000_000;
     const dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => ++now);
     try {
@@ -225,7 +215,6 @@ describe('promoteScenario', () => {
     await promoteScenario('b', [primary, a, b, sibling], HH);
 
     const queue = await listPendingMutations();
-    // 1 update (b) + 1 delete (p) + 2 re-parents (a, sibling) = 4 mutations.
     expect(queue).toHaveLength(4);
     const promotedUpdate = queue.find(
       (m) => m.aggregateId === 'b' && m.operation === 'update',
@@ -234,7 +223,6 @@ describe('promoteScenario', () => {
     const promotedPayload = promotedUpdate?.payload as ScenarioPayload;
     expect(promotedPayload.isPrimary).toBe(true);
     expect(promotedPayload.parentScenarioId).toBeNull();
-    // Resolved values flatten — retirementAge inherited via b's own override.
     expect(promotedPayload.overrides.retirementAge?.primary.ageYears).toBe(60);
 
     const deletion = queue.find((m) => m.operation === 'delete');
@@ -256,7 +244,7 @@ describe('promoteScenario', () => {
     await seed(primary);
     await seed(a);
     await promoteScenario('a', [primary, a], HH);
-    expect(readPromotionMarker()).toBeNull();
+    expect(localStorage.getItem(PROMOTION_MARKER_KEY)).toBeNull();
   });
 
   it('refuses to promote the base scenario', async () => {
@@ -267,11 +255,7 @@ describe('promoteScenario', () => {
     ).rejects.toThrow(/base/i);
   });
 
-  // Batched bulk-fill wake: the cascade threads its `saveScenario` /
-  // direct `queueLocalMutation` writes through one `withBatchedStoreSignals`
-  // scope, so its 4 scenario writes fire the fine `scenario` store signal
-  // exactly ONCE on scope exit — not once per `saveScenario` call. This is the
-  // regression guard for the `saveScenario`-forwarding wrap.
+  // The cascade threads its writes through one withBatchedStoreSignals scope, so its 4 scenario writes fire the fine `scenario` signal once, not once per saveScenario.
   it('fires exactly one fine scenario store signal for the whole cascade, not one per write', async () => {
     const primary = makeScenario('p', { name: 'Base', isPrimary: true });
     const a = makeScenario('a', { name: 'A', parentScenarioId: 'p' });
@@ -287,7 +271,6 @@ describe('promoteScenario', () => {
 
     await promoteScenario('b', [primary, a, b, sibling], HH);
 
-    // 4 scenario writes (promote + delete old base + 2 re-parents), one signal.
     expect(scenariosListener).toHaveBeenCalledTimes(1);
     unsubscribe();
   });
@@ -363,9 +346,7 @@ describe('reconcileScenarios', () => {
     await seed(winner);
     await seed(loser);
 
-    // Simulate a peer tab currently inside `reconcileScenarios`. The
-    // recency check keeps stale locks (crashed tab > STALE_MS ago) from
-    // blocking us, so the timestamp must be fresh.
+    // A peer tab inside `reconcileScenarios`: the recency check ignores stale locks (a crashed tab), so the timestamp must be fresh.
     localStorage.setItem(
       'retivo.scenarios.reconcileLock',
       String(Date.now()),
@@ -395,7 +376,6 @@ describe('reconcileScenarios', () => {
     await seed(loser);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    // Old lock — a previous tab presumably crashed mid-reconcile.
     localStorage.setItem(
       'retivo.scenarios.reconcileLock',
       String(Date.now() - 60_000),

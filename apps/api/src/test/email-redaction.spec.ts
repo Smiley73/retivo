@@ -1,25 +1,4 @@
-/**
- * Verifies that SES / mail-send failure logs across the auth services
- * (signup, resend-verification, email-verification approval, signup-approval,
- * mfa-email-otp, password-reset, change-email) emit
- * `{ userId, emailFingerprint }` and not the raw email string. Uses
- * `Logger.prototype.warn` as the capture point — the services all instantiate
- * per-class `new Logger(...)` from `@nestjs/common`, so prototype spying is the
- * single right hook.
- *
- * Each failure is forced with an SES-shaped rejection whose message embeds the
- * raw recipient address (`sesRejectionEmbeddingEmail`), so the negative proof
- * genuinely exercises the `reason: err.name` (not `err.message`) redaction —
- * `redact` masks by field name, so an email baked into a message string would
- * otherwise reach CloudWatch un-scrubbed.
- *
- * The verification covers both directions:
- *   (a) fingerprint of the expected email is present in the captured
- *       log args (presence proof).
- *   (b) the raw email substring is absent from the serialized log args
- *       (negative proof — the requirement is "no raw email", not "fingerprint
- *       is also present").
- */
+// Mail-send failure logs across the auth services emit { userId, emailFingerprint }, never the raw email; Logger.prototype.warn is the capture point.
 import request from 'supertest';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -43,11 +22,8 @@ interface CapturedCall {
   serialized: string;
 }
 
-// A realistic SES send rejection: the AWS error message embeds the raw
-// recipient address (e.g. "Email address is not verified: user@example.com").
-// The mail-dispatch failure logs must log the error CLASS (`err.name`), never
-// `err.message` — `redact` masks by field name, so an email baked into a
-// message string would otherwise reach CloudWatch un-scrubbed.
+// A realistic SES rejection whose message embeds the raw recipient: the failure logs must log the error class (`err.name`), never
+// `err.message`, because `redact` masks by field name and would not scrub an email inside a message string.
 function sesRejectionEmbeddingEmail(email: string): Error {
   return new Error(`Email address is not verified: ${email}`);
 }
@@ -62,8 +38,7 @@ function captureWarn(): { calls: CapturedCall[]; restore: () => void } {
   return { calls, restore: () => spy.mockRestore() };
 }
 
-// The dev-mode (`!sesEnabled`) fallback paths log via `Logger.prototype.log`,
-// not `.warn` — spy that instead. Same capture shape.
+// The dev-mode (`!sesEnabled`) fallback paths log via `Logger.prototype.log`, not `.warn`.
 function captureLog(): { calls: CapturedCall[]; restore: () => void } {
   const calls: CapturedCall[] = [];
   const spy = jest
@@ -81,8 +56,6 @@ function expectFingerprintAndNoRawEmail(
 ): void {
   const matching = calls.find((c) => c.serialized.includes(expectedFingerprint));
   expect(matching).toBeDefined();
-  // Negative proof: the raw email must not appear anywhere in the captured
-  // call arguments (incl. nested objects, message strings, etc.).
   for (const c of calls) {
     expect(c.serialized.toLowerCase()).not.toContain(rawEmail.toLowerCase());
   }
@@ -112,8 +85,6 @@ describe('email redaction in failure logs', () => {
         .post('/api/v1/auth/signup')
         .set('Origin', process.env.WEB_ORIGIN!)
         .send({ email, password: STRONG_PASSWORD });
-      // Signup itself succeeds — the failed SES dispatch is swallowed
-      // and logged. The user is created either way.
       expect(res.status).toBe(202);
       expect(sendSpy).toHaveBeenCalled();
       expectFingerprintAndNoRawEmail(capture.calls, fp, email);
@@ -124,9 +95,7 @@ describe('email redaction in failure logs', () => {
   });
 
   it('resend-verification.service: SES dispatch failure emits emailFingerprint, not raw email', async () => {
-    // Seed an unverified user via signup, then back-date its
-    // `lastVerificationSentAt` past the 60s cooldown so the resend
-    // endpoint actually attempts a send instead of silently no-oping.
+    // Back-date `lastVerificationSentAt` past the 60s cooldown so resend actually attempts a send.
     const email = freshEmail();
     const fp = emailFingerprint(email);
     const signup = await request(t.app.getHttpServer())
@@ -158,7 +127,7 @@ describe('email redaction in failure logs', () => {
         .post('/api/v1/auth/resend-verification')
         .set('Origin', process.env.WEB_ORIGIN!)
         .send({ email });
-      // resend endpoint is always 202 — never a user-existence oracle.
+      // Resend is always 202, never a user-existence oracle.
       expect(res.status).toBe(202);
       expect(sendSpy).toHaveBeenCalled();
       expectFingerprintAndNoRawEmail(capture.calls, fp, email);
@@ -169,8 +138,7 @@ describe('email redaction in failure logs', () => {
   });
 
   it('email-verification.service: approval-mail request failure emits emailFingerprint, not raw email', async () => {
-    // Seed a foreign-email signup so the verify-email step actually
-    // hits the approval-mail dispatch branch.
+    // A foreign-email signup makes verify-email hit the approval-mail dispatch branch.
     const email = freshEmail();
     const fp = emailFingerprint(email);
     const signup = await request(t.app.getHttpServer())
@@ -191,8 +159,6 @@ describe('email redaction in failure logs', () => {
         .post('/api/v1/auth/verify-email')
         .set('Origin', process.env.WEB_ORIGIN!)
         .send({ token: verificationToken });
-      // verify-email itself returns 200 — the approval failure is
-      // swallowed and logged.
       expect(res.status).toBe(200);
       expect(reqApprovalSpy).toHaveBeenCalled();
       expectFingerprintAndNoRawEmail(capture.calls, fp, email);
@@ -211,7 +177,6 @@ describe('email redaction in failure logs', () => {
     const capture = captureLog();
     try {
       await verifyService.sendVerificationMail(email, rawToken);
-      // A log line was emitted, and it is the fixed argument-free marker.
       expect(capture.calls.length).toBeGreaterThan(0);
       for (const c of capture.calls) {
         expect(c.serialized).not.toContain(rawToken);
@@ -265,19 +230,13 @@ describe('email redaction in failure logs', () => {
   });
 
   it('signup-approval.service: approval-mail dispatch failure emits emailFingerprint, not raw email', async () => {
-    // Force the SES send path inside requestApproval to throw. Bypass
-    // the HTTP layer; the service is injectable, the failure log is
-    // what we're after.
+    // Bypasses the HTTP layer and forces the SES send path inside requestApproval to throw; the failure log is what is under test.
     const email = freshEmail();
     const fp = emailFingerprint(email);
     const userId = 'test-' + Math.random().toString(36).slice(2);
 
     const approvalService = t.module.get(SignupApprovalService);
-    // The private `sendApprovalMail` is reachable via the prototype as
-    // an indirect property; spying on it from the instance ensures the
-    // failure path runs without any direct SES interaction. The repo
-    // `insert` call still runs; we let it write a real row (cleanup is
-    // not necessary for log capture).
+    // Spying on the private `sendApprovalMail` from the instance runs the failure path without direct SES interaction.
     const sendApprovalSpy = jest
       .spyOn(
         approvalService as unknown as {
@@ -298,8 +257,7 @@ describe('email redaction in failure logs', () => {
   });
 
   it('mfa-email-otp.service: code-mail dispatch failure emits emailFingerprint, not raw email', async () => {
-    // The failure log lives in the private `afterSend` wrapper; drive it
-    // directly with an SES rejection whose message embeds the recipient email.
+    // The failure log lives in the private `afterSend` wrapper; drive it directly with an SES rejection embedding the recipient.
     const email = freshEmail();
     const fp = emailFingerprint(email);
     const userId = 'test-' + Math.random().toString(36).slice(2);
@@ -328,8 +286,7 @@ describe('email redaction in failure logs', () => {
   });
 
   it('password-reset.service: mail dispatch failure emits emailFingerprint, not raw email', async () => {
-    // The failure log lives in the private `afterSend` wrapper; drive it
-    // directly with an SES rejection whose message embeds the recipient email.
+    // The failure log lives in the private `afterSend` wrapper; drive it directly with an SES rejection embedding the recipient.
     const email = freshEmail();
     const fp = emailFingerprint(email);
     const userId = 'test-' + Math.random().toString(36).slice(2);
@@ -358,10 +315,7 @@ describe('email redaction in failure logs', () => {
   });
 
   it('change-email.service: verification-mail dispatch failure emits emailFingerprint, not raw email', async () => {
-    // Seed a real user with a pending email-change intent so the
-    // condition-pinned TransactWrite in `mintAndSendToken` commits and reaches
-    // the mail dispatch, then force that dispatch to reject with an SES-shaped
-    // error embedding the NEW recipient address.
+    // A pending email-change intent lets the condition-pinned TransactWrite in `mintAndSendToken` commit and reach the mail dispatch, which is forced to reject with the new address embedded.
     const email = freshEmail();
     const newEmail = freshEmail();
     const fp = emailFingerprint(newEmail);

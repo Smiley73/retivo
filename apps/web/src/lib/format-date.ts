@@ -1,19 +1,5 @@
-/**
- * Single source for absolute-date display across the app.
- *
- * Default format: `MMMM d, yyyy` (e.g. `May 20, 2026`).
- *
- * Calendar-date strings (`YYYY-MM-DD`) are parsed as UTC year/month/day
- * to avoid the `new Date('2026-05-20')` midnight-UTC pitfall — that
- * coerces to the previous calendar day in any timezone west of GMT.
- *
- * Full ISO timestamps are formatted in the user's local timezone, since
- * those represent a moment in time (e.g. `lastUsedAt`) and the calendar
- * day the user perceives is the local one.
- *
- * Numeric input controls keep `MM/dd/yyyy` via `<input type="date">` —
- * this helper is for read-only display only.
- */
+// Absolute-date display, default `MMMM d, yyyy`. `YYYY-MM-DD` strings parse as UTC parts to dodge the
+// `new Date('2026-05-20')` previous-day shift west of GMT; full ISO timestamps format in local time. Read-only display.
 
 const MONTHS = [
   'January',
@@ -30,11 +16,7 @@ const MONTHS = [
   'December',
 ];
 
-/**
- * Returns `MMMM d, yyyy` for the given ISO date or datetime string.
- * Empty / falsy / unparseable inputs return an empty string — callers
- * decide how to render the empty state.
- */
+/** `MMMM d, yyyy` for an ISO date or datetime; empty, falsy or unparseable input returns `''` for the caller to render. */
 export function formatDate(input: string | null | undefined): string {
   if (!input) return '';
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {

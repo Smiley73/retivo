@@ -1,34 +1,15 @@
-/**
- * Balance Projection page — chart-row real-dollar deflator.
- *
- * The page-local drawdown pipeline (`buildDrawdownByMethod` + its
- * `simulateDrawdown` call site) was deleted in the runner migration:
- * the deterministic drawdown now comes from `runBalanceProjectionForPage`
- * via `drawdownByMethodFromPageResult` (balance-projection-page-data.ts).
- * The shared engine `simulateDrawdown` (drawdown-engine.ts) stays — the
- * runner consumes it. Only the per-year balance line-chart deflator
- * survives here; it stitches the runner's per-method drawdown balances
- * onto the accumulation chart rows and converts to today's dollars.
- */
+/** Chart-row real-dollar deflator: stitches the runner's per-method drawdown balances onto the accumulation chart rows and converts them to today's dollars. */
 import type {
   ProjectionChartRow,
   ProjectionMethod,
 } from '../components/ProjectionChart';
-import type {
-  DrawdownByMethodResult,
-  RepresentativeRun,
-} from './balance-projection-page-data';
+import type { RepresentativeRun } from '../lib/monte-carlo';
+import type { DrawdownByMethodResult } from './balance-projection-page-data';
 import type { DisplayMode } from '../lib/view-deflator';
 
 const PROJECTION_CHART_TAIL_YEARS = 0;
 
-/**
- * Read the representative run's per-year balance + growth in the active display
- * basis. In Today's-dollars (`today`) the run self-deflates by the PATH's own
- * sampled CPI (`realBalanceByYear` / `realGrowthByYear`) — NOT the
- * scenario's `viewDeflator`. In Future-dollars the nominal `years[]` values are
- * read verbatim. Returns `null` outside the run's horizon.
- */
+// The run's per-year balance and growth in the display basis: Today's dollars self-deflate by the path's own sampled CPI (realBalanceByYear), not viewDeflator; Future dollars read nominal years[]. Null outside the run's horizon.
 function mcValuesForYear(
   run: RepresentativeRun,
   year: number,
@@ -53,10 +34,8 @@ export function deflateChartRows(opts: {
   readonly lastDeathYear: number | null;
   readonly retirementYear: number | null;
   readonly viewDeflator: (year: number, monthIndex?: number) => number;
-  /** Active representative run when a Monte Carlo basis is selected; `null`
-   *  for a deterministic basis. Drives the `mc` chart-row channel. */
+  /** Active MC representative run, or null for a deterministic basis; drives the `mc` chart-row channel. */
   readonly representativeRun?: RepresentativeRun | null;
-  /** Display basis — picks the run's real (today) vs nominal (future) series. */
   readonly displayMode?: DisplayMode;
 }): ProjectionChartRow[] {
   const {
@@ -80,10 +59,7 @@ export function deflateChartRows(opts: {
   ): number | null =>
     v === null ? null : v * viewDeflator(year, monthIndex ?? 11);
 
-  // Representative-run `mc` channel: the balance line draws solid before
-  // retirement and dashed from the retirement year onward (mirroring the
-  // deterministic split), in the run's own display basis. The retirement-year
-  // integer row carries the value in BOTH channels so the two sub-paths join.
+  // The mc channel draws solid before retirement and dashed after, mirroring the deterministic split; the retirement-year integer row carries the value in both channels so the sub-paths join.
   const mcChannel = (
     year: number,
   ): { solid: number | null; dashed: number | null; growth: number | null } => {
@@ -119,10 +95,7 @@ export function deflateChartRows(opts: {
     if (twr0 !== null) row.twrDashed = twr0 * retYearFactor;
   }
 
-  // `lastDeathYear` is the integer death year now (death = Dec 31 of
-  // `deathYear`, the terminal year), so the drawdown rows end at
-  // `deathYear` (tail = 0). The balance chart adds its own `year + 1`
-  // convention so the death-year-end point renders at `deathYear + 1`.
+  // The balance chart adds its own year + 1 convention so the death-year-end point renders at deathYear + 1.
   const tailEndYear = lastDeathYear + PROJECTION_CHART_TAIL_YEARS;
   const cleanBalance = (b: number | null | undefined): number | null =>
     b === null || b === undefined || b === 0 ? null : b;
@@ -147,8 +120,7 @@ export function deflateChartRows(opts: {
       plannedGrowth: null,
       twrGrowth: null,
       mcSolid: null,
-      // `mcChannel` already returned the value in display basis (real-deflated
-      // for today / nominal for future) — do NOT re-apply `yearFactor`.
+      // mcChannel already returns display-basis values: do not re-apply yearFactor.
       mcDashed,
       mcGrowth: null,
     });

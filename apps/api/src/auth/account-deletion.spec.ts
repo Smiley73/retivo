@@ -1,13 +1,5 @@
-/**
- * Unit test for the MFA account-deletion cascade.
- * Asserts the `DELETE /auth/account` sweep purges the three MFA tables:
- * `user-mfa` (keyed delete), `mfa-email-otp` (keyed delete), and every
- * `trusted-device` row (list-by-userId, then delete each (userId, deviceId)).
- *
- * Pure unit test: every collaborator is stubbed. argon2 runs against a real
- * hash so the password re-auth passes and the cascade reaches the auth-state
- * sweep.
- */
+// The MFA account-deletion cascade: the DELETE /auth/account sweep purges user-mfa, mfa-email-otp and every trusted-device row. Every collaborator is stubbed;
+// argon2 runs against a real hash so re-auth passes and the cascade reaches the auth-state sweep.
 import 'reflect-metadata';
 import { UnauthorizedException } from '@nestjs/common';
 import * as argon2 from 'argon2';
@@ -98,9 +90,7 @@ describe('DeleteAccountService — MFA cascade', () => {
       recordFailure: jest.fn(),
       clear: jest.fn().mockResolvedValue(undefined),
       purgeAddress: jest.fn().mockResolvedValue(undefined),
-      // Mirror the real primitive's boolean contract: run the caller's
-      // verify closure (argon2 re-auth) and reject on a `false` result so a
-      // wrong password still 401s here; a match resolves and the cascade runs.
+      // Mirrors the real primitive's boolean contract: run the verify closure and reject on false so a wrong password still 401s.
       verifyWithBackoff: jest.fn(
         async (args: { emailLowercase: string; verify: () => Promise<boolean> }) => {
           const matches = await args.verify();
@@ -129,13 +119,10 @@ describe('DeleteAccountService — MFA cascade', () => {
       listByUser: jest.fn().mockResolvedValue(devices),
       delete: trustedDeviceDelete,
     } as unknown as TrustedDeviceRepository;
-    // Step-up is not exercised in this unit test (AUTH_MFA_ENFORCED unset → the
-    // service's `mfaEnforced` is false, so `verify` is never called).
+    // AUTH_MFA_ENFORCED is unset, so `verify` is never called.
     const stepUpSvc = {
       verify: jest.fn().mockResolvedValue({ method: 'totp' }),
     } as unknown as StepUpService;
-    // No device id is threaded through this unit test's
-    // args, so `verify` is never called.
     const trustedDeviceSvc = { verify: jest.fn() } as unknown as TrustedDeviceService;
     const config = {
       get: jest.fn().mockReturnValue(undefined),
@@ -175,17 +162,13 @@ describe('DeleteAccountService — MFA cascade', () => {
 
     expect(userMfaDelete).toHaveBeenCalledWith('u1');
     expect(mfaEmailOtpDelete).toHaveBeenCalledWith('u1');
-    // The namespaced step-up Email-OTP row is swept too.
     expect(mfaEmailOtpDeleteStepUp).toHaveBeenCalledWith('u1');
     expect(trustedDeviceDelete).toHaveBeenCalledWith('u1', 'dev1');
     expect(trustedDeviceDelete).toHaveBeenCalledWith('u1', 'dev2');
     expect(trustedDeviceDelete).toHaveBeenCalledTimes(2);
-    // The cascade must unconditionally purge the FailedLoginAttempt
-    // row (including any guessing-notice stamp), not the stamp-preserving
-    // `clear()` a successful login uses.
+    // The cascade must purge the FailedLoginAttempt row (including any guessing-notice stamp), not call the stamp-preserving `clear()` a successful login uses.
     expect(failed.purgeAddress).toHaveBeenCalledWith('a@b.test');
     expect(failed.clear).not.toHaveBeenCalled();
-    // The completion audit event is the last step of the cascade.
     const events = (auth.record as jest.Mock).mock.calls.map(
       (c) => (c[0] as { eventType: string }).eventType,
     );

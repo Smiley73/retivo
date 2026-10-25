@@ -1,9 +1,4 @@
-/**
- * EntryDisclosureRow — collapsed/expanded visibility, controlled expansion,
- * the problem chip + `aria-describedby` wiring, and the accessible
- * description. `components/`-dir, so the AGENTS axe-smoke rule applies (at
- * least one `expectNoA11yViolations`).
- */
+/** EntryDisclosureRow: collapsed and expanded visibility, controlled expansion, and the problem chip with aria-describedby wiring. */
 import React, { useState } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';

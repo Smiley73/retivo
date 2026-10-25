@@ -1,22 +1,12 @@
-/**
- * Tests for `buildSwrComparisonData`. Pure
- * builder — no React, no pipeline: params are hand-built directly so the
- * layer math, capping, degenerate states and both dollar modes can be
- * pinned precisely. Cross-tab agreement (gross withdrawal == Cash flow
- * band, tax == Taxes tab) is proved by construction — `buildSwrComparisonData`
- * reads `yearlyCashflowByYear`/`resolvedDrawdownYears` directly rather than
- * recomputing either, so the fixtures here assert the pass-through.
- */
+// `buildSwrComparisonData`: a pure builder with hand-built params so the layer math, capping, degenerate states and both dollar modes can be pinned.
+// Cross-tab agreement (gross withdrawal equals the Cash flow band, tax equals the Taxes tab) holds by construction, since it reads `yearlyCashflowByYear` / `resolvedDrawdownYears` directly; the fixtures assert the pass-through.
 import { describe, expect, it } from 'vitest';
 import { buildSwrComparisonData, type BuildSwrComparisonDataParams } from './balance-projection-swr-derivation';
-import {
-  SAFE_WITHDRAWAL_RATE_BENGEN_PCT,
-  SAFE_WITHDRAWAL_RATE_BENGEN_REFINED_PCT,
-} from '../lib/safe-withdrawal-rate';
 import { buildViewDeflator } from '../lib/view-deflator';
 import type { CashflowMonthlyPoint } from '../components/CashflowProjectionChart';
 import type { DrawdownYear } from '../lib/drawdown-engine';
-import type { DrawdownByMethodResult, RepresentativeRun } from './balance-projection-page-data';
+import type { RepresentativeRun } from '../lib/monte-carlo';
+import type { DrawdownByMethodResult } from './balance-projection-page-data';
 
 const IDENTITY = (): number => 1;
 
@@ -63,8 +53,7 @@ function methodResult(netPortfolioAtRetirement: number): DrawdownByMethodResult 
   };
 }
 
-/** Minimal always-valid params — a 2032-only window (single, full, funded
- *  year), Planned basis, deterministic. Each test overrides what it needs. */
+// Minimal always-valid params: a 2032-only window (single, full, funded year), Planned basis, deterministic.
 function baseParams(
   overrides: Partial<BuildSwrComparisonDataParams> = {},
 ): BuildSwrComparisonDataParams {
@@ -157,10 +146,7 @@ describe('buildSwrComparisonData — degenerate states', () => {
   });
 
   it('no full retirement year: a mid-year retirement whose window ends in the transition year itself (life expectancy reached in the retirement year) is a distinct marker — never an `ok` bundle with a $0 anchor draw', () => {
-    // Window [2031, 2031] with a June retirement: the anchor is 2032, which
-    // the window never reaches. The single partial-year row carries a
-    // positive draw, so an `ok` result here could only mean the anchor
-    // scalar survived as its `0` initialiser.
+    // Window [2031, 2031] with a June retirement: the anchor is 2032, which the window never reaches, so an `ok` result could only mean the anchor scalar survived as its `0` initialiser.
     const result = buildSwrComparisonData(
       baseParams({
         primaryRetirementIso: '2031-06-15',
@@ -215,14 +201,7 @@ describe('buildSwrComparisonData — portfolio at retirement', () => {
   });
 
   it('MC: today reads realBalanceByYear[idx]; future reads years[idx].balance — pinned to the accumulation/drawdown PHASE BOUNDARY (no accountBalances at idx, accountBalances at idx+1), with a materially different candidate at idx+1', () => {
-    // retirementYear=2031, firstYear=2020 -> idx = 2031-2020-1 = 10. Rows
-    // 0..10 (years 2020..2030) are the accumulation phase — no
-    // `accountBalances`, steeply growing balance. Row 11 (2031, the
-    // retirement year itself) is the first DRAWDOWN-phase row — it alone
-    // carries `accountBalances` (the real phase discriminator the resolved-
-    // drawdown adapter and this builder both key off) and its balance drops
-    // sharply post-withdrawal, so reading idx+1 instead of idx would land on
-    // a candidate an order of magnitude off, not a ~1.6% rounding difference.
+    // Rows 0..10 (2020..2030) are accumulation (no `accountBalances`, steeply growing); row 11 (2031, the retirement year) is the first drawdown row, the only one carrying `accountBalances`, and its balance drops sharply, so reading idx+1 instead of idx = 2031-2020-1 = 10 would land an order of magnitude off.
     const run: RepresentativeRun = {
       firstYear: 2020,
       seed: 1,
@@ -242,8 +221,6 @@ describe('buildSwrComparisonData — portfolio at retirement', () => {
       realGrowthByYear: Array.from({ length: 12 }, () => 0),
       realFactorByYear: Array.from({ length: 12 }, () => 0.5),
     };
-    // The discriminator: the chosen index carries no `accountBalances`, and
-    // index + 1 does.
     expect(run.years[10].accountBalances).toBeUndefined();
     expect(run.years[11].accountBalances).toBeDefined();
     const today = buildSwrComparisonData(
@@ -264,11 +241,9 @@ describe('buildSwrComparisonData — portfolio at retirement', () => {
     );
     expect(today.state).toBe('ok');
     expect(future.state).toBe('ok');
-    // idx = 10 -> realBalanceByYear[10] = 300_000, years[10].balance = 600_000.
     expect(today.bundle!.portfolioAtRetirement).toBe(300_000);
     expect(future.bundle!.portfolioAtRetirement).toBe(600_000);
-    // NOT the retirement-year row itself (idx 11 -> 30_000 / 60_000) — 10x
-    // off, so even a tolerance-based assertion would catch the off-by-one.
+    // Not the retirement-year row itself (idx 11, 30_000 / 60_000): 10x off, so even a tolerance-based assertion catches the off-by-one.
     expect(today.bundle!.portfolioAtRetirement).not.toBeCloseTo(30_000, -3);
     expect(future.bundle!.portfolioAtRetirement).not.toBeCloseTo(60_000, -3);
   });
@@ -283,7 +258,6 @@ describe('buildSwrComparisonData — the anchor is the first FULL retirement yea
         cashflowFromYear: 2031,
         drawdownEndYear: 2032,
         yearlyCashflowByYear: new Map([
-          // Transition year: small partial-year draw (would fail a "compared" check).
           [2031, cfRow(2031, { withdrawal: 5_000, taxes: 0, total: 5_000 })],
           [2032, cfRow(2032, { withdrawal: 40_000, taxes: 5_000, total: 60_000 })],
         ]),
@@ -297,7 +271,6 @@ describe('buildSwrComparisonData — the anchor is the first FULL retirement yea
     expect(b.rows[0].fourPointFivePercentRuleValue).toBeNull();
     expect(b.rows[1].isPartialYear).toBe(false);
     expect(b.rows[1].fourPercentRuleValue).not.toBeNull();
-    // Card scalar and the series value at the anchor year are the same number.
     expect(b.anchorAfterTaxDraw).toBe(b.rows[1].afterTaxDraw);
     expect(b.anchorAfterTaxDraw).toBe(40_000 - 5_000);
   });
@@ -330,8 +303,7 @@ describe('buildSwrComparisonData — the anchor is the first FULL retirement yea
       realFactorByYear: Array.from({ length }, () => 1),
     });
 
-    // retirementYear=2030, firstYear=2020 -> idx=9 (December 2029 — a full
-    // MC year before the deterministic case's "no offset").
+    // retirementYear=2030, firstYear=2020 gives idx=9 (December 2029, a full MC year, unlike the deterministic case's no offset).
     const janFirst = buildSwrComparisonData(
       baseParams({
         activeMcBasis: 'mc-typical',
@@ -371,9 +343,7 @@ describe('buildSwrComparisonData — the anchor is the first FULL retirement yea
 
 describe('buildSwrComparisonData — the four-layer identity', () => {
   it('guaranteed + other + after-tax draw + tax == planned spend + tax, with part-time wages', () => {
-    // need (=total) = 60_000 = plannedSpendOnly(55_000) + tax(5_000).
-    // ss+pension = 20_000, partTime = 10_000, gross withdrawal (funded) =
-    // need - earned = 60_000 - 30_000 = 30_000, after-tax draw = 25_000.
+    // need (= total) = 60_000 = plannedSpendOnly 55_000 + tax 5_000; ss+pension 20_000 and partTime 10_000, so the funded gross withdrawal is 30_000 and the after-tax draw 25_000.
     const result = buildSwrComparisonData(
       baseParams({
         yearlyCashflowByYear: new Map([
@@ -392,14 +362,12 @@ describe('buildSwrComparisonData — the four-layer identity', () => {
       60_000, // planned spend(55k) + tax(5k) == cfRow.total
       6,
     );
-    // Other income never lands in the guaranteed layer.
     expect(row.guaranteedIncomeSplit.socialSecurity).toBeCloseTo(15_000, 6);
     expect(row.guaranteedIncomeSplit.pension).toBeCloseTo(5_000, 6);
   });
 
   it('a year the ACA credit lowered the draw keeps the draw it funds and a tax layer of 0', () => {
-    // $71,200 spending, $31,300 Social Security, a $5,134.20 credit applied to
-    // premiums: the cashflow row draws 34,765.80 and carries -5,134.20 as taxes.
+    // $71,200 spending, $31,300 Social Security, a $5,134.20 credit applied to premiums: the cashflow row draws 34,765.80 and carries -5,134.20 as taxes.
     const result = buildSwrComparisonData(
       baseParams({
         yearlyCashflowByYear: new Map([
@@ -435,7 +403,6 @@ describe('buildSwrComparisonData — the four-layer identity', () => {
   });
 
   it('a surplus-guaranteed-income year floors both portfolio layers at 0 and surfaces the surplus, never a negative segment', () => {
-    // plannedSpendOnly = 30_000 (total 30k, tax 0); guaranteed = 50_000 (surplus 20_000).
     const result = buildSwrComparisonData(
       baseParams({
         yearlyCashflowByYear: new Map([
@@ -456,10 +423,7 @@ describe('buildSwrComparisonData — the four-layer identity', () => {
   });
 
   it('guaranteedIncomeSurplus is measured against planned spend PLUS the tax the draw funds — a funded year with tax reports 0 surplus, not an overstated one', () => {
-    // total=110_000, tax=10_000 -> plannedSpendOnly=100_000; guaranteed
-    // (ss+pension)=105_000; the reconciled withdrawal is 5_000
-    // (110_000 - 105_000) — the portfolio really was tapped that year, all
-    // of it absorbed by the tax the draw funds, so the true surplus is 0.
+    // total=110_000 and tax=10_000 give plannedSpendOnly=100_000; guaranteed (ss+pension)=105_000; the reconciled withdrawal is 5_000, all absorbed by the tax the draw funds, so the true surplus is 0.
     const result = buildSwrComparisonData(
       baseParams({
         yearlyCashflowByYear: new Map([
@@ -470,7 +434,6 @@ describe('buildSwrComparisonData — the four-layer identity', () => {
       }),
     );
     const row = result.bundle!.rows.find((r) => r.year === 2032)!;
-    // Display cap is unchanged: min(105_000, plannedSpendOnly 100_000).
     expect(row.guaranteedIncome).toBe(100_000);
     expect(row.afterTaxDraw).toBe(0); // max(0, 5_000 - 10_000)
     expect(row.tax).toBe(10_000);
@@ -483,8 +446,7 @@ describe('buildSwrComparisonData — the four-layer identity', () => {
   });
 
   it('guaranteed/other income layers scale by a non-identity viewDeflator — NOT the raw nominal split (today\'s-dollars)', () => {
-    // f=0.8 at 2032 only: distinguishes "scaled by viewDeflator" from a
-    // deleted `* f` (which would leave the nominal 20_000 / 10_000 instead).
+    // f=0.8 at 2032 only distinguishes "scaled by viewDeflator" from a deleted `* f` (which would leave the nominal 20_000 / 10_000).
     const viewDeflator = (year: number): number => (year === 2032 ? 0.8 : 1);
     const result = buildSwrComparisonData(
       baseParams({
@@ -497,7 +459,6 @@ describe('buildSwrComparisonData — the four-layer identity', () => {
       }),
     );
     const row = result.bundle!.rows.find((r) => r.year === 2032)!;
-    // Nominal ss+pension = 20_000, partTime = 10_000 — both at the SAME f=0.8.
     expect(row.guaranteedIncome).toBeCloseTo(16_000, 6);
     expect(row.otherIncome).toBeCloseTo(8_000, 6);
     expect(row.guaranteedIncomeSplit.socialSecurity).toBeCloseTo(15_000 * 0.8, 6);
@@ -539,8 +500,8 @@ describe('buildSwrComparisonData — both dollar modes', () => {
         drawdownByMethod: { planned: methodResult(1_000_000), twr: null },
       }),
     );
-    const expected4 = (SAFE_WITHDRAWAL_RATE_BENGEN_PCT / 100) * 1_000_000;
-    const expected45 = (SAFE_WITHDRAWAL_RATE_BENGEN_REFINED_PCT / 100) * 1_000_000;
+    const expected4 = (4 / 100) * 1_000_000;
+    const expected45 = (4.5 / 100) * 1_000_000;
     for (const row of result.bundle!.rows) {
       expect(row.fourPercentRuleValue).toBeCloseTo(expected4, 6);
       expect(row.fourPointFivePercentRuleValue).toBeCloseTo(expected45, 6);
@@ -550,8 +511,7 @@ describe('buildSwrComparisonData — both dollar modes', () => {
   it('future-dollars: the rule line is NOT flat nominal — it inflates year over year with the same factor the draw layer carries', () => {
     const anchor = { nowYear: 2026, nowMonthIndex: 5, inflationPct: 3 };
     const realDeflator = buildViewDeflator('today', anchor);
-    // Under an ACTIVE future-dollars mode, viewDeflator is the identity —
-    // the page's own convention (raw nominal-as-computed layers).
+    // Under an active future-dollars mode viewDeflator is the identity: the page's convention (raw nominal-as-computed layers).
     const viewDeflator = (): number => 1;
     const result = buildSwrComparisonData(
       baseParams({
@@ -571,23 +531,17 @@ describe('buildSwrComparisonData — both dollar modes', () => {
       }),
     );
     const rows = result.bundle!.rows;
-    // Not flat: each later year's nominal figure is strictly larger than the
-    // last (the real rule constant re-inflated further forward each year).
+    // Not flat: each later year's nominal figure is strictly larger (the real rule constant re-inflated further forward each year).
     expect(rows[0].fourPercentRuleValue).not.toBeCloseTo(rows[2].fourPercentRuleValue!, 2);
     expect(rows[0].fourPercentRuleValue!).toBeLessThan(rows[1].fourPercentRuleValue!);
     expect(rows[1].fourPercentRuleValue!).toBeLessThan(rows[2].fourPercentRuleValue!);
-    // At the retirement year itself, the two conversions (real portfolio's
-    // OWN deflation, then re-inflating the rule value back at that same
-    // year) cancel exactly, landing on the flat NOMINAL figure at that one
-    // year — a robust, inflation-arithmetic-independent pin.
+    // At the retirement year the two conversions (the real portfolio's own deflation, then re-inflating the rule value at that year) cancel exactly, landing on the flat nominal figure there: a pin independent of the inflation arithmetic.
     expect(rows[0].fourPercentRuleValue).toBeCloseTo(
-      (SAFE_WITHDRAWAL_RATE_BENGEN_PCT / 100) * 1_000_000,
+      (4 / 100) * 1_000_000,
       6,
     );
-    // Every later year's value equals the SAME real figure re-expressed at
-    // that year, relative to the retirement year's own deflation factor.
     const realAtRetirement =
-      (SAFE_WITHDRAWAL_RATE_BENGEN_PCT / 100) * 1_000_000 * realDeflator(2031, 11);
+      (4 / 100) * 1_000_000 * realDeflator(2031, 11);
     for (const row of rows) {
       const expected = realAtRetirement / realDeflator(row.year, 11);
       expect(row.fourPercentRuleValue).toBeCloseTo(expected, 2);
@@ -599,7 +553,6 @@ describe('buildSwrComparisonData — both dollar modes', () => {
     const realDeflator = buildViewDeflator('today', anchor);
     const cashflow = new Map([
       [2031, cfRow(2031, { withdrawal: 5_000, taxes: 0, total: 5_000 })],
-      // Draw well above the 4% rule figure (400_000*0.04 = 16_000).
       [2032, cfRow(2032, { withdrawal: 100_000, taxes: 0, total: 100_000 })],
     ]);
     const today = buildSwrComparisonData(
@@ -659,9 +612,7 @@ describe('buildSwrComparisonData — both dollar modes', () => {
       bundle.anchorAfterTaxDraw - bundle.fourPercentRule.impliedFirstYearAnnualSpend,
       6,
     );
-    // At this one year the real->displayed round trip cancels exactly (the
-    // same cancellation the earlier future-dollars test pins), so this also
-    // confirms the bundle scalar isn't silently still the flat real figure.
+    // At this year the real-to-displayed round trip cancels exactly (as in the earlier future-dollars test), confirming the bundle scalar isn't silently still the flat real figure.
     expect(bundle.fourPercentRule.impliedFirstYearAnnualSpend).toBeCloseTo(40_000, 2);
   });
 });

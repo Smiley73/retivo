@@ -1,10 +1,4 @@
-/**
- * Projected withdrawals page — full year-by-year per-account schedule. A
- * show/hide disclosure button wrapping a React Aria `Table` inside the shared
- * `TableScroll` wrapper (locked sticky-thead pattern). One row per (year,
- * account) withdrawal line; the selected/current year is tinted. Extracted from
- * `WithdrawalGuidancePage` so the page stays under the file shape cap.
- */
+/** Full year-by-year per-account schedule: a show/hide disclosure around a React Aria Table in TableScroll, one row per (year, account) withdrawal line, with the selected year tinted. */
 import React from 'react';
 import {
   Cell,
@@ -31,12 +25,9 @@ export interface WithdrawalGuidanceScheduleProps {
   readonly selectedYear: number;
   readonly open: boolean;
   readonly onToggle: () => void;
-  /** Format a nominal-dollar value for display (applies the dollar-basis
-   *  deflator + currency formatting). `year` drives today's-dollars deflation. */
   readonly formatAt: (dollars: number, year: number) => string;
 }
 
-/** Flatten the per-year rows into per-(year, account) display lines. */
 interface ScheduleLine {
   readonly key: string;
   readonly year: number;
@@ -44,15 +35,9 @@ interface ScheduleLine {
   readonly withdrawnDollars: number;
   readonly rmdDollars: number;
   readonly endingBalanceDollars: number;
-  /** MIXED accounts only: true when sub-account split data is available. */
   readonly isMixed?: boolean;
-  /** MIXED named-strategy only: pre-tax portion of withdrawal (nominal dollars). */
   readonly preTaxWithdrawnDollars?: number;
-  /** MIXED named-strategy only: post-tax/Roth portion of withdrawal (nominal
-   *  dollars). Residual: `withdrawnDollars − preTaxWithdrawnDollars`. */
   readonly postWithdrawnDollars?: number;
-  /** MIXED named-strategy only: label for the post bucket ('Roth' or
-   *  'after-tax contributions (gains taxable)'). */
   readonly postLabel?: string;
 }
 

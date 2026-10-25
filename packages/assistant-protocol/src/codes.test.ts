@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  CLOSE_CODES,
-  HANDSHAKE_ERROR_CODES,
-  TAB_CLOSE_REASONS,
-  errorCodeSchema,
-  handshakeErrorForCloseCode,
-} from './codes.js';
+import { CLOSE_CODES, errorCodeSchema, handshakeErrorForCloseCode, type TabCloseReason } from './codes.js';
 import {
   DEFAULT_BRIDGE_PORT,
   MAX_FRAME_BYTES,
@@ -15,7 +9,7 @@ import {
 
 describe('codes and constants', () => {
   it('gives every handshake error a unique close code in 4000-4999', () => {
-    const codes = HANDSHAKE_ERROR_CODES.map((code) => CLOSE_CODES[code]);
+    const codes = Object.values(CLOSE_CODES);
     for (const code of codes) {
       expect(code).toBeGreaterThanOrEqual(4000);
       expect(code).toBeLessThanOrEqual(4999);
@@ -34,7 +28,16 @@ describe('codes and constants', () => {
   });
 
   it('keeps tab close reasons short ASCII', () => {
-    for (const reason of TAB_CLOSE_REASONS) {
+    const reasons = Object.keys({
+      disconnect: 0,
+      'sign-out': 0,
+      idle: 0,
+      lock: 0,
+      'user-switch': 0,
+      pagehide: 0,
+      'consent-declined': 0,
+    } satisfies Record<TabCloseReason, 0>);
+    for (const reason of reasons) {
       expect(reason).toMatch(/^[\x20-\x7e]+$/);
       expect(new TextEncoder().encode(reason).length).toBeLessThanOrEqual(123);
     }

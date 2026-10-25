@@ -1,9 +1,5 @@
-// Third-party notices of the bridge bundle (apps/mcp-bridge/scripts/build-bundle.mjs).
-// The SDK's dist ships ajv, fast-uri and others already bundled, so esbuild's metafile lists only the
-// SDK's own files for them; the notices generator finds them through the `//#region` markers in those
-// chunks. This runs the generator on a throwaway workspace and on the real SDK chunks (no bundle
-// build; the built artifact is checked by bridge-artifact-contract.test.mjs). Runs under
-// `pnpm test:scripts`.
+// Notices of the bridge bundle: the SDK's dist pre-bundles ajv, fast-uri and others, so the generator finds them through the `//#region`
+// markers in its chunks. Runs the generator on a throwaway workspace and the real SDK chunks, without a bundle build.
 
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';

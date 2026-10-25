@@ -1,15 +1,5 @@
-/**
- * The "AI assistants" card under Settings → Preferences: the per-device opt-in,
- * and once it is on, the download command for the bridge file this copy serves
- * (with the checksum it verifies), the launch commands, the pairing-code field,
- * the connection status and Disconnect. All session logic lives in `assistant/`
- * (which may not import `pages/` or `components/`); this file only renders it.
- *
- * Hidden entirely unless the build carries a bridge port and the `ai-assistants`
- * beta feature is visible. The pairing code is a short-lived secret, not a
- * credential: no autocomplete, password-manager opt-out, not a password input,
- * and it leaves component state the moment Connect is pressed.
- */
+/** The "AI assistants" card under Settings → Preferences: the per-device opt-in plus, once on, the bridge download command, launch commands, pairing-code field, status and Disconnect. All session logic lives in assistant/ (which may not import pages/ or components/).
+* Hidden unless the build carries a bridge port and the ai-assistants beta feature is visible. The pairing code is a short-lived secret, not a credential: no autocomplete, password-manager opt-out, not a password input, and cleared from component state when Connect is pressed. */
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { BRIDGE_NOTICES_FILE, bridgeCommandFor, bridgeInstallCommand, isWellFormedPairingCode, type AgentName } from '@retirement/assistant-protocol';
 import { useAssistant } from '../assistant/AssistantContext';
@@ -33,7 +23,6 @@ const AGENTS: readonly { agent: AgentName; label: string }[] = [
 const COPY_FEEDBACK_MS = 2000;
 const CODE_FIELD_ID = 'ai-assistants-pairing-code';
 
-/** What the status line says while a session is running. */
 const PHASE_TEXT: Record<string, string> = {
   connecting: 'Connecting to the bridge…',
   'awaiting-hello': 'Waiting for the bridge to answer…',
@@ -62,7 +51,6 @@ function browserRemedy(family: BrowserFamily, kind: 'blocked' | 'unreachable' | 
   }
 }
 
-/** The plain-language message for a diagnosis; the browser decides which remedy fits. */
 function diagnosisText(diagnosis: Diagnosis, family: BrowserFamily): string | null {
   switch (diagnosis.kind) {
     case 'none':
@@ -95,7 +83,6 @@ function diagnosisText(diagnosis: Diagnosis, family: BrowserFamily): string | nu
   }
 }
 
-/** Copies text; returns whether the clipboard accepted it. Never throws. */
 async function copyText(text: string): Promise<boolean> {
   if (!navigator.clipboard) return false;
   try {
@@ -123,7 +110,6 @@ function downloadCommandFor(sha256: string): string | null {
   }
 }
 
-/** A copyable command: the text, and a button that copies it and reports back through `onCopy`. */
 const CommandRow: React.FC<{ command: string; buttonLabel: string; copiedKey: string; copied: string | null; onCopy: (key: string, command: string) => void }> = ({
   command,
   buttonLabel,

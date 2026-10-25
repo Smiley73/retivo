@@ -1,18 +1,4 @@
-/**
- * Tooltip — focus reveal behavior + a11y smoke.
- *
- * Built on React Aria's `TooltipTrigger`/`Tooltip`.
- * Asserts the contract: the bubble is
- * hidden by default, reveals on keyboard focus (the a11y path the
- * legacy mouse-only handlers lacked — and the deterministic reveal
- * path under jsdom; React Aria owns pointer-hover-intent natively but
- * jsdom cannot emit the real mouse-modality pointer stream RA's
- * `useHover` gates on, so focus is the asserted seam), hides on blur,
- * and is wired as `role="tooltip"` + the trigger's `aria-describedby`
- * — plus the shared-component axe rule (AGENTS mandate). The public API
- * (`children`/`content`/`multiline`/`className`) is frozen.
- * Interaction goes through `@testing-library/user-event`.
- */
+/** Tooltip: focus reveal (jsdom cannot emit the mouse-modality pointer stream React Aria's `useHover` gates on), blur hide and ARIA wiring. */
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

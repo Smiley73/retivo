@@ -1,14 +1,6 @@
-/**
- * IncomeStream form draft shape + start/end defaults & validators.
- * Pure data/validation module (no JSX) split out of the income form so
- * both `IncomeFormPage` (state + submit) and `IncomeSchedulePickers`
- * (the schedule UI) depend on it without an import cycle, and so each
- * file stays under the 400-line shape limit.
- *
- * v1 form exposes a narrower subset of the partTime start/end
- * vocabulary; the data model still supports the full ScheduleStart /
- * ScheduleEnd discriminated unions.
- */
+// IncomeStream form draft shape and start/end defaults and validators; split out so the form page and the schedule pickers share it without an import cycle.
+// The v1 form exposes a narrower subset of the partTime start/end vocabulary than the data model.
+
 import type {
   IncomeStreamKind,
   JointAndSurvivorPct,
@@ -32,8 +24,7 @@ export interface FormDraft {
 
   payoutType: PensionPayoutType;
   monthlyBenefit: string;
-  /** True = use scenario inflation rate (tracksInflation = true);
-   *  false = use explicit pensionColaPct (tracksInflation = false). */
+  /** True: scenario inflation rate; false: explicit `pensionColaPct`. */
   pensionTracksInflation: boolean;
   pensionColaPct: string;
   jointAndSurvivorPct: JointAndSurvivorPct;
@@ -43,8 +34,7 @@ export interface FormDraft {
   lumpSumTargetAccountId: string;
 
   annualAmount: string;
-  /** True = use scenario inflation rate (tracksInflation = true);
-   *  false = use explicit partTimeColaPct (tracksInflation = false). */
+  /** True: scenario inflation rate; false: explicit `partTimeColaPct`. */
   partTimeTracksInflation: boolean;
   partTimeColaPct: string;
 
@@ -52,11 +42,8 @@ export interface FormDraft {
   oneOffSource: OneOffIncomeSource;
   oneOffTargetAccountId: string;
 
-  /** Unified start anchor — every income kind. Owner-implicit (no
-   *  memberId on the age variant) for annuity/lumpSum/oneOff; partTime
-   *  may set memberId explicitly to anchor to the non-owner spouse. */
+  /** Every income kind; the age variant is owner-implicit, except partTime may set `memberId` to anchor to the other spouse. */
   start: ScheduleStart;
-  /** End anchor — partTime only. */
   end?: ScheduleEnd;
 
   taxable: boolean;
@@ -106,18 +93,10 @@ export function validateEnd(end: ScheduleEnd): string | null {
 }
 
 /**
- * Cross-field schedule check: the resolved end must fall after the
- * resolved start. `resolveEndMonth` returns the EXCLUSIVE end boundary
- * (the first inactive month), so a non-empty window needs
- * `endIdx > startIdx`; on-or-before the start is the "end before start"
- * bug this guards.
- *
- * Returns `null` (no error) when the schedule is fine OR when either
- * anchor can't be resolved to a concrete month — a member with no
- * birthdate (`age` / `lifetime`) or an unresolved owner retirement year
- * (`retirementStart` / `endOfRetirementYear`, which surface as a NaN
- * year). The projection engine already fail-safes broken anchors, so the
- * form must not hard-block on an anchor it simply couldn't resolve here.
+ * Cross-field check that the resolved end falls after the resolved start
+ * (`resolveEndMonth` is the exclusive boundary, so a window needs `endIdx > startIdx`).
+ * Returns null when either anchor cannot resolve here (no birthdate, or an unresolved
+ * retirement year giving NaN): the engine fail-safes broken anchors, so the form must not block on one.
  */
 export function validateSchedule(
   start: ScheduleStart,

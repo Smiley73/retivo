@@ -1,8 +1,3 @@
-/**
- * Diagnostics install/shim tests. Original-fired-first console passthrough,
- * single-entry-per-console-routed-event, idempotent install, window
- * error/rejection → source 'window', recursion guard, uninstall restores.
- */
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDiagnostics, uninstallDiagnostics } from './install';
@@ -24,9 +19,7 @@ describe('installDiagnostics', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     installDiagnostics();
     console.error('boom', { code: 'X' });
-    // Original (spied) fired.
     expect(spy).toHaveBeenCalledWith('boom', { code: 'X' });
-    // And exactly one entry was captured.
     const entries = getEntries();
     expect(entries).toHaveLength(1);
     expect(entries[0].source).toBe('console');
@@ -47,7 +40,6 @@ describe('installDiagnostics', () => {
     installDiagnostics();
     installDiagnostics();
     console.error('once');
-    // Double install must not double-capture.
     expect(getEntries()).toHaveLength(1);
   });
 
@@ -64,11 +56,7 @@ describe('installDiagnostics', () => {
   it('should_guard_against_logger_internal_console_recursion', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     installDiagnostics();
-    // Re-enter the shim from INSIDE the forward path: this arg's toJSON is
-    // invoked by the logger's coalesce-key serialization (while inShim===true)
-    // and calls the shimmed console.error again. The recursion guard's true
-    // branch must short-circuit that nested call so the loop terminates and the
-    // nested call is NOT separately captured.
+    // Re-enter the shim from inside the forward path: toJSON runs during coalesce-key serialization while inShim is true, and the guard must swallow the nested call.
     let nested = false;
     const reentrant = {
       toJSON(): string {
@@ -82,16 +70,13 @@ describe('installDiagnostics', () => {
     };
     expect(() => console.error('outer', reentrant)).not.toThrow();
     expect(nested).toBe(true);
-    // Exactly one captured entry — the nested re-entry was swallowed by the
-    // guard, never producing a second entry or looping.
     expect(getEntries().filter((e) => e.source === 'console')).toHaveLength(1);
   });
 
   it('should_capture_an_unhandledrejection_event_with_source_window', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     installDiagnostics();
-    // jsdom does not synthesize PromiseRejectionEvent end-to-end; dispatch the
-    // event shape the handler reads (type + reason).
+    // jsdom does not synthesize PromiseRejectionEvent; dispatch the shape the handler reads.
     const event = new Event('unhandledrejection') as Event & { reason: unknown };
     event.reason = new Error('rejected boom');
     window.dispatchEvent(event);
@@ -105,8 +90,6 @@ describe('installDiagnostics', () => {
     installDiagnostics();
     console.error('flush on pagehide');
     window.dispatchEvent(new Event('pagehide'));
-    // The pagehide handler fires flush() fire-and-forget; await a microtask turn
-    // by flushing directly is redundant — instead await the persisted store.
     await vi.waitFor(async () => {
       expect((await listDiagnosticLogs()).some((r) => r.message === 'flush on pagehide')).toBe(true);
     });

@@ -1,10 +1,4 @@
-/**
- * Unit tests for WebAuthn PRF-extension plumbing.
- *
- * Covers the two required behaviors: a PRF result present in the assertion
- * yields a usable wrap key (PRF slot path), and an absent/unsupported PRF
- * result fails soft (returns null) so the caller falls back to password.
- */
+// A PRF result in the assertion yields a usable wrap key; an absent or unsupported one fails soft (null) so the caller falls back to password.
 import { describe, it, expect } from 'vitest';
 import type { AuthenticationResponseJSON } from '@simplewebauthn/browser';
 import {
@@ -33,7 +27,6 @@ describe('passkey-prf — option plumbing', () => {
     const ext = next.extensions as unknown as { appid?: string; prf?: { eval: { first: Uint8Array } } };
     expect(ext.appid).toBe('x'); // server-provided extensions preserved
     expect(ext.prf?.eval.first).toBeInstanceOf(Uint8Array);
-    // Original options object is untouched (no `prf` key leaked back in).
     expect((options as { extensions: { prf?: unknown } }).extensions.prf).toBeUndefined();
   });
 });

@@ -1,16 +1,7 @@
-/**
- * Passkey controller surface tests.
- *
- * The full WebAuthn signature path needs a hardware-or-software
- * authenticator simulator; that lives in the manual / e2e suite. These
- * tests cover the parts that can run in-process: option generation,
- * the auth gate on management endpoints, and idempotent removal.
- */
+// Passkey controller surface: option generation, the auth gate on management endpoints and idempotent removal. The full WebAuthn signature path needs
+// an authenticator and lives in the manual/e2e suite.
 
-// WebAuthn server boundary: mock ONLY `verifyRegistrationResponse` so
-// register/finish can be driven to a deterministic verified outcome without a
-// real authenticator (mirrors step-up.spec.ts's `verifyAuthenticationResponse`
-// seam).
+// Mocks only `verifyRegistrationResponse` (no software authenticator) so register/finish reaches a deterministic verified outcome.
 const verifyRegistrationResponse = jest.fn();
 jest.mock('@simplewebauthn/server', () => ({
   ...jest.requireActual('@simplewebauthn/server'),
@@ -54,9 +45,7 @@ describe('passkey API', () => {
       expect(res.body.rp).toBeTruthy();
       expect(res.body.authenticatorSelection?.userVerification).toBe('required');
       expect(res.body.authenticatorSelection?.residentKey).toBe('required');
-      // PRF must be enabled at credential creation so PRF-based zero-knowledge
-      // enrollment works with strict third-party passkey managers (Keeper,
-      // 1Password) — they only return PRF at assertion when it was requested here.
+      // PRF must be requested at credential creation: strict third-party passkey managers (Keeper, 1Password) only return PRF at assertion when it was.
       expect(res.body.extensions?.prf).toBeDefined();
     });
   });
@@ -84,9 +73,7 @@ describe('passkey API', () => {
       expect(res.body).toHaveLength(0);
     });
 
-    // Passkey removal is a body-bearing `POST … /remove`, gated by a password re-verify baseline
-    // present regardless of the MFA flag. This app runs with `AUTH_MFA_ENFORCED` off (default), so
-    // the gate is password-only — the flag-off degrade floor.
+    // Removal is a body-bearing POST gated by a password re-verify present regardless of the MFA flag; this app runs with AUTH_MFA_ENFORCED off, so the gate is password-only: the flag-off degrade floor.
     it('remove is idempotent — 200 with the right password even when the credentialId is unknown (no notice for a no-op)', async () => {
       const s = await login(t);
       const res = await request(t.app.getHttpServer())
@@ -164,14 +151,4 @@ describe('passkey API', () => {
       expect(enrolled!.userAgent).toBe('jest-passkey-enroll-agent');
     });
   });
-
-  // The `challenge store cap` block that lived here asserted
-  // `PasskeyChallengeStore`'s in-memory `MAX_ENTRIES = 1000` eviction
-  // behaviour. That cap bounded *memory* on the one namespace an
-  // unauthenticated caller can write to (`auth:`) — a concern specific to a
-  // per-process `Map`. The store has since moved onto a
-  // shared DynamoDB table with no such cap; porting it as a distributed
-  // admission ceiling is out of scope here (deliberately left to
-  // the shared throttle counter's cost-aware throttling). Removed rather than left to bit-rot against
-  // code that no longer exists.
 });

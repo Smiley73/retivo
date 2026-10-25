@@ -1,17 +1,24 @@
-/**
- * Unit tests for TierEditor and TierList components.
- *
- * Covers: renders tier labels; renders account names; Add tier fires onChange
- * with new empty tier; Remove tier fires onChange with tier removed and
- * accounts redistributed to tier 0; excluded list renders; empty list
- * empty-state text; a11y smoke.
- */
+// TierEditor and TierList: tier labels, account names, Add/Remove tier (a removed tier's accounts go to tier 0), the excluded list, the empty state and cross-tier moves.
 import 'fake-indexeddb/auto';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { TierEditor, moveAccountAcrossTiers } from './scenario-withdrawal-strategy-tier-editor';
+import type { DragAndDropOptions } from 'react-aria-components';
+import { TierEditor } from './scenario-withdrawal-strategy-tier-editor';
 import { expectNoA11yViolations } from '../test/a11y';
 import type { AccountPayload, Aggregate } from '../db/types';
+
+// React Aria DnD does not function in jsdom, so the hook's options are captured and the drop handlers driven directly.
+const dndOptions = vi.hoisted(() => [] as DragAndDropOptions[]);
+vi.mock('react-aria-components', async () => {
+  const actual = await vi.importActual<typeof import('react-aria-components')>('react-aria-components');
+  return {
+    ...actual,
+    useDragAndDrop: (options: DragAndDropOptions) => {
+      dndOptions.push(options);
+      return actual.useDragAndDrop(options);
+    },
+  };
+});
 
 function makeAccount(id: string, name: string): Aggregate<AccountPayload> {
   return {
@@ -44,14 +51,10 @@ const ACCOUNTS = [
   makeAccount('a2', 'Brokerage'),
 ];
 
-// Restore all vi mocks + spies after each test so React Aria's drag-and-drop
-// global event listeners (installed by useDragAndDrop) don't bleed into
-// concurrent test files running in the same vitest worker pool.
+// Restore mocks and spies after each test so React Aria's drag-and-drop global listeners (installed by useDragAndDrop) don't bleed into concurrent test files in the same worker pool.
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
-// ——— Render ————————————————————————————————————————————————
 
 describe('TierEditor — render', () => {
   it('renders tier labels for each tier', () => {
@@ -66,8 +69,7 @@ describe('TierEditor — render', () => {
         onReviewPensions={vi.fn()}
       />,
     );
-    // Both the header span ("Tier 1 (drained first)") and the GridList label
-    // ("Tier 1") match — getAllByText asserts ≥ 1 element exists.
+    // Both the header span and the GridList label match, so getAllByText asserts at least one element.
     expect(screen.getAllByText(/Tier 1/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Tier 2/).length).toBeGreaterThan(0);
   });
@@ -100,16 +102,13 @@ describe('TierEditor — render', () => {
         onReviewPensions={vi.fn()}
       />,
     );
-    // Both the header span ("Excluded (never drawn from)") and the GridList
-    // label ("Excluded accounts") match /excluded/i — getAllByText handles it.
+    // Both the header span and the GridList label match /excluded/i.
     expect(screen.getAllByText(/excluded/i).length).toBeGreaterThan(0);
-    // a2 appears inside the excluded list
     expect(screen.getByText('Brokerage')).toBeTruthy();
   });
 
   it('shows empty-state text when a tier has no accounts', () => {
-    // excludedAccountIds is non-empty so only tier 0 produces the empty-state
-    // text — avoids a getByText "multiple elements" error.
+    // excludedAccountIds is non-empty, so only tier 0 produces the empty-state text; avoids a multiple-elements error.
     render(
       <TierEditor
         tiers={[[], ['a1']]}
@@ -124,8 +123,6 @@ describe('TierEditor — render', () => {
     expect(screen.getByText(/no accounts/i)).toBeTruthy();
   });
 });
-
-// ——— Add tier ——————————————————————————————————————————————
 
 describe('TierEditor — Add tier', () => {
   it('fires onChange with an additional empty tier when Add tier clicked', () => {
@@ -149,8 +146,6 @@ describe('TierEditor — Add tier', () => {
   });
 });
 
-// ——— Remove tier ————————————————————————————————————————————
-
 describe('TierEditor — Remove tier', () => {
   it('fires onChange with tier removed and its accounts moved to tier 0', () => {
     const onChange = vi.fn();
@@ -165,56 +160,66 @@ describe('TierEditor — Remove tier', () => {
         onReviewPensions={vi.fn()}
       />,
     );
-    // Remove button only appears when tiers.length > 1.
     fireEvent.click(screen.getByRole('button', { name: /remove tier 2/i }));
     expect(onChange).toHaveBeenCalledOnce();
     const [nextTiers] = onChange.mock.calls[0] as [string[][], string[]];
     expect(nextTiers).toHaveLength(1);
-    // a2 from removed tier 2 moved to tier 0.
     expect(nextTiers[0]).toContain('a2');
   });
 });
 
-// ——— Cross-tier move ——————————————————————————————
-// React Aria DnD (useDragAndDrop) does not function in jsdom — test the
-// exported `moveAccountAcrossTiers` pure function directly. This is the same
-// logic the DnD handlers call; testing it directly avoids jsdom DnD
-// limitations AND tests the production function (not a duplicate helper).
-
 describe('TierEditor — cross-tier move logic', () => {
-  it('moving account from tier 1 to tier 2 produces correct tier arrays', () => {
-    // Move a2 from tier 1 → tier 0 (before a1).
-    const { tiers: nextTiers, excludedAccountIds: nextExcluded } =
-      moveAccountAcrossTiers([['a1'], ['a2']], [], 'a2', 'tier-0', 'a1');
-    // After move: tier 0 = [a2, a1], tier 1 = [].
-    expect(nextTiers[0]).toEqual(['a2', 'a1']);
-    expect(nextTiers[1]).toEqual([]);
-    expect(nextExcluded).toEqual([]);
+  const dragItem = (id: string) => ({
+    kind: 'text',
+    types: new Set(['application/x-tier-account-id']),
+    getText: async () => id,
+  }) as never;
+
+  function renderTiers(tiers: string[][], onChange: (tiers: string[][], excluded: string[]) => void) {
+    dndOptions.length = 0;
+    render(
+      <TierEditor
+        tiers={tiers}
+        excludedAccountIds={[]}
+        accounts={ACCOUNTS}
+        cbpInfoRows={[]}
+        onChange={onChange}
+        onElectPayout={vi.fn()}
+        onReviewPensions={vi.fn()}
+      />,
+    );
+    // One option set per TierList on the first render: tier-0..tier-N, then Excluded.
+    return dndOptions.slice(0, tiers.length + 1);
+  }
+
+  it('moving account from tier 1 to tier 2 produces correct tier arrays', async () => {
+    const onChange = vi.fn();
+    const [tier0] = renderTiers([['a1'], ['a2']], onChange);
+    await tier0.onInsert!({
+      items: [dragItem('a2')],
+      target: { type: 'item', key: 'a1', dropPosition: 'before' },
+    } as never);
+    expect(onChange).toHaveBeenCalledWith([['a2', 'a1'], []], []);
   });
 
-  it('moving account to Excluded removes it from tiers', () => {
-    // Move a1 from tier 0 → Excluded.
-    const { tiers: nextTiers, excludedAccountIds: nextExcluded } =
-      moveAccountAcrossTiers([['a1', 'a2']], [], 'a1', 'excluded');
-    expect(nextTiers[0]).toEqual(['a2']);
-    expect(nextExcluded).toEqual(['a1']);
+  it('moving account to Excluded removes it from tiers', async () => {
+    const onChange = vi.fn();
+    const [, excluded] = renderTiers([['a1', 'a2']], onChange);
+    await excluded.onRootDrop!({ items: [dragItem('a1')] } as never);
+    expect(onChange).toHaveBeenCalledWith([['a2']], ['a1']);
   });
 
-  it('moving account to end of a tier (no beforeId) appends correctly', () => {
-    const { tiers: nextTiers } =
-      moveAccountAcrossTiers([['a1', 'a2'], []], [], 'a1', 'tier-1');
-    expect(nextTiers[0]).toEqual(['a2']);
-    expect(nextTiers[1]).toEqual(['a1']);
+  it('moving account to end of a tier (no beforeId) appends correctly', async () => {
+    const onChange = vi.fn();
+    const [, tier1] = renderTiers([['a1', 'a2'], []], onChange);
+    await tier1.onRootDrop!({ items: [dragItem('a1')] } as never);
+    expect(onChange).toHaveBeenCalledWith([['a2'], ['a1']], []);
   });
 });
 
-// ——— showOrder — within-tier drain position numbers ——————————————————
-
 describe('TierList — showOrder drain position numbers', () => {
   it('shows 1-based position prefix for each account in a drawdown tier', () => {
-    // TierEditor passes showOrder to drawdown TierList components; a
-    // single-tier scenario with two accounts should render "1." and "2."
-    // aria-hidden prefixes before the account names.
+    // TierEditor passes showOrder to the drawdown TierLists: a single-tier scenario with two accounts renders "1." and "2." aria-hidden prefixes before the names.
     render(
       <TierEditor
         tiers={[['a1', 'a2']]}
@@ -226,8 +231,7 @@ describe('TierList — showOrder drain position numbers', () => {
         onReviewPensions={vi.fn()}
       />,
     );
-    // getByText uses substring matching; the span is aria-hidden but still
-    // in the DOM — getByText finds it.
+    // getByText matches substrings; the prefix span is aria-hidden but still in the DOM.
     expect(screen.getByText('1.')).toBeTruthy();
     expect(screen.getByText('2.')).toBeTruthy();
   });
@@ -244,13 +248,10 @@ describe('TierList — showOrder drain position numbers', () => {
         onReviewPensions={vi.fn()}
       />,
     );
-    // No position numbers on the excluded list.
     expect(screen.queryByText('1.')).toBeNull();
     expect(screen.queryByText('2.')).toBeNull();
   });
 });
-
-// ——— A11y smoke ——————————————————————————————————————————
 
 describe('TierEditor — a11y smoke', () => {
   it('passes expectNoA11yViolations', async () => {

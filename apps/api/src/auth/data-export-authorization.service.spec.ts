@@ -1,14 +1,5 @@
-/**
- * Unit tests for DataExportAuthorizationService. Proves the 5-minute session-bound
- * export-authorization token round-trips for the exact minting session and fails closed for a wrong
- * session / user / household, a tampered token, an expired one, a missing `purpose`, or a missing
- * cookie. Uses a real generated RS256 keypair + the real JwtKeyStore so the sign/verify path is
- * genuine; only the config is stubbed.
- *
- * The "never accepted as a session bearer" property is proven in
- * jwt-auth.guard.spec.ts (the guard's domain), where JwtAuthGuard rejects this
- * token because it carries a `purpose` claim.
- */
+// DataExportAuthorizationService: the 5-minute session-bound export token round-trips for the exact minting session and fails closed for a wrong session, user or household, a tampered or expired token, a missing `purpose` or a missing cookie.
+// Real RS256 keypair and JwtKeyStore; only config is stubbed. That the token is never accepted as a session bearer is proven in jwt-auth.guard.spec.ts.
 import 'reflect-metadata';
 import { generateKeyPairSync } from 'node:crypto';
 import jwt from 'jsonwebtoken';
@@ -18,8 +9,6 @@ import type { EnvConfig } from '../common/env.config.js';
 import { JwtKeyStore } from './jwt-key-store.js';
 import {
   DataExportAuthorizationService,
-  DATA_EXPORT_AUTHORIZATION_PURPOSE,
-  type ExportAuthorizationBinding,
 } from './data-export-authorization.service.js';
 import {
   EXPORT_AUTHORIZATION_COOKIE_NAME,
@@ -61,7 +50,7 @@ function buildService(config: TypedConfig = configFor()): {
   return { svc: new DataExportAuthorizationService(keyStore, config), keyStore };
 }
 
-const BINDING: ExportAuthorizationBinding = {
+const BINDING = {
   userId: 'user-1',
   householdId: 'household-1',
   jti: 'jti-1',
@@ -98,10 +87,7 @@ describe('DataExportAuthorizationService', () => {
   it('should_reject_a_tampered_token', () => {
     const { svc } = buildService();
     const token = svc.sign(BINDING);
-    // Flip the FIRST character of the signature segment. Its base64url char
-    // encodes the top 6 bits of the signature's first byte — always meaningful,
-    // unlike the whole-token last char (only the last byte's low 2 bits, the
-    // rest decode-discarded padding), so this is deterministically tamper-red.
+    // The signature's first base64url char encodes the top 6 bits of its first byte, always meaningful, unlike the last char (low 2 bits of the last byte, the rest discarded padding), so flipping it is a deterministic tamper.
     const [header, payload, sig] = token.split('.');
     const tamperedSigHead = sig[0] === 'A' ? 'B' : 'A';
     const tampered = `${header}.${payload}.${tamperedSigHead}${sig.slice(1)}`;
@@ -112,7 +98,7 @@ describe('DataExportAuthorizationService', () => {
     const { svc, keyStore } = buildService();
     const { kid, privateKey: pk } = keyStore.current();
     const expired = jwt.sign(
-      { ...BINDING, boundJti: BINDING.jti, purpose: DATA_EXPORT_AUTHORIZATION_PURPOSE },
+      { ...BINDING, boundJti: BINDING.jti, purpose: 'data_export' },
       pk,
       { algorithm: 'RS256', keyid: kid, expiresIn: -10 },
     );
@@ -120,8 +106,7 @@ describe('DataExportAuthorizationService', () => {
   });
 
   it('should_reject_a_token_with_a_wrong_issuer_audience_domain', () => {
-    // A token minted for a DIFFERENT environment/service must fail closed even
-    // though it is otherwise a valid RS256 export-authorization token.
+    // A token minted for another environment or service must fail closed though otherwise a valid RS256 token.
     const other = buildService(
       configFor({ issuer: 'retivo-api/other', audience: 'retivo-web/other' }),
     );
@@ -131,12 +116,11 @@ describe('DataExportAuthorizationService', () => {
   });
 
   it('should_reject_a_token_carrying_no_issuer_audience_claims', () => {
-    // A legacy export-authorization token was signed without iss/aud — mint one
-    // directly with the real key but no issuer/audience options.
+    // A legacy token signed without iss/aud, minted directly with the real key.
     const { svc, keyStore } = buildService();
     const { kid, privateKey: pk } = keyStore.current();
     const legacyToken = jwt.sign(
-      { ...BINDING, boundJti: BINDING.jti, purpose: DATA_EXPORT_AUTHORIZATION_PURPOSE },
+      { ...BINDING, boundJti: BINDING.jti, purpose: 'data_export' },
       pk,
       { algorithm: 'RS256', keyid: kid, expiresIn: EXPORT_AUTHORIZATION_TTL_SEC },
     );
@@ -168,9 +152,7 @@ describe('DataExportAuthorizationService', () => {
 
   it('should_fail_closed_not_throw_for_a_malformed_percent_encoded_cookie', () => {
     const { svc } = buildService();
-    // A lone `%` is an invalid percent-sequence: decodeURIComponent throws
-    // URIError. verifyFromRequest must treat it as an absent cookie (false), not
-    // let the exception escape its documented never-throws contract.
+    // A lone `%` makes decodeURIComponent throw URIError; verifyFromRequest must treat it as an absent cookie, not break its never-throws contract.
     const req = reqWithCookie(`${EXPORT_AUTHORIZATION_COOKIE_NAME}=%; other=x`);
     expect(() => svc.verifyFromRequest(req, BINDING)).not.toThrow();
     expect(svc.verifyFromRequest(req, BINDING)).toBe(false);
@@ -180,7 +162,7 @@ describe('DataExportAuthorizationService', () => {
     const { svc, keyStore } = buildService();
     const { privateKey: pk } = keyStore.current();
     const noKid = jwt.sign(
-      { ...BINDING, boundJti: BINDING.jti, purpose: DATA_EXPORT_AUTHORIZATION_PURPOSE },
+      { ...BINDING, boundJti: BINDING.jti, purpose: 'data_export' },
       pk,
       { algorithm: 'RS256', expiresIn: EXPORT_AUTHORIZATION_TTL_SEC },
     );
@@ -190,7 +172,7 @@ describe('DataExportAuthorizationService', () => {
   it('should_reject_a_token_with_an_unknown_kid', () => {
     const { svc } = buildService();
     const unknownKid = jwt.sign(
-      { ...BINDING, boundJti: BINDING.jti, purpose: DATA_EXPORT_AUTHORIZATION_PURPOSE },
+      { ...BINDING, boundJti: BINDING.jti, purpose: 'data_export' },
       privateKey,
       { algorithm: 'RS256', keyid: 'not-registered', expiresIn: EXPORT_AUTHORIZATION_TTL_SEC },
     );
@@ -199,10 +181,9 @@ describe('DataExportAuthorizationService', () => {
 
   it('should_reject_a_token_signed_with_a_non_rs256_algorithm', () => {
     const { svc } = buildService();
-    // HS256-signed token carrying a registered kid: the kid lookup succeeds but
-    // the RS256-only verify must reject the disallowed algorithm.
+    // An HS256-signed token with a registered kid passes the kid lookup, so the RS256-only verify must reject the algorithm.
     const hsToken = jwt.sign(
-      { ...BINDING, boundJti: BINDING.jti, purpose: DATA_EXPORT_AUTHORIZATION_PURPOSE },
+      { ...BINDING, boundJti: BINDING.jti, purpose: 'data_export' },
       'shared-secret',
       { algorithm: 'HS256', keyid: 'k1', expiresIn: EXPORT_AUTHORIZATION_TTL_SEC },
     );

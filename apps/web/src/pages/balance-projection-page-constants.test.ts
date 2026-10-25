@@ -1,9 +1,4 @@
-/**
- * Unit tests for the Balance Projection page's basis-label resolver — the
- * function that decides which basis name a Monte-Carlo-aware chart title
- * suffixes. A title must name the basis actually driving its data: the MC
- * tier when an MC basis is selected, else the deterministic method.
- */
+// The basis-label resolver for Monte-Carlo-aware chart titles: a title must name the basis actually driving its data (the MC tier when an MC basis is selected, else the deterministic method).
 import { describe, expect, it } from 'vitest';
 import {
   COMPARE_WITH_PARAM,

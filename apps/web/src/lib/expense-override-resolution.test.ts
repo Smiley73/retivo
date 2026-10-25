@@ -1,12 +1,4 @@
-/**
- * Per-id sparse override resolver — locks the per-key merge, clear-marker, disable-wins and id-normalization rules.
- *
- * The previous section-level resolver let a child's `expenses` section
- * blow away every ancestor's disabled / patched / added entries; the
- * sparse resolver merges them per-id, with first-ancestor-wins
- * semantics and explicit `reEnabledIds` to overrule an inherited
- * disable.
- */
+// Per-id sparse override resolver: per-key merge, clear markers, disable-wins, first-ancestor-wins and id normalization.
 import { describe, expect, it } from 'vitest';
 import {
   resolveExpensesForScenarioSparse,
@@ -127,9 +119,7 @@ describe('resolveExpensesForScenarioSparse — single scenario', () => {
 });
 
 describe('resolveExpensesForScenarioSparse — sparse inheritance', () => {
-  // Pinned defect: child re-enables a parent-disabled expense
-  // via `reEnabledIds`. The pre-sparse resolver could not express this
-  // intent without forcing the child to clone the parent's section.
+  // Pinned defect: the pre-sparse resolver could not let a child re-enable a parent-disabled expense.
   it('child re-enables a parent-disabled expense via reEnabledIds', () => {
     const exp = [expense('e1'), expense('e2')];
     const parent = scenario('parent', null, {
@@ -271,10 +261,8 @@ describe('resolveExpensesForScenarioSparse — per-key chain merge', () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0].source).toBe('patched');
-    // parent's amount AND child's glide both survive the per-key merge.
     expect(result[0].payload.amount).toBe(555);
     expect(result[0].payload.discretionaryGlide).toEqual(glide);
-    // Unpatched keys still inherit from the canonical payload.
     expect(result[0].payload.name).toBe('Travel');
   });
 
@@ -341,7 +329,6 @@ describe('resolveExpensesForScenarioSparse — per-key chain merge', () => {
       [grandparent, parent, child],
       exp,
     );
-    // First ancestor (parent) re-enables e1 before the gp disable is seen.
     expect(result.map((r) => r.id).sort()).toEqual([
       'aggregate:e1',
       'aggregate:e2',
@@ -350,10 +337,7 @@ describe('resolveExpensesForScenarioSparse — per-key chain merge', () => {
 });
 
 describe('resolveExpensesForScenarioSparse — defensive raw-id normalization', () => {
-  // A raw (un-prefixed) id read from the store resolves
-  // identically to its `aggregate:<raw>` form. This is forward-
-  // compatibility insurance — every UI writer ships prefixed ids, but
-  // the resolver MUST tolerate a missed write site without breaking.
+  // A raw (un-prefixed) id resolves like its `aggregate:<raw>` form, in case a write site misses the prefix.
 
   it('aggregate:abc and local:abc do NOT collide (different namespaces)', () => {
     const exp = [expense('abc', { amount: 100 })];
@@ -368,7 +352,6 @@ describe('resolveExpensesForScenarioSparse — defensive raw-id normalization', 
       },
     });
     const result = resolveExpensesForScenarioSparse('s1', [sc], exp);
-    // The canonical `abc` survives, the local `abc` is dropped.
     expect(result.map((r) => r.id)).toEqual(['aggregate:abc']);
   });
 });
@@ -393,7 +376,6 @@ describe('resolveExpensesForScenarioSparse — null clears an inherited key', ()
     expect(result).toHaveLength(1);
     expect(result[0].source).toBe('patched');
     expect(result[0].payload).not.toHaveProperty('discretionaryGlide');
-    // Other canonical keys still inherit.
     expect(result[0].payload.amount).toBe(400);
   });
 
@@ -423,7 +405,6 @@ describe('resolveExpensesForScenarioSparse — null clears an inherited key', ()
 
   it('chain merge: a closer null clear wins over a deeper set; a deeper clear loses to a closer set', () => {
     const exp = [expense('e1', { classification: 'discretionary' })];
-    // Closer clear over deeper set.
     const parentSet = scenario('parentSet', null, {
       overrides: {
         expenses: { patches: { 'aggregate:e1': { discretionaryGlide: glide } } },
@@ -441,7 +422,6 @@ describe('resolveExpensesForScenarioSparse — null clears an inherited key', ()
     );
     expect(a[0].payload).not.toHaveProperty('discretionaryGlide');
 
-    // Deeper clear under closer set → the set wins.
     const parentClear = scenario('parentClear', null, {
       overrides: {
         expenses: { patches: { 'aggregate:e1': { discretionaryGlide: null } } },

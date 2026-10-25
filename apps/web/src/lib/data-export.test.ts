@@ -1,7 +1,3 @@
-/**
- * Tests for the workspace export. fake-indexeddb runs the real IDB
- * code paths so the bundle is built from a genuine store snapshot.
- */
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clearAllStores, listAggregates } from '../db/store';
@@ -52,7 +48,6 @@ describe('buildExportBundle', () => {
 
     const bundle = await buildExportBundle(HOUSEHOLD_ID, DEVICE_ID);
 
-    // Counts should mirror what listAggregates returns for each type.
     for (const type of AGGREGATE_TYPES_IN_DEPENDENCY_ORDER) {
       const fromStore = await listAggregates(type);
       expect(bundle.aggregates[type].length).toBe(fromStore.length);
@@ -62,10 +57,7 @@ describe('buildExportBundle', () => {
     expect(bundle.aggregates.householdMember.length).toBe(2);
   });
 
-  // Regression guard for the zero-knowledge encryption boundary:
-  // local export bundles stay PLAINTEXT. Encryption happens only on cloud
-  // push — exported aggregate payloads must carry normal domain fields and
-  // must NOT be encrypted envelopes ({ ciphertext, nonce, encryptionVersion }).
+  // Regression guard for the zero-knowledge boundary: local export bundles stay plaintext; encryption happens only on cloud push.
   it('exports plaintext aggregate payloads, never encrypted envelopes', async () => {
     await loadDemoData({
       householdId: HOUSEHOLD_ID,
@@ -78,7 +70,6 @@ describe('buildExportBundle', () => {
     const member = bundle.aggregates.householdMember[0];
     expect(member).toBeDefined();
     const memberPayload = member.payload as Record<string, unknown>;
-    // Normal plaintext domain field present (not an opaque envelope).
     expect(Object.keys(memberPayload).length).toBeGreaterThan(0);
 
     const account = bundle.aggregates.account[0];
@@ -86,7 +77,6 @@ describe('buildExportBundle', () => {
     const accountPayload = account.payload as Record<string, unknown>;
     expect('name' in accountPayload || 'kind' in accountPayload).toBe(true);
 
-    // No payload anywhere in the bundle is an encrypted envelope.
     for (const type of AGGREGATE_TYPES_IN_DEPENDENCY_ORDER) {
       for (const aggr of bundle.aggregates[type]) {
         const payload = aggr.payload as Record<string, unknown>;
@@ -117,7 +107,6 @@ describe('plainJson', () => {
     const value = { hello: 'world', n: 42, nested: { ok: true } };
     const blob = plainJson(value);
 
-    // Not gzip: the first two bytes must NOT be the 1f 8b magic.
     const head = new Uint8Array(await blob.slice(0, 2).arrayBuffer());
     expect(head[0]).not.toBe(0x1f);
 
@@ -131,7 +120,6 @@ describe('gzipJson', () => {
     const value = { hello: 'world', n: 42, nested: { ok: true } };
     const blob = await gzipJson(value);
 
-    // Magic bytes: 1f 8b at the start of every gzip stream.
     const head = new Uint8Array(await blob.slice(0, 2).arrayBuffer());
     expect(head[0]).toBe(0x1f);
     expect(head[1]).toBe(0x8b);

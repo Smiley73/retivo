@@ -1,52 +1,13 @@
-/**
- * Shared contribution-growth-factor helper consumed by BOTH the
- * deterministic projection engine (`projection.ts`) and the Monte Carlo
- * per-account ledger (`balance-projection-bundle-mc-ledger.ts`).
- *
- * The configured per-account contribution figure is interpreted as a
- * TODAY'S-dollars amount (factor = 1 at `asOfMonth`). An explicit
- * `contributionGrowthPct` (fixed-COLA mode) grows the contribution
- * nominally across accumulation steps month-precise, today-anchored —
- * mirroring `expense-projection.ts`'s `buildInflationFactorAt`:
- *
- *   factor(eventMonth) = (1 + pct/100)^((eventMonth − asOfMonth) / 12)
- *   asOfMonth = todayYear * 12 + todayMonthIndex
- *
- * Anchoring at TODAY (not the projection's own first step) is the whole
- * point: it cancels the display deflator (which uses the same today
- * anchor), so a configured contribution shows flat in the default
- * Today's-dollars view in BOTH engines and BOTH view modes.
- *
- * `tracks-inflation` accounts (absent `contributionGrowthPct`) do NOT
- * use this helper for their growth — the deterministic engine grows them
- * at the resolved scenario inflation rate (so the resolver materialises
- * that rate as a `fixed`-mode equivalent), while the MC engine scales the
- * today's-dollars base by each path's own cumulative CPI. The helper only
- * ever applies an explicit fixed-nominal rate.
- *
- * Sanitisation: the accepted domain is finite and `-100 < pct ≤ 25`.
- * An out-of-band / non-finite percent yields a factor of 1 (no growth) so
- * a corrupt stored value can never overflow the ~60-offset compounding
- * into Infinity/NaN and poison the projection / reconciliation invariant.
- */
+// Month-precise growth factor for an explicit `contributionGrowthPct` (factor 1 at `asOfMonth`); `tracks-inflation` accounts do not use it.
 
-/** Lower bound (exclusive) on a valid `contributionGrowthPct`. A −100%
- *  rate would zero the contribution outright; anything below is data
- *  error. */
-export const MIN_CONTRIBUTION_GROWTH_PCT = -100;
-/** Upper bound (inclusive) on a valid `contributionGrowthPct`. A
- *  safety rail, not a modeling claim: 25%/yr nominal lets a user model
- *  aggressive raises; above is almost certainly corrupt. The
- *  `PercentInput` uses `max={25}` to match. */
+/** Lower bound (exclusive): -100% would zero the contribution, so anything below is a data error. */
+const MIN_CONTRIBUTION_GROWTH_PCT = -100;
+/** Upper bound (inclusive): a safety rail for aggressive raises, not a modeling claim. */
 export const MAX_CONTRIBUTION_GROWTH_PCT = 25;
-/** Minimum value the annual-increase PercentInput allows; the validator's lower bound is exclusive -100, so we stay safely above it. */
+/** Lowest value the annual-increase input allows: just above the validator's exclusive -100. */
 export const MIN_CONTRIBUTION_GROWTH_PCT_INPUT = -99;
 
-/**
- * True iff `pct` is a finite percent inside the accepted domain
- * `(-100, 25]`. Used by the resolver + migration to decide whether
- * a stored value is honored or dropped to the tracks-inflation default.
- */
+/** True iff `pct` is finite and in `(-100, 25]`; the resolver and migration drop any other stored value to tracks-inflation. */
 export function isValidContributionGrowthPct(pct: unknown): pct is number {
   return (
     typeof pct === 'number' &&
@@ -56,17 +17,7 @@ export function isValidContributionGrowthPct(pct: unknown): pct is number {
   );
 }
 
-/**
- * Month-precise, today-anchored growth factor for an explicit fixed-COLA
- * `contributionGrowthPct`. Returns 1 at `asOfMonth` and for any
- * out-of-band / non-finite percent (the guard) or a `0` rate.
- *
- * @param pct          fixed annual growth percent (e.g. 3 for 3 %/yr).
- * @param eventMonth   absolute month index of the contribution step
- *                     (`stepYear * 12 + stepMonthIndex`).
- * @param asOfMonth    today's absolute month index
- *                     (`todayYear * 12 + todayMonthIndex`).
- */
+/** Growth factor `(1 + pct/100)^((eventMonth − asOfMonth) / 12)`, months as `year * 12 + monthIndex`; an out-of-band percent gives 1 so corrupt data cannot compound into Infinity or NaN. */
 export function contributionGrowthFactor(
   pct: number,
   eventMonth: number,

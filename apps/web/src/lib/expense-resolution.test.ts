@@ -1,6 +1,3 @@
-/**
- * Resolver tests — locks the disable / patch / added semantics of scenario resolution.
- */
 import { describe, expect, it } from 'vitest';
 import { resolveExpensesForScenario } from './expense-resolution';
 import type {
@@ -85,8 +82,6 @@ describe('resolveExpensesForScenario', () => {
       },
     });
     const result = resolveExpensesForScenario('s1', [sc], exp);
-    // The 'gone' patch is silently dropped because no canonical with
-    // that id exists; 'e1' still resolves as canonical.
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('aggregate:e1');
     expect(result[0].source).toBe('canonical');

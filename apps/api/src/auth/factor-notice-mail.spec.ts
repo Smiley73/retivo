@@ -1,7 +1,4 @@
-/**
- * Unit tests for the pure factor-change notice mail builder —
- * no SES, no Moto, no Nest wiring.
- */
+// The pure factor-change notice mail builder: no SES, Moto or Nest wiring.
 import { buildFactorNoticeMail, buildFactorUndoLink } from './factor-notice-mail.js';
 
 describe('buildFactorNoticeMail', () => {

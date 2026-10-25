@@ -1,21 +1,12 @@
-/**
- * Shared builder from a validated `UpsertKeyEnvelopeSlotDto` to the persisted
- * `HouseholdKeyEnvelopeRow`. Extracted from
- * `KeyEnvelopeController` so the atomic change-password commit —
- * which carries the SAME slot shape in its
- * own request body — builds the row with the one definition rather than a
- * second hand-rolled copy.
- */
+// Shared builder from a validated `UpsertKeyEnvelopeSlotDto` to the persisted `HouseholdKeyEnvelopeRow`, used by the controller and the
+// change-password commit alike.
 import type { KeyEnvelopeKdfDto, UpsertKeyEnvelopeSlotDto } from './dto/auth.dto.js';
-import type { HouseholdKeyEnvelopeRow, KeyEnvelopeKdf } from '../dynamo/types.js';
+import type { KdfParams } from '@retirement/contracts';
+import type { HouseholdKeyEnvelopeRow } from '../dynamo/types.js';
 
-/**
- * Copy the validated KDF DTO into a PLAIN persisted-row object, dispatching on
- * `algorithm` so the stored row carries the algorithm's own work-factor fields
- * and nothing else. See the (former) `KeyEnvelopeController.toKdfRow` doc —
- * unchanged behaviour, only the location moved.
- */
-function toKdfRow(kdf: KeyEnvelopeKdfDto): KeyEnvelopeKdf {
+// Copies the validated KDF DTO into a plain row object, dispatching on `algorithm` so the row carries only that
+// algorithm work-factor fields.
+function toKdfRow(kdf: KeyEnvelopeKdfDto): KdfParams {
   if (kdf.algorithm === 'Argon2id') {
     return {
       algorithm: 'Argon2id',
@@ -23,23 +14,19 @@ function toKdfRow(kdf: KeyEnvelopeKdfDto): KeyEnvelopeKdf {
       ...(kdf.t === undefined ? {} : { t: kdf.t }),
       ...(kdf.p === undefined ? {} : { p: kdf.p }),
       salt: kdf.salt,
-    } as KeyEnvelopeKdf;
+    } as KdfParams;
   }
   return {
     algorithm: kdf.algorithm,
     ...(kdf.iterations === undefined ? {} : { iterations: kdf.iterations }),
     salt: kdf.salt,
-  } as KeyEnvelopeKdf;
+  } as KdfParams;
 }
 
 /**
- * Build the persisted slot row from a validated `UpsertKeyEnvelopeSlotDto`.
- * Binds the row to `householdId` + `slotId` — never the (untrusted) body's
- * own `householdId`/`slotId` fields — so it always lands in the caller's
- * partition at the id the caller (route param or the change-password commit)
- * decided. `credentialRevision`, when supplied, is stamped server-side —
- * NEVER read from the DTO, which carries no
- * such field.
+ * Builds the slot row bound to the given `householdId` and `slotId`, never the untrusted body fields, so it lands in
+ * the caller partition at the id the caller decided. `credentialRevision` is stamped server-side and never read from
+ * the DTO.
  */
 export function buildKeyEnvelopeSlotRow(
   householdId: string,

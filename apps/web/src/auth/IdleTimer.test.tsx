@@ -1,9 +1,4 @@
-/**
- * Idle-timeout client behaviour. Server enforcement is covered in the
- * api refresh-token tests; this suite verifies the SPA's UX layer:
- * activity resets, warn modal, cross-tab sync, visibility-wake, and the
- * one-shot signout reason consumed by the login page.
- */
+// The SPA's idle-timeout UX: activity resets, warn modal, cross-tab sync, visibility wake and the one-shot signout reason; server enforcement is covered in the api tests.
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -77,8 +72,6 @@ describe('IdleTimer', () => {
 
     expect(onWarn).toHaveBeenCalled();
 
-    // The clock was just reset — advancing back near the original
-    // timeout should NOT trigger logout.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);
     });
@@ -94,8 +87,6 @@ describe('IdleTimer', () => {
       await Promise.resolve();
     });
 
-    // Without the reset, the next 15s tick (total 35s) would have
-    // fired logout. With the reset, it shouldn't.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15_000);
     });
@@ -110,7 +101,7 @@ describe('IdleTimer', () => {
       await vi.advanceTimersByTimeAsync(20_000);
       recordProgrammaticActivity();
     });
-    // A bare write would not have rescheduled this tab: the key moved AND the 30 s timer was pushed out.
+    // A bare write would not have rescheduled this tab: the key moved and the 30 s timer was pushed out.
     expect(localStorage.getItem(ACTIVITY_KEY)).toBe(String(Date.now()));
     expect(localStorage.getItem(ACTIVITY_KEY)).not.toBe(mounted);
 
@@ -119,7 +110,6 @@ describe('IdleTimer', () => {
     });
     expect(onTimeout).not.toHaveBeenCalled();
 
-    // Each call defers once: the window now runs 30 s from the call, so 16 s more is past it.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(16_000);
     });
@@ -157,12 +147,10 @@ describe('IdleTimer', () => {
   it('storage event from another tab resets the timer', async () => {
     const { onTimeout } = renderTimer({ idleMs: 30_000, warnLeadMs: 5_000 });
 
-    // Advance past warn line.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(26_000);
     });
 
-    // Sibling tab writes activity.
     await act(async () => {
       localStorage.setItem(ACTIVITY_KEY, String(Date.now()));
       window.dispatchEvent(
@@ -174,8 +162,6 @@ describe('IdleTimer', () => {
       await Promise.resolve();
     });
 
-    // 10s further — would have been past timeout (36s), but the storage
-    // event reset us. No logout yet.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
@@ -185,8 +171,6 @@ describe('IdleTimer', () => {
   it('visibilitychange to visible past idleMs triggers timeout', async () => {
     const { onTimeout } = renderTimer({ idleMs: 30_000, warnLeadMs: 5_000 });
 
-    // Simulate the tab having been hidden / OS asleep — write a stale
-    // activity timestamp directly so the next visibility event sees it.
     await act(async () => {
       localStorage.setItem(ACTIVITY_KEY, String(Date.now() - 60_000));
       Object.defineProperty(document, 'visibilityState', {
@@ -221,8 +205,7 @@ describe('IdleTimer', () => {
 });
 
 function clearStorage() {
-  // Some test envs ship a localStorage stub that lacks .clear(); iterate
-  // keys defensively.
+  // Some test environments ship a localStorage stub without .clear(), so iterate keys.
   for (const store of [localStorage, sessionStorage]) {
     for (let i = store.length - 1; i >= 0; i--) {
       const key = store.key(i);

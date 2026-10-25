@@ -1,22 +1,6 @@
 /**
- * Unified PDF export orchestrator.
- *
- * Two cleanly separated halves:
- *
- *   1. `buildPdfSectionModel` — a PURE assembly step. Given the already-
- *      display-transformed rows/series + labels (NEVER raw engine data, NEVER
- *      re-deflated), it returns an ordered `PdfSectionModel` with one
- *      section per `PDF_SECTION_MANIFEST` entry, in manifest order. This is the
- *      tested surface: deterministic, no jsPDF, no DOM.
- *
- *   2. `buildAndDownloadPdf` — a thin RENDER step. It lazy-loads the jsPDF
- *      trio (injectable loader), walks the section model, captures
- *      each chart SVG (svg2pdf), renders each table (jspdf-autotable), and
- *      triggers the browser download. It only forwards already-prepared data to
- *      library calls, so it is in `vitest.config.ts` `coverage.exclude`.
- *
- * Framework-free: no React / JSX. The render step touches DOM (SVG nodes,
- * download anchor) but holds no component state.
+ * PDF export orchestrator: `buildPdfSectionModel` assembles the section model from already display-transformed data (pure, tested);
+ * `buildAndDownloadPdf` renders it with the lazy-loaded jsPDF libraries (coverage-excluded).
  */
 import {
   PDF_SECTION_MANIFEST,
@@ -44,7 +28,7 @@ import {
   type PdfLibLoader,
 } from './lazy-load';
 import type { DisplayMode } from '../view-deflator';
-import type { McBasis } from '../../pages/balance-projection-page-pipeline';
+import type { McBasis } from '../monte-carlo';
 import type { ProjectionMethod } from '../../components/ProjectionChart';
 import type { YearlyTableRow } from '../../pages/balance-projection-page-yearly';
 import type { PortfolioFlowYear } from '../../pages/balance-projection-page-yearly-builders';
@@ -54,10 +38,6 @@ import { ONE_LINE_DISCLAIMER } from '../disclaimer-fragments';
 import { APP_NAME, OPEN_SOURCE_TEXT, REPO_HOST_PATH, REPO_URL } from '../brand';
 import { formatAgeYearsMonths } from '../format-age';
 
-/** Per-kind section payload. A `cover` carries the cover labels; a `chart`
- *  carries the section header (the SVG itself is supplied separately at render
- *  time, keyed by section id); a `table` carries its autotable spec (or `null`
- *  when that table has no rows for the current scenario). */
 type PdfSectionData =
   | { readonly kind: 'cover'; readonly labels: CoverLabels }
   | { readonly kind: 'chart'; readonly header: string; readonly tableSpec: PdfTableSpec | null }
@@ -80,35 +60,19 @@ export interface BuildPdfSectionModelParams {
   readonly displayMode: DisplayMode;
   /** Already display-transformed year-by-year rows. */
   readonly unifiedYearTableRows: ReadonlyArray<YearlyTableRow>;
-  /** Already display-transformed annual portfolio flows, or `null`. */
   readonly portfolioFlowsByYear: ReadonlyArray<PortfolioFlowYear> | null;
-  /** The CFP Report inventory + scenario data. */
   readonly reportData: ReportData;
-  /** Render-clock "now" (month 1-12, day 1-31). */
   readonly date: { year: number; month: number; day: number };
-  /** Per-chart-section data tables, keyed by manifest section id. A chart
-   *  section gets a `tableSpec` only when an entry is present (tie this to the
-   *  same data-presence gate the render host uses, so a chart never has a table
-   *  without its chart, or vice-versa). Built (display-basis) by the page
-   *  from `vm` / `expenseProjection` via the `pdf-tables` builders. */
+  /**
+   * Data tables for chart sections, keyed by manifest id; set only where the chart itself renders.
+   */
   readonly chartTablesBySection?: ReadonlyMap<string, PdfTableSpec>;
-  /** The withdrawal-guidance table spec (the PDF's final section), or `null`
-   *  when it has no rows. A page-built `table`-kind spec with no existing
-   *  channel, so it gets its own field (NOT folded into the chart-scoped
-   *  `chartTablesBySection` map). Built (display-basis) by the page via the
-   *  pure `buildWithdrawalGuidanceSectionSpec` selection helper — the MC note,
-   *  the empty note, or the full table. */
+  /** Withdrawal-guidance table spec (the final section), or `null` when it has no rows. */
   readonly withdrawalGuidanceTableSpec?: PdfTableSpec | null;
-  /** Manifest section ids to leave out of the export entirely — the sections
-   *  of beta features the user has not switched on (`lib/feature-flags.ts`
-   *  `hiddenBetaPdfSectionIds`). Manifest order is preserved for the rest. */
+  /** Manifest section ids to leave out, e.g. beta features the user has not enabled. */
   readonly excludedSectionIds?: ReadonlySet<string>;
 }
 
-/** Map a manifest table id to its autotable spec from the already-transformed
- *  inputs. Returns `null` when that table type has no data source yet (the
- *  remaining chart-derived tables + tax detail have none);
- *  a `null` spec causes the section to be skipped entirely (no page emitted). */
 function tableSpecForSection(
   id: string,
   params: BuildPdfSectionModelParams,
@@ -120,7 +84,6 @@ function tableSpecForSection(
         params.activeMethod,
       );
     case 'chart-portfolio-flows':
-      // The portfolio-flow table spec is built only when the caller supplies the numbers.
       return params.portfolioFlowsByYear
         ? buildPortfolioFlowsTableSpec(params.portfolioFlowsByYear)
         : null;
@@ -133,26 +96,17 @@ function tableSpecForSection(
     case 'report-income':
       return buildReportIncomeTableSpec(params.reportData.incomeStreams);
     case 'table-roth-tax-free':
-      // A household with no Roth accounts has no rows — `null` skips the
-      // page entirely, the same empty-table gate every other section
-      // uses.
       return params.reportData.rothTaxFreeAmounts.length > 0
         ? buildRothTaxFreeTableSpec(params.reportData.rothTaxFreeAmounts)
         : null;
     case 'table-withdrawal-guidance':
-      // Page-built (the MC note / empty note / full table chosen by the pure
-      // selection helper); `null` when the page supplied none.
       return params.withdrawalGuidanceTableSpec ?? null;
     default:
       return null;
   }
 }
 
-/**
- * Pure assembly of the ordered section model. One section per manifest entry
- * (minus any `excludedSectionIds`), in manifest order, so the rendered PDF
- * order can never drift.
- */
+/** Assemble one section per manifest entry (minus `excludedSectionIds`), in manifest order. */
 export function buildPdfSectionModel(
   params: BuildPdfSectionModelParams,
 ): PdfSectionModel {
@@ -201,27 +155,12 @@ export function buildPdfSectionModel(
   return { sections, coverLabels };
 }
 
-// ---------------------------------------------------------------------------
-// Thin render step (coverage-excluded): forwards the prepared model to the
-// lazy-loaded jsPDF / autotable / svg2pdf libraries. No display logic here.
-// ---------------------------------------------------------------------------
-
-/** Fixed chart draw width (PDF points) — every chart embeds at this width so
- *  the charts stay visually consistent page to page. */
 const CHART_DRAW_WIDTH = 500;
-/** Top of the chart area on a page (below the section title). */
 const CHART_TOP = 70;
-/** Single-chart max draw height — a touch shorter than the full page so the
- *  chart's data table has room to start on the same page before paginating. */
 const CHART_MAX_HEIGHT = 360;
-/** Gap between a chart's bottom edge and the start of its data table. */
 const CHART_TABLE_GAP = 24;
-/** Body/head font size for every autotable — small so dense year-by-year and
- *  per-account tables stay readable without spilling across many pages. */
 const TABLE_FONT_SIZE = 7;
-/** Shared autotable style options (render-only). */
 const TABLE_STYLES = { fontSize: TABLE_FONT_SIZE, cellPadding: 2 } as const;
-/** Totals rows stay visually distinct and appear once, on the table's last page. */
 const TABLE_FOOT_STYLES = {
   fontStyle: 'bold' as const,
   fillColor: [238, 240, 242] as [number, number, number],
@@ -236,18 +175,12 @@ const SCENARIO_CONTINUATION_HEADING_Y = 50;
 const SCENARIO_CONTENT_RESTART_Y = 74;
 const SCENARIO_TABLE_FIRST_ROW_RESERVE = 22;
 const SCENARIO_TABLE_BOTTOM_MARGIN = 47;
-/** Retivo's PDF cover lockup redraws the solid favicon at half scale,
- *  matched to the wordmark's visible cap height. */
+// Cover lockup: the solid favicon redrawn at half scale, matched to the wordmark cap height.
 const BRAND_ACCENT_RGB = [14, 101, 73] as const;
 const BRAND_DOT = { x: 47, y: 63, radius: 7 } as const;
 const BRAND_WORDMARK = { x: 68, y: 69 } as const;
 
-/** Read an SVG's height-to-width aspect ratio from its `viewBox` (the chart
- *  engine emits `0 0 <w> <h>`, where `h` already includes the PDF legend band).
- *  Falls back to numeric width/height attributes, then a sane landscape
- *  default. Used to derive a NON-distorting draw height for each chart so the
- *  fixed-width embed never stretches the vector (the engine SVGs carry
- *  `preserveAspectRatio="none"`, so the draw rect must match the true aspect). */
+// Engine SVGs carry preserveAspectRatio="none", so the draw rect must match the viewBox aspect.
 /* c8 ignore start -- exercised only in a real export (svg2pdf path) */
 function svgAspectRatio(svg: SVGElement): number {
   const vb = svg.getAttribute('viewBox');
@@ -296,8 +229,6 @@ function buildScenarioMemberLine(member: ReportOverviewMember): string {
   return segments.join(' · ');
 }
 
-/** Display label for the legal-disclaimer page heading + its Table-of-Contents
- *  entry — single-sourced so the two can never drift. */
 const IMPORTANT_INFO_TITLE = 'Important Information';
 
 function tableFootOptions(spec: PdfTableSpec): {
@@ -313,8 +244,6 @@ function tableFootOptions(spec: PdfTableSpec): {
   };
 }
 
-/** Parse a `#RRGGBB` hex string to jsPDF's numeric RGB channels, or `null`
- *  when the input is absent / malformed (caller keeps the default text color). */
 /* c8 ignore start -- render-only color helper (jsPDF setTextColor path) */
 function hexToRgb(hex: string | undefined): { r: number; g: number; b: number } | null {
   if (!hex) return null;
@@ -326,36 +255,26 @@ function hexToRgb(hex: string | undefined): { r: number; g: number; b: number } 
 
 export interface BuildAndDownloadPdfParams {
   readonly sectionModel: PdfSectionModel;
-  /** Live SVG nodes for the `chart` sections, keyed by manifest section id.
-   *  A missing entry means that chart isn't mounted and is skipped. */
+  /** Live SVG nodes for `chart` sections by manifest id; a missing entry skips the chart. */
   readonly svgElementsBySection: ReadonlyMap<string, SVGElement>;
   readonly filename: string;
-  /** Injectable loader — tests pass a mock so no real jsPDF loads. */
   readonly loader?: PdfLibLoader;
   readonly signal?: AbortSignal;
-  /** Optional disclaimer text appended as a final page after all sections. */
   readonly disclaimer?: string;
-  /** Household overview, folded into the Scenario page (portfolio, annual
-   *  contributions, members, projection milestones). */
   readonly overview?: ReportHouseholdOverview;
   /** MC plan success rate (0–1), or `null` when no MC result / not applicable. */
   readonly successProbability?: number | null;
-  /** Hex color (`#RRGGBB`) for the success-probability figure — the standardized
-   *  red/amber/green tier (`successTierForPct`), resolved by the page so this
-   *  render step stays framework-free. Omit → neutral text color. */
+  /** Hex color for the success-probability figure, resolved by the page; omit for neutral text. */
   readonly successProbabilityColor?: string;
-  /** Estimated portfolio balance at the primary retirement year, in the active
-   *  display unit (today's or future dollars). Omit when unavailable. */
+  /** Estimated portfolio balance at the primary retirement year, in the active display unit. */
   readonly atRetirementBalance?: number | null;
-  /** Estimated portfolio balance at the end-of-horizon year, in the active
-   *  display unit. Omit when unavailable. */
+  /** Estimated portfolio balance at the end-of-horizon year, in the active display unit. */
   readonly atHorizonBalance?: number | null;
   /** Active scenario's single-line description (omit / empty to render none). */
   readonly scenarioDescription?: string;
   /** Active scenario's multi-line notes (omit / empty to render none). */
   readonly scenarioNotes?: string;
-  /** Grouped scenario settings for the Scenario page (one small table per
-   *  group). Empty / omitted → the Scenario section emits no page. */
+  /** Grouped scenario settings; empty or omitted emits no settings tables. */
   readonly scenarioSettingGroups?: ReadonlyArray<ReportScenarioSettingGroup>;
 }
 
@@ -366,15 +285,13 @@ export async function buildAndDownloadPdf(
   const { jsPDF, autoTable, svg2pdf } = await loader();
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
 
-  // Generated-on date string, shared by the title page and the running footer.
   const generatedDate = params.sectionModel.coverLabels.generatedOn.replace(
     'Generated on ',
     '',
   );
 
-  // Table-of-contents bookkeeping: page 3 is reserved up front, then filled once
-  // every section's true start page is known (autotable pagination shifts page
-  // numbers, so they only resolve after the full render completes).
+  // Page 3 is reserved for the ToC and filled once autotable pagination has settled each section's
+  // start page.
   let tocPageNumber: number | null = null;
   const tocEntries: Array<{ title: string; page: number }> = [];
 
@@ -383,8 +300,6 @@ export async function buildAndDownloadPdf(
       const { labels } = section.data;
 
       // ----- Page 1: title page -----
-      // App brand: the transparent favicon's solid pine dot redrawn as a
-      // fill-only vector, so no external asset has to load in the PDF pipeline.
       doc.setFillColor(...BRAND_ACCENT_RGB);
       doc.circle(BRAND_DOT.x, BRAND_DOT.y, BRAND_DOT.radius, 'F');
       doc.setTextColor(...BRAND_ACCENT_RGB);
@@ -392,8 +307,6 @@ export async function buildAndDownloadPdf(
       doc.text(APP_NAME, BRAND_WORDMARK.x, BRAND_WORDMARK.y);
       doc.setTextColor(0, 0, 0);
 
-      // Open-source line, page-one provenance only, with a real external link
-      // to the repo (not repeated per page).
       doc.setFontSize(9);
       doc.setTextColor(90, 90, 90);
       doc.textWithLink(OPEN_SOURCE_TEXT, 40, 104, { url: REPO_URL });
@@ -423,8 +336,6 @@ export async function buildAndDownloadPdf(
         doc.text(f.value, 40, y + 19);
         y += 50;
       }
-      // The scenario description + notes now lead the Scenario page (not the
-      // cover) so they sit with the rest of the scenario detail.
 
       // ----- Page 2: "Important Information" legal disclaimer -----
       if (params.disclaimer) {
@@ -438,8 +349,6 @@ export async function buildAndDownloadPdf(
         /* c8 ignore next -- splitTextToSize uses real jsPDF font metrics */
         const lines = doc.splitTextToSize(params.disclaimer, 515) as string[];
         doc.text(lines, 40, 88);
-        // ToC entry for the disclaimer page. Pushed here (during cover
-        // processing, before any content section) so it leads the ToC (A-11).
         tocEntries.push({ title: IMPORTANT_INFO_TITLE, page: importantInfoPage });
       }
 
@@ -451,15 +360,11 @@ export async function buildAndDownloadPdf(
       continue;
     }
 
-    // Decide whether this section emits a page.
     if (section.data.kind === 'chart') {
-      // Skip chart sections whose SVG element isn't mounted — no page emitted.
       if (!params.svgElementsBySection.has(section.manifest.id)) continue;
     }
     if (section.data.kind === 'table') {
-      // The Scenario page renders from the render-step params (overview +
-      // grouped settings), not an autotable spec; every other table needs a
-      // non-null spec.
+      // The Scenario page renders from params, not a table spec.
       if (section.manifest.id === 'report-scenarios') {
         if (!params.overview && !params.scenarioSettingGroups?.length) continue;
       } else if (!section.data.spec) {
@@ -472,7 +377,6 @@ export async function buildAndDownloadPdf(
 
     /* c8 ignore start -- render-only Scenario page header (jsPDF text) */
     if (section.manifest.id === 'report-scenarios') {
-      // Kicker label (the generic section title) above the scenario name.
       doc.setFontSize(10);
       doc.setTextColor(120, 120, 120);
       doc.text('SCENARIO', SCENARIO_CONTENT_LEFT, SCENARIO_CONTINUATION_HEADING_Y);
@@ -579,7 +483,7 @@ export async function buildAndDownloadPdf(
         sy += 6;
       }
 
-      // --- Household overview (folded in from the former overview page) ---
+      // --- Household overview ---
       const ov = params.overview;
       if (ov) {
         beginScenarioBlock(22, 15);
@@ -670,8 +574,7 @@ export async function buildAndDownloadPdf(
           body: group.rows.map((r) => [r.label, r.value]),
           startY: sy + 8,
           styles: TABLE_STYLES,
-          // Fixed label column + auto value column so long values wrap instead
-          // of overflowing the page (jspdf-autotable linebreak overflow).
+          // Fixed label column so long values wrap instead of overflowing.
           columnStyles: { 0: { cellWidth: 175 }, 1: { cellWidth: 'auto' } },
           margin: {
             top: SCENARIO_CONTENT_RESTART_Y,
@@ -696,8 +599,7 @@ export async function buildAndDownloadPdf(
       const svg = params.svgElementsBySection.get(section.manifest.id);
       /* c8 ignore next -- svg2pdf walks real SVG layout, untestable in jsdom */
       if (svg) {
-        // One chart per page: draw at its true aspect (no stretch), capped a
-        // little short of full height so the data table has room beneath it.
+        // Draw at the true aspect, capped so the data table fits beneath.
         let w = CHART_DRAW_WIDTH;
         let h = w * svgAspectRatio(svg);
         if (h > CHART_MAX_HEIGHT) {
@@ -705,7 +607,6 @@ export async function buildAndDownloadPdf(
           h = CHART_MAX_HEIGHT;
         }
         await captureChartSvg(svg, doc, svg2pdf, 40, CHART_TOP, w, h);
-        // The chart's data table flows under it (autotable paginates the rest).
         /* c8 ignore next -- tableSpec rendering exercised via the table path */
         if (section.data.tableSpec) {
           autoTable(doc, {
@@ -731,8 +632,7 @@ export async function buildAndDownloadPdf(
     }
   }
 
-  // Fill the reserved table-of-contents page now that every section's start
-  // page is known. Each row links to its page (jsPDF internal GoTo action).
+  // Fill the reserved ToC page once every section's start page is known.
   if (tocPageNumber !== null && tocEntries.length > 0) {
     doc.setPage(tocPageNumber);
     doc.setFontSize(16);
@@ -757,8 +657,7 @@ export async function buildAndDownloadPdf(
     }
     doc.text(`Page ${i} of ${totalPages}`, 555, 825, { align: 'right' });
     doc.text(REPO_HOST_PATH, 40, 825);
-    // Per-page legal line (C-2): a detached PDF page still carries the
-    // illustrative-estimates disclaimer. Centered between the repo address + page number.
+    // Per-page disclaimer so a detached page still carries it.
     doc.text(ONE_LINE_DISCLAIMER, 297, 825, { align: 'center' });
   }
 

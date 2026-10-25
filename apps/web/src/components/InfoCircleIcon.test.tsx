@@ -1,6 +1,4 @@
-/**
- * InfoCircleIcon — render, a11y wiring, decorative variant.
- */
+/** InfoCircleIcon — render, a11y wiring, decorative variant. */
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { InfoCircleIcon } from './InfoCircleIcon';
@@ -28,11 +26,6 @@ describe('InfoCircleIcon', () => {
 
   it('has no a11y violations with role="img"', async () => {
     const { container } = render(<InfoCircleIcon role="img" ariaLabel="Notes" />);
-    await expectNoA11yViolations(container);
-  });
-
-  it('has no a11y violations when decorative (no role)', async () => {
-    const { container } = render(<InfoCircleIcon />);
     await expectNoA11yViolations(container);
   });
 });

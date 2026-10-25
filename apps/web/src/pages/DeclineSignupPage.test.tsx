@@ -1,6 +1,3 @@
-/**
- * Tests for the DeclineSignupPage component.
- */
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 

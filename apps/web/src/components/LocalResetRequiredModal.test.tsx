@@ -1,8 +1,4 @@
-/**
- * LocalResetRequiredModal tests. Covers the blocking-modal render + copy, the
- * Retry interaction (re-attempts the drop), and the mandatory shared-component
- * a11y smoke (AGENTS.md → Testing setup).
- */
+/** LocalResetRequiredModal: blocking-modal copy and the Retry interaction that re-attempts the drop. */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { LocalResetRequiredModal } from './LocalResetRequiredModal';
@@ -24,10 +20,7 @@ describe('LocalResetRequiredModal', () => {
 
   it('wires the guidance copy as the dialog accessible description', () => {
     render(<LocalResetRequiredModal open onRetry={vi.fn().mockResolvedValue(undefined)} />);
-    // RAC wires the alertdialog's aria-describedby from the
-    // `slot="description"` body explicitly (regression guard — RAC does not
-    // auto-wire it, so without the manual id the dialog would announce only
-    // its title).
+    // RAC does not auto-wire aria-describedby from the description slot, so the manual id must exist or the dialog announces only its title.
     expect(screen.getByRole('alertdialog')).toHaveAccessibleDescription(
       /another browser tab still has this app open/i,
     );
@@ -50,7 +43,6 @@ describe('LocalResetRequiredModal', () => {
     );
     render(<LocalResetRequiredModal open onRetry={onRetry} />);
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    // While pending the label flips to "Retrying…" and the button is disabled.
     const pending = screen.getByRole('button');
     expect(pending).toBeDisabled();
     expect(pending).toHaveTextContent('Retrying…');

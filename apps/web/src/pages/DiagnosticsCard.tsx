@@ -1,15 +1,5 @@
-/**
- * Workspace page: Diagnostics card.
- *
- * On-device debugging surface. Three actions: Export diagnostics (a separate
- * gzipped `.json.gz` download, never synced), View recent activity (a
- * read-only modal that RE-QUERIES the IDB store on open, no aggregate
- * signal subscription), and Clear (a destructive confirm that empties both the
- * in-memory rings and the persisted store). The card carries the
- * on-device / "may contain personal data" note: diagnostics never leave
- * the device except by the explicit Export download, and gzip is not
- * encryption.
- */
+/** Workspace Diagnostics card: export diagnostics (a gzipped .json.gz download, never synced), a read-only recent-activity viewer that re-queries IDB on open, and Clear.
+* Diagnostics never leave the device except by the explicit Export, and gzip is not encryption. */
 import React, { useCallback, useMemo, useState } from 'react';
 import { Button, Disclosure, DisclosurePanel, Heading } from 'react-aria-components';
 import { Modal } from '../components/Modal';
@@ -42,13 +32,10 @@ import {
 } from './profile-page-chrome';
 
 interface Props {
-  /** Current household id (null while booting) — stamped into the export. */
   householdId: string | null;
-  /** Account email (unused today; kept for parity with the sibling cards). */
   email: string;
 }
 
-/** Tailwind text token per level so the chip reads at a glance. */
 const LEVEL_TONE: Record<DiagnosticLevel, string> = {
   error: 'text-negative',
   warn: 'text-warning',
@@ -56,10 +43,7 @@ const LEVEL_TONE: Record<DiagnosticLevel, string> = {
   log: 'text-muted',
 };
 
-/** Full local date + time (with seconds) for an activity row's captured
- *  `ts`. Guards an unparseable `ts` by returning it raw rather than
- *  rendering "Invalid Date". Omits the year (recent diagnostics rarely
- *  cross a year boundary). */
+// Returns an unparseable ts raw rather than rendering "Invalid Date"; omits the year since recent diagnostics rarely cross one.
 function formatActivityTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -72,9 +56,7 @@ function formatActivityTime(iso: string): string {
   });
 }
 
-/** One viewer row: level chip + time + namespace + message, with an
- *  expandable redacted `detail` behind a React Aria Disclosure (never a raw
- *  <details>). Read-only, monospace detail. */
+// The detail sits behind a React Aria Disclosure, never a raw <details>.
 const ActivityRow: React.FC<{ entry: DiagnosticEntry }> = ({ entry }) => {
   const time = formatActivityTime(entry.ts);
   return (
@@ -111,9 +93,7 @@ const ActivityRow: React.FC<{ entry: DiagnosticEntry }> = ({ entry }) => {
 };
 
 export const DiagnosticsCard: React.FC<Props> = ({ householdId }) => {
-  // Defensive `?? []` reads so a partial `useSync` mock / mid-mount context
-  // can't crash the render (this card is mounted via object-literal mocks in
-  // the WorkspacePage tests that omit these arrays).
+  // Defensive `?? []`: the WorkspacePage tests mount this card with object-literal useSync mocks that omit these arrays.
   const { pendingMutations, conflictMutations, failedErrorMutations, resolveConflict, checkAndRepair } =
     useSync();
   const pending = pendingMutations ?? [];
@@ -129,8 +109,6 @@ export const DiagnosticsCard: React.FC<Props> = ({ householdId }) => {
   const [clearing, setClearing] = useState(false);
   const [repairing, setRepairing] = useState(false);
 
-  // One-time short timezone abbreviation (e.g. "PST") for the recent-activity
-  // note; omitted from the note when the runtime can't resolve one.
   const tzLabel = useMemo(
     () =>
       new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
@@ -139,10 +117,7 @@ export const DiagnosticsCard: React.FC<Props> = ({ householdId }) => {
     [],
   );
 
-  // Re-query IDB, sorted by capture time (`ts`), newest first, `seq`
-  // tiebreak. Used on viewer open + after a Clear success.
-  // Read-only; no aggregate-signal subscription (wrong layer). An
-  // unparseable `ts` sorts oldest rather than poisoning the comparator.
+  // Newest first by ts with a seq tiebreak; an unparseable ts sorts oldest rather than poisoning the comparator. No aggregate-signal subscription.
   const loadEntries = useCallback(async (): Promise<void> => {
     try {
       const rows = (await listDiagnosticLogs()) as unknown as DiagnosticEntry[];
@@ -180,7 +155,6 @@ export const DiagnosticsCard: React.FC<Props> = ({ householdId }) => {
       await clearAllDiagnostics();
       setConfirmClear(false);
       setNotice('Diagnostics cleared.');
-      // Re-query so an open viewer reflects the now-empty store.
       await loadEntries();
     } catch {
       setError('Could not clear diagnostics. Please try again.');
@@ -189,15 +163,9 @@ export const DiagnosticsCard: React.FC<Props> = ({ householdId }) => {
     }
   }, [loadEntries]);
 
-  // Check & repair: re-drive the auto-repair pass over every parked conflict
-  // (re-queue each with a fresh id → flush). Silently clears a since-fixed
-  // conflict and rehydrates a legacy row's server facts so its keep/discard
-  // unlocks; anything still a real-choice conflict stays for the per-row
-  // keep/discard below. Best-effort — a transport hiccup surfaces the badge, so
-  // no per-item error is duplicated here.
+  // Re-drives the auto-repair pass over parked conflicts: clears a since-fixed one and rehydrates a legacy row's server facts; real-choice conflicts stay for keep/discard. Best-effort, as a transport hiccup surfaces the badge.
   const onCheckAndRepair = useCallback(async () => {
-    // Defensive: a partial `useSync` mock (WorkspacePage-style object literal)
-    // may omit `checkAndRepair` even though the real context always provides it.
+    // Partial useSync mocks may omit checkAndRepair though the real context always provides it.
     if (typeof checkAndRepair !== 'function') return;
     setError(null);
     setRepairing(true);
@@ -289,8 +257,6 @@ export const DiagnosticsCard: React.FC<Props> = ({ householdId }) => {
                     <Button
                       onPress={() => void onCheckAndRepair()}
                       isDisabled={repairing}
-                      // Shared secondary-button look (single-sourced with the
-                      // list's Keep control) + this card's looser px-2.5 py-1.
                       className={`${RESOLVE_BTN_BASE} px-2.5 py-1 ${KEEP_BTN_COLORS}`}
                     >
                       {repairing ? 'Checking…' : 'Check & repair'}

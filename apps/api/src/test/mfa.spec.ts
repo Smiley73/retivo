@@ -1,15 +1,5 @@
-/**
- * MFA endpoint integration tests against the local emulator. Covers the two-step login
- * challenge (TOTP, Email-OTP, and passkey), trusted-device skip, routine-vs-recovery trust
- * eligibility, retired backup-code rejection, the auth-rejection matrix, and the CSRF-exemption of
- * the pre-session MFA endpoints.
- *
- * Runs with AUTH_MFA_ENFORCED=true (set before bootstrap, restored after) so
- * `POST /auth/login` returns a challenge instead of a session. Email-OTP codes
- * are hashed at rest (sha256), so tests recover the live code by brute-forcing
- * the 6-digit space against the stored `codeHash` — cheap (1M sha256) and the
- * only handle without a dev-shortcut.
- */
+// MFA endpoints with AUTH_MFA_ENFORCED=true: two-step login (TOTP, Email-OTP, passkey), trusted-device skip and trust eligibility, retired backup
+// codes, the auth-rejection matrix and CSRF exemption. Email-OTP codes are stored as sha256, so tests recover the live code by brute force.
 import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
 import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -46,8 +36,7 @@ interface ChallengeResponse {
 
 const ORIGIN = () => process.env.WEB_ORIGIN!;
 
-/** Clear the per-user Email-OTP send cooldown anchor so a second send for the
- * same user in the same test second is not silently no-op'd by the 60s window. */
+// Clears the 60s Email-OTP send cooldown so a second send for the same user is not a silent no-op.
 async function clearEmailOtpCooldown(t: TestApp, userId: string): Promise<void> {
   const userTable = t.module
     .get(ConfigService)
@@ -61,9 +50,6 @@ async function clearEmailOtpCooldown(t: TestApp, userId: string): Promise<void> 
   );
 }
 
-/** Every AuthEvent row for `userId`, newest scan order not guaranteed —
- * callers filter/sort as needed (ip/userAgent assertions, lock-crossing
- * counts). */
 async function authEventsFor(t: TestApp, userId: string): Promise<AuthEventRow[]> {
   const table = t.module
     .get(ConfigService)
@@ -72,8 +58,6 @@ async function authEventsFor(t: TestApp, userId: string): Promise<AuthEventRow[]
   return rows.filter((r) => r.userId === userId);
 }
 
-/** A syntactically-valid TOTP code that cannot verify for `secret` — drawn
- * from an unrelated freshly-generated secret. */
 function wrongTotpCode(secret: string): string {
   let candidate: string;
   do {
@@ -82,7 +66,6 @@ function wrongTotpCode(secret: string): string {
   return candidate;
 }
 
-/** Authenticated bearer + CSRF headers for a session response. */
 function authHeaders(res: request.Response): {
   accessToken: string;
   refreshCookie: string;
@@ -125,10 +108,8 @@ describe('enforced MFA endpoints', () => {
       const challenge = login.body as ChallengeResponse;
       expect(challenge.mfaRequired).toBe(true);
       expect(challenge.challengeToken).toBeTruthy();
-      // No TOTP enrolled → email_otp is the routine factor.
       expect(challenge.methods).toEqual(['email_otp']);
       expect(challenge.recoveryMethods).toEqual(['email_otp']);
-      // No session cookies on the challenge response.
       const challengeCookies = parseSetCookies(login.headers['set-cookie']);
       expect(challengeCookies[REFRESH_COOKIE_NAME]).toBeUndefined();
 
@@ -151,9 +132,7 @@ describe('enforced MFA endpoints', () => {
       const challenge = login.body as ChallengeResponse;
       expect(challenge.challengeToken).toBeTruthy();
 
-      // Recover a genuinely VALID email-OTP so the ONLY thing wrong is the
-      // substituted device — proving the device check fires before factor
-      // verification (a valid code still can't complete on a foreign device).
+      // A valid code, so the only fault is the substituted device: the device check must fire before factor verification.
       await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/email/send')
         .set('Origin', ORIGIN())
@@ -172,20 +151,13 @@ describe('enforced MFA endpoints', () => {
           deviceId: substituteDevice,
           rememberDevice: true,
         });
-      // Maps to the existing MFA_CHALLENGE_INVALID response, not
-      // MFA_CODE_INVALID — the device mismatch is caught before the factor.
       expect(verify.status).toBe(401);
       expect(verify.body.error.code).toBe('MFA_CHALLENGE_INVALID');
-      // No session and no trusted-device cookie were created.
       const cookies = parseSetCookies(verify.headers['set-cookie']);
       expect(cookies[REFRESH_COOKIE_NAME]).toBeUndefined();
       expect(cookies[DEVICE_TRUST_COOKIE_NAME]).toBeUndefined();
 
-      // Prove the rejected attempt did NOT consume the one-time OTP: reuse the
-      // SAME challenge token and SAME code on the CORRECT (challenge-bound)
-      // device and it must still succeed. If the device check ran AFTER factor
-      // verification, this second attempt would fail MFA_CODE_INVALID because
-      // the code was already burned.
+      // The rejected attempt must not have burned the one-time OTP: if the device check ran after factor verification, this retry would fail MFA_CODE_INVALID.
       const retry = await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/verify')
         .set('Origin', ORIGIN())
@@ -219,7 +191,6 @@ describe('enforced MFA endpoints', () => {
       expect(login.status).toBe(200);
       const challengeToken = (login.body as ChallengeResponse).challengeToken!;
 
-      // First completion succeeds and consumes the challenge's single-use jti.
       await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/email/send')
         .set('Origin', ORIGIN())
@@ -233,10 +204,7 @@ describe('enforced MFA endpoints', () => {
       expect(first.status).toBe(200);
       expect((first.body as ChallengeResponse).accessToken).toBeTruthy();
 
-      // Replay the SAME (still-unexpired) challenge with a genuinely valid,
-      // freshly-issued OTP so the ONLY thing wrong is the already-consumed
-      // challenge — proving the single-use ledger, not the one-time OTP, rejects
-      // the replay.
+      // A freshly issued valid OTP leaves the already-consumed challenge as the only fault, so the single-use ledger, not the one-time OTP, rejects the replay.
       await clearEmailOtpCooldown(t, userId);
       await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/email/send')
@@ -250,7 +218,6 @@ describe('enforced MFA endpoints', () => {
         .send({ challengeToken, method: 'email_otp', code: secondCode, deviceId });
       expect(replay.status).toBe(401);
       expect(replay.body.error.code).toBe('MFA_CHALLENGE_INVALID');
-      // No alternative session was minted on the rejected replay.
       const cookies = parseSetCookies(replay.headers['set-cookie']);
       expect(cookies[REFRESH_COOKIE_NAME]).toBeUndefined();
     });
@@ -268,9 +235,7 @@ describe('enforced MFA endpoints', () => {
         .expect(202);
       const code = await recoverEmailOtp(t, userId);
 
-      // Fire two identical completions concurrently. The single-winner
-      // conditional PutItem on the challenge jti admits exactly one; the loser
-      // races on either the OTP (single-use) or the challenge and is rejected.
+      // The conditional PutItem on the challenge jti admits exactly one winner; the loser is rejected on the single-use OTP or the challenge.
       const [a, b] = await Promise.all([
         request(t.app.getHttpServer())
           .post('/api/v1/auth/mfa/verify')
@@ -288,17 +253,11 @@ describe('enforced MFA endpoints', () => {
     });
 
     it('admits exactly one winner across a concurrent TOTP replay of the same challenge', async () => {
-      // A REUSABLE factor (TOTP) — unlike a single-use email OTP — is NOT
-      // consumed by a verify attempt, so both concurrent requests genuinely
-      // pass factor verification with the SAME valid code and race solely on
-      // the challenge-jti single-use conditional PutItem
-      // (RevokedTokensRepository.consumeMfaChallenge). Exactly one may win; the
-      // loser gets MFA_CHALLENGE_INVALID and no session.
+      // TOTP is reusable and not consumed by a verify attempt, so both requests pass factor verification with the same code and race solely on
+      // the challenge-jti conditional PutItem (RevokedTokensRepository.consumeMfaChallenge).
       const { email, userId } = await signupVerifyApprove(t);
       const deviceId = freshDeviceId();
 
-      // Bootstrap a session via email-OTP, then enroll TOTP so a re-login
-      // presents a TOTP challenge.
       const first = await completeEmailOtpLogin(t, email, userId, deviceId);
       const secret = await enrollTotp(t, authHeaders(first));
 
@@ -310,7 +269,6 @@ describe('enforced MFA endpoints', () => {
       const challengeToken = challenge.challengeToken!;
       const code = generateSync({ secret });
 
-      // Fire two identical TOTP completions concurrently on the same challenge.
       const [a, b] = await Promise.all([
         request(t.app.getHttpServer())
           .post('/api/v1/auth/mfa/verify')
@@ -327,8 +285,6 @@ describe('enforced MFA endpoints', () => {
       const winner = a.status === 200 ? a : b;
       const loser = a.status === 200 ? b : a;
       expect((winner.body as ChallengeResponse).accessToken).toBeTruthy();
-      // The loser is rejected as an already-consumed challenge and mints no
-      // session — no refresh cookie on the losing response.
       expect(loser.body.error.code).toBe('MFA_CHALLENGE_INVALID');
       const loserCookies = parseSetCookies(loser.headers['set-cookie']);
       expect(loserCookies[REFRESH_COOKIE_NAME]).toBeUndefined();
@@ -340,7 +296,6 @@ describe('enforced MFA endpoints', () => {
       const { email, userId } = await signupVerifyApprove(t);
       const deviceId = freshDeviceId();
 
-      // First login: complete email-OTP (the routine factor here) + remember.
       const verify = await completeEmailOtpLogin(t, email, userId, deviceId, true);
       expect(verify.status).toBe(200);
       expect((verify.body as ChallengeResponse).deviceRemembered).toBe(true);
@@ -348,7 +303,6 @@ describe('enforced MFA endpoints', () => {
       const trust = cookies[DEVICE_TRUST_COOKIE_NAME];
       expect(trust).toBeTruthy();
 
-      // Second login: same deviceId + trust cookie → session directly.
       const trustHeader = `${DEVICE_TRUST_COOKIE_NAME}=${encodeURIComponent(trust)}`;
       const second = await loginRaw(t, email, deviceId, [trustHeader]);
       expect(second.status).toBe(200);
@@ -364,15 +318,12 @@ describe('enforced MFA endpoints', () => {
       const { email, userId } = await signupVerifyApprove(t);
       const deviceId = freshDeviceId();
 
-      // Bootstrap + enroll TOTP so email_otp becomes a recovery factor.
       const first = await completeEmailOtpLogin(t, email, userId, deviceId);
       await enrollTotp(t, authHeaders(first));
 
-      // Re-login, verify via email_otp (recovery) with rememberDevice.
       const newDevice = freshDeviceId();
       const login = await loginRaw(t, email, newDevice);
       const challengeToken = (login.body as ChallengeResponse).challengeToken!;
-      // Second send for the same user — clear the 60s cooldown first.
       await clearEmailOtpCooldown(t, userId);
       await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/email/send')
@@ -391,7 +342,6 @@ describe('enforced MFA endpoints', () => {
           rememberDevice: true,
         });
       expect(verify.status).toBe(200);
-      // Session issued, but recovery-factor email_otp is NOT routine → no trust.
       expect((verify.body as ChallengeResponse).deviceRemembered).toBe(false);
       const cookies = parseSetCookies(verify.headers['set-cookie']);
       expect(cookies[DEVICE_TRUST_COOKIE_NAME]).toBeUndefined();
@@ -415,66 +365,7 @@ describe('enforced MFA endpoints', () => {
     });
   });
 
-  describe('totp/disable — password-only step-up + status reflects disable', () => {
-    it('correct password → 200 and status reports totpEnabled:false', async () => {
-      const { email, userId } = await signupVerifyApprove(t);
-      const deviceId = freshDeviceId();
-      const s = authHeaders(await completeEmailOtpLogin(t, email, userId, deviceId));
-      await enrollTotp(t, s);
-
-      // Sanity: status reports TOTP enabled and no retired backup-code field.
-      const before = await request(t.app.getHttpServer())
-        .get('/api/v1/auth/mfa/status')
-        .set('Origin', ORIGIN())
-        .set('Authorization', `Bearer ${s.accessToken}`);
-      expect(before.status).toBe(200);
-      expect(before.body.totpEnabled).toBe(true);
-      expect(before.body).not.toHaveProperty('backupCodesCount');
-
-      // Step-up: password + the Email-OTP no-lockout floor (the flag is on).
-      const disableCode = await sendAndRecoverStepUpOtp(t, s, 'mfa_totp_disable');
-      const disable = await request(t.app.getHttpServer())
-        .post('/api/v1/auth/mfa/totp/disable')
-        .set('Origin', ORIGIN())
-        .set('Authorization', `Bearer ${s.accessToken}`)
-        .set('X-CSRF-Token', s.csrfValue)
-        .set('Cookie', [s.refreshCookie, s.csrfCookie].join('; '))
-        .send({ currentPassword: STRONG_PASSWORD, method: 'email_otp', code: disableCode });
-      expect(disable.status).toBe(200);
-      expect(disable.body.totpEnabled).toBe(false);
-
-      const after = await request(t.app.getHttpServer())
-        .get('/api/v1/auth/mfa/status')
-        .set('Origin', ORIGIN())
-        .set('Authorization', `Bearer ${s.accessToken}`);
-      expect(after.status).toBe(200);
-      expect(after.body.totpEnabled).toBe(false);
-      expect(after.body).not.toHaveProperty('backupCodesCount');
-    });
-
-    it('a wrong password → 401 INVALID_CREDENTIALS and leaves the factor enabled', async () => {
-      const { email, userId } = await signupVerifyApprove(t);
-      const deviceId = freshDeviceId();
-      const s = authHeaders(await completeEmailOtpLogin(t, email, userId, deviceId));
-      await enrollTotp(t, s);
-
-      const disable = await request(t.app.getHttpServer())
-        .post('/api/v1/auth/mfa/totp/disable')
-        .set('Origin', ORIGIN())
-        .set('Authorization', `Bearer ${s.accessToken}`)
-        .set('X-CSRF-Token', s.csrfValue)
-        .set('Cookie', [s.refreshCookie, s.csrfCookie].join('; '))
-        .send({ currentPassword: 'WrongPassw0rd!Nope' });
-      expect(disable.status).toBe(401);
-      expect(disable.body.error.code).toBe('INVALID_CREDENTIALS');
-
-      const status = await request(t.app.getHttpServer())
-        .get('/api/v1/auth/mfa/status')
-        .set('Origin', ORIGIN())
-        .set('Authorization', `Bearer ${s.accessToken}`);
-      expect(status.body.totpEnabled).toBe(true);
-    });
-
+  describe('totp/disable', () => {
     it('a missing currentPassword → 400 BAD_REQUEST', async () => {
       const { email, userId } = await signupVerifyApprove(t);
       const deviceId = freshDeviceId();
@@ -497,8 +388,7 @@ describe('enforced MFA endpoints', () => {
       const s = authHeaders(await completeEmailOtpLogin(t, email, userId, deviceId));
       await enrollTotp(t, s);
 
-      // 257 chars exceeds @MaxLength(256) → the ValidationPipe 400s before the
-      // password is ever checked, so the factor is untouched.
+      // 257 chars exceeds @MaxLength(256): the ValidationPipe 400s before the password is checked, so the factor is untouched.
       const disable = await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/totp/disable')
         .set('Origin', ORIGIN())
@@ -519,8 +409,7 @@ describe('enforced MFA endpoints', () => {
       const { email, userId } = await signupVerifyApprove(t);
       const deviceId = freshDeviceId();
       const s = authHeaders(await completeEmailOtpLogin(t, email, userId, deviceId));
-      // No enrollTotp — the account has no enabled factor. Email-OTP is the
-      // no-lockout step-up floor (the flag is on).
+      // No factor is enabled, so Email-OTP is the no-lockout step-up floor.
       const code = await sendAndRecoverStepUpOtp(t, s, 'mfa_totp_disable');
       const disable = await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/totp/disable')
@@ -555,6 +444,12 @@ describe('enforced MFA endpoints', () => {
       expect(disabled).toBeTruthy();
       expect(disabled!.ip).toBeTruthy();
       expect(disabled!.userAgent).toBe('jest-mfa-disable-agent');
+
+      const status = await request(t.app.getHttpServer())
+        .get('/api/v1/auth/mfa/status')
+        .set('Origin', ORIGIN())
+        .set('Authorization', `Bearer ${s.accessToken}`);
+      expect(status.body.totpEnabled).toBe(false);
     });
   });
 
@@ -580,7 +475,6 @@ describe('enforced MFA endpoints', () => {
     it('lists a device trusted via a routine-factor rememberDevice verify', async () => {
       const { email, userId } = await signupVerifyApprove(t);
       const deviceId = freshDeviceId();
-      // Email-OTP is the routine factor (no TOTP) → rememberDevice mints trust.
       const verify = await completeEmailOtpLogin(t, email, userId, deviceId, true);
       expect((verify.body as ChallengeResponse).deviceRemembered).toBe(true);
       const s = authHeaders(verify);
@@ -599,14 +493,12 @@ describe('enforced MFA endpoints', () => {
     it('forgetting all trusted devices re-challenges the device on its next login', async () => {
       const { email, userId } = await signupVerifyApprove(t);
       const deviceId = freshDeviceId();
-      // Trust the device on first login.
       const verify = await completeEmailOtpLogin(t, email, userId, deviceId, true);
       const cookies = parseSetCookies(verify.headers['set-cookie']);
       const trust = cookies[DEVICE_TRUST_COOKIE_NAME];
       expect(trust).toBeTruthy();
       const s = authHeaders(verify);
 
-      // Forget every trusted device (omitted list).
       const forget = await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/trusted-devices/forget')
         .set('Origin', ORIGIN())
@@ -616,12 +508,8 @@ describe('enforced MFA endpoints', () => {
         .send({});
       expect(forget.status).toBe(204);
 
-      // The forget-all response must clear the
-      // device-trust cookie at BOTH its live `/api/v1` path and its
-      // older `/api/v1/auth` path, since a browser that
-      // minted its cookie before the path was widened still holds a
-      // same-name cookie scoped to the narrower path that a single-path
-      // clear cannot reach.
+      // The forget-all response clears the device-trust cookie at both its live /api/v1 path and the older /api/v1/auth path, which a browser that
+      // minted it before the path was widened still holds.
       const setCookieHeaders = (
         Array.isArray(forget.headers['set-cookie'])
           ? forget.headers['set-cookie']
@@ -633,8 +521,6 @@ describe('enforced MFA endpoints', () => {
       expect(deviceTrustClears.some((h) => h.includes('Path=/api/v1;'))).toBe(true);
       expect(deviceTrustClears.some((h) => h.includes('Path=/api/v1/auth;'))).toBe(true);
 
-      // The previously-trusted device, presenting its old trust cookie, is now
-      // challenged again rather than getting a session directly.
       const trustHeader = `${DEVICE_TRUST_COOKIE_NAME}=${encodeURIComponent(trust)}`;
       const relogin = await loginRaw(t, email, deviceId, [trustHeader]);
       expect(relogin.status).toBe(200);
@@ -672,9 +558,7 @@ describe('enforced MFA endpoints', () => {
       const deviceId = freshDeviceId();
       const s = authHeaders(await completeEmailOtpLogin(t, email, userId, deviceId));
 
-      // Authenticated + a valid enrollment-gate proof (otherwise the gate itself, not the
-      // pending-secret check, rejects the request), but enroll/start was never called → no pending
-      // secret, so enrollConfirm returns false and the controller maps that to 401.
+      // A valid enrollment-gate proof keeps the gate from rejecting first; with no pending secret enrollConfirm returns false, mapped to 401.
       const otpCode = await sendAndRecoverStepUpOtp(t, s, 'mfa_totp_enroll');
       const confirm = await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/totp/enroll/confirm')
@@ -726,10 +610,7 @@ describe('enforced MFA endpoints', () => {
   });
 
   describe('per-account TOTP lock', () => {
-    /** Enroll TOTP on a fresh account and open a TOTP challenge on a new
-     * device. The single-use challenge is only consumed AFTER a successful
-     * factor check, so a wrong/locked TOTP attempt never burns it — the
-     * returned `verifyTotp` reuses the same challenge token every call. */
+    // The single-use challenge is consumed only after a successful factor check, so wrong or locked attempts never burn it and `verifyTotp` reuses the same token.
     async function enrollAndChallenge(): Promise<{
       userId: string;
       secret: string;
@@ -738,13 +619,11 @@ describe('enforced MFA endpoints', () => {
       verifyTotp: (code: string) => request.Test;
     }> {
       const { email, userId } = await signupVerifyApprove(t);
-      // Bootstrap an authenticated session (no TOTP yet) to enroll TOTP.
       const bootstrap = authHeaders(
         await completeEmailOtpLogin(t, email, userId, freshDeviceId()),
       );
       const secret = await enrollTotp(t, bootstrap);
 
-      // A fresh login now offers TOTP as the routine factor.
       const loginDevice = freshDeviceId();
       const login = await loginRaw(t, email, loginDevice);
       expect(login.status).toBe(200);
@@ -765,24 +644,19 @@ describe('enforced MFA endpoints', () => {
       const { userId, secret, challengeToken, loginDevice, verifyTotp } =
         await enrollAndChallenge();
 
-      // 3 free (grace) misses, then the 4th miss — compared like any other
-      // (a plain wrong code), and the one that trips the lock.
+      // 3 free grace misses; the 4th is compared like any wrong code and trips the lock.
       for (let i = 0; i < 4; i++) {
         const res = await verifyTotp(wrongTotpCode(secret));
         expect(res.status).toBe(401);
         expect(res.body.error.code).toBe('MFA_CODE_INVALID');
       }
 
-      // Inside the window the correct code is refused too — proving this is
-      // an account-scoped lock, not merely a counter that happens to reject
-      // wrong guesses.
+      // The correct code is refused too, so this is an account-scoped lock, not a counter that happens to reject wrong guesses.
       const lockedWithCorrectCode = await verifyTotp(generateSync({ secret }));
       expect(lockedWithCorrectCode.status).toBe(429);
       expect(lockedWithCorrectCode.body.error.code).toBe('RATE_LIMITED');
 
-      // The lock is scoped to the TOTP factor: the SAME challenge still
-      // completes via email OTP. Clear the per-user send cooldown first — the
-      // bootstrap login above already sent+consumed one code for this user.
+      // The lock is scoped to the TOTP factor: the same challenge completes via Email-OTP (clear the send cooldown the bootstrap login used).
       await clearEmailOtpCooldown(t, userId);
       await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/email/send')
@@ -797,8 +671,7 @@ describe('enforced MFA endpoints', () => {
       expect(viaEmailOtp.status).toBe(200);
       expect((viaEmailOtp.body as ChallengeResponse).accessToken).toBeTruthy();
 
-      // The threshold crossing is audited exactly once, not once per refusal
-      // (six verify attempts hit the endpoint above; the lock event fires once).
+      // The threshold crossing is audited once, not once per refusal.
       const events = await authEventsFor(t, userId);
       const lockEvents = events.filter((e) => e.eventType === 'mfa_totp_locked');
       expect(lockEvents).toHaveLength(1);
@@ -827,7 +700,6 @@ describe('enforced MFA endpoints', () => {
       const login = await loginRaw(t, email, deviceId);
       const challengeToken = (login.body as ChallengeResponse).challengeToken!;
 
-      // No CSRF cookie/header present at all — endpoint is exempt.
       const send = await request(t.app.getHttpServer())
         .post('/api/v1/auth/mfa/email/send')
         .set('Origin', ORIGIN())

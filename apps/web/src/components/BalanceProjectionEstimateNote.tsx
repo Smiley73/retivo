@@ -1,70 +1,32 @@
 /**
- * Standing estimate disclosure for the Balance Projection page.
- *
- * The projection now FUNDS the federal tax, Medicare IRMAA, and ACA
- * premium-tax-credit figures: the drawdown engine raises each year's
- * withdrawal to cover the estimated tax / health-cost bill, so these
- * numbers reduce the projected balances and can move the depletion year.
- * This note frames them as balance-affecting ESTIMATES (not exact tax
- * filings) so a reader treats the figures as a planning guide.
- *
- * Qualification: the yield / cash-interest / evolving-cost-basis tax
- * components are DISPLAY-exact but deliberately NOT funded into either
- * engine's balance progression (the funding solvers keep the shared
- * pre-commit approximation). The "What is not modeled" paragraph discloses
- * that portion as display-only so the funded assurance above stays accurate
- * for households with taxable brokerage / savings / money-market / CD
- * balances.
- *
- * The standard-deduction-only paragraph is ALWAYS ON. It is a blanket
- * disclosure, not a materiality-triggered warning: the itemized/AMT/QBI gap
- * is one-sided (a household that itemizes owes LESS than shown), and the
- * projection has no itemizable-expense inventory to size the gap from, so a
- * heuristic trigger would be an unlabeled assumption.
- *
- * The always-on health-coverage paragraph covers the rough age-priced ACA
- * benchmark and its assumptions, plus the fact that only the Medicare
- * income-related surcharge is modeled. The CONDITIONAL missing-premium
- * readiness warning fires only on positive evidence (an IRMAA surcharge is
- * charged while the plan records no medical spending at all).
- *
- * Follows the `OptimizerDisclaimerCard` precedent: a `role="note"` card
- * announced to assistive tech, styled with Tailwind defaults + the typed
- * component idiom (no inline style, no arbitrary-value utilities). Body
- * copy renders at the page baseline `text-sm`.
+ * Standing disclosure that tax and health-cost figures are estimates that fund withdrawals. The standard-deduction
+ * paragraph is always on (no itemizable-expense inventory); the missing-premium warning needs positive evidence.
  */
 import React from 'react';
-// The single source of truth for the rough age-premium curve, so this
-// disclosure can never quote a price the engine no longer charges.
 import { ROUGH_BENCHMARK_ASSUMPTIONS } from '../lib/aca-ptc';
 import { MEDICARE_PREMIUMS_URL } from '../pages/medicare-premium-helper';
 import { TextLink } from './TextLink';
 
 export interface BalanceProjectionEstimateNoteProps {
   /**
-   * True when at least one projection year's Medicare IRMAA surcharge was
-   * estimated from the projected first-year income because the member is on
-   * Medicare in the first one or two retirement years and no historical
-   * (two-years-prior) MAGI was provided. Adds the projected-first-year-MAGI
-   * disclosure line to this note. Defaults to false.
+   * An IRMAA surcharge was estimated from projected first-year income because no two-years-prior
+   * MAGI was provided; adds a disclosure line.
    */
   readonly magiEstimatedFromProjection?: boolean;
   /**
-   * True when a Monte Carlo basis is active. Every MC basis funds
-   * tax from the portfolio each year (Combined-Pot and the named strategies
-   * alike), so the simulated-run wording still states the figures reduce the
-   * projected balances. Defaults to false (deterministic render verbatim).
+   * A Monte Carlo basis is active; every MC basis funds tax from the portfolio, so the figures
+   * still reduce balances.
    */
   readonly isMcBasisActive?: boolean;
   /**
-   * True when the projection charges a Medicare income-related
-   * surcharge while the plan records no medical spending at all, so the base
-   * Medicare premium (a user-entered medical expense) is missing. Adds the
-   * readiness warning below. Defaults to false.
+   * The projection charges a Medicare income-related surcharge while the plan records no medical
+   * spending; adds the readiness warning.
    */
   readonly medicareBasePremiumMissing?: boolean;
-  /** True when a projection year has income at or below 138% of the federal
-   *  poverty line while on a Marketplace plan. Adds the Medicaid paragraph. */
+  /**
+   * A projection year has income at or below 138% of the federal poverty line on a Marketplace
+   * plan; adds the Medicaid paragraph.
+   */
   readonly medicaidMayApply?: boolean;
 }
 

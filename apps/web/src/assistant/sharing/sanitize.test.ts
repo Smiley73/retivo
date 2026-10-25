@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildMasker, cleanText, EMPTY_MASKER, MASK, matchModeFor, sanitizeClientName, sanitizeFreeText, sanitizeLabel } from './sanitize';
+import { buildMasker, MASK, sanitizeClientName, sanitizeFreeText, sanitizeLabel } from './sanitize';
+
+const EMPTY_MASKER = buildMasker([]);
 
 describe('sanitizers', () => {
   it('removes control, zero-width and bidirectional characters', () => {
@@ -104,15 +106,6 @@ describe('sanitizers', () => {
     expect(sanitizeLabel('Li\u0301 and Li', buildMasker(['Li']))).toBe(`L\u00ed and ${MASK}`);
   });
 
-  it('states one matching policy: whole word below four characters, substring otherwise', () => {
-    expect(matchModeFor('S')).toBe('word');
-    expect(matchModeFor('Ng')).toBe('word');
-    expect(matchModeFor('Ann')).toBe('word');
-    expect(matchModeFor('Smith')).toBe('substring');
-    expect(matchModeFor('李')).toBe('substring');
-    expect(matchModeFor('a@b.c')).toBe('substring');
-  });
-
   it('tells whether a whole token is one of the terms', () => {
     const masker = buildMasker(['Zimmerman', 'Müller']);
     expect(masker.isTerm('zimmerman')).toBe(true);
@@ -126,7 +119,6 @@ describe('sanitizers', () => {
   it('leaves empty text empty', () => {
     expect(sanitizeLabel('', EMPTY_MASKER)).toBe('');
     expect(sanitizeFreeText('   \n ', EMPTY_MASKER)).toBe('');
-    expect(cleanText('')).toBe('');
   });
 
   it('takes the untrusted client name down the same path', () => {

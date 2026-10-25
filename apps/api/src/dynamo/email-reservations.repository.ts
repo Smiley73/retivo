@@ -1,10 +1,5 @@
-/**
- * `EmailReservation` row access. Email uniqueness is enforced by
- * `signup.service.ts` via `TransactWriteItems` (DynamoDB does not
- * support GSI conditional writes); this repo exposes the deletion
- * path used by `DeleteAccountService` so an account can be fully
- * purged including the email lock row.
- */
+// EmailReservation row access. Uniqueness is enforced by signup.service.ts via TransactWriteItems; this repo exposes the deletion
+// path for DeleteAccountService.
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -35,11 +30,7 @@ export class EmailReservationsRepository extends BaseRepository {
     );
   }
 
-  /**
-   * Point read by the table's PK. Used to reach a
-   * user's own reservation row(s) — the live `emailLowercase` and, when
-   * present, the `pendingEmailLowercase` of an in-flight email change.
-   */
+  /** Point read by PK, to reach a user own reservation rows: the live `emailLowercase` and any pending change. */
   async findByEmail(emailLowercase: string): Promise<EmailReservationRow | null> {
     const r = await this.doc.send(
       new GetCommand({ TableName: this.tableName, Key: { emailLowercase } }),

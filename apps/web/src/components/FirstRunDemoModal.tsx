@@ -1,13 +1,6 @@
 /**
- * First-login modal that asks the user whether to load the demo
- * dataset. Triggered by AppShell when sync settles in `synced` state
- * with zero household members in IndexedDB — i.e. a brand-new workspace
- * the user just signed up to.
- *
- * Skipping the modal leaves the user on the Household welcome card
- * where they can add their primary member manually. The Settings →
- * Workspace → "Load demo data" button is the second surface for this
- * loader (with an overwrite warning when data already exists).
+ * First-login modal asking whether to load the demo dataset, triggered by AppShell when sync settles with zero
+ * household members.
  */
 import React, { useState } from 'react';
 import { Modal } from './Modal';
@@ -69,7 +62,6 @@ export const FirstRunDemoModal: React.FC<FirstRunDemoModalProps> = ({
           {error}
         </Alert>
       )}
-      {/* Left-aligned, primary (Load demo data) first ("Modals" in docs/ui-conventions.md). */}
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <button
           type="button"

@@ -1,13 +1,6 @@
 /**
- * Inner SVG-engine impl for the charitable-distributions (QCD) chart.
- * Uses the in-house SVG chart engine.
- *
- * One bar per year — the amount given directly from a traditional IRA to
- * charity that year (`useChartColors().qcd`, pink, distinct from the RMD
- * band's teal/red/green). The rows arrive already deflated to the page's
- * display-dollars basis, so bar heights are read verbatim with no
- * re-deflation, keeping the bars summing to the adjacent "QCD distributed"
- * tile. Mirrors `RothConversionsChartInner`.
+ * Inner SVG-engine chart for QCDs: one bar per year, rows already deflated to the display basis so bars sum to the
+ * "QCD distributed" tile.
  */
 import React from 'react';
 import type { QcdChartRow } from './QcdChart';
@@ -24,7 +17,6 @@ interface InnerProps {
   members?: ReadonlyArray<TooltipMember>;
 }
 
-/** Single-series legend/series label shared by the bars + tooltip. */
 const SERIES_NAME = 'Charitable distribution (QCD)';
 
 function makeTooltip(
@@ -69,20 +61,16 @@ function makeTooltip(
 const InnerChart: React.FC<InnerProps> = ({ rows, members }) => {
   const colors = useChartColors();
   const chrome = useChartChrome();
-  // Bars map by `x` = their integer `year` (mirrors the RMD chart — every
-  // bar is a full-value bar at its calendar year).
+  // Bars sit on their integer `year`.
   const data: ChartDatum[] = React.useMemo(
     () => rows.map((r) => ({ ...r, x: r.year })),
     [rows],
   );
   const xs = rows.map((r) => r.year);
-  // Empty rows: the caller gates the chart out in practice, but guard a bare
-  // empty series so the domain math never produces NaN bounds.
+  // The caller gates out empty rows; guard a bare empty series so the domain stays finite.
   const xMin = xs.length > 0 ? xs[0] : 0;
   const xLast = xs.length > 0 ? xs[xs.length - 1] : 0;
-  // Inset the first/last bars from the plot edges (bars are centered on
-  // their x). ~0.6yr is wider than a half bar at any zoom; mirrors the
-  // RMD chart.
+  // Inset the edge bars, which are centred on x.
   const BAR_EDGE_PAD = 0.6;
   const xMinPadded = Math.floor(xMin) - BAR_EDGE_PAD;
   const xMax = xLast + BAR_EDGE_PAD;

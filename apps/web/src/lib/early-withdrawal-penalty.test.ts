@@ -1,7 +1,4 @@
-/**
- * Source-cited tests for the early-withdrawal / HSA additional-tax engine.
- * IRC §72(t) (10% before 59½); IRC §223(f)(4) (20% HSA before 65).
- */
+// IRC §72(t) (10% before 59½); IRC §223(f)(4) (20% HSA before 65).
 import { describe, it, expect } from 'vitest';
 import {
   computeEarlyWithdrawalPenalty,
@@ -45,17 +42,13 @@ describe('carriesTenPercentPenalty', () => {
     }
   });
   it('includes the designated-Roth employer types with 10% penalty (401K/403B/TSP)', () => {
-    // The earnings-tranche penalty on a pre-59½ designated-Roth employer draw is
-    // 10% for these three types — they are members of PENALTY_10_TYPES.
+    // 10% earnings-tranche penalty for the three designated-Roth employer types (members of PENALTY_10_TYPES).
     for (const t of ['RETIREMENT_ROTH_401K', 'RETIREMENT_ROTH_403B', 'RETIREMENT_ROTH_TSP'] as const) {
       expect(carriesTenPercentPenalty(t)).toBe(true);
     }
   });
   it('excludes 457b, Roth IRA, brokerage, and cash-like from the contribution-penalty set', () => {
-    // RETIREMENT_ROTH_IRA stays OUT of PENALTY_10_TYPES (the contribution
-    // tranche must remain penalty-free); the earnings-tranche penalty is a
-    // dedicated branch, not membership in this set.
-    // RETIREMENT_ROTH_457B is excluded — governmental §72(t) exemption → 0% penalty.
+    // RETIREMENT_ROTH_IRA stays out of PENALTY_10_TYPES (the contribution tranche is penalty-free); ROTH_457B is excluded by the governmental §72(t) exemption.
     for (const t of ['RETIREMENT_457B', 'RETIREMENT_ROTH_IRA', 'RETIREMENT_ROTH_457B', 'BROKERAGE', 'SAVINGS', 'CD', 'HSA', 'OTHER'] as const) {
       expect(carriesTenPercentPenalty(t)).toBe(false);
     }
@@ -84,8 +77,7 @@ describe('computeEarlyWithdrawalPenalty', () => {
   });
 
   it('a pre-59½ Roth IRA earnings-excess basis incurs the 10% penalty', () => {
-    // The owner-level tracker passes the EARNINGS EXCESS as penaltyBasisDollars
-    // (the contribution tranche is split off upstream and stays penalty-free).
+    // The owner-level tracker passes the earnings excess as penaltyBasisDollars; the contribution tranche is split off upstream.
     const accounts: PenaltyAccountInput[] = [
       { id: 'roth', type: 'RETIREMENT_ROTH_IRA', penaltyBasisDollars: 10_000, ownerBirthdate: ownerYoung },
     ];
@@ -103,10 +95,7 @@ describe('computeEarlyWithdrawalPenalty', () => {
   });
 
   it('exemption (Option A): an exempt Roth IRA waives the 10% penalty leg only', () => {
-    // $10k earnings excess → $1,000 penalty when non-exempt; $0 when exempt.
-    // The ordinary-income tax on the $10k is routed by the engine (not this
-    // function) and is unchanged by the exemption — verified at the engine
-    // layer; here we assert only that the exemption zeroes the penalty.
+    // $10k earnings excess → $1,000 penalty when non-exempt; $0 when exempt (the engine routes the ordinary-income tax).
     const accounts: PenaltyAccountInput[] = [
       { id: 'roth', type: 'RETIREMENT_ROTH_IRA', penaltyBasisDollars: 10_000, ownerBirthdate: ownerYoung },
     ];
@@ -117,7 +106,6 @@ describe('computeEarlyWithdrawalPenalty', () => {
   });
 
   it('MIXED basis: 10% on the pre-tax tranche only', () => {
-    // Caller passes only the $6k pre-tax tranche as penaltyBasisDollars.
     const accounts: PenaltyAccountInput[] = [
       { id: 'mixed', type: 'RETIREMENT_401K', penaltyBasisDollars: 6_000, ownerBirthdate: ownerYoung },
     ];
@@ -161,8 +149,6 @@ describe('computeEarlyWithdrawalPenalty', () => {
   });
 
   it('designated-Roth 401k/403b/TSP earnings excess incurs the 10% penalty', () => {
-    // The caller passes only the earnings tranche as penaltyBasisDollars (the
-    // contribution tranche is shielded upstream by applyRothBasisOrdering).
     for (const type of ['RETIREMENT_ROTH_401K', 'RETIREMENT_ROTH_403B', 'RETIREMENT_ROTH_TSP'] as const) {
       const accounts: PenaltyAccountInput[] = [
         { id: 'roth-emp', type, penaltyBasisDollars: 10_000, ownerBirthdate: ownerYoung },
@@ -174,8 +160,6 @@ describe('computeEarlyWithdrawalPenalty', () => {
   });
 
   it('designated-Roth 457b earnings excess incurs NO penalty (governmental exemption)', () => {
-    // RETIREMENT_ROTH_457B is NOT in PENALTY_10_TYPES: the §457(b) governmental
-    // plan exception waives the §72(t) 10% penalty.
     const accounts: PenaltyAccountInput[] = [
       { id: 'roth-457b', type: 'RETIREMENT_ROTH_457B', penaltyBasisDollars: 10_000, ownerBirthdate: ownerYoung },
     ];
@@ -191,10 +175,8 @@ describe('computeEarlyWithdrawalPenalty', () => {
     expect(computeEarlyWithdrawalPenalty(accounts, 2030, ['r401k']).penaltyDollars).toBe(0);
   });
 
-  // IRC §72(t)(2)(A)(ii): a distribution made on account of the
-  // ORIGINAL owner's death carries no 10% additional tax at ANY beneficiary age.
-  // The pre-fix engine applied the BENEFICIARY's 59½ test and charged 10% on money
-  // a beneficiary is in fact REQUIRED to withdraw.
+  // IRC §72(t)(2)(A)(ii): a distribution on account of the original owner's death carries no 10% tax at any beneficiary age.
+  // Regression: the engine once applied the beneficiary's own 59½ test.
   it('an inherited account carries NO 10% at any beneficiary age (§72(t)(2)(A)(ii))', () => {
     for (const type of ['RETIREMENT_IRA', 'RETIREMENT_401K', 'RETIREMENT_ROTH_IRA'] as const) {
       const owned: PenaltyAccountInput[] = [
@@ -209,13 +191,9 @@ describe('computeEarlyWithdrawalPenalty', () => {
           inheritedFromDeceasedOwner: true,
         },
       ];
-      // The beneficiary's own account (same age, same dollars) IS penalized …
       expect(computeEarlyWithdrawalPenalty(owned, 2030, []).penaltyDollars).toBe(1_000);
-      // … the inherited one is not.
       const r = computeEarlyWithdrawalPenalty(inherited, 2030, []);
       expect(r.penaltyDollars).toBe(0);
-      // And a MISSING beneficiary birthdate is irrelevant to an inherited account,
-      // so it must not raise the estimate-note flag either.
       const noBirthdate = computeEarlyWithdrawalPenalty(
         [{ ...inherited[0], ownerBirthdate: undefined }],
         2030,

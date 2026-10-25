@@ -1,18 +1,4 @@
-/**
- * Social Security claim-age comparison page. For each non-deleted scenario in the
- * household, surfaces the Social Security claim age per member that
- * maximizes a user-chosen metric (deterministic end-of-plan balance or
- * Monte Carlo plan-success probability).
- *
- * Read-only by default; the only mutation path is the per-row Apply
- * action, gated behind a confirmation dialog that names the scenario
- * and the proposed ages. Apply merges into the existing SS
- * override — preserves `benefitReductionPct` + `colaPct`.
- *
- * Dispatch loops + Apply prep live in `ss-optimizer-page-helpers.ts`
- * so this file stays under the ≤400-ln shape cap; the page itself owns
- * state hooks + the React tree only.
- */
+/** Social Security claim-age comparison page: per scenario, the claim age per member that maximizes a chosen metric (end-of-plan balance or Monte Carlo plan success). Read-only except the confirmed per-row Apply, which merges into the SS override and preserves benefitReductionPct and colaPct. */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckIcon } from '../components/icons';
 import { useAuth } from '../auth/AuthContext';
@@ -25,8 +11,6 @@ import { useConfirm } from '../components/ConfirmDialog';
 import { useAggregates } from '../lib/use-aggregates';
 import { saveScenario } from '../lib/scenario-mutations';
 import { valueNegativeClass } from './accounts-page-chrome';
-// Worker spawned via Vite's `?worker` ESM transform — separate JS chunk
-// lazy-loaded on first run.
 import OptimizerWorker from '../workers/claim-age-optimizer.worker.ts?worker';
 import {
   OptimizerDetToolbar,
@@ -65,12 +49,9 @@ import {
 } from './ss-optimizer-path-count';
 import type { ProjectionMethod } from '../lib/balance-projection-runner-types';
 
-/** Page-local UI pref under the `retivo.*` namespace (all client-side
- *  keys are now prefixed so the clear-data nuke + storage audit cover them
- *  uniformly; matches Balance Projection's convention). */
+/** Page-local UI pref under the `retivo.*` namespace so the clear-data nuke and storage audit cover it. */
 export const METRIC_STORAGE_KEY = 'retivo.optimizer.metric';
 
-/** MC progress label format. Tests pin against this exact verbatim shape. */
 export const PROGRESS_LABEL_FORMAT = (
   scenarioIdx: number,
   pairIdx: number,
@@ -110,14 +91,7 @@ interface DetProgressState {
 
 export const SsOptimizerPage: React.FC = () => {
   const { householdId } = useAuth();
-  // Reactive revision signal (revision-signal
-  // substitution only). The optimizer inputs come from an imperative
-  // multi-aggregate batch load (`loadOptimizerAggregates`) that `useAggregates`
-  // row arrays can't replace; instead we subscribe to every store the batch
-  // reads and re-fetch when any of their `aggregates` arrays change identity
-  // (a single write, a bulk fill, or a scenario edit/delete). The subscribed
-  // set is the exact superset of every `listAggregates` type the batch reads
-  // (8 types).
+  // The inputs come from an imperative multi-aggregate batch load, so subscribe to every store the batch reads (8 types) and re-fetch when any `aggregates` array changes identity.
   const scenarioRevision = useAggregates('scenario').aggregates;
   const memberRevision = useAggregates('householdMember').aggregates;
   const accountRevision = useAggregates('account').aggregates;
@@ -133,36 +107,24 @@ export const SsOptimizerPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
   const runIdRef = useRef(0);
-  // Distinguishes metric-change vs aggregate-change re-runs.
   const prevMetricRef = useRef<Metric>(metric);
-  // Per-metric row caches — populated on dispatch completion, keyed
-  // by the `aggregates` reference (same ref ⇒ data unchanged ⇒ restore
-  // instantly on metric flip).
   const balanceCacheRef = useRef<RowCache | null>(null);
   const mcCacheRef = useRef<RowCache | null>(null);
   const [pathCount, setPathCount] = useState<number>(
     () => readPathCountFromStorage(OPTIMIZER_MC_DEFAULT_PATH_COUNT),
   );
   const [mcProgress, setMcProgress] = useState<McProgressState | null>(null);
-  // Smooth per-scenario path progress, keyed by scenario id — drives the
-  // in-flight row's bar. Only the currently-computing scenario has a live
-  // entry; rows clear theirs the moment their outcome resolves.
   const [mcRowProgress, setMcRowProgress] = useState<Map<string, RowProgress>>(
     () => new Map(),
   );
   const mcAbortRef = useRef<AbortController | null>(null);
-  // The `aggregates` the in-flight MC run was started against, so the
-  // supersede effect can tell a run that is still current from a stale one.
   const mcRunAggregatesRef = useRef<OptimizerAggregates | null>(null);
   const mcRunIdRef = useRef(0);
   const [mcRunning, setMcRunning] = useState(false);
   const [detRunning, setDetRunning] = useState(false);
   const [detProgress, setDetProgress] = useState<DetProgressState | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  // Gates the full-page LoadingState to the first load only, so a
-  // revision-driven re-read (mid-session bulk fill / scenario edit on an
-  // already-populated page) updates aggregates silently instead of flashing
-  // the skeleton and re-running the optimizer.
+  // The full-page LoadingState gates the first load only, so a revision-driven re-read doesn't flash the skeleton or re-run the optimizer.
   const hasLoadedRef = useRef(false);
   useEffect(
     () => () => {
@@ -179,14 +141,7 @@ export const SsOptimizerPage: React.FC = () => {
     return workerRef.current;
   }, []);
 
-  // Content signature of the last loaded batch (ids + versions across all
-  // eight aggregate sets). Each subscribed `useAggregates` hook settles its
-  // array reference once on mount and again on every store write, so a naive
-  // `setAggregates` on each re-read would mint a fresh `OptimizerAggregates`
-  // object on every settle — restarting the `aggregates`-keyed MC/Det run for
-  // identical data. Gating the state swap on a changed signature keeps the
-  // reference stable across no-op re-reads while a real edit (new version /
-  // added / removed row) still produces a fresh object + cache invalidation.
+  // Each subscribed hook settles its array on mount and on every write; swapping state only on a changed signature keeps the reference stable across no-op re-reads, which would otherwise restart the aggregates-keyed MC/Det run.
   const aggregatesSignatureRef = useRef<string | null>(null);
   const reload = useCallback(async () => {
     setError(null);
@@ -197,8 +152,6 @@ export const SsOptimizerPage: React.FC = () => {
     setAggregates(loaded);
   }, []);
 
-  // Re-fetch on mount and on any aggregate source change via the
-  // reactive per-store revision deps (workspace bulk fill + scenario edits).
   useEffect(() => {
     let active = true;
     if (!hasLoadedRef.current) setLoading(true);
@@ -230,23 +183,13 @@ export const SsOptimizerPage: React.FC = () => {
     const metricChanged = prevMetricRef.current !== metric;
     prevMetricRef.current = metric;
     runIdRef.current += 1;
-    // Supersede an in-flight MC run only when its inputs or the metric
-    // changed. A run started against this same `aggregates` is still
-    // current: the first-load effect can flush after an early Run click,
-    // and aborting it there would drop the run with nothing to re-dispatch.
+    // Supersede an in-flight MC run only when its inputs or the metric changed: the first-load effect can flush after an early Run click, and aborting then would drop the run with nothing to re-dispatch.
     if (metricChanged || mcRunAggregatesRef.current !== aggregates) {
       mcRunIdRef.current += 1;
       mcAbortRef.current?.abort();
     }
-    // Superseding any prior run: clear the deterministic flag so a stale
-    // in-flight balance run — whose guarded `finally` will now no-op
-    // (its runId is stale) — can't strand `detRunning` true. Leaving it
-    // set keeps MC Apply buttons disabled even after the MC run finishes
-    // (running = mcRunning || detRunning). The balance branch below
-    // re-sets it the moment it actually dispatches; React batches the
-    // false→true so there's no intermediate render.
+    // Clear the deterministic flag: a stale balance run's guarded finally no-ops (stale runId) and would otherwise strand detRunning true, keeping MC Apply disabled.
     setDetRunning(false);
-    // Cache hit (same aggregates ref) → restore + skip dispatch.
     const cache =
       metric === 'balance' ? balanceCacheRef.current : mcCacheRef.current;
     if (cache && cache.aggregates === aggregates) {
@@ -334,9 +277,6 @@ export const SsOptimizerPage: React.FC = () => {
             pairs: totals.pairs,
             totalPairs: totals.totalPairs,
           }),
-        // Fill each scenario's row the moment its grid resolves instead
-        // of waiting for the whole sweep. The final `setRows(populated)`
-        // below stays the authoritative reconcile + cache source.
         onScenarioResult: (scenarioId, outcome) => {
           setRows((current) =>
             current.map((row) =>
@@ -345,7 +285,6 @@ export const SsOptimizerPage: React.FC = () => {
                 : row,
             ),
           );
-          // Row is now `ready`/terminal — drop its live progress entry.
           setMcRowProgress((current) => {
             if (!current.has(scenarioId)) return current;
             const next = new Map(current);
@@ -367,8 +306,7 @@ export const SsOptimizerPage: React.FC = () => {
         }
       }
     } finally {
-      // Unconditional so a mid-run mc→balance switch doesn't strand
-      // the toolbar on Cancel. abortRef reset stays guarded.
+      // Unconditional so a mid-run mc→balance switch doesn't strand the toolbar on Cancel.
       setMcRunning(false);
       if (myRunId === mcRunIdRef.current) mcAbortRef.current = null;
     }
@@ -382,8 +320,6 @@ export const SsOptimizerPage: React.FC = () => {
     if (!isValidPathCount(next)) return;
     setPathCount(next);
     writePathCountToStorage(next);
-    // Bumping the cache makes the next Run recompute against the new
-    // path count rather than restoring stale rows.
     mcCacheRef.current = null;
   }, []);
 

@@ -1,19 +1,11 @@
-/**
- * AES-256-GCM payload encrypt/decrypt + the shared canonical-serialization and
- * base64url helpers for the zero-knowledge encryption boundary (see "The
- * household key and the payloads" in docs/security.md).
- *
- * Native WebCrypto only (no new dependency, no CSP change). The
- * per-payload encryption key is derived from the HDK via HKDF so the HDK itself
- * never directly encrypts payloads. Decrypt fails closed: any AAD mismatch,
- * wrong key, or unsupported version throws (never returns null silently).
- */
+// AES-256-GCM payload crypto and helpers; see docs/security.md "The household key and the payloads".
+// The payload key is derived from the HDK via HKDF, so the HDK never encrypts directly. Decrypt fails closed.
 import type { AadMetadata, EncryptedPayloadEnvelope } from './encryption-types';
 
 const SUPPORTED_ENCRYPTION_VERSION = 1;
 const GCM_NONCE_BYTES = 12;
 const AES_GCM_KEY_BITS = 256;
-/** HKDF info label for the payload encryption key (distinct from wrap/MAC). */
+// HKDF info label for the payload key; distinct from the wrap and MAC labels.
 const PAYLOAD_ENC_LABEL = 'payload-enc';
 
 const textEncoder = new TextEncoder();
@@ -27,10 +19,7 @@ export class PayloadCryptoError extends Error {
   }
 }
 
-/**
- * base64url-encode raw bytes (RFC 4648 §5, no padding). Used for every binary
- * field that crosses the wire/storage boundary so the shapes are JSON-safe.
- */
+/** base64url (RFC 4648 §5, no padding) of raw bytes. */
 export function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -47,20 +36,16 @@ export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Deterministic JSON serialization: object keys are emitted in sorted order at
- * every depth so any device produces byte-identical output for equal data
- * regardless of field order. The single canonical-serialization primitive
- * reused by AAD, envelope-set MAC, and freshness MAC.
+ * JSON with keys sorted at every depth, so any device emits identical bytes for equal data; the one serialization used
+ * by AAD, envelope-set MAC and freshness MAC.
  */
 export function canonicalJsonBytes(value: unknown): Uint8Array<ArrayBuffer> {
   return utf8Bytes(canonicalStringify(value));
 }
 
 /**
- * UTF-8 encode a string into a fresh ArrayBuffer-backed view. TextEncoder
- * returns a `Uint8Array<ArrayBufferLike>`, which WebCrypto's `BufferSource`
- * (ArrayBuffer only) rejects under TS5.9's stricter typed-array generics; the
- * explicit copy pins the backing buffer type.
+ * UTF-8 bytes in an ArrayBuffer-backed view: TextEncoder's `Uint8Array<ArrayBufferLike>` is rejected as a WebCrypto
+ * `BufferSource` under TS 5.9.
  */
 export function utf8Bytes(value: string): Uint8Array<ArrayBuffer> {
   const encoded = textEncoder.encode(value);
@@ -81,11 +66,8 @@ function canonicalStringify(value: unknown): string {
   return `{${entries.join(',')}}`;
 }
 
-/**
- * Canonical AES-GCM AAD bytes for a payload (stable identity
- * only). Field order is normalized via {@link canonicalJsonBytes}.
- */
-export function canonicalAad(meta: AadMetadata): Uint8Array<ArrayBuffer> {
+// AES-GCM AAD bytes for a payload: stable identity fields only, canonicalised.
+function canonicalAad(meta: AadMetadata): Uint8Array<ArrayBuffer> {
   return canonicalJsonBytes({
     aggregateId: meta.aggregateId,
     aggregateType: meta.aggregateType,
@@ -94,10 +76,6 @@ export function canonicalAad(meta: AadMetadata): Uint8Array<ArrayBuffer> {
   });
 }
 
-/**
- * Derive the AES-256-GCM payload encryption key from the HDK via HKDF-SHA-256.
- * Keeps the HDK as a key-deriving root rather than a direct content key.
- */
 async function derivePayloadKey(hdk: CryptoKey): Promise<CryptoKey> {
   const hdkBytes = await crypto.subtle.exportKey('raw', hdk);
   const baseKey = await crypto.subtle.importKey('raw', hdkBytes, 'HKDF', false, ['deriveKey']);
@@ -115,10 +93,7 @@ async function derivePayloadKey(hdk: CryptoKey): Promise<CryptoKey> {
   );
 }
 
-/**
- * AES-256-GCM-encrypt a JSON-serializable payload, binding the AAD. Returns
- * a v1 envelope with a fresh random 12-byte nonce; `keyId` identifies the HDK.
- */
+/** Encrypts a JSON-serializable payload into a v1 envelope with a fresh 12-byte nonce, binding the AAD. */
 export async function encryptPayload(
   payload: unknown,
   meta: AadMetadata,
@@ -149,9 +124,8 @@ export async function encryptPayload(
 }
 
 /**
- * AES-256-GCM-decrypt an envelope, verifying the AAD. Fails closed: an
- * unsupported version, AAD mismatch, or wrong key throws {@link
- * PayloadCryptoError} (never returns null/undefined).
+ * Decrypts an envelope and verifies the AAD; fails closed with {@link PayloadCryptoError} (unsupported version or alg,
+ * mismatch, wrong key).
  */
 export async function decryptPayload(
   envelope: EncryptedPayloadEnvelope,

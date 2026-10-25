@@ -1,10 +1,4 @@
-/**
- * Tests for the isolate-first legend visibility hook. From the pristine
- * all-visible state a click isolates the clicked series; later clicks toggle
- * series individually; clicking the lone-visible series restores all. The
- * updater prunes orphan keys first so a mid-life series-universe change can't
- * trigger a spurious restore-all. Each call returns a fresh `Set` identity.
- */
+/** Isolate-first legend visibility: the first click isolates, later clicks toggle, and the lone-visible click restores all. */
 import { describe, expect, it } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useSeriesVisibility } from './useSeriesVisibility';
@@ -35,18 +29,13 @@ describe('useSeriesVisibility', () => {
 
   it('hides just the clicked series when several are visible', () => {
     const { result } = renderHook(() => useSeriesVisibility());
-    // Make several visible: isolate Alpha, then re-enable Beta → Alpha+Beta visible.
     act(() => result.current.toggle('Alpha', ALL));
     act(() => result.current.toggle('Beta', ALL));
-    // Now click Alpha (visible, not the only one) → hide just Alpha.
     act(() => result.current.toggle('Alpha', ALL));
     expect([...result.current.hidden].sort()).toEqual(['Alpha', 'Gamma']);
   });
 
   it('keeps a legendId-shared paired key visible on isolate and clears it on restore-all', () => {
-    // The de-duplicated legend-key universe treats a solid/dashed channel pair
-    // as one shared key (e.g. `Portfolio`). Isolating it hides every other key
-    // but leaves the shared key visible; clicking it back restores all.
     const keys = ['Portfolio', 'Expenses', 'Income'];
     const { result } = renderHook(() => useSeriesVisibility());
     act(() => result.current.toggle('Portfolio', keys));
@@ -58,19 +47,13 @@ describe('useSeriesVisibility', () => {
 
   it('prunes orphan keys when the series universe changes mid-life', () => {
     const { result } = renderHook(() => useSeriesVisibility());
-    // Isolate Alpha against the full universe → Beta, Gamma hidden.
     act(() => result.current.toggle('Alpha', ALL));
     expect([...result.current.hidden].sort()).toEqual(['Beta', 'Gamma']);
 
-    // Universe shrinks (Gamma drops out, e.g. a groupBy/showExcluded rebuild).
-    // Beta is the only real hidden key; Alpha is the only visible one. Clicking
-    // Alpha must restore all (not be treated as still-isolated) — the orphan
-    // Gamma is pruned before the count check, so no spurious clear-then-stuck.
     const SHRUNK = ['Alpha', 'Beta'];
     act(() => result.current.toggle('Alpha', SHRUNK));
     expect(result.current.hidden.size).toBe(0);
 
-    // Universe grows: isolate against a larger set still works correctly.
     const GROWN = ['Alpha', 'Beta', 'Gamma', 'Delta'];
     act(() => result.current.toggle('Delta', GROWN));
     expect([...result.current.hidden].sort()).toEqual(['Alpha', 'Beta', 'Gamma']);

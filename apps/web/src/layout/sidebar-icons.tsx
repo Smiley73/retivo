@@ -1,9 +1,4 @@
-/**
- * Inline SVG glyphs for the sidebar nav (extracted from Sidebar.tsx to
- * keep that file under the shape limit). Pure presentational components; no
- * behavioral contract. Each uses `currentColor` so the glyph follows
- * the active / hover ink set by the nav row.
- */
+// Inline SVG nav glyphs for Sidebar.tsx; presentational, each uses `currentColor` so it follows the row's active/hover ink.
 import React from 'react';
 
 // Nav item glyph: small, slightly dimmed, never shrinks below its box.
@@ -77,9 +72,6 @@ export const SocialSecurityIcon = () => (
   </svg>
 );
 
-// Piggy bank: rounded body, snout, ear, slot, two legs. Reads as
-// "savings/contributions" without colliding with the cylinder used for
-// Account Balances or the chart used for Plans.
 export const PiggyBankIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M4 13c0-3.3 3.1-6 7-6 3.6 0 6.5 2.3 6.9 5.2L20 13v3l-1.5.4c-.4 1-1.1 1.9-2 2.6V21h-2v-1.5c-.6.1-1.3.2-2 .2s-1.4-.1-2-.2V21H8.5v-2c-1.5-1-2.5-2.5-2.5-4.5z" />
@@ -89,8 +81,6 @@ export const PiggyBankIcon = () => (
   </svg>
 );
 
-// Line chart: Balance Projection. Reads as "growth over time" without
-// colliding with the dashboard grid or the savings piggy bank.
 export const ProjectionIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <polyline points="3 17 9 11 13 15 21 5" />
@@ -98,8 +88,6 @@ export const ProjectionIcon = () => (
   </svg>
 );
 
-// Receipt: Expenses entry. Reads as "expense list" without colliding
-// with the piggy bank (savings/contributions) or the projection chart.
 export const ReceiptIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M5 3h14v18l-3-2-3 2-3-2-3 2-2-1.5z" />
@@ -109,8 +97,6 @@ export const ReceiptIcon = () => (
   </svg>
 );
 
-// Banknote: Income entry. Sketch of cash so it reads as "money in"
-// next to the Receipt (money out) and Piggy bank (money saved).
 export const BanknoteIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <rect x="2" y="6" width="20" height="12" rx="2" />
@@ -120,8 +106,6 @@ export const BanknoteIcon = () => (
   </svg>
 );
 
-// Tag: expense Categories entry. Reads as "labels for expenses" without
-// colliding with the savings piggy bank or the dashboard grid.
 export const TagIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M3 12V4a1 1 0 011-1h8l9 9-9 9-9-9z" />
@@ -129,8 +113,6 @@ export const TagIcon = () => (
   </svg>
 );
 
-// Target: claim-age optimizer entry. Bullseye reads as "best-fit
-// answer per scenario", visually distinct from the Projection chart.
 export const TargetIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <circle cx="12" cy="12" r="9" />
@@ -139,25 +121,18 @@ export const TargetIcon = () => (
   </svg>
 );
 
-// Wrench: Workspace settings entry (export/import/restore + workspace tools).
-// Visually distinct from the data-list glyphs so it reads as "tooling".
 export const WrenchIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M14.7 6.3a4 4 0 015.4 5.4l-2.7-1-1 2.7-2.7-1-1 2.7-2.7-1L8.7 17 4 21.3 2.7 20l4.3-4.3 2.7-1 1-2.7 2.7 1 1-2.7 2.7 1z" />
   </svg>
 );
 
-// Shield: Security settings entry (password, passkeys, encryption, 2FA,
-// delete account). Reads as "account protection", distinct from the Profile
-// person glyph used for Preferences.
 export const ShieldIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6l7-3z" />
   </svg>
 );
 
-// Sparkles: Help & Info section / What's New entry. Reads as "new + notable"
-// — distinct from the document, chart, and money glyphs already in the sidebar.
 export const SparklesIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3z" />
@@ -165,8 +140,6 @@ export const SparklesIcon = () => (
   </svg>
 );
 
-// File-text: Report entry. Reads as "summary document" — distinct from the
-// Receipt (torn paper) and Banknote (cash) already in the sidebar.
 export const ReportIcon = () => (
   <svg className={NAV_ICON_CLASS} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />

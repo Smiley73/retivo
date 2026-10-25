@@ -1,21 +1,12 @@
 import 'reflect-metadata';
 import { dtoViolations } from '../../test/dto-validation.js';
 import {
-  birthdateBoundsForUtcDate,
   EncryptedWorkspaceResetDto,
   PasskeyRemoveDto,
   UpdateAccountDto,
   UpsertKeyEnvelopeDto,
+  UpsertKeyEnvelopeSlotDto,
 } from './auth.dto.js';
-
-describe('birthdateBoundsForUtcDate', () => {
-  it('clamps a leap-day boundary when the minimum year is not a leap year', () => {
-    expect(birthdateBoundsForUtcDate('2020-02-29')).toEqual({
-      min: '1900-02-28',
-      max: '2020-02-29',
-    });
-  });
-});
 
 describe('UpdateAccountDto', () => {
   const valid = { firstName: 'Alicia', lastName: 'Smythe', birthdate: '1971-05-13' };
@@ -40,6 +31,18 @@ describe('UpdateAccountDto', () => {
     expect(dtoViolations(UpdateAccountDto, { ...valid, firstName: '   ' })).toContain(
       'firstName:matches',
     );
+  });
+
+  describe('on a leap day', () => {
+    beforeEach(() => jest.useFakeTimers({ now: new Date('2020-02-29T12:00:00Z') }));
+    afterEach(() => jest.useRealTimers());
+
+    it('clamps the 120-year minimum to Feb 28 of a non-leap year', () => {
+      expect(dtoViolations(UpdateAccountDto, { ...valid, birthdate: '1900-02-28' })).toEqual([]);
+      expect(dtoViolations(UpdateAccountDto, { ...valid, birthdate: '1900-02-27' })).toContain(
+        'birthdate:birthdateInSupportedRange',
+      );
+    });
   });
 
   it('rejects a name over 80 characters', () => {
@@ -121,6 +124,29 @@ describe('UpsertKeyEnvelopeDto', () => {
     delete b.slot;
     expect(dtoViolations(UpsertKeyEnvelopeDto, b)).toEqual(
       expect.arrayContaining(['slot:isDefined', 'slot:isObject']),
+    );
+  });
+});
+
+describe('UpsertKeyEnvelopeSlotDto', () => {
+  const slot = {
+    householdId: 'hh-1',
+    slotId: 'password',
+    slotType: 'password',
+    kdf: { algorithm: 'PBKDF2-HMAC-SHA-256', iterations: 600_000, salt: 'c2FsdA' },
+    wrappedKey: 'd3JhcHBlZA',
+    encryptionVersion: 1,
+    createdAt: '2026-10-09T00:00:00.000Z',
+    updatedAt: '2026-10-09T00:00:00.000Z',
+  };
+
+  it('accepts a known slotType', () => {
+    expect(dtoViolations(UpsertKeyEnvelopeSlotDto, slot)).toEqual([]);
+  });
+
+  it('rejects an unknown slotType', () => {
+    expect(dtoViolations(UpsertKeyEnvelopeSlotDto, { ...slot, slotType: 'bogus' })).toContain(
+      'slotType:isIn',
     );
   });
 });

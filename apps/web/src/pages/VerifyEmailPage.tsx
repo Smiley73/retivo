@@ -1,15 +1,4 @@
-/**
- * Email-verification landing route. The signup mail link points here
- * with the token in the URL fragment (`#token=…` — never sent to the
- * server, never logged at the edge). We extract
- * it once on mount, scrub it from the URL via `history.replaceState`
- * so a back-button or copy-and-share doesn't expose it, then POST it
- * to the API. Error path lets the user request a fresh link without
- * re-entering their password.
- *
- * Layout mirrors LoginPage / SignupPage: centered card outside the app
- * shell so the unauthenticated surface stays visually consistent.
- */
+/** Email-verification landing route. The token arrives in the URL fragment (never sent to the server or logged at the edge); read once on mount, scrubbed via history.replaceState, then POSTed. The error path lets the user request a fresh link without re-entering a password. */
 import React, { useEffect, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Link } from 'react-router';
@@ -48,8 +37,7 @@ function readTokenFromFragment(): string {
 
 export const VerifyEmailPage: React.FC = () => {
   const { verifyEmail, resendVerification } = useAuth();
-  // Read once on mount; the effect below scrubs the fragment before
-  // any subsequent render so this state is the only surviving copy.
+  // Read once on mount; the effect below scrubs the fragment before any later render, so this state is the only surviving copy.
   const [token] = useState<string>(readTokenFromFragment);
   const [status, setStatus] = useState<Status>({ kind: 'verifying' });
   const [resendEmail, setResendEmail] = useState('');
@@ -61,9 +49,6 @@ export const VerifyEmailPage: React.FC = () => {
   const [resendDevLink, setResendDevLink] = useState<string | null>(null);
   const verifiedTokenRef = React.useRef<string | null>(null);
 
-  // Scrub the fragment from the URL as soon as we've captured it so a
-  // back-button, share, or browser-history snapshot doesn't keep the
-  // raw token around. Runs once after the first render.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!window.location.hash) return;
@@ -75,10 +60,7 @@ export const VerifyEmailPage: React.FC = () => {
       setStatus({ kind: 'error', message: 'Verification token is missing from the link.' });
       return;
     }
-    // Guard against StrictMode double-fire which would consume the token
-    // on the first call, then fail on the second with "already used".
-    // Tracking the attempted token (rather than a boolean) means a new
-    // token in the same mount still triggers a fresh verification.
+    // Guards StrictMode double-fire, which would consume the token on the first call and fail the second with "already used"; tracking the token keeps a new token in the same mount verifiable.
     if (verifiedTokenRef.current === token) return;
     verifiedTokenRef.current = token;
     setStatus({ kind: 'verifying' });
@@ -145,10 +127,7 @@ export const VerifyEmailPage: React.FC = () => {
                 </p>
                 <p className={authMutedClass}>
                   <small>
-                    {/* Plain anchor (not <Link>) so the navigation is a
-                        full reload — same rationale as the verify-now dev
-                        shortcut: the page reads the token from the
-                        fragment only at mount. */}
+                    {/* A plain anchor, not <Link>, so navigation is a full reload: the page reads the token from the fragment only at mount. */}
                     <DevShortcutBadge />{' '}
                     <a
                       href={`/auth/approve-signup#token=${encodeURIComponent(status.approvalToken)}`}
@@ -225,10 +204,6 @@ export const VerifyEmailPage: React.FC = () => {
             {resendDevLink ? (
               <p className={authMutedClass}>
                 <small>
-                  {/* Plain anchor (not <Link>) so the navigation is a
-                      full reload — `useState(readTokenFromFragment)` only
-                      runs at mount, and a same-path hash-only nav under
-                      react-router would not remount the page. */}
                   <DevShortcutBadge />{' '}
                   <a href={resendDevLink} className={authDevLinkClass}>
                     verify now

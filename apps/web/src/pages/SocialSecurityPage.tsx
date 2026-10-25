@@ -1,17 +1,4 @@
-/**
- * Social Security inputs.
- *
- * One row per adult household member; each member's PIA + the derived
- * monthly benefit at ages 62, FRA, and 70 (computed via
- * `apps/web/src/lib/ssa-formulas.ts` — `monthlyBenefitAtAge` +
- * `fraMonthsForBirthdate`). Reads `socialSecurityBenefit` +
- * `householdMember` aggregates from IndexedDB; saves through
- * `queueLocalMutation`.
- *
- * Aggregate id is deterministic — `ss-<householdMemberId>` — so the
- * "one record per member" constraint falls out of the per-aggregate
- * version-condition.
- */
+/** Social Security inputs: one row per adult member with PIA and the derived benefit at 62, FRA and 70 (lib/ssa-formulas.ts). The aggregate id is deterministic (ss-<householdMemberId>), so the version condition enforces one record per member. */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { useAuth } from '../auth/AuthContext';
@@ -84,11 +71,7 @@ export const SocialSecurityPage: React.FC = () => {
   const { householdId } = useAuth();
   const { notifyPending } = useSync();
   const { confirm, dialog } = useConfirm();
-  // Reactive reads: members + benefit rows re-read on any write to their store
-  // (single saves/deletes via the per-store fine signal, sync bootstrap / demo
-  // fill via the coarse workspace event). The benefit modal's draft is seeded
-  // only in `openModal`, never from a derivation, so an auto-re-read refreshes
-  // the table without clobbering an in-progress edit.
+  // The benefit modal's draft is seeded only in openModal, never from a derivation, so an auto-re-read can't clobber an in-progress edit.
   const memberQuery = useAggregates('householdMember');
   const benefitQuery = useAggregates('socialSecurityBenefit');
   const ready = memberQuery.ready && benefitQuery.ready;
@@ -205,11 +188,7 @@ export const SocialSecurityPage: React.FC = () => {
 
   const handleSave = async () => {
     if (!modalMemberId || !householdId) return;
-    // The statement date is the engine's COLA anchor — a
-    // future-dated statement would make `year − anchorYear` negative and
-    // deflate near-term benefits. Reject explicitly with an inline error (no
-    // silent clamp); the modal's picker also caps selection at today, so this
-    // guards previously stored / hand-synced future dates.
+    // The statement date is the engine's COLA anchor: a future date makes year − anchorYear negative and deflates near-term benefits, so reject it inline (no silent clamp); this guards previously stored or hand-synced future dates.
     const todayIso = new Date().toISOString().slice(0, 10);
     const asOf = editState.piaAsOfDate.trim();
     if (asOf && asOf.slice(0, 10) > todayIso) {
@@ -240,8 +219,6 @@ export const SocialSecurityPage: React.FC = () => {
       });
       notifyPending();
       closeModal();
-      // The save writes a `socialSecurityBenefit` row, so the reactive read
-      // re-runs and the table refreshes without a manual reload token.
     } catch {
       setFormError('Failed to save record');
     } finally {
@@ -273,8 +250,6 @@ export const SocialSecurityPage: React.FC = () => {
         },
       });
       notifyPending();
-      // The delete tombstone is a `socialSecurityBenefit` write, so the
-      // reactive read re-runs and drops the row — no manual reload token.
     } catch {
       setDeleteError('Failed to delete record');
     }

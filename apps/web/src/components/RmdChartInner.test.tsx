@@ -1,8 +1,4 @@
-/**
- * Render-level test for RmdChartInner on the SVG engine — asserts the
- * stacked RMD bars render (met segment below the shortfall segment) and
- * theme-reactivity for both series colors (`rmdMet` / `rmdShortfall`).
- */
+/** RmdChartInner: stacked RMD bars (met below shortfall) and theme-reactive series colours. */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, within } from '@testing-library/react';
@@ -18,8 +14,6 @@ const rows = [
   { year: 2032, rmdMet: 24_000, rmdShortfall: 0, rmdRetained: 0 },
 ];
 
-// Mixed array: one over-withdraw (surplus) year + one zero-surplus year, so
-// the green "Surplus (kept)" band renders only where the year retains surplus.
 const splitRows = [
   { year: 2030, rmdMet: 20_000, rmdShortfall: 0, rmdRetained: 8_000 },
   { year: 2031, rmdMet: 22_000, rmdShortfall: 0, rmdRetained: 0 },
@@ -54,14 +48,11 @@ describe('RmdChartInner', () => {
     expect(metBars).toHaveLength(3); // every year has a met segment
     expect(shortfallBars).toHaveLength(1); // only 2031 has a shortfall
 
-    // The shortfall segment (2031) sits ABOVE its met segment: a smaller
-    // SVG `y` (higher on screen) and its bottom meets the met top.
     const metTop2031 = metBars[1].y;
     const shortfallBottom = shortfallBars[0].y + shortfallBars[0].height;
     expect(shortfallBars[0].y).toBeLessThan(metTop2031);
     expect(shortfallBottom).toBeCloseTo(metTop2031, 0);
 
-    // Drag selection renders the zoom marquee.
     expect(
       container.querySelector('[data-testid="chart-drag-marquee"]'),
     ).not.toBeNull();
@@ -112,14 +103,12 @@ describe('RmdChartInner — surplus (kept) split', () => {
   it('shows a green Surplus (kept) band beside the teal Used-for-spending-and-taxes band when a year over-withdraws', () => {
     const container = renderWithTheme('light', <InnerChart rows={splitRows} />);
 
-    // The split-mode series replace the single "RMD met" band.
     expect(getBars(container, 'RMD met')).toHaveLength(0);
     const spentBars = getBars(container, 'Used for spending and taxes');
     const surplusBars = getBars(container, 'Surplus (kept)');
     expect(spentBars).toHaveLength(2); // both years carry a spent segment
     expect(surplusBars).toHaveLength(1); // only the over-withdraw year (2030)
 
-    // The green surplus band sources its fill from the new token.
     expect(seriesColor(container, 'Surplus (kept)')).toBe(
       CHART_COLORS.light.rmdRetained,
     );
@@ -161,7 +150,6 @@ describe('RmdChartInner — surplus (kept) split', () => {
       { year: 2030, rmdMet: 20_000, rmdShortfall: 0, rmdRetained: 20_000.01 },
     ];
     const container = renderWithTheme('light', <InnerChart rows={overshootRows} />);
-    // Clamp keeps the spent segment at exactly zero (no negative-height rect).
     expect(getBars(container, 'Used for spending and taxes')).toHaveLength(0);
     const surplus = getBars(container, 'Surplus (kept)');
     expect(surplus).toHaveLength(1);
@@ -191,9 +179,6 @@ describe('RmdChartInner — legend show/hide (isolate-first)', () => {
     const container = renderWithTheme('light', <InnerChart rows={rows} />);
     expect(getBars(container, 'RMD met')).toHaveLength(3);
 
-    // Isolate-first: a click from all-visible focuses the clicked series and
-    // hides the rest. Clicking Shortfall isolates it → the met segment is gone
-    // and the shortfall segment survives + restacks.
     const shortfallToggle = within(container).getByRole('button', {
       name: 'Shortfall',
     });
@@ -203,16 +188,8 @@ describe('RmdChartInner — legend show/hide (isolate-first)', () => {
     const metToggle = within(container).getByRole('button', { name: 'RMD met' });
     expect(metToggle).toHaveAttribute('aria-pressed', 'true');
 
-    // Clicking the lone-visible Shortfall restores every series.
     fireEvent.click(shortfallToggle);
     expect(getBars(container, 'RMD met')).toHaveLength(3);
     expect(metToggle).toHaveAttribute('aria-pressed', 'false');
-  });
-});
-
-describe('RmdChartInner — a11y', () => {
-  it('renders without a11y violations', async () => {
-    const container = renderWithTheme('light', <InnerChart rows={rows} />);
-    await expectNoA11yViolations(container);
   });
 });

@@ -1,22 +1,4 @@
-/**
- * Scenario detail page: Income overrides card.
- *
- * Mirrors ScenarioExpenseOverridesCard one-for-one — same status
- * badges (Default | Modified | Scenario-only | Disabled), same
- * inline-disabled row treatment (struck + dim with the green
- * Re-enable affordance), same per-row actions, same "Move to
- * household list" promote flow. Diverges only where the income
- * data model demands it:
- *
- *   - rows are grouped by `memberId` (not by category, which income
- *     does not have);
- *   - Edit on a canonical/patched row opens the shared `IncomeFormPage`
- *     in scenario-patch mode (full-form, per-key patch); Edit on a
- *     scenario-only added row re-opens it in add-edit mode.
- *
- * The card writes scenario `update` mutations only — canonical
- * IncomeStream aggregates are never touched from this card.
- */
+/** Scenario detail page Income overrides card, mirroring ScenarioExpenseOverridesCard with rows grouped by memberId; writes scenario `update` mutations only, never the canonical IncomeStream aggregates. */
 import React, { useMemo, useState } from 'react';
 import {
   PlusIcon,
@@ -79,10 +61,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
   const { confirm, dialog } = useConfirm();
   const { notifyPending } = useSync();
   const navigate = useNavigate();
-  // Reactive reads: each canonical list re-reads on any write to its store
-  // (single writes via the fine signal, bulk fills via the coarse workspace
-  // event). Read-only — the override edits write to the scenario, never to
-  // these — so auto-re-read never clobbers an in-progress edit.
   const incomeQuery = useAggregates('incomeStream');
   const memberQuery = useAggregates('householdMember');
   const [error, setError] = useState<string | null>(null);
@@ -96,9 +74,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
       ? 'Failed to load income sources.'
       : null;
 
-  /** Open the shared income editor on a canonical/patched row in
-   *  scenario-patch mode; Save writes a per-key `Partial<IncomeStreamPayload>`
-   *  patch into this scenario (the canonical aggregate is untouched). */
   const editInScenario = (canonicalId: string): void => {
     const params = new URLSearchParams({
       scenarioId: scenario.id,
@@ -107,8 +82,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
     navigate(`/income/${canonicalId}/edit?${params.toString()}`);
   };
 
-  /** Re-open a scenario-only added row in the full form (add-edit mode);
-   *  Save replaces the matching `added[]` entry by `_localId` in place. */
   const editAddedInScenario = (localId: string): void => {
     const params = new URLSearchParams({
       scenarioId: scenario.id,
@@ -118,26 +91,14 @@ export const IncomeOverridesCard: React.FC<Props> = ({
     navigate(`/income/scenario-entry?${params.toString()}`);
   };
 
-  // Local-only overrides — written back to `scenario.payload.overrides.income`.
-  // Edit actions (disable/patch/add/remove) mutate the *local* slice so the
-  // override layer for *this* scenario stays minimal; the merged view is
-  // the per-id sparse resolver output so ancestor disables / patches /
-  // added entries this scenario hasn't re-enabled surface here too.
+  // Edits mutate the local slice so this scenario's override layer stays minimal; the merged view comes from the sparse resolver so ancestor disables, patches and adds surface too.
   const overrides: IncomeOverride = scenario.payload.overrides.income ?? {};
 
-  // An added row is "owned" only when its `_localId` lives in THIS scenario's
-  // `added[]`. Rows inherited from an ancestor's `added[]` resolve here too,
-  // but Edit / Move / Delete all mutate the current scenario's `added[]` only,
-  // so they would no-op (or navigate to a not-found editor) on inherited rows.
-  // Inherited added rows therefore expose no per-row actions.
+  // Rows inherited from an ancestor's added[] resolve here but Edit / Move / Delete mutate only this scenario's added[], so they would no-op: inherited rows expose no actions.
   const isOwnedAdded = (localId: string): boolean =>
     (overrides.added ?? []).some((a) => a._localId === localId);
 
-  // A `patched` row is "owned" only when THIS scenario's `patches` records the
-  // patch (under the prefixed `aggregate:<id>` key or the bare `<id>` key — the
-  // two forms `onResetPatch` deletes). A row that resolves to `patched` purely
-  // from an ancestor's patch has no key here, so Reset (which deletes only the
-  // current scenario's key) would be a no-op — gate it out.
+  // Reset deletes only this scenario's key (prefixed aggregate:<id> or bare <id>), so a row patched only by an ancestor gates it out.
   const hasOwnPatch = (canonicalId: string): boolean => {
     const patches = overrides.patches;
     if (!patches) return false;
@@ -149,13 +110,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
     [scenario.id, scenarios, canonical],
   );
 
-  /**
-   * Build the rendered list by walking the canonical list in its
-   * natural order so disabled rows stay where the user left them
-   * (greyed out + Re-enable). Then append every scenario-only `added`
-   * entry the sparse resolver returns (this scenario's own + any
-   * inherited from ancestors).
-   */
   type Row =
     | { kind: 'canonical'; id: string; payload: IncomeStreamPayload }
     | { kind: 'patched'; id: string; payload: IncomeStreamPayload }
@@ -189,12 +143,7 @@ export const IncomeOverridesCard: React.FC<Props> = ({
     return list;
   }, [canonical, resolvedIncome]);
 
-  /**
-   * Group rows by `memberId`. Walk the members list in stable order
-   * (primary first, then secondary) so headers don't reshuffle. Rows
-   * whose `memberId` no longer resolves fall into a synthetic
-   * "Unassigned" trailing group so they stay visible + actionable.
-   */
+  // Rows whose member no longer resolves fall into a trailing "Unassigned" group so they stay visible and actionable.
   const groups = useMemo(() => {
     const byMember = new Map<string, Row[]>();
     for (const r of rows) {
@@ -231,7 +180,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
     setSubmitting(true);
     setError(null);
     try {
-      // Strip empty fields so the override stays minimal.
       const cleaned: IncomeOverride = {};
       if (next.disabledIds && next.disabledIds.length > 0) cleaned.disabledIds = next.disabledIds;
       if (next.reEnabledIds && next.reEnabledIds.length > 0)
@@ -245,7 +193,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
           income: Object.keys(cleaned).length > 0 ? cleaned : undefined,
         },
       };
-      // Drop the key entirely when empty so the resolver inherits.
       if (payload.overrides.income === undefined) {
         const rest = { ...payload.overrides };
         delete rest.income;
@@ -267,7 +214,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
       disabledIds: Array.from(
         new Set([...(overrides.disabledIds ?? []), prefixedId]),
       ),
-      // Disable wins same-scenario conflict.
       reEnabledIds: (overrides.reEnabledIds ?? []).filter(
         (id) => id !== prefixedId,
       ),
@@ -329,7 +275,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
     if (!target) return;
     const name = target.name.trim();
 
-    // Validate: name uniqueness against existing canonical (case-folded).
     const norm = name.toLowerCase();
     const collides = canonical.some(
       (c) => (c.payload.name ?? '').trim().toLowerCase() === norm,
@@ -340,7 +285,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
       );
       return;
     }
-    // Validate: memberId still resolves.
     const memberExists = members.some((m) => m.id === target.memberId);
     if (!memberExists) {
       setError("This income source's owner no longer exists. Re-assign first.");
@@ -363,7 +307,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
     setSubmitting(true);
     setError(null);
     try {
-      // Strip _localId before promoting; assign a fresh canonical UUID.
       const { _localId, ...canonicalPayload } = target;
       void _localId;
       const newCanonicalId = cryptoUuid();
@@ -375,7 +318,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
         expectedVersion: 0,
         payload: canonicalPayload as IncomeStreamPayload,
       });
-      // Drop the entry from scenario.added in the same batch.
       const next: IncomeOverride = {
         ...overrides,
         added: (overrides.added ?? []).filter((a) => a._localId !== localId),
@@ -407,8 +349,6 @@ export const IncomeOverridesCard: React.FC<Props> = ({
     );
   }
 
-  // Footer counts (mock `.foot-note`) — derived from the rendered rows so
-  // they always match what the user sees.
   const disabledCount = rows.filter((r) => r.kind === 'disabled').length;
   const modifiedCount = rows.filter((r) => r.kind === 'patched').length;
   const scenarioOnlyCount = rows.filter((r) => r.kind === 'added').length;
@@ -487,8 +427,7 @@ export const IncomeOverridesCard: React.FC<Props> = ({
                     : r.kind === 'added'
                       ? 'scenario'
                       : 'disabled';
-              // Mute *content*, not the whole row — keeps the green
-              // Re-enable button vivid as the affirmative path back.
+              // Mute the text columns, not the whole row, so the Re-enable button stays vivid.
               const struckTextClass = isDisabled
                 ? 'text-muted line-through'
                 : undefined;

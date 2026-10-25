@@ -1,12 +1,4 @@
-/**
- * ScenarioDetailPage render + interaction tests.
- *
- * Mocks AuthContext + SyncContext, drives IndexedDB through
- * fake-indexeddb for the read path. Exercises the UI
- * behaviors: Promote/Delete/Reset-all visibility on
- * primary, retirement-age toggle behavior with the warning callout,
- * and the per-section Reset-to-inherited affordance.
- */
+// ScenarioDetailPage render and interaction over fake-indexeddb, with AuthContext and SyncContext mocked: action visibility, the retirement-age toggle and warning, and per-section Reset-to-inherited.
 import 'fake-indexeddb/auto';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -162,12 +154,9 @@ describe('ScenarioDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByDisplayValue('Base')).toBeInTheDocument(),
     );
-    // Summary card text on the page (no inputs visible yet). With no
-    // secondary member the mode picker collapses to a single line.
     expect(screen.getByText(/Alex retires at 65/i)).toBeInTheDocument();
     expect(screen.queryByLabelText('alex-retirement-years')).toBeNull();
 
-    // Open the modal to see the inputs.
     fireEvent.click(screen.getByRole('button', { name: /Configure retirement age/i }));
     await waitFor(() =>
       expect(screen.getByLabelText('alex-retirement-years')).toBeInTheDocument(),
@@ -196,7 +185,6 @@ describe('ScenarioDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByDisplayValue('Base')).toBeInTheDocument(),
     );
-    // Anchored-on-primary copy: "Alex: 65; Sam: same day (age 62 years 3 months)".
     expect(
       screen.getByText(/Alex: 65; Sam: same day \(age 62 years 3 months\)/i),
     ).toBeInTheDocument();
@@ -213,9 +201,7 @@ describe('ScenarioDetailPage', () => {
         },
       },
     });
-    // Whitespace-only firstName must resolve to "Primary" (AGENTS
-    // member-firstName rule) — not render a blank/space label nor a
-    // broken " -retirement" aria prefix.
+    // A whitespace-only firstName must resolve to "Primary" (AGENTS member-firstName rule), not a blank label or a broken " -retirement" aria prefix.
     await seedMember('hm-1', true, '   ');
 
     renderAt('p');
@@ -255,7 +241,6 @@ describe('ScenarioDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByDisplayValue('Base')).toBeInTheDocument(),
     );
-    // Anchored-on-primary copy: "Alex: 65; Sam: same day (age 62 years 3 months)".
     expect(
       screen.getByText(/Alex: 65; Sam: same day \(age 62 years 3 months\)/i),
     ).toBeInTheDocument();
@@ -313,10 +298,8 @@ describe('ScenarioDetailPage', () => {
     await waitFor(() => screen.getByDisplayValue('Base'));
     fireEvent.click(screen.getByRole('button', { name: /Configure retirement age/i }));
     await waitFor(() => screen.getByLabelText('alex-retirement-years'));
-    // No mode picker rendered without a secondary member.
     expect(screen.queryByRole('radio', { name: /Each retires independently/i })).toBeNull();
     expect(screen.queryByRole('radio', { name: /Both retire when/i })).toBeNull();
-    // No secondary input fieldset at all.
     expect(screen.queryByLabelText(/sam-retirement-years/i)).toBeNull();
   });
 
@@ -328,7 +311,6 @@ describe('ScenarioDetailPage', () => {
         retirementAge: {
           primary: { ageYears: 65, ageMonths: 0 },
           secondary: { ageYears: 67, ageMonths: 6 },
-          // sameDateAnchor undefined => independent mode.
         },
       },
     });
@@ -347,7 +329,6 @@ describe('ScenarioDetailPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText('sam-retirement-years')).toHaveValue('67');
     expect(screen.getByLabelText('sam-retirement-months')).toHaveValue('6');
-    // Mode picker is in the independent state.
     expect(
       screen.getByRole('radio', { name: /Each retires independently/i }),
     ).toBeChecked();
@@ -361,7 +342,6 @@ describe('ScenarioDetailPage', () => {
         retirementAge: {
           primary: { ageYears: 65, ageMonths: 0 },
           secondary: { ageYears: 67, ageMonths: 6 },
-          // sameDateAnchor undefined => independent.
         },
       },
     });
@@ -388,9 +368,7 @@ describe('ScenarioDetailPage', () => {
     fireEvent.click(anchorPrimaryRadio);
 
     await waitFor(() => expect(anchorPrimaryRadio).toBeChecked());
-    // Secondary input still rendered but read-only/disabled (derived).
     expect(screen.getByLabelText('sam-retirement-years')).toBeDisabled();
-    // Warning gone — same date by definition.
     expect(
       screen.queryByText(/Future retirement-spending projections/i),
     ).toBeNull();
@@ -464,10 +442,7 @@ describe('ScenarioDetailPage', () => {
     fireEvent.click(
       screen.getByRole('button', { name: /Configure Social Security/i }),
     );
-    // SS claim age is now the React Aria `RangeSlider` (62-70 whole
-    // years). The slider's native `value`
-    // surfaces the snapped year; the spoken value rides the
-    // accessible-description channel.
+    // SS claim age is a React Aria `RangeSlider`: its native `value` surfaces the snapped year and the spoken value rides the accessible-description channel.
     await waitFor(() =>
       screen.getByRole('slider', { name: /Alex Social Security claim age/i }),
     );
@@ -477,7 +452,6 @@ describe('ScenarioDetailPage', () => {
     expect(
       screen.getByRole('slider', { name: /Sam Social Security claim age/i }),
     ).toHaveValue('70');
-    // No "same age" toggle for SS (couples routinely claim differently).
     expect(screen.queryByRole('switch', { name: /same age/i })).toBeNull();
   });
 
@@ -534,7 +508,6 @@ describe('ScenarioDetailPage', () => {
     });
     await seedMember('hm-1', true, 'Alex');
 
-    // Aggressive overrides SS → reset link shows on the SS card.
     const aggressive = renderAt('a');
     await waitFor(() => screen.getByDisplayValue('Aggressive'));
     expect(
@@ -544,7 +517,6 @@ describe('ScenarioDetailPage', () => {
     ).toBeInTheDocument();
     aggressive.unmount();
 
-    // Empty inherits SS — no reset link on the SS card.
     renderAt('e');
     await waitFor(() => screen.getByDisplayValue('Empty'));
     expect(
@@ -581,7 +553,6 @@ describe('ScenarioDetailPage', () => {
     });
     await seedMember('hm-1', true, 'Alex');
 
-    // Aggressive overrides retirementAge → reset link shows.
     const aggressive = renderAt('a');
     await waitFor(() => screen.getByDisplayValue('Aggressive'));
     expect(
@@ -589,7 +560,6 @@ describe('ScenarioDetailPage', () => {
     ).toBeInTheDocument();
     aggressive.unmount();
 
-    // Empty inherits — no reset link.
     renderAt('e');
     await waitFor(() => screen.getByDisplayValue('Empty'));
     expect(
@@ -631,7 +601,6 @@ describe('ScenarioDetailPage', () => {
     const toggle = screen.getByRole('switch', { name: /Stop contributing today/i });
     fireEvent.click(toggle);
     await waitFor(() => screen.getByText(/Stop contributing today\./i));
-    // No modal mounted — only the inline switch.
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -677,13 +646,11 @@ describe('ScenarioDetailPage', () => {
     renderAt('p');
     await waitFor(() => screen.getByDisplayValue('Base'));
 
-    // Four groups render with the correct testids.
     const timingGroup = await screen.findByTestId('scenario-group-timing');
     const incomeGroup = await screen.findByTestId('scenario-group-income');
     const savingsGroup = await screen.findByTestId('scenario-group-savings');
     const withdrawalsGroup = await screen.findByTestId('scenario-group-withdrawals');
 
-    // Groups render in the documented DOM order (Timing → Income → Savings → Withdrawals).
     const row = await screen.findByTestId('scenario-overrides-row');
     const groupTestids = Array.from(
       row.querySelectorAll('[data-testid^="scenario-group-"]'),
@@ -695,7 +662,6 @@ describe('ScenarioDetailPage', () => {
       'scenario-group-withdrawals',
     ]);
 
-    // Each group contains its expected cards (verified by h3 headings).
     const headings = (el: HTMLElement) =>
       Array.from(el.querySelectorAll('h3')).map((h) => h.textContent ?? '');
 
@@ -715,7 +681,6 @@ describe('ScenarioDetailPage', () => {
 
     expect(headings(withdrawalsGroup).some((t) => /Withdrawal strategy/i.test(t))).toBe(true);
     expect(headings(withdrawalsGroup).some((t) => /Tax assumptions/i.test(t))).toBe(true);
-    // The "Account limits" summary card is always present.
     expect(headings(withdrawalsGroup).some((t) => /Account limits/i.test(t))).toBe(true);
   });
 
@@ -746,10 +711,7 @@ describe('ScenarioDetailPage', () => {
   });
 
   it('account floors: Account limits card counts an INHERITED floor (no local override)', async () => {
-    // Parent sets a floor; the child inherits it with NO local accountFloors.
-    // The engine still enforces the inherited floor, so the card must show the
-    // resolved count (1), not "No account floors set", and must NOT show the
-    // Customized pill (no local customization).
+    // The child inherits the parent's floor with no local accountFloors; the engine still enforces it, so the card must show the resolved count, not "No account floors set", and no Customized pill.
     await seedScenario('p', { name: 'Base', isPrimary: true });
     await seedScenario('parent', {
       name: 'Parent',
@@ -806,7 +768,6 @@ describe('ScenarioDetailPage', () => {
     const withdrawalsGroup = await screen.findByTestId('scenario-group-withdrawals');
     const heading = within(withdrawalsGroup).getByText(/Account limits/i);
     const card = heading.closest('section') as HTMLElement;
-    // The floor count still renders; the retired Combined-Pot-only warning does not.
     expect(within(card).getByText(/minimum-balance floor/i)).toBeInTheDocument();
     expect(
       within(card).queryByText(/Floors have no effect/i),
@@ -838,7 +799,6 @@ describe('ScenarioDetailPage', () => {
   });
 
   it('account floors: Account limits Reset is hidden on base, visible on a non-base local override', async () => {
-    // Base scenario is the canonical source — no Reset even with a floor.
     await seedScenario('p', {
       name: 'Base',
       isPrimary: true,
@@ -907,13 +867,11 @@ describe('ScenarioDetailPage', () => {
     renderAt('a');
     await waitFor(() => screen.getByDisplayValue('Aggressive'));
 
-    // Inflation card is overridden — should have customized tint.
     const incomeGroup = await screen.findByTestId('scenario-group-income');
     const inflationHeading = within(incomeGroup).getByText(/Inflation/i);
     const inflationCard = inflationHeading.closest('section');
     expect(inflationCard).toHaveClass('bg-accent-subtle');
 
-    // Retirement age is NOT overridden — should not have customized tint.
     const timingGroup = await screen.findByTestId('scenario-group-timing');
     const retirementHeading = within(timingGroup).getByText(/Retirement age/i);
     const retirementCard = retirementHeading.closest('section');
@@ -934,14 +892,12 @@ describe('ScenarioDetailPage', () => {
     renderAt('a');
     await waitFor(() => screen.getByDisplayValue('Custom'));
 
-    // Income group has 2 overrides → "2 customized" badge.
     const row = await screen.findByTestId('scenario-overrides-row');
     const badges = Array.from(row.querySelectorAll('span')).filter((s) =>
       /customized/.test(s.textContent ?? ''),
     );
     expect(badges.some((b) => /2 customized/.test(b.textContent ?? ''))).toBe(true);
 
-    // Timing group has 0 overrides → no "customized" text in the timing group header area.
     const timingGroup = await screen.findByTestId('scenario-group-timing');
     const timingParent = timingGroup.parentElement;
     const timingBadge = timingParent
@@ -966,13 +922,10 @@ describe('ScenarioDetailPage', () => {
     const withdrawalsGroup = await screen.findByTestId('scenario-group-withdrawals');
     const taxHeading = within(withdrawalsGroup).getByText(/Tax assumptions/i);
     const taxCard = taxHeading.closest('section');
-    // Body text unchanged.
     expect(within(taxCard as HTMLElement).getByText('No scenario overrides.')).toBeInTheDocument();
   });
 
   it('does not show customized tint on any card of the base scenario, even with local overrides', async () => {
-    // Base scenario has no parent — no card should carry the customized tint,
-    // regardless of whether fields are locally set.
     await seedScenario('base', {
       name: 'Base',
       isPrimary: true,
@@ -1006,29 +959,23 @@ describe('ScenarioDetailPage', () => {
   });
 
   it('parent-picker renders a 3-level Base→A→B chain with depth classes', async () => {
-    // AC — indented-tree depth classes on parent <Select> option rows.
-    // Navigate to B (a non-primary child) so the parent picker is visible.
     const user = userEvent.setup();
     await seedScenario('base', { name: 'Base', isPrimary: true });
     await seedScenario('a', { name: 'A', isPrimary: false, parentScenarioId: 'base' });
     await seedScenario('b', { name: 'B', isPrimary: false, parentScenarioId: 'a' });
     renderAt('b');
     await waitFor(() => screen.getByDisplayValue('B'));
-    // Open the parent <Select>.
     const parentBtn = screen.getByRole('button', { name: /Parent scenario/ });
     await user.click(parentBtn);
     const rows = await screen.findAllByRole('option');
-    // Tree order: Base(depth 0)→pl-2, A(depth 1)→pl-6, B filtered out (blocked = descendants of B = {B}).
-    // blocked set = {B itself}; Base + A remain.
-    // Base at depth 0 → pl-2; A at depth 1 → pl-6.
+    // B is filtered out (blocked is B and its descendants); Base at depth 0 gets pl-2, A at depth 1 pl-6.
     expect(rows.length).toBeGreaterThanOrEqual(2);
     expect(rows[0]).toHaveClass('pl-2'); // Base at depth 0
     expect(rows[1]).toHaveClass('pl-6'); // A at depth 1
   });
 
   it('parent-picker excludes self and descendants: editing A in Base→A→B omits A and B', async () => {
-    // Self + descendant exclusion. Navigate to A (middle node).
-    // blocked = descendantIds('a') = {a, b}. Only Base should appear in the picker.
+    // Self and descendant exclusion: for A, blocked is {a, b}, so only Base appears.
     const user = userEvent.setup();
     await seedScenario('base', { name: 'Base', isPrimary: true });
     await seedScenario('a', { name: 'A', isPrimary: false, parentScenarioId: 'base' });
@@ -1037,17 +984,13 @@ describe('ScenarioDetailPage', () => {
     await waitFor(() => screen.getByDisplayValue('A'));
     const parentBtn = screen.getByRole('button', { name: /Parent scenario/ });
     await user.click(parentBtn);
-    // A and B must be absent from the picker (they are blocked).
     expect(screen.queryByRole('option', { name: 'A' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'B' })).toBeNull();
-    // Base must be present and carry the depth-0 indent class.
     const baseOption = await screen.findByRole('option', { name: 'Base' });
     expect(baseOption).toHaveClass('pl-2'); // depth 0 → pl-2
   });
 
   it('onResetWithdrawalStrategy removes all three withdrawal-strategy keys in one mutation', async () => {
-    // Clicking Reset on the withdrawal-strategy card on a non-base scenario,
-    // after confirming, queues one update mutation whose overrides lack all three keys.
     await seedScenario('p', { name: 'Base', isPrimary: true });
     await seedScenario('a', {
       name: 'Aggressive',
@@ -1064,15 +1007,12 @@ describe('ScenarioDetailPage', () => {
     renderAt('a');
     await waitFor(() => screen.getByDisplayValue('Aggressive'));
 
-    // Reset button is visible because all three fields are locally overridden.
     const resetBtn = screen.getByRole('button', { name: /Reset withdrawal strategy/i });
     fireEvent.click(resetBtn);
 
-    // Confirm dialog appears — click the "Reset" confirm button.
     const confirmBtn = await screen.findByRole('button', { name: /^Reset$/i });
     fireEvent.click(confirmBtn);
 
-    // Exactly one new mutation queued, overrides lack all three withdrawal-strategy keys.
     await waitFor(async () => {
       const mutations = await listPendingMutations();
       const updates = mutations.filter(
@@ -1091,8 +1031,7 @@ describe('ScenarioDetailPage', () => {
   });
 
   it('shows the base-scenario effective retirement-age default with no override set', async () => {
-    // No retirementAge in overrides → component falls back to DEFAULT_RETIREMENT (65).
-    // Regression guard: effective value is shown instead of "No scenario overrides."
+    // No retirementAge override falls back to DEFAULT_RETIREMENT (65): the effective value shows instead of "No scenario overrides."
     await seedScenario('p', { name: 'Base', isPrimary: true });
     await seedMember('hm-1', true, 'Alex');
 
@@ -1100,31 +1039,28 @@ describe('ScenarioDetailPage', () => {
 
     await waitFor(() => expect(screen.getByDisplayValue('Base')).toBeInTheDocument());
     expect(screen.getByText(/Alex retires at 65/i)).toBeInTheDocument();
-    // Scope to this card only — TaxAssumptionsCard intentionally keeps "No scenario overrides."
+    // Scoped to this card: TaxAssumptionsCard intentionally keeps "No scenario overrides."
     const section = container.querySelector<HTMLElement>('[aria-labelledby="retirement-age-heading"]');
     expect(section).not.toBeNull();
     expect(within(section!).queryByText('No scenario overrides.')).not.toBeInTheDocument();
   });
 
   it('shows the base-scenario effective Social Security default with no override set', async () => {
-    // No socialSecurity in overrides → falls back to DEFAULT_SS_CLAIM (67, full
-    // benefit, COLA tracks inflation — the default-on tracking mode).
+    // No socialSecurity override falls back to DEFAULT_SS_CLAIM (67, full benefit, COLA tracks inflation).
     await seedScenario('p', { name: 'Base', isPrimary: true });
 
     const { container } = renderAt('p');
 
     await waitFor(() => expect(screen.getByDisplayValue('Base')).toBeInTheDocument());
     expect(screen.getByText(/claims at 67/i)).toBeInTheDocument();
-    // Scope to this card only — TaxAssumptionsCard intentionally keeps "No scenario overrides."
+    // Scoped to this card: TaxAssumptionsCard intentionally keeps "No scenario overrides."
     const section = container.querySelector<HTMLElement>('[aria-labelledby="social-security-heading"]');
     expect(section).not.toBeNull();
     expect(within(section!).queryByText('No scenario overrides.')).not.toBeInTheDocument();
   });
 
   it('summarizes SS COLA as tracking inflation by default (resolved rate shown)', async () => {
-    // colaTracksInflation absent → default-on. With no inflation override the
-    // resolved rate is DEFAULT_INFLATION_PCT (3%), and the card must show the
-    // rate the engines actually apply — not the dormant fixed colaPct.
+    // colaTracksInflation absent means on; with no inflation override the card must show the resolved DEFAULT_INFLATION_PCT (3%) the engines apply, not the dormant fixed colaPct.
     await seedScenario('p', {
       name: 'Base',
       isPrimary: true,
@@ -1171,20 +1107,17 @@ describe('ScenarioDetailPage', () => {
   });
 
   it('shows "Continue contributions until retirement." on the base scenario with no override set', async () => {
-    // No contributions override → effective stopContributionsToday = false.
     await seedScenario('p', { name: 'Base', isPrimary: true });
 
     const { container } = renderAt('p');
 
     await waitFor(() => expect(screen.getByDisplayValue('Base')).toBeInTheDocument());
     expect(screen.getByText('Continue contributions until retirement.')).toBeInTheDocument();
-    // Scope to this card only — TaxAssumptionsCard intentionally keeps "No scenario overrides."
+    // Scoped to this card: TaxAssumptionsCard intentionally keeps "No scenario overrides."
     const section = container.querySelector<HTMLElement>('[aria-labelledby="future-contributions-heading"]');
     expect(section).not.toBeNull();
     expect(within(section!).queryByText('No scenario overrides.')).not.toBeInTheDocument();
   });
-
-  // --- Working-years Roth conversions summary card ---
 
   const ROTH_CONVERSION = {
     sourceAccountId: 'acct-pretax',
@@ -1228,9 +1161,7 @@ describe('ScenarioDetailPage', () => {
     await waitFor(() => screen.getByDisplayValue('Aggressive'));
 
     const card = rothCard();
-    // Both are single-year (2030) windows: total = (10,000 + 5,000) × 24% × 1yr
-    // = $3,600 total. The shortened copy uses "rate R%" and drops the "not
-    // deducted" disclosure tail.
+    // Both are single-year windows: (10,000 + 5,000) × 24% × 1 year = $3,600; the copy uses "rate R%" and drops the "not deducted" tail.
     expect(
       within(card).getByText(/2 conversions during your working years/i),
     ).toBeInTheDocument();
@@ -1246,7 +1177,6 @@ describe('ScenarioDetailPage', () => {
       parentScenarioId: 'p',
       overrides: {
         preRetirementRothConversions: [
-          // One conversion, $2,200/yr over 2026–2028 inclusive (3 years).
           {
             ...ROTH_CONVERSION,
             annualAmountDollars: 2200,
@@ -1261,7 +1191,6 @@ describe('ScenarioDetailPage', () => {
     await waitFor(() => screen.getByDisplayValue('Aggressive'));
 
     const card = rothCard();
-    // Total = $2,200/yr × 3 years = $6,600 total (NOT the per-year $2,200).
     expect(within(card).getByText(/\$6,600 total/)).toBeInTheDocument();
     expect(within(card).queryByText(/\$2,200 total/)).toBeNull();
   });
@@ -1273,14 +1202,12 @@ describe('ScenarioDetailPage', () => {
       parentScenarioId: 'p',
       overrides: {
         preRetirementRothConversions: [
-          // A: $2,200/yr over 2028–2030 (3 years) = $6,600.
           {
             ...ROTH_CONVERSION,
             annualAmountDollars: 2200,
             start: { kind: 'year', year: 2028 },
             end: { kind: 'year', year: 2030 },
           },
-          // B: $4,400/yr over 2030–2032 (3 years) = $13,200.
           {
             ...ROTH_CONVERSION,
             annualAmountDollars: 4400,
@@ -1295,8 +1222,7 @@ describe('ScenarioDetailPage', () => {
     await waitFor(() => screen.getByDisplayValue('Aggressive'));
 
     const card = rothCard();
-    // Total across both full windows: $6,600 + $13,200 = $19,800 total
-    // (each conversion counts every year of its own window, not just overlaps).
+    // Each conversion counts every year of its own window, not just the overlap.
     expect(within(card).getByText(/\$19,800 total/)).toBeInTheDocument();
   });
 
@@ -1348,7 +1274,6 @@ describe('ScenarioDetailPage', () => {
   });
 
   it('Roth-conversions Reset link is hidden on the base scenario, visible on a non-base local override', async () => {
-    // Base scenario with a local override: no Reset (it is the canonical source).
     await seedScenario('p', {
       name: 'Base',
       isPrimary: true,
@@ -1375,7 +1300,6 @@ describe('ScenarioDetailPage', () => {
     await seedScenario('a', {
       name: 'Child',
       parentScenarioId: 'p',
-      // No local Roth-conversion override — inherits the parent's list.
     });
     renderAt('a');
     await waitFor(() => screen.getByDisplayValue('Child'));
@@ -1385,7 +1309,6 @@ describe('ScenarioDetailPage', () => {
       within(card).getByText(/1 conversion during your working years/i),
     ).toBeInTheDocument();
     expect(within(card).queryByText('No scenario overrides.')).toBeNull();
-    // Inherited (not local) → quiet inherited-from line, no Reset.
     expect(within(card).getByText(/Inherited from Base\./i)).toBeInTheDocument();
     expect(
       within(card).queryByRole('button', {
@@ -1430,8 +1353,6 @@ describe('ScenarioDetailPage', () => {
     });
   });
 
-  // The Withdrawal-strategy card's Configure navigates to the
-  // dedicated page, not a modal.
   it('Configure on the Withdrawal-strategy card navigates to the page with no dialog', async () => {
     await seedScenario('p', { name: 'Base', isPrimary: true });
     await seedMember('hm-1', true, 'Alex');
@@ -1465,11 +1386,8 @@ describe('ScenarioDetailPage', () => {
         '/scenarios/p/withdrawal-strategy',
       ),
     );
-    // No withdrawal-strategy modal appears.
     expect(screen.queryByRole('dialog')).toBeNull();
   });
-
-  // --- Qualified Charitable Distributions summary card ---
 
   const QCD_ENTRY = {
     memberId: 'hm-1',
@@ -1479,8 +1397,6 @@ describe('ScenarioDetailPage', () => {
     end: { kind: 'year' as const, year: 2026 },
   };
 
-  /** Seed a 70½-eligible primary member (born 1950) who owns a traditional IRA
-   *  so a QCD entry resolves to a non-zero engine-applied count. */
   async function seedEligibleIra(): Promise<void> {
     const acc: Aggregate<AccountPayload> = {
       id: 'acct-ira',
@@ -1596,7 +1512,6 @@ describe('ScenarioDetailPage', () => {
     await seedScenario('a', {
       name: 'Child',
       parentScenarioId: 'p',
-      // No local QCD override — inherits the parent's list.
     });
     await seedEligibleIra();
     renderAt('a');
@@ -1607,7 +1522,6 @@ describe('ScenarioDetailPage', () => {
       within(card).getByText(/1 charitable distribution from a traditional IRA/i),
     ).toBeInTheDocument();
     expect(within(card).queryByText('No scenario overrides.')).toBeNull();
-    // Inherited (not local) → quiet inherited-from line, no Reset.
     expect(within(card).getByText(/Inherited from Base\./i)).toBeInTheDocument();
     expect(
       within(card).queryByRole('button', {
@@ -1615,10 +1529,6 @@ describe('ScenarioDetailPage', () => {
       }),
     ).toBeNull();
   });
-
-  // -------------------------------------------------------------------------
-  // Filing editor entry + resolution prompt
-  // -------------------------------------------------------------------------
 
   it('shows no filing prompt for a scenario whose filing facts resolve cleanly', async () => {
     await seedMember('hm-1', true, 'Ada');
@@ -1644,8 +1554,7 @@ describe('ScenarioDetailPage', () => {
     });
     renderAt('sc-p11-legacy');
     await screen.findByRole('heading', { name: 'Legacy' });
-    // The copy states the projections are UNCHANGED — this is a prompt, not a
-    // blocker, and nothing was dropped.
+    // The copy states projections are unchanged: a prompt, not a blocker, nothing dropped.
     expect(
       await screen.findByText(/projections keep filing exactly as they did\s+before/i),
     ).toBeInTheDocument();
@@ -1695,9 +1604,7 @@ describe('ScenarioDetailPage', () => {
     await screen.findByRole('heading', { name: 'SaveFiling' });
     await userEvent.click(screen.getByRole('button', { name: /Choose how you file/i }));
     const dialog = await screen.findByRole('dialog');
-    // Converting the older setting is an EXPLICIT act: Save stays
-    // disabled until the user uses the filing controls, so adopt the shown
-    // choice first.
+    // Converting the older setting is explicit: Save stays disabled until the filing controls are used, so adopt the shown choice first.
     fireEvent.click(
       within(dialog).getByRole('button', { name: /use the choice shown below/i }),
     );

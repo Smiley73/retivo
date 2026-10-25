@@ -1,12 +1,5 @@
-/**
- * Standalone snapshot-purge Lambda handler tests.
- *
- * Covers the guard, the paging list+delete loop, and the partial-delete
- * failure path. The handler builds its own
- * S3Client at module scope, so we stub @aws-sdk/client-s3's S3Client
- * (keeping the real command classes) and drive `send` per test —
- * deterministic, no emulator-endpoint plumbing the handler doesn't read.
- */
+// The standalone snapshot-purge Lambda handler: the guard, the paging list-and-delete loop and the partial-delete failure path. The handler builds its own S3Client at module scope,
+// so @aws-sdk/client-s3's S3Client is stubbed (real command classes kept) and `send` driven per test.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import type { Context } from 'aws-lambda';
@@ -24,7 +17,6 @@ jest.mock('@aws-sdk/client-s3', () => {
   };
 });
 
-// Imported after the mock is registered.
 import { handler } from '../account-snapshot-purge-lambda.js';
 
 const CONTEXT = {} as Context;
@@ -50,7 +42,6 @@ describe('snapshot-purge Lambda — validateHouseholdId guard', () => {
     await expect(
       handler({ householdId: value } as { householdId: string }, CONTEXT),
     ).rejects.toThrow();
-    // Guard rejects before any S3 call.
     expect(send).not.toHaveBeenCalled();
   });
 });
@@ -67,10 +58,7 @@ describe('snapshot-purge Lambda — S3 client config', () => {
 
     await handler({ householdId }, CONTEXT);
 
-    // The handler caches a single S3Client at module scope, built lazily
-    // on the first purge. Whichever test triggers that first build, the
-    // constructor must have carried bounded timeouts (no SDK defaults) —
-    // the repo non-negotiable that every outbound call is time-bounded.
+    // The handler caches one S3Client built lazily on the first purge; whichever test builds it first, the constructor must carry bounded timeouts (no SDK defaults), as every outbound call is time-bounded.
     expect(s3ClientCtor).toHaveBeenCalled();
     const config = s3ClientCtor.mock.calls[0][0] as {
       requestHandler?: { requestTimeout?: number; connectionTimeout?: number };
@@ -97,10 +85,8 @@ describe('snapshot-purge Lambda — delete loop', () => {
     const result = await handler({ householdId }, CONTEXT);
 
     expect(result).toEqual({ deleted: 2 });
-    // List scoped to the household prefix.
     const listInput = send.mock.calls[0][0].input;
     expect(listInput.Prefix).toBe(`${householdId}/`);
-    // Delete carried exactly the two listed keys.
     const deleteInput = send.mock.calls[1][0].input;
     expect(deleteInput.Delete.Objects).toEqual([
       { Key: `${householdId}/a.json.gz` },
@@ -125,7 +111,6 @@ describe('snapshot-purge Lambda — delete loop', () => {
       CONTEXT,
     );
 
-    // Only the two non-kept objects were deleted.
     expect(result).toEqual({ deleted: 2 });
     const deleteInput = send.mock.calls[1][0].input;
     expect(deleteInput.Delete.Objects).toEqual([
@@ -160,8 +145,7 @@ describe('snapshot-purge Lambda — delete loop', () => {
       CONTEXT,
     );
 
-    // A malformed keep-list can only fail to match — it never widens the
-    // delete, so every listed object under the prefix is purged.
+    // A malformed keep-list can only fail to match, never widen the delete, so every listed object under the prefix is purged.
     expect(result).toEqual({ deleted: 2 });
     expect(send.mock.calls[0][0].input.Prefix).toBe(`${householdId}/`);
     const deleteObjects = send.mock.calls[1][0].input.Delete.Objects as Array<{
@@ -171,7 +155,6 @@ describe('snapshot-purge Lambda — delete loop', () => {
       { Key: `${householdId}/a.json.gz` },
       { Key: `${householdId}/b.json.gz` },
     ]);
-    // Never widens beyond the household prefix.
     for (const o of deleteObjects) {
       expect(o.Key.startsWith(`${householdId}/`)).toBe(true);
     }

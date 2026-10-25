@@ -61,7 +61,7 @@ const WHOLE_WORD_BELOW_CHARS = 4;
  *                 trade: it can shorten an unrelated word that contains a long name (`Checking` for
  *                 `King`), never leak one.
  */
-export function matchModeFor(term: string): 'word' | 'substring' {
+function matchModeFor(term: string): 'word' | 'substring' {
   return Array.from(term).length >= WHOLE_WORD_BELOW_CHARS || UNSPACED_SCRIPT.test(term) ? 'substring' : 'word';
 }
 
@@ -101,14 +101,14 @@ export function buildMasker(rawTerms: readonly string[]): Masker {
 }
 
 /** A masker that masks nothing. */
-export const EMPTY_MASKER: Masker = buildMasker([]);
+const EMPTY_MASKER: Masker = buildMasker([]);
 
 /**
  * Removes invisible characters, normalizes to NFC and collapses whitespace; the first half of every
  * sanitizer and of every term. Both sides of a match go through it, so a name typed precomposed
  * (`Müller`) is still found in text pasted decomposed (`Mu\u0308ller`).
  */
-export function cleanText(text: string): string {
+function cleanText(text: string): string {
   return text.replace(LINE_BREAKS, ' ').replace(INVISIBLE, '').normalize('NFC').replace(/\s+/gu, ' ').trim();
 }
 

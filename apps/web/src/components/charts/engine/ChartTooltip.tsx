@@ -1,20 +1,11 @@
 /**
- * HTML tooltip overlay for the SVG chart engine. Positioned absolutely
- * over the chart at the hovered datum's pixel x. The chart-specific body
- * (the rows of series values) is supplied by the caller as `children` —
- * the engine only owns positioning + the theme-reactive surface chrome.
- *
- * The absolute `left`/`top` of an HTML overlay div cannot be expressed
- * as SVG presentation attributes, so this is the one place the engine
- * uses an inline `style` (the chart engine's runtime-geometry carve-out in
- * the UI coding standards of AGENTS.md).
+ * HTML tooltip overlay positioned at the hovered datum; the caller supplies the body. The absolute `left` cannot be
+ * an SVG attribute, so this is the engine's inline-style carve-out (AGENTS.md "UI coding standards").
  */
 import React from 'react';
 
 interface ChartTooltipProps {
-  /** Pixel x within the chart container where the tooltip anchors. */
   px: number;
-  /** Container width, to flip the tooltip left of the cursor near the edge. */
   containerWidth: number;
   children: React.ReactNode;
 }

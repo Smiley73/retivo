@@ -17,22 +17,6 @@ import type { AuthEventRow, AuthEventType } from './types.js';
 
 const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
 
-/**
- * {@link AuthEventsRepository.listForUser} takes an OPTIONAL `opts.limit` —
- * used only by tests that need a small, deterministic page size to exercise
- * multi-page paging without seeding an unrealistic row count. The account
- * export itself passes no `limit`, so its
- * `QueryCommand` below carries no `Limit` at all and DynamoDB pages by its
- * own ~1 MB response-size cap instead — "few, large pages" through the
- * export-authorization cookie's 5-minute window. An earlier version of this
- * hard-capped every page at 1,000 rows regardless of caller; combined with
- * the route's 120/min throttle and the 5-minute cookie, that made a very
- * large retained history (reachable within the 1-year retention window, e.g.
- * via repeated `/auth/refresh` calls) mathematically impossible to export
- * before the cookie expired. `Scan` on this table is
- * deliberately withheld from the api role, so this Queries by the
- * `userId` PK — never a Scan. */
-
 /** One page of a user's auth-event history, keyed off an opaque cursor. */
 export interface AuthEventPage {
   items: AuthEventRow[];
@@ -41,11 +25,9 @@ export interface AuthEventPage {
 }
 
 /**
- * Thrown when a presented account-export history cursor is malformed OR carries a `userId` that
- * does not match the authenticated caller. Decoding never trusts a client-supplied key outright:
- * the cursor is re-asserted to belong to the calling user before it is used as a DynamoDB
- * `ExclusiveStartKey`, so a forged/foreign cursor can never page through another user's history.
- * The controller maps this to `400`.
+ * Thrown when an account-export history cursor is malformed or carries a `userId` other than the caller. The cursor
+ * is re-asserted to belong to the caller before use as an `ExclusiveStartKey`, so a forged cursor cannot page through
+ * another user history. The controller maps it to 400.
  */
 export class InvalidAccountExportCursorError extends Error {
   constructor() {
@@ -54,17 +36,13 @@ export class InvalidAccountExportCursorError extends Error {
   }
 }
 
-/** Encode a `{ userId, eventId }` DynamoDB key as an opaque cursor string. */
+// Encode a `{ userId, eventId }` DynamoDB key as an opaque cursor string.
 function encodeCursor(key: { userId: string; eventId: string }): string {
   return Buffer.from(JSON.stringify(key), 'utf8').toString('base64url');
 }
 
-/**
- * Decode + validate a presented cursor against `expectedUserId`. Returns
- * `undefined` for an absent cursor (first page). Throws
- * {@link InvalidAccountExportCursorError} for anything malformed or whose
- * embedded `userId` disagrees with the caller — never trusts the raw value.
- */
+// Decodes a cursor against `expectedUserId`; undefined for an absent cursor, throws InvalidAccountExportCursorError
+// for anything malformed or foreign.
 function decodeCursor(
   cursor: string | null | undefined,
   expectedUserId: string,
@@ -90,11 +68,7 @@ function decodeCursor(
 @Injectable()
 export class AuthEventsRepository extends BaseRepository {
   private readonly logger = new Logger(AuthEventsRepository.name);
-  /**
-   * Deployment stack (`local` when unset). Drives
-   * the event-time metric emission policy in `mapAuthEventToMetrics` — no
-   * metrics are emitted for a `local`/unset stack.
-   */
+  // Deployment stack (`local` when unset); drives the metric emission policy in `mapAuthEventToMetrics`.
   private readonly stack: string;
 
   constructor(
@@ -105,10 +79,7 @@ export class AuthEventsRepository extends BaseRepository {
     this.stack = config.get('STACK', { infer: true }) ?? 'local';
   }
 
-  /**
-   * Fire-and-forget audit append. Audit failures must never
-   * break an auth flow; we log and swallow.
-   */
+  /** Fire-and-forget audit append: failures are logged and swallowed, never breaking an auth flow. */
   async record(args: {
     userId: string;
     eventType: AuthEventType;
@@ -132,11 +103,8 @@ export class AuthEventsRepository extends BaseRepository {
       await this.doc.send(
         new PutCommand({ TableName: this.tableName, Item: row }),
       );
-      // Emit event-time EMF metrics ONLY after the durable audit write has
-      // succeeded, so a metric can never fire for an event that was not
-      // actually recorded. Mapping + prod/dev/local policy live in
-      // `mapAuthEventToMetrics`; a failed emit is non-fatal (the writer
-      // swallows it) and never carries PII.
+      // Emit metrics only after the durable write succeeded, so a metric never fires for an unrecorded event. A
+      // failed emit is non-fatal and carries no PII.
       for (const metric of mapAuthEventToMetrics(args.eventType, this.stack)) {
         emitOperationalMetric(metric);
       }
@@ -148,13 +116,9 @@ export class AuthEventsRepository extends BaseRepository {
   }
 
   /**
-   * Paged read of a user's WHOLE retained sign-in and security history (no window, unlike
-   * {@link FailedLoginAttemptRow}'s
-   * 24-hour backoff state). Queries by the `userId` PK — `Scan` on this table is
-   * deliberately withheld from the api role; this repository never adds
-   * it. `cursor` is the opaque value {@link AuthEventPage.nextCursor} returned by
-   * the prior call; a presented cursor is re-validated to belong to `userId`
-   * before use (never trusted outright) — see {@link InvalidAccountExportCursorError}.
+   * Pages a user whole retained history by the `userId` PK (Scan is withheld from the api role). `limit` is for tests
+   * only: the export passes none, so DynamoDB pages by its ~1 MB cap and a very large history can finish inside the
+   * export cookie 5-minute window. A presented cursor is re-validated against `userId`.
    */
   async listForUser(
     userId: string,
@@ -167,18 +131,10 @@ export class AuthEventsRepository extends BaseRepository {
         KeyConditionExpression: 'userId = :u',
         ExpressionAttributeValues: { ':u': userId },
         ExclusiveStartKey: exclusiveStartKey,
-        // Omitted entirely (`undefined`) unless a caller opts into an
-        // explicit cap — DynamoDB then pages by its own ~1 MB response-size
-        // limit instead of an artificial row count (see this
-        // method's doc comment above).
+        // Omitted unless a caller opts in, so DynamoDB pages by its ~1 MB cap instead of an artificial row count.
         Limit: opts.limit,
-        // Strongly consistent: the account export writes a
-        // `refresh` and then a `data_export` AuthEvent immediately before
-        // fetching this history's first page. An eventually consistent read
-        // could still be racing that replica lag and silently omit either
-        // just-committed row while still reporting `nextCursor: null`,
-        // contradicting the whole-retained-history contract this endpoint
-        // promises. Every page of the export's history read pays this cost.
+        // Strongly consistent: the export writes `refresh` and `data_export` events just before this read, and a stale
+        // replica could omit them while reporting `nextCursor: null`.
         ConsistentRead: true,
       }),
     );

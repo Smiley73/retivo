@@ -1,8 +1,5 @@
-/**
- * Per-id sparse override resolver for the household's canonical
- * IncomeStream list. Mirror of [expense-override-resolution.ts] — same
- * rules apply.
- */
+// Per-id sparse override resolver for the canonical IncomeStream list; mirrors `expense-override-resolution.ts` and shares its rules.
+
 import { scenarioChain, type ScenarioAggregate } from './scenario-resolution';
 import {
   applyPatchWithClears,
@@ -14,8 +11,7 @@ import type { Aggregate, IncomeStreamPayload } from '../db/types';
 type ResolvedIncomeSource = 'canonical' | 'patched' | 'added';
 
 export interface ResolvedIncomeStream {
-  /** Prefixed id: `aggregate:<canonical-id>` for canonical / patched
-   *  rows, `local:<_localId>` for scenario-only added rows. */
+  /** `aggregate:<canonical-id>` for canonical and patched rows, `local:<_localId>` for scenario-only adds. */
   id: string;
   source: ResolvedIncomeSource;
   payload: IncomeStreamPayload;
@@ -74,6 +70,4 @@ export function resolveIncomeForScenarioSparse(
   return out;
 }
 
-// Re-export the shared normalizer for callers that need to write
-// prefixed ids without re-implementing the prefix rule.
 export { normalizeOverrideId };

@@ -1,13 +1,4 @@
-/**
- * Balance Projection page — per-scenario cashflow series assembly.
- * Builds the income / expense / deposit monthly + yearly series the
- * drawdown engine + the income / expense / portfolio-flow charts
- * consume. Extracted from `balance-projection-page-pipeline.ts`
- * to keep individual pipeline files under the 400-ln file shape cap.
- *
- * `buildPageCashflowSeries` itself remains > 40 ln: splitting it further risks
- * behavior changes that the parity gate can't regression-test today.
- */
+/** Per-scenario cashflow series assembly: the income, expense and deposit monthly and yearly series that feed the drawdown engine and the income, expense and portfolio-flow charts. */
 import {
   DEFAULT_INFLATION_PCT,
   DEFAULT_LIFE_EXPECTANCY_AGE,
@@ -57,7 +48,6 @@ import type { PipelineData } from './balance-projection-page-data';
 
 const PROJECTION_CHART_TAIL_YEARS = 0;
 
-/** 0-indexed month from an ISO `YYYY-MM-DD` (Jan = 0). */
 function parseIsoMonth0(iso: string): number | null {
   const match = /^\d{4}-(\d{2})/.exec(iso);
   if (!match) return null;
@@ -86,20 +76,7 @@ export interface CashflowSeriesPipelineResult {
     readonly incomeMonths: ReturnType<typeof projectIncomeByMonth>;
     readonly expenseMonths: ReturnType<typeof projectExpensesByMonth>;
   };
-  /**
-   * Band-basis per-category expense projections for the cashflow "by
-   * category" mode. Id-keyed + name-agnostic (the builder never
-   * sees category names). Two inflation bases:
-   *   - `*Nominal` — scenario-rate inflation (per-category, incl. Medical
-   *     +2pp). Drives Future-dollars shares AND the display-basis-
-   *     independent **active-set** signal (a category is active iff
-   *     it has any non-zero nominal contribution in range).
-   *   - `*Base` — inflation pinned to 0% (real/today's dollars), the
-   *     Expenses-page mechanism. Drives Today's-dollars shares.
-   * Only the share RATIOS are consumed downstream (the residual allocation
-   * rescales to the displayed essential+discretionary), so neither set is
-   * deflated here.
-   */
+  /** Band-basis per-category projections for the cashflow "by category" mode, id-keyed and name-agnostic. *Nominal uses scenario-rate inflation (Future-dollar shares and the active-set signal); *Base pins inflation to 0% (Today's shares). Only ratios are consumed downstream, so neither is deflated here. */
   readonly categoryMonthlyNominal: ReturnType<typeof projectExpensesByCategoryMonth>;
   readonly categoryYearlyNominal: ReturnType<typeof projectExpensesByCategoryYear>;
   readonly categoryMonthlyBase: ReturnType<typeof projectExpensesByCategoryMonth>;
@@ -150,9 +127,6 @@ export function buildPageCashflowSeries(opts: {
   if (!Number.isFinite(retirementYear)) return null;
   const fromYear = retirementYear;
   const chartEndYear = cashflowChartEndYear;
-  // `lastDeathYear` is now the integer death year (death = Dec 31 of
-  // `deathYear`, the terminal year), so the cashflow projection ends
-  // at `deathYear` (tail = 0).
   const drawdownEndYear =
     lastDeathYear !== null
       ? lastDeathYear + PROJECTION_CHART_TAIL_YEARS
@@ -231,13 +205,7 @@ export function buildPageCashflowSeries(opts: {
     { from: fromYear, to: drawdownEndYear },
   );
 
-  // The SAME shared earned-income series the drawdown runner feeds
-  // the earnings test — the page previously built its SS context without
-  // earnings-test inputs, so its chart/table disagreed with the runner for
-  // pre-FRA part-time-wage scenarios. It also starts at the EARLIEST SS
-  // entitlement year (own or survivor claim) when it precedes retirement so
-  // the engine's earnings-test/ARF warm-up sees those years — same widening
-  // as the runner; the spendable-income series keeps its own range.
+  // The same shared earned-income series as the drawdown runner, widened to the earliest SS entitlement year so the earnings-test warm-up sees those years; otherwise the chart disagrees with the runner for pre-FRA part-time-wage scenarios.
   const earliestEntitlement = earliestSsEntitlementYear(
     data.members,
     data.resolved.socialSecurity,
@@ -253,8 +221,7 @@ export function buildPageCashflowSeries(opts: {
   const ssCtx = buildSsContext(data.members, [...ssBenefits], {
     claimAgePrimary,
     claimAgeSecondary,
-    // SEPARATE survivor claim ages — absent → the engine withholds
-    // survivor-dependent results, same as the drawdown runner.
+    // Separate survivor claim ages: absent means the engine withholds survivor-dependent results, as in the runner.
     survivorClaimAgePrimary: data.resolved.socialSecurity?.survivor?.primary,
     survivorClaimAgeSecondary: data.resolved.socialSecurity?.survivor?.secondary,
     lifeExpectancyPrimary: lifePrimary,
@@ -274,8 +241,7 @@ export function buildPageCashflowSeries(opts: {
     : [];
 
   const secondary = data.members.find((m) => !m.payload.isPrimary);
-  // Per-key resolver so the page's expense band reflects per-category
-  // inflation (Medical = general + 2pp by default), matching the runner.
+  // Per-key resolver so the expense band reflects per-category inflation (Medical = general + 2pp), matching the runner.
   const resolvedInflation = resolveInflationForScenario(
     selectedScenarioId,
     data.scenarios,
@@ -312,12 +278,6 @@ export function buildPageCashflowSeries(opts: {
     { from: fromYear, to: drawdownEndYear },
   );
 
-  // Band-basis per-category projections for the cashflow "by category"
-  // mode. Id-keyed; the builder is name-agnostic. The `Nominal`
-  // pair uses the scenario per-category inflation (Future shares + the
-  // active-set signal); the `Base` pair pins inflation to 0% (Today's
-  // shares), the Expenses-page mechanism. Only ratios are consumed
-  // downstream, so no deflator is applied here.
   const categoryRange = { from: fromYear, to: drawdownEndYear };
   const expenseCtxMonth = { ...expenseCtx, retirementMonth0: retirementMonth0 ?? 0 };
   const expenseCtxBase = { ...expenseCtx, inflation: { ratePct: 0 } };
@@ -361,16 +321,8 @@ export function buildPageCashflowSeries(opts: {
     incomeByYear.set(y, ss + pensionAnnuity + partTime + oneOff);
     sourceSplitByYear.set(y, { ss, pensionAnnuity, partTime, oneOff });
   }
-  // DISPLAY-ONLY + intentionally household-summed: this builder synthesizes its
-  // OWN household-summed post-primary `depositsByMonth` for the yearly /
-  // Annual-Portfolio-Flow CHARTS. It does NOT feed the deterministic drawdown
-  // engine — the engine consumes the RUNNER's `series.depositsByMonth` (built in
-  // balance-projection-runner-cashflow.ts), where post-primary
-  // contributions are routed per-account with their pre/post split. The charted figure here
-  // is the household deposit TOTAL, invariant to per-account placement (the sum
-  // is preserved), so per-account/split routing introduces no engine-vs-chart
-  // mismatch and no double-count. The pre/post bucket split is an engine-internal
-  // concern this aggregate flow chart does not surface, so this stays summed.
+  // Display-only and household-summed: these depositsByMonth feed the yearly and Annual Portfolio Flow charts, not the drawdown engine,
+  // which consumes the runner's per-account series (balance-projection-runner-cashflow.ts). The charted total is invariant to per-account placement, so there is no mismatch or double-count.
   const depositsByMonth: MonthlyCashflowSeries = emptyMonthlySeries(
     fromYear,
     drawdownEndYear,

@@ -34,7 +34,7 @@ export const CONSENT_CHOICES_FIXED_STATEMENT =
 /** Shown in place of the assistant's name when the bridge did not report one. */
 export const UNKNOWN_ASSISTANT_NAME = 'an assistant';
 
-/** Label of the D7 switch, word for word. */
+/** Label of the keep-signed-in switch, word for word. */
 export const KEEP_SIGNED_IN_LABEL = 'Let assistant activity keep me signed in';
 
 function minutesPhrase(idleMinutes: number | null): string {

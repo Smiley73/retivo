@@ -1,13 +1,6 @@
-/**
- * Component tests for the Security page's Passkeys card: the per-passkey "Use
- * for encryption" toggle and the just-registered "Use this passkey to unlock
- * your data?" confirmation dialog. Renders through
- * SecurityPage, which hosts the card.
- */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+// Security-page Passkeys card: the per-passkey "Use for encryption" toggle and the just-registered "Use this passkey to unlock your data?" confirmation dialog, rendered through SecurityPage.
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
-import { SecurityPage } from '../pages/SecurityPage';
 vi.mock('react-router', async () => (await import('./security-page.test-harness')).reactRouterMock());
 vi.mock('../db/store', async () => (await import('./security-page.test-harness')).dbStoreMock());
 vi.mock('../lib/local-data', async () => (await import('./security-page.test-harness')).localDataMock());
@@ -21,18 +14,12 @@ vi.mock('../lib/data-export', async () => (await import('./security-page.test-ha
 vi.mock('../lib/data-import', async () => (await import('./security-page.test-harness')).dataImportMock());
 vi.mock('../auth/key-envelope-client', async () => (await import('./security-page.test-harness')).keyEnvelopeClientMock());
 
-import { useAuth } from '../auth/AuthContext';
-import { securityAuthValue } from './security-page.test-harness';
+import { renderPage } from './security-page.test-harness';
 import { expectNoA11yViolations } from '../test/a11y';
 
-function renderPage(overrides: Record<string, unknown> = {}) {
-  (useAuth as any).mockReturnValue(securityAuthValue({ confirmPasskeyRestriction: vi.fn() }, overrides));
-  return render(<MemoryRouter><SecurityPage /></MemoryRouter>);
-}
+const authExtra = { confirmPasskeyRestriction: vi.fn() };
 
-/** Click "Add passkey" → fill + submit the password gate
- * (flag-off floor by default in `mfaAuthDefaults`)
- * so `registerPasskey` runs. */
+// Click "Add passkey" and submit the password gate (the flag-off floor by default in `mfaAuthDefaults`) so `registerPasskey` runs.
 async function addPasskeyViaGate(): Promise<void> {
   fireEvent.click(await screen.findByRole('button', { name: 'Add passkey' }));
   const dialog = await screen.findByRole('dialog');
@@ -53,7 +40,7 @@ describe('SecurityPage Passkeys — "Use for encryption" toggle', () => {
   };
 
   it('renders a "Use for encryption" switch per passkey when unlocked', async () => {
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([passkey]),
     });
@@ -65,7 +52,7 @@ describe('SecurityPage Passkeys — "Use for encryption" toggle', () => {
   it('enabling the switch opens the password prompt, then calls enrollPasskeyForEncryption with the credentialId + password', async () => {
     const user = userEvent.setup();
     const enrollPasskeyForEncryption = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([passkey]),
       enrollPasskeyForEncryption,
@@ -85,11 +72,10 @@ describe('SecurityPage Passkeys — "Use for encryption" toggle', () => {
   });
 
   it('does not render the switch when the session is locked', async () => {
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: false,
       listPasskeys: vi.fn().mockResolvedValue([passkey]),
     });
-    // The passkey row renders (Delete button present) but no encryption switch.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument(),
     );
@@ -115,7 +101,7 @@ describe('SecurityPage Passkeys — removal step-up', () => {
   it('gates removal behind password + the reusable step-up modal when enforced', async () => {
     const removePasskey = vi.fn().mockResolvedValue({ noticeSent: true });
     const stepUpSendEmailOtp = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       listPasskeys: vi.fn().mockResolvedValue([passkey]),
       removePasskey,
       stepUpSendEmailOtp,
@@ -127,19 +113,16 @@ describe('SecurityPage Passkeys — removal step-up', () => {
       }),
     });
 
-    // Row "Delete" → confirm dialog (alertdialog) → confirm.
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
     const confirmDialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(confirmDialog).getByRole('button', { name: 'Delete' }));
 
-    // Password re-verify baseline.
     const pwDialog = await screen.findByRole('dialog');
     fireEvent.change(within(pwDialog).getByLabelText('Current password'), {
       target: { value: 'pw123456' },
     });
     fireEvent.click(within(pwDialog).getByRole('button', { name: 'Continue' }));
 
-    // The reusable step-up modal opens; removal has NOT run yet.
     await waitFor(() => expect(screen.getByText("Confirm it's you")).toBeInTheDocument());
     expect(removePasskey).not.toHaveBeenCalled();
 
@@ -163,8 +146,7 @@ describe('SecurityPage Passkeys — removal step-up', () => {
 describe('SecurityPage Passkeys — registration encryption dialog', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    // The PRF binding loads via getKeyEnvelopes; default to an empty slot set
-    // (no passkey holds the PRF slot) so the binding resolves positively.
+    // The PRF binding loads via getKeyEnvelopes; default to an empty slot set (no passkey holds the PRF slot) so the binding resolves positively.
     const { getKeyEnvelopes } = await import('../auth/key-envelope-client');
     (getKeyEnvelopes as any).mockReset();
     (getKeyEnvelopes as any).mockResolvedValue({
@@ -187,7 +169,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
   it('prompts on registration while unlocked, and confirming enrolls the new credential', async () => {
     const registerPasskey = vi.fn().mockResolvedValue({ ...newPasskey, noticeSent: true });
     const enrollPasskeyForEncryption = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
@@ -195,12 +177,10 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
     });
     await addPasskeyViaGate();
     await waitFor(() => expect(registerPasskey).toHaveBeenCalled());
-    // The confirmation dialog appears; enroll has NOT fired yet.
     const confirm = await screen.findByRole('button', { name: 'Use for encryption' });
     expect(enrollPasskeyForEncryption).not.toHaveBeenCalled();
     fireEvent.click(confirm);
 
-    // The password floor opens next.
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Current password'), {
       target: { value: 'confirm-pw' },
@@ -220,7 +200,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
       envelopeSetTag: 'tag',
     });
     const registerPasskey = vi.fn().mockResolvedValue({ ...newPasskey, noticeSent: true });
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([
         { ...newPasskey, id: 'pk-existing', credentialId: 'cred-existing' },
@@ -236,7 +216,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
   it('does NOT prompt when the session is locked', async () => {
     const registerPasskey = vi.fn().mockResolvedValue({ ...newPasskey, noticeSent: true });
     const enrollPasskeyForEncryption = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: false,
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
@@ -254,7 +234,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
   it('cancelling the dialog enrolls nothing', async () => {
     const registerPasskey = vi.fn().mockResolvedValue({ ...newPasskey, noticeSent: true });
     const enrollPasskeyForEncryption = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
@@ -274,7 +254,7 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
     const enrollPasskeyForEncryption = vi
       .fn()
       .mockRejectedValue(new Error('passkey did not return a PRF result (unsupported)'));
-    renderPage({
+    renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
@@ -293,7 +273,6 @@ describe('SecurityPage Passkeys — registration encryption dialog', () => {
     await waitFor(() =>
       expect(enrollPasskeyForEncryption).toHaveBeenCalledWith('cred-new', 'confirm-pw', undefined),
     );
-    // The passkey is still registered (row visible) + a clear inline error shows.
     await waitFor(() => expect(screen.getByText(/Synced passkey/i)).toBeInTheDocument());
     expect(screen.getByRole('alert')).toHaveTextContent(/can't be used for encryption/i);
   });
@@ -312,9 +291,8 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
 
   it('does not call registerPasskey until the password gate resolves', async () => {
     const registerPasskey = vi.fn().mockResolvedValue(newPasskey);
-    renderPage({ listPasskeys: vi.fn().mockResolvedValue([]), registerPasskey });
+    renderPage(authExtra, { listPasskeys: vi.fn().mockResolvedValue([]), registerPasskey });
     fireEvent.click(await screen.findByRole('button', { name: 'Add passkey' }));
-    // The password prompt is open; the write has NOT fired yet.
     await screen.findByRole('dialog');
     expect(registerPasskey).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Current password'), {
@@ -327,7 +305,7 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
   it('gates adding a passkey behind the reusable step-up modal when enforced, then registers with the proof', async () => {
     const registerPasskey = vi.fn().mockResolvedValue(newPasskey);
     const stepUpSendEmailOtp = vi.fn().mockResolvedValue(undefined);
-    renderPage({
+    renderPage(authExtra, {
       listPasskeys: vi.fn().mockResolvedValue([]),
       registerPasskey,
       stepUpSendEmailOtp,
@@ -345,7 +323,6 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
     });
     fireEvent.click(within(pwDialog).getByRole('button', { name: 'Continue' }));
 
-    // The reusable step-up modal opens; registration has NOT run yet.
     await waitFor(() => expect(screen.getByText("Confirm it's you")).toBeInTheDocument());
     expect(registerPasskey).not.toHaveBeenCalled();
 
@@ -366,7 +343,7 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
   });
 
   it('does not offer the emailed code as the add-passkey step-up factor once an authenticator app is enrolled — the server refuses it', async () => {
-    renderPage({
+    renderPage(authExtra, {
       listPasskeys: vi.fn().mockResolvedValue([]),
       getMfaStatus: vi.fn().mockResolvedValue({
         totpEnabled: true,
@@ -383,9 +360,7 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
     fireEvent.click(within(pwDialog).getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(screen.getByText("Confirm it's you")).toBeInTheDocument());
 
-    // Only the enrolled authenticator is offered — no factor picker, no
-    // emailed-code path (the recovery list is dropped for enrollment; removal
-    // below keeps it as the no-lockout floor).
+    // Only the enrolled authenticator is offered, with no factor picker or emailed-code path (the recovery list is dropped for enrollment; removal keeps it as the no-lockout floor).
     const factorDialog = screen.getByRole('dialog');
     expect(within(factorDialog).queryByRole('radiogroup')).not.toBeInTheDocument();
     expect(
@@ -397,19 +372,17 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
   it('renders a restricted passkey with a confirm action that lifts it, and passes a11y checks', async () => {
     const restricted = { ...newPasskey, restrictedPostReset: true };
     const confirmPasskeyRestriction = vi.fn().mockResolvedValue(undefined);
-    const { container } = renderPage({
+    const { container } = renderPage(authExtra, {
       isUnlocked: true,
       listPasskeys: vi.fn().mockResolvedValue([restricted]),
       confirmPasskeyRestriction,
-      // A predating TOTP factor is a real proving method for a restricted
-      // passkey (email_otp can never vouch — no enrollment timestamp).
+      // A predating TOTP factor is a real proving method for a restricted passkey (email_otp can never vouch: no enrollment timestamp).
       getMfaStatus: vi.fn().mockResolvedValue({ totpEnabled: true, methods: ['totp'] }),
     });
     expect(await screen.findByText('Needs confirmation')).toBeInTheDocument();
     expect(
       screen.getByText(/added right after a password reset/i),
     ).toBeInTheDocument();
-    // No encryption toggle offered for a restricted passkey, even unlocked.
     expect(screen.queryByRole('switch', { name: 'Use for encryption' })).not.toBeInTheDocument();
     await expectNoA11yViolations(container);
 
@@ -429,15 +402,13 @@ describe('SecurityPage Passkeys — enrollment gate + post-reset restriction', (
 
   it('offers no dead-end confirm modal when nothing predates the reset — points at removal instead', async () => {
     const restricted = { ...newPasskey, restrictedPostReset: true };
-    // Default mfaAuthDefaults() status has no `methods` — the card falls back
-    // to `['email_otp']`, filtered to no eligible confirm method.
-    renderPage({ listPasskeys: vi.fn().mockResolvedValue([restricted]) });
+    // Default `mfaAuthDefaults()` status has no `methods`, so the card falls back to `['email_otp']`, filtered to no eligible confirm method.
+    renderPage(authExtra, { listPasskeys: vi.fn().mockResolvedValue([restricted]) });
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm this passkey' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(
       within(dialog).getByText(/don't have an older sign-in method/i),
     ).toBeInTheDocument();
-    // Routes into the existing gated remove flow (the escape hatch).
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete passkey' }));
     const confirmDeleteDialog = await screen.findByRole('alertdialog');
     expect(within(confirmDeleteDialog).getByText('Delete passkey')).toBeInTheDocument();

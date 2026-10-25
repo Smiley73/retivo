@@ -1,20 +1,4 @@
-/**
- * ExpensesProjectionChart — the list-page (non-single-series) path, on
- * the SVG chart engine.
- *
- *   - WITHOUT `singleSeriesLabel`: the two stacked-area legend entries
- *     (Essential / Discretionary) render; Total is implied by the stack
- *     height and has no legend entry.
- *   - WITH `singleSeriesLabel="This expense"`: only that one entry
- *     renders; the breakdown entries are absent.
- *   - Theme: the Essential area fill is sourced from `CHART_COLORS` and
- *     FLIPS between a light and dark `ThemeProvider`.
- *   - axe smoke against the resolved chart (AGENTS mandate).
- *
- * The chart is lazy-loaded behind Suspense, so every assertion awaits
- * the resolved `…Inner` chart (legend text), never the Suspense
- * "Loading…" fallback. The theme block renders the `…Inner` chart directly.
- */
+/** ExpensesProjectionChart legend and theme contract; assertions await the lazy inner chart, never the Suspense fallback. */
 import React from 'react';
 import { screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -66,7 +50,6 @@ describe('ExpensesProjectionChart — list-page (breakdown) path', () => {
     );
     expect(await screen.findByText('Essential')).toBeInTheDocument();
     expect(screen.getByText('Discretionary')).toBeInTheDocument();
-    // Total is implied by the combined stack height — no standalone legend entry.
     expect(screen.queryByText('Total')).not.toBeInTheDocument();
     expect(screen.queryByText('This expense')).not.toBeInTheDocument();
     await expectNoA11yViolations(container);

@@ -1,32 +1,14 @@
-/**
- * Tests for `useGuardrailsVm`.
- *
- * Covers the funded-ratio wiring off the engine baseline series, the
- * month-precise not-yet-retired scoping, the pre-gate crash guard,
- * the absent-guardrail-fields guard, and the bounded "Check now" MC
- * lifecycle + PoS-temper.
- *
- * The pipeline helpers are mocked so the hook's own orchestration is asserted
- * in isolation; `fundedRatio` (lib/guardrails.ts) stays REAL so the ratio is a
- * true hand-checkable value.
- */
+// `useGuardrailsVm`: the funded-ratio wiring off the engine baseline series, month-precise not-yet-retired scoping, the pre-gate crash guard, the absent-guardrail-fields guard and the bounded "Check now" MC lifecycle with PoS-temper.
+// The pipeline helpers are mocked to assert the hook's orchestration in isolation; `fundedRatio` stays real so the ratio is hand-checkable.
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import {
-  useGuardrailsVm,
-  GUARDRAILS_LIVE_MC_TIMEOUT_MS,
-  type GuardrailsVm,
-} from './use-guardrails-vm';
+import { useGuardrailsVm, type GuardrailsVm } from './use-guardrails-vm';
 import { GUARDRAILS_LIVE_MC_SEED } from '../lib/balance-projection-runner-mc';
 import { fundedRatio } from '../lib/guardrails';
 
-/** Call `checkNow` off a fresh `result.current` read (narrowing survives the
- *  helper's own scope, unlike an inline closure read). */
 function clickCheckNow(vm: GuardrailsVm): void {
   if (vm.status === 'ready') vm.checkNow();
 }
-
-// --- Mocks -----------------------------------------------------------------
 
 let mockData: {
   ready: boolean;
@@ -58,9 +40,7 @@ vi.mock('../lib/retirement-date-math', () => ({
   resolveMemberRetirementDates: () => new Map([['m1', mockRetirementIso]]),
 }));
 
-// Sums a test-only `currentBalance` over whatever accounts the hook passes, so a
-// test can assert the numerator reflects exactly the accounts the hook selected
-// (active-only).
+// Sums a test-only `currentBalance` over the accounts the hook passes, so a test can assert the numerator reflects exactly the accounts it selected (active-only).
 vi.mock('../lib/balance-calc', () => ({
   computePortfolioSummary: (
     accounts: Array<{ account: { payload: { currentBalance?: number } } }>,
@@ -74,8 +54,7 @@ vi.mock('../lib/balance-calc', () => ({
   }),
 }));
 
-// call(1) (override present) returns the funded-ratio baseline fields; call(2)
-// (no override) returns the REAL-config input the PoS run consumes.
+// call(1) (override present) returns the funded-ratio baseline fields; call(2) (no override) returns the real-config input the PoS run consumes.
 let mockNetNeed: number[] | undefined = [909_091];
 let mockTaxRate: number | undefined = 0;
 const buildMcMock: Mock = vi.fn(
@@ -100,8 +79,7 @@ interface MockPool {
   dispose: Mock;
   size: number;
   signal?: AbortSignal;
-  /** The `onProgress` callback passed to the most recent `run()` call, so a
-   *  test can simulate the worker's `{ kind: 'progress' }` messages. */
+  // The `onProgress` callback of the most recent `run()` call, so a test can simulate the worker's progress messages.
   lastOnProgress: ((done: number, total: number) => void) | undefined;
 }
 const createdPools: MockPool[] = [];
@@ -128,8 +106,6 @@ vi.mock('../monte-carlo/mc-worker-pool', () => ({
   createMcPool: (opts: unknown) => createMcPoolMock(opts),
 }));
 vi.mock('../workers/monte-carlo.worker.ts?worker', () => ({ default: class {} }));
-
-// --- Fixtures --------------------------------------------------------------
 
 function readyData(): typeof mockData {
   return {
@@ -168,14 +144,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// --- Tests -----------------------------------------------------------------
-
 describe('useGuardrailsVm — funded-ratio wiring', () => {
   it('should_compute_the_ratio_from_the_engine_baseline_series_and_classify_hold', () => {
-    // netNeed 909,091 @ 0 tax, portfolio 1,000,000 → ratio ≈ 1.10 → pct 110 →
-    // HOLD (between the 85 / 115 default bands). A raw un-converted comparison
-    // would misread 1.10 as ≤ 85 and say "cut". January so the
-    // current-year proration is a no-op and the round number holds.
+    // netNeed 909,091 at 0 tax against a 1,000,000 portfolio gives ratio ≈ 1.10, pct 110: HOLD between the default 85/115 bands (a raw un-converted comparison would misread 1.10 as ≤ 85 and say "cut"). January makes the current-year proration a no-op.
     vi.setSystemTime(new Date('2026-01-15T00:00:00'));
     const { result } = renderHook(() => useGuardrailsVm());
     expect(result.current.status).toBe('ready');
@@ -186,10 +157,7 @@ describe('useGuardrailsVm — funded-ratio wiring', () => {
   });
 
   it('should_classify_cut_on_the_inclusive_lower_edge', () => {
-    // 850,000 / 1,000,000 = 0.85 exactly → pct 85 → CUT on the inclusive lower
-    // edge (the EDGE_EPS absorbs the `ratio * 100` fp error, mirroring
-    // applyGuardrailStep's own edge behavior). January so the current-year
-    // proration is a no-op and the exact 0.85 edge holds.
+    // 850,000 / 1,000,000 = 0.85 exactly gives pct 85, CUT on the inclusive lower edge (EDGE_EPS absorbs the `ratio * 100` fp error, mirroring applyGuardrailStep). January keeps the proration a no-op.
     vi.setSystemTime(new Date('2026-01-15T00:00:00'));
     mockData.accounts = [{ id: 'a1', payload: { active: true, currentBalance: 850_000 } }];
     mockNetNeed = [1_000_000];
@@ -207,10 +175,7 @@ describe('useGuardrailsVm — funded-ratio wiring', () => {
   });
 
   it('should_prorate_only_the_current_drawdown_year_when_checked_mid_year', () => {
-    // Retired for years, checked in November (month index 10). Only index 0 (the
-    // current, partially-elapsed year) is prorated by the fraction of the year
-    // remaining — (12 − 10) / 12 = 2/12 — so the Jan→Oct already-spent net need is
-    // not counted as still owed. Year 1's liability is untouched.
+    // Retired for years, checked in November (month index 10): only index 0 (the current, partially elapsed year) is prorated by the fraction of the year remaining, (12 − 10) / 12 = 2/12, so the already-spent Jan→Oct net need isn't counted as still owed.
     vi.setSystemTime(new Date('2026-11-15T00:00:00'));
     mockNetNeed = [1_200_000, 990_000];
     const { result } = renderHook(() => useGuardrailsVm());
@@ -231,15 +196,12 @@ describe('useGuardrailsVm — funded-ratio wiring', () => {
       effectiveTaxRate: 0,
     });
     expect(result.current.ratio).toBeCloseTo(prorated as number, 6);
-    // Proration is load-bearing: without it the mid-year ratio is materially lower
-    // (the false-"cut" the fix prevents).
+    // Proration is load-bearing: without it the mid-year ratio is materially lower (the false "cut" the fix prevents).
     expect(prorated as number).not.toBeCloseTo(unprorated as number, 6);
   });
 
   it('should_be_a_no_op_in_january_when_no_month_has_elapsed', () => {
-    // Control: in January (month index 0) the proration factor is (12 − 0)/12 = 1,
-    // so the ratio matches the full, un-prorated net-need series — the prior
-    // behavior is not regressed.
+    // Control: in January the proration factor is 1, so the ratio matches the un-prorated series.
     vi.setSystemTime(new Date('2026-01-15T00:00:00'));
     mockNetNeed = [1_200_000, 990_000];
     const { result } = renderHook(() => useGuardrailsVm());
@@ -256,10 +218,7 @@ describe('useGuardrailsVm — funded-ratio wiring', () => {
   });
 
   it('should_exclude_inactive_account_balances_from_the_funded_ratio_numerator', () => {
-    // One active ($700k) + one inactive ($300k). The projection + "Check now" MC
-    // both use ACTIVE accounts only, so the numerator must too: the inactive $300k
-    // is excluded. netNeed 700,000 @ 0 tax → ratio = 700k / 700k = 1.0 (active-only),
-    // NOT 1,000,000 / 700,000 ≈ 1.43 (incl-inactive). January so no proration.
+    // One active ($700k) and one inactive ($300k) account. The projection and "Check now" MC use active accounts only, so the numerator must too: ratio 700k / 700k = 1.0, not 1,000,000 / 700,000 ≈ 1.43.
     vi.setSystemTime(new Date('2026-01-15T00:00:00'));
     mockData.accounts = [
       { id: 'a1', payload: { active: true, currentBalance: 700_000 } },
@@ -275,12 +234,10 @@ describe('useGuardrailsVm — funded-ratio wiring', () => {
 
 describe('useGuardrailsVm — scoping + empty states', () => {
   it('should_render_not_yet_retired_for_a_later_month_in_the_current_year_month_precise', () => {
-    // Today is June (month 5) 2026; retirement is November 2026 — same year, later
-    // month. A year-only check would wrongly proceed.
+    // Today is June 2026 and retirement is November 2026, same year but a later month; a year-only check would wrongly proceed.
     mockRetirementIso = '2026-11-01';
     const { result } = renderHook(() => useGuardrailsVm());
     expect(result.current.status).toBe('not-yet-retired');
-    // No MC assembly attempted while gated out.
     expect(buildMcMock).not.toHaveBeenCalled();
   });
 
@@ -335,14 +292,12 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
       clickCheckNow(result.current);
     });
 
-    // The PoS run consumes the NO-override (call 2) input, spread with the
-    // fixed live seed — NOT the forced-on ratio-calc input.
+    // The PoS run consumes the no-override (call 2) input spread with the fixed live seed, not the forced-on ratio-calc input.
     const pool = createdPools[0];
     expect(pool.run).toHaveBeenCalledTimes(1);
     const runInput = pool.run.mock.calls[0][0] as { __call: number; seed: number };
     expect(runInput.__call).toBe(2);
     expect(runInput.seed).toBe(GUARDRAILS_LIVE_MC_SEED);
-    // AbortController wired through to the pool.
     expect(pool.signal).toBeInstanceOf(AbortSignal);
 
     if (result.current.status !== 'ready') throw new Error('expected ready');
@@ -368,9 +323,7 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
       clickCheckNow(result.current);
     });
     if (result.current.status !== 'ready') throw new Error('expected ready');
-    // Known synchronously from the built input (pathCount: 10_000, __call 2) —
-    // seeded before any worker `progress` message arrives so the bar renders
-    // determinate from the first paint instead of starting indeterminate.
+    // Known synchronously from the built input (pathCount 10_000), so the bar renders determinate from the first paint instead of starting indeterminate.
     expect(result.current.posProgressDone).toBe(0);
     expect(result.current.posProgressTotal).toBe(10_000);
   });
@@ -418,8 +371,7 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
       staleOnProgress?.(9_999, 10_000); // late report from the disposed run 1
     });
     if (result.current.status !== 'ready') throw new Error('expected ready');
-    // Run 2 has not reported anything yet — the stale run-1 report must not
-    // leak through and show a misleadingly near-complete bar for run 2.
+    // Run 2 has reported nothing yet; the stale run-1 report must not show a misleadingly near-complete bar.
     expect(result.current.posProgressDone).toBe(0);
     expect(result.current.posProgressTotal).toBe(10_000);
   });
@@ -433,6 +385,19 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
     });
     if (result.current.status !== 'ready') throw new Error('expected ready');
     expect(result.current.pos.kind).toBe('timed-out');
+  });
+
+  it('should_abort_the_pool_signal_after_the_20_second_bound', () => {
+    poolRunNeverSettles = true;
+    const { result } = renderHook(() => useGuardrailsVm());
+    if (result.current.status !== 'ready') throw new Error('expected ready');
+    act(() => {
+      clickCheckNow(result.current);
+    });
+    vi.advanceTimersByTime(19_999);
+    expect(createdPools[0].signal!.aborted).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(createdPools[0].signal!.aborted).toBe(true);
   });
 
   it('should_surface_error_when_the_pool_resolves_error', async () => {
@@ -481,7 +446,6 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
     await act(async () => {
       clickCheckNow(result.current);
     });
-    // Two fresh pools (no cache short-circuit), both seeded identically.
     expect(createdPools.length).toBe(2);
     expect((createdPools[0].run.mock.calls[0][0] as { seed: number }).seed).toBe(
       GUARDRAILS_LIVE_MC_SEED,
@@ -492,7 +456,7 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
   });
 
   it('should_temper_a_raise_to_hold_when_the_pos_is_thin', async () => {
-    // ratio far above the upper band → raise; PoS 60% < 80% → tempered to hold.
+    // Ratio far above the upper band gives raise; PoS 60% < 80% tempers it to hold.
     mockNetNeed = [100_000];
     nextPoolReply = { kind: 'result', summary: { successProbability: 0.6 } };
     const { result } = renderHook(() => useGuardrailsVm());
@@ -520,11 +484,7 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
   });
 
   it('should_reset_a_settled_pos_to_idle_when_a_same_scenario_reactive_input_changes', async () => {
-    // Settle a "Check now" run to `ready`, then change a same-scenario reactive
-    // input that is NOT `selectedScenarioId` (an account balance — a NEW accounts
-    // array reference, exactly what a store write produces). The funded-ratio core
-    // recomputes off that same data, so the stale PoS must not linger and temper
-    // the freshly recomputed verdict — it returns to `idle`.
+    // Settle a "Check now" run, then change a same-scenario reactive input that isn't `selectedScenarioId` (a new accounts array reference, as a store write produces). The funded-ratio core recomputes, so the stale PoS must not linger and temper the fresh verdict: it returns to `idle`.
     nextPoolReply = { kind: 'result', summary: { successProbability: 0.72 } };
     const { result, rerender } = renderHook(() => useGuardrailsVm());
     if (result.current.status !== 'ready') throw new Error('expected ready');
@@ -545,9 +505,7 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
   });
 
   it('should_dispose_an_in_flight_run_and_reset_pos_when_a_same_scenario_input_changes', () => {
-    // An in-flight run is torn down (pool.dispose) and the PoS reset when the
-    // underlying reactive inputs change mid-run — the run is now based on stale
-    // inputs, so it must not settle against the recomputed verdict.
+    // An in-flight run is torn down (pool.dispose) and the PoS reset when the reactive inputs change mid-run, since it is now based on stale inputs.
     poolRunNeverSettles = true;
     const { result, rerender } = renderHook(() => useGuardrailsVm());
     if (result.current.status !== 'ready') throw new Error('expected ready');
@@ -566,10 +524,5 @@ describe('useGuardrailsVm — Check now MC lifecycle', () => {
     expect(createdPools[0].dispose).toHaveBeenCalled();
     if (result.current.status !== 'ready') throw new Error('expected ready');
     expect(result.current.pos).toEqual({ kind: 'idle' });
-  });
-
-  it('exposes a timeout bound above the path budget', () => {
-    // Sanity pin so the constant can't be trimmed to 0 without a failing test.
-    expect(GUARDRAILS_LIVE_MC_TIMEOUT_MS).toBeGreaterThanOrEqual(10_000);
   });
 });

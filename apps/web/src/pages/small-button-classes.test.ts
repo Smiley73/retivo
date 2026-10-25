@@ -1,13 +1,5 @@
-/**
- * Standalone small (compact) button-class strings.
- *
- * Guards the Tailwind-v4 source-order fix ("Buttons and destructive actions" in docs/ui-conventions.md): the compact button classes
- * are full **standalone** strings, not `${roleClass} ${btnSmClass}`
- * concats — on equal specificity Tailwind emits utilities in numeric
- * source order, so a role class's `px-4 py-2` would silently beat an
- * appended `px-2.5 py-1`. Each standalone string must therefore carry
- * the compact sizing directly and never the full-size padding/text.
- */
+// Standalone small button-class strings, guarding the Tailwind-v4 source-order fix ("Buttons and destructive actions" in docs/ui-conventions.md): on equal specificity Tailwind emits utilities in numeric source order, so a role class's `px-4 py-2` would silently beat an appended `px-2.5 py-1`.
+// Each standalone string must carry the compact sizing directly and never the full-size padding/text.
 import { describe, expect, it } from 'vitest';
 import {
   btnPrimarySmClass,
@@ -15,7 +7,6 @@ import {
   btnDangerSmClass,
 } from './accounts-page-chrome';
 import { btnSuccessSmClass } from './scenarios-page-chrome';
-import { btnSecondarySmClass as dialogBtnSecondarySmClass } from '../components/dialog-chrome';
 
 const COMPACT_TOKENS = ['px-2.5', 'py-1', 'text-xs'] as const;
 const FULL_SIZE_TOKENS = ['px-4', 'py-2', 'text-sm'] as const;
@@ -25,7 +16,6 @@ const STANDALONE_SM_CLASSES: ReadonlyArray<readonly [string, string]> = [
   ['btnSecondarySmClass', btnSecondarySmClass],
   ['btnDangerSmClass', btnDangerSmClass],
   ['btnSuccessSmClass', btnSuccessSmClass],
-  ['dialog btnSecondarySmClass', dialogBtnSecondarySmClass],
 ];
 
 describe('standalone small button classes', () => {

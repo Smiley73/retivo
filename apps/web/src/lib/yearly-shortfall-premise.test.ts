@@ -1,15 +1,4 @@
-/**
- * Premise test for the Yearly phantom-shortfall fix. Grounds the
- * bug's premise with the REAL projection helpers (not invented annual totals):
- * in a mid-year transition year the drawdown engine's monthly-basis
- * `withdrawn` diverges from the per-year (annualExpense − annualEarned)
- * net need by a material (> $1) amount, while the engine reports the year
- * fully funded (`depleted === false`). That residual is exactly what the
- * old Yearly shortfall (`Expenses − Earned − engineWithdrawn`) rendered as
- * a phantom shortfall. Two transition classes are covered:
- *   (a) the partial first retirement year (mid-year June retirement);
- *   (b) a mid-year income stop (part-time ends mid-year).
- */
+// Grounds the phantom-shortfall fix with the real projection helpers: in a mid-year transition year (a June first retirement year, or a mid-year income stop) the engine's monthly-basis `withdrawn` diverges from the per-year net need by more than $1 while the year is reported funded; that residual is what the old Yearly shortfall rendered.
 import { describe, expect, it } from 'vitest';
 import {
   projectExpensesByMonth,
@@ -166,8 +155,6 @@ describe('Yearly phantom-shortfall premise (real projection helpers)', () => {
     depositsByMonth: emptyMonthlySeries(RETIREMENT_YEAR, HORIZON_YEAR),
     retirementYear: RETIREMENT_YEAR,
     horizonYear: HORIZON_YEAR,
-    // The per-account engine needs a ledger (the Combined Pot single-pool path
-    // is retired). One large POST_TAX pool reproduces the single-pool math.
     withdrawalStrategy: { kind: 'taxEfficient' },
     accounts: [
       {
@@ -186,7 +173,6 @@ describe('Yearly phantom-shortfall premise (real projection helpers)', () => {
     const row = dd.years[2050 - RETIREMENT_YEAR];
     expect(row.depleted).toBe(false); // fully funded
     const residual = Math.abs(row.withdrawn - annualNetNeed(2050));
-    // Pre-fix this residual is the phantom shortfall the Yearly band drew.
     expect(residual).toBeGreaterThan(1);
   });
 
@@ -198,7 +184,6 @@ describe('Yearly phantom-shortfall premise (real projection helpers)', () => {
   });
 
   it('control: a steady mid-retirement year has no material divergence', () => {
-    // 2055 — no boundary (part-time runs all 12 months, expense steady).
     const row = dd.years[2055 - RETIREMENT_YEAR];
     expect(row.depleted).toBe(false);
     const residual = Math.abs(row.withdrawn - annualNetNeed(2055));

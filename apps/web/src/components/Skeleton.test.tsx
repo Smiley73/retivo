@@ -1,13 +1,4 @@
-/**
- * Skeleton — loading-placeholder render + a11y smoke.
- *
- * The shared first-paint primitive that replaced the bare
- * `<p>Loading…</p>` strings. Asserts the dimmed blocks carry the
- * reduced-motion-safe pulse + are `aria-hidden`, that `LoadingState`
- * announces once via a `role="status"` region with an `sr-only` label,
- * that each variant previews a distinct shape, plus the shared-component
- * axe rule (AGENTS mandate for component test files).
- */
+/** Skeleton: aria-hidden pulse blocks, the LoadingState status region with sr-only label, and distinct variant shapes. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -22,7 +13,6 @@ describe('Skeleton', () => {
     expect(block.className).toContain('w-40');
     expect(block.className).toContain('animate-pulse');
     expect(block.className).toContain('motion-reduce:animate-none');
-    // Decorative — assistive tech hears the LoadingState status, not the box.
     expect(block).toHaveAttribute('aria-hidden', 'true');
   });
 
@@ -40,8 +30,6 @@ describe('LoadingState', () => {
     const status = screen.getByRole('status');
     expect(status).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByText('Loading your accounts…')).toBeInTheDocument();
-    // The visual preview is hidden from AT so it is not read as a stream
-    // of empty boxes.
     expect(status.querySelector('[aria-hidden="true"]')).not.toBeNull();
   });
 
@@ -49,7 +37,6 @@ describe('LoadingState', () => {
     const { container } = render(
       <LoadingState label="Loading entries…" variant="table" />,
     );
-    // Header bar + 5 body-row blocks.
     const shape = container.querySelector('[aria-hidden="true"]') as HTMLElement;
     expect(shape.children).toHaveLength(6);
   });

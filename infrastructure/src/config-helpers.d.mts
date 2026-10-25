@@ -1,7 +1,4 @@
-// Type declarations for the dependency-free config-helpers.mjs runtime module.
-// The implementation is plain ESM JS so it stays importable under `node --test`
-// (scripts/test/config-coverage.test.mjs) without a TS runner; this .d.mts gives
-// config.ts the compile-time types tsc needs.
+// Types for config-helpers.mjs, which stays plain ESM so `node --test` imports it without a TS runner.
 
 export declare const CLOUDWATCH_LOG_RETENTION_DAYS: ReadonlyArray<number>;
 

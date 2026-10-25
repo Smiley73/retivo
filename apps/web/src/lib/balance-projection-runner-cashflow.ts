@@ -1,9 +1,6 @@
 /**
- * Cashflow-series builder for the BPP-equivalent helper. Produces the
- * per-month expense + income + deposit triples the drawdown engine
- * consumes — plus the targeted-one-off + post-primary-contribution
- * event lists the MC bundle re-anchors. Split out of
- * `balance-projection-runner.ts` (file shape limit).
+ * Cashflow-series builder: per-month expense, income and deposit series for the drawdown engine, plus the
+ * one-off and post-primary-contribution events the MC bundle re-anchors.
  */
 import {
   DEFAULT_INFLATION_PCT,
@@ -58,9 +55,8 @@ export function buildCashflowSeries(
   args: RunBalanceProjectionArgs,
   ctx: PipelineContext,
 ): CashflowSeries {
-  // Single expense projection (resolved expenses + context) feeds BOTH the
-  // aggregate expense series AND the medical-demand sub-slice so the
-  // latter is a strict subset of the former.
+  // One expense projection feeds both the aggregate series and the medical-demand sub-slice, so the latter is
+  // a subset of the former.
   const { resolved: resolvedExpenses, ctx: expenseCtx } = buildExpenseProjection(args, ctx);
   const expenseRows = buildExpenseRowsFrom(resolvedExpenses, expenseCtx, ctx);
   const expensesByMonth = buildMonthlyExpenseSeries({
@@ -76,7 +72,6 @@ export function buildCashflowSeries(
     expensesByMonth.values.length,
     isHsaQualifiedMedical,
   );
-  // Every `isMedical` row: the cap on the credit applied to premiums.
   const medicalExpenseByMonth = buildMedicalDemandByMonth(
     args,
     ctx,
@@ -85,8 +80,6 @@ export function buildCashflowSeries(
     expensesByMonth.values.length,
     isMedicalExpense,
   );
-  // Does the plan model ANY medical spending? Read off the same
-  // resolved expense projection, but WITHOUT the HSA-qualified filter.
   const allMedicalIds = medicalCategoryIdSet(args.medicalCategoryIds);
   const anyMedicalSpendingModeled = resolvedExpenses.some((e) =>
     allMedicalIds.has(e.payload.categoryId),
@@ -101,10 +94,8 @@ export function buildCashflowSeries(
   });
   const postPrimaryContributionEvents = buildPostPrimaryContributionEvents(ctx);
   const plainPensionPlacementEvents = buildPlainPensionPlacementEvents(args, ctx);
-  // Post-primary spouse contributions are NOT folded into the
-  // household-pool deposit series — they route per-account (carrying their
-  // pre/post split) via the per-account ledger. The household pool carries
-  // only the one-off / pension-lump-sum `depositInflow`.
+  // Post-primary spouse contributions route per-account through the ledger, not through the household-pool
+  // deposit series.
   const depositsByMonth = buildMonthlyDepositSeries({
     incomeRows: nonSsIncomeRows,
     retirementYear: ctx.primaryRetirementYear,
@@ -133,20 +124,12 @@ export function buildCashflowSeries(
     ssRows,
     medicalDemandByMonth,
     medicalExpenseByMonth,
-    // The FULL `isMedical` inventory, not the HSA-qualified subset
-    // `medicalDemandByMonth` is filtered to.
     anyMedicalSpendingModeled,
   };
 }
 
-/** Build the post-retirement **plain** (non-linked-CBP) pension lump-sum
- *  placement events. Re-sources from the identity-preserving income producer
- *  (`collectPostRetirementPlainPensionPlacements`), NOT the household-pool
- *  `depositInflow` (which has already summed away the target + owner).
- *  Each event carries its target `accountId` (absolute `month`) so the
- *  per-account ledger + MC `routeEventsToLedger` place the dollars in the
- *  target account. One-off windfalls keep flowing through `depositInflow`
- *  (still household-spread). */
+// Sourced from the identity-preserving income producer; `depositInflow` has already summed away target and
+// owner.
 function buildPlainPensionPlacementEvents(
   args: RunBalanceProjectionArgs,
   ctx: PipelineContext,
@@ -181,18 +164,13 @@ function buildPlainPensionPlacementEvents(
     { ...incomeCtx, retirementMonth0: ctx.primaryRetirementMonth0 },
     ctx.primaryRetirementAbsMonth,
   ).map((ev) => ({
-    // Absolute step month (`year*12 + month0`) — matches the post-primary /
-    // one-off event convention; `reanchorEvents` rebases it for the MC bundle.
+    // Absolute step month (`year*12 + month0`); `reanchorEvents` rebases it for the MC bundle.
     month: ev.month0,
     amount: ev.amount,
     accountId: ev.accountId,
   }));
 }
 
-/** Build the resolved expense list + the fully-populated projection context
- *  (inflation category rates included) ONCE so the aggregate expense series and
- *  the medical-demand sub-slice project against identical inputs — the
- *  latter is then a strict subset of the former. */
 function buildExpenseProjection(
   args: RunBalanceProjectionArgs,
   ctx: PipelineContext,
@@ -213,10 +191,7 @@ function buildExpenseProjection(
       : null,
     primaryRetirementIso: ctx.primaryRetIso,
   });
-  // Per-key resolver (not the generic resolveScenario) so per-category
-  // rates (e.g. Medical = general + 2pp) thread into the deterministic
-  // expense series the drawdown engine reads (faster Medical growth
-  // raises withdrawals → MAGI → IRMAA/ACA/federal-tax automatically).
+  // Per-key resolver so per-category rates (e.g. Medical = general + 2pp) reach the expense series.
   const resolvedInflation = resolveInflationForScenario(
     args.scenarioId,
     [...ctx.effectiveScenarios],
@@ -252,20 +227,8 @@ function buildExpenseRowsFrom(
   }));
 }
 
-/**
- * Per-month medical demand in INTEGER CENTS for the rows `qualifies` admits:
- * the HSA-qualified subset for the HSA pass, every `isMedical` row for the cap
- * on the credit applied to premiums. Sums the
- * categories flagged `isMedical` (resolved via `medicalCategoryIdSet`) from the
- * SAME category-month projection that underlies `expensesByMonth`, applying the
- * identical `(recurring − spike)/12 + spike` monthly bucketing
- * `buildMonthlyExpenseSeries` uses — so the series is a STRICT SUBSET of the
- * aggregate expense series, month for month. Anchored at (retirementYear, Jan);
- * `length` matches `expensesByMonth.values`. No `isMedical` category ⇒ the
- * resolver's seeded `cat-medical` fallback (absent array) or an empty set
- * (explicit empty array) — an empty set yields all-zero. Cents are
- * rounded per month so the medical/emergency HSA split reconciles to the cent.
- */
+// Integer cents per month, `(recurring - spike)/12 + spike` as in `buildMonthlyExpenseSeries`; rounded per
+// month so the HSA/emergency split reconciles to the cent.
 function buildMedicalDemandByMonth(
   args: RunBalanceProjectionArgs,
   ctx: PipelineContext,
@@ -277,8 +240,6 @@ function buildMedicalDemandByMonth(
   const out = new Array<number>(length).fill(0);
   const medicalIds = medicalCategoryIdSet(args.medicalCategoryIds);
   if (medicalIds.size === 0) return out;
-  // Filtering before projectExpensesByCategoryMonth preserves per-category
-  // rounding and the strict-subset invariant.
   const qualifiedExpenses = resolvedExpenses.filter((e) => qualifies(e, medicalIds));
   if (qualifiedExpenses.length === 0) return out;
   const points = projectExpensesByCategoryMonth(
@@ -296,8 +257,6 @@ function buildMedicalDemandByMonth(
       recurring += p.recurringByCategoryId[id] ?? 0;
       oneOff += p.oneOffByCategoryId[id] ?? 0;
     }
-    // Same monthly bucketing as buildMonthlyExpenseSeries: the run-rate share
-    // is /12, the one-off spike lands at full amount in its event month.
     const monthly = (recurring - oneOff) / 12 + oneOff;
     out[slot] = Math.round(monthly * 100);
   }
@@ -319,8 +278,6 @@ function buildSsRows(
   const ssCtx = buildSsContext([...args.members], [...args.ssBenefits], {
     claimAgePrimary: ss.primary,
     claimAgeSecondary: ss.secondary,
-    // SEPARATE survivor claim ages — absent member keys stay absent so
-    // the projection withholds survivor-dependent results.
     survivorClaimAgePrimary: ss.survivor?.primary,
     survivorClaimAgeSecondary: ss.survivor?.secondary,
     lifeExpectancyPrimary: lifePrimary,
@@ -339,8 +296,6 @@ function buildSsRows(
     year: m.year,
     month0: m.month0,
     total: m.total,
-    // Per-member SS so the hybrid-IRMAA split withholds each Medicare
-    // member's surcharge only from that member's own benefit.
     primary: m.byMember.primary,
     ...(m.byMember.secondary !== undefined ? { secondary: m.byMember.secondary } : {}),
   }));
@@ -363,8 +318,6 @@ function buildNonSsIncomeRows(
   const lifeSecondary = ctx.resolvedScenario.lifeExpectancy?.secondary;
   const todayYear = args.todayYear;
   const todayMonthIndex = args.todayMonthIndex;
-  // Reuse the CBP projections already computed in
-  // buildPipelineContext instead of re-projecting per call.
   const cbpBalanceLookup = makeCbpBalanceLookup(
     ctx.cbpProjectionByAccount,
     ctx.primaryRetirementAbsMonth,
@@ -394,12 +347,6 @@ function buildNonSsIncomeRows(
   }));
 }
 
-/**
- * Per-member earned income (part-time wages) for the SSA earnings test.
- * Delegates to the shared `buildEarnedIncomeSeries` helper so the
- * runner and the Balance Projection page assemble IDENTICAL earnings-test
- * inputs.
- */
 function buildEarnedIncomeByMemberYear(
   args: RunBalanceProjectionArgs,
   ctx: PipelineContext,
@@ -428,10 +375,8 @@ function buildEarnedIncomeByMemberYear(
     inflationPct: ctx.resolvedScenario.inflation?.ratePct ?? DEFAULT_INFLATION_PCT,
     linkedCbpBalanceLookup: cbpBalanceLookup,
   });
-  // Start the series at the EARLIEST SS entitlement year (own or
-  // survivor claim) when it precedes the primary retirement year — the SS
-  // engine's earnings-test/ARF warm-up reads those pre-retirement years.
-  // The spendable-income series keeps its own retirement-based range.
+  // Starts at the earliest SS entitlement year (own or survivor claim): the earnings-test warm-up reads
+  // pre-retirement years.
   const earliestEntitlement = earliestSsEntitlementYear(
     [...args.members],
     ctx.resolvedScenario.socialSecurity,
@@ -470,8 +415,6 @@ function buildPostPrimaryContributionEvents(
     for (let abs = primaryAbs; abs < ownerAbs; abs += 1) {
       out.push({
         month: abs,
-        // Summed `amount` kept for the no-ledger kernel path (byte-identical);
-        // the per-account split routes by `amountPre`/`amountPost`.
         amount: perMonth,
         amountPre: pre,
         amountPost: post,

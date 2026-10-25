@@ -1,28 +1,13 @@
-/**
- * MonteCarloFanSection — Reset-button visibility + a11y smoke.
- *
- * Tests:
- *  - reset_visible_when_zoomed: Reset button present when useChartZoom
- *    reports isZoomed=true.
- *  - a11y_smoke: expectNoA11yViolations (AGENTS mandate for every
- *    components/ test file).
- *
- * useChartZoom is mocked at the module boundary so the section's
- * conditional rendering can be driven without a real drag gesture.
- * MonteCarloFanChart is mocked to a simple div (avoids Recharts
- * ResizeObserver dependency in jsdom).
- */
+/** MonteCarloFanSection: Reset button visibility, with useChartZoom and the fan chart mocked. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { expectNoA11yViolations } from '../test/a11y';
 
-// Mock MonteCarloFanChart — avoids Recharts / ResizeObserver in jsdom.
 vi.mock('./MonteCarloFanChart', () => ({
   MonteCarloFanChart: () => <div data-testid="mc-fan-chart" />,
 }));
 
-// Mutable zoom state controlled by each test.
 let mockIsZoomed = false;
 const mockReset = vi.fn();
 

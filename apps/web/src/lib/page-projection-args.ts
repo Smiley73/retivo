@@ -1,12 +1,5 @@
-/**
- * The pure argument assembly behind the Balance Projection page's data load:
- * resolve the scenario, find the primary member and each member's retirement
- * date, count the accounts the runner will drop, and build the arguments (plus
- * the `canRun` guard) for `runBalanceProjectionForPage`. `loadPageData` is the
- * thin caller that runs the projection and maps rows; the AI assistant tools
- * call this same function so the resolved scenario and the runner arguments
- * they report are the ones the page runs on.
- */
+// Argument assembly behind the Balance Projection page's data load, shared with the AI assistant tools so they report the resolved scenario and runner arguments the page runs on.
+
 import type {
   AccountBalancePayload,
   AccountPayload,
@@ -32,9 +25,7 @@ export interface PageProjectionInputs {
   readonly expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
   readonly incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
   readonly ssBenefits: ReadonlyArray<Aggregate<SocialSecurityBenefitPayload>>;
-  /** Household expense categories — the source for the flag-derived medical
-   *  set. Omit to keep the legacy `cat-medical` default (back-compat for
-   *  callers that don't load categories). */
+  /** Source of the flag-derived medical set; omit for the `cat-medical` default. */
   readonly categories?: ReadonlyArray<Aggregate<ExpenseCategoryPayload>>;
   readonly todayYear: number;
   readonly todayMonthIndex: number;
@@ -42,24 +33,17 @@ export interface PageProjectionInputs {
 
 export interface PageProjectionAssembly {
   readonly resolved: ScenarioOverrides;
-  /** Flag-derived medical category ids; absent when no category source was given. */
   readonly medicalCategoryIds: string[] | undefined;
   readonly primaryMember: Aggregate<HouseholdMemberPayload> | null;
   readonly memberRetirementById: Map<string, string | null>;
   readonly primaryRetirementAbsMonth: number | null;
   readonly hiddenInactiveCount: number;
   readonly hiddenZeroHistoryCount: number;
-  /** True when ≥1 active account has at least one balance row with a non-zero balance. */
   readonly hasAnyRealBalance: boolean;
-  /** The runner needs a primary member, a resolved primary retirement date and an active account. */
   readonly canRun: boolean;
   readonly args: RunBalanceProjectionArgs;
 }
 
-/** Resolve the household's primary member and the per-member retirement
- *  dates, then derive the primary's retirement ISO date + its absolute-month
- *  index (`year * 12 + month0`) the page uses to anchor markers. Returns
- *  nulls when there is no primary or its retirement date is unresolved. */
 function derivePrimaryRetirement(
   retirementAge: ScenarioOverrides['retirementAge'],
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
@@ -96,14 +80,7 @@ function derivePrimaryRetirement(
   };
 }
 
-/**
- * Does a balance row record an actual (non-zero) balance? For a MIXED-treatment
- * account the money can live only in the split fields, so we read
- * `startingBalancePreTax/PostTax` + `endingBalancePreTax/PostTax` with the
- * top-level `startingBalance`/`endingBalance` as a fallback. A row whose
- * every relevant balance field is 0 is NOT real — that includes the auto-$0
- * seed an account picks up at creation.
- */
+/** True when the row records a non-zero balance. MIXED money can live only in the split fields, so those are read too; the auto-$0 seed row is not real. */
 function balanceRowIsReal(p: AccountBalancePayload): boolean {
   const candidates = [
     p.startingBalance,
@@ -116,14 +93,7 @@ function balanceRowIsReal(p: AccountBalancePayload): boolean {
   return candidates.some((v) => v !== 0);
 }
 
-/** Hidden-account footer counts (presentation only): inactive accounts and
- *  active accounts with no **non-zero** balance row (the runner drops both from
- *  `accountProjections`). Re-keyed from "no balance row at all" to "no non-zero
- *  balance row" so the NoAccountState vs NoHistoryState distinction stays
- *  correct once auto-$0 seed accounts always carry a row. Also surfaces
- *  the portfolio-level `hasAnyRealBalance` predicate the empty-state gate reads.
- *  Returned alongside the active-account list the caller uses to decide whether
- *  the runner has anything to project. */
+/** Hidden-account footer counts: inactive accounts and active ones with no non-zero balance row, which the runner drops. Keyed on non-zero rows so seed accounts keep the NoAccountState and NoHistoryState distinction. */
 function deriveHiddenAccountCounts(
   accounts: ReadonlyArray<Aggregate<AccountPayload>>,
   balances: ReadonlyArray<Aggregate<AccountBalancePayload>>,
@@ -151,11 +121,7 @@ function deriveHiddenAccountCounts(
   };
 }
 
-/**
- * Resolve one scenario and assemble everything the page's deterministic
- * projection runs on. Throws when `selectedScenarioId` is not a scenario (the
- * resolver's own error), exactly as `loadPageData` always did.
- */
+/** Resolves one scenario and assembles what the page's deterministic projection runs on; throws when `selectedScenarioId` is not a scenario. */
 export function assemblePageProjection(
   opts: PageProjectionInputs,
 ): PageProjectionAssembly {

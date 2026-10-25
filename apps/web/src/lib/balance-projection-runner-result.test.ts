@@ -1,16 +1,8 @@
-/**
- * Result-shaping helper tests for `balance-projection-runner-result.ts`.
- *
- * Covers the RMD-surplus passthrough on `buildDrawdownYearRows`: the
- * `rmdReinvestedCents` / `rmdOverflowToCashCents` engine fields must copy
- * through onto `DrawdownYearRow` AS-IS (including `undefined → undefined`), so a
- * dropped engine value can't be silently masked by a downstream `?? 0`.
- */
+/** Tests for the RMD-surplus passthrough in `buildDrawdownYearRows` (`balance-projection-runner-result.ts`). */
 import { describe, it, expect } from 'vitest';
 import { buildDrawdownYearRows } from './balance-projection-runner-result';
 import type { DrawdownYear } from './drawdown-engine';
 
-/** Minimal DrawdownYear with the surplus fields controllable. */
 function makeYear(overrides: Partial<DrawdownYear> & { year: number }): DrawdownYear {
   return {
     balance: 500_000,
@@ -39,9 +31,7 @@ describe('buildDrawdownYearRows — RMD surplus passthrough', () => {
       makeYear({ year: 2030, rmdReinvestedCents: undefined, rmdOverflowToCashCents: undefined }),
     ];
     const rows = buildDrawdownYearRows(years);
-    // The field is passed through AS-IS by buildDrawdownYearRows: a missing
-    // engine value stays `undefined` here (the tax post-pass default, if any,
-    // is a separate step downstream — this shape transform must not coerce).
+    // Passed through as-is: a missing engine value stays undefined; this shape transform must not coerce.
     expect(rows[0].rmdReinvestedCents).toBeUndefined();
     expect(rows[0].rmdOverflowToCashCents).toBeUndefined();
   });

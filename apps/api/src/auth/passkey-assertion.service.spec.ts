@@ -1,15 +1,5 @@
-/**
- * Unit tests for PasskeyAssertionService — the shared WebAuthn boundary for the passkey LOGIN and
- * the passkey SECOND-FACTOR paths. The `@simplewebauthn/server` primitives are module-mocked so the
- * assertion logic is testable TDD-first: we drive `generateAuthenticationOptions` +
- * `verifyAuthenticationResponse` per case and assert the userId-scoping, the conditional counter
- * write, and the typed failure codes.
- *
- * The challenge store is a real DynamoDB-backed `PasskeyChallengeStore`
- * pulled from a bootstrapped app's DI
- * container — cheap to share across every case in this file since it holds
- * no in-process state; the PasskeysRepository + ConfigService are stubbed.
- */
+// PasskeyAssertionService, the shared WebAuthn boundary for passkey login and the passkey second factor: userId scoping, the conditional counter write and typed failure codes.
+// `@simplewebauthn/server` is module-mocked (no software authenticator); the challenge store is a real DynamoDB-backed instance from a bootstrapped app, shared since it holds no in-process state.
 import 'reflect-metadata';
 
 const generateAuthenticationOptions = jest.fn();
@@ -20,7 +10,6 @@ jest.mock('@simplewebauthn/server', () => ({
   verifyAuthenticationResponse: (...a: unknown[]) => verifyAuthenticationResponse(...a),
 }));
 
-// Imported after the mock is registered.
 import { PasskeyAssertionService } from './passkey-assertion.service.js';
 import { PasskeyChallengeStore } from './passkey-challenge-store.js';
 import { bootstrapTestApp, type TestApp } from '../test/test-helpers.js';
@@ -33,7 +22,6 @@ import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 const WEB_ORIGIN = 'https://app.example.test';
 const CHALLENGE = 'webauthn-challenge-xyz';
 
-/** Build a clientDataJSON base64url string carrying the WebAuthn challenge. */
 function clientDataJSON(challenge: string): string {
   return Buffer.from(JSON.stringify({ challenge, type: 'webauthn.get' })).toString('base64url');
 }
@@ -73,10 +61,6 @@ interface Built {
   passkeys: { find: jest.Mock; listForUser: jest.Mock; updateCounterAndLastUsed: jest.Mock };
 }
 
-// The challenge store is now a DynamoDB-backed async facade with no
-// in-process state and no sweep interval to leak — a single real instance,
-// pulled from a bootstrapped app's DI container, is shared by every
-// `build()` call in this file.
 let t: TestApp;
 let realStore: PasskeyChallengeStore;
 
@@ -124,7 +108,6 @@ describe('PasskeyAssertionService — generateMfaStartOptions', () => {
     const options = await svc.generateMfaStartOptions('u1');
 
     expect(options).toEqual({ challenge: CHALLENGE });
-    // allowCredentials were scoped to the user's enrolled passkeys.
     expect(generateAuthenticationOptions).toHaveBeenCalledWith(
       expect.objectContaining({
         userVerification: 'required',
@@ -134,8 +117,7 @@ describe('PasskeyAssertionService — generateMfaStartOptions', () => {
         ],
       }),
     );
-    // The challenge is stored under the userId-scoped mfa namespace, not
-    // the discoverable `auth:` namespace.
+    // The challenge is stored under the userId-scoped mfa namespace, not the discoverable `auth:` one.
     expect(await store.consume(`mfa:u1:${CHALLENGE}`)).toMatchObject({ challenge: CHALLENGE });
     expect(await store.consume(`auth:${CHALLENGE}`)).toBeNull();
   });
@@ -159,8 +141,6 @@ describe('PasskeyAssertionService — verifyMfaAssertion', () => {
     const result = await svc.verifyMfaAssertion('u1', assertion('cred-a') as never);
 
     expect(result).toEqual({ credentialId: 'cred-a' });
-    // Resolved the credential under the challenge user — never the assertion
-    // userHandle.
     expect(passkeys.find).toHaveBeenCalledWith('u1', 'cred-a');
     expect(passkeys.updateCounterAndLastUsed).toHaveBeenCalledWith(
       'u1',
@@ -172,7 +152,6 @@ describe('PasskeyAssertionService — verifyMfaAssertion', () => {
 
   it('rejects a missing/expired challenge with MFA_CODE_INVALID', async () => {
     const { svc, passkeys } = build();
-    // No challenge stored.
     passkeys.find.mockResolvedValue(passkeyRow('cred-a'));
     await expect(svc.verifyMfaAssertion('u1', assertion('cred-a') as never)).rejects.toMatchObject({
       response: { code: 'MFA_CODE_INVALID' },
@@ -183,8 +162,6 @@ describe('PasskeyAssertionService — verifyMfaAssertion', () => {
   it('rejects a credential not enrolled to the challenge user (credential substitution)', async () => {
     const { svc, store, passkeys } = build();
     await store.set(`mfa:u1:${CHALLENGE}`, CHALLENGE, 'u1');
-    // The asserted credential is not enrolled to u1 even though userHandle
-    // claims a different user.
     passkeys.find.mockResolvedValue(null);
     await expect(svc.verifyMfaAssertion('u1', assertion('cred-foreign') as never)).rejects.toMatchObject(
       { response: { code: 'MFA_CODE_INVALID' } },
@@ -209,8 +186,7 @@ describe('PasskeyAssertionService — verifyMfaAssertion', () => {
     const { svc, store, passkeys } = build();
     await store.set(`mfa:u1:${CHALLENGE}`, CHALLENGE, 'u1');
     passkeys.find.mockResolvedValue(passkeyRow('cred-a', 9));
-    // SimpleWebAuthn v13's exact counter-regression message (cloned-authenticator
-    // signal): both counters non-zero, presented did not strictly advance.
+    // SimpleWebAuthn v13's exact counter-regression message (cloned-authenticator signal).
     verifyAuthenticationResponse.mockRejectedValue(
       new Error('Response counter value 3 was lower than expected 9'),
     );
@@ -223,8 +199,7 @@ describe('PasskeyAssertionService — verifyMfaAssertion', () => {
     const { svc, store, passkeys } = build();
     await store.set(`mfa:u1:${CHALLENGE}`, CHALLENGE, 'u1');
     passkeys.find.mockResolvedValue(passkeyRow('cred-a'));
-    // An unrecognised verification failure must NOT masquerade as a UV or a
-    // counter anomaly — it surfaces the generic MFA_CODE_INVALID.
+    // An unrecognised failure must not masquerade as a UV or counter anomaly; it surfaces the generic MFA_CODE_INVALID.
     verifyAuthenticationResponse.mockRejectedValue(
       new Error('Could not verify the assertion signature'),
     );
@@ -251,14 +226,12 @@ describe('PasskeyAssertionService — verifyMfaAssertion', () => {
 
   it('only consumes the mfa-namespace challenge, never an auth-namespace one', async () => {
     const { svc, store, passkeys } = build();
-    // An `auth:`-minted (discoverable-login) challenge must NOT satisfy MFA
-    // verify (namespace isolation).
+    // An `auth:` (discoverable-login) challenge must not satisfy MFA verify: namespace isolation.
     await store.set(`auth:${CHALLENGE}`, CHALLENGE);
     passkeys.find.mockResolvedValue(passkeyRow('cred-a'));
     await expect(svc.verifyMfaAssertion('u1', assertion('cred-a') as never)).rejects.toMatchObject({
       response: { code: 'MFA_CODE_INVALID' },
     });
-    // The auth challenge is still present (untouched by the MFA path).
     expect(await store.consume(`auth:${CHALLENGE}`)).toMatchObject({ challenge: CHALLENGE });
   });
 });
@@ -273,8 +246,6 @@ describe('PasskeyAssertionService — discoverable login seam', () => {
     const { svc, store } = build();
     generateAuthenticationOptions.mockResolvedValue({ challenge: CHALLENGE });
     await svc.generateLoginStartOptions();
-    // The login challenge lives under `auth:` only — the MFA verify path keys on
-    // `mfa:<userId>:<challenge>`, so it can never consume this one.
     expect(await store.consume(`mfa:u1:${CHALLENGE}`)).toBeNull();
     expect(await svc.consumeLoginChallenge(assertion('cred-a') as never)).toMatchObject({
       challenge: CHALLENGE,

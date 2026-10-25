@@ -1,31 +1,17 @@
 /**
- * Legend for the SVG chart engine — replaces the Recharts `<Legend>`
- * that auto-collected one entry per non-hidden series. Renders a row of
- * color swatches + names below the chart. The swatch color is a runtime
- * theme-resolved series color, so it uses the SVG `<svg><rect fill>`
- * presentation attribute (not an inline style) to stay within the
- * inline-style ban.
- *
- * Interactive mode: when `onToggle` is supplied each entry renders as a
- * toggle `<button aria-pressed>` (native button → free keyboard + focus)
- * with isolate-first click semantics. A hidden entry is dimmed + struck
- * through via Tailwind utilities (no inline style). The hidden set is keyed
- * by series `name` so paired channels (Projection chart's solid/dashed)
- * toggle as one. Click passes the clicked key plus the full, de-duplicated
- * legend-key universe (`legendKeys`) to `onToggle` so the hook can isolate /
- * restore-all over the real key set. Without `onToggle` the legend stays
- * static (`<span>`s).
+ * Legend row for the chart engine; with `onToggle` entries are `<button aria-pressed>` with isolate-first clicks,
+ * keyed by series `name` so paired channels toggle as one.
  */
 import React from 'react';
 import type { SeriesSpec } from './types';
 
 interface ChartLegendProps {
   series: SeriesSpec[];
-  /** Series names currently hidden (interactive mode). */
   hiddenSeries?: ReadonlySet<string>;
-  /** When set, entries become toggle buttons that call this with the
-   *  clicked series' key and the full de-duplicated legend-key universe.
-   *  Omit for a static (read-only) legend. */
+  /**
+   * Makes entries toggle buttons, called with the clicked key and the de-duplicated legend-key
+   * universe; omit for a static legend.
+   */
   onToggle?: (name: string, allNames: readonly string[]) => void;
 }
 
@@ -42,9 +28,8 @@ export const ChartLegend: React.FC<ChartLegendProps> = ({
 }) => {
   const entries = series.filter((s) => !s.hideFromLegend);
   if (entries.length === 0) return null;
-  // De-duplicated legend-key universe — each legend identity appears once, so
-  // the hook's restore-all arithmetic can't be inflated by two visible entries
-  // that share an identity.
+  // De-duplicated so two visible entries sharing an identity cannot inflate the restore-all
+  // arithmetic.
   const legendKeys = Array.from(new Set(entries.map((e) => e.legendId ?? e.name)));
   return (
     <ul className="m-0 flex list-none flex-wrap justify-center gap-4 p-0 pt-2 text-xs text-muted">

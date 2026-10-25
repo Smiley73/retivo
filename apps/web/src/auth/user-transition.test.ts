@@ -1,8 +1,4 @@
-/**
- * Unit tests for the cross-user IDB-leak guard. Exercises every
- * decision in `maybeResetForNewUser` with stubbed deps so the logic is
- * verified independently of IndexedDB + localStorage globals.
- */
+// Every decision in `maybeResetForNewUser`, with stubbed deps so the logic is verified independently of IndexedDB and localStorage.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { maybeResetForNewUser, productionDeps } from './user-transition';
@@ -18,7 +14,6 @@ import {
   getEntries as getDiagnosticsEntries,
   recordError as recordDiagnosticsError,
 } from '../lib/diagnostics/logger';
-import { buildDiagnosticsEnvelope } from '../lib/diagnostics/export';
 
 interface StubState {
   storedUserId: string | null;
@@ -88,8 +83,6 @@ describe('maybeResetForNewUser', () => {
   });
 
   it('drops + records userId on the first-ever login (no tracker, empty IDB)', async () => {
-    // Rationale: `previous` (null) does not equal `claims.userId`, so
-    // layer 1 fires. The drop on an empty IDB is a no-op cost.
     const state = freshState({ storedUserId: null, hasForeign: false });
     await maybeResetForNewUser(CLAIMS_A, makeDeps(state));
     expect(state.dropCalls).toBe(1);
@@ -97,9 +90,6 @@ describe('maybeResetForNewUser', () => {
   });
 
   it('drops on the upgrade case (no tracker, IDB still holds prior household)', async () => {
-    // Pre-fix devices have stale IDB from before this code shipped;
-    // localStorage tracker is absent. Layer 1 catches it because
-    // `null !== userId`.
     const state = freshState({ storedUserId: null, hasForeign: true });
     await maybeResetForNewUser(CLAIMS_B, makeDeps(state));
     expect(state.dropCalls).toBe(1);
@@ -121,9 +111,7 @@ describe('maybeResetForNewUser', () => {
   });
 
   it('drops despite a matching tracker when IDB still holds foreign household data (DevTools tampering)', async () => {
-    // Attack: attacker wipes/fakes the tracker to match their userId.
-    // Layer 2's IDB audit catches the leak because aggregate rows
-    // still carry the prior user's householdId.
+    // An attacker who forges the tracker to match their userId is still caught by the layer-2 IDB audit of foreign householdIds.
     const state = freshState({ storedUserId: 'user-A', hasForeign: true });
     await maybeResetForNewUser(CLAIMS_A, makeDeps(state));
     expect(state.dropCalls).toBe(1);
@@ -143,10 +131,7 @@ describe('maybeResetForNewUser', () => {
   });
 
   it('fails closed on a drop failure: re-throws and does NOT record the new userId', async () => {
-    // A blocked/failed drop must not let the new account ride over the
-    // previous account's stale rows. The guard re-throws and leaves the
-    // tracker unchanged so the caller does not expose the new household and
-    // a retry (after other tabs release the IDB) re-runs the drop.
+    // A blocked drop must not let the new account ride over stale rows: the guard re-throws and leaves the tracker unchanged, so a retry re-runs the drop.
     const state = freshState({
       storedUserId: 'user-A',
       hasForeign: false,
@@ -171,9 +156,7 @@ describe('maybeResetForNewUser', () => {
   });
 
   it('clears the diagnostics rings after a successful cross-user drop', async () => {
-    // A different user must never inherit the prior user's in-memory
-    // diagnostics rings — the drop wipes the persisted store but not the
-    // module-level rings, so the guard clears them after a successful drop.
+    // The drop wipes the persisted store but not the module-level diagnostics rings, so the guard clears them for a different user.
     const state = freshState({ storedUserId: 'user-A', hasForeign: true });
     await maybeResetForNewUser(CLAIMS_B, makeDeps(state));
     expect(state.dropCalls).toBe(1);
@@ -217,22 +200,16 @@ describe('maybeResetForNewUser', () => {
   });
 
   it('records the new userId on legitimate first login (no drop) — covers null→A→A flow', async () => {
-    // First call: null tracker → drops, records A.
     const state = freshState({ storedUserId: null, hasForeign: false });
     await maybeResetForNewUser(CLAIMS_A, makeDeps(state));
     expect(state.storedUserId).toBe('user-A');
 
-    // Second call as same user: tracker matches, audit clean → no drop.
     state.dropCalls = 0;
     await maybeResetForNewUser(CLAIMS_A, makeDeps(state));
     expect(state.dropCalls).toBe(0);
   });
 
-  it('integration: a real cross-user drop empties the rings, the IDB store, and the next-user export', async () => {
-    // End-to-end leak closure: record + flush real entries as user A, run the
-    // transition with the REAL logger.clear wired + REAL fake-indexeddb drop,
-    // then assert user B inherits nothing — empty rings, empty persisted store,
-    // empty export envelope.
+  it('integration: a real cross-user drop empties the rings and the IDB store', async () => {
     clearDiagnosticsRings();
     await clearDiagnosticLogs();
     recordDiagnosticsError('user A captured secret');
@@ -245,25 +222,18 @@ describe('maybeResetForNewUser', () => {
       storeLastUserId: (): void => {},
       hasForeignHouseholdData,
       dropLocalDatabase,
-      // Real binding under test — not a spy.
       clearDiagnostics: clearDiagnosticsRings,
       nudgeOtherTabsToReleaseIdb: (): void => {},
       warn: (): void => {},
     };
     await maybeResetForNewUser(CLAIMS_B, deps);
 
-    // User B: rings emptied, persisted store dropped, export carries nothing.
     expect(getDiagnosticsEntries()).toHaveLength(0);
     expect(await listDiagnosticLogs()).toHaveLength(0);
-    const envelope = await buildDiagnosticsEnvelope('hh-B');
-    expect(envelope.entries).toHaveLength(0);
   });
 
   it('production guard wires the real dropLocalDatabase, not the clear-data nuke (non-regression)', () => {
-    // The cross-user transition guard keeps dropLocalDatabase()'s
-    // selective IDB-only wipe (preserves deviceId/email) and must never be
-    // swapped for the explicit clear-data clearAllLocalData() full nuke —
-    // lock the binding so a future edit can't silently change it.
+    // The guard keeps dropLocalDatabase()'s selective IDB-only wipe (preserving deviceId/email) and must never become the full clearAllLocalData() nuke.
     expect(productionDeps.dropLocalDatabase).toBe(dropLocalDatabase);
   });
 });

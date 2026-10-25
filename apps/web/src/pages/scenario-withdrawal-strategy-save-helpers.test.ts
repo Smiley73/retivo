@@ -1,9 +1,4 @@
-/**
- * Unit tests for the five pure save-helpers.
- * Each helper has a small decision matrix; modal integration tests
- * exercise the common paths but cannot easily enumerate every branch in
- * isolation. These tests pin the contract per branch.
- */
+// The five pure save-helpers: each has a small decision matrix that modal integration tests can't easily enumerate, so these pin the contract per branch.
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
@@ -33,7 +28,6 @@ import {
 type ScenarioOverrides = ScenarioPayload['overrides'];
 const empty: ScenarioOverrides = {};
 
-/** Minimal active account fixture for the prune-aware custom-order helper. */
 function acct(id: string, type: AccountType = 'RETIREMENT_401K'): Aggregate<AccountPayload> {
   return {
     id,
@@ -60,7 +54,6 @@ function acct(id: string, type: AccountType = 'RETIREMENT_401K'): Aggregate<Acco
   };
 }
 
-/** A single-window cap window (draft + persisted share the shape here). */
 function win(over: Partial<DraftMagiCapWindow> = {}): DraftMagiCapWindow {
   return {
     start: { kind: 'retirementStart' },
@@ -258,19 +251,14 @@ describe('buildNextCustomOrder', () => {
     });
   });
 
-  // The inherited order can still carry a CBP id (legacy data, or a
-  // parent saved before CBP became non-orderable). The draft is already
-  // CBP-pruned by seedTierState; the comparison must prune the inherited
-  // order the same way so a CBP-only difference is NOT mistaken for an edit.
+  // The inherited order can still carry a CBP id (legacy data, or a parent saved before CBP became non-orderable); the draft is CBP-pruned by seedTierState, so the comparison must prune the inherited order the same way or a CBP-only difference is mistaken for an edit.
   it('omits the key when the inherited order differs only by a pruned CBP id (no local override)', () => {
     expect(
       buildNextCustomOrder({
         strategyKind: 'customOrder',
-        // Draft: CBP already pruned out by seedTierState.
         tiers: [['acct-401k']],
         excludedAccountIds: [],
         effective: {
-          // Inherited: still references the now-non-orderable CBP account.
           customDrawdownOrder: { tiers: [['acct-401k', 'acct-cbp']], excludedAccountIds: [] },
         },
         localOverrides: empty,
@@ -283,7 +271,6 @@ describe('buildNextCustomOrder', () => {
     expect(
       buildNextCustomOrder({
         strategyKind: 'customOrder',
-        // Draft moved acct-ira to its own tier (a genuine edit), CBP pruned.
         tiers: [['acct-401k'], ['acct-ira']],
         excludedAccountIds: [],
         effective: {
@@ -305,11 +292,7 @@ describe('buildNextCustomOrder', () => {
   });
 });
 
-/** `buildNextMagiCap` takes the Fill/Minimize + line + target-Roth
- *  fields explicitly from the UI draft. This helper supplies the default draft
- *  values (Minimize / IRMAA / no target) so each test states only the fields it
- *  exercises; the defaults are OMITTED from the written payload (the engine
- *  reads today's behavior from their absence). */
+// `buildNextMagiCap` takes the Fill/Minimize, line and target-Roth fields from the UI draft; this helper supplies defaults (Minimize / IRMAA / no target), which are omitted from the written payload since the engine reads today's behaviour from their absence.
 function mc(args: {
   magiCapEnabled: boolean;
   magiCapWindows: DraftMagiCapWindow[];
@@ -505,8 +488,7 @@ describe('buildNextTaxAssumptions', () => {
   });
 
   it('prunes an orphaned id (deleted account) from a LOCAL exempt override on save', () => {
-    // The scenario locally exempts acct-a + acct-gone; acct-gone was deleted
-    // (absent from `accounts`). Saving drops the orphan and keeps the live id.
+    // The scenario locally exempts acct-a and acct-gone; acct-gone was deleted (absent from `accounts`), so saving drops the orphan and keeps the live id.
     expect(
       buildNextTaxAssumptions({
         hsaQualifiedPct: 100,
@@ -523,9 +505,7 @@ describe('buildNextTaxAssumptions', () => {
   });
 
   it('does not materialise a child override when the orphan is purely inherited', () => {
-    // No local override; the orphan lives only in the inherited (effective)
-    // list. Pruning both sides for the comparison means the lists match after
-    // pruning, so no key is written — the inherited orphan is left untouched.
+    // No local override; the orphan lives only in the inherited list. Pruning both sides makes the lists match, so no key is written and the inherited orphan is untouched.
     expect(
       buildNextTaxAssumptions({
         hsaQualifiedPct: 100,
@@ -556,7 +536,6 @@ describe('buildNextTaxAssumptions', () => {
   });
 });
 
-/** Minimal household-member fixture for the ACA opt-out prune helper. */
 function member(id: string): Aggregate<HouseholdMemberPayload> {
   return {
     id,
@@ -620,10 +599,6 @@ describe('buildNextAcaCoverage', () => {
     ).toEqual({});
   });
 });
-
-// ---------------------------------------------------------------------------
-// buildNextHealthCoverage
-// ---------------------------------------------------------------------------
 
 describe('buildNextHealthCoverage', () => {
   const members = [member('m-primary'), member('m-secondary')];
@@ -731,8 +706,7 @@ describe('buildNextHealthCoverage', () => {
   });
 
   it('does not materialise a child override for a purely-inherited orphan row', () => {
-    // The inherited map names a member who no longer exists. Both sides prune to
-    // the same empty map, so no local key is written.
+    // The inherited map names a member who no longer exists; both sides prune to the same empty map, so no local key is written.
     expect(
       buildNextHealthCoverage({
         effective: {
@@ -756,10 +730,6 @@ describe('buildNextHealthCoverage', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildNextHealthCoverage — review regressions
-// ---------------------------------------------------------------------------
-
 describe('buildNextHealthCoverage — review regressions', () => {
   const members = [member('m-primary'), member('m-secondary')];
   const base = { effective: empty, localOverrides: empty, members };
@@ -773,9 +743,7 @@ describe('buildNextHealthCoverage — review regressions', () => {
   }) as never;
 
   it('prunes a benchmark row left at $0 rather than storing a verbatim $0 benchmark', () => {
-    // Every engine treats a stored override as the household's benchmark plan
-    // price, so a `$0` row would floor the premium tax credit to $0 and raise
-    // the funded withdrawal — from a row the user only clicked "Add" on.
+    // Every engine treats a stored override as the household's benchmark plan price, so a `$0` row would floor the premium tax credit to $0 and raise the funded withdrawal, from a row the user only clicked "Add" on.
     expect(
       buildNextHealthCoverage({
         ...base,
@@ -784,7 +752,6 @@ describe('buildNextHealthCoverage — review regressions', () => {
         benchmarkRows: [{ taxYear: 2030, annualSlcspDollars: 0 }],
       }),
     ).toEqual({});
-    // A positive price on the same row IS stored.
     expect(
       buildNextHealthCoverage({
         ...base,
@@ -796,8 +763,7 @@ describe('buildNextHealthCoverage — review regressions', () => {
   });
 
   it('merges two rows sharing one (member, year) key field-wise instead of dropping the first', () => {
-    // Both Add buttons seed the same default key, so adding and filling two rows
-    // for one member/year used to discard the earlier row's values silently.
+    // Both Add buttons seed the same default key, so adding and filling two rows for one member/year used to discard the earlier row's values silently.
     const next = buildNextHealthCoverage({
       ...base,
       fplRegion: 'contiguous',
@@ -810,10 +776,7 @@ describe('buildNextHealthCoverage — review regressions', () => {
   });
 
   it('a region-only save does NOT materialise a coverage-months child override when member order differs', () => {
-    // The stored map's key order is insertion order; the editor's rows are
-    // sorted by (taxYear, memberId). An order-sensitive comparison declared the
-    // semantically-identical map "changed" and wrote a child override the
-    // "does not materialise" contract forbids.
+    // The stored map's key order is insertion order but the editor's rows are sorted by (taxYear, memberId); an order-sensitive comparison called the semantically identical map "changed" and wrote a child override the "does not materialise" contract forbids.
     const stored = {
       healthCoverageMonths: {
         perMember: {
@@ -838,10 +801,7 @@ describe('buildNextHealthCoverage — review regressions', () => {
   });
 
   it('a null member / year entry in an IMPORTED map reads as "nothing stated" instead of throwing', () => {
-    // `data-import` validates the aggregate envelope and forbidden keys, not
-    // override shapes, so `{ perMember: { id: null } }` is reachable. Before the
-    // shared reader, seeding the editor from it threw a TypeError that took out
-    // the whole Health coverage modal.
+    // `data-import` validates the aggregate envelope and forbidden keys, not override shapes, so `{ perMember: { id: null } }` is reachable; seeding the editor from it used to throw a TypeError that took out the whole Health coverage modal.
     const nullMember = { perMember: { 'm-primary': null } };
     const nullYear = { perMember: { 'm-primary': { 2030: null } } };
     expect(toDraftHealthRows(nullMember as never)).toEqual([]);
@@ -857,33 +817,22 @@ describe('buildNextHealthCoverage — review regressions', () => {
       benchmarkRows: [],
     });
     expect(next.acaFplRegion).toBe('alaska');
-    // Nothing was stated, and the draft states nothing either → no child
-    // override is materialised.
+    // Nothing stated and nothing in the draft: no child override is materialised.
     expect(next.healthCoverageMonths).toBeUndefined();
   });
 });
-
-// ---------------------------------------------------------------------------
-// buildNextHealthCoverage — untrusted stored/imported data
-// ---------------------------------------------------------------------------
 
 describe('buildNextHealthCoverage — imported-data hardening', () => {
   const members = [member('m-primary'), member('m-secondary')];
   const base = { effective: empty, localOverrides: empty, members };
 
-  // Belt-and-braces: if the guard ever regresses, the assertions below fail
-  // FIRST and this only stops one poisoned prototype from cascading into
-  // unrelated tests in the same worker.
+  // Belt-and-braces: if the guard regresses, the assertions below fail first, and this only stops one poisoned prototype from cascading into unrelated tests in the same worker.
   afterEach(() => {
     delete (Object.prototype as unknown as Record<string, unknown>)['2030'];
   });
 
   it('an imported `__proto__` member id cannot pollute Object.prototype (CWE-1321)', () => {
-    // `data-import.ts` rejects `__proto__` in KEY position but PERMITS it as an
-    // aggregate-id VALUE, so a household member can genuinely carry that id and
-    // reach the editor's member picker. Indexing a plain `{}` accumulator with
-    // it resolved to `Object.prototype`, so saving the row wrote the tax year
-    // onto every object in the page and stored NO own member entry.
+    // `data-import.ts` rejects `__proto__` in key position but permits it as an aggregate-id value, so a member can carry that id and reach the member picker; indexing a plain `{}` accumulator with it resolved to `Object.prototype`, writing the tax year onto every object in the page and storing no own member entry.
     const polluted = member('__proto__');
     const next = buildNextHealthCoverage({
       effective: empty,
@@ -902,12 +851,10 @@ describe('buildNextHealthCoverage — imported-data hardening', () => {
       benchmarkRows: [],
     });
 
-    // (1) Nothing leaked onto the prototype chain.
     expect(Object.hasOwn(Object.prototype, '2030')).toBe(false);
     expect(({} as Record<string, unknown>)['2030']).toBeUndefined();
     expect(([] as unknown as Record<string, unknown>)['2030']).toBeUndefined();
-    // (2) The dangerous id is not persisted either — the save writes no key at
-    //     all, because the only row was dropped and nothing else changed.
+    // The dangerous id is not persisted either: the only row was dropped and nothing else changed, so no key is written.
     expect(next.healthCoverageMonths).toBeUndefined();
   });
 
@@ -943,19 +890,12 @@ describe('buildNextHealthCoverage — imported-data hardening', () => {
   });
 
   it('a malformed stored YEAR key does not spuriously materialise a child override', () => {
-    // The stored map arrives from an envelope-only-validated import, so a year
-    // key like `"NaN"` is reachable. It used to survive the shared reader, seed
-    // an editor row the year picker has no option for, and then be discarded by
-    // the save path (which requires an integer year) — so an unrelated save
-    // silently dropped it AND wrote a child override that differed from what
-    // was inherited.
+    // The stored map comes from an envelope-only-validated import, so a year key like `"NaN"` is reachable. It used to survive the shared reader, seed an editor row the year picker has no option for, then be discarded by the save path (which requires an integer year), so an unrelated save silently dropped it and wrote a child override differing from what was inherited.
     const stored = {
       healthCoverageMonths: {
         perMember: { 'm-primary': { NaN: { partBMonths: 6 }, 1999: { partBMonths: 5 } } },
       },
     };
-    // The editor seeds from the same shared reader, so both sides agree there
-    // is nothing stated.
     expect(toDraftHealthRows(stored.healthCoverageMonths as never)).toEqual([]);
     const next = buildNextHealthCoverage({
       effective: stored as never,

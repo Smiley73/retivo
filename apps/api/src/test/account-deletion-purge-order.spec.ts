@@ -1,16 +1,5 @@
-/**
- * Account-deletion snapshot-purge ordering + failure tests.
- *
- * Locks the purge-first ordering: the snapshot purge runs
- * BEFORE the irreversible DynamoDB + auth-state sweeps. A purge failure
- * fails the request with the account fully intact (household data,
- * snapshots, and the User/Credential rows all survive — recoverable by
- * re-login); a successful purge is invoked exactly once with only the
- * household id.
- *
- * Builds its own Nest app so it can override AccountSnapshotPurgeService
- * with a spy / failure stub.
- */
+// Account-deletion purge-first ordering: the snapshot purge runs before the irreversible DynamoDB and auth-state sweeps, a purge failure leaves the account fully intact,
+// and a successful purge is invoked once with only the household id. Builds its own Nest app to override AccountSnapshotPurgeService.
 import 'reflect-metadata';
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
@@ -35,7 +24,6 @@ import { validateEnv } from '../common/env.config.js';
 import { ensureLocalAwsResources } from '../aws/local-bootstrap.js';
 import {
   AccountSnapshotPurgeService,
-  SnapshotPurgeError,
 } from '../auth/account-snapshot-purge.service.js';
 import {
   scanAll,
@@ -54,11 +42,9 @@ describe('account deletion — snapshot purge ordering + failure', () => {
   let doc: DynamoDBDocumentClient;
   let s3: S3Client;
   let snapshotsBucket: string;
-  // Mutable hooks the overridden purge service reads on each call.
   let purgeCalls: string[];
   let purgeShouldFail: boolean;
-  // Records household row presence at the instant purge ran, to prove
-  // purge happens before the DynamoDB sweep.
+  // Records household row presence at purge time to prove the purge precedes the DynamoDB sweep.
   let mutationLogAtPurge: number | null;
 
   beforeAll(async () => {
@@ -69,14 +55,12 @@ describe('account deletion — snapshot purge ordering + failure', () => {
       .useValue({
         purge: async (householdId: string): Promise<void> => {
           purgeCalls.push(householdId);
-          // Snapshot household data presence at purge time so the test
-          // can assert the DynamoDB sweep has NOT run yet.
           const rows = (
             await scanAll<MutationLogRow>(doc, tableName('TABLE_MUTATION_LOG'))
           ).filter((r) => r.householdId === householdId);
           mutationLogAtPurge = rows.length;
           if (purgeShouldFail) {
-            throw new SnapshotPurgeError('forced purge failure (test)');
+            throw new Error('forced purge failure (test)');
           }
         },
       })
@@ -105,10 +89,7 @@ describe('account deletion — snapshot purge ordering + failure', () => {
 
   afterAll(async () => {
     await app.close();
-    // This suite builds its own Nest app (to override the purge service) and
-    // resolves `doc` + `s3` directly from its module, so it is not covered by
-    // the `app.close()` patch in `bootstrapTestApp`. Destroy their HTTP
-    // keep-alive pools explicitly to avoid a leaked-handle teardown warning.
+    // This suite builds its own app, so the `app.close()` patch in bootstrapTestApp does not cover its clients; destroy their keep-alive pools to avoid a leaked-handle warning.
     doc.destroy();
     s3.destroy();
   });
@@ -119,16 +100,11 @@ describe('account deletion — snapshot purge ordering + failure', () => {
     mutationLogAtPurge = null;
   });
 
-  /** This suite builds its own Nest app, so adapt it to the shared helper. */
   function freshSession(): Promise<Session> {
     return signupVerifyLogin({ app, module: moduleRef, doc });
   }
 
-  /**
-   * Seed a MutationLog row for the household directly. A plaintext
-   * `POST /sync/push` 403s, so the purge-order test seeds the row whose
-   * presence-at-purge-time + post-sweep absence it asserts.
-   */
+  // A plaintext push 403s, so the purge-order test seeds the row whose presence at purge time and absence after the sweep it asserts.
   async function seedHouseholdMutation(s: Session): Promise<void> {
     await doc.send(
       new PutCommand({
@@ -172,13 +148,9 @@ describe('account deletion — snapshot purge ordering + failure', () => {
     const res = await deleteAccount(s, STRONG_PASSWORD);
     expect(res.status).toBe(204);
 
-    // Purge called exactly once, with only the household id.
     expect(purgeCalls).toEqual([s.householdId]);
-    // The DynamoDB sweep had not yet run when the purge fired — the
-    // household's MutationLog row was still present at that instant.
     expect(mutationLogAtPurge).toBeGreaterThan(0);
 
-    // After completion the DynamoDB sweep did run.
     const muts = (await scanAll<MutationLogRow>(doc, tableName('TABLE_MUTATION_LOG'))).filter(
       (r) => r.householdId === s.householdId,
     );
@@ -201,7 +173,6 @@ describe('account deletion — snapshot purge ordering + failure', () => {
     expect(res.status).toBeGreaterThanOrEqual(500);
     expect(purgeCalls).toEqual([s.householdId]);
 
-    // User + credential rows survive.
     const userRow = await doc.send(
       new GetCommand({ TableName: tableName('TABLE_USER'), Key: { userId: s.userId } }),
     );
@@ -211,14 +182,11 @@ describe('account deletion — snapshot purge ordering + failure', () => {
     );
     expect(cred.Item).toBeDefined();
 
-    // Household sync data survives (DynamoDB sweep never ran).
     const muts = (await scanAll<MutationLogRow>(doc, tableName('TABLE_MUTATION_LOG'))).filter(
       (r) => r.householdId === s.householdId,
     );
     expect(muts.length).toBeGreaterThan(0);
 
-    // Snapshots survive (purge failed before deleting them — the stub
-    // never touched S3).
     const list = await s3.send(
       new ListObjectsV2Command({ Bucket: snapshotsBucket, Prefix: `${s.householdId}/` }),
     );

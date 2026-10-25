@@ -1,30 +1,7 @@
-/**
- * Tests for VersionBanner — assert it stays hidden until a real
- * mismatch is recorded, that Dismiss removes it, that Reload triggers a
- * window reload, and that both `descriptionFor` copy variants
- * (build-mismatch / schema-ahead) render, including the re-arm branch
- * that upgrades an already-open toast when a stronger signal arrives.
- *
- * VersionBanner itself renders no DOM (it only subscribes and feeds the
- * shared `appToastQueue`); the toast
- * markup lives in `AppToastRegion`, so every test here renders BOTH,
- * exactly as `App.tsx` mounts them (region in `App`, subscriber in
- * `AppShell`). `AppToastRegion.test.tsx` covers the region's own behaviour
- * (both toast kinds sharing one region, the wait notice) directly.
- */
+/** VersionBanner: hidden until a real mismatch, Dismiss and Reload, both description variants, and re-arming an open toast. */
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { VersionBanner } from './VersionBanner';
-import { AppToastRegion } from './AppToastRegion';
-import {
-  __resetBuildIdState,
-  __resetVerifyThrottleForTest,
-  __setClientBuildIdForTest,
-  __setVerifierForTest,
-  recordSchemaAhead,
-  recordServerBuildId,
-} from '../lib/build-id';
 import { expectNoA11yViolations } from '../test/a11y';
 
 const BUILD_MISMATCH_DESCRIPTION =
@@ -32,11 +9,17 @@ const BUILD_MISMATCH_DESCRIPTION =
 const SCHEMA_AHEAD_DESCRIPTION =
   'A newer version of the app is required to read the latest changes — reload to update.';
 
-/** Render both halves of the relocated toast: the subscriber (no DOM) and
- *  the shared region that actually renders the markup — matching how
- *  App.tsx mounts them (VersionBanner in AppShell, AppToastRegion in App,
- *  above the routes). */
+let deployedBuildId = 'server-2';
+let banner: {
+  VersionBanner: typeof import('./VersionBanner').VersionBanner;
+  AppToastRegion: typeof import('./AppToastRegion').AppToastRegion;
+  recordServerBuildId: typeof import('../lib/build-id').recordServerBuildId;
+  recordSchemaAhead: typeof import('../lib/build-id').recordSchemaAhead;
+};
+
+// Renders both halves, as App.tsx mounts them: the subscriber (no DOM) and the shared toast region.
 function renderVersionBanner() {
+  const { VersionBanner, AppToastRegion } = banner;
   return render(
     <>
       <VersionBanner />
@@ -45,49 +28,52 @@ function renderVersionBanner() {
   );
 }
 
-/** Simulate "API said new version + CF confirms bundle is live" — drive
- *  the same async path the real fetch verifier would, then flush
- *  microtasks so the listener fires before assertions. */
+// Drives the async path the real fetch verifier takes, then flushes microtasks so the listener fires.
 async function recordVerifiedMismatch(serverId: string): Promise<void> {
   await act(async () => {
-    recordServerBuildId(serverId);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    banner.recordServerBuildId(serverId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
-/** Simulate the same-response race: the API response's build id and the
- *  sync layer's schema-ahead detection both fire for the same, freshly-
- *  seen id before that id's own verification resolves — `recordSchemaAhead`
- *  reads `pendingReason` fresh at resolution, so the stronger reason wins
- *  even though this is the id's first-ever notification. */
+// Both reasons fire for the same fresh id before its verification resolves; the stronger reason wins.
 async function recordVerifiedSchemaAhead(serverId: string): Promise<void> {
   await act(async () => {
-    recordServerBuildId(serverId);
-    recordSchemaAhead();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    banner.recordServerBuildId(serverId);
+    banner.recordSchemaAhead();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
-/** Assert the shared Reload/Dismiss actions render regardless of which
- *  description copy is showing — the two reasons share one toast shape. */
 function expectReloadAndDismissButtons(): void {
   expect(screen.getByRole('button', { name: /dismiss/i })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /reload/i })).toBeInTheDocument();
 }
 
 describe('VersionBanner', () => {
-  beforeEach(() => {
-    __resetBuildIdState();
-    __setClientBuildIdForTest('client-1');
-    __setVerifierForTest(async () => 'live');
-  });
+  // Fresh build-id module state per case; the first import is slow on a cold transform cache.
+  beforeEach(async () => {
+    window.sessionStorage.clear();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    deployedBuildId = 'server-2';
+    vi.resetModules();
+    vi.stubGlobal('__BUILD_ID__', 'client-1');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ buildId: deployedBuildId }) })),
+    );
+    const [{ VersionBanner }, { AppToastRegion }, { recordSchemaAhead, recordServerBuildId }] =
+      await Promise.all([
+        import('./VersionBanner'),
+        import('./AppToastRegion'),
+        import('../lib/build-id'),
+      ]);
+    banner = { VersionBanner, AppToastRegion, recordSchemaAhead, recordServerBuildId };
+  }, 60_000);
 
   afterEach(() => {
-    __resetBuildIdState();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -123,18 +109,12 @@ describe('VersionBanner', () => {
     await recordVerifiedMismatch('server-2');
     expect(screen.getByText(BUILD_MISMATCH_DESCRIPTION)).toBeInTheDocument();
 
-    // A newer deploy (server-3) arrives while the server-2 toast is still
-    // open; before its own build-mismatch verification resolves, the sync
-    // layer reports schema-ahead for that same newer id — re-arming the
-    // open toast (VersionBanner's `currentReason !== mismatch.reason`
-    // branch) instead of leaving the weaker build-mismatch copy showing.
-    __resetVerifyThrottleForTest();
+    deployedBuildId = 'server-3';
+    vi.advanceTimersByTime(5_000);
     await act(async () => {
-      recordServerBuildId('server-3');
-      recordSchemaAhead();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      banner.recordServerBuildId('server-3');
+      banner.recordSchemaAhead();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(screen.getAllByTestId('version-banner')).toHaveLength(1);
@@ -144,7 +124,7 @@ describe('VersionBanner', () => {
   });
 
   it('stays hidden when the deployed bundle is still the client build', async () => {
-    __setVerifierForTest(async () => 'old');
+    deployedBuildId = 'client-1';
     renderVersionBanner();
     await recordVerifiedMismatch('server-2');
     expect(screen.queryByTestId('version-banner')).not.toBeInTheDocument();
@@ -167,8 +147,7 @@ describe('VersionBanner', () => {
   it('calls window.location.reload when the user clicks Reload', async () => {
     const user = userEvent.setup();
     const reloadSpy = vi.fn();
-    // jsdom's `window.location` is non-configurable; replace `reload`
-    // via Object.defineProperty so the spy survives strict-mode checks.
+    // jsdom's `window.location` is non-configurable, so replace `reload` via Object.defineProperty.
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: { ...window.location, reload: reloadSpy },

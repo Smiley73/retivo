@@ -1,17 +1,5 @@
 /**
- * Balance-projection bundle module — collects the page-level resolution
- * work for the Monte Carlo input builder into a single, independently-
- * unit-testable surface.
- *
- * Exports:
- *   - `buildMonthlyExpenseSeries` — pure converter from per-month rows
- *     to a `MonthlyCashflowSeries`.
- *   - `buildMonthlyIncomeSeries` — SS + pension + part-time + oneOff
- *     spendable, monthly.
- *   - `buildMonthlyDepositSeries` — targeted one-offs + CBP lump-sums
- *     + synthesized secondary post-primary contributions, monthly.
- *   - `buildBalanceProjectionMcBundle` — packages every input the MC
- *     builder needs into a typed bundle.
+ * Balance-projection MC bundle: the page-level resolution for the Monte Carlo input builder plus the monthly cashflow series builders, as one unit-testable surface.
  */
 import {
   defaultAssetMixForAccountType,
@@ -46,13 +34,9 @@ import type { CalibrationSnapshot } from './calibration';
 import { splitRolloverByRmd } from './rmd-rollover-split';
 import type { RmdTable } from './rmd';
 
-// Re-exported so existing consumers keep importing the MC ledger entry type
-// from this module (public API unchanged).
 export type { AccountMcLedgerEntry };
 
-/** Per-month spendable-income row contract. Mirrors the subset of
- *  `IncomeProjectionMonth` the bundle needs (the income-projection
- *  helper emits more fields the bundle ignores). */
+/** Per-month spendable-income row; a subset of `IncomeProjectionMonth`. */
 export interface MonthlyIncomeRow {
   year: number;
   month0: number;
@@ -63,21 +47,18 @@ export interface MonthlyIncomeRow {
   depositInflow: number;
 }
 
-/** Per-month SS row contract. */
+/** Per-month SS row. */
 export interface MonthlySsRow {
   year: number;
   month0: number;
-  /** Combined SS run-rate, $/yr at this month. */
   total: number;
 }
 
-/** Per-month expense row contract. `total` mixes a recurring run-rate
- *  ($/yr at this month) with the literal one-off spike (event-month
- *  dollars). The drawdown engine consumes them with different
- *  arithmetic — divide the run-rate share by 12 to get monthly
- *  dollars, but charge one-off spikes at full amount in their event
- *  month. The `oneOffEssential` + `oneOffDiscretionary` fields surface
- *  the spike portion so callers can split correctly. */
+/**
+ * Per-month expense row. `total` mixes a recurring run-rate ($/yr at this month) with the literal
+ * one-off spike (event-month dollars); `oneOffEssential` + `oneOffDiscretionary` expose the spike
+ * so callers divide only the run-rate by 12.
+ */
 export interface MonthlyExpenseRow {
   year: number;
   month0: number;
@@ -86,42 +67,35 @@ export interface MonthlyExpenseRow {
   oneOffDiscretionary: number;
 }
 
-/** Targeted post-retirement deposit event (CBP lump-sum, one-off
- *  windfall, secondary post-primary monthly contribution). Pre-classified
- *  so the MC builder can tag events with the right `source`. */
+/**
+ * Targeted post-retirement deposit event (CBP lump-sum, one-off windfall, secondary post-primary
+ * monthly contribution), pre-classified so the MC builder can tag its `source`.
+ */
 export interface ClassifiedDepositEvent {
   /** Absolute step index in the MC kernel — `(year - todayYear) * 12 + month0`. */
   month: number;
-  /** Nominal-dollar amount at the event month. For account-less event types
-   *  (CBP lump-sum / one-off windfall) this is the whole event amount. For a
-   *  post-primary spouse contribution it is `amountPre + amountPost` (the
-   *  summed value the no-ledger kernel path reads — kept so that path stays
-   *  byte-identical). */
+  /**
+   * Nominal dollars at the event month; for a post-primary spouse contribution it is
+   * `amountPre + amountPost`, the sum the no-ledger kernel path reads.
+   */
   amount: number;
-  /** Pre-tax (pre-tax-designated) slice of a post-primary spouse
-   *  contribution. Carried so the destination account's `pre` bucket receives
-   *  exactly the pre-tax dollars (no longer inferred from destination
-   *  treatment). Undefined for CBP / one-off events (they route the whole
-   *  `amount` by destination treatment). */
+  /**
+   * Pre-tax slice of a post-primary spouse contribution, credited to the destination's `pre`
+   * bucket; undefined for CBP / one-off events, which route `amount` by destination treatment.
+   */
   amountPre?: number;
-  /** Designated-Roth (post-tax) slice of a post-primary spouse contribution —
-   *  routed to the destination account's `post` bucket regardless of
-   *  treatment (a MIXED account's Roth slice stays RMD-exempt, §325).
-   *  Undefined for CBP / one-off events. */
+  /**
+   * Designated-Roth slice of a post-primary spouse contribution, routed to the destination's `post`
+   * bucket regardless of treatment (a MIXED account's Roth slice stays RMD-exempt, SECURE 2.0
+   * §325). Undefined for CBP / one-off events.
+   */
   amountPost?: number;
-  /** Optional account id for caller correlation. */
   accountId?: string;
 }
 
 /**
- * Convert per-month expense rows to a `MonthlyCashflowSeries` anchored at
- * (retirementYear, January). Each row contributes its `total / 12`
- * monthly run-rate divided into a one-month deposit — the engine pools
- * them per-month and treats the result as actual dollars per month.
- *
- * Rows outside the [retirementYear..horizonYear] window are silently
- * dropped — the projection helper sometimes emits trailing months past
- * the death cutoff at zero.
+ * Convert per-month expense rows to a series anchored at (retirementYear, January); rows outside
+ * [retirementYear..horizonYear] are dropped.
  */
 export function buildMonthlyExpenseSeries(args: {
   rows: ReadonlyArray<MonthlyExpenseRow>;
@@ -131,10 +105,8 @@ export function buildMonthlyExpenseSeries(args: {
   const series = emptyMonthlySeries(args.retirementYear, args.horizonYear);
   if (series.values.length === 0) return series;
   for (const row of args.rows) {
-    // `total` mixes recurring run-rate ($/yr) with literal one-off
-    // spikes (event-month dollars). Split before scaling: divide the
-    // run-rate share by 12 (→ monthly dollars), keep the spike share
-    // at full amount in its event month.
+    // Split before scaling: the run-rate ($/yr) divides by 12, the one-off spike stays whole in its
+    // event month.
     const oneOff = row.oneOffEssential + row.oneOffDiscretionary;
     const runRate = row.total - oneOff;
     addOneOff(series, row.year, row.month0, runRate / 12 + oneOff);
@@ -143,13 +115,8 @@ export function buildMonthlyExpenseSeries(args: {
 }
 
 /**
- * Convert per-month income rows (SS + pension + part-time + spendable
- * one-off) to a single income `MonthlyCashflowSeries`. Mirrors the
- * page's pre-extracted inline construction; the engine sums these
- * dollars into `income[]` for net-need computation.
- *
- * `depositInflow` is intentionally NOT folded here —
- * portfolio additions feed `buildMonthlyDepositSeries`, not income.
+ * Convert per-month income rows (SS, pension, part-time, spendable one-off) to one income series.
+ * `depositInflow` is not folded in: portfolio additions feed `buildMonthlyDepositSeries`.
  */
 export function buildMonthlyIncomeSeries(args: {
   ssRows: ReadonlyArray<MonthlySsRow>;
@@ -160,14 +127,11 @@ export function buildMonthlyIncomeSeries(args: {
   const series = emptyMonthlySeries(args.retirementYear, args.horizonYear);
   if (series.values.length === 0) return series;
   for (const row of args.ssRows) {
-    // SS is a pure run-rate — divide by 12 for monthly dollars.
     addOneOff(series, row.year, row.month0, row.total / 12);
   }
   for (const row of args.incomeRows) {
-    // Pension + part-time are run-rates ($/yr at this month); divide
-    // by 12. `oneOffIncome` is the spendable one-off literal event
-    // amount — keep at full value in its event month (the income
-    // projection helper emits it as the literal payout, not a rate).
+    // Pension and part-time are $/yr run-rates; `oneOffIncome` is a literal event amount kept
+    // whole.
     const runRate = row.pensionIncome + row.partTimeIncome;
     addOneOff(series, row.year, row.month0, runRate / 12 + row.oneOffIncome);
   }
@@ -175,19 +139,10 @@ export function buildMonthlyIncomeSeries(args: {
 }
 
 /**
- * Build the household-pool monthly deposit series the drawdown engine
- * consumes: targeted one-off windfalls + CBP lump-sum payouts that
- * arrive via `MonthlyIncomeRow.depositInflow` (still
- * household-spread in both engines). Post-primary spouse contributions
- * are NOT folded here: they route per-account, carrying their
- * pre/post split, via the per-account ledger (deterministic) and the MC
- * ledger's split deposit slots — so summing them into the household pool
- * (and then proportional-spreading) would double-count + drop their
- * account target.
- *
- * Inflows whose absolute month falls before primary's retirement month
- * are silently skipped — those are routed to per-account accumulation
- * upstream.
+ * Household-pool monthly deposit series: targeted one-off windfalls and CBP lump-sum payouts
+ * arriving via `depositInflow`. Post-primary spouse contributions are excluded because they route
+ * per-account with their pre/post split, and pooling them would double-count and drop their account
+ * target. Inflows before primary's retirement month are skipped (routed to accumulation upstream).
  */
 export function buildMonthlyDepositSeries(args: {
   incomeRows: ReadonlyArray<MonthlyIncomeRow>;
@@ -207,54 +162,42 @@ export function buildMonthlyDepositSeries(args: {
 }
 
 /**
- * Pre-resolved MC bundle. Built once on the page; the MC builder
- * consumes it as a single argument and returns either a
- * validation failure (`input === undefined`) or a complete
- * `BuiltMonteCarloInputs`.
- *
- * Scalars are **today's-dollar** retirement-start values — the MC
- * kernel inflates them forward by sampled CPI. `events` carry nominal
- * dollars at their event month (the kernel does not inflate events).
- */
-/**
- * Downturn-guardrail block carried on the MC bundle (guardrails). Present only
- * when the resolved scenario ENABLES the guardrail. All REAL series are today's-
- * dollar per DRAWDOWN year, index 0 = the first drawdown (retirement) year,
- * length = drawdown-year count.
+ * Downturn-guardrail block on the MC bundle, present only when the resolved scenario enables the
+ * guardrail. Real series are today's-dollar per drawdown year (index 0 = the first).
  */
 export interface GuardrailBundleBlock {
   readonly config: DownturnGuardrailsOverride;
-  /** REAL total spending on the 100% baseline path, per drawdown year. */
+  /** Real total spending on the 100% baseline path, per drawdown year. */
   readonly baselineTotalRealByYear: number[];
-  /** REAL net spending need (total − guaranteed income) on the baseline path. */
+  /** Real net spending need (total − guaranteed income) on the baseline path. */
   readonly baselineNetNeedRealByYear: number[];
-  /** REAL essential-only spending on the baseline path (the cut floor). */
+  /** Real essential-only spending on the baseline path (the cut floor). */
   readonly essentialRealByYear: number[];
   /** Effective-tax gross-up proxy for the funded-ratio liability. */
   readonly effectiveTaxRate: number;
 }
 
+/**
+ * Pre-resolved MC bundle, built once on the page. Scalars are today's-dollar retirement-start
+ * values the kernel inflates by sampled CPI; `events` are nominal dollars at their event month and
+ * are not inflated.
+ */
 export interface BalanceProjectionMcBundle {
   // --- identity + anchors --------------------------------------------
   /** Scenario the bundle was resolved against. Drives cache keys. */
   scenarioId: string;
-  /** Calendar year of step 0 (= MC `firstYear`). */
   todayYear: number;
-  /** Month-of-year (0..11) "today" falls on. The today-anchor for
-   *  tracks-inflation per-path contribution CPI scaling — threaded
-   *  into `MonteCarloInput.todayMonthIndex`. Defaults to 0 (January). */
+  /**
+   * Month-of-year (0..11) "today" falls on; the today-anchor for per-path CPI scaling of
+   * tracks-inflation contributions. Defaults to 0.
+   */
   todayMonthIndex: number;
-  /** Calendar year of primary's retirement (step `retirementStepIdx`). */
   retirementYear: number;
-  /** Month-of-year (0..11) for primary's retirement step. */
   primaryRetirementMonth0: number;
-  /** Last calendar year to simulate. */
   horizonYear: number;
-  /** Primary retirement as a fractional year — passed straight through
-   *  to the fan chart's vertical marker. */
+  /** Primary retirement as a fractional year, for the fan chart's vertical marker. */
   retirementFractionalYear: number;
-  /** Life-expectancy markers for the fan chart. Display-only — the
-   *  builder ignores them. */
+  /** Fan-chart life-expectancy markers; display-only. */
   lifeMarkers: ReadonlyArray<{
     fractionalYear: number;
     label: string;
@@ -262,113 +205,99 @@ export interface BalanceProjectionMcBundle {
   }>;
 
   // --- engine-facing scalars (today's-dollar) ------------------------
-  /** Combined balance at firstYear, excluding annuity-elected CBPs. */
   portfolioToday: number;
-  /** Household-blended asset mix across all non-CBP active accounts.
-   *  Retained for back-compat with non-MC consumers; the MC runner now
-   *  reads per-account asset mix off `accountMcLedger`. */
+  /**
+   * Household-blended asset mix across non-CBP active accounts; the MC runner reads per-account
+   * mixes off `accountMcLedger`.
+   */
   blendedMix: AssetMix;
-  /** Sum of annual planned contributions across accounts. */
   annualContribution: number;
-  /** Windowed per-month expense base in today's dollars. One entry per
-   *  projection month from `todayYear`; length =
-   *  `(horizonYear − todayYear + 1) × 12`. Charges each expense only in its
-   *  active start/end window. Threaded straight to
-   *  `MonteCarloInput.monthlyExpenseBase`. */
+  /**
+   * Windowed per-month expense base in today's dollars from `todayYear`, length
+   * `(horizonYear − todayYear + 1) × 12`; each expense is charged only in its start/end window.
+   */
   monthlyExpenseBase: number[];
-  /** Per-effective-rate windowed expense buckets. Present only when ≥ 1
-   *  category inflates at a rate ≠ the
-   *  scenario general rate; each `amount` is a per-month today's-dollar array
-   *  the same length as `monthlyExpenseBase`, with `Σ_b amount_b[i] ===
-   *  monthlyExpenseBase[i]` per step. Absent ⇒ the MC kernel runs the verbatim
-   *  scalar `monthlyExpenseBase` path. Threaded straight to
-   *  `MonteCarloInput.monthlyExpenseBucketsBase`. */
+  /**
+   * Per-effective-rate windowed expense buckets, present only when a category inflates at a rate
+   * other than the scenario's; each `amount` matches `monthlyExpenseBase` in length and the buckets
+   * sum to it per step. Absent means the kernel runs the scalar path.
+   */
   monthlyExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
-  /** Per-month today's-dollar HSA medical-demand base (HSA withdrawal-reserve)
-   *  — the `isMedical` subset of `monthlyExpenseBase`. Present only when
-   *  ≥ 1 category is flagged `isMedical`. Threaded into
-   *  `MonteCarloInput.monthlyMedicalDemandBase`. */
+  /**
+   * Per-month today's-dollar HSA medical-demand base, the `isMedical` subset of
+   * `monthlyExpenseBase`; present only when a category is flagged `isMedical`.
+   */
   monthlyMedicalDemandBase?: number[];
-  /** Effective inflation rate (%) the `isMedical` categories grow at. Present
-   *  only alongside `monthlyMedicalDemandBase`. Threaded into
-   *  `MonteCarloInput.medicalDemandRatePct`. */
+  /**
+   * Inflation rate (%) of the `isMedical` categories; present only alongside
+   * `monthlyMedicalDemandBase`.
+   */
   medicalDemandRatePct?: number;
-  /** Per-effective-rate medical-demand buckets — present only when the
-   *  `isMedical` categories span > 1 effective rate, so each medical sub-series
-   *  inflates at its own rate. Threaded into
-   *  `MonteCarloInput.monthlyMedicalDemandBucketsBase`. */
+  /**
+   * Per-rate medical-demand buckets, present only when the `isMedical` categories span more than
+   * one effective rate.
+   */
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
-  /** Per-month today's-dollar modeled Medical expenses (every `isMedical` row),
-   *  rate and buckets, for the matching `MonteCarloInput` fields. */
+  /** Modeled Medical expenses (every `isMedical` row): per-month base, rate and buckets. */
   monthlyMedicalExpenseBase?: number[];
   medicalExpenseRatePct?: number;
   monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
-  /** Pre-computed nominal annual SS benefit by year-offset from
-   *  `todayYear`. Length = `horizonYear - todayYear + 1`. Already in
-   *  nominal (calendar-year) dollars — the MC kernel reads directly,
-   *  no CPI scaling. */
+  /**
+   * Nominal annual SS benefit by year offset from `todayYear` (length
+   * `horizonYear - todayYear + 1`); the kernel reads it without CPI scaling.
+   */
   ssByYear: number[];
-  /** Pre-computed nominal annual non-SS income by year-offset from
-   *  `todayYear`. Same length and indexing as `ssByYear`. Already in
-   *  nominal dollars. */
+  /** Nominal annual non-SS income, indexed like `ssByYear`. */
   incomeByYear: number[];
-  /** Resolved annual scenario inflation rate (%). Threaded into
-   *  `MonteCarloInput.scenarioInflationPct` so the kernel can mean-shift
-   *  the CPI bootstrap. */
+  /** Resolved annual scenario inflation rate (%), used to mean-shift the CPI bootstrap. */
   scenarioInflationPct: number;
-  /** Downturn-guardrail config + baseline REAL per-drawdown-year net-need /
-   *  essential / total spending series + effective-tax proxy (guardrails).
-   *  Present ONLY when a scenario in the chain ENABLES the guardrail; absent
-   *  otherwise so a no-guardrail scenario's serialized `MonteCarloInput` (and
-   *  `mcCacheKey`) carries no guardrail fields. Assembled by the runner
-   *  (`assembleMcBundle`) and threaded into `MonteCarloInput` by
-   *  `mcInputFromBundle`. */
+  /**
+   * Guardrail config plus real baseline per-drawdown-year series and an effective-tax proxy;
+   * present only when a scenario in the chain enables the guardrail, so a no-guardrail
+   * `MonteCarloInput` and `mcCacheKey` carry no guardrail fields.
+   */
   downturnGuardrails?: GuardrailBundleBlock;
 
   // --- validation + classified events --------------------------------
-  /** CBP validation against the active scenario. When `ok === false`,
-   *  the MC builder returns `input: undefined`. */
+  /**
+   * CBP validation against the active scenario; when `ok === false` the MC builder returns
+   * `input: undefined`.
+   */
   cbpValidation: CbpValidationResult;
-  /** CBP lump-sum events: one entry per linked `lumpSum` pension stream,
-   *  anchored at the stream's `start` (the event month) with the source
-   *  CBP balance compounded forward to that month at `planningReturnPct`.
-   *  The source CBP is excluded from the per-account ledger (mirrors the
-   *  bundle factory's `skipsPortfolio: true`); these events route the
-   *  transferred balance to the target account's per-account
-   *  `depositsByMonth[eventMonth]` slot. */
+  /**
+   * One event per linked `lumpSum` pension stream, at the stream's `start` month with the source
+   * CBP balance compounded to that month at `planningReturnPct`. The source CBP is excluded from
+   * the per-account ledger (`skipsPortfolio: true`).
+   */
   cbpLumpSumEvents: ReadonlyArray<ClassifiedDepositEvent>;
-  /** Targeted one-off windfalls (non-CBP). */
   targetedOneOffEvents: ReadonlyArray<ClassifiedDepositEvent>;
-  /** Synthesized monthly contributions from secondary working past
-   *  primary's retirement. */
+  /** Synthesized monthly contributions from the secondary working past primary's retirement. */
   postPrimaryContributionEvents: ReadonlyArray<ClassifiedDepositEvent>;
-  /** Post-retirement plain-pension lump-sum placement events. */
   plainPensionPlacementEvents: ReadonlyArray<ClassifiedDepositEvent>;
-  /** Per-CALENDAR-YEAR rolled-CBP RMD income (dollars) carved from
-   *  linked-CBP lump-sums landing in/after the source owner's RMD trigger
-   *  year. The MC runner adds it to the per-path `otherIncome` (spendable +
-   *  taxable) so the two engines agree to the cent. Empty when no split. */
+  /**
+   * Rolled-CBP RMD income by calendar year, carved from linked-CBP lump-sums landing in or after
+   * the source owner's RMD trigger year; the MC runner adds it to per-path `otherIncome` (spendable
+   * and taxable) so both engines agree. Empty when no split.
+   */
   rolledRmdIncomeByYear: ReadonlyMap<number, number>;
 
   // --- aggregates carried for the remediation banner -----------------
   /** Raw accounts list so callers can resolve owner names + deep-links. */
   accounts: ReadonlyArray<Aggregate<AccountPayload>>;
-  /** Raw members list (same banner consumer). */
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
 
   // --- per-account MC ledger ------------------------------------
-  /** Per-account ledger for the MC runner. One entry per active account
-   *  that enters the simulation (annuity-elected CBPs excluded).
-   *  Empty `Float64Array`s as placeholder — the MC runner allocates the
-   *  actual per-step series during input assembly (it needs the step
-   *  count, which depends on the simulation horizon the runner owns). */
+  /**
+   * Per-account ledger for the MC runner, one entry per active account (annuity-elected CBPs
+   * excluded). The `Float64Array`s are empty placeholders: the runner allocates per-step series
+   * once it knows the step count.
+   */
   accountMcLedger: ReadonlyArray<AccountMcLedgerEntry>;
 }
 
 /**
- * Input shape for `buildBalanceProjectionMcBundle`. All fields are
- * already-resolved page state — no IndexedDB, no React, no Date.now().
- * Tests can construct this directly with literal data.
+ * Input for `buildBalanceProjectionMcBundle`: already-resolved page state, so tests can construct
+ * it from literals.
  */
 export interface BalanceProjectionMcBundleArgs {
   scenarioId: string;
@@ -379,17 +308,17 @@ export interface BalanceProjectionMcBundleArgs {
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
   expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
   ssBenefits: ReadonlyArray<Aggregate<SocialSecurityBenefitPayload>>;
-  /** Pre-resolved CBP election map (output of
-   *  `resolveLinkedCbpIncomeStreams`). May be `null` when validation
-   *  failed; the bundle factory only consults this when validation is
-   *  `ok`. */
+  /**
+   * Pre-resolved CBP election map (from `resolveLinkedCbpIncomeStreams`); `null` when validation
+   * failed.
+   */
   cbpElections: ReadonlyMap<string, ResolvedCbpElection> | null;
   cbpValidation: CbpValidationResult;
   todayYear: number;
-  /** Today's calendar month index (0 = Jan). Forms the today-anchor for
-   *  contribution-growth baking so the MC fixed-growth series matches the
-   *  deterministic engine for the same calendar month. Omitted → 0
-   *  (January) for back-compat with direct-bundle test callers. */
+  /**
+   * Today's month index (0 = Jan), anchoring contribution-growth baking to the deterministic
+   * engine; defaults to 0 for direct-bundle test callers.
+   */
   todayMonthIndex?: number;
   retirementYear: number;
   primaryRetirementMonth0: number;
@@ -400,103 +329,81 @@ export interface BalanceProjectionMcBundleArgs {
     label: string;
     color: string;
   }>;
-  /** Per-account effective payload (post-scenario-override) + latest
-   *  balance. Caller resolves overrides upstream. For MIXED-tax
-   *  accounts callers should pass `latestBalancePreTax` /
-   *  `latestBalancePostTax` so the MC ledger reflects the stored
-   *  split — falls back to 50/50 when omitted. */
+  /**
+   * Per-account effective payload (post-scenario-override) and latest balance; MIXED accounts
+   * should pass `latestBalancePreTax` / `latestBalancePostTax`, else the split falls back to 50/50.
+   */
   accountBundles: ReadonlyArray<{
     account: Aggregate<AccountPayload>;
     latestBalance: number;
     latestBalancePreTax?: number | null;
     latestBalancePostTax?: number | null;
-    /** Per-step glide-derived mix series; computed by the runner when
-     *  `retirementAllocation` is set. `null` / omitted → flat `assetMix`
-     *  path (existing default). Only meaningful for non-CBP accounts. */
+    /**
+     * Per-step glide-derived mix series for non-CBP accounts with `retirementAllocation`; null or
+     * omitted keeps the flat `assetMix`.
+     */
     assetMixSeries?: ReadonlyArray<AssetMix> | null;
   }>;
-  /** Windowed per-month expense base in today's dollars. One entry per
-   *  projection month from `todayYear`; length =
-   *  `(horizonYear − todayYear + 1) × 12`. */
+  /**
+   * Windowed per-month expense base in today's dollars; length
+   * `(horizonYear − todayYear + 1) × 12`.
+   */
   monthlyExpenseBase: number[];
-  /** Per-effective-rate windowed expense buckets. Present only when ≥ 1
-   *  category inflates at a rate ≠ the
-   *  scenario general rate; each `amount` is a per-month array the same length
-   *  as `monthlyExpenseBase`, with `Σ_b amount_b[i] === monthlyExpenseBase[i]`.
-   *  Absent ⇒ scalar path. */
+  /**
+   * Per-effective-rate windowed expense buckets, as on `BalanceProjectionMcBundle`. Absent means
+   * the scalar path.
+   */
   monthlyExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
-  /** Per-month today's-dollar HSA medical-demand base (HSA withdrawal-reserve)
-   *  — the `isMedical` subset of `monthlyExpenseBase`. Present only when
-   *  ≥ 1 category is flagged `isMedical`. Carried through to
-   *  `MonteCarloInput.monthlyMedicalDemandBase`. */
+  /**
+   * Per-month today's-dollar HSA medical-demand base (the `isMedical` subset of
+   * `monthlyExpenseBase`).
+   */
   monthlyMedicalDemandBase?: number[];
-  /** Effective inflation rate (%) the `isMedical` categories grow at. Present
-   *  only alongside `monthlyMedicalDemandBase`. Carried through to
-   *  `MonteCarloInput.medicalDemandRatePct`. */
+  /** Inflation rate (%) of the `isMedical` categories. */
   medicalDemandRatePct?: number;
-  /** Per-effective-rate medical-demand buckets — present only when the
-   *  `isMedical` categories span > 1 effective rate, so each medical sub-series
-   *  inflates at its own rate. Carried through to
-   *  `MonteCarloInput.monthlyMedicalDemandBucketsBase`. */
+  /** Per-rate medical-demand buckets when the `isMedical` categories span more than one rate. */
   monthlyMedicalDemandBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
   /** Modeled Medical expenses (every `isMedical` row) base, rate and buckets. */
   monthlyMedicalExpenseBase?: number[];
   medicalExpenseRatePct?: number;
   monthlyMedicalExpenseBucketsBase?: ReadonlyArray<{ ratePct: number; amount: number[] }>;
-  /** Pre-computed nominal annual SS benefit by year-offset from
-   *  `todayYear`. Length must equal `horizonYear - todayYear + 1`.
-   *  Already in nominal (calendar-year) dollars. */
+  /**
+   * Nominal annual SS benefit by year offset from `todayYear`; length must equal
+   * `horizonYear - todayYear + 1`.
+   */
   ssByYear: number[];
-  /** Pre-computed nominal annual non-SS income by year-offset from
-   *  `todayYear`. Same length and indexing as `ssByYear`. Already in
-   *  nominal dollars. */
+  /** Nominal annual non-SS income, indexed like `ssByYear`. */
   incomeByYear: number[];
-  /** Resolved annual scenario inflation rate (%). Carried through to
-   *  the bundle so the MC kernel can mean-shift the CPI bootstrap. */
   scenarioInflationPct: number;
-  /** Pre-classified events the page already separates. CBP lump-sums
-   *  are computed inside the factory; the page provides the targeted
-   *  one-offs and post-primary contributions split out. */
+  /** Pre-classified events from the page; CBP lump-sums are computed inside the factory. */
   targetedOneOffEvents: ReadonlyArray<ClassifiedDepositEvent>;
   postPrimaryContributionEvents: ReadonlyArray<ClassifiedDepositEvent>;
-  /** Post-retirement plain-pension lump-sum placement events (carry
-   *  `accountId`). Routed per-account whole (→ destination treatment) via
-   *  `routeEventsToLedger`, with a household-spread fallback when the target
-   *  is not in the MC ledger. Omitted ⇒ none. */
+  /**
+   * Post-retirement plain-pension lump-sum placements (carry `accountId`), routed per-account via
+   * `routeEventsToLedger` with a household-spread fallback when the target is not in the MC ledger.
+   * Omitted means none.
+   */
   plainPensionPlacementEvents?: ReadonlyArray<ClassifiedDepositEvent>;
-  /** Source-CBP owner ISO birthdate keyed by CBP account id, for the
-   *  rollover-year RMD split. A miss → no split (whole amount rolls). */
+  /**
+   * Source-CBP owner ISO birthdate by CBP account id for the rollover-year RMD split; a miss means
+   * no split.
+   */
   cbpOwnerBirthdateByAccountId?: ReadonlyMap<string, string>;
-  /** The run's RMD calibration snapshot (no hard-coded trigger ages /
-   *  divisors). When omitted the split never fires (whole amount rolls). */
+  /** The run's RMD calibration snapshot; when omitted the split never fires. */
   rmdSnapshot?: CalibrationSnapshot<RmdTable>;
-  /** Linked-CBP lump-sum event-month metadata keyed by source
-   *  CBP account id, as the **absolute month** (`year * 12 + month0`).
-   *  Tells `applyCbpAccount` how long to compound the source CBP
-   *  balance forward and which kernel step to route the deposit to.
-   *  When omitted (or no entry for a CBP), `applyCbpAccount` falls
-   *  back to the retirement-step anchor (kept for direct bundle callers
-   *  that don't compute resolved-income event timing). */
+  /**
+   * Linked-CBP lump-sum event month by source CBP account id, as the absolute month
+   * (`year * 12 + month0`); tells `applyCbpAccount` how long to compound and where to route the
+   * deposit. Omitted falls back to the retirement-step anchor.
+   */
   cbpLumpSumEventAbsMonth?: ReadonlyMap<string, number>;
 }
 
 /**
- * Assemble the MC bundle. Computes:
- *   - `portfolioToday`: sum of every non-CBP active account balance.
- *     Lump-sum-elected CBPs are EXCLUDED (transfer
- *     semantic — `skipsPortfolio: true`) — their balance flows into
- *     the target account via a dated `cbpLumpSum` event firing at
- *     the income stream's `start` anchor (per-event month, NOT the
- *     retirement step). Annuity-elected CBPs are also excluded —
- *     their balance becomes monthly income via the linked stream.
- *   - `blendedMix`: balance-weighted asset mix across non-CBP accounts.
- *   - `annualContribution`: sum of planned contributions.
- *   - `cbpLumpSumEvents`: source CBP compounded forward to the event
- *     month at `planningReturnPct`. The
- *     dated event routes to the target account's per-step deposit
- *     series via `routeEventsToLedger`.
- *
- * Annuity-elected CBPs contribute zero events and zero portfolio dollars.
+ * Assemble the MC bundle. `portfolioToday` sums non-CBP active accounts: a lump-sum-elected CBP is
+ * a transfer (`skipsPortfolio: true`) that arrives as a dated `cbpLumpSum` event at the stream's
+ * `start`, and an annuity-elected CBP becomes monthly income via its linked stream, so neither
+ * counts. Lump-sum events route to the target account's deposit series via `routeEventsToLedger`.
  */
 export function buildBalanceProjectionMcBundle(
   args: BalanceProjectionMcBundleArgs,
@@ -507,23 +414,14 @@ export function buildBalanceProjectionMcBundle(
     0,
     (args.retirementYear - args.todayYear) * 12 + args.primaryRetirementMonth0,
   );
-  // Resolve the per-account contribution-growth rate + mode once
-  // (override → baseline → tracks-inflation). `'fixed'` accounts get the
-  // growth baked into their ledger contribution series here; tracks-
-  // inflation accounts keep a today's-dollars base the runner CPI-scales
-  // per path. `resolveContributionGrowth` throws on an unknown
-  // scenario id (sibling-resolver contract); the production runner always
-  // passes a resolvable chain, but direct-bundle test callers may pass a
-  // stub scenario list — fall back to an empty map (every account →
-  // tracks-inflation default) so the factory stays robust.
+  // Resolve contribution growth once (override → baseline → tracks-inflation). The resolver throws
+  // on an unknown scenario id, so direct-bundle test callers with a stub scenario list get an empty
+  // map (every account → tracks-inflation).
   const growthByAccount = args.scenarios.some((s) => s.id === args.scenarioId)
     ? resolveContributionGrowth(args.scenarioId, [...args.scenarios], args.accounts)
     : new Map<string, ResolvedContributionGrowth>();
-  // Resolve the per-account floor (per-field
-  // first-ancestor-wins, CWE-20 sanitised) so the MC ledger carries it into the
-  // strategy-path drawdown engine — per-path floor enforcement matches the
-  // deterministic engine. Falls back to an empty map when the scenario id is
-  // not resolvable (direct-bundle test callers), like `growthByAccount`.
+  // Per-account floor (first-ancestor-wins per field, CWE-20 sanitised) for the strategy-path
+  // drawdown; an empty map when the scenario id is unresolvable, like `growthByAccount`.
   const floorsByAccount = args.scenarios.some((s) => s.id === args.scenarioId)
     ? resolveAccountFloorsForScenario(args.scenarioId, [...args.scenarios], args.accounts)
     : new Map<string, ResolvedAccountFloor>();
@@ -543,18 +441,9 @@ export function buildBalanceProjectionMcBundle(
     cbpOwnerBirthdateByAccountId: args.cbpOwnerBirthdateByAccountId,
     rmdSnapshot: args.rmdSnapshot,
   });
-  // Route every dated event into the target account's per-step series
-  // when the event carries a `targetAccountId` resolving to a ledger
-  // entry. Untargeted events (or events targeting a non-ledger account
-  // — e.g. an annuity-elected CBP) fall back to proportional-to-balance
-  // distribution by the kernel via the household-level `deposit`
-  // series — the runner handles this fallback when it assembles
-  // `MonteCarloInput`.
-  // Route ledger-matched plain-pension placements per-account. Events whose
-  // target is NOT in the MC ledger are left in the household spread by `mcInput-
-  // FromBundle` (it subtracts only the ledger-matched amounts from
-  // `targetedOneOffEvents`); the dollars are conserved there, so no
-  // fallback re-append is needed (a re-append would double-count them).
+  // Route dated events into the target account's per-step series; untargeted events, or ones whose
+  // account is not in the ledger (e.g. an annuity-elected CBP), fall back to the kernel's
+  // proportional household `deposit` series.
   routeEventsToLedger({
     accountMcLedger: built.accountMcLedger,
     stepCount,
@@ -567,9 +456,6 @@ export function buildBalanceProjectionMcBundle(
   return assembleMcBundleResult({ args, built });
 }
 
-/** Compose the public `BalanceProjectionMcBundle` from the assembled
- *  per-account ledger + caller args. Extracted from
- *  `buildBalanceProjectionMcBundle` (40-ln function cap). */
 function assembleMcBundleResult(opts: {
   args: BalanceProjectionMcBundleArgs;
   built: AccountLedgerAndAggregates;
@@ -591,11 +477,8 @@ function assembleMcBundleResult(opts: {
     ...(args.monthlyExpenseBucketsBase !== undefined
       ? { monthlyExpenseBucketsBase: args.monthlyExpenseBucketsBase }
       : {}),
-    // HSA withdrawal-reserve: carry the medical-demand base + its
-    // effective rate (and the per-rate buckets when the medical set spans > 1
-    // rate) through to the bundle so the production MC path
-    // (`mcInputFromBundle`) sees the same medical demand the deterministic
-    // engine funds HSA-first against. Absent ⇒ no `isMedical` category.
+    // HSA withdrawal-reserve: carry the medical-demand base and rate (and per-rate buckets) so
+    // `mcInputFromBundle` sees the demand the deterministic engine funds HSA-first against.
     ...(args.monthlyMedicalDemandBase !== undefined
       ? {
           monthlyMedicalDemandBase: args.monthlyMedicalDemandBase,
@@ -619,15 +502,9 @@ function assembleMcBundleResult(opts: {
     scenarioInflationPct: args.scenarioInflationPct,
     cbpValidation: args.cbpValidation,
     cbpLumpSumEvents: built.cbpLumpSumEvents,
-    // The household-spread seam (`targetedOneOffEvents`, sourced from
-    // `MonthlyIncomeRow.depositInflow`) ALREADY carries every plain-pension
-    // lump-sum's dollars (a targeted lump-sum lands in `depositInflow`). So the
-    // unmatched-target fallback is NOT re-appended here (that double-counted the
-    // unmatched dollars). `mcInputFromBundle` instead SUBTRACTS the per-account-
-    // placed (ledger-matched) plain-pension amounts from this spread — the
-    // symmetric mirror of the deterministic `subtractCbpLumpSumsFromHousehold-
-    // Deposits(…, plainPensionDeposits)`. Unmatched targets are never subtracted,
-    // so they stay in the spread exactly once.
+    // The household spread already carries every plain-pension lump-sum's dollars (via
+    // `depositInflow`), so unmatched targets are not re-appended (that double-counted);
+    // `mcInputFromBundle` subtracts only the ledger-matched amounts.
     targetedOneOffEvents: args.targetedOneOffEvents,
     postPrimaryContributionEvents: args.postPrimaryContributionEvents,
     plainPensionPlacementEvents: args.plainPensionPlacementEvents ?? [],
@@ -647,19 +524,9 @@ interface AccountLedgerAndAggregates {
   readonly annualContribution: number;
 }
 
-/**
- * Walk `accountBundles` once, emitting per-account MC ledger entries +
- * accumulating CBP lump-sum events + portfolio scalars + the blended
- * mix. Extracted from `buildBalanceProjectionMcBundle` (40-ln
- * function cap).
- */
-/** Accumulator state mutated as `walkAccountBundle` iterates every
- *  bundle. Held outside the loop so the post-loop blended-mix
- *  finalization (`finalizeBlendedMix`) can read it. */
 interface LedgerAccumulator {
   readonly accountMcLedger: AccountMcLedgerEntry[];
   readonly cbpLumpSumEvents: ClassifiedDepositEvent[];
-  /** Per-calendar-year rolled-CBP RMD income (dollars). */
   readonly rolledRmdIncomeByYear: Map<number, number>;
   portfolioToday: number;
   totalNonCbpBalance: number;
@@ -679,25 +546,19 @@ function buildAccountLedgerAndAggregates(args: {
   todayMonthIndex: number;
   stepCount: number;
   retirementStepIdx: number;
-  /** Per-CBP event-month metadata (absolute month). When a CBP
-   *  source has an entry, its lump-sum fires at that month with the
-   *  balance compounded forward from today; absent or unspecified
-   *  falls back to the retirement-step anchor. */
+  /**
+   * Event month by CBP account id (absolute month); absent falls back to the retirement-step
+   * anchor.
+   */
   cbpLumpSumEventAbsMonth?: ReadonlyMap<string, number>;
-  /** Resolved per-account contribution-growth. */
   growthByAccount: ReadonlyMap<string, ResolvedContributionGrowth>;
-  /** Resolved per-account floor + HSA mode. */
   floorsByAccount: ReadonlyMap<string, ResolvedAccountFloor>;
-  /** Source-CBP owner ISO birthdate keyed by CBP account id. */
   cbpOwnerBirthdateByAccountId?: ReadonlyMap<string, string>;
-  /** The run's RMD calibration snapshot. */
   rmdSnapshot?: CalibrationSnapshot<RmdTable>;
 }): AccountLedgerAndAggregates {
   const acc = emptyLedgerAccumulator();
   const retirementAbsMonth =
     (args.retirementYear - args.todayYear) * 12 + args.primaryRetirementMonth0;
-  // Already-retired clamp + fractional-year exponent — see in-line note
-  // history at the original call site.
   const cbpEventMonth = Math.max(0, retirementAbsMonth);
   const yearsToRetirement = Math.max(0, retirementAbsMonth / 12);
   for (const bundle of args.accountBundles) {
@@ -743,10 +604,6 @@ function emptyLedgerAccumulator(): LedgerAccumulator {
   };
 }
 
-/** Per-bundle body of the ledger walk. Updates `acc` in place; routes
- *  CBP accounts through `applyCbpAccount`, non-CBP through the
- *  standard ledger-entry path. Extracted from
- *  `buildAccountLedgerAndAggregates` (40-ln function cap). */
 function walkAccountBundle(opts: {
   bundle: BalanceProjectionMcBundleArgs['accountBundles'][number];
   acc: LedgerAccumulator;
@@ -771,9 +628,7 @@ function walkAccountBundle(opts: {
     account.payload.plannedContributionPreTax +
     account.payload.plannedContributionPostTax;
   if (account.payload.type === 'RETIREMENT_CASH_BALANCE') {
-    // Resolve the per-CBP event month from threaded metadata
-    // (income stream's `start` anchor). When absent, fall back to the
-    // retirement-step anchor (direct-bundle-call back-compat).
+    // Event month from the stream's `start` anchor; the retirement-step anchor when absent.
     const eventAbs = opts.cbpLumpSumEventAbsMonth?.get(account.id) ?? null;
     const resolvedEventMonth =
       eventAbs !== null
@@ -784,8 +639,6 @@ function walkAccountBundle(opts: {
     const handled = applyCbpAccount({
       account,
       latestBalance: bundle.latestBalance,
-      // The stored post-tax (Roth-designated) balance share, so a MIXED
-      // source CBP carves its RMD only on the pre-tax portion (SECURE 2.0 §325).
       latestBalancePostTax: bundle.latestBalancePostTax ?? null,
       cbpValidation: opts.cbpValidation,
       cbpElections: opts.cbpElections,
@@ -820,9 +673,6 @@ function walkAccountBundle(opts: {
   });
 }
 
-/** Non-CBP account branch: add to portfolio totals + blended-mix
- *  weighted sums + emit the per-account MC ledger entry. Split from
- *  `walkAccountBundle` (40-ln function cap). */
 function appendNonCbpLedgerEntry(args: {
   bundle: BalanceProjectionMcBundleArgs['accountBundles'][number];
   acc: LedgerAccumulator;
@@ -832,7 +682,6 @@ function appendNonCbpLedgerEntry(args: {
     firstYear: number;
     todayMonthIndex: number;
     contributionGrowth: ResolvedContributionGrowth | undefined;
-    /** Resolved floor + HSA mode for this account. */
     floor: ResolvedAccountFloor | undefined;
   };
 }): void {
@@ -866,10 +715,6 @@ function appendNonCbpLedgerEntry(args: {
   );
 }
 
-/** Post-loop blended-mix finalization. Derives the household-blended
- *  asset mix from the running weighted sums (or the 70/25/5 default
- *  when no non-CBP balance exists). Split from
- *  `buildAccountLedgerAndAggregates` (40-ln function cap). */
 function finalizeBlendedMix(acc: LedgerAccumulator): AssetMix {
   if (acc.totalNonCbpBalance > 0) {
     return {
@@ -881,13 +726,9 @@ function finalizeBlendedMix(acc: LedgerAccumulator): AssetMix {
   return { stocksPct: 70, bondsPct: 25, cashPct: 5 };
 }
 
-/** The Roth-designated (post-tax) portion of a MIXED source CBP's grown
- *  basis, in integer cents. Derived from the stored post-tax balance SHARE
- *  applied to the compounded-forward basis (the share — not the raw stored
- *  post-tax dollars — keeps it consistent with the grown basis). Returns 0
- *  when no positive post-tax balance is recorded (whole basis treated pre-tax).
- *  Mirrors the deterministic `cbpRothPortionCents` so the two engines exclude
- *  the same Roth fraction from the rollover-year RMD. */
+// Roth-designated cents of a MIXED CBP's grown basis: the stored post-tax share applied to the
+// grown basis, matching the deterministic `cbpRothPortionCents`; 0 when no post-tax balance is
+// recorded.
 function mcCbpRothPortionCents(
   latestBalance: number,
   latestBalancePostTax: number | null,
@@ -904,12 +745,9 @@ function mcCbpRothPortionCents(
   return Math.round(basisCents * rothFraction);
 }
 
-/** CBP-account branch of the ledger walk. Returns whether this CBP
- *  contributes to `portfolioToday` (and how much). */
 function applyCbpAccount(args: {
   account: Aggregate<AccountPayload>;
   latestBalance: number;
-  /** Stored post-tax (Roth-designated) balance for a MIXED source CBP. */
   latestBalancePostTax?: number | null;
   cbpValidation: CbpValidationResult;
   cbpElections: ReadonlyMap<string, ResolvedCbpElection> | null;
@@ -933,9 +771,8 @@ function applyCbpAccount(args: {
     const planningRate = args.account.payload.planningReturnPct;
     const grown =
       args.latestBalance * Math.pow(1 + planningRate / 100, args.yearsToRetirement);
-    // Split (linked-CBP only, SAME pure helper as the deterministic seam →
-    // cent-exact parity). The rollover-year RMD is carved out FIRST (taxable
-    // ordinary income, distributed) and only the excess rolls to the target.
+    // Carve the rollover-year RMD first (taxable ordinary income, distributed) with the same helper
+    // as the deterministic seam; only the excess rolls to the target.
     const eventCalendarYear = args.firstYear + Math.floor(args.cbpEventMonth / 12);
     const basisCents = Math.round(grown * 100);
     const split =
@@ -945,10 +782,8 @@ function applyCbpAccount(args: {
             ownerBirthdate: args.ownerBirthdate,
             eventYear: eventCalendarYear,
             sourceTaxTreatment: args.account.payload.taxTreatment,
-            // A MIXED source CBP carves its RMD only on the pre-tax
-            // (non-Roth-designated) portion (SECURE 2.0 §325). Apply the stored
-            // post-tax balance share to the grown basis so it stays consistent
-            // with the compounded-forward basis.
+            // A MIXED source CBP carves its RMD only on the pre-tax portion (SECURE 2.0 §325); the
+            // stored post-tax share is applied to the grown basis.
             ...(args.account.payload.taxTreatment === 'MIXED'
               ? {
                   rothPortionCents: mcCbpRothPortionCents(
@@ -963,7 +798,6 @@ function applyCbpAccount(args: {
         : { rmdPortionCents: 0, rolloverExcessCents: basisCents };
     args.cbpLumpSumEvents.push({
       month: args.cbpEventMonth,
-      // Only the EXCESS rolls into the target's pre-tax bucket.
       amount: split.rolloverExcessCents / 100,
       accountId: election.targetAccountId,
     });
@@ -974,17 +808,14 @@ function applyCbpAccount(args: {
         (args.rolledRmdIncomeByYear.get(eventCalendarYear) ?? 0) + dollars,
       );
     }
-    // Lump-sum CBP — balance never compounds inside the MC ledger; it
-    // lands as a deposit at retirement on the target account.
+    // A lump-sum CBP never compounds in the MC ledger; it lands as a deposit on the target.
     return { skipsPortfolio: true, portfolioDelta: 0 };
   }
   if (election?.kind === 'annuity') {
-    // Annuity-elected CBP — excluded; income flows via the linked
-    // stream instead.
+    // Annuity-elected: excluded; income flows via the linked stream.
     return { skipsPortfolio: true, portfolioDelta: 0 };
   }
-  // CBP without a resolved election (validation failed / unconfigured):
-  // emit a ledger entry that compounds at `planningReturnPct`.
+  // No resolved election (validation failed or unconfigured): compounds at `planningReturnPct`.
   args.accountMcLedger.push(
     buildLedgerEntry({
       account: args.account,
@@ -1000,10 +831,6 @@ function applyCbpAccount(args: {
   return { skipsPortfolio: false, portfolioDelta: args.latestBalance };
 }
 
-/** Distribute targeted events into per-account ledger arrays by
- *  `targetAccountId`. Events without a target or whose target isn't in
- *  the ledger set are left for the runner to apply at the household
- *  level. */
 function routeEventsToLedger(args: {
   accountMcLedger: AccountMcLedgerEntry[];
   stepCount: number;
@@ -1011,17 +838,13 @@ function routeEventsToLedger(args: {
   cbpLumpSumEvents: ReadonlyArray<ClassifiedDepositEvent>;
   targetedOneOffEvents: ReadonlyArray<ClassifiedDepositEvent>;
   postPrimaryContributionEvents: ReadonlyArray<ClassifiedDepositEvent>;
-  /** Plain-pension placement events (carry `accountId`). */
   plainPensionPlacementEvents?: ReadonlyArray<ClassifiedDepositEvent>;
 }): void {
   const byId = new Map<string, AccountMcLedgerEntry>();
   for (const entry of args.accountMcLedger) byId.set(entry.id, entry);
-  // CBP / one-off events carry no pre/post split — the whole `amount` routes
-  // to the summed `deposit` slot (the kernel reads it; the named-strategy path
-  // routes it by destination treatment). Post-primary spouse contributions
-  // DO carry the split (`amountPre`/`amountPost`): route each slice to the
-  // matching split slot AND keep `deposit += amountPre + amountPost` so the
-  // summed field the no-ledger kernel path reads stays byte-identical.
+  // CBP and one-off events carry no pre/post split: the whole amount goes to the summed `deposit`
+  // slot. Post-primary spouse contributions carry `amountPre`/`amountPost`, routed to their slots
+  // while `deposit += amountPre + amountPost` stays what the no-ledger kernel path reads.
   const routeWholeAmount = (list: ReadonlyArray<ClassifiedDepositEvent>): void => {
     for (const ev of list) {
       if (ev.month < 0 || ev.month >= args.stepCount) continue;
@@ -1029,11 +852,8 @@ function routeEventsToLedger(args: {
       const entry = byId.get(ev.accountId);
       if (!entry) continue;
       if (ev.month < args.retirementStepIdx) {
-        // Pre-retirement: accumulation phase. Post-tax bucket (one-off
-        // / windfall dollars).
         entry.contribPost[ev.month] += ev.amount;
       } else {
-        // Post-retirement: drawdown phase. Targeted deposit slot.
         entry.deposit[ev.month] += ev.amount;
       }
     }
@@ -1044,34 +864,25 @@ function routeEventsToLedger(args: {
       if (!ev.accountId) continue;
       const entry = byId.get(ev.accountId);
       if (!entry) continue;
-      // When no split is set (both fields absent), treat the whole amount
-      // as pre-tax to prevent silent dollar-drop. All production callers set the
-      // split via buildPostPrimaryContributionEvents; this guards against direct-
-      // construction callers that omit the split fields.
+      // With neither split field set, treat the whole amount as pre-tax rather than silently
+      // dropping dollars (direct-construction callers).
       const hasSplit = ev.amountPre !== undefined || ev.amountPost !== undefined;
       const pre = hasSplit ? (ev.amountPre ?? 0) : ev.amount;
       const post = hasSplit ? (ev.amountPost ?? 0) : 0;
       if (ev.month < args.retirementStepIdx) {
-        // Pre-retirement: accumulation phase. Post-primary contributions are
-        // post-(primary)-retirement by construction, so this branch is not
-        // taken in production; route defensively to `contribPost` (mirrors the
-        // account-less path) if ever a pre-retirement post-primary event lands.
+        // Post-primary contributions are post-retirement by construction; this branch is only
+        // defensive and mirrors the account-less path.
         entry.contribPost[ev.month] += pre + post;
       } else {
-        // Post-retirement: split the targeted deposit by source. `deposit`
-        // keeps the summed value (kernel byte-identical); the named-strategy
-        // slice consumes the split slots.
+        // `deposit` keeps the summed value; the named-strategy slice consumes the split slots.
         entry.depositPre[ev.month] += pre;
         entry.depositPost[ev.month] += post;
         entry.deposit[ev.month] += pre + post;
       }
     }
   };
-  // Ledger-matched plain-pension placements route per-account whole (→
-  // destination treatment downstream, the same seam linked-CBP uses). A target
-  // absent from the MC ledger is left in the household spread by the caller
-  // (`mcInputFromBundle` subtracts only the matched amounts), so it is skipped
-  // here — the dollars stay in `targetedOneOffEvents` exactly once.
+  // Ledger-matched placements route whole (destination treatment applies downstream, as for
+  // linked-CBP); an unmatched target stays in the household spread, so it is skipped here.
   const routePlainPension = (list: ReadonlyArray<ClassifiedDepositEvent>): void => {
     for (const ev of list) {
       if (ev.month < 0 || ev.month >= args.stepCount) continue;

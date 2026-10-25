@@ -1,34 +1,5 @@
-// pnpm CVE-pin drop-detection contract guard.
-//
-// pnpm 10 reads dependency overrides / build allow-lists / audit waivers from
-// `pnpm-workspace.yaml`, NOT from a root-`package.json` `pnpm` field (which it
-// silently ignores). This guard turns four tribal facts into machine-checked
-// failures with teaching messages:
-//
-//   (a) the root package.json must never regrow a `pnpm` key — settings there
-//       are silently dead, so a re-added block would be a security foot-gun
-//       (CVE pins that look present but do nothing);
-//   (b) pnpm-workspace.yaml's `overrides:` block matches the frozen CVE-pin
-//       registry (`EXPECTED_OVERRIDES`) key-for-key and value-for-value AND
-//       matches the resolved `overrides:` block at the top of pnpm-lock.yaml —
-//       a dropped, added, or downgraded pin fails here naming the key (the
-//       registry check catches a coordinated downgrade that keeps both files
-//       agreeing; the lock check catches an uninstalled workspace edit);
-//   (c) every override carries a non-empty reason comment directly above it in
-//       pnpm-workspace.yaml, so a pin never loses the advisory it clears;
-//   (d) the workspace file keeps its `onlyBuiltDependencies` build allow-list,
-//       and carries only the advisory waivers in `ALLOWED_WAIVERS`, so a
-//       reintroduced waiver must not slip in silently.
-//
-// Both YAML/lockfile blocks are parsed by line-scan (no YAML dependency — this
-// script suite installs none) — an indentation/format drift that makes the scan
-// collect zero overrides fails loud rather than passing an empty-vs-empty
-// comparison vacuously.
-//
-// No infra harness, no new dependency. Runs under `pnpm test:scripts` (already
-// invoked by `pnpm test`). Lives in scripts/test/ so Node's test runner does
-// not match the built-in `test-*.mjs` discovery glob. Pattern:
-// scripts/test/csp-contract.test.mjs.
+// pnpm-workspace.yaml holds the settings pnpm reads: overrides match the frozen CVE-pin registry and the lockfile, each has a reason comment, and the root package.json has no dead `pnpm` key.
+// YAML is line-scanned; a scan that collects zero overrides fails instead of comparing empty to empty.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,54 +12,41 @@ const PACKAGE_JSON = resolve(__dirname, '../../package.json');
 const WORKSPACE_YAML = resolve(__dirname, '../../pnpm-workspace.yaml');
 const LOCKFILE_YAML = resolve(__dirname, '../../pnpm-lock.yaml');
 
-// Shared with the real-file "no audit-waiver block" assertions below AND with
-// the synthetic reintroduced-waiver fixture test, so the fixture test actually
-// exercises the same patterns the guard runs against pnpm-workspace.yaml
-// rather than a re-typed copy of them (a drift in one would otherwise go
-// unnoticed by the other).
+// Shared by the real-file and synthetic-fixture waiver assertions, so both run the same patterns.
 const AUDIT_CONFIG_RE = /^auditConfig:/m;
 const IGNORE_GHSAS_RE = /^\s+ignoreGhsas:/m;
 
-// The only advisory waivers allowed in pnpm-workspace.yaml. GHSA-ch52-4w7c-c8xp
-// (http-cache-semantics max-stale) has no patched release and is reachable only
-// through the Pulumi deploy tooling, never the app or Lambda bundles.
-// GHSA-hp3w-g68c-fv3c (sprintf-js) likewise has no patch and is reachable only
-// through jest's test tooling. Remove each here and in the workspace file once a
-// fix is published.
+// The only allowed advisory waivers; neither has a patched release. Remove each here and in the workspace file once one is published.
+// GHSA-ch52-4w7c-c8xp (http-cache-semantics) is reachable only through the Pulumi deploy tooling, GHSA-hp3w-g68c-fv3c (sprintf-js) only through jest.
 const ALLOWED_WAIVERS = Object.freeze(['GHSA-ch52-4w7c-c8xp', 'GHSA-hp3w-g68c-fv3c']);
 
-// The 16 live CVE override-pins, key -> exact CVE-safe floor. Each pin's reason
-// lives as a comment above it in pnpm-workspace.yaml. This map is the frozen
-// floor list: the contract check asserts pnpm-workspace.yaml matches it
-// value-for-value, so a coordinated downgrade (workspace edited + `pnpm install`
-// re-run, both files agreeing) still fails rather than passing an equal-vs-equal
-// check against the lockfile. Frozen so a test can't mutate it.
+// The CVE override pins, key -> exact CVE-safe floor. A coordinated downgrade that keeps workspace and lockfile agreeing still fails against this map.
 const EXPECTED_OVERRIDES = new Map(
   Object.entries(
     Object.freeze({
-      'fast-uri': '>=4.1.5',
+      'fast-uri': '>=4.2.3',
       'brace-expansion@>=5.0.0 <5.0.6': '>=5.0.6',
       protobufjs: '>=7.5.8 <8',
       qs: '>=6.15.2',
       '@grpc/grpc-js': '>=1.14.5',
       'undici@>=7.0.0 <7.29.1': '>=7.29.1 <8',
-      'undici@<6.27.0': '>=6.27.0 <7',
+      'undici@>=8.0.0 <8.12.2': '>=8.12.2 <9',
+      'undici@<6.29.1': '>=6.29.1 <7',
       'form-data@>=4.0.0 <4.0.6': '>=4.0.6',
-      'multer@>=1.0.0 <2.4.0': '>=2.4.0',
-      'body-parser@>=2.0.0 <2.3.0': '>=2.3.0 <3',
-      'dompurify@<3.4.16': '>=3.4.16 <4',
+      'multer@>=1.0.0 <2.5.0': '>=2.5.0',
+      'body-parser@>=2.0.0 <2.4.0': '>=2.4.0 <3',
+      'dompurify@<3.4.17': '>=3.4.17 <4',
       'nanoid@<3.3.17': '>=3.3.17 <4',
       browserslist: '>=4.28.7 <5',
       'proxy-addr@<2.0.8': '>=2.0.8 <3',
       'source-map-js@<1.2.2': '>=1.2.2 <2',
       'smol-toml@<1.9.0': '>=1.9.0 <2',
+      'ip-address@<=10.7.3': '>=10.7.4',
     }),
   ),
 );
 
-// Strip a single layer of surrounding single/double quotes (pnpm-workspace.yaml
-// double-quotes its keys/values; pnpm-lock.yaml single-quotes values and leaves
-// most keys bare — so the two files must compare equal after this).
+// pnpm-workspace.yaml double-quotes keys and values, pnpm-lock.yaml single-quotes values and leaves most keys bare.
 function stripQuotes(s) {
   const t = s.trim();
   if (t.length >= 2 && (t[0] === '"' || t[0] === "'") && t[t.length - 1] === t[0]) {
@@ -97,9 +55,7 @@ function stripQuotes(s) {
   return t;
 }
 
-// Collect the `  <key>: <value>` lines of the block introduced by a
-// `^<blockName>:` line and terminated by the next column-0 (`^\S`) line.
-// Returns a Map<key, value> with quotes stripped from both sides.
+// The `  <key>: <value>` lines of the block introduced by `^<blockName>:`, up to the next column-0 line.
 function parseOverridesBlock(source, blockName, label) {
   const lines = source.split('\n');
   const start = lines.findIndex((l) => l === `${blockName}:`);
@@ -114,8 +70,7 @@ function parseOverridesBlock(source, blockName, label) {
     if (/^\S/.test(line)) break; // next column-0 line ends the block
     const trimmed = line.trim();
     if (trimmed === '' || trimmed.startsWith('#')) continue;
-    // key up to the first `: ` separator (override keys contain no colon);
-    // value is the remainder.
+    // Override keys contain no colon.
     const m = line.match(/^\s+(.+?):\s+(.+)$/);
     assert.notEqual(
       m,
@@ -127,13 +82,7 @@ function parseOverridesBlock(source, blockName, label) {
   return map;
 }
 
-// Collect each override key's reason: the text of the indented `#` comment
-// lines directly above it, with no blank line between. A key consumes the
-// comment lines above it, so a comment never counts for the next key, and a
-// blank line detaches whatever precedes it. Returns Map<key, reason>; an
-// uncommented key maps to ''. Keys are quote-stripped like parseOverridesBlock.
-// A column-0 comment ends the block (as in parseOverridesBlock), so reasons
-// must be indented.
+// Each override key's reason: the indented `#` lines directly above it. A blank line detaches them, and a key consumes its own, so none counts for the next key.
 function parseOverrideReasons(source, blockName, label) {
   const lines = source.split('\n');
   const start = lines.findIndex((l) => l === `${blockName}:`);
@@ -168,16 +117,11 @@ function parseOverrideReasons(source, blockName, label) {
   return reasons;
 }
 
-// Keys whose attached reason is empty.
 function overridesWithoutReason(reasons) {
   return [...reasons].filter(([, reason]) => reason === '').map(([key]) => key);
 }
 
-// Pure key-level comparison of two override maps. Returns one entry per
-// difference: `missing` (key in `a`, absent from `b`), `extra` (key in `b`,
-// absent from `a`), or `value` (present in both, values differ). Shared by the
-// registry-drift check, the stale-lockfile check, and their synthetic-drift
-// tests so every mismatch branch is directly exercisable.
+// One entry per difference: `missing` (only in `a`), `extra` (only in `b`) or `value` (both, differing).
 function diffOverrides(a, b) {
   const diffs = [];
   for (const [key, expected] of a) {
@@ -195,9 +139,7 @@ function diffOverrides(a, b) {
   return diffs;
 }
 
-// Render one `diffOverrides` entry as a human message. `aLabel`/`bLabel` name
-// the two compared sources; `remedy` is the trailing fix hint (empty for an
-// `extra` key, which has no natural remedy).
+// `remedy` is the trailing fix hint; an `extra` key has none.
 function formatDiff(diff, aLabel, bLabel, remedy) {
   if (diff.kind === 'missing') {
     return `\`${diff.key}\` present in ${aLabel} but missing from ${bLabel}${remedy}`;
@@ -226,16 +168,12 @@ test('pnpm-workspace.yaml overrides match the CVE-pin registry exactly', () => {
     'pnpm-workspace.yaml',
   );
 
-  // Fail loud on a vacuous empty comparison from a format drift.
   assert.ok(
     workspaceOverrides.size > 0,
     'parsed 0 overrides from pnpm-workspace.yaml — line-scan format changed',
   );
 
-  // Exact-pin identity: every key present with its CVE-safe floor, no key
-  // added or dropped. This catches a *coordinated* downgrade — a pin edited to
-  // an old vulnerable range with `pnpm install` re-run so the lockfile agrees —
-  // which the stale-lockfile check below cannot see.
+  // Catches a coordinated downgrade that the stale-lockfile check below cannot see.
   const drift = diffOverrides(EXPECTED_OVERRIDES, workspaceOverrides);
   assert.equal(
     drift.length,
@@ -266,7 +204,6 @@ test('pnpm-workspace.yaml overrides equal pnpm-lock.yaml overrides key-for-key',
   );
   const lockOverrides = parseOverridesBlock(lockSrc, 'overrides', 'pnpm-lock.yaml');
 
-  // Fail loud on a vacuous empty-vs-empty comparison from a format drift.
   assert.ok(
     workspaceOverrides.size > 0,
     'parsed 0 overrides from pnpm-workspace.yaml — line-scan format changed',
@@ -276,8 +213,7 @@ test('pnpm-workspace.yaml overrides equal pnpm-lock.yaml overrides key-for-key',
     'parsed 0 overrides from pnpm-lock.yaml — line-scan format changed',
   );
 
-  // Stale-lockfile check: an uninstalled workspace edit leaves the two files
-  // disagreeing. Compare key-for-key and value-for-value, naming any mismatch.
+  // An uninstalled workspace edit leaves the two files disagreeing.
   const mismatches = diffOverrides(workspaceOverrides, lockOverrides);
   assert.equal(
     mismatches.length,
@@ -318,9 +254,6 @@ test('pnpm-workspace.yaml keeps the build allow-list and carries only the allowe
     /^onlyBuiltDependencies:/m,
     'pnpm-workspace.yaml must keep the `onlyBuiltDependencies:` build allow-list',
   );
-  // Exactly the dated waivers in ALLOWED_WAIVERS and nothing else. A new waiver
-  // needs a fresh reachability argument and a review expiry written as a comment
-  // above it in pnpm-workspace.yaml — not a silent re-add.
   const waived = [...workspaceSrc.matchAll(/^\s+-\s+(GHSA-[a-z0-9-]+)\s*$/gm)].map((m) => m[1]);
   assert.deepEqual(
     waived,
@@ -335,10 +268,7 @@ test('pnpm-workspace.yaml keeps the build allow-list and carries only the allowe
   }
 });
 
-// --- Detection-branch coverage (synthetic in-memory fixtures) -------------
-// The guard exists to DETECT drift; the tests above only exercise the passing
-// real files. These drive the parse/compare helpers directly against crafted
-// inputs so the negative half of every branch is proven.
+// --- Detection-branch coverage: crafted inputs prove the negative half of each branch ---
 
 test('stripQuotes strips one matching quote layer and trims, leaving bare/unmatched text', () => {
   assert.equal(stripQuotes('">=6.15.2"'), '>=6.15.2');
@@ -504,9 +434,7 @@ test('diffOverrides is empty for identical maps', () => {
 });
 
 test('a synthetic workspace fixture that reintroduces an audit waiver fails the no-waiver assertions', () => {
-  // Proves the "must not contain" checks above are not passing vacuously
-  // against the real (already-clean) file — a fixture that DOES carry a
-  // reintroduced waiver must be rejected by the same regexes.
+  // The real file is clean, so only a crafted waiver shows the regexes can fail.
   const reintroducedWaiver =
     'onlyBuiltDependencies:\n' +
     '  - esbuild\n' +

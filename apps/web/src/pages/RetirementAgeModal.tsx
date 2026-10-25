@@ -1,19 +1,4 @@
-/**
- * Retirement-Age configuration modal, extracted from
- * `ScenarioDetailPage.tsx` so the largest page in the app does not keep
- * growing. Shared primitives (`AgeInputs`, `RetirementDateLine`,
- * default-override constants, the same-date recompute) live in
- * `scenario-age-modal-shared.tsx`. The retirement-timing mode picker
- * is the typed `<SegmentedRadioGroup>`.
- *
- * Behavioral contract: the shared `<Modal>`
- * (viewport-centered, focus trap, Esc/scrim) at the AGENTS width-scale
- * width 560; left-aligned, primary-action-first button row; WAI-ARIA
- * `<div role="group">`/`<header>` field groups (NOT `<fieldset>`);
- * numeric age inputs are `type="text" inputMode="numeric"`; the
- * same-date-anchor recompute + day-of-month snapping; the unsaved-edits
- * guard.
- */
+/** Retirement-Age modal: age inputs per member, the retirement-timing mode picker and the same-date-anchor recompute with day-of-month snapping, behind the unsaved-edits guard. Shared primitives live in scenario-age-modal-shared.tsx. */
 import React, { useMemo, useState } from 'react';
 import { textLinkClass } from '../components/TextLink';
 import { Link } from 'react-router';
@@ -85,10 +70,7 @@ export const RetirementAgeModal: React.FC<RetirementAgeModalProps> = ({
     return DEFAULT_RETIREMENT;
   }, [scenario, scenarios]);
 
-  /** Initial draft fills in the secondary value when missing (so the
-   *  modal always renders an editable input pair when secondary exists)
-   *  and recomputes any anchored side so storage reflects the new value
-   *  even if the underlying birthdates have shifted since the last save. */
+  // Fills in a missing secondary value and recomputes any anchored side so storage reflects the new value even if the birthdates shifted since the last save.
   const initialDraft = useMemo<RetirementAgeOverride>(() => {
     let d: RetirementAgeOverride = { ...baseline };
     if (secondaryMember && !d.secondary) {
@@ -154,8 +136,6 @@ export const RetirementAgeModal: React.FC<RetirementAgeModalProps> = ({
   const onSave = async () => {
     setSubmitting(true);
     try {
-      // Strip `secondary` from the persisted payload when there's no
-      // secondary household member — keeps the override shape minimal.
       const persisted: RetirementAgeOverride = secondaryMember
         ? draft
         : { primary: draft.primary };
@@ -171,10 +151,7 @@ export const RetirementAgeModal: React.FC<RetirementAgeModalProps> = ({
     }
   };
 
-  // Independent mode signals user intent to potentially have different
-  // retirement dates — fire the warning regardless of whether the
-  // current ages happen to align on the same calendar date. Same-date
-  // modes guarantee a single date by construction; never warn.
+  // Independent mode signals the user may want different dates, so it warns whatever the current ages; same-date modes guarantee one date and never warn.
   const showWarning = secondaryMember !== null && mode === 'independent';
 
   const primaryAriaPrefix = `${primaryName.toLocaleLowerCase()}-retirement`;
@@ -182,11 +159,7 @@ export const RetirementAgeModal: React.FC<RetirementAgeModalProps> = ({
   const primaryEditable = mode !== 'sameDateAnchorSecondary';
   const secondaryEditable = mode !== 'sameDateAnchorPrimary';
 
-  // Same-date anchor's actual retirement date — the non-anchor's
-  // displayed "Retires" line snaps to this exact ISO date so the two
-  // sides never disagree just because of birthdate-day-of-month
-  // rounding (e.g. anchor born 3rd of month, non-anchor born 12th of
-  // month → `birthdate + age` would land on different days).
+  // The non-anchor's "Retires" line snaps to the anchor's exact ISO date, since birthdate + age lands on different days when the birth days of month differ.
   let anchorDate: string | null = null;
   try {
     if (mode === 'sameDateAnchorPrimary' && primaryBirthdate) {
@@ -322,7 +295,6 @@ export const RetirementAgeModal: React.FC<RetirementAgeModalProps> = ({
 
         {error && <Alert tone="error">{error}</Alert>}
 
-        {/* Left-aligned, primary action first — AGENTS modal rule. */}
         <div className="flex justify-start gap-2">
           <button
             type="button"

@@ -1,55 +1,5 @@
-// Workflow and deploy-artifact trust-boundary regression guard.
-//
-// Reads the workflow + infrastructure source as TEXT (no YAML dep, no infra
-// harness — the `infrastructure/` package has no unit-test harness) and asserts
-// the supply-chain boundaries it locks in:
-//
-//   1. Every workflow `uses:` reference is pinned to a full 40-hex-character
-//      commit SHA. A moving tag in a workflow is a supply-chain hole (a
-//      compromised upstream tag alters code that runs in CI).
-//   2. No job that acquires AWS credentials (`aws-actions/configure-aws-credentials`)
-//      also runs an application build command or a remote shell installer
-//      (`curl ... | sh`). Lines are attributed to their owning job by YAML
-//      indentation (see `jobLines`, no YAML dependency). No workflow acquires
-//      credentials today, so this passes without inspecting a job; it is the
-//      guard that fails if one is added that builds in the credentialed job.
-//   2b. No job that never acquires AWS credentials carries the `id-token`
-//      permission, and no workflow-level `permissions:` block grants one
-//      implicitly.
-//   2c. Fork-safe CI (every workflow file): no `pull_request_target`,
-//      `workflow_run` or `issue_comment` trigger; no `secrets.` reference; no
-//      permission granted `write` at workflow or job level; no label-based or
-//      fork-based (`labels`, `head.repo`) condition in a job `if:`. Each rule
-//      is also run against small inline workflow texts that break it, so the
-//      rules themselves are shown to fail.
-//   2d. ci.yml specifically: `pull_request` is not restricted to types that
-//      leave out `synchronize`; `push` to `main` is present; a job named
-//      `All checks` exists, runs under a bare `if: always()`, and needs every
-//      job except itself and the `if: false` ones; the variables that relax the
-//      audit and the date checks (AUDIT_ADVISORIES_NONBLOCKING,
-//      SKIP_REVIEW_BY_DATE_CHECK) are set only from a `pull_request` event
-//      expression, so `main` and dispatch runs stay strict.
-//   2e. Runners and checkouts (every workflow file): no job runs on a floating
-//      `*-latest` image (GitHub moves those to the next OS release on its own
-//      schedule), and every `actions/checkout` step sets
-//      `persist-credentials: false`, so the token is not left in the clone's
-//      git config for later steps to read.
-//   3. Both Lambda placeholder-fallback branches (lambda.ts's `lambdaCode()`
-//      and signup-cascade.ts's `cascadeCode()`) delegate to the shared
-//      `resolveLambdaArtifact()` (lambda-artifact.ts), whose shell fallback is
-//      reachable ONLY under `pulumi.runtime.isDryRun()` (a `pulumi preview`); a
-//      real `pulumi up` with the artifact incomplete throws, naming the build
-//      command, instead of silently deploying a non-functional shell. This is a
-//      SEMANTIC assertion (preview-only shell + real-up throw), not source-wide
-//      fallback absence.
-//   4. That shared resolver enforces FULL coverage: it validates EVERY one of
-//      the six deployed handler files (not just one primary handler), so a
-//      partial artifact — the primary handler present but a sibling handler
-//      file missing — is rejected on a real `pulumi up` (all six ship from
-//      one shared build directory; Pulumi picks the per-Lambda entry from it).
-//
-// Runs under `pnpm test:scripts`. Pattern: scripts/test/csp-contract.test.mjs,
-// scripts/test/jwt-key-age.test.mjs.
+// Reads workflows and infrastructure source as text and pins the supply-chain boundaries: SHA-pinned actions, no build or installer in a credentialed job,
+// fork-safe CI, the ci.yml gate job, pinned runners and checkouts, and the Lambda placeholder fallback. Each rule also runs against inline texts that break it.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -74,10 +24,7 @@ const ARTIFACT_SRC = resolve(
   'lambda-artifact.ts',
 );
 
-// The six handler files that ship from the one shared artifact — the
-// resolver must validate ALL of them. Mirrors DEPLOYED_HANDLERS in
-// scripts/test/lambda-artifact-contract.test.mjs and DEPLOYED_HANDLER_FILES in
-// infrastructure/src/lambda-artifact.ts.
+// The six handler files that ship from the one shared artifact; mirrors DEPLOYED_HANDLER_FILES in infrastructure/src/lambda-artifact.ts.
 const DEPLOYED_HANDLERS = [
   'lambda.js',
   'compactor-lambda.js',
@@ -93,14 +40,7 @@ function workflowFiles() {
     .map((f) => join(WORKFLOWS_DIR, f));
 }
 
-/**
- * Attribute every line under a workflow file's `jobs:` key to its owning
- * top-level job name, by indentation alone (2-space job keys under `jobs:`,
- * matching this repository's YAML style everywhere it's used) — no YAML
- * dependency, same house rule as the rest of this file. Returns a
- * `Map<jobName, { text, num }[]>`; a file with no `jobs:` key returns an
- * empty map.
- */
+/** Every line under `jobs:` attributed to its owning job by indentation alone (2-space job keys); an empty map when there is no `jobs:` key. */
 function jobLines(fileText) {
   const lines = fileText.split('\n');
   const jobsIdx = lines.findIndex((l) => /^jobs:\s*$/.test(l));
@@ -125,10 +65,7 @@ function jobLines(fileText) {
 
 const isComment = (line) => /^\s*#/.test(line);
 
-/**
- * The top-level `on:` block of a workflow (its own line plus every indented
- * line under it, comments and blanks dropped). Empty array when absent.
- */
+/** The top-level `on:` block of a workflow, comments and blanks dropped. */
 function onBlock(fileText) {
   const lines = fileText.split('\n');
   const idx = lines.findIndex((l) => /^["']?on["']?:/.test(l));
@@ -156,10 +93,7 @@ function triggerBlock(fileText, trigger) {
   return out;
 }
 
-/**
- * The `types:` list of the `pull_request` trigger, or null when it has none
- * (GitHub's default types — opened, synchronize, reopened — apply).
- */
+/** The `types:` list of the `pull_request` trigger, or null when it has none (GitHub's default types apply). */
 function pullRequestTypes(fileText) {
   const block = triggerBlock(fileText, 'pull_request');
   if (!block) return null;
@@ -174,10 +108,7 @@ function pullRequestTypes(fileText) {
   return types;
 }
 
-/**
- * A job-level (4-space) key's value, with folded/continued lines joined and
- * comments dropped; null when the job has no such key.
- */
+/** A job-level (4-space) key's value, continued lines joined and comments dropped; null when absent. */
 function jobKey(lines, key) {
   const idx = lines.findIndex((l) => new RegExp(`^ {4}${key}:`).test(l.text));
   if (idx === -1) return null;
@@ -236,12 +167,7 @@ function forkSafetyViolations(fileText, file) {
 
 const indentOf = (line) => line.match(/^ */)[0].length;
 
-/**
- * Whether the step whose `uses:` key is on line `index` has
- * `persist-credentials: false` among its own keys. A step's keys share one
- * indentation: the `uses:` key itself, or two columns past a `- ` marker when
- * `uses:` is the first key. Lines of the next step or job sit shallower.
- */
+/** Whether the step whose `uses:` key is on line `index` has `persist-credentials: false` among its own keys. */
 function stepDropsToken(lines, index) {
   const startsStep = /^\s*-\s/.test(lines[index]);
   const keyIndent = indentOf(lines[index]) + (startsStep ? 2 : 0);
@@ -276,9 +202,7 @@ function runnerAndCheckoutViolations(fileText, file) {
   return violations;
 }
 
-// The variables that relax the dependency audit and the date-dependent tests on
-// pull requests. Anything that sets them other than a `pull_request` event
-// expression would leak the relaxation to `main` and manual runs.
+// Variables that relax the audit and date checks; set from anything but a `pull_request` expression they would leak to `main` and manual runs.
 const RELAXATION_VARS = ['AUDIT_ADVISORIES_NONBLOCKING', 'SKIP_REVIEW_BY_DATE_CHECK'];
 const PR_EVENT_EXPR_RE = /\$\{\{[^}]*github\.event_name\s*==\s*'pull_request'[^}]*\}\}/;
 
@@ -334,16 +258,12 @@ function ciViolations(fileText, file) {
   return violations;
 }
 
-// A `uses:` value, ignoring a trailing `# comment`. Local (`./...`) and Docker
-// (`docker://...`) references are not tag-pinnable and are exempt.
+// Local (`./...`) and Docker (`docker://...`) references are not tag-pinnable and are exempt.
 const USES_RE = /^\s*(?:-\s*)?uses:\s*(\S+)/;
 const SHA_PIN_RE = /^[^@\s]+@[0-9a-f]{40}$/;
 const AWS_CREDS_RE = /aws-actions\/configure-aws-credentials/;
 const SHELL_INSTALLER_RE = /\|\s*sh\b/;
-// The three build helpers (lib/deploy-common.sh), the `build:lambda` script
-// name, and a literal `pnpm --filter @retirement/web ... build` / `vite
-// build` invocation — anything that would re-introduce an application build
-// into a credentialed job, inline in the workflow YAML.
+// Anything that would put an application build inline in a credentialed job: the lib/deploy-common.sh build helpers, `build:lambda`, a `pnpm --filter ... build` or `vite build`.
 const APPLICATION_BUILD_RE =
   /\bbuild_lambda\b|\bcompute_build_id\b|\bbuild_spa\b|\bbuild:lambda\b|pnpm[^\n]*--filter\s+@retirement\/web[^\n]*\bbuild\b|\bvite build\b/;
 const ID_TOKEN_GRANT_RE = /id-token:\s*write/;
@@ -370,8 +290,6 @@ test('every workflow `uses:` is pinned to a full 40-hex commit SHA', () => {
 });
 
 test('no job that acquires AWS credentials runs an application build command or a remote shell installer', () => {
-  // Scope every check to the credentialed job's own lines: which JOB a line
-  // belongs to matters, not its line number in the file.
   const violations = [];
   for (const file of workflowFiles()) {
     const text = readFileSync(file, 'utf8');
@@ -379,7 +297,7 @@ test('no job that acquires AWS credentials runs an application build command or 
       const hasCreds = lines.some((l) => AWS_CREDS_RE.test(l.text));
       if (!hasCreds) continue; // this job never acquires AWS credentials
       for (const { text: lineText, num } of lines) {
-        if (/^\s*#/.test(lineText)) continue; // a comment EXPLAINING the rule is not a violation of it
+        if (/^\s*#/.test(lineText)) continue; // a comment explaining the rule is not a violation of it
         if (SHELL_INSTALLER_RE.test(lineText)) {
           violations.push(`${file}:${num} [job:${job}] shell installer: ${lineText.trim()}`);
         }
@@ -403,12 +321,7 @@ test('no job without AWS credentials carries `id-token`, and no workflow-level `
     const lines = text.split('\n');
     const jobsIdx = lines.findIndex((l) => /^jobs:\s*$/.test(l));
     const preambleEnd = jobsIdx === -1 ? lines.length : jobsIdx;
-    // A workflow-level `id-token: write` (BEFORE `jobs:`, at any indent under
-    // a top-level `permissions:` key) grants it to every job that doesn't
-    // override it — a job without credentials must not inherit `id-token`
-    // this way. A workflow-level `permissions:` block that grants
-    // something else (e.g. `contents: read`, as ci.yml's least-privilege
-    // default does) is fine; only an id-token grant here is the violation.
+    // A workflow-level `id-token` grant (before `jobs:`) reaches every job that does not override it; other workflow-level permissions are fine.
     for (let i = 0; i < preambleEnd; i += 1) {
       if (ID_TOKEN_GRANT_RE.test(lines[i])) {
         violations.push(
@@ -429,11 +342,7 @@ test('no job without AWS credentials carries `id-token`, and no workflow-level `
   assert.deepEqual(violations, [], violations.join('\n'));
 });
 
-// Semantic fail-closed guard: the shell fallback is preview-only, and a real
-// `pulumi up` with the artifact incomplete throws, naming the build command.
-// The invariant now lives in the shared resolver (lambda-artifact.ts); both
-// entry-point resolvers delegate to it. Regex-locks: a `!pulumi.runtime
-// .isDryRun()` branch that throws an Error mentioning `build:lambda`.
+// A `!pulumi.runtime.isDryRun()` branch that throws an Error mentioning `build:lambda`.
 const FAIL_CLOSED_RE =
   /!pulumi\.runtime\.isDryRun\(\)\s*\)\s*{[\s\S]*?throw new Error\([\s\S]*?build:lambda/;
 
@@ -464,8 +373,6 @@ test('lambda.ts and signup-cascade.ts route their artifact through the shared fa
       /resolveLambdaArtifact\s*\(/,
       `${src} must resolve its Lambda artifact via the shared resolver (no bespoke single-file existence check)`,
     );
-    // The old single-file check (`existsSync(... "lambda.js")` /
-    // `signup-cascade-lambda.js`) that accepted a partial artifact must be gone.
     assert.doesNotMatch(
       source,
       /fs\.existsSync/,
@@ -476,17 +383,13 @@ test('lambda.ts and signup-cascade.ts route their artifact through the shared fa
 
 test('the shared resolver validates ALL six deployed handler files (full-coverage fail-closed)', () => {
   const source = readFileSync(ARTIFACT_SRC, 'utf8');
-  // Reject the pre-fix behavior: a check keyed off only ONE primary handler
-  // would let a partial artifact (that handler present, a sibling missing)
-  // deploy. Every deployed handler must be named in the resolver's required
-  // set so the resolver rejects any missing one.
+  // A check keyed off one primary handler would let a partial artifact deploy.
   for (const handler of DEPLOYED_HANDLERS) {
     assert.ok(
       source.includes(`"${handler}"`),
       `lambda-artifact.ts must validate the presence of ${handler} (all six ship from the one shared artifact)`,
     );
   }
-  // And the missing-file computation must drive the resolver's decision.
   assert.match(
     source,
     /missingHandlerFiles/,

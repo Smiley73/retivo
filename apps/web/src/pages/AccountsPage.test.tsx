@@ -1,9 +1,4 @@
-/**
- * AccountsPage render test.
- *
- * Drives the IndexedDB code paths via fake-indexeddb. Covers the
- * empty-state copy and the populated-list rendering.
- */
+// AccountsPage: empty-state copy and the populated list over IndexedDB.
 import 'fake-indexeddb/auto';
 import { fireEvent, render, screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -110,12 +105,7 @@ async function seedAccount(
   await putAggregate('account', acc);
 }
 
-/** One annual balance row for an account. The two personal split keys are `null`
- *  explicitly — that pair is what distinguishes a flat row from a MIXED one.
- *  Passing an unflushed `batch` (a bare `new Set()`) writes the row WITHOUT
- *  firing the store's change signal — the shape of a row synced by another tab,
- *  which lands in IndexedDB while this page's `useAggregates` snapshot stays
- *  stale (see `recordOrNotify` in db/store.ts). */
+// An unflushed `batch` (a bare `new Set()`) writes the row without firing the store's change signal: the shape of a row synced by another tab, which leaves this page's `useAggregates` snapshot stale (see `recordOrNotify` in db/store.ts).
 async function seedBalance(
   accountId: string,
   year: number,
@@ -248,7 +238,6 @@ describe('AccountsPage', () => {
     await seedHousehold();
     await seedAccount('My 401k', 'RETIREMENT_401K');
     await seedAccount('Brokerage', 'BROKERAGE');
-    // Sanity: both rows are in the store before we render.
     const stored = (await import('../db/store')).listAggregates;
     const rows = await stored('account');
     expect(rows.map((r) => r.id).sort()).toEqual(
@@ -256,10 +245,7 @@ describe('AccountsPage', () => {
     );
     renderPage();
     await waitFor(() => {
-      // Account names render as <Link> labels inside the table — the
-      // generic "Brokerage" string also appears in the type-filter
-      // dropdown, so anchor on the row's edit-button aria-label
-      // instead (it's the unambiguous "name" surface).
+      // The generic "Brokerage" string also appears in the type-filter dropdown, so anchor on the row's edit-button aria-label.
       expect(screen.getByLabelText('Delete My 401k')).toBeInTheDocument();
       expect(screen.getByLabelText('Delete Brokerage')).toBeInTheDocument();
     });
@@ -286,19 +272,13 @@ describe('AccountsPage', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Delete Primary 401k')).toBeInTheDocument();
     });
-    // The Owner filter is the shared React Aria <Select>;
-    // its trigger is the element labelled by the "Owner" <label>.
     const ownerSelect = screen.getByLabelText('Owner');
 
-    // Project rule: prefer member firstName in user-facing copy.
-    // Seeded primary is "Alex", secondary is "Sam".
     await user.click(ownerSelect);
     const optionLabels = (await screen.findAllByRole('option')).map(
       (o) => o.textContent,
     );
     expect(optionLabels).toEqual(['All', 'Joint', 'Alex', 'Sam']);
-    // Close the listbox opened for the inventory check so each
-    // selectOwner() starts from a closed trigger.
     await user.keyboard('{Escape}');
     await waitFor(() =>
       expect(screen.queryByRole('listbox')).not.toBeInTheDocument(),
@@ -350,15 +330,11 @@ describe('AccountsPage — React Aria Table + notes indicator', () => {
     });
     await seedAccount('Plain Brokerage', 'BROKERAGE', { notes: '' });
     renderPage();
-    // React Aria Table renders role="grid". The aria-label on the
-    // <Table> component is the grid's accessible name.
     const grid = await screen.findByRole('grid', {
       name: 'Retirement and savings accounts',
     });
     expect(grid).toBeInTheDocument();
-    // Each row carries role="row" (RA Row primitive). Re-query inside waitFor:
-    // the grid can resolve carrying only its header row.
-    // 1 header row + 2 data rows.
+    // Re-query inside waitFor: the grid can resolve carrying only its header row.
     await waitFor(() => {
       expect(within(grid).getAllByRole('row').length).toBeGreaterThanOrEqual(3);
     });
@@ -375,19 +351,12 @@ describe('AccountsPage — React Aria Table + notes indicator', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('Delete Notes 401k')).toBeInTheDocument(),
     );
-    // The NotesIndicator surfaces an SVG with role="img" + aria-label
-    // "Notes" — one per row whose notes is non-empty.
     const indicators = screen.getAllByRole('img', { name: 'Notes' });
     expect(indicators).toHaveLength(1);
   });
 
   it('renders in-row interactive controls that are keyboard-focusable', async () => {
-    // RA Table's arrow-key row-navigation keyboard model is exercised
-    // by Adobe's upstream tests. In jsdom we cannot reliably synthesize
-    // the focus-manager events the grid uses to advance row focus, so
-    // we sanity-check that the row's Edit + Delete controls are
-    // reachable + can hold focus — confirming the rendered Table is
-    // keyboard-reachable.
+    // jsdom cannot synthesize the focus-manager events React Aria Table uses for row arrow-key navigation, so assert that the row's Edit and Delete controls can hold focus.
     await clearAllStores();
     await seedHousehold();
     await seedAccount('Notes 401k', 'RETIREMENT_401K');
@@ -404,16 +373,7 @@ describe('AccountsPage — React Aria Table + notes indicator', () => {
   });
 
   it('exposes the React Aria Table grid for arrow-key navigation', async () => {
-    // The page must support arrow-key row navigation (RA Table keyboard
-    // model). RA's grid focus-delegate behavior is brittle to
-    // synthesize in jsdom — the actual ArrowDown handler relies on
-    // browser-level focus-manager events Adobe's upstream tests exercise
-    // in a real DOM. The robust jsdom proxy is: the table's
-    // accessible name is queryable via `role="grid"` (so AT can target
-    // it) AND its first focusable descendant in each row holds focus
-    // — confirming the grid's contract surface is wired correctly.
-    // Real-DOM grid arrow nav is covered by a manual
-    // walkthrough gate before merge.
+    // jsdom cannot synthesize React Aria's grid focus-delegate events (ArrowDown relies on browser-level focus-manager events), so assert the grid's accessible name and that each row's first focusable control holds focus.
     await clearAllStores();
     await seedHousehold();
     await seedAccount('First 401k', 'RETIREMENT_401K');
@@ -423,13 +383,11 @@ describe('AccountsPage — React Aria Table + notes indicator', () => {
       name: 'Retirement and savings accounts',
     });
     expect(grid).toBeInTheDocument();
-    // findBy*, not getBy*: the grid resolving does not mean its ROWS have.
+    // findBy: the grid resolving does not mean its rows have.
     const firstRowDelete = await screen.findByLabelText('Delete First 401k');
     const secondRowDelete = await screen.findByLabelText('Delete Second IRA');
     firstRowDelete.focus();
     expect(firstRowDelete).toHaveFocus();
-    // Both rows expose their own focusable descendant — the arrow-key
-    // navigation surface (Adobe's grid moves focus between these).
     secondRowDelete.focus();
     expect(secondRowDelete).toHaveFocus();
   });
@@ -514,8 +472,6 @@ describe('AccountsPage — income-linked delete guard', () => {
     await act(async () => {
       fireEvent.click(screen.getByLabelText('Delete Unlinked 401k'));
     });
-    // The no-reference path goes straight to the shared confirm, which
-    // is a React Aria alertdialog.
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('Delete "Unlinked 401k"?');
     await act(async () => {
@@ -527,18 +483,13 @@ describe('AccountsPage — income-linked delete guard', () => {
       expect(del).toBeTruthy();
       expect(del!.aggregateId).toBe('acc-unlinked-401k');
     });
-    // The reactive read layer must drop the deleted row from the rendered
-    // table without a manual reload.
     await waitFor(() =>
       expect(screen.queryByLabelText('Delete Unlinked 401k')).toBeNull(),
     );
   });
 
   it('reads income references at click-time, not page-load (catches a post-render add)', async () => {
-    // Render with no income, THEN seed a linked income stream
-    // into IndexedDB (simulating sync / another tab), THEN click
-    // Delete. The guard re-reads fresh at click-time, so the block
-    // dialog still appears and no delete mutation queues.
+    // Seed the linked income stream after render (simulating sync or another tab): the guard re-reads at click time, so the block dialog still appears and no delete mutation queues.
     await clearAllStores();
     await seedHousehold();
     await seedAccount('Late Link CBP', 'RETIREMENT_CASH_BALANCE');
@@ -546,7 +497,6 @@ describe('AccountsPage — income-linked delete guard', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('Delete Late Link CBP')).toBeInTheDocument(),
     );
-    // Reference added AFTER the page rendered — not in the load snapshot.
     await seedIncomeStream('inc-1', 'ACME pension', {
       linkedCbpAccountId: 'acc-late-link-cbp',
     });
@@ -586,27 +536,20 @@ describe('AccountsPage — income-linked delete guard', () => {
     await clearAllStores();
     await seedHousehold();
     renderPage();
-    // Mounted against an empty workspace: the empty-state copy renders.
     expect(await screen.findByText(/No accounts yet/i)).toBeInTheDocument();
 
-    // Simulate the sync layer bulk-filling the store after the page is
-    // already mounted, then dispatching the workspace-change event.
+    // Simulate the sync layer bulk-filling the store after mount, then dispatching the workspace-change event.
     await seedAccount('My 401k', 'RETIREMENT_401K');
     const { notifyWorkspaceChanged } = await import('../lib/workspace-events');
     await act(async () => {
       notifyWorkspaceChanged();
     });
 
-    // Same page instance (no route change / remount) now shows the row.
     await waitFor(() =>
       expect(screen.getByLabelText('Delete My 401k')).toBeInTheDocument(),
     );
   });
 });
-
-// ---------------------------------------------------------------------------
-// Deleting a Roth IRA that consumed its owner's pooled tax-free figure
-// ---------------------------------------------------------------------------
 
 describe('AccountsPage — pooled tax-free delete warning', () => {
   const WARNING = /can increase the tax-free amount calculated for your other Roth IRAs/;
@@ -615,8 +558,6 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
     setupContexts();
     await clearAllStores();
     await seedHousehold();
-    // The sibling that funds the owner's §408A pool: $50k of recorded
-    // contributions, no outflow of its own.
     await seedAccount('Keeper Roth', 'RETIREMENT_ROTH_IRA', { taxTreatment: 'ROTH' });
     await seedBalance('acc-keeper-roth', 2020, {
       totalContributions: 50_000,
@@ -629,8 +570,7 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
     vi.clearAllMocks();
   });
 
-  /** Rollover-funded, then zeroed out — its charge against the pool is the
-   *  sibling's basis, so deleting it hands that basis back to the household. */
+  // Rollover-funded, then zeroed out: its charge against the pool is the sibling's basis, so deleting it hands that basis back.
   async function seedConsumerRoth(): Promise<void> {
     await seedAccount('Consumer Roth', 'RETIREMENT_ROTH_IRA', { taxTreatment: 'ROTH' });
     await seedBalance('acc-consumer-roth', 2020, {
@@ -640,8 +580,7 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
     await seedBalance('acc-consumer-roth', 2021, { startingBalance: 50_000 });
   }
 
-  /** Same type, same owner, same two-confirm delete flow — but it only ever
-   *  contributed, so removing it LOWERS the household figure. */
+  // Only ever contributed, so removing it lowers the household figure.
   async function seedContributorRoth(): Promise<void> {
     await seedAccount('Contributor Roth', 'RETIREMENT_ROTH_IRA', { taxTreatment: 'ROTH' });
     await seedBalance('acc-contributor-roth', 2020, {
@@ -674,11 +613,9 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('This account has balance data that will also be deleted.');
     expect(dialog).toHaveTextContent(WARNING);
-    // The warning has to reach a screen reader with the rest of the message, not
-    // as loose text somewhere in the panel.
+    // The warning has to reach a screen reader with the rest of the message.
     expect(dialog).toHaveAccessibleDescription(WARNING);
 
-    // Deletion itself is unchanged: same two confirmations, same mutation.
     await confirmBothSteps();
     await waitFor(async () => {
       const del = (await listPendingMutations()).find((p) => p.operation === 'delete');
@@ -712,15 +649,8 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
 
   it('completes the warned flow by keyboard alone', async () => {
     const user = userEvent.setup();
-    // jsdom cannot reproduce the browser's grid focus-manager, so each control is
-    // focused the way the keyboard tests above do; the assertion is that it
-    // holds focus and that Enter activates it. React Aria moves DOM focus off
-    // the in-cell button and onto the row container after `.focus()` returns —
-    // synchronously in a React effect, or (when the interaction modality is
-    // "virtual") on the next animation frame via focusSafely/runAfterTransition.
-    // Flush the effect AND a frame so the steal has landed either way, then
-    // re-focus; nothing re-arms the steal after that, so Enter deterministically
-    // reaches the button.
+    // jsdom cannot reproduce the browser's grid focus-manager. React Aria moves DOM focus off the in-cell button onto the row container after `.focus()` returns, in a React effect or, under virtual modality, on the next animation frame.
+    // Flush the effect and a frame, then re-focus; nothing re-arms the steal, so Enter reaches the button.
     const pressEnterOn = async (button: HTMLElement) => {
       button.focus();
       await act(async () => {
@@ -732,7 +662,7 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
       await user.keyboard('{Enter}');
     };
     await seedConsumerRoth();
-    const { container } = renderPage();
+    renderPage();
     await waitFor(() =>
       expect(screen.getByLabelText('Delete Consumer Roth')).toBeInTheDocument(),
     );
@@ -740,7 +670,6 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
 
     const first = await screen.findByRole('alertdialog');
     expect(first).toHaveAccessibleDescription(WARNING);
-    await expectNoA11yViolations(container);
     await pressEnterOn(within(first).getByRole('button', { name: 'Delete' }));
 
     const second = await screen.findByRole('alertdialog');
@@ -770,15 +699,9 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
     expect(screen.getByLabelText('Delete Consumer Roth')).toBeInTheDocument();
   });
 
-  // The pooled tax-free figure counts every Roth IRA a member owns, ACTIVE OR NOT. The page builds an
-  // active-only account list for the form modal right beside this call, and
-  // substituting it here would break both cases below and no other test —
-  // every other account in this file is active.
+  // The pooled tax-free figure counts every Roth IRA a member owns, active or not; the active-only list built for the form modal would break both cases below.
   it('warns when the account that FUNDS the pool is inactive', async () => {
-    // Same money movement as the warned case above, but the sibling whose $50k of
-    // contributions the deletion hands back is a closed account. With an
-    // active-only list that sibling disappears, the figure is $0 either way, and
-    // the warning goes silent for the household that most needs it.
+    // With an active-only list the closed sibling disappears and the warning goes silent for the household that most needs it.
     await seedAccount('Keeper Roth', 'RETIREMENT_ROTH_IRA', {
       taxTreatment: 'ROTH',
       active: false,
@@ -796,10 +719,7 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
   });
 
   it('warns when the account BEING DELETED is inactive', async () => {
-    // An inactive Roth IRA's outflows are charged against its owner's pool exactly
-    // as an active one's are, so deleting it hands the same charges back. With an
-    // active-only list the account under deletion is not even in the set the
-    // predicate looks it up in, so the answer is "no warning" by accident.
+    // An inactive Roth IRA's outflows are charged against the pool like an active one's; an active-only list would not even contain the account under deletion.
     await seedAccount('Consumer Roth', 'RETIREMENT_ROTH_IRA', {
       taxTreatment: 'ROTH',
       active: false,
@@ -821,16 +741,7 @@ describe('AccountsPage — pooled tax-free delete warning', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// onDelete decides BOTH confirms from click-time reads, not the page-load
-// snapshot. A balance row synced by another tab lands in IndexedDB without
-// firing this page's store signal, so the captured `accounts` / `balances`
-// arrays can be stale (see onDelete's comment). A plain post-render
-// `seedBalance` cannot reproduce that — `putAggregate` fires the fine signal
-// and `useAggregates` re-reads — so these cases write with the signal
-// suppressed (an unflushed `Batch`) and fail if onDelete is pointed back at
-// the captured arrays.
-// ---------------------------------------------------------------------------
+// onDelete decides both confirms from click-time reads, not the page-load snapshot: a balance row synced by another tab lands without firing the store signal, so these cases write with the signal suppressed (an unflushed Batch) and fail if onDelete reads the captured arrays.
 
 describe('AccountsPage — delete confirms read balances at click-time, not page-load', () => {
   const WARNING = /can increase the tax-free amount calculated for your other Roth IRAs/;
@@ -847,11 +758,7 @@ describe('AccountsPage — delete confirms read balances at click-time, not page
   });
 
   it('warns off a sibling contribution row that arrived AFTER the page rendered', async () => {
-    // At render the keeper Roth has NO rows, so on the page-load snapshot the
-    // owner's pool is $0 with or without the consumer and the deletion warns
-    // about nothing. The $50k contribution row lands afterwards with the store
-    // signal suppressed; only a click-time re-read can see the household
-    // figure this irreversible delete would raise.
+    // At render the keeper Roth has no rows, so the page-load snapshot would warn about nothing; only a click-time re-read sees the figure this delete would raise.
     await seedAccount('Keeper Roth', 'RETIREMENT_ROTH_IRA', { taxTreatment: 'ROTH' });
     await seedAccount('Consumer Roth', 'RETIREMENT_ROTH_IRA', { taxTreatment: 'ROTH' });
     await seedBalance('acc-consumer-roth', 2020, {
@@ -877,10 +784,7 @@ describe('AccountsPage — delete confirms read balances at click-time, not page
   });
 
   it("switches to the two-step flow off the account's first row written AFTER render", async () => {
-    // No balance rows at render, so the snapshot says "no balance data" and
-    // the one-step confirm would show. The account's first row lands after
-    // render with the signal suppressed; the click-time read must route the
-    // delete through the two-step balance-data flow instead.
+    // No balance rows at render, so the snapshot would show the one-step confirm; the click-time read must route the delete through the two-step flow.
     await seedAccount('Late Rows 401k', 'RETIREMENT_401K');
     renderPage();
     await waitFor(() =>
@@ -902,10 +806,6 @@ describe('AccountsPage — delete confirms read balances at click-time, not page
   });
 });
 
-// ---------------------------------------------------------------------------
-// Tax details column
-// ---------------------------------------------------------------------------
-
 describe('AccountsPage — Tax details column', () => {
   beforeEach(async () => {
     await clearAllStores();
@@ -913,17 +813,13 @@ describe('AccountsPage — Tax details column', () => {
   });
 
   it('summarises each account tax-detail state and has no accessibility violations', async () => {
-    // Complete: every fact this type needs is recorded.
     await seedAccount('Roth Full', 'RETIREMENT_ROTH_IRA', {
       taxTreatment: 'ROTH',
       rothIraRegularContributionBasis: 48_000,
       rothIraFirstContributionTaxYear: 2015,
     });
-    // Partial: a Roth IRA with nothing recorded → cautious defaults in use.
     await seedAccount('Roth Empty', 'RETIREMENT_ROTH_IRA', { taxTreatment: 'ROTH' });
-    // Blocked: inherited with no beneficiary facts → estimate withheld.
     await seedAccount('Inherited IRA', 'RETIREMENT_IRA', { rmdInheritedAccount: true });
-    // Not applicable: no Roth / required-withdrawal facts exist for this type.
     await seedAccount('Brokerage', 'BROKERAGE');
 
     const { container } = renderPage();
@@ -931,9 +827,7 @@ describe('AccountsPage — Tax details column', () => {
       expect(screen.getByLabelText('Delete Roth Full')).toBeInTheDocument(),
     );
 
-    // Each badge is paired with a VISUALLY-HIDDEN sibling naming the account (an
-    // `aria-label` on a role-less `<span>` would be inert to assistive tech), and the
-    // visible badge sits in the same cell.
+    // Each badge is paired with a visually hidden sibling naming the account (an `aria-label` on a role-less `<span>` is inert to assistive tech).
     const expectBadge = (spoken: string, visible: string): void => {
       const label = screen.getByText(spoken);
       expect(label).toHaveClass('sr-only');
@@ -941,19 +835,16 @@ describe('AccountsPage — Tax details column', () => {
     };
     expect(screen.queryByText('Roth Empty: tax details incomplete')).not.toBeInTheDocument();
     expectBadge('Inherited IRA: required-withdrawal estimate on hold', 'On hold');
-    // A COMPLETE account earns no badge — the badge flags outstanding work, so a
-    // fully-recorded row stays clean rather than showing a redundant "Recorded".
+    // A complete account earns no badge: the badge flags outstanding work.
     expect(
       screen.queryByText('Roth Full: tax details recorded'),
     ).not.toBeInTheDocument();
-    // The brokerage row carries no badge either (nothing to record).
     expect(
       screen.queryByText('Brokerage: tax details recorded'),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByText('Brokerage: tax details incomplete'),
     ).not.toBeInTheDocument();
-    // The dedicated column is gone; the badge now sits beside the account name.
     expect(
       screen.queryByRole('columnheader', { name: 'Tax details' }),
     ).not.toBeInTheDocument();

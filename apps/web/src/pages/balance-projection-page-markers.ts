@@ -1,13 +1,4 @@
-/**
- * Balance Projection page — retirement + life-expectancy marker
- * builders. Extracted from `BalanceProjectionPage.tsx` to keep the page itself
- * small.
- *
- * Each helper is a pure transformer over ISO date strings (no React,
- * no DOM). The runner currently emits its own `retirementMarkers` /
- * `lifeExpectancyMarkers` shapes but does not surface the page-specific
- * label / color presentation.
- */
+/** Retirement and life-expectancy marker builders: pure transformers over ISO date strings. */
 import {
   DEFAULT_LIFE_EXPECTANCY_AGE,
   type Aggregate,
@@ -24,8 +15,6 @@ const SHORT_MONTHS = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-/** Convert an ISO `YYYY-MM-DD` retirement date into a fractional X-axis
- *  coordinate plus a compact `MMM YYYY` label. */
 function retirementDateToMarker(isoDate: string): {
   fractionalYear: number;
   shortDate: string;
@@ -71,26 +60,9 @@ export function primaryRetirementBoundary(
   };
 }
 
-/**
- * Projected death year (integer `deathYear = birthYear + ageYears`).
- *
- * Death is modelled as Dec 31 of `deathYear`, so the birth
- * month/day no longer shift the result — only the birth *year* matters
- * (no partial-year proration; the death year is a full year). The ISO
- * regex + `month < 1 || month > 12` guard are preserved so an invalid
- * birthdate still returns `null` (the null contract is unchanged).
- *
- * DELIBERATELY as loose as the engine's `projectedDeathFractionalYear`, which
- * is what `computeHorizonYear` projects the plan to. Tightening this to the
- * strict ISO validator looked like a fix — it would agree with the market-
- * stress cap anchor — but it made the markers STRICTER than the projection they
- * annotate: a member with an impossible day (`1990-02-31`) kept driving the
- * horizon while losing their death marker, and the charts' end year shrank
- * below the years still being drawn. The market-stress row handles the
- * disagreement on its own side instead, by declining to name anyone when any
- * member's birthdate is one the two validators could read differently — see
- * {@link resolveLastSurvivor}.
- */
+// Projected death year (birthYear + ageYears); death is Dec 31, so only the birth year matters. Returns null for an invalid birthdate.
+// Deliberately as loose as the engine's projectedDeathFractionalYear, which sets the horizon: a stricter check would drop the death marker of a member with an impossible day (1990-02-31) who still drives the horizon.
+// resolveLastSurvivor handles the disagreement on its own side.
 function deathFractionalYearFromBirth(
   birthIso: string,
   ageYears: number,
@@ -103,27 +75,13 @@ function deathFractionalYearFromBirth(
   return year + ageYears;
 }
 
-/** A member's given name as a usable string, or `''` when it is blank, missing,
- *  or not a string at all. Member payloads reach this module straight off an
- *  envelope-only-validated import, so `firstName` really can be absent despite
- *  the type — and a bare `.trim()` on it threw out of the whole page. */
+// Member payloads come from envelope-only-validated imports, so firstName can be absent despite the type; a bare .trim() threw out of the whole page.
 function safeFirstName(member: Aggregate<HouseholdMemberPayload>): string {
   const raw = member.payload.firstName;
   return typeof raw === 'string' ? raw.trim() : '';
 }
 
-/**
- * Life-expectancy death markers for the retirement charts (Expected
- * cashflow, Income breakdown, Portfolio Flow, Tax & Health-Cost Burden).
- *
- * Each marker's `fractionalYear` is the **integer death year**.
- * Death is modelled on Dec 31 of `deathYear`, the terminal year — no
- * partial-year proration. Each chart maps this integer to its own
- * terminal-data x-convention so the marker hugs the last data point
- *: yearly charts use `deathYear` directly; always-monthly charts
- * map to the December sample (`deathYear + 11/12`); the per-year balance
- * chart applies its `year + 1` convention (`deathYear + 1`).
- */
+/** Death markers for the retirement charts; fractionalYear is the integer death year and each chart maps it to its own terminal-data x-convention (yearly: deathYear, monthly: deathYear + 11/12, balance chart: deathYear + 1). */
 export function buildExpenseDeathMarkers(
   primaryMember: Aggregate<HouseholdMemberPayload> | null,
   secondaryMember: Aggregate<HouseholdMemberPayload> | null,
@@ -154,47 +112,22 @@ export function buildExpenseDeathMarkers(
   return out;
 }
 
-/** Who the plan's horizon belongs to. `firstName` credits the added years —
- *  two members reaching the horizon at the SAME age are named together, since
- *  the years are added to both lives; it is `null` when nobody can be named
- *  with confidence, and the row then states the age alone. */
+/** firstName credits the added years (members reaching the horizon at the same age are named together); null when nobody can be named with confidence. */
 export interface LastSurvivor {
   readonly firstName: string | null;
   readonly birthYear: number;
 }
 
 /**
- * Resolve the household member projected to die LAST — the person whose life
- * the market-stress longevity case actually lengthens, because the plan's
- * horizon IS their death year and the stress extends that horizon.
- *
- * DISTINCT from the age-105 cap anchor (`longestLivedBirthYearOf`), which is
- * the YOUNGEST member by birth year. That one bounds how FAR the stress may
- * run; this one names WHOSE life it extends. They are the same person in an
- * ordinary household and diverge only when an older member's longer life
- * expectancy carries them past a younger member's — in which case naming the
- * youngest would credit the added years to someone the plan already buried.
- *
- * WHY THE STRICT PRE-CHECK. Three code paths disagree about which members
- * exist: the cap anchor runs the strict ISO validator, the death markers and
- * this module run the looser shape-plus-month test, and the ENGINE's
- * `computeHorizonYear` — the one that actually sets the horizon being aged
- * here — is looser still, falling back to a bare four-digit year prefix. Where
- * they disagree, the member who owns the horizon can be one this function never
- * saw, and it would then confidently print a DIFFERENT member's age: with an
- * imported `1990-02-31` secondary driving the horizon, the row named the
- * primary at an age the plan has her dead well before. So this refuses the
- * whole question unless EVERY member's birthdate is strictly valid — the one
- * condition under which all three paths provably agree, since the loose test
- * and the bare-year fallback both reduce to the strict result. Outside it the
- * row prints no age rather than a wrong one.
- */
+* The member projected to die last, whose life the market-stress longevity case lengthens; distinct from the age-105 cap anchor, which is the youngest by birth year.
+* Refuses the whole question unless every member's birthdate is strictly valid: the cap anchor, the death markers and the engine's computeHorizonYear use stricter and looser tests,
+* so with an imported 1990-02-31 member the row could print a different member's age. Printing no age beats a wrong one.
+*/
 export function resolveLastSurvivor(
   primaryMember: Aggregate<HouseholdMemberPayload> | null,
   secondaryMember: Aggregate<HouseholdMemberPayload> | null,
   override: LifeExpectancyOverride | undefined,
 ): LastSurvivor | null {
-  // A household with no primary is not one this can mirror the engine on.
   if (primaryMember === null) return null;
   const present: { member: Aggregate<HouseholdMemberPayload>; slot: 'primary' | 'secondary' }[] =
     [{ member: primaryMember, slot: 'primary' }];
@@ -205,9 +138,7 @@ export function resolveLastSurvivor(
   for (const { member, slot } of present) {
     if (!isValidRmdIsoDate(member.payload.birthdate)) return null;
     const age = override?.[slot] ?? DEFAULT_LIFE_EXPECTANCY_AGE;
-    // `lifeExpectancy` carries no runtime shape check either, so an imported
-    // scenario can hold a string or a NaN here. An age that is not a real
-    // number yields no trustworthy death year, so decline rather than print one.
+    // lifeExpectancy has no runtime shape check, so an imported scenario can hold a string or NaN: decline rather than print a death year.
     if (typeof age !== 'number' || !Number.isFinite(age)) return null;
     const birthYear = Number(member.payload.birthdate.slice(0, 4));
     candidates.push({ deathYear: birthYear + age, birthYear, firstName: safeFirstName(member) });
@@ -215,12 +146,7 @@ export function resolveLastSurvivor(
   const lastDeathYear = Math.max(...candidates.map((c) => c.deathYear));
   const survivors = candidates.filter((c) => c.deathYear === lastDeathYear);
   const elder = survivors.reduce((a, b) => (a.birthYear <= b.birthYear ? a : b));
-  // Two members born the same year on the same life expectancy tie on the death
-  // year and reach the horizon at the SAME age — the out-of-the-box shape for a
-  // same-age couple, so dropping both names there would leave the commonest
-  // two-person household unnamed. Name them together. A tie between DIFFERENT
-  // birth years means two different ages, with no single one to print, so that
-  // falls back to the elder's age stated alone.
+  // Same-age members tie on death year and are named together; a tie between different birth years falls back to the elder's age alone.
   const sameAge = survivors.every((c) => c.birthYear === elder.birthYear);
   const allNamed = survivors.every((c) => c.firstName !== '');
   return {

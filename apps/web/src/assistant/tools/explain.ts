@@ -53,7 +53,7 @@ const WITHDRAWAL = [
 ] as const satisfies readonly SettingKey[];
 
 /** The resolved settings each metric rests on. Pinned by a test so a change is deliberate. */
-export const METRIC_INPUT_KEYS = {
+const METRIC_INPUT_KEYS = {
   ending_balance: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, ...TAX_AND_BENEFITS],
   run_out_year: [...TIMING, ...CASHFLOW, ...GROWTH, ...WITHDRAWAL, ...TAX_AND_BENEFITS],
   // The retirement boundary comes before any withdrawal: only what grows and what goes in matters.
@@ -75,7 +75,7 @@ export const METRIC_INPUT_KEYS = {
 const MATH_PAGE = 'docs/math-projections.md';
 
 /** The math page heading that describes each metric: what each number means for the deterministic ones, reading the result for the Monte Carlo ones. */
-export const METRIC_DOCS = {
+const METRIC_DOCS = {
   ending_balance: { path: MATH_PAGE, heading: 'What each number means', alsoSee: 'Planned and Historical' },
   run_out_year: { path: MATH_PAGE, heading: 'What each number means', alsoSee: 'Planned and Historical' },
   portfolio_at_retirement: { path: MATH_PAGE, heading: 'What each number means', alsoSee: 'Planned and Historical' },

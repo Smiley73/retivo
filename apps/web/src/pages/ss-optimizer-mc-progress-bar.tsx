@@ -1,9 +1,4 @@
-/**
- * MC progress bar — linear React Aria `ProgressBar` rendered next to
- * the Cancel button while a Monte Carlo sweep is running. Verbatim
- * progress label rides on `aria-label`; sighted users see the
- * "Scenario X of Y" line + the visual bar.
- */
+/** Linear React Aria ProgressBar beside Cancel while a Monte Carlo sweep runs; the progress label rides on aria-label and sighted users see the "Scenario X of Y" line. */
 import React from 'react';
 import { ProgressBar } from 'react-aria-components';
 
@@ -12,11 +7,8 @@ export interface OptimizerMcProgressBarProps {
   readonly pairIdx: number;
   readonly scenarios: number;
   readonly pairs: number;
-  /** Global triple-index across all scenarios (1-based). Used as the
-   *  bar's `value` so 1-D fallback scenarios contribute their actual
-   *  triple count instead of the joint-product overestimate. */
+  /** The bar's value; counting triples, so 1-D fallback scenarios contribute their actual count rather than the joint-product overestimate. */
   readonly cumulativeIdx: number;
-  /** Global triple total. Bar's `maxValue`. */
   readonly totalPairs: number;
   readonly progressLabel: (
     scenarioIdx: number,

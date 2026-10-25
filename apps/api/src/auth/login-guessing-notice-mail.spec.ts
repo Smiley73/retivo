@@ -1,9 +1,4 @@
-/**
- * Unit tests for `formatUtcTimestamp`. The mail
- * body itself is composed inline in `login-guessing-notice.service.ts` (so
- * the HTML mail-body escaping regression guard can see it) and is covered by
- * `login-guessing-notice.service.spec.ts`.
- */
+// formatUtcTimestamp; the mail body is composed inline in login-guessing-notice.service.ts so the HTML-escaping regression guard can see it, and is covered by its service spec.
 import { formatUtcTimestamp } from './login-guessing-notice-mail.js';
 
 describe('formatUtcTimestamp', () => {

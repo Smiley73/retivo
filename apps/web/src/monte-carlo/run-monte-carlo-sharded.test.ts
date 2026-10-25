@@ -1,17 +1,5 @@
-/**
- * Sharding coordinator. Driven through fake
- * `MinimalMcWorker`s that actually COMPUTE (`runPathRange` /
- * `assembleAccumulationFromTyped` / `assembleMonteCarloSummary` in-process), so
- * a single- or multi-shard coordinator run produces a real summary that must
- * equal a plain `runMonteCarlo`. Covers: fan-out message shapes, the
- * transfer-list boundary (`input` never transferred, the shard
- * reply + assemble message are), progress summing, abort mid-shard, shard
- * error propagation, and the synchronous validation gate.
- *
- * The computing fake worker factory lives in `computing-fake-worker.test-harness.ts`.
- * `mcPoolSize` reads `navigator.hardwareConcurrency`, stubbed per test to pin
- * the shard count deterministically.
- */
+// The sharding coordinator driven through fake `MinimalMcWorker`s that compute in-process, so a run must equal a plain
+// `runMonteCarlo`; `mcPoolSize` reads `navigator.hardwareConcurrency`, stubbed per test to pin the shard count.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runMonteCarlo, type MonteCarloInput } from '../lib/monte-carlo';
 import { summaryToComparable, makeMonthlyExpenseBase } from '../lib/monte-carlo.test-helpers';
@@ -76,7 +64,6 @@ describe('runMonteCarloSharded', () => {
     if (reply.kind === 'result') {
       expect(summaryToComparable(reply.summary)).toEqual(summaryToComparable(runMonteCarlo(input)));
     }
-    // Exactly one shard was created (single-shard) + reused for assemble.
     const runShards = workers.flatMap((w) => w.postedMessages).filter(
       (m) => (m as { kind: string }).kind === 'runShard',
     );
@@ -92,7 +79,6 @@ describe('runMonteCarloSharded', () => {
     if (reply.kind === 'result') {
       expect(summaryToComparable(reply.summary)).toEqual(summaryToComparable(runMonteCarlo(input)));
     }
-    // Fan-out shapes: three contiguous, gap-free ranges covering [0, pathCount).
     const runShards = workers
       .flatMap((w) => w.postedMessages)
       .filter((m): m is { kind: 'runShard'; pathStart: number; pathEnd: number } =>
@@ -118,12 +104,10 @@ describe('runMonteCarloSharded', () => {
     const shardDispatches = all.filter((e) => e.msg.kind === 'runShard');
     const assembleDispatches = all.filter((e) => e.msg.kind === 'assemble');
     expect(shardDispatches).toHaveLength(3);
-    // `input` is shared across every shard → must NOT be transferred (detaching
-    // its buffers would corrupt later dispatches).
+    // `input` is shared across every shard, so it must not be transferred: detaching its buffers would corrupt later dispatches.
     for (const e of shardDispatches) {
       expect(e.transfer === undefined || e.transfer.length === 0).toBe(true);
     }
-    // The assemble payload is single-recipient → zero-copy transferred.
     expect(assembleDispatches).toHaveLength(1);
     expect(assembleDispatches[0].transfer && assembleDispatches[0].transfer.length).toBeGreaterThan(0);
   });
@@ -138,7 +122,6 @@ describe('runMonteCarloSharded', () => {
       onProgress: (done, total) => calls.push([done, total]),
     });
     expect(calls.length).toBeGreaterThan(0);
-    // Monotonic non-decreasing, total pinned to pathCount, terminal = pathCount.
     for (let i = 1; i < calls.length; i += 1) expect(calls[i][0]).toBeGreaterThanOrEqual(calls[i - 1][0]);
     for (const [, total] of calls) expect(total).toBe(input.pathCount);
     expect(calls[calls.length - 1][0]).toBe(input.pathCount);
@@ -170,7 +153,6 @@ describe('runMonteCarloSharded', () => {
     const { factory, workers } = makeFactory({ assembleError: 'assemble boom' });
     const reply = await runMonteCarloSharded(input, { factory });
     expect(reply).toEqual({ kind: 'error', message: 'assemble boom' });
-    // The pool is torn down in the coordinator's `finally`.
     expect(workers.every((w) => w.terminated)).toBe(true);
   });
 
@@ -178,9 +160,7 @@ describe('runMonteCarloSharded', () => {
     setCores(4); // 3 shards resolve, then abort fires exactly at assemble
     const input = buildInput();
     const controller = new AbortController();
-    // Abort synchronously when the assemble message is posted — the in-flight
-    // assemble dispatch settles as 'aborted', exercising the assemble-phase
-    // abort branch (all shards already resolved).
+    // Abort fires when the assemble message is posted, exercising the assemble-phase abort branch.
     const { factory, workers } = makeFactory({ onAssemblePost: () => controller.abort() });
     const reply = await runMonteCarloSharded(input, { factory, signal: controller.signal });
     expect(reply).toEqual({ kind: 'aborted' });
@@ -194,9 +174,7 @@ describe('runMonteCarloSharded', () => {
     await expect(runMonteCarloSharded(bad, { factory })).rejects.toThrow(
       /ssByYear\.length \(2\) !== horizon \(12\)/,
     );
-    // Zero workers were ever built — the gate fired before any dispatch.
     expect(workers).toHaveLength(0);
-    // Identical error to the serial path.
     expect(() => runMonteCarlo(bad)).toThrow(/ssByYear\.length \(2\) !== horizon \(12\)/);
   });
 });

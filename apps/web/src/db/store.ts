@@ -1,14 +1,5 @@
-/**
- * IndexedDB wrapper. One object store per aggregate type plus stores
- * for the local mutation queue and per-device metadata. Schema version
- * here is the *IDB schema version*, not the per-aggregate `schemaVersion`
- * — bumping it triggers `upgrade()` to add new stores.
- *
- * The working store is fully local (see "Browser storage" in
- * docs/architecture.md); reads come from these
- * stores immediately, writes append to `mutations` and flush via the
- * sync client.
- */
+// IndexedDB wrapper: one object store per aggregate type plus the mutation queue and device metadata; `DB_VERSION` is the
+// IDB schema version. The only module allowed `idb` or `deleteDatabase` (AGENTS.md "Project-specific security").
 import {
   openDB,
   type DBSchema,
@@ -30,19 +21,13 @@ import { currentSchemaVersion, migrate } from './migrations.js';
 const DB_NAME = 'retirement';
 const DB_VERSION = 9;
 
-/**
- * Cap (ms) we wait for a blocked IDB operation to release before failing
- * closed with a typed error instead of hanging indefinitely. Shared by
- * {@link dropLocalDatabase} (a blocked `deleteDatabase`) and {@link db} (a
- * blocked v9 `openDB`) so both honest-timeout paths use one constant.
- */
+// Cap (ms) on waiting for a blocked IDB operation before failing closed with a typed error rather than hanging; shared
+// by `dropLocalDatabase` (blocked `deleteDatabase`) and `db` (blocked v9 `openDB`).
 const IDB_BLOCKED_TIMEOUT_MS = 2000;
 
 /**
- * Thrown by {@link dropLocalDatabase} when `deleteDatabase` stays blocked
- * past the timeout (another tab still holds the IDB open). A typed error so
- * the cross-user transition guard can fail closed and the UI can surface the
- * "close all other tabs then retry" prompt.
+ * `deleteDatabase` stayed blocked past the timeout (another tab holds the IDB open); typed so the cross-user transition
+ * guard fails closed and the UI shows "close all other tabs then retry".
  */
 export class DatabaseDropBlockedError extends Error {
   constructor() {
@@ -51,15 +36,9 @@ export class DatabaseDropBlockedError extends Error {
   }
 }
 
-/**
- * Thrown by {@link db} when the v9 `openDB` upgrade stays blocked past
- * {@link IDB_BLOCKED_TIMEOUT_MS} (an older-version tab still holds the IDB
- * open and never released — e.g. a pre-this-feature v8 bundle with no
- * `blocking()` handler during a rollout). A typed error so callers see an
- * honest failure rather than an indefinite hang, and so the cached
- * `dbPromise` is reset for a clean retry once the blocking tab closes.
- */
-export class DatabaseUpgradeBlockedError extends Error {
+// The v9 `openDB` upgrade stayed blocked past IDB_BLOCKED_TIMEOUT_MS (an older tab with no `blocking()` handler still
+// holds the IDB); `dbPromise` is reset so a retry works once that tab closes.
+class DatabaseUpgradeBlockedError extends Error {
   constructor() {
     super('IndexedDB upgrade was blocked by another connection and did not complete');
     this.name = 'DatabaseUpgradeBlockedError';
@@ -67,17 +46,11 @@ export class DatabaseUpgradeBlockedError extends Error {
 }
 
 /**
- * Thrown by the transactional queue-collapse primitives
- * ({@link collapseToFailedConflict}, {@link replaceQueueMutationsAtomically})
- * when the aggregate's live queue stack — re-read INSIDE the collapse
- * transaction — no longer matches the snapshot the caller classified: a
- * `queueLocalMutation` from a concurrent user edit for the SAME aggregate
- * landed between the caller's stack read and this commit. The collapse aborts
- * (writes nothing) rather than stomping that edit; the auto-repair pass catches
- * this, leaves the rejection pending, and re-routes the aggregate on the next
- * flush round with the fresh stack (closes the
- * check-and-mutate TOCTOU). The `aggregateId` is kept as a structured property,
- * not interpolated into the message, so a stray log never carries the raw id.
+ * The aggregate's live queue stack, re-read inside the collapse transaction, no longer matches the snapshot the caller
+ * classified: a concurrent `queueLocalMutation` for the same aggregate landed in between. The collapse writes nothing
+ * rather than stomp that edit; auto-repair leaves the rejection pending and re-routes next flush (closing the
+ * check-and-mutate TOCTOU). The `aggregateId` is a property, not in the message, so a stray log never carries the raw
+ * id.
  */
 export class ConcurrentQueueMutationError extends Error {
   constructor(public readonly aggregateId: string) {
@@ -89,14 +62,9 @@ export class ConcurrentQueueMutationError extends Error {
 }
 
 /**
- * Thrown by {@link writeAccountWithRetypeGuard} when the caller's `decide`
- * callback refuses the write — the account has real balance history and the
- * submitted type differs from what's persisted. The aggregate id AND the fresh, ACTUALLY-persisted
- * type the write was refused against are structured properties, not
- * interpolated into the message, mirroring {@link ConcurrentQueueMutationError}
- * — a caller building a refusal message from anything else (e.g. a snapshot
- * taken when the editor opened) can end up naming a type the person is
- * already past.
+ * The caller's `decide` refused the write: the account has real balance history and the submitted type differs from the
+ * persisted one. The id and the freshly persisted type are properties, not in the message, so a refusal message built
+ * from anything else (e.g. a snapshot taken when the editor opened) can't name a type the person is already past.
  */
 export class AccountRetypeBlockedError extends Error {
   constructor(
@@ -111,11 +79,9 @@ export class AccountRetypeBlockedError extends Error {
 }
 
 /**
- * Thrown by {@link writeAccountWithRetypeGuard} when the in-transaction
- * balance read the caller's `needsBalanceRead` requested itself fails —
- * distinct from {@link AccountRetypeBlockedError} so the caller can render the
- * "could not check" copy rather than claim the account has (or lacks) real
- * history it was never able to read.
+ * The in-transaction balance read requested by `needsBalanceRead` itself failed; distinct from {@link
+ * AccountRetypeBlockedError} so the caller shows "could not check" instead of claiming the account has (or lacks)
+ * history it never read.
  */
 export class AccountRetypeCheckFailedError extends Error {
   constructor(public readonly accountId: string) {
@@ -127,19 +93,12 @@ export class AccountRetypeCheckFailedError extends Error {
 }
 
 /**
- * Device-local cache row for the household data key (HDK), used by the
- * zero-knowledge encryption boundary. Held as
- * exported raw bytes so it survives an IDB structured-clone round-trip.
- *
- * It lives in the `keyCache` store **inside** the `retirement` IDB — never a
- * second database — so it rides the centralized `dropLocalDatabase()` /
- * `clearAllLocalData()` teardown (the HDK is dropped exactly when the IDB is
- * dropped, no parallel clearing). The store is a singleton: one HDK per device,
- * keyed by the fixed {@link KEY_CACHE_ID}; `householdId` is carried as a field
- * so a stale entry from a prior household can be detected and ignored.
+ * Device-local row caching the household data key as exported raw bytes (survives structured clone). It lives in the
+ * `keyCache` store inside the `retirement` IDB, never a second database, so it is dropped exactly when the IDB is. A
+ * singleton keyed by {@link KEY_CACHE_ID}; `householdId` lets a stale entry from a prior household be detected and
+ * ignored.
  */
 export interface KeyCacheEntry {
-  /** Fixed singleton keyPath value — always {@link KEY_CACHE_ID}. */
   id: string;
   householdId: string;
   hdkExported: ArrayBuffer;
@@ -148,43 +107,33 @@ export interface KeyCacheEntry {
 /** Singleton key for the {@link KeyCacheEntry} row in the `keyCache` store. */
 export const KEY_CACHE_ID = 'hdk';
 
-/** Cached Monte Carlo result row. Local-only, not synced. Two INDEPENDENTLY
- *  enforced LRU budgets are applied on insert — one for ordinary (`'primary'`)
- *  entries and one for the market-stress comparison's — and eviction only ever
- *  drops entries from the budget that went over, so neither kind can push the
- *  other out. `monte-carlo-cache.ts` owns both caps and is the place to read
- *  their current sizes. Invalidated when `engineVersion` doesn't match the
- *  current build's `ENGINE_VERSION`. */
+/**
+ * Cached Monte Carlo result row, local-only. Two independently enforced LRU budgets (ordinary `'primary'` and
+ * market-stress entries) evict only within the class that went over; `monte-carlo-cache.ts` owns the caps. Invalidated
+ * when `engineVersion` differs from the build's `ENGINE_VERSION`.
+ */
 export interface MonteCarloCacheEntry {
-  /** SHA-256 (16 hex chars) of the projection-relevant aggregate
-   *  snapshot. Acts as the primary key. */
+  /** SHA-256 (16 hex chars) of the projection-relevant aggregate snapshot; the primary key. */
   id: string;
-  /** Monte Carlo engine version at the time the entry was computed.
-   *  Mismatched entries are silently re-computed on read. */
+  /** Engine version at compute time; mismatches are recomputed on read. */
   engineVersion: number;
-  /** Serialized `MonteCarloSummary`. Kept opaque to the store; the
-   *  cache helper handles the typed cast. */
+  /** Serialized `MonteCarloSummary`, opaque to the store. */
   summary: unknown;
   /** Last-read timestamp (ms epoch) — drives LRU eviction. */
   lastAccessedAt: number;
-  /** Which LRU BUDGET this entry is charged to.
-   *  ABSENT means `'primary'`, so every entry written before the split — and
-   *  every ordinary run since — keeps the primary budget with no migration.
-   *  `'marketStress'` marks the seed-inclusive entries one market-stress
-   *  comparison writes; they are capped separately so a comparison can never
-   *  evict the per-scenario results the Scenarios page reads. */
+  /**
+   * Which LRU budget the entry is charged to; absent means `'primary'`, so older and ordinary entries keep it with no
+   * migration. `'marketStress'` marks a comparison's seed-inclusive entries, capped separately so a comparison can't
+   * evict the per-scenario results the Scenarios page reads.
+   */
   entryClass?: 'marketStress';
 }
 
 /**
- * One persisted on-device diagnostics entry (v9). Local-only, NOT synced and
- * NOT aggregate data — a debugging breadcrumb/error captured by the
- * `lib/diagnostics` logger and mirrored here so entries survive a crash/reload.
- * `seq` is a strictly-monotonic counter allocated INSIDE the append
- * transaction (read max-via-index + 1) so prune order stays correct across
- * tabs even within a same-millisecond batch. Shape mirrors the in-memory
- * `DiagnosticEntry`; the store keeps it opaque via `Record<string, unknown>`
- * so the logger owns the typed contract.
+ * One persisted on-device diagnostics entry (v9), local-only and not aggregate data: a breadcrumb or error mirrored
+ * from the `lib/diagnostics` logger so it survives a crash or reload. `seq` is allocated inside the append transaction
+ * (max via index + 1) so prune order holds across tabs within a same-millisecond batch. Opaque via `Record<string,
+ * unknown>`; the logger owns the typed contract.
  */
 export interface DiagnosticLogEntry {
   /** Primary key — the entry's stable id (UUID/ULID from the logger). */
@@ -236,28 +185,12 @@ const STORE_BY_TYPE: Record<AggregateType, AggregateStore> = {
   incomeStream: 'incomeStreams',
 };
 
-/**
- * Per-store change-notification registry. Each `AggregateStore` carries a
- * monotonically increasing version counter and a set of subscribers; a
- * single-row write to that store (`putAggregate` / `deleteAggregateLocally`)
- * bumps the counter and wakes only that store's subscribers, so a reactive
- * read hook can re-read on **any** write to its own type without the consumer
- * wiring a manual revision dependency (the live-query read layer).
- *
- * This is the per-type FINE signal. The bulk-fill paths (sync bootstrap/pull,
- * demo loader, expense-categories bootstrap, data-import, scenario cascades)
- * wrap their write loop in {@link withBatchedStoreSignals}: inside the scope
- * each write records its touched store on the batch instead of firing per row,
- * and the scope flushes **one** fine signal per touched store on exit. They
- * additionally keep their existing end-of-loop coarse `WORKSPACE_CHANGED_EVENT`
- * (where they had one), which the hook folds into the same re-read via a union.
- * `clearAllStores` is the one single-call path that touches every store, so it
- * notifies all of them.
- *
- * The counter is a `useSyncExternalStore`-friendly sync snapshot: the data
- * read itself is async (`listAggregates`), so the subscribed value is a
- * version number, not the rows.
- */
+// Per-store change notification: each `AggregateStore` has a version counter and subscribers, and a single-row write
+// (`putAggregate`/`deleteAggregateLocally`) bumps it and wakes only that store's subscribers, so a reactive read hook
+// re-reads on any write to its own type without a manual revision dependency. Bulk-fill paths wrap their loop in {@link
+// withBatchedStoreSignals} and flush one signal per touched store on exit, keeping their end-of-loop coarse
+// `WORKSPACE_CHANGED_EVENT`; `clearAllStores` notifies every store. The counter is a `useSyncExternalStore`-friendly
+// sync snapshot because the read itself is async.
 const storeVersions = new Map<AggregateStore, number>();
 const storeListeners = new Map<AggregateStore, Set<() => void>>();
 
@@ -267,9 +200,8 @@ export function getStoreVersion(store: AggregateStore): number {
 }
 
 /**
- * Subscribe to single-write changes on one aggregate store. Returns an
- * unsubscribe function. Pairs with {@link getStoreVersion} for
- * `useSyncExternalStore`.
+ * Subscribes to single-write changes on one aggregate store; returns the unsubscribe. Pairs with {@link
+ * getStoreVersion} for `useSyncExternalStore`.
  */
 export function subscribeToStoreChanges(
   store: AggregateStore,
@@ -286,29 +218,19 @@ export function subscribeToStoreChanges(
   };
 }
 
-/** Bump a store's version and wake its subscribers. */
 function notifyStoreChanged(store: AggregateStore): void {
   storeVersions.set(store, getStoreVersion(store) + 1);
   storeListeners.get(store)?.forEach((listener) => listener());
 }
 
 /**
- * Per-load signal-suppression scope handle. A `Batch` is just the set of
- * stores a bulk load has written to inside one {@link withBatchedStoreSignals}
- * scope. While a batch is threaded through `putAggregate` /
- * `deleteAggregateLocally`, those mutators record the touched store on it
- * instead of firing the per-row fine signal; the scope then emits one
- * `notifyStoreChanged` per touched store on exit. Each scope owns a fresh
- * `Batch`, so two un-serialized bulk loads never share or clobber each other's
- * touched-store set (the concurrency-safety guarantee — no global flag).
+ * The stores a bulk load touched inside one {@link withBatchedStoreSignals} scope: mutators given a batch record the
+ * store on it instead of firing the per-row signal, and the scope emits one `notifyStoreChanged` per touched store on
+ * exit. Each scope owns a fresh `Batch`, so overlapping un-serialized loads never share a touched-store set (no global
+ * flag).
  */
 export type Batch = Set<AggregateStore>;
 
-/**
- * Either record the touched store on the batch (suppressing the per-row fine
- * signal until scope exit) or notify immediately when no batch is in scope.
- * The single decision point both single-write mutators share.
- */
 function recordOrNotify(store: AggregateStore, batch: Batch | undefined): void {
   if (batch) {
     batch.add(store);
@@ -318,22 +240,11 @@ function recordOrNotify(store: AggregateStore, batch: Batch | undefined): void {
 }
 
 /**
- * Run `fn` with a fresh signal-suppression batch and, on the way out, flush
- * **one** fine `notifyStoreChanged` per store the batch touched. Bulk writers
- * wrap their write loop in this and thread the supplied `batch` into every
- * `putAggregate` / `deleteAggregateLocally` (directly or via
- * `queueLocalMutation` / `saveScenario` / `applyPulledChange`) so a row-by-row
- * burst collapses to one fine signal per touched store instead of N per row.
- *
- * The flush runs on **both** the success and the error path (an exception
- * inside the scope still wakes the touched-store subscribers, then re-throws)
- * — a thrown error mid-bulk must not strand mounted readers on stale data.
- * Per-type isolation holds: only stores actually written wake.
- *
- * Each call owns its own `Batch` set, so overlapping loads (e.g. a demo load
- * during a background sync `pull`) each flush only their own touched stores.
- * The coarse `WORKSPACE_CHANGED_EVENT` is NOT owned here — callers
- * keep their existing end-of-loop `notifyWorkspaceChanged()`.
+ * Runs `fn` with a fresh signal-suppression batch and flushes one `notifyStoreChanged` per touched store on exit, on
+ * the error path too (a mid-bulk throw must not strand readers on stale data; the error re-throws). Bulk writers thread
+ * `batch` into every `putAggregate`/`deleteAggregateLocally` (directly or via
+ * `queueLocalMutation`/`saveScenario`/`applyPulledChange`). Overlapping loads each flush only their own stores. The
+ * coarse `WORKSPACE_CHANGED_EVENT` stays with callers' end-of-loop `notifyWorkspaceChanged()`.
  */
 export async function withBatchedStoreSignals<T>(
   fn: (batch: Batch) => Promise<T>,
@@ -350,28 +261,16 @@ export async function withBatchedStoreSignals<T>(
 
 let dbPromise: Promise<IDBPDatabase<Schema>> | null = null;
 
-/**
- * Same-origin BroadcastChannel name for the cross-tab IDB-release nudge
- * (see "Browser storage" in docs/architecture.md). When a cross-user login needs to
- * drop the IDB but another tab still holds it open, the dropping tab posts
- * {@link IDB_RELEASE_NUDGE} on this channel; every other tab closes its
- * cached handle (below) so the queued `deleteDatabase` can complete and the
- * blocked login can be retried.
- */
+// Same-origin BroadcastChannel for the cross-tab IDB-release nudge (docs/architecture.md "Browser storage"): when a
+// cross-user login must drop the IDB while another tab holds it open, the dropping tab posts {@link IDB_RELEASE_NUDGE}
+// and every other tab closes its cached handle so the queued `deleteDatabase` completes.
 const IDB_NUDGE_CHANNEL = 'retivo.idb.nudge';
-/** Message payload telling other tabs to close their IDB handle. */
 const IDB_RELEASE_NUDGE = 'release-idb';
 
 let nudgeChannel: BroadcastChannel | null = null;
 
-/**
- * Lazily open the cross-tab nudge channel and register the release listener.
- * Stateful singleton with lifecycle cleanup ({@link closeNudgeChannel}) per
- * CODING_STANDARDS "stateful singletons need lifecycle cleanup". A tab that
- * receives the nudge closes its cached IDB handle so another tab's pending
- * `deleteDatabase` is no longer blocked. Closing the handle is safe: the next
- * `db()` call transparently reopens it.
- */
+// Lazily opens the nudge channel; a receiving tab closes its cached handle (the next `db()` reopens it). A stateful
+// singleton with lifecycle cleanup ({@link closeNudgeChannel}).
 function ensureNudgeChannel(): void {
   if (nudgeChannel || typeof BroadcastChannel === 'undefined') return;
   nudgeChannel = new BroadcastChannel(IDB_NUDGE_CHANNEL);
@@ -381,11 +280,6 @@ function ensureNudgeChannel(): void {
   };
 }
 
-/**
- * Close the cached IDB handle (if open) and null the promise so the next
- * {@link db} call reopens a fresh connection. Used by the cross-tab nudge
- * listener so this tab stops blocking another tab's `deleteDatabase`.
- */
 async function closeIdbHandle(): Promise<void> {
   if (!dbPromise) return;
   try {
@@ -399,10 +293,8 @@ async function closeIdbHandle(): Promise<void> {
 }
 
 /**
- * Notify every other same-origin tab to close its IDB handle so a pending
- * `deleteDatabase` can complete. Emitted by the cross-user transition guard
- * before/around a drop (see auth/user-transition.ts). No-op where
- * BroadcastChannel is unavailable (older runtimes / SSR).
+ * Tells every other same-origin tab to close its IDB handle so a pending `deleteDatabase` can complete; emitted by the
+ * cross-user guard (auth/user-transition.ts). No-op without BroadcastChannel.
  */
 export function nudgeOtherTabsToReleaseIdb(): void {
   if (typeof BroadcastChannel === 'undefined') return;
@@ -410,36 +302,22 @@ export function nudgeOtherTabsToReleaseIdb(): void {
   nudgeChannel?.postMessage(IDB_RELEASE_NUDGE);
 }
 
-/**
- * Tear down the nudge channel. Lifecycle cleanup for the stateful singleton
- * above; call from teardown paths / tests so the listener is not leaked.
- */
+/** Tears down the nudge channel (lifecycle cleanup for the singleton); call from teardown paths and tests. */
 export function closeNudgeChannel(): void {
   nudgeChannel?.close();
   nudgeChannel = null;
 }
 
-/**
- * Wrap a pending `openDB` promise with a bounded blocked-timeout. The
- * returned promise resolves with the handle on a normal open, but if the
- * caller arms the timeout via {@link ArmableOpen.armBlockedTimeout} (from the
- * `openDB` `blocked()` callback) and the open has not resolved within
- * {@link IDB_BLOCKED_TIMEOUT_MS}, it REJECTS with
- * {@link DatabaseUpgradeBlockedError} so `db()` surfaces an honest error
- * instead of an indefinite hang. A late real resolution (the blocking tab
- * finally closed) is not double-settled: the handle is closed and discarded so
- * it is never returned as a half-state. The arm-timer is cleared on resolve.
- *
- * Factored out of {@link db} so the bounded-wait is unit-testable without
- * driving a real `onblocked` (which `fake-indexeddb` cannot trigger).
- */
 interface ArmableOpen {
   promise: Promise<IDBPDatabase<Schema>>;
   /** Call from the `openDB` `blocked()` callback to start the failure timer. */
   armBlockedTimeout: () => void;
 }
 
-export function wrapOpenWithBlockedTimeout(
+// Wraps a pending `openDB` promise with a bounded blocked-timeout: once armed (from the `blocked()` callback) and
+// unresolved within IDB_BLOCKED_TIMEOUT_MS it rejects with DatabaseUpgradeBlockedError instead of hanging. A late real
+// resolution is closed and discarded, never returned as a half-state.
+function wrapOpenWithBlockedTimeout(
   openPromise: Promise<IDBPDatabase<Schema>>,
   capMs: number = IDB_BLOCKED_TIMEOUT_MS,
 ): ArmableOpen {
@@ -459,8 +337,7 @@ export function wrapOpenWithBlockedTimeout(
       (handle) => {
         clearTimer();
         if (settled) {
-          // Timed out already → discard the late handle so it is never cached
-          // as a half-state (the db() caller already reset dbPromise).
+          // Already timed out: discard the late handle so it is never cached as a half-state.
           handle.close();
           return;
         }
@@ -489,21 +366,18 @@ export function wrapOpenWithBlockedTimeout(
 }
 
 export function db(): Promise<IDBPDatabase<Schema>> {
-  // Register the cross-tab release listener as soon as a connection is
-  // opened, so this tab will yield its handle when another tab needs to
-  // drop the database.
+  // Register the cross-tab release listener once a connection opens, so this tab yields its handle when another needs
+  // to drop the database.
   ensureNudgeChannel();
   if (!dbPromise) {
     let armBlockedTimeout: () => void = () => {};
     const rawOpen = openDB<Schema>(DB_NAME, DB_VERSION, {
       upgrade(db) {
-        // v2: removed the 'plans' store.
+        // v2: drop the 'plans' store.
         if (db.objectStoreNames.contains('plans' as never)) {
           db.deleteObjectStore('plans' as never);
         }
-        // The loop below covers v6's added `incomeStreams` store too;
-        // any object store missing from the live schema gets created
-        // with the standard household/updatedAt indexes.
+        // Also creates v6's `incomeStreams`: any missing store gets the standard householdId/updatedAt indexes.
         for (const store of Object.values(STORE_BY_TYPE) as AggregateStore[]) {
           if (!db.objectStoreNames.contains(store)) {
             const os = db.createObjectStore(store, { keyPath: 'id' });
@@ -523,32 +397,26 @@ export function db(): Promise<IDBPDatabase<Schema>> {
         if (!db.objectStoreNames.contains('selectedScenario')) {
           db.createObjectStore('selectedScenario', { keyPath: 'id' });
         }
-        // v7: Monte Carlo result cache (LRU N=5, local-only, not synced).
+        // v7: Monte Carlo result cache (local-only).
         if (!db.objectStoreNames.contains('monteCarloResults')) {
           const os = db.createObjectStore('monteCarloResults', { keyPath: 'id' });
           os.createIndex('lastAccessedAt', 'lastAccessedAt');
         }
-        // v8: device-local household-data-key cache (singleton, local-only,
-        // not synced) for zero-knowledge payload encryption.
-        // Inside the `retirement` IDB so it rides the centralized nuke.
+        // v8: device-local household-data-key cache (singleton, local-only), inside the `retirement` IDB so it rides
+        // the centralized teardown.
         if (!db.objectStoreNames.contains('keyCache')) {
           db.createObjectStore('keyCache', { keyPath: 'id' });
         }
-        // v9: on-device diagnostics log (local-only, NOT synced, NOT
-        // aggregate data). The `seq` index drives the append-time prune
-        // cursor. Preserved across clearAllStores / force-bootstrap
-        // but wiped by every dropLocalDatabase.
+        // v9: on-device diagnostics log (local-only); the `seq` index drives the append-time prune. Kept across
+        // clearAllStores/force-bootstrap, wiped by every dropLocalDatabase.
         if (!db.objectStoreNames.contains('diagnosticLogs')) {
           const os = db.createObjectStore('diagnosticLogs', { keyPath: 'id' });
           os.createIndex('seq', 'seq');
         }
       },
-      // A v9 open blocked by an open v8 tab would otherwise stall db() and
-      // freeze all IDB I/O in this tab. Close this tab's cached handle so a
-      // sibling's upgrade can proceed (mirrors the nudge closeIdbHandle); the
-      // bounded blocked-timeout below then guarantees the promise db() returns
-      // REJECTS with DatabaseUpgradeBlockedError (and the cache is reset for a
-      // clean retry) rather than hanging forever.
+      // A v9 open blocked by an open v8 tab would stall db() and freeze this tab's IDB I/O: close this tab's cached
+      // handle so a sibling's upgrade can proceed (as the nudge does); the blocked-timeout below then rejects with
+      // DatabaseUpgradeBlockedError and resets the cache for a clean retry.
       blocking() {
         void closeIdbHandle();
       },
@@ -556,24 +424,19 @@ export function db(): Promise<IDBPDatabase<Schema>> {
         console.warn(
           '[db] IndexedDB upgrade to v9 is blocked by another open tab; close other tabs of this app to finish upgrading',
         );
-        // Arm the bounded failure path: a sibling that never releases (e.g. a
-        // pre-this-feature v8 tab with no blocking() handler during rollout)
-        // would otherwise leave this promise pending forever.
+        // Arm the bounded failure path: a sibling that never releases (e.g. a v8 tab without a blocking() handler
+        // during rollout) would leave this promise pending forever.
         armBlockedTimeout();
       },
       terminated() {
-        // The browser killed the connection (e.g. storage pressure). Drop the
-        // cached promise so the next db() call reopens a fresh handle.
+        // The browser killed the connection (e.g. storage pressure): drop the cached promise so the next db() reopens.
         dbPromise = null;
       },
     });
     const wrapped = wrapOpenWithBlockedTimeout(rawOpen);
     armBlockedTimeout = wrapped.armBlockedTimeout;
-    // On a blocked-timeout reject (or any open error), reset the cached promise
-    // so a later db() call retries cleanly instead of awaiting a rejected
-    // promise forever. Re-throw so the awaiting caller sees the error.
-    // Guard the reset against a sibling that already replaced the cache (e.g. a
-    // terminated() reopen) so we only null our own chain.
+    // On a blocked-timeout reject or any open error, reset the cache so a later db() retries cleanly, but only if it is
+    // still our own chain (a terminated() reopen may have replaced it); re-throw for the awaiting caller.
     const cached: Promise<IDBPDatabase<Schema>> = wrapped.promise.catch(
       (err: unknown) => {
         if (dbPromise === cached) dbPromise = null;
@@ -596,17 +459,10 @@ export async function listAggregates(type: AggregateType): Promise<Aggregate[]> 
 }
 
 /**
- * Like {@link listAggregates}, but **does not** filter tombstones.
- * Used by the demo-reload and import paths to detect cloud-side
- * tombstones (which bootstrap wrote into IDB with `deletedAt` set) so
- * a subsequent reload can queue `update @ tombstone_version` instead
- * of `create @ 0` — cloud's `attribute_not_exists OR version=:expected`
- * condition would always reject create-at-0 against an existing
- * tombstoned row, leaving the badge stuck on "Refresh needed".
- *
- * Don't use this for UI reads — the workspace should never display
- * deleted rows. Reserved for the bookkeeping paths that need to
- * reason about cloud version chains, including past tombstones.
+ * As {@link listAggregates} but keeps tombstones, for the demo-reload and import bookkeeping that must see cloud-side
+ * tombstones (bootstrap writes them with `deletedAt`) so a reload queues `update @ tombstone_version`: the server's
+ * `attribute_not_exists OR version=:expected` condition always rejects `create @ 0` over a tombstone, leaving the badge
+ * on "Refresh needed". Not for UI reads.
  */
 export async function listAggregatesIncludingDeleted(
   type: AggregateType,
@@ -625,16 +481,9 @@ export async function getAggregate(type: AggregateType, id: string): Promise<Agg
 }
 
 /**
- * Like {@link getAggregate}, but **does not** filter tombstones: returns
- * the migrated row even when it carries a `deletedAt` (a soft-delete
- * tombstone). `null` only when the row is genuinely absent.
- *
- * Reserved for the bookkeeping paths that must reason about a row the
- * cloud has tombstoned — e.g. the discard convergence check in
- * `resolveConflict`, where adopting a remote deletion leaves the local
- * row a pulled tombstone that {@link getAggregate} would (wrongly) read as
- * absent, failing the convergence predicate. Don't use this for UI reads —
- * the workspace must never display a deleted row (use {@link getAggregate}).
+ * As {@link getAggregate} but returns a tombstoned row (null only when absent), for bookkeeping that must reason about
+ * a row the cloud tombstoned, e.g. `resolveConflict`'s discard convergence check, where an adopted remote deletion
+ * would read as absent. Not for UI reads.
  */
 export async function getAggregateIncludingDeleted(
   type: AggregateType,
@@ -675,15 +524,11 @@ export async function queueMutation(m: PendingMutation): Promise<void> {
 
 export async function listPendingMutations(): Promise<PendingMutation[]> {
   const handle = await db();
-  // Upgrade any row a prior (schema-behind) build queued before it can be
-  // pushed. The read stays `readonly`; the (rare) persist is a separate
-  // read-check-write — see listStatusRowsUpgraded for why.
+  // Upgrades any row a schema-behind build queued before it can be pushed; the read stays `readonly` and the rare
+  // persist is a separate read-check-write (see listStatusRowsUpgraded).
   const migrated = await listStatusRowsUpgraded(handle, 'pending');
-  // The `status` index orders ties by primary key (random UUID), so flush
-  // order would be random. Sort by the monotonic `timestamp` so the server
-  // applies same-aggregate mutations in creation order (an update can't be
-  // pushed before its create). queueLocalMutation guarantees strict
-  // (non-tying) timestamps.
+  // The `status` index orders ties by random UUID; sort by the strictly monotonic `timestamp` so the server applies
+  // same-aggregate mutations in creation order (an update can't precede its create).
   return migrated.sort((a, b) => a.timestamp - b.timestamp);
 }
 
@@ -692,12 +537,7 @@ export async function listFailedConflicts(): Promise<PendingMutation[]> {
   return listStatusRowsUpgraded(handle, 'failed-conflict');
 }
 
-/**
- * Mirror of `listFailedConflicts` for the `failed-error` status. Returns `[]`
- * in production today — no current code writes `failed-error` (a transport
- * error leaves items `pending`), so this is forward-compat scaffolding for the
- * sync inspector that lights up when a future writer stamps that status.
- */
+/** The `failed-error` rows: batches parked after a permanent push rejection. */
 export async function listFailedErrors(): Promise<PendingMutation[]> {
   const handle = await db();
   return listStatusRowsUpgraded(handle, 'failed-error');
@@ -713,10 +553,8 @@ export async function updateMutationStatus(
   const m = await tx.store.get(id);
   if (!m) return;
   m.status = status;
-  // Stamp the rejection reason (or clear a stale one when none is passed —
-  // any non-failure transition, e.g. a retry back to `pending`). The
-  // rejection loop passes the allowlist-normalised reason; every other caller
-  // omits it and thereby clears.
+  // Stamp the rejection reason, or clear a stale one when none is passed (any non-failure transition, e.g. a retry back
+  // to `pending`); only the rejection loop passes the allowlist-normalised reason.
   m.reason = reason;
   await tx.store.put(m);
 }
@@ -727,13 +565,9 @@ export async function removeMutation(id: string): Promise<void> {
 }
 
 /**
- * Atomically remove a set of queue mutations in ONE `mutations` readwrite
- * transaction. The auto-repair `drop` path uses this:
- * a simple delete-vs-deleted drop scopes to just the rejected row, while a
- * create-over-tombstone whose local stack ends in a delete (the poison train)
- * scopes to the WHOLE stack so no stale sibling survives to re-conflict.
- * All-or-nothing — a fault mid-removal aborts the transaction, so the queue is
- * never left partially swept. Missing ids are ignored; an empty list is a no-op.
+ * Removes a set of queue mutations in one `mutations` transaction, all-or-nothing, so the queue is never left partially
+ * swept. Auto-repair's `drop` path: a simple drop scopes to the rejected row, a created-then-deleted poison train to
+ * the whole stack. Missing ids are ignored; an empty list is a no-op.
  */
 export async function removeMutations(ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return;
@@ -745,9 +579,8 @@ export async function removeMutations(ids: readonly string[]): Promise<void> {
     }
     await tx.done;
   } catch (err) {
-    // Roll the whole removal back on any fault — abort explicitly, consume the
-    // resulting `tx.done` rejection so it is not an unhandled promise, and
-    // re-throw the original error.
+    // Abort explicitly to roll everything back, consume the `tx.done` rejection so it isn't unhandled, and re-throw the
+    // original error.
     try {
       tx.abort();
     } catch {
@@ -759,16 +592,10 @@ export async function removeMutations(ids: readonly string[]): Promise<void> {
 }
 
 /**
- * Re-queue a parked mutation as a fresh-id `pending` row in ONE `mutations`
- * transaction (Check & repair): delete `oldId` and put
- * a copy carrying `freshId`, `status:'pending'`, and the rejection facts
- * (`reason` / `currentVersion` / `currentUpdatedAt`) cleared. A FRESH id is
- * mandatory — replaying the original would hit the server's 7-day cached
- * `CONFLICT`; resetting the status to `pending` is required because
- * `flushPending` only pushes `pending` rows. The follow-on rejection re-drives
- * the auto-repair pass — silently resolving a since-fixed conflict and
- * rehydrating a legacy row's server facts (`currentVersion` / `currentUpdatedAt`
- * / tombstone flag). No-op on a missing id.
+ * Check & repair: re-queues a parked mutation as a fresh-id `pending` row in one transaction (deletes `oldId`, puts a
+ * copy with `freshId`, status `pending` and the rejection facts cleared). A fresh id is mandatory since the original
+ * would replay the server's 7-day cached `CONFLICT`, and `pending` because `flushPending` pushes only those; the
+ * follow-on rejection re-drives auto-repair. No-op on a missing id.
  */
 export async function reEnqueueMutationWithFreshId(
   oldId: string,
@@ -794,10 +621,10 @@ export async function reEnqueueMutationWithFreshId(
   await tx.done;
 }
 
-/** Every queue row (any status) for one aggregate id, via the `aggregateId`
- *  index. The auto-repair pass reads the FULL stack (pending + failed-conflict)
- *  for an aggregate so a later pending sibling can't re-poison it after a
- *  collapse. */
+/**
+ * Every queue row (any status) for one aggregate via the `aggregateId` index; auto-repair reads the full stack so a
+ * later pending sibling can't re-poison the aggregate after a collapse.
+ */
 export async function listMutationsByAggregate(
   aggregateId: string,
 ): Promise<PendingMutation[]> {
@@ -806,35 +633,23 @@ export async function listMutationsByAggregate(
   return tx.store.index('aggregateId').getAll(aggregateId);
 }
 
-/** Every queue row (any status). Used by the version-truth capture to recover
- *  each aggregate's last server-acknowledged version before a destructive
- *  `clearMutationQueue()`, and by the
- *  server-authoritative export's `readAllMutations` default.
- *
- *  Migrates a schema-behind row's payload in memory before returning it (so
- *  neither caller ever sees a retired field), but — unlike
- *  {@link listPendingMutations} / {@link listFailedConflicts} /
- *  {@link listFailedErrors}, which persist the upgrade because they already
- *  feed a push or a status write — never persists it. This function is the
- *  read the export's "never writes workspace/queue state" contract depends
- *  on: same in-memory pattern as {@link listAggregatesIncludingDeleted}. */
+/**
+ * Every queue row (any status), for the version-truth capture before a destructive `clearMutationQueue()` and the
+ * export's `readAllMutations` default. Migrates a schema-behind payload in memory only and never persists it, unlike
+ * {@link listPendingMutations}/{@link listFailedConflicts}/{@link listFailedErrors}, because the export's "never writes
+ * workspace/queue state" contract depends on this read.
+ */
 export async function listAllMutations(): Promise<PendingMutation[]> {
   const handle = await db();
   const rows = await handle.getAll('mutations');
   return rows.map(migrateMutation);
 }
 
-/**
- * Concurrency fence for the transactional queue-collapse primitives: the
- * aggregate's live queue stack (re-read INSIDE the collapse transaction) must
- * still equal the snapshot the caller classified. A concurrent
- * `queueLocalMutation` for the same aggregate adds a row absent from
- * `expectedIds`; committing the collapse would then stomp (or exclude) it — a
- * silent lost update. Throw {@link ConcurrentQueueMutationError} so the caller
- * aborts and re-routes on the next round. A
- * MISSING row is fine (a concurrent apply-remove) — only an unexpected ADDED
- * row signals the lost-update race.
- */
+// Concurrency fence for the transactional collapse primitives: the aggregate's live stack, re-read inside the collapse
+// transaction, must still match the caller's snapshot. A concurrent `queueLocalMutation` adds a row absent from
+// `expectedIds` that the collapse would stomp (a silent lost update), so throw {@link ConcurrentQueueMutationError} and
+// let the caller re-route next round. A missing row is fine (a concurrent apply-remove); only an added one signals the
+// race.
 function assertQueueStackUnchanged(
   liveStack: readonly PendingMutation[],
   expectedIds: readonly string[],
@@ -847,12 +662,9 @@ function assertQueueStackUnchanged(
 }
 
 /**
- * Park a rejected mutation as `failed-conflict`, persisting the rejection facts
- * the manual Resolve UI re-bases from. Unlike
- * {@link updateMutationStatus}, this writes `reason` + `currentVersion` +
- * `currentUpdatedAt` **together** in one transaction, so persisting the server
- * facts can never clobber the reason (the "preserve reason on a status change"
- * rule). Each omitted fact is written as absent. No-op on a missing id.
+ * Parks a rejected mutation as `failed-conflict`, writing `reason`, `currentVersion` and `currentUpdatedAt` together in
+ * one transaction so persisting the server facts can't clobber the reason (the Resolve UI re-bases from them). Omitted
+ * facts are written absent. No-op on a missing id.
  */
 export async function parkFailedConflict(
   id: string,
@@ -878,14 +690,11 @@ export async function parkFailedConflict(
 }
 
 /**
- * Collapse an aggregate's stack to ONE parked `failed-conflict` representative
- * (escalation): remove the sibling rows and stamp
- * the representative with the rejection facts, all in one `mutations`
- * transaction. Restart-safe — a crash before the tx commits leaves every row
- * `pending`, so the next flush re-escalates identically. No-op on a missing
- * representative. Re-reads the aggregate's live stack inside the transaction
- * first and aborts with {@link ConcurrentQueueMutationError} if a concurrent
- * `queueLocalMutation` landed since the caller's snapshot.
+ * Escalation: collapses an aggregate's stack to one parked `failed-conflict` representative stamped with the rejection
+ * facts, removing the siblings, in one transaction. Restart-safe (a crash before commit leaves every row `pending`, so
+ * the next flush re-escalates identically). Re-reads the live stack first and aborts with {@link
+ * ConcurrentQueueMutationError} if a concurrent `queueLocalMutation` landed since the snapshot. No-op on a missing
+ * representative.
  */
 export async function collapseToFailedConflict(args: {
   aggregateId: string;
@@ -900,9 +709,8 @@ export async function collapseToFailedConflict(args: {
   const handle = await db();
   const tx = handle.transaction('mutations', 'readwrite');
   try {
-    // Concurrency fence: re-read the live stack BEFORE any write and
-    // confirm it still matches the caller's snapshot; abort otherwise so the
-    // repair pass re-routes next round rather than folding a stale collapse.
+    // Re-read the live stack before any write and abort on a mismatch, so the repair re-routes next round instead of
+    // folding a stale collapse.
     assertQueueStackUnchanged(
       await tx.store.index('aggregateId').getAll(args.aggregateId),
       args.removeMutationIds,
@@ -922,9 +730,6 @@ export async function collapseToFailedConflict(args: {
     }
     await tx.done;
   } catch (err) {
-    // Roll the whole collapse back on any fault (the concurrency abort above,
-    // or a request error) — abort explicitly, consume the resulting `tx.done`
-    // rejection so it is not an unhandled promise, and re-throw the original.
     try {
       tx.abort();
     } catch {
@@ -936,15 +741,10 @@ export async function collapseToFailedConflict(args: {
 }
 
 /**
- * Atomically remove a set of queue mutations, write a corrected local aggregate
- * row, and append ONE fresh mutation — all in a single IDB readwrite
- * transaction over `mutations` + the aggregate's store.
- * The collapse/re-queue primitive the auto-repair
- * re-base + manual keep resolution use: unlike {@link queueLocalMutation}
- * (aggregate write + queue write in SEPARATE transactions), a crash mid-collapse
- * here can never drop the un-synced edit — the whole swap commits or none of it
- * does. Fires the aggregate store's fine change signal after commit so
- * mounted readers re-read.
+ * Atomically removes queue mutations, writes a corrected local aggregate and appends one fresh mutation in a single
+ * readwrite transaction over `mutations` and the aggregate's store; the auto-repair re-base and manual keep use it.
+ * Unlike {@link queueLocalMutation} (separate transactions), a crash mid-collapse can't drop the un-synced edit. Fires
+ * the store's fine change signal after commit.
  */
 export async function replaceQueueMutationsAtomically(args: {
   aggregateType: AggregateType;
@@ -957,22 +757,16 @@ export async function replaceQueueMutationsAtomically(args: {
   const tx = handle.transaction(['mutations', store], 'readwrite');
   try {
     const mutations = tx.objectStore('mutations');
-    // Concurrency fence: re-read the aggregate's live queue stack INSIDE
-    // this transaction, BEFORE any write, and confirm it still matches the
-    // caller's snapshot (`removeMutationIds`). A `queueLocalMutation` from a
-    // concurrent user edit that landed after the caller read the stack adds a
-    // row absent from that snapshot; writing `correctedAggregate` here would
-    // stomp it (a silent lost update). Abort instead — the repair pass re-reads
-    // and re-routes the aggregate on the next round.
+    // Concurrency fence: re-read the live stack inside this transaction before any write and confirm it matches the
+    // caller's snapshot; a concurrent `queueLocalMutation` row would be stomped by `correctedAggregate` (a silent lost
+    // update), so abort and let the repair pass re-route.
     assertQueueStackUnchanged(
       await mutations.index('aggregateId').getAll(args.freshMutation.aggregateId),
       args.removeMutationIds,
       args.freshMutation.aggregateId,
     );
-    // Append the fresh mutation FIRST, then remove the stale rows, so if any
-    // step throws the un-synced edit is never the casualty (queue-before-remove
-    // — the restart-safe ordering). The explicit abort below rolls the
-    // whole swap back on any fault; the ordering is the belt to that suspenders.
+    // Append the fresh mutation before removing the stale rows, so a throw never makes the un-synced edit the casualty
+    // (queue-before-remove, the restart-safe ordering); the explicit abort rolls everything back.
     await mutations.put(args.freshMutation);
     await tx.objectStore(store).put(args.correctedAggregate);
     for (const id of args.removeMutationIds) {
@@ -981,9 +775,8 @@ export async function replaceQueueMutationsAtomically(args: {
     }
     await tx.done;
   } catch (err) {
-    // A request error (e.g. a DataCloneError) must roll the whole transaction
-    // back — abort explicitly, then consume the resulting `tx.done` rejection so
-    // it is not an unhandled promise, and re-throw the original error.
+    // A request error (e.g. a DataCloneError) must roll the whole transaction back: abort, consume the `tx.done`
+    // rejection, re-throw.
     try {
       tx.abort();
     } catch {
@@ -995,52 +788,38 @@ export async function replaceQueueMutationsAtomically(args: {
   notifyStoreChanged(store);
 }
 
-/** The aggregate + queue row {@link writeAccountWithRetypeGuard} commits on a
- *  successful write. */
+/** The aggregate and queue row {@link writeAccountWithRetypeGuard} commits. */
 export interface GuardedAccountWrite {
   readonly aggregate: Aggregate<AccountPayload>;
   readonly mutation: PendingMutation;
 }
 
-/** What the caller's `decide` callback in {@link writeAccountWithRetypeGuard}
- *  returns: either the write to commit, or a refusal (writes nothing). */
+/**
+ * The caller's verdict in {@link writeAccountWithRetypeGuard}: the write to commit, or a refusal that writes nothing.
+ */
 export type GuardedAccountDecision = GuardedAccountWrite | { readonly refuse: true };
 
 /**
- * Guarded account save:
- * ONE IndexedDB `readwrite` transaction over the `accounts`, `accountBalances`
- * and `mutations` stores that reads the account's FRESH, tombstone-filtered,
- * migrated row first, optionally reads that account's fresh, tombstone-
- * filtered, migrated balance rows, then asks the caller's `decide` callback
- * for a verdict — all before any write, so a blocked type change writes
- * nothing (mirrors {@link replaceQueueMutationsAtomically}: re-read inside,
- * explicit abort on fault, {@link notifyStoreChanged} only after commit).
- *
- * `db/` may not import `pages/` or `sync/` (`.dependency-cruiser.cjs` →
- * `db-layering`), so this primitive is domain-free: it knows nothing about
- * account *types* or retype rules, only that a caller-supplied predicate
- * decides whether the balance read is needed at all, and a caller-supplied
- * decision decides whether to write or refuse. `decide` (and
- * `needsBalanceRead`) MUST be synchronous and must not await anything
- * non-IDB — an IDB transaction auto-commits as soon as control returns to the
- * event loop with no pending request, so an `await` on a plain promise inside
- * either callback would silently end the transaction out from under the
- * write that follows.
- *
- * Throws {@link AccountRetypeBlockedError} when `decide` refuses, or
- * {@link AccountRetypeCheckFailedError} when the balance read itself fails
- * (only reachable when `needsBalanceRead` returned `true`). Any other fault —
- * including the account row being absent or tombstoned — is a plain `Error`:
- * the pre-existing general save-failure path, not this feature's to type.
+ * Guarded account save in one `readwrite` transaction over `accounts`, `accountBalances` and `mutations`: reads the
+ * account's fresh, tombstone-filtered, migrated row, optionally its fresh balance rows, then asks the caller's `decide`
+ * for a verdict, all before any write, so a blocked type change writes nothing (like {@link
+ * replaceQueueMutationsAtomically}: re-read inside, explicit abort on fault, {@link notifyStoreChanged} only after
+ * commit). `db/` may not import `pages/` or `sync/` (`.dependency-cruiser.cjs` `db-layering`), so this primitive is
+ * domain-free: a caller predicate decides whether the balance read is needed and a caller decision whether to write or
+ * refuse. `decide` and `needsBalanceRead` must be synchronous and await nothing non-IDB: an IDB transaction
+ * auto-commits once control returns to the event loop with no pending request, so an `await` on a plain promise would
+ * end it before the write. Throws {@link AccountRetypeBlockedError} when `decide` refuses, {@link
+ * AccountRetypeCheckFailedError} when the balance read fails (only if `needsBalanceRead` returned true), and a plain
+ * `Error` for any other fault, including an absent or tombstoned account row.
  */
 export async function writeAccountWithRetypeGuard(args: {
   accountId: string;
-  /** Synchronous. Called with the fresh account row; `true` means this write
-   *  also needs that account's fresh balance rows before `decide` can judge
-   *  it (e.g. "the submitted type differs from what's persisted"). */
+  /**
+   * Synchronous. `true` means the write also needs the account's fresh balance rows before `decide` can judge it (e.g.
+   * the submitted type differs from the persisted one).
+   */
   needsBalanceRead: (freshAccount: Aggregate<AccountPayload>) => boolean;
-  /** Synchronous. Called with the fresh account row and — only when
-   *  `needsBalanceRead` returned `true` — that account's fresh balance rows. */
+  /** Synchronous. Gets the fresh account and, only when `needsBalanceRead` returned true, its fresh balance rows. */
   decide: (
     freshAccount: Aggregate<AccountPayload>,
     balances: ReadonlyArray<Aggregate<AccountBalancePayload>> | undefined,
@@ -1080,10 +859,6 @@ export async function writeAccountWithRetypeGuard(args: {
     await tx.done;
     result = decision;
   } catch (err) {
-    // Roll the whole write back on any fault (a refusal, a failed balance
-    // read, a missing account, or a request error) — abort explicitly,
-    // consume the resulting `tx.done` rejection so it is not an unhandled
-    // promise, and re-throw the original error.
     try {
       tx.abort();
     } catch {
@@ -1097,11 +872,8 @@ export async function writeAccountWithRetypeGuard(args: {
 }
 
 /**
- * Drop every entry from the mutation queue (pending + failed-conflict).
- * Used by the demo-reload overwrite path: legacy `failed-conflict`
- * mutations from a previously broken load would otherwise survive the
- * wipe and keep the badge stuck on "Refresh needed" even after a clean
- * sync round-trip.
+ * Drops every mutation-queue entry (pending and failed-conflict), for the demo-reload overwrite: stale
+ * `failed-conflict` rows from a broken load would otherwise survive the wipe and pin the badge on "Refresh needed".
  */
 export async function clearMutationQueue(): Promise<void> {
   const handle = await db();
@@ -1121,19 +893,11 @@ export async function writeDeviceMetadata(metadata: DeviceMetadata): Promise<voi
 }
 
 /**
- * Atomic read-modify-write of the singleton `deviceMetadata` row inside ONE
- * IDB `readwrite` transaction (get → updater → put → await tx.done). IDB
- * transactions are atomic even across tabs, so this closes the lost-update
- * class the plain `readDeviceMetadata`/`writeDeviceMetadata` pair exposes:
- * two sync flows that each read the full row, mutate one field, and write the
- * whole row back would otherwise let last-writer-wins clobber a sibling
- * field's just-persisted value (e.g. a pull's `syncCursor` reverted by a
- * concurrent freshness-pin persist). The `updater` must update ONLY the
- * fields it owns and spread the rest of `current` so the transaction's read
- * (not a stale earlier read) is the merge base. `current` is `null` on a
- * first write; callers seed the row's identity fields then.
- *
- * Returns the persisted row so callers can read back the merged result.
+ * Atomic read-modify-write of the singleton `deviceMetadata` row in one `readwrite` transaction (get, updater, put). It
+ * closes the lost-update class of the plain read/write pair, where two sync flows each read the whole row and write it
+ * back and last-writer-wins clobbers a sibling field (e.g. a pull's `syncCursor` reverted by a freshness-pin persist).
+ * The `updater` must change only the fields it owns and spread the rest of `current`, so the transaction's read is the
+ * merge base. `current` is null on a first write, when callers seed the identity fields. Returns the persisted row.
  */
 export async function updateDeviceMetadata(
   updater: (current: DeviceMetadata | null) => DeviceMetadata,
@@ -1176,10 +940,8 @@ export async function clearSelectedScenario(): Promise<void> {
 }
 
 /**
- * Read the cached household-data-key entry, or null when none is cached. The
- * `keyCache` store is a singleton keyed by {@link KEY_CACHE_ID}; callers must
- * still confirm the entry's `householdId` matches the active household before
- * trusting the bytes (a stale entry survives until the next IDB drop).
+ * The cached household-data-key entry, or null. Callers must confirm `householdId` matches the active household before
+ * trusting the bytes: a stale entry survives until the next IDB drop.
  */
 export async function readKeyCacheEntry(): Promise<KeyCacheEntry | null> {
   const handle = await db();
@@ -1199,27 +961,8 @@ export async function clearKeyCacheStore(): Promise<void> {
   await handle.clear('keyCache');
 }
 
-/**
- * Append diagnostics entries AND prune the store back to `max` in ONE
- * `readwrite` transaction (mirrors `monte-carlo-cache.ts` `putCached`'s
- * put+count+cursor-evict). The strictly-monotonic `seq` is allocated
- * INSIDE this transaction — read the current max via the `seq` index and
- * increment — so insertion order stays correct across tabs even within a
- * same-millisecond batch (a module-level counter would collide across tabs,
- * an ISO-`ts` index can't order a same-ms batch). Prune evicts the lowest
- * `seq` rows first via the index cursor. The supplied entries' own `seq` is
- * overwritten here so the store owns the authoritative ordering.
- *
- * Returns the entries as persisted (with their allocated `seq`) so the caller
- * can keep the in-memory ring aligned.
- */
-/**
- * Evict the lowest-`seq` `diagnosticLogs` rows until the store holds at most
- * `max`. Single eviction policy, shared by the atomic append-time prune and the
- * standalone `pruneDiagnosticLogs` backstop. Operates on an OPEN
- * `diagnosticLogs` `readwrite` transaction store so it can run inside the
- * append's one-transaction window.
- */
+// Evicts the lowest-`seq` rows until the store holds at most `max`; shared by the append-time prune and the
+// `pruneDiagnosticLogs` backstop, running on an open `readwrite` store so it fits the append's one-transaction window.
 async function pruneDiagnosticsToMax(
   store: IDBPObjectStore<Schema, ['diagnosticLogs'], 'diagnosticLogs', 'readwrite'>,
   max: number,
@@ -1235,6 +978,12 @@ async function pruneDiagnosticsToMax(
   }
 }
 
+/**
+ * Appends diagnostics entries and prunes the store back to `max` in one `readwrite` transaction. The monotonic `seq` is
+ * allocated inside it (current max via the `seq` index, plus one), so order holds across tabs within a same-millisecond
+ * batch, which a module-level counter or an ISO-`ts` index cannot give; the entries' own `seq` is overwritten. Returns
+ * the entries as persisted, so the caller can keep the in-memory ring aligned.
+ */
 export async function appendDiagnosticLogs(
   entries: readonly DiagnosticLogEntry[],
   max: number,
@@ -1252,8 +1001,6 @@ export async function appendDiagnosticLogs(
     await tx.store.put(row);
     persisted.push(row);
   }
-  // Prune from the oldest (lowest seq) until within bounds — same policy as the
-  // standalone backstop (one shared helper).
   await pruneDiagnosticsToMax(tx.store, max);
   await tx.done;
   return persisted;
@@ -1266,8 +1013,8 @@ export async function listDiagnosticLogs(): Promise<DiagnosticLogEntry[]> {
 }
 
 /**
- * Prune the diagnostics store back to `max` rows (lowest `seq` first). The
- * startup / cross-tab / crash backstop for the atomic append-time prune.
+ * Prunes the diagnostics store back to `max` rows (lowest `seq` first): the startup, cross-tab and crash backstop for
+ * the append-time prune.
  */
 export async function pruneDiagnosticLogs(max: number): Promise<void> {
   const handle = await db();
@@ -1283,16 +1030,9 @@ export async function clearDiagnosticLogs(): Promise<void> {
 }
 
 /**
- * Audit the working store: does it currently hold any aggregate whose
- * `householdId` differs from `expectedHouseholdId`? Used by
- * `AuthContext.maybeResetForNewUser` as a defence-in-depth check that
- * doesn't trust the localStorage user-transition tracker (an attacker
- * with DevTools could wipe or fake it). One `count()` per store via
- * the `householdId` index — DOM-bound but cheap.
- *
- * Returns `true` iff at least one store has at least one row whose
- * `householdId` does not equal the expected value. Empty stores
- * (legitimate first-ever login) return `false`.
+ * True iff any aggregate store holds a row whose `householdId` differs from `expectedHouseholdId`; empty stores (a
+ * first-ever login) are false. A defence-in-depth check for `AuthContext.maybeResetForNewUser` that doesn't trust the
+ * localStorage transition tracker (DevTools can wipe or fake it); one `count()` per store via the `householdId` index.
  */
 export async function hasForeignHouseholdData(
   expectedHouseholdId: string,
@@ -1311,15 +1051,10 @@ export async function hasForeignHouseholdData(
 }
 
 /**
- * Drop every store. Used by `bootstrap?force=true` (the Full Sync reset in
- * SyncContext). Includes `keyCache`: after a Full Sync wipes all sync data the
- * device's cached HDK must go too, otherwise the device sits in a logically
- * inconsistent state (appears unlocked over freshly-wiped data).
- * `deviceMetadata` and `selectedScenario` are deliberately preserved so the
- * device keeps its `deviceId`/scenario pointer across a force-bootstrap.
- * `diagnosticLogs` is likewise preserved — device-local debugging state
- * survives a same-user reset; only `dropLocalDatabase()` + the card
- * Clear wipe it.
+ * Clears every aggregate store, `mutations` and `keyCache` (the Full Sync reset in SyncContext): a cached HDK left over
+ * freshly wiped data would look unlocked over nothing. `deviceMetadata`, `selectedScenario` and `diagnosticLogs` are
+ * preserved, so the device keeps its `deviceId`, scenario pointer and debugging state across a force-bootstrap; only
+ * `dropLocalDatabase()` and the card Clear wipe diagnostics.
  */
 export async function clearAllStores(): Promise<void> {
   const handle = await db();
@@ -1331,30 +1066,19 @@ export async function clearAllStores(): Promise<void> {
   const tx = handle.transaction(stores, 'readwrite');
   await Promise.all(stores.map((s) => tx.objectStore(s).clear()));
   await tx.done;
-  // Wake every aggregate-store subscriber: a clear empties all of them, so
-  // each reactive reader must re-read (and see its store empty).
+  // A clear empties every aggregate store, so wake each reactive reader.
   for (const store of Object.values(STORE_BY_TYPE) as AggregateStore[]) {
     notifyStoreChanged(store);
   }
 }
 
 /**
- * Hard-delete the entire IndexedDB database (all stores + deviceMetadata).
- * Used by the "Clear data on this device" button on the Workspace page
- * (Workspace tools) and by the cross-user transition guard. Closes the cached
- * handle so the next call to `db()` opens a fresh database.
- *
- * If other connections hold the DB open (`onblocked`), the delete is
- * queued by the browser. We wait up to 2 s for them to release; if the
- * delete has not actually completed by then we **reject** with
- * {@link DatabaseDropBlockedError} — the drop is NOT a success and the
- * caller (the cross-user transition guard) must fail closed rather than
- * expose a new account over a previous account's stale rows. The browser keeps the delete queued, so a later retry — once
- * the other tabs have released their handles (nudged via
- * {@link nudgeOtherTabsToReleaseIdb}) — resolves cleanly.
- *
- * @throws {DatabaseDropBlockedError} when the delete stays blocked past the
- *   2 s cap (no other tab released its handle in time).
+ * Hard-deletes the whole IndexedDB database, for "Clear data on this device" (Workspace tools) and the cross-user
+ * transition guard; the next `db()` opens a fresh one. If other connections hold it open the browser queues the delete;
+ * we wait up to 2 s and then reject with {@link DatabaseDropBlockedError}, because a not-yet-completed drop is not a
+ * success and the guard must fail closed rather than expose a new account over a previous account's stale rows. The
+ * queued delete still completes once other tabs release (nudged via {@link nudgeOtherTabsToReleaseIdb}), so a retry
+ * resolves cleanly.
  */
 export async function dropLocalDatabase(): Promise<void> {
   if (dbPromise) {
@@ -1375,12 +1099,9 @@ export async function dropLocalDatabase(): Promise<void> {
       settled = true;
       reject(req.error ?? new Error('Failed to delete IndexedDB'));
     };
-    // Other tabs hold the DB open → the delete is queued. Wait briefly for
-    // them to release. If `onsuccess` has not fired by the 2 s cap, the DB is
-    // still present → reject so the caller fails closed (does not store the
-    // new lastUserId, does not expose the new household). The queued delete
-    // still completes later once the last handle closes; the user retries
-    // after closing other tabs.
+    // Other tabs hold the DB open, so the delete is queued. If `onsuccess` hasn't fired by the cap, reject so the
+    // caller fails closed (no new lastUserId stored, no new household exposed); the user retries after closing other
+    // tabs.
     req.onblocked = () => {
       console.warn('[db] deleteDatabase blocked by another connection; failing closed after 2 s if not released');
       setTimeout(() => {
@@ -1390,8 +1111,7 @@ export async function dropLocalDatabase(): Promise<void> {
       }, IDB_BLOCKED_TIMEOUT_MS);
     };
   });
-  // The drop emptied every aggregate store, so wake each reactive reader to
-  // re-read (and see its store empty) — mirrors clearAllStores's tail.
+  // Wake every reactive reader to see its emptied store (as clearAllStores does).
   for (const store of Object.values(STORE_BY_TYPE) as AggregateStore[]) {
     notifyStoreChanged(store);
   }
@@ -1406,16 +1126,10 @@ function migrateAggregate(type: AggregateType, aggregate: Aggregate): Aggregate 
   };
 }
 
-/**
- * Mirror of {@link migrateAggregate} for a queued mutation row. A mutation
- * queued by an older build persists its payload at the `schemaVersion` in
- * effect when it was written; unlike the aggregate stores (migrated on every
- * read), the `mutations` store is otherwise never migrated, so a stale row
- * would keep round-tripping a field a payload migration has since dropped —
- * out through both `listAllMutations` (export) and `listPendingMutations`
- * (push) — until it flushes. Returns the input unchanged when already
- * current, so callers can cheaply detect "did this change".
- */
+// Mirror of {@link migrateAggregate} for a queued mutation row. The `mutations` store isn't migrated on read like the
+// aggregate stores, so a row queued by an older build would keep round-tripping a field a payload migration has since
+// dropped (through both `listAllMutations` and `listPendingMutations`) until it flushes. Returns the input unchanged
+// when already current, so callers can detect a change.
 function migrateMutation(m: PendingMutation): PendingMutation {
   const current = currentSchemaVersion(m.aggregateType);
   if (m.schemaVersion >= current) return m;
@@ -1426,21 +1140,11 @@ function migrateMutation(m: PendingMutation): PendingMutation {
   };
 }
 
-/**
- * Read every mutation-queue row for one `status`, migrating a schema-behind
- * row's payload in memory on the way out, and — only when at least one row
- * WAS behind — persist the upgrade through {@link persistMutationUpgrades}.
- *
- * The read is the plain `readonly` transaction these list functions have
- * always been. They run on every poll tick and every flush (three at a time
- * from `refreshCounts`), so a `readwrite` read would serialize each of those
- * behind — and ahead of — every real queue write (a UI edit's
- * `queueMutation`, a push's `removeMutations`), and stretch the flush's own
- * drain loop by a macrotask turn per read. The write lock is taken only in
- * the upgrade window (a device's first reads after a bundle whose payload
- * schema moved), and only once per row: a persisted row is current on every
- * later read, so the steady state never writes.
- */
+// Reads every queue row for one `status`, migrating schema-behind payloads in memory and persisting the upgrade via
+// {@link persistMutationUpgrades} only when a row was behind. The read stays `readonly`: these run on every poll tick
+// and flush (three at a time from `refreshCounts`), and a `readwrite` read would serialize each behind and ahead of
+// real queue writes and add a macrotask turn per read. The write lock is taken only in the upgrade window, once per
+// row.
 async function listStatusRowsUpgraded(
   handle: IDBPDatabase<Schema>,
   status: PendingMutation['status'],
@@ -1458,28 +1162,12 @@ async function listStatusRowsUpgraded(
   return upgraded;
 }
 
-/**
- * Persist a payload-schema upgrade for the given queue rows — best-effort.
- *
- * ATOMIC relative to concurrent writers: each row is re-read INSIDE this
- * `readwrite` transaction and the migrated copy of THAT row is what gets
- * written, so a status/reason a retried push's `updateMutationStatus` set,
- * or a removal a completed push or conflict sweep made, between the caller's
- * readonly snapshot and this write is never clobbered by a stale put — a row
- * that is gone is skipped, a row already current is left alone.
- *
- * BEST-EFFORT, never a dependency of the read: the caller already holds the
- * complete, correct upgrade in memory and returns it regardless. A failed
- * persist (origin storage at quota is the realistic case, and the upgrade
- * window is exactly when a stale queue may be sitting on a full origin) must
- * not become a failed `listPendingMutations`: the flush that read is feeding
- * is what drains the queue and frees the space, so throwing here would stall
- * the very flush that clears the fault — and take the conflict inspector's
- * lists down with it. Abort explicitly, consume the resulting `tx.done`
- * rejection so it is not an unhandled promise, log, and move on; the rows
- * stay schema-behind on disk, so the next read re-does the upgrade in memory
- * and re-attempts the persist.
- */
+// Best-effort persist of a payload-schema upgrade. Atomic against concurrent writers: each row is re-read inside the
+// `readwrite` transaction and its own migrated copy written, so a status/reason or removal made since the caller's
+// readonly snapshot is never clobbered by a stale put (a gone row is skipped, a current one left alone). Never a
+// dependency of the read, which already holds the correct upgrade in memory: a failed persist (origin storage at quota
+// is the realistic case) must not fail `listPendingMutations`, since that flush drains the queue and frees the space.
+// Abort, consume the `tx.done` rejection, log, move on; the rows stay behind on disk and the next read retries.
 async function persistMutationUpgrades(
   handle: IDBPDatabase<Schema>,
   ids: readonly string[],
@@ -1510,11 +1198,9 @@ async function persistMutationUpgrades(
 export { STORE_BY_TYPE };
 
 /**
- * Defense-in-depth check used by SyncContext to skip pulled aggregates
- * whose type isn't in `STORE_BY_TYPE`. The server filters its egress
- * against `ACTIVE_AGGREGATE_TYPES` (apps/api/src/sync/aggregate-types.ts);
- * mirroring on the client lets a removed type land safely if a stale
- * server is still serving it (rolling deploy, S3 snapshot drift).
+ * True for a type in `STORE_BY_TYPE`; SyncContext uses it to skip pulled aggregates of a removed type that a stale
+ * server (rolling deploy, S3 snapshot drift) still serves. The server filters egress against `ACTIVE_AGGREGATE_TYPES`
+ * (apps/api/src/sync/aggregate-types.ts).
  */
 export function isKnownAggregateType(type: string): type is AggregateType {
   return Object.prototype.hasOwnProperty.call(STORE_BY_TYPE, type);

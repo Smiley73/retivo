@@ -1,8 +1,3 @@
-/**
- * Unit tests for retirement-date arithmetic. The same-date scenario
- * mode relies on these to recompute the non-anchor's age whenever the
- * anchor's age changes.
- */
 import { describe, it, expect } from 'vitest';
 import {
   ageOnDate,
@@ -53,7 +48,6 @@ describe('ageOnDate', () => {
   });
 
   it('returns years + months when target lands part-way through a year', () => {
-    // 1988-03-15 to 2050-06-15: 62 years, 3 months (day equal).
     expect(ageOnDate('1988-03-15', '2050-06-15')).toEqual({
       ageYears: 62,
       ageMonths: 3,
@@ -61,7 +55,6 @@ describe('ageOnDate', () => {
   });
 
   it('borrows a month when day-of-month is earlier than birthday day', () => {
-    // 1985-06-20 to 2050-06-15: 64y 11m (day 15 < day 20 -> borrow).
     expect(ageOnDate('1985-06-20', '2050-06-15')).toEqual({
       ageYears: 64,
       ageMonths: 11,
@@ -78,7 +71,6 @@ describe('ageOnDate', () => {
 
 describe('retirementDatesDiffer', () => {
   it('returns false when both members hit retirement on the same day', () => {
-    // Both born same day, both retire at same age -> same date.
     expect(
       retirementDatesDiffer(
         '1985-06-15',
@@ -101,8 +93,6 @@ describe('retirementDatesDiffer', () => {
   });
 
   it('returns false when ages compensate exactly for the birthdate gap (same date)', () => {
-    // Sam born 2y 9m after Alex. Alex retires at 65y 0m -> 2050-06-15.
-    // For Sam to retire 2050-06-15, age = 62y 3m.
     expect(
       retirementDatesDiffer(
         '1985-06-15',
@@ -136,19 +126,15 @@ describe('resolveMemberRetirementDates', () => {
       ],
     );
     expect(result.get('p')).toBe('2050-06-15');
-    // Secondary computed independently — note the 12th, NOT the 15th.
     expect(result.get('s')).toBe('2050-06-12');
   });
 
   it('snaps secondary to primary\'s exact date when sameDateAnchor === primary, even with a day-of-month gap', () => {
-    // Without the snap, secondary born on the 12th would land on the
-    // 12th of some month; the anchor's date is on the 15th.
+    // Without the snap, a secondary born on the 12th would land on the 12th; the anchor's date is the 15th.
     const result = resolveMemberRetirementDates(
       {
         primary: { ageYears: 65, ageMonths: 0 },
-        // Note: stored age is FLOORED to whole months — re-deriving the
-        // secondary's date from `birthdate + age` is exactly what the
-        // snap is here to prevent.
+        // The stored age is floored to whole months, so re-deriving the secondary's date from birthdate + age is what the snap prevents.
         secondary: { ageYears: 62, ageMonths: 3 },
         sameDateAnchor: 'primary',
       },
@@ -188,8 +174,6 @@ describe('resolveMemberRetirementDates', () => {
   });
 
   it('returns null for the snap target when the anchor side cannot be computed', () => {
-    // Primary age missing -> primary date is null -> snap can't apply ->
-    // secondary keeps its own birthdate+age (or null if it also lacks an age).
     const result = resolveMemberRetirementDates(
       {
         secondary: { ageYears: 62, ageMonths: 3 },

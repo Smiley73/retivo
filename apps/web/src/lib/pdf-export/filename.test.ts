@@ -1,57 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildPdfFilename,
-  sanitizeFilenameComponent,
-} from './filename';
+import { buildPdfFilename } from './filename';
 
-describe('sanitizeFilenameComponent', () => {
-  it('passes normal ASCII through unchanged', () => {
-    expect(sanitizeFilenameComponent('Base_Case-2')).toBe('Base_Case-2');
+const component = (name: string): string =>
+  buildPdfFilename({ scenarioName: name, basisKey: 'b', date: { year: 2026, month: 1, day: 1 } })
+    .replace(/^retivo-/, '')
+    .replace(/-b-2026-01-01\.pdf$/, '');
+
+describe('filename component sanitizing', () => {
+  it.each([
+    ['normal ASCII is unchanged', 'Base_Case-2', 'Base_Case-2'],
+    ['control characters become a dash', 'a\x00b\x07c', 'a-b-c'],
+    ['the RTL-override mark (U+202E) becomes a dash', 'safe\u202Eevil', 'safe-evil'],
+    ['a leading dot is stripped, not dashed', '.hidden', 'hidden'],
+    ['leading dots are stripped', '...deep', 'deep'],
+    ['a path separator becomes a dash', 'a/b/c', 'a-b-c'],
+    ['unicode becomes a dash', 'café résumé', 'caf-r-sum'],
+    ['runs collapse to one dash and edges trim', '  spaced   out  ', 'spaced-out'],
+    ['nothing usable gives "untitled"', '////', 'untitled'],
+    ['an empty name gives "untitled"', '', 'untitled'],
+    ['only dots gives "untitled"', '...', 'untitled'],
+  ])('%s', (_label, name, expected) => {
+    expect(component(name)).toBe(expected);
   });
 
-  it('collapses control characters to a dash', () => {
-    expect(sanitizeFilenameComponent('a\x00b\x07c')).toBe('a-b-c');
+  it('caps the component at 40 characters', () => {
+    expect(component('a'.repeat(60))).toBe('a'.repeat(40));
   });
 
-  it('collapses the RTL-override mark to a dash', () => {
-    // U+202E RIGHT-TO-LEFT OVERRIDE between two words.
-    expect(sanitizeFilenameComponent('safe\u202Eevil')).toBe('safe-evil');
-  });
-
-  it('strips a leading dot rather than turning it into a dash', () => {
-    expect(sanitizeFilenameComponent('.hidden')).toBe('hidden');
-    expect(sanitizeFilenameComponent('...deep')).toBe('deep');
-  });
-
-  it('collapses a forward slash (path separator) to a dash', () => {
-    expect(sanitizeFilenameComponent('a/b/c')).toBe('a-b-c');
-  });
-
-  it('collapses unicode to a dash', () => {
-    expect(sanitizeFilenameComponent('café résumé')).toBe('caf-r-sum');
-  });
-
-  it('collapses runs of disallowed chars to a single dash and trims edges', () => {
-    expect(sanitizeFilenameComponent('  spaced   out  ')).toBe('spaced-out');
-  });
-
-  it('caps the result at 40 characters', () => {
-    const long = 'a'.repeat(60);
-    const out = sanitizeFilenameComponent(long);
-    expect(out.length).toBe(40);
-    expect(out).toBe('a'.repeat(40));
-  });
-
-  it('does not leave a trailing dash after the length cap truncates mid-run', () => {
-    // 39 'a's then a dash region — the cap lands on the dash, which is trimmed.
-    const out = sanitizeFilenameComponent(`${'a'.repeat(39)}!!!!tail`);
-    expect(out.endsWith('-')).toBe(false);
-  });
-
-  it('returns "untitled" when nothing usable remains', () => {
-    expect(sanitizeFilenameComponent('////')).toBe('untitled');
-    expect(sanitizeFilenameComponent('')).toBe('untitled');
-    expect(sanitizeFilenameComponent('...')).toBe('untitled');
+  it('leaves no trailing dash when the cap truncates mid-run', () => {
+    expect(component(`${'a'.repeat(39)}!!!!tail`).endsWith('-')).toBe(false);
   });
 });
 

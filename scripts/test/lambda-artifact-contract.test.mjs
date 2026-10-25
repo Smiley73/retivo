@@ -1,27 +1,5 @@
-// Lambda artifact reproducibility contract.
-//
-// The deployable Lambda artifact is produced by `pnpm --filter
-// @retirement/api build:lambda` (apps/api/scripts/build-lambda.mjs). This test
-// builds it into a throwaway directory and asserts the supply-chain invariants
-// it locks in:
-//
-//   - the artifact is lockfile-derived: no package-lock.json and no
-//     artifact-local registry install (`npm install`) anywhere in the build
-//     path — the graph comes from `pnpm deploy` against the committed lockfile;
-//   - every direct production dependency ships at the exact version the tested
-//     workspace resolved (dependency parity, no drift);
-//   - the staged tree contains zero symbolic links (Lambda's zip layer handles
-//     them poorly and they defeat byte-traceability);
-//   - the uncompressed artifact stays under Lambda's 250 MiB limit;
-//   - the artifact survives an archive/extract round-trip and every one of the
-//     six deployed handler entrypoints imports from the extracted tree, with
-//     `require()` of ES modules switched off as it is in the Lambda runtime;
-//   - the production dependency graph passes the audit gate.
-//
-// This is heavier than the other scripts/test/ contract checks (it runs a real
-// nest build + pnpm deploy) but stays a pure node:test with no infra harness,
-// run by `pnpm test:contracts` (RUN_CONTRACT_TESTS=1); skipped under
-// `pnpm test:scripts`. Pattern: scripts/test/csp-contract.test.mjs.
+// Builds the Lambda artifact and asserts its supply-chain invariants: lockfile-derived, version parity, no symlinks, under 250 MiB, handlers import, clean audit.
+// Gated: skipped under `pnpm test:scripts`, run by `pnpm test:contracts` (RUN_CONTRACT_TESTS=1).
 
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -43,9 +21,7 @@ const REPO_ROOT = resolve(__dirname, '../..');
 const API_ROOT = resolve(REPO_ROOT, 'apps', 'api');
 const BUILD_SCRIPT_SRC = resolve(API_ROOT, 'scripts', 'build-lambda.mjs');
 
-// The six entrypoints Pulumi deploys (five via infrastructure/src/lambda.ts,
-// one via infrastructure/src/signup-cascade.ts). Each must import cleanly from
-// the extracted artifact, proving the hoisted package graph is complete.
+// The six entrypoints Pulumi deploys (five via lambda.ts, one via signup-cascade.ts).
 const DEPLOYED_HANDLERS = [
   'lambda.js',
   'compactor-lambda.js',
@@ -69,7 +45,7 @@ describe(
   let workDir;
   let artifactDir;
 
-  // Build the artifact ONCE into a temp dir, shared by every assertion below.
+  // One build, shared by every assertion below.
   before(
     () => {
       workDir = mkdtempSync(join(tmpdir(), 'lambda-artifact-contract-'));
@@ -99,9 +75,7 @@ describe(
 
   test('build-lambda.mjs never runs an artifact-local registry install', () => {
     const raw = readFileSync(BUILD_SCRIPT_SRC, 'utf8');
-    // Scan executable code only — the docstring intentionally describes the
-    // supply-chain rationale ("no artifact-local `npm install`"), which must not
-    // be mistaken for the command itself.
+    // Executable code only: the docstring names the forbidden command.
     const code = raw
       .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
       .replace(/(^|[^:])\/\/.*$/gm, '$1'); // line comments (leave `://` intact)
@@ -221,13 +195,8 @@ describe(
         existsSync(handlerPath),
         `extracted artifact is missing handler ${handler}`,
       );
-      // Import in a subprocess so each handler is exercised against the
-      // extracted tree in isolation (a missing/broken dependency throws a
-      // nonzero exit here). `--no-experimental-require-module` matches the
-      // Lambda Node.js runtime, where CommonJS code cannot `require()` an ES
-      // module. Plain Node 24 allows it, so without the flag a CommonJS
-      // dependency that loads an ESM-only package passes here and then fails
-      // at start-up on Lambda with ERR_REQUIRE_ESM.
+      // `--no-experimental-require-module` matches the Lambda runtime: plain Node 24 lets CommonJS `require()` an ES module,
+      // which then fails on Lambda with ERR_REQUIRE_ESM.
       execFileSync(
         process.execPath,
         [
@@ -242,10 +211,7 @@ describe(
   });
 
   test('the production dependency graph passes the audit gate', () => {
-    // Mirrors the workspace `audit:ci` gate but scoped to the production graph
-    // the artifact ships. Honors pnpm-workspace.yaml's auditConfig.ignoreGhsas.
-    // CI sets AUDIT_ADVISORIES_NONBLOCKING=true only on a pull request that
-    // changes no dependency file; main, dispatch and local runs stay strict.
+    // Honors auditConfig.ignoreGhsas; CI sets AUDIT_ADVISORIES_NONBLOCKING=true only on a pull request that changes no dependency file.
     try {
       execFileSync('pnpm', ['audit', '--prod', '--audit-level=moderate'], {
         cwd: REPO_ROOT,

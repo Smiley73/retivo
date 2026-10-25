@@ -1,31 +1,5 @@
-/**
- * Account deletion orchestrator. Verifies the caller's password, then
- * hard-deletes every S3 snapshot + household-scoped row + auth row for
- * the user. Hard delete on confirm — no soft-delete window in v1. See
- * docs/security.md, "Deleting and exporting your data".
- *
- * Cascade order (purge-first):
- * password verify → audit initiated → revoke sessions → S3 snapshot
- * purge (delegated to the dedicated AccountSnapshotPurgeService /
- * least-privilege purge Lambda) → shared DynamoDB household sweep
- * (HouseholdSweepService) → HouseholdKeyEnvelope sweep →
- * auth-state sweep → audit completed. The snapshot purge runs BEFORE the
- * irreversible DynamoDB / auth sweeps so a purge failure leaves the account
- * fully intact (only sessions revoked, recoverable by re-login). The
- * key-envelope rows are deleted alongside the household sync rows so a deleted
- * account leaves no wrapped key material behind (zero-knowledge cascade).
- *
- * The household-row sweep + session revocation are extracted into the
- * shared HouseholdSweepService so the encrypted-workspace
- * reset reuses the exact same audited path — no second BatchWriteItem
- * code path.
- *
- * The api-role IAM widening this needs (BatchWriteItem on
- * MutationLog/IdempotencyKey/AggregateVersion/DeviceRegistry +
- * lambda:InvokeFunction on the purge Lambda) now serves both the
- * DELETE /auth/account cascade and the encrypted-workspace reset via the
- * shared sweep. The api role no longer holds bucket-wide s3:DeleteObject.
- */
+// Account deletion orchestrator: password verify, then purge S3 snapshots before the irreversible DynamoDB and auth sweeps, so a purge failure
+// leaves the account intact. See docs/security.md, "Deleting and exporting your data".
 import {
   BadRequestException,
   Injectable,
@@ -60,15 +34,13 @@ export interface DeleteAccountArgs {
   currentJti: string;
   currentAccessExp: number;
   currentPassword: string;
-  /** Fresh step-up factor — required when
-   * `AUTH_MFA_ENFORCED` is on, absent on the flag-off password-only floor. */
+  /** Fresh step-up factor, required when `AUTH_MFA_ENFORCED` is on. */
   method?: StepUpMethod;
   code?: string;
   assertion?: AuthenticationResponseJSON;
   ip: string | null;
   userAgent: string | null;
-  /** Device identity — lets a trusted device's password
-   *  re-verify bypass the per-address backoff, mirroring login. */
+  /** Lets a trusted device bypass the per-address backoff, as in login. */
   deviceId?: string;
   deviceTrustToken?: string;
 }
@@ -104,29 +76,18 @@ export class DeleteAccountService {
   async deleteAccount(args: DeleteAccountArgs): Promise<void> {
     const user = await this.users.findById(args.userId);
     if (!user) {
-      // The JWT claim says this user exists but the row is gone — treat as
-      // INVALID_CREDENTIALS so a partially-completed prior cascade doesn't
-      // leak state to the caller.
+      // The claim says the user exists but the row is gone: INVALID_CREDENTIALS, so a partial prior cascade leaks no
+      // state.
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Current password is incorrect.',
       });
     }
 
-    // Password re-verify wrapped with the shared per-account backoff —
-    // the same primitive POST /sync/workspace/clear uses. checkBackoff runs
-    // first (a lockout throws 429 before argon2 is ever paid), then the argon2
-    // verify inside the closure resolves whether the password matches: a
-    // `false` makes the helper record one failure + throw INVALID_CREDENTIALS,
-    // a match clears the counter, and a backend/argon2 fault propagates out of
-    // the closure WITHOUT touching the counter (a transient error after
-    // a correct password must never count as a failed attempt). Verified
-    // directly against argon2 here (no `password_verify` AuthEvent, preserving
-    // delete-account's audit contract: `_initiated` is the first event, only
-    // after a successful verify).
-    // Already-authenticated caller: `userId` is real, so no unknown-identity
-    // timing concern (unlike login). Resolve trust directly when the
-    // controller threaded a device id.
+    // Password re-verify under the shared per-account backoff: a lockout is 429 before argon2, a wrong password
+    // records one failure and throws INVALID_CREDENTIALS, and a backend fault propagates uncounted. Verified
+    // directly against argon2 with no `password_verify` event, so `_initiated` stays the first event after a
+    // successful verify. Trust resolves directly since the caller is authenticated.
     const trust = args.deviceId
       ? {
           trusted: await this.trustedDeviceSvc.verify(
@@ -151,12 +112,8 @@ export class DeleteAccountService {
       trust,
     });
 
-    // Fresh second-factor step-up — required after
-    // the password gate when `AUTH_MFA_ENFORCED` is on; the flag-off floor is
-    // password-only, so this is skipped entirely there (preserving today's
-    // local-dev UX). The `StepUpService` emits its own `step_up_passed`/`_failed`
-    // audit and throws `MFA_CODE_INVALID` (or a passkey-specific code) on a bad
-    // factor before any destructive work runs.
+    // Fresh step-up after the password gate when `AUTH_MFA_ENFORCED` is on, before any destructive work;
+    // `StepUpService` emits its own audit.
     if (this.mfaEnforced) {
       if (!args.method) {
         throw new BadRequestException({
@@ -175,8 +132,7 @@ export class DeleteAccountService {
       });
     }
 
-    // Audit first — the AuthEvent table is intentionally not swept, so the
-    // initiated event survives even if the cascade aborts mid-flight.
+    // Audit first: the AuthEvent table is not swept, so the initiated event survives an aborted cascade.
     await this.auth.record({
       userId: args.userId,
       eventType: 'account_deletion_initiated',
@@ -191,22 +147,14 @@ export class DeleteAccountService {
       currentAccessExp: args.currentAccessExp,
     });
 
-    // Purge S3 snapshots BEFORE any irreversible DynamoDB / auth-state
-    // delete. A purge failure throws here, failing the request with the
-    // account still fully intact (only sessions revoked, recoverable by
-    // re-login) — the most reversible outcome. The initiated audit row
-    // above survives as evidence of the attempt. A re-issued DELETE
-    // re-verifies the password and re-runs the cascade.
+    // Purge S3 snapshots before any irreversible delete: a failure here leaves the account intact (only sessions
+    // revoked), the most reversible outcome. A re-issued DELETE re-verifies the password and re-runs the cascade.
     await this.snapshotPurge.purge(args.householdId);
 
-    // Shared household-data sweep — MutationLog,
-    // IdempotencyKey, AggregateVersion, WorkspaceMeta, DeviceRegistry.
+    // Shared household sweep (see AGENTS.md, "Project-specific security").
     await this.sweep.sweepHouseholdData(args.householdId);
-    // Zero-knowledge cascade: drop the household's wrapped
-    // key-envelope rows (all slots + the ENVELOPE_META sentinel) so a deleted
-    // account leaves no key material behind. Not part of the shared sweep —
-    // the key-envelope table is outside the compactor boundary and this
-    // delete is account-deletion / encrypted-workspace-reset only.
+    // Drop the key-envelope rows so a deleted account leaves no key material; outside the shared sweep because that
+    // table is outside the compactor boundary.
     await this.keyEnvelopes.deleteAllForHousehold(args.householdId);
     await this.sweepAuthState(args.userId, user.emailLowercase, user.currentResetToken ?? null);
 
@@ -227,31 +175,24 @@ export class DeleteAccountService {
     await this.refreshTokens.deleteAllForUser(userId);
     await this.passkeys.deleteAllForUser(userId);
     await this.emailVerifications.deleteAllForUser(userId);
-    // Sweep the user's dangling password-reset row by the
-    // `currentResetToken` handle — a single keyed delete, no Scan, so
-    // no Scan IAM grant is needed on the PasswordReset table.
+    // Sweep the dangling password-reset row by the `currentResetToken` handle: a single keyed delete, no Scan grant
+    // needed.
     if (currentResetToken) {
       await this.passwordResets.deleteToken(currentResetToken);
     }
     await this.approvals.deleteAllForUser(userId);
-    // MFA cascade: drop the user's TOTP state, any
-    // live Email-OTP code, and every trusted-device
-    // trust row. `UserMfa` / `MfaEmailOtp` are single keyed deletes;
-    // `TrustedDevice` is keyed `(userId, deviceId)`, so list-then-delete by PK
-    // (a Query, no Scan) clears every SK row under the user.
+    // MFA cascade: `UserMfa` and `MfaEmailOtp` are keyed deletes; `TrustedDevice` is listed by PK (a Query) then
+    // deleted.
     await this.userMfa.delete(userId);
     await this.mfaEmailOtp.delete(userId);
-    // Also drop the namespaced step-up Email-OTP code row — step-up creates this `<userId>#stepup` row,
-    // so its cleanup lands here alongside the login code row's delete.
+    // Also drop the namespaced `<userId>#stepup` Email-OTP row.
     await this.mfaEmailOtp.deleteStepUp(userId);
     const devices = await this.trustedDevices.listByUser(userId);
     await Promise.all(
       devices.map((d) => this.trustedDevices.delete(userId, d.deviceId)),
     );
-    // Unconditional purge — `clear()`
-    // deliberately preserves an existing guessing-notice stamp, which would
-    // otherwise survive this account's deletion and leak into a newly
-    // registered account that reuses the freed address.
+    // Unconditional: `clear()` preserves a guessing-notice stamp, which would otherwise leak into a new account
+    // reusing the freed address.
     await this.failed.purgeAddress(emailLowercase);
     await this.credentials.deleteByUserId(userId);
     await this.users.deleteByUserId(userId);

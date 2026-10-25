@@ -1,13 +1,4 @@
-/**
- * Render-level test for QcdRmdSplitChartInner on the SVG engine — asserts the
- * two stacked segments render (the tax-free "Covered by QCD" slice below
- * the "Net taxable" slice), the tooltip content (gross = offset + net, offset,
- * net), the empty/zero-row handling, the single-year y-axis domain scaling (no
- * `[0,1]` fallback), the legend show/hide toggle, theme-reactivity for both
- * series colours (`qcdOffset` / `rmdMet`), and an a11y smoke.
- *
- * Mirrors `QcdChart.test.tsx` + `RmdChartInner.test.tsx`.
- */
+/** QcdRmdSplitChartInner: stacked QCD-covered and net-taxable segments, tooltip, empty and single-year handling, legend toggle and theme. */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, within } from '@testing-library/react';
@@ -72,8 +63,6 @@ describe('QcdRmdSplitChartInner', () => {
     expect(offsetBars).toHaveLength(2); // one per gross-IRA-RMD year
     expect(netBars).toHaveLength(2);
 
-    // The net-taxable segment (2047) sits ABOVE its offset segment: a smaller
-    // SVG `y` (higher on screen) and its bottom meets the offset top.
     const offsetTop2047 = offsetBars[0].y;
     const netBottom2047 = netBars[0].y + netBars[0].height;
     expect(netBars[0].y).toBeLessThan(offsetTop2047);
@@ -97,7 +86,6 @@ describe('QcdRmdSplitChartInner', () => {
     expect(tip.textContent).toContain('Gross IRA RMD');
     expect(tip.textContent).toContain(OFFSET);
     expect(tip.textContent).toContain(NET);
-    // Gross = offset + net = $30,000 for 2047 (the leftmost bar under clientX 40).
     expect(tip.textContent).toContain('$30,000');
     expect(tip.textContent).toContain('$10,000'); // offset
     expect(tip.textContent).toContain('$20,000'); // net
@@ -109,8 +97,6 @@ describe('QcdRmdSplitChartInner', () => {
     expect(getBars(container, NET)).toHaveLength(0);
   });
 
-  // Regression mirror of the QCD/Roth charts: a SINGLE stacked bar must still
-  // scale the y-axis to its stacked height (the [0,1] fallback would top at "$1").
   it('scales the y-axis to the bar height for a single year (not the [0,1] fallback)', () => {
     const container = renderWithTheme(
       'light',
@@ -136,7 +122,6 @@ describe('QcdRmdSplitChartInner — legend show/hide (isolate-first)', () => {
     const container = renderWithTheme('light', <InnerChart rows={rows} />);
     const offsetToggle = within(container).getByRole('button', { name: OFFSET });
     fireEvent.click(offsetToggle);
-    // Only the clicked offset series stays; the net-taxable series is hidden.
     expect(getBars(container, OFFSET)).toHaveLength(2);
     expect(getBars(container, NET)).toHaveLength(0);
     expect(offsetToggle).toHaveAttribute('aria-pressed', 'false');
@@ -144,7 +129,6 @@ describe('QcdRmdSplitChartInner — legend show/hide (isolate-first)', () => {
       within(container).getByRole('button', { name: NET }),
     ).toHaveAttribute('aria-pressed', 'true');
 
-    // Clicking the lone-visible offset series restores every series.
     fireEvent.click(offsetToggle);
     expect(getBars(container, NET)).toHaveLength(2);
     expect(

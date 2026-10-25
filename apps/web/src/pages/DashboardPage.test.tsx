@@ -1,18 +1,4 @@
-/**
- * DashboardPage render tests for the Graphite Spectrum landing dashboard.
- *
- * The page's financial numbers all come from `useDashboardProjection`,
- * which internally runs the shared Balance Projection data-load +
- * pipeline + view-model (incl. the async Monte-Carlo worker). These
- * tests mock that hook at the module boundary — the same pattern the
- * projection-page tests use to keep the MC worker out of the render
- * path — so we can drive the page's section order / progress bar / chart
- * wiring + loading + empty states deterministically without spinning up
- * IndexedDB or the worker. The view-model math itself is covered by the
- * BalanceProjection page + lib unit tests; the plan-health block's and
- * plan-basics card's own render behaviour is covered by their own suites
- * (`DashboardPlanHealthBlock.test.tsx`, `DashboardPlanBasicsCard.test.tsx`).
- */
+// DashboardPage section order, progress bar, chart wiring, loading and empty states with `useDashboardProjection` mocked, which keeps the MC worker and IndexedDB out of the render path.
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -21,11 +7,7 @@ vi.mock('./use-dashboard-projection', () => ({
   useDashboardProjection: vi.fn(),
 }));
 
-// The per-year chart lazy-loads an SVG renderer; stub it so the page
-// render stays synchronous (the chart engine is exercised elsewhere).
-// Capture the last props so we can assert the Monte-Carlo overlay wiring
-// (the dashboard always renders ProjectionChart — never the fan — and
-// passes an `mcOverlay` only when a fresh MC result exists).
+// Stub the lazy SVG chart so the render stays synchronous; capture the last props to assert the Monte Carlo overlay wiring.
 let lastProjectionChartProps: Record<string, unknown> | null = null;
 vi.mock('../components/ProjectionChart', () => ({
   ProjectionChart: (props: Record<string, unknown>) => {
@@ -95,9 +77,6 @@ function renderPage() {
   );
 }
 
-/** Minimal fresh MC summary whose real-basis P50/P25 series feed the
- *  dashboard's two overlay lines. firstYear 2030 → values map onto the
- *  chart x = year + 1 convention inside ProjectionChartInner. */
 function freshMcResult() {
   return {
     firstYear: 2030,
@@ -109,8 +88,6 @@ function freshMcResult() {
   } as unknown as NonNullable<PlanStressTestVm['result']>;
 }
 
-/** Every DOCUMENT_POSITION_FOLLOWING check in one place: asserts each
- *  node in `nodes` precedes the next one in document order. */
 function expectDocumentOrder(nodes: readonly Element[]): void {
   for (let i = 0; i < nodes.length - 1; i++) {
     expect(
@@ -290,9 +267,7 @@ describe('DashboardPage', () => {
   });
 
   it('shows a loading shell before the workspace read settles', () => {
-    // `ready: false` = the initial IndexedDB read is still in flight. The
-    // page must render the loading skeleton, never the empty-looking
-    // populated branch (chart + "—" cards) or the no-accounts prompt.
+    // `ready: false` means the initial IndexedDB read is in flight: render the loading skeleton, never the empty-looking populated branch or the no-accounts prompt.
     setHook({ ready: false, vm: null, projectedAtRetirement: null });
     renderPage();
     expect(screen.getByRole('status')).toBeInTheDocument();
@@ -305,8 +280,6 @@ describe('DashboardPage', () => {
     setHook({ accountCount: 0, vm: null, projectedAtRetirement: null });
     renderPage();
     expect(screen.getByText(/No accounts yet/)).toBeInTheDocument();
-    // Neither the plan-health block, the plan-basics card, nor the
-    // progress bar render in the empty state.
     expect(
       screen.queryByRole('heading', { name: 'Retirement readiness' }),
     ).not.toBeInTheDocument();
@@ -333,8 +306,6 @@ describe('DashboardPage', () => {
       }),
     });
     renderPage();
-    // The dashboard always renders the deterministic ProjectionChart (never
-    // the fan) and threads the MC overlay built from the real-basis bands.
     expect(screen.getByTestId('projection-chart')).toBeInTheDocument();
     expect(lastProjectionChartProps?.mcOverlay).toEqual({
       firstYear: 2030,

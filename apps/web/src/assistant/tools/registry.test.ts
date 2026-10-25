@@ -1,35 +1,26 @@
 /** The package registry and the tab's handler map name the same tools, and the registry's limits fit what the tab enforces. */
 import 'fake-indexeddb/auto';
-import { MAX_CALL_TIMEOUT_MS, TOOL_REGISTRY, toolEntrySchema } from '@retirement/assistant-protocol';
+import { MAX_CALL_TIMEOUT_MS, TOOL_REGISTRY } from '@retirement/assistant-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { clearMonteCarloCache } from '../../db/monte-carlo-cache';
 import { clearAllStores } from '../../db/store';
 import { loadDemoData } from '../../lib/demo-data-loader';
 import { ANALYSIS_TEST_INPUTS, BASE_ID } from '../../test/assistant-analysis-inputs';
 import { callPlanTool, plantSavedStressTest } from '../../test/assistant-tools';
-import { ANALYSIS_TOOL_NAMES, PLAN_TOOL_NAMES, planToolHandlers } from '.';
+import { registerPlanTools } from '.';
 import { STRESS_TEST_WALL_CLOCK_MS } from './stress-test';
+
+const ANALYSIS_TOOL_NAMES = ['retivo_get_projection', 'retivo_get_stress_test', 'retivo_compare_scenarios', 'retivo_explain', 'retivo_run_what_if'];
 
 describe('the tab’s handler map', () => {
   it('has a handler for every registry entry, and nothing the registry lacks', () => {
-    const registered = TOOL_REGISTRY.map((entry) => entry.name);
-    const handled = [...planToolHandlers().keys()];
-    expect(handled.every((name) => registered.includes(name))).toBe(true);
-    expect(registered.filter((name) => !handled.includes(name))).toEqual([]);
-    expect([...handled].sort()).toEqual([...PLAN_TOOL_NAMES, ...ANALYSIS_TOOL_NAMES].sort());
+    const handled: string[] = [];
+    registerPlanTools((name) => {
+      handled.push(name);
+      return () => undefined;
+    });
+    expect([...handled].sort()).toEqual(TOOL_REGISTRY.map((entry) => entry.name).sort());
     expect(handled).toHaveLength(9);
-    expect([...ANALYSIS_TOOL_NAMES].sort()).toEqual(
-      ['retivo_get_projection', 'retivo_get_stress_test', 'retivo_compare_scenarios', 'retivo_explain', 'retivo_run_what_if'].sort(),
-    );
-  });
-
-  it('names tools whose registry entries parse against the descriptor schema', () => {
-    for (const name of [...PLAN_TOOL_NAMES, ...ANALYSIS_TOOL_NAMES]) {
-      const entry = TOOL_REGISTRY.find((candidate) => candidate.name === name);
-      expect(entry, name).toBeDefined();
-      expect(toolEntrySchema.safeParse(entry).success, name).toBe(true);
-      expect(entry!.name).toMatch(/^retivo_[a-z_]+$/);
-    }
   });
 });
 

@@ -1,18 +1,5 @@
-/**
- * EmailVerificationService.consumeToken unit tests — the atomic single-use
- * consume transaction's cancellation mapping.
- *
- * Locks the two error branches of the delete-token + mark-verified
- * `TransactWriteItems`:
- *   - a `ConditionalCheckFailed` cancellation (a superseded / already-consumed
- *     token, or the user's verification handle moved) → `400
- *     VERIFICATION_TOKEN_INVALID`, no writes;
- *   - a transient cancellation that survives the bounded retry → `503
- *     VERIFICATION_WRITE_CONFLICT`.
- *
- * Mirrors the SignupApprovalService.approve harness (signup-approval.service.spec.ts):
- * the atomic transaction's `doc.send` is stubbed to drive each branch.
- */
+// EmailVerificationService.consumeToken's cancellation mapping for the atomic delete-token plus mark-verified transaction: ConditionalCheckFailed (superseded or consumed token, or a moved
+// verification handle) is 400 VERIFICATION_TOKEN_INVALID with no writes, and a transient cancellation outlasting the bounded retry is 503 VERIFICATION_WRITE_CONFLICT.
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { SESClient } from '@aws-sdk/client-ses';
@@ -55,13 +42,7 @@ function verificationRow(): EmailVerificationRow {
   };
 }
 
-/**
- * Build a service whose atomic consume transaction (`doc.send`) is driven by
- * `docSendImpl`. The token lookup resolves a fresh, unexpired `verify_email`
- * row so `consumeToken` reaches the transaction. `findById` is never reached
- * on the cancellation branches (they throw before the post-commit side
- * effects).
- */
+// The token lookup resolves a fresh `verify_email` row so consumeToken reaches the transaction; `findById` is never reached because the cancellation branches throw before the post-commit side effects.
 function buildService(docSendImpl: () => Promise<unknown>): EmailVerificationService {
   const ses = { send: jest.fn().mockResolvedValue({}) } as unknown as SESClient;
   const doc = {
@@ -108,8 +89,7 @@ describe('EmailVerificationService.consumeToken — atomic consume cancellation 
         new TransactionCanceledException({
           message: 'Transaction cancelled, please refer to CancellationReasons',
           $metadata: {},
-          // Item 1 (the conditional mark-verified) failed — token consumed /
-          // superseded, or the verification handle moved.
+          // Item 1 (the conditional mark-verified) failed: token consumed or superseded, or the verification handle moved.
           CancellationReasons: [{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }],
         }),
       ),
@@ -128,8 +108,7 @@ describe('EmailVerificationService.consumeToken — atomic consume cancellation 
 
   it('maps a surviving transient transaction conflict to 503 VERIFICATION_WRITE_CONFLICT', async () => {
     const svc = buildService(() =>
-      // Every attempt cancels for a purely transient reason → runTransactWrite
-      // exhausts its bounded retry and throws TransientTransactionError.
+      // Every attempt cancels transiently, so runTransactWrite exhausts its bounded retry and throws TransientTransactionError.
       Promise.reject(
         new TransactionCanceledException({
           message: 'Transaction cancelled, please refer to CancellationReasons',

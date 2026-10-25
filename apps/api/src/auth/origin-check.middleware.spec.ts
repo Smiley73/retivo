@@ -1,12 +1,4 @@
-/**
- * OriginCheckMiddleware unit tests.
- *
- * Locks the multi-origin allowlist behavior: a state-changing
- * request from any allowed web origin (localhost or a LAN address) passes;
- * a disallowed origin is rejected `403 ORIGIN_MISMATCH`. Safe methods always
- * bypass. The allowlist is the parsed WEB_ALLOWED_ORIGINS list, mirroring the
- * env config's single source of truth.
- */
+// OriginCheckMiddleware multi-origin allowlist (the parsed WEB_ALLOWED_ORIGINS): an allowed web origin (localhost or a LAN address) passes on state-changing requests, a disallowed origin is 403 ORIGIN_MISMATCH, and safe methods bypass.
 import type { ConfigService } from '@nestjs/config';
 import type { Request, Response, NextFunction } from 'express';
 import { OriginCheckMiddleware } from './origin-check.middleware.js';

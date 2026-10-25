@@ -54,7 +54,8 @@ import { ToolArgsError, type ToolEnv } from './define';
  * contribution, asset-mix and floor sections stay `excluded`: they carry free text, ids or shapes whose
  * absence has its own meaning, and widening is a later decision.
  */
-export const WHAT_IF_CLASSIFICATION = {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- read only through `typeof`; the compiler enforces coverage
+const WHAT_IF_CLASSIFICATION = {
   retirementAge: 'allowed',
   socialSecurity: 'allowed',
   filingStatus: 'excluded',
@@ -203,12 +204,10 @@ function leafKey(leaf: Leaf): string {
 
 // ---------- Range checks: the editors' bounds, rejected and never clamped ----------
 
-function rejectRange(path: string, min: number, max: number, unit: string, value: number): never {
-  throw new ToolArgsError(`overrides.${path} must be from ${min} to ${max}${unit}; ${value} is outside the range Retivo's editor accepts.`);
-}
-
 function requireRange(path: string, value: number, min: number, max: number, unit = ''): void {
-  if (!(value >= min && value <= max)) rejectRange(path, min, max, unit, value);
+  if (!(value >= min && value <= max)) {
+    throw new ToolArgsError(`overrides.${path} must be from ${min} to ${max}${unit}; ${value} is outside the range Retivo's editor accepts.`);
+  }
 }
 
 function defaulted(age: { ageYears: number; ageMonths?: number }): RetirementAgePerMember {
@@ -402,7 +401,7 @@ const HANDLERS: { [K in AllowedSection]: Handler<K> } = {
     const merged: Record<string, { planningReturnPct?: number }> = { ...context.resolved.accountReturns?.perAccount };
     const asked: Record<string, { planningReturnPct: number }> = {};
     for (const [id, entry] of Object.entries(supplied.perAccount)) {
-      if (!active.has(id) || id === '__proto__') {
+      if (!active.has(id)) {
         throw new ToolArgsError('overrides.accountReturns.perAccount names an id that is not an active account of the household. Use account ids from retivo_get_plan_data.');
       }
       requireRange('accountReturns.perAccount.planningReturnPct', entry.planningReturnPct, PLANNING_RETURN_MIN, PLANNING_RETURN_MAX, ' percent');

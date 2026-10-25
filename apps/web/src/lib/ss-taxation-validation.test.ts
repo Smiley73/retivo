@@ -1,21 +1,10 @@
-/**
- * SS taxation engine — input validation tests (fail-fast rules).
- * Oracle: IRS Pub 915 Worksheet 1 (2024 edition), 26 USC §86.
- */
+// Oracle: IRS Pub 915 Worksheet 1 (2024 edition), 26 USC §86.
 
 import { describe, expect, it } from 'vitest';
-import {
-  computeSsTaxation,
-  SsTaxationInvalidInputError,
-  UnsupportedTaxYearError,
-  type SsTaxThresholds,
-} from './ss-taxation';
+import { computeSsTaxation, type SsTaxThresholds } from './ss-taxation';
 import { SS_TAX_THRESHOLDS } from './ss-taxation-thresholds';
 import { type CalibrationSnapshot } from './calibration';
 
-// ---------------------------------------------------------------------------
-// Minimal snapshot for isolation tests (validation-order, clamp, etc.)
-// ---------------------------------------------------------------------------
 const MINIMAL_SNAPSHOT: CalibrationSnapshot<SsTaxThresholds> = {
   values: {
     2024: SS_TAX_THRESHOLDS.values[2024],
@@ -26,7 +15,13 @@ const MINIMAL_SNAPSHOT: CalibrationSnapshot<SsTaxThresholds> = {
   },
 };
 
-// [title, field, bad value] — each field gets the bad values the cases used.
+const invalidInput = (reason?: RegExp) =>
+  expect.objectContaining({
+    name: 'SsTaxationInvalidInputError',
+    code: 'SS_TAXATION_INVALID_INPUT',
+    ...(reason !== undefined ? { reason: expect.stringMatching(reason) } : {}),
+  });
+
 const BAD_CENTS: ReadonlyArray<readonly [string, string, number]> = [
   ['negative grossSsCents', 'grossSsCents', -1],
   ['NaN otherAgiCents', 'otherAgiCents', NaN],
@@ -41,10 +36,6 @@ const BAD_CENTS: ReadonlyArray<readonly [string, string, number]> = [
   ['negative otherAgiCents', 'otherAgiCents', -100],
 ];
 
-// ---------------------------------------------------------------------------
-// SsTaxationInvalidInputError — cent field validation
-// ---------------------------------------------------------------------------
-
 describe('SsTaxationInvalidInputError — cent field validation', () => {
   const base = {
     grossSsCents: 10_000_00,
@@ -54,76 +45,35 @@ describe('SsTaxationInvalidInputError — cent field validation', () => {
     taxYear: 2024,
   };
 
-  it.each(BAD_CENTS)('%s throws', (_label, field, value) => {
-    expect(() =>
-      computeSsTaxation({ ...base, [field]: value }, MINIMAL_SNAPSHOT),
-    ).toThrow(SsTaxationInvalidInputError);
+  it.each(BAD_CENTS)('%s throws and the reason names the field', (_label, field, value) => {
+    expect(() => computeSsTaxation({ ...base, [field]: value }, MINIMAL_SNAPSHOT)).toThrow(
+      invalidInput(new RegExp(field)),
+    );
   });
 
-  it('error.code === SS_TAXATION_INVALID_INPUT and reason names the offending field', () => {
-    let caught: unknown;
-    try {
-      computeSsTaxation({ ...base, grossSsCents: -1 }, MINIMAL_SNAPSHOT);
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(SsTaxationInvalidInputError);
-    const err = caught as SsTaxationInvalidInputError;
-    expect(err.code).toBe('SS_TAXATION_INVALID_INPUT');
-    expect(err.reason).toMatch(/grossSsCents/);
+  it.each([
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+    ['fractional (2025.5)', 2025.5],
+  ])('%s taxYear throws', (_label, taxYear) => {
+    expect(() => computeSsTaxation({ ...base, taxYear }, MINIMAL_SNAPSHOT)).toThrow(invalidInput());
   });
 });
-
-// ---------------------------------------------------------------------------
-// SsTaxationInvalidInputError — taxYear validation
-// ---------------------------------------------------------------------------
-
-describe('SsTaxationInvalidInputError — taxYear validation', () => {
-  const base = {
-    grossSsCents: 10_000_00,
-    otherAgiCents: 0,
-    taxExemptInterestCents: 0,
-    filingStatus: 'Single' as const,
-    taxYear: 2024,
-  };
-
-  it('NaN taxYear throws', () => {
-    expect(() =>
-      computeSsTaxation({ ...base, taxYear: NaN }, MINIMAL_SNAPSHOT),
-    ).toThrow(SsTaxationInvalidInputError);
-  });
-
-  it('Infinity taxYear throws', () => {
-    expect(() =>
-      computeSsTaxation({ ...base, taxYear: Infinity }, MINIMAL_SNAPSHOT),
-    ).toThrow(SsTaxationInvalidInputError);
-  });
-
-  it('fractional taxYear (2025.5) throws', () => {
-    expect(() =>
-      computeSsTaxation({ ...base, taxYear: 2025.5 }, MINIMAL_SNAPSHOT),
-    ).toThrow(SsTaxationInvalidInputError);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// SsTaxationInvalidInputError — filing status validation
-// ---------------------------------------------------------------------------
 
 describe('SsTaxationInvalidInputError — filing status validation', () => {
-  it("'QW' cast as SsTaxFilingStatus throws (MFS and QSS ARE valid)", () => {
+  it("'QW' cast as SsTaxFilingStatus throws and the reason names it (MFS and QSS ARE valid)", () => {
     expect(() =>
       computeSsTaxation(
         {
           grossSsCents: 10_000_00,
           otherAgiCents: 0,
           taxExemptInterestCents: 0,
-            filingStatus: 'QW' as any, // deliberate runtime bypass to test validation
+          filingStatus: 'QW' as any, // deliberate runtime bypass to test validation
           taxYear: 2024,
         },
         MINIMAL_SNAPSHOT,
       ),
-    ).toThrow(SsTaxationInvalidInputError);
+    ).toThrow(invalidInput(/QW/));
   });
 
   it('accepts MFS and QSS (tax-unit pipeline)', () => {
@@ -136,33 +86,7 @@ describe('SsTaxationInvalidInputError — filing status validation', () => {
       ).not.toThrow();
     }
   });
-
-  it('error.code === SS_TAXATION_INVALID_INPUT on invalid filingStatus', () => {
-    let caught: unknown;
-    try {
-      computeSsTaxation(
-        {
-          grossSsCents: 10_000_00,
-          otherAgiCents: 0,
-          taxExemptInterestCents: 0,
-            filingStatus: 'QW' as any, // deliberate runtime bypass to test validation
-          taxYear: 2024,
-        },
-        MINIMAL_SNAPSHOT,
-      );
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(SsTaxationInvalidInputError);
-    const err = caught as SsTaxationInvalidInputError;
-    expect(err.code).toBe('SS_TAXATION_INVALID_INPUT'); // assert code on filingStatus branch
-    expect(err.reason).toMatch(/QW/);
-  });
 });
-
-// ---------------------------------------------------------------------------
-// mfsLivedWithSpouse runtime validation
-// ---------------------------------------------------------------------------
 
 describe('mfsLivedWithSpouse runtime validation', () => {
   const base = {
@@ -174,20 +98,19 @@ describe('mfsLivedWithSpouse runtime validation', () => {
   };
 
   it('non-boolean mfsLivedWithSpouse (the STRING "false") throws instead of being truthy', () => {
-    // "false" is truthy in JS — without validation it would wrongly select the
-    // §86(c)(1)(C)(ii) zero-base rule. Must fail fast.
+    // "false" is truthy in JS, so unvalidated it would wrongly select the §86(c)(1)(C)(ii) zero-base rule.
     expect(() =>
       computeSsTaxation(
         { ...base, mfsLivedWithSpouse: 'false' as any }, // deliberate runtime bypass
         MINIMAL_SNAPSHOT,
       ),
-    ).toThrow(SsTaxationInvalidInputError);
+    ).toThrow(invalidInput());
   });
 
   it('numeric mfsLivedWithSpouse (1) throws', () => {
     expect(() =>
       computeSsTaxation({ ...base, mfsLivedWithSpouse: 1 as any }, MINIMAL_SNAPSHOT),
-    ).toThrow(SsTaxationInvalidInputError);
+    ).toThrow(invalidInput());
   });
 
   it('genuine boolean and absent mfsLivedWithSpouse are accepted', () => {
@@ -202,17 +125,12 @@ describe('mfsLivedWithSpouse runtime validation', () => {
         { ...base, taxYear: 2023, mfsLivedWithSpouse: 'yes' as any }, // deliberate runtime bypass
         SS_TAX_THRESHOLDS,
       ),
-    ).toThrow(SsTaxationInvalidInputError);
+    ).toThrow(invalidInput());
   });
 });
 
-// ---------------------------------------------------------------------------
-// Validation order — validation fires before snapshot lookup
-// ---------------------------------------------------------------------------
-
 describe('validation order', () => {
   it('taxYear=2023 AND grossSsCents=NaN → SsTaxationInvalidInputError (not UnsupportedTaxYearError)', () => {
-    // Validation runs first; the invalid-input error surfaces before year-resolution.
     expect(() =>
       computeSsTaxation(
         {
@@ -224,11 +142,10 @@ describe('validation order', () => {
         },
         SS_TAX_THRESHOLDS,
       ),
-    ).toThrow(SsTaxationInvalidInputError);
+    ).toThrow(invalidInput());
   });
 
   it('valid input but taxYear below minimum → UnsupportedTaxYearError (not input error)', () => {
-    // Confirms that when inputs ARE valid, the year error is the one thrown.
     expect(() =>
       computeSsTaxation(
         {
@@ -240,6 +157,6 @@ describe('validation order', () => {
         },
         SS_TAX_THRESHOLDS,
       ),
-    ).toThrow(UnsupportedTaxYearError);
+    ).toThrow(expect.objectContaining({ name: 'UnsupportedTaxYearError' }));
   });
 });

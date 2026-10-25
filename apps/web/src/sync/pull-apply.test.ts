@@ -1,9 +1,4 @@
-/**
- * Characterization tests for the pull-apply helpers split out of
- * SyncContext.tsx to keep that file under the shape limit. These pin each function's
- * CURRENT input→output behavior as a regression net independent of the
- * CPU-load-sensitive `SyncContext.test.tsx` integration suite.
- */
+// Pins each pull-apply helper's input-to-output behaviour independently of the SyncContext integration suites.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -45,10 +40,7 @@ describe('plaintextPayload', () => {
     expect(plaintextPayload(payload)).toBe(payload);
   });
 
-  // Write-path backstop: a STRICT encrypted envelope
-  // reaching this point means the transport guard was bypassed or regressed
-  // — refuse it rather than writing ciphertext into IndexedDB as though it
-  // were plaintext.
+  // A strict envelope reaching this point means the transport guard was bypassed: refuse it rather than write ciphertext as plaintext.
   it('throws UnauthenticatedPayloadError on a strict-envelope-shaped payload', () => {
     const envelope = {
       encryptionVersion: 1,
@@ -178,11 +170,7 @@ describe('applyPulledChange', () => {
     expect(applied).toBe(false);
   });
 
-  // Write-path backstop: this is the ONE point every apply
-  // path funnels through (both the incremental pull loop and the bootstrap
-  // apply loop in SyncContext call `applyPulledChange`), so an
-  // envelope-shaped payload reaching it must throw and write nothing rather
-  // than land ciphertext in IndexedDB as though it were plaintext.
+  // Every apply path funnels through `applyPulledChange`, so an envelope-shaped payload reaching it must throw and write nothing.
   it('propagates UnauthenticatedPayloadError and writes nothing for a strict-envelope-shaped payload', async () => {
     await expect(
       applyPulledChange(
@@ -364,14 +352,5 @@ describe('repairRejections', () => {
     expect(parked?.reason).toBe('NOT_FOUND');
   });
 
-  // A deterministic test for the `ConcurrentQueueMutationError` raced-retry
-  // catch path (a concurrent `queueLocalMutation` landing between this
-  // function's stack read and the collapse transaction's own re-read) would
-  // need to inject a mutation INSIDE that transaction window — the collapse
-  // helpers (`collapseAndReQueue` / `collapseToFailedConflict` in db/store.ts)
-  // re-read the live stack from within their own IDB transaction, so there is
-  // no seam to interleave a write between the snapshot read and the commit
-  // without mocking `db/store.js` internals. Skipped by design;
-  // the 'drop'/'rebase'/'escalate'/'passthrough' branches above
-  // cover the rest of the switch.
+  // The `ConcurrentQueueMutationError` raced-retry path has no seam to interleave a write inside the collapse transaction without mocking store internals, so it is not tested.
 });

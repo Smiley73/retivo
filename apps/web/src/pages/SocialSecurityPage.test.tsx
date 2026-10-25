@@ -1,9 +1,4 @@
-/**
- * SocialSecurityPage render tests.
- *
- * Drives IndexedDB through fake-indexeddb and asserts the empty,
- * populated, and adult-only render paths.
- */
+// SocialSecurityPage empty, populated and adult-only render paths over fake-indexeddb.
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -17,8 +12,7 @@ import type {
 
 vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
 vi.mock('../sync/SyncContext', () => ({ useSync: vi.fn() }));
-// Spy on queueLocalMutation so the future-statement-date test can assert the
-// save was BLOCKED (never queued) — no test in this file wants a real push.
+// Spy on queueLocalMutation so the future-statement-date test can assert the save was blocked (never queued).
 vi.mock('../sync/mutation-queue', () => ({
   queueLocalMutation: vi.fn().mockResolvedValue(undefined),
 }));
@@ -139,7 +133,6 @@ describe('SocialSecurityPage', () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: /^Delete/ })).toBeInTheDocument();
-    // At-FRA cell: member born 1985-04-15 → FRA 67 → monthlyBenefitAtAge(3000, 804, 804) = $3,000.
     expect(screen.getByText('$3,000')).toBeInTheDocument();
   });
 
@@ -147,21 +140,15 @@ describe('SocialSecurityPage', () => {
     await clearAllStores();
     await seedMember('hm-primary', true, '1985-04-15', 'Alex', 'Primary');
     renderPage();
-    // Wait for page to finish loading (member row present)
     await waitFor(() =>
       expect(screen.getByText('Alex (primary)')).toBeInTheDocument(),
     );
-    // The disclosure card is a role="note" region with plainEnglish out-of-scope copy.
     const note = screen.getByRole('note');
     expect(note).toBeInTheDocument();
     expect(note.textContent).toContain('not modeled');
-    // Accurate WEP/GPO wording: the offsets were REPEALED (not "not modeled")
-    // by the Social Security Fairness Act.
+    // The WEP/GPO offsets were repealed by the Social Security Fairness Act (not "not modeled").
     expect(note.textContent).toContain('repealed by the Social Security Fairness Act');
-    // The earnings test IS applied before FRA; own-retirement and spousal
-    // withheld months ARE restored at FRA, while survivor-benefit withheld
-    // months are NOT (a disclosed qualification) — the note states
-    // all three accurately.
+    // The note discloses that the earnings test is applied before FRA, own-retirement and spousal withheld months are restored at FRA, and survivor withheld months are not.
     expect(note.textContent).toContain('earnings test');
     expect(note.textContent).toContain(
       'own retirement benefit or a spousal benefit are restored at full retirement age',
@@ -169,8 +156,7 @@ describe('SocialSecurityPage', () => {
     expect(note.textContent).toContain(
       'months withheld from a survivor benefit are not restored',
     );
-    // Survivor benefits key off the SEPARATE survivor claim age and are
-    // withheld (left out) until it is set — the note discloses that.
+    // Survivor benefits key off the separate survivor claim age and are withheld until it is set.
     expect(note.textContent).toContain('survivor claim age');
   });
 
@@ -194,8 +180,7 @@ describe('SocialSecurityPage', () => {
       name: 'Social Security benefits per household member',
     });
     expect(grid).toBeInTheDocument();
-    // Same race as the arrow-key test below: the grid can resolve carrying only its
-    // header row, so re-query inside waitFor rather than asserting once.
+    // The grid can resolve carrying only its header row, so re-query inside waitFor.
     await waitFor(() => {
       expect(within(grid).getAllByRole('row').length).toBeGreaterThanOrEqual(2);
     });
@@ -216,8 +201,6 @@ describe('SocialSecurityPage', () => {
   });
 
   it('renders the in-row Edit control as keyboard-focusable', async () => {
-    // RA Table arrow-key model exercised by Adobe upstream; here we
-    // sanity-check the in-row Edit button can hold focus.
     await clearAllStores();
     await seedMember('hm-primary', true, '1985-04-15', 'Alex', 'Primary');
     await seedSsa('hm-primary', 3000);
@@ -228,26 +211,17 @@ describe('SocialSecurityPage', () => {
   });
 
   it('exposes the React Aria Table grid for arrow-key navigation across rows', async () => {
-    // jsdom can't reliably synthesize RA Table's focus-manager
-    // events for grid ArrowUp/ArrowDown; the robust jsdom assertion is
-    // that the grid's accessible name is queryable AND each row's
-    // focusable Edit/Add descendant can independently hold focus — the
-    // surface arrow-key navigation moves between. Real-DOM grid arrow
-    // nav is covered by Adobe's upstream tests + a manual
-    // walkthrough gate before merge.
+    // jsdom cannot synthesize React Aria Table's focus-manager events for grid arrow keys, so assert the grid's accessible name and that each row's Edit/Add control can hold focus.
     await clearAllStores();
     await seedMember('hm-primary', true, '1985-04-15', 'Alex', 'Primary');
     await seedMember('hm-secondary', false, '1986-02-10', 'Sam', 'Secondary');
     await seedSsa('hm-primary', 3000);
-    // hm-secondary has no benefit → row renders an "Add" button.
     renderPage();
     const grid = await screen.findByRole('grid', {
       name: 'Social Security benefits per household member',
     });
     expect(grid).toBeInTheDocument();
-    // findBy*, not getBy*: the grid resolving does not mean its ROWS have
-    // rendered, and a synchronous get has no retry — this raced under CPU
-    // load (reproduced 1-in-6 concurrently; seen on CI shard 2).
+    // findBy: the grid resolving does not mean its rows have rendered; a synchronous get has no retry and raced under CPU load.
     const editBtn = await screen.findByRole('button', { name: /^Edit/ });
     const addBtn = await screen.findByRole('button', { name: 'Add' });
     editBtn.focus();
@@ -259,11 +233,7 @@ describe('SocialSecurityPage', () => {
   it('blocks Save with an inline error when the SSA statement date is in the future', async () => {
     await clearAllStores();
     await seedMember('hm-primary', true, '1985-04-15', 'Alex', 'Primary');
-    // Seed a stored FUTURE statement date (previously saved / hand-synced bad
-    // data). The modal's picker caps NEW selections at today, so the stored
-    // value is the reachable future-date path in jsdom — Save must still
-    // reject it: the date's year is the engine's COLA anchor, and a future
-    // anchor would deflate near-term benefits.
+    // A stored future statement date (bad data saved or synced earlier) is the reachable future-date path in jsdom, since the picker caps new selections at today. Save must still reject it: the year is the engine's COLA anchor, and a future anchor would deflate near-term benefits.
     await seedSsa('hm-primary', 3000, null, '2099-01-01');
     renderPage();
     const edit = await screen.findByRole('button', { name: /^Edit/ });
@@ -272,8 +242,6 @@ describe('SocialSecurityPage', () => {
     await act(async () => {
       fireEvent.click(save);
     });
-    // Inline validation error renders inside the modal; the save is blocked
-    // (nothing queued) and the modal stays open.
     expect(
       await screen.findByText(/"Date on the SSA statement" can't be in the future\./),
     ).toBeInTheDocument();
@@ -288,8 +256,7 @@ describe('SocialSecurityPage', () => {
       await screen.findByText(/No adult household members/i),
     ).toBeInTheDocument();
 
-    // A single-row write fires only the per-store fine signal — no
-    // notifyWorkspaceChanged() — proving the useAggregates subscription wakes.
+    // A single-row write fires only the per-store signal, no notifyWorkspaceChanged(); the useAggregates subscription must still wake.
     await act(async () => {
       await seedMember('hm-primary', true, '1985-04-15', 'Alex', 'Primary');
     });

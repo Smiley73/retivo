@@ -1,16 +1,5 @@
-/**
- * Guardrails page — live advisory surface.
- *
- * Reads TODAY's funded ratio for the sidebar-selected scenario off actual account
- * balances (via `useGuardrailsVm`) and shows where that ratio falls relative to
- * the selected range — below / within / above — with the scenario's real Monte
- * Carlo modeled success rate as on-demand context. Read-only: the range bands are
- * edited in the scenario editor, which this page links to. It describes the
- * current numbers; it is not a direction to change spending.
- *
- * Thin presentation layer — all the math + the "Check now" MC lifecycle live in
- * `use-guardrails-vm.ts`.
- */
+/** Guardrails page: today's funded ratio for the selected scenario against its range (below / within / above) with the real Monte Carlo success rate as on-demand context.
+* Read-only and descriptive, not a direction to change spending; the math and "Check now" lifecycle live in use-guardrails-vm.ts. */
 import React from 'react';
 import { Link } from 'react-router';
 import { PageHeader } from '../components/PageHeader';
@@ -32,9 +21,7 @@ import {
   type PosRunState,
 } from './use-guardrails-vm';
 
-/** Range position → neutral headline + plain-language body + badge tone. The
- *  tone stays `neutral` for every range position: a below/within/above reading
- *  is a factual reference point, not a safe/unsafe judgment. */
+// Neutral tone for every position: below/within/above is a factual reference point, not a safe/unsafe judgment.
 const VERDICT_COPY: Record<
   GuardrailVerdict,
   { readonly headline: string; readonly tone: 'success' | 'negative' | 'neutral' }
@@ -50,9 +37,6 @@ function ratioPctLabel(ratio: number | null): string {
   return `${Math.round(ratio * 100)}%`;
 }
 
-/** The funded-ratio range-position body copy — states the current number and
- *  where it falls relative to the scenario's own range edges. Neutral and
- *  descriptive: no instruction to change spending. */
 function verdictBody(
   verdict: GuardrailVerdict,
   ratio: number | null,
@@ -72,7 +56,6 @@ function verdictBody(
   }
 }
 
-/** Config summary — all 5 tunables + the enabled flag. */
 const ConfigSummary: React.FC<{ config: GuardrailsConfigView }> = ({ config }) => (
   <Card className="mb-4">
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -101,7 +84,6 @@ const ConfigSummary: React.FC<{ config: GuardrailsConfigView }> = ({ config }) =
   </Card>
 );
 
-/** The probability-of-success context block for the settled "Check now" run. */
 const PosContext: React.FC<{
   readonly pos: PosRunState;
   readonly progressDone: number;
@@ -234,10 +216,7 @@ export const GuardrailsPage: React.FC = () => {
   }
 
   const { config, ratio, verdict, temperedVerdict, pos } = vm;
-  // Range position (below/within/above) is an objective fact of the ratio vs.
-  // the configured edges — it is driven by the RAW verdict and never changes
-  // based on Monte Carlo odds. Only the `tempered` Alert below reflects the
-  // MC-odds context.
+  // Range position is driven by the raw verdict and never changes with Monte Carlo odds; only the tempered Alert below reflects them.
   const copy = VERDICT_COPY[verdict];
   const tempered = temperedVerdict !== verdict; // raise → hold on a thin PoS.
 

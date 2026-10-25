@@ -1,7 +1,7 @@
 /**
  * What the person agreed to, for one session. The record lives in the session's
  * memory and dies with it (nothing on disk, so `clearAllLocalData()` has nothing
- * to clear); row 4's dispatcher and idle hook read it from the session, never a
+ * to clear); the dispatcher and idle hook read it from the session, never a
  * copy. Choices are fixed once allowed: to change them the person disconnects
  * and pairs again.
  */
@@ -10,7 +10,7 @@ import { defaultSharingChoices, SHARING_SWITCH_IDS, type SharingChoices } from '
 /** What the dialog resolves with when the person allows. */
 export interface ConsentAnswer {
   choices: SharingChoices;
-  /** The D7 switch: completed calls count as activity for the idle timer. */
+  /** The keep-signed-in switch: completed calls count as activity for the idle timer. */
   keepSignedInWhileActive: boolean;
 }
 

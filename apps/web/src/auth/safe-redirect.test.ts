@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { safeRedirect, safeReturnTo } from './safe-redirect';
 
-// jsdom's default document origin (see vitest.config.ts — no explicit
-// `environmentOptions.jsdom.url` override, so this is jsdom's own default).
+// Jsdom's default document origin.
 const TRUSTED_ORIGIN = window.location.origin;
 
 describe('safeRedirect', () => {
@@ -12,9 +11,7 @@ describe('safeRedirect', () => {
       ['a nested route', '/accounts/123/balances'],
       ['a route with a query string', '/expenses?x=1'],
       ['a route with a hash', '/dashboard#section-2'],
-      // Focus-restore returnTo: the canonical Edit link's
-      // `returnTo` decodes to a path whose own query value is
-      // percent-encoded (so it survives the outer URL parse unmangled).
+      // The canonical Edit link's `returnTo` decodes to a path whose own query value is percent-encoded, so it survives the outer URL parse.
       ['the focus-restore shape (percent-encoded query value)', '/expenses?focusExpenseId=abc%2F123'],
     ])('%s', (_label, target) => {
       expect(safeRedirect(target)).toBe(target);
@@ -28,12 +25,9 @@ describe('safeRedirect', () => {
       ['the /\\ escape', '/\\evil.example'],
       ['a javascript: URI', 'javascript:alert(1)'],
       ['a data: URI', 'data:text/html,evil'],
-      // Same-origin absolute URLs are deliberately rejected too: the
-      // consumer contract requires a leading `/`, not merely same-origin.
+      // Same-origin absolute URLs are rejected too: the consumer contract requires a leading `/`.
       ['an absolute URL on the app\'s own origin', `${TRUSTED_ORIGIN}/dashboard`],
-      // The WHATWG URL parser strips tab/LF/CR before resolving the
-      // authority, so each of these looks like a same-origin path under
-      // prefix matching while actually resolving to `//evil.example`.
+      // The WHATWG URL parser strips tab/LF/CR before resolving the authority, so each of these looks like a same-origin path by prefix but resolves to `//evil.example`.
       ['a tab that turns the target protocol-relative', '/\t/evil.example'],
       ['a newline that turns the target protocol-relative', '/\n/evil.example'],
       ['a carriage return that turns the target protocol-relative', '/\r/evil.example'],
@@ -56,9 +50,7 @@ describe('safeRedirect', () => {
       ['an encoded control character', '/foo%09bar'],
     ])('%s is accepted', (_label, target) => {
       const result = safeRedirect(target);
-      // State the actual security property (the resolved origin), not the
-      // string shape — a string-identity assertion here would pass even if
-      // the parser decoded the escape before comparing origins.
+      // Assert the resolved origin, not the string shape: an identity assertion would pass even if the parser decoded the escape before comparing origins.
       expect(new URL(result, TRUSTED_ORIGIN).origin).toBe(TRUSTED_ORIGIN);
       expect(result).toBe(target);
     });

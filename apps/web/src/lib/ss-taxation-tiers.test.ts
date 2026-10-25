@@ -1,15 +1,8 @@
-/**
- * SS taxation engine — tier matrix tests (MFJ / Single / HoH).
- * Oracle: IRS Pub 915 Worksheet 1 (2024 edition), 26 USC §86.
- */
+// Oracle: IRS Pub 915 Worksheet 1 (2024 edition), 26 USC §86.
 
 import { describe, expect, it } from 'vitest';
 import { computeSsTaxation } from './ss-taxation';
 import { SS_TAX_THRESHOLDS } from './ss-taxation-thresholds';
-
-// ---------------------------------------------------------------------------
-// MFJ — tier: 'none'
-// ---------------------------------------------------------------------------
 
 describe('MFJ — tier: none', () => {
   it('taxableSsCents=0 when PI < tier-1', () => {
@@ -47,10 +40,6 @@ describe('MFJ — tier: none', () => {
     expect(result.provisionalIncomeCents).toBe(32_000_00);
   });
 });
-
-// ---------------------------------------------------------------------------
-// MFJ — tier: 'fifty'
-// ---------------------------------------------------------------------------
 
 describe('MFJ — tier: fifty', () => {
   it('50% tier mid-range', () => {
@@ -106,10 +95,6 @@ describe('MFJ — tier: fifty', () => {
     expect(result.provisionalIncomeCents).toBe(44_000_00);
   });
 });
-
-// ---------------------------------------------------------------------------
-// MFJ — tier: 'eighty-five'
-// ---------------------------------------------------------------------------
 
 describe('MFJ — tier: eighty-five', () => {
   it('85% cap engaged (high other-income)', () => {
@@ -169,10 +154,6 @@ describe('MFJ — tier: eighty-five', () => {
     expect(result.tier).toBe('eighty-five');
   });
 });
-
-// ---------------------------------------------------------------------------
-// Single — full tier matrix
-// ---------------------------------------------------------------------------
 
 describe('Single — tier matrix', () => {
   it('tier none (PI < $25,000)', () => {
@@ -264,10 +245,6 @@ describe('Single — tier matrix', () => {
     expect(result.taxableSsCents).toBe(5_350_00);
   });
 });
-
-// ---------------------------------------------------------------------------
-// HoH — uses Single thresholds
-// ---------------------------------------------------------------------------
 
 describe('HoH — uses Single thresholds per §86(c)(1)(A)', () => {
   it('PI above Single tier-2 ($34k) → eighty-five (would be fifty under MFJ tier-2 $44k)', () => {

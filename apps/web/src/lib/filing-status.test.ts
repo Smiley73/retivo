@@ -1,7 +1,3 @@
-/**
- * Tests for filing-status derivation.
- */
-
 import { describe, expect, it } from 'vitest';
 import {
   deriveFilingStatus,
@@ -13,16 +9,17 @@ import {
   type FilingPlanContext,
   type FilingPlanResolution,
   type FilingPlanTaxUnit,
-  type FilingSummaryContext,
-  type FilingPlanUnresolvedReason,
   type FilingStatusWindow,
-  type IndividualFilingPlan,
-  type JointFilingPlan,
   type ResolvedTaxUnit,
   type SeparateFilingPlan,
   type TaxFilingPlan,
   type TaxUnitFilingStatus,
 } from './filing-status';
+
+type IndividualFilingPlan = Extract<TaxFilingPlan, { kind: 'individual' }>;
+type JointFilingPlan = Extract<TaxFilingPlan, { kind: 'joint' }>;
+type FilingPlanUnresolvedReason = Extract<FilingPlanResolution, { kind: 'unresolved' }>['reason'];
+type FilingSummaryContext = Parameters<typeof summarizeFilingPlan>[0];
 
 describe('deriveFilingStatus', () => {
   it('should_return_MFJ_when_both_members_alive_and_no_override', () => {
@@ -69,7 +66,6 @@ describe('resolveFilingPlanForYear', () => {
       const jointPlan: JointFilingPlan = { kind: 'joint' };
       const res = resolveFilingPlanForYear({ ...base, taxFilingPlan: jointPlan });
       expect(res.kind).toBe('resolved');
-      // Assert against the exported resolved-unit contract.
       const expectedStatus: TaxUnitFilingStatus = 'MFJ';
       const expectedUnit: ResolvedTaxUnit = {
         memberIds: ['primary', 'secondary'],
@@ -79,7 +75,6 @@ describe('resolveFilingPlanForYear', () => {
     });
 
     it('should_resolve_joint_plan_to_MFJ_in_the_death_year_itself', () => {
-      // The dying member still counts as alive in their death year → MFJ.
       const res = resolveFilingPlanForYear({
         ...base,
         taxFilingPlan: { kind: 'joint' },
@@ -104,8 +99,6 @@ describe('resolveFilingPlanForYear', () => {
     });
 
     it('should_diverge_from_the_frozen_MFJ_scalar_after_death_the_audit_finding_6_fix', () => {
-      // Same post-death year: the joint PLAN drops to Single, whereas the frozen
-      // scalar keeps filing MFJ. This is the transition-safety fix.
       const ctx: FilingPlanContext = { ...base, secondaryAlive: false };
       const plan = resolveFilingPlanForYear({ ...ctx, taxFilingPlan: { kind: 'joint' } });
       const scalar = resolveFilingPlanForYear({ ...ctx, filingStatusOverride: 'MFJ' });
@@ -265,10 +258,7 @@ describe('resolveFilingPlanForYear', () => {
     });
 
     it('should_surface_an_unknown_plan_kind_never_throw', () => {
-      // Simulate a newer client's plan kind (or corrupt IndexedDB data) reaching
-      // this older resolver: `plan.units` is absent, so the old fall-through would
-      // throw a TypeError. It must resolve `unresolved`, symmetric with an
-      // unknown scalar.
+      // A newer client's plan kind (or corrupt IndexedDB data): the old fall-through threw a TypeError on the absent plan.units; it must resolve unresolved.
       const corruptPlan = { kind: 'future-status' } as unknown as TaxFilingPlan;
       const res = resolveFilingPlanForYear({ ...base, taxFilingPlan: corruptPlan });
       expect(res.kind).toBe('unresolved');
@@ -277,9 +267,7 @@ describe('resolveFilingPlanForYear', () => {
     });
 
     it('unknown_plan_kind_stays_unresolved_when_everybody_is_dead', () => {
-      // An unknown `plan.kind` must be flagged regardless of alive-state — it
-      // must NOT be swallowed by the all-deceased short-circuit into `[]`,
-      // symmetric with the scalar-path invalid/ambiguous combinations.
+      // An unknown plan.kind must be flagged regardless of alive-state, not swallowed by the all-deceased short-circuit into [].
       const corruptPlan = { kind: 'future-status' } as unknown as TaxFilingPlan;
       const res = resolveFilingPlanForYear({
         ...base,
@@ -353,7 +341,6 @@ describe('resolveFilingPlanForYear', () => {
     it('an_unknown_scalar_value_is_surfaced_never_guessed', () => {
       const res = resolveFilingPlanForYear({
         ...base,
-        // Simulate a corrupt / future scalar reaching the resolver.
         filingStatusOverride: 'QSS' as unknown as 'MFJ',
       });
       expect(res.kind).toBe('unresolved');
@@ -361,8 +348,7 @@ describe('resolveFilingPlanForYear', () => {
     });
 
     it('one_member_MFJ_stays_invalid_even_when_everybody_is_dead', () => {
-      // The invalid combination must be flagged regardless of alive-state — it
-      // must NOT be swallowed by the all-deceased short-circuit into `[]`.
+      // The invalid combination is flagged regardless of alive-state, not swallowed by the all-deceased short-circuit.
       const res = resolveFilingPlanForYear({
         ...oneMember,
         filingStatusOverride: 'MFJ',
@@ -385,8 +371,7 @@ describe('resolveFilingPlanForYear', () => {
     });
 
     it('two_member_MFJ_still_short_circuits_to_empty_when_everybody_is_dead', () => {
-      // A VALID combination is the legitimate all-deceased exception: it resolves
-      // cleanly to no tax units.
+      // A valid combination is the legitimate all-deceased exception: it resolves to no tax units.
       expect(
         resolveFilingPlanForYear({
           ...base,
@@ -428,10 +413,6 @@ describe('resolveFilingPlanForYear', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Runtime validation of an untrusted `taxFilingPlan` payload
-// ---------------------------------------------------------------------------
-
 describe('resolveFilingPlanForYear — corrupt plan payloads', () => {
   const ctx: FilingPlanContext = {
     hasSecondaryMember: true,
@@ -439,7 +420,6 @@ describe('resolveFilingPlanForYear — corrupt plan payloads', () => {
     secondaryAlive: true,
     taxYear: 2030,
   };
-  /** A malformed payload only a corrupt store / a newer client can produce. */
   const corrupt = (plan: unknown): FilingPlanContext => ({
     ...ctx,
     taxFilingPlan: plan as TaxFilingPlan,
@@ -457,8 +437,7 @@ describe('resolveFilingPlanForYear — corrupt plan payloads', () => {
   });
 
   it('should_return_unresolved_when_separate_plan_has_one_unit', () => {
-    // A single-entry `units` array would SILENTLY DROP the other spouse — the
-    // exact outcome the guard exists to prevent.
+    // A single-entry units array would silently drop the other spouse.
     expectUnresolved({
       kind: 'separate',
       units: [{ memberId: 'primary', filingStatus: 'MFS', householdSize: 1 }],
@@ -466,7 +445,6 @@ describe('resolveFilingPlanForYear — corrupt plan payloads', () => {
   });
 
   it('should_return_unresolved_when_both_units_name_the_same_spouse', () => {
-    // A duplicate owner would double-count that spouse's accounts on merge.
     expectUnresolved({
       kind: 'separate',
       units: [
@@ -510,8 +488,7 @@ describe('resolveFilingPlanForYear — corrupt plan payloads', () => {
   });
 
   it('should_not_throw_for_any_corrupt_payload', () => {
-    // The whole point: a malformed plan must degrade to the legacy fallback,
-    // never take down the projection / MC run / report with a TypeError.
+    // A malformed plan must degrade to the legacy fallback, never take down the projection with a TypeError.
     for (const plan of [
       { kind: 'separate' },
       { kind: 'separate', units: 'nope' },
@@ -523,11 +500,7 @@ describe('resolveFilingPlanForYear — corrupt plan payloads', () => {
     }
   });
 
-  // The stored value's declared type is a compile-time claim only.
-  // IndexedDB / sync can hand the resolver a `null`, a JSON array, or a bare
-  // primitive, all of which passed the `!== undefined` boundary check and then
-  // threw a TypeError on the first `.kind` read — taking down the whole
-  // projection instead of routing the year to the legacy-scalar fallback.
+  // IndexedDB / sync can hand the resolver a null, a JSON array or a primitive; each used to throw a TypeError on the first .kind read.
   it('should_return_unresolved_when_the_stored_plan_is_null', () => {
     expectUnresolved(null);
   });
@@ -561,14 +534,8 @@ describe('resolveFilingPlanForYear — corrupt plan payloads', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// A stored plan that no longer matches the household's membership
-// ---------------------------------------------------------------------------
-
 describe('resolveFilingPlanForYear — plan vs household cardinality', () => {
-  /** A household that added a spouse AFTER an individual plan was saved — a
-   *  supported flow (the household editor adds a second member at any time),
-   *  so the stored plan is legitimate history, not corrupt data. */
+  // A household that added a spouse after an individual plan was saved: legitimate history, not corrupt data.
   const coupleWithIndividualPlan: FilingPlanContext = {
     taxFilingPlan: { kind: 'individual' },
     hasSecondaryMember: true,
@@ -586,9 +553,7 @@ describe('resolveFilingPlanForYear — plan vs household cardinality', () => {
   });
 
   it('should_not_file_one_Single_return_for_a_whole_couple', () => {
-    // The bug this pins: resolving literally produced ONE `Single` unit covering
-    // the couple, taxing both spouses on the narrower single schedule and
-    // deduction — silently, since the summary reported it as resolved.
+    // Bug pinned: resolving literally produced ONE Single unit for the couple, taxing both on the single schedule, while the summary said resolved.
     const res = resolveFilingPlanForYear(coupleWithIndividualPlan);
     expect(res.kind).not.toBe('resolved');
     const summary = summarizeFilingPlan({
@@ -596,8 +561,7 @@ describe('resolveFilingPlanForYear — plan vs household cardinality', () => {
       hasSecondaryMember: true,
       taxYear: 2030,
     });
-    // The engines keep the legacy derivation (both alive, no scalar → MFJ)
-    // and the editor prompts, instead of quietly filing Single.
+    // The engines keep the legacy derivation (both alive, no scalar → MFJ) and the editor prompts.
     expect(summary.headline).toBe('Married filing jointly');
     expect(summary.unresolvedLegacyDetail).toBeDefined();
   });
@@ -624,9 +588,7 @@ describe('resolveFilingPlanForYear — plan vs household cardinality', () => {
   });
 
   it('should_keep_resolving_a_joint_plan_whose_spouse_was_removed', () => {
-    // The mirror case needs no guard: with no secondary member the alive-state
-    // already collapses a joint plan to the sole member's `Single` return, which
-    // is the correct treatment for a one-person household.
+    // With no secondary member, alive-state already collapses a joint plan to the sole member's Single return.
     const res = resolveFilingPlanForYear({
       taxFilingPlan: { kind: 'joint' },
       hasSecondaryMember: false,
@@ -661,9 +623,7 @@ describe('isWellFormedFilingPlan', () => {
   });
 
   it('should_reject_a_non_object_stored_value', () => {
-    // The editor asks this predicate before opening on the stored plan,
-    // so a corrupt `null` would crash `initialFilingPlan` on the very tab the
-    // resolution prompt links to for repairing it.
+    // The editor asks this before opening on the stored plan; a corrupt null would crash initialFilingPlan.
     for (const stored of [null, [], [{ kind: 'joint' }], 'joint', 42, true]) {
       expect(isWellFormedFilingPlan(stored, true)).toBe(false);
       expect(isWellFormedFilingPlan(stored, false)).toBe(false);
@@ -694,13 +654,7 @@ describe('isWellFormedFilingPlan', () => {
 });
 
 describe('resolveFilingPlanForYear — an exception outranks the standing status', () => {
-  // The bug this locks down: a one-person plan filing head of household every year
-  // (a standing OPEN-ENDED window), with a two-year qualifying-surviving-spouse
-  // exception added on top. The editor rendered the QSS row and its statutory
-  // two-year warning, so the plan LOOKED configured — but a standing window covers
-  // every tax year, so a stored-order first-match scan never reached the exception
-  // and those two years were still filed head of household. Materially different
-  // tax, silently, with no error or warning on any surface.
+  // Bug pinned: a standing open-ended HoH window plus a two-year QSS exception: a stored-order first-match scan never reached the exception, so those years were filed HoH with no warning.
   const QSS_START = 2036;
   /** EXCLUSIVE — the window covers 2036 and 2037 only. */
   const QSS_END = 2038;
@@ -720,10 +674,7 @@ describe('resolveFilingPlanForYear — an exception outranks the standing status
     return res.kind === 'resolved' ? res.taxUnits[0]?.filingStatus : undefined;
   };
 
-  // BOTH stored orders resolve identically. The editor now writes the exceptions
-  // ahead of the standing window, but a plan written before that (or synced from a
-  // client that wrote it the other way) must not be resolved differently — the
-  // priority is a property of the two window KINDS, not of their array positions.
+  // Both stored orders resolve identically: priority is a property of the two window kinds, not of array positions.
   const orders: ReadonlyArray<readonly [string, IndividualFilingPlan]> = [
     ['standing_window_stored_first', { kind: 'individual', statusWindows: [standingHoH, qss] }],
     ['exception_stored_first', { kind: 'individual', statusWindows: [qss, standingHoH] }],
@@ -743,9 +694,6 @@ describe('resolveFilingPlanForYear — an exception outranks the standing status
   }
 
   it('should_apply_the_same_priority_to_a_couples_post_death_survivor', () => {
-    // Same shape on a joint plan: the standing window is a leftover from a spell
-    // when the spouse was removed, and the survivor's QSS years must still
-    // win against it.
     const plan: JointFilingPlan = { kind: 'joint', statusWindows: [standingHoH, qss] };
     const survivor = (taxYear: number): FilingPlanResolution =>
       resolveFilingPlanForYear({
@@ -763,7 +711,6 @@ describe('resolveFilingPlanForYear — an exception outranks the standing status
       kind: 'resolved',
       taxUnits: [{ memberIds: ['primary'], filingStatus: 'HoH' }],
     });
-    // A live MFJ year is still untouched by either window.
     expect(
       resolveFilingPlanForYear({
         taxFilingPlan: plan,
@@ -779,8 +726,7 @@ describe('resolveFilingPlanForYear — an exception outranks the standing status
   });
 
   it('should_keep_first_stored_wins_between_two_overlapping_exceptions', () => {
-    // Only the standing window is deprioritised. Among year-bounded exceptions the
-    // earliest stored one still wins the years they share.
+    // Only the standing window is deprioritised; among year-bounded exceptions the earliest stored one wins.
     const laterHoH: FilingStatusWindow = {
       status: 'HoH',
       start: { kind: 'year', year: QSS_START },
@@ -795,9 +741,6 @@ describe('resolveFilingPlanForYear — an exception outranks the standing status
   });
 
   it('should_list_the_exception_the_engines_really_apply_on_every_summary_surface', () => {
-    // The report card and the PDF settings table list `windows`; with the exception
-    // genuinely winning its years, listing it is accurate rather than a promise
-    // nothing keeps.
     const plan: IndividualFilingPlan = {
       kind: 'individual',
       statusWindows: [standingHoH, qss],
@@ -815,15 +758,9 @@ describe('resolveFilingPlanForYear — an exception outranks the standing status
   });
 });
 
-// ---------------------------------------------------------------------------
-// The shared, resolver-backed filing summary
-// ---------------------------------------------------------------------------
-
 describe('summarizeFilingPlan', () => {
   it('should_report_the_legacy_status_the_engine_actually_filed_when_unresolved', () => {
-    // The regression: a two-member `Single` scalar cannot be converted, so the
-    // engines fall back to `deriveFilingStatus` → Single. The on-screen card
-    // used to claim "one joint return" while the PDF said "Single".
+    // A two-member Single scalar cannot be converted, so the engines fall back to deriveFilingStatus → Single; the card used to claim one joint return.
     const summary = summarizeFilingPlan({
       filingStatusOverride: 'Single',
       hasSecondaryMember: true,
@@ -833,7 +770,6 @@ describe('summarizeFilingPlan', () => {
     expect(summary.headline).toBe('Single');
     expect(summary.whileBothAlive).toMatch(/filed as single/i);
     expect(summary.whileBothAlive).not.toMatch(/joint/i);
-    // And it agrees with what the resolver+legacy fallback really does.
     expect(
       deriveFilingStatus({
         primaryAlive: true,
@@ -872,7 +808,6 @@ describe('summarizeFilingPlan', () => {
   });
 
   it('should_report_HoH_for_a_one_member_household_carrying_the_HoH_scalar', () => {
-    // The legacy scalar resolves CLEANLY here (open-ended HoH), so no prompt.
     const summary = summarizeFilingPlan({
       filingStatusOverride: 'HoH',
       hasSecondaryMember: false,
@@ -893,8 +828,6 @@ describe('summarizeFilingPlan', () => {
   });
 
   it('should_match_the_materialized_plan_to_the_scalar_it_replaces', () => {
-    // The plan the editor seeds for a one-member `HoH` scalar must
-    // resolve to the SAME tax unit the scalar itself resolves to, every year.
     const scalarCtx: FilingPlanContext = {
       filingStatusOverride: 'HoH',
       hasSecondaryMember: false,
@@ -912,11 +845,7 @@ describe('summarizeFilingPlan', () => {
     expect(resolveFilingPlanForYear(planCtx)).toEqual(resolveFilingPlanForYear(scalarCtx));
   });
 
-  // The summary drives the on-screen report card AND the PDF settings
-  // table. It must survive exactly the payloads the resolver already classifies
-  // as unresolved: a window entry that IS an object but is missing an anchor
-  // would reach `isOpenEndedStatusWindow` / `describeFilingStatusWindow` and
-  // throw, so a corrupt scenario could not be reported on at all.
+  // The summary must survive the payloads the resolver classifies as unresolved: a window missing an anchor used to throw.
   it('should_not_throw_on_a_malformed_status_window', () => {
     const withBadWindow = (statusWindows: unknown): FilingSummaryContext => ({
       taxFilingPlan: { kind: 'joint', statusWindows } as unknown as TaxFilingPlan,
@@ -939,8 +868,7 @@ describe('summarizeFilingPlan', () => {
     const summary = summarizeFilingPlan({
       taxFilingPlan: {
         kind: 'joint',
-        // Missing `end` — the resolver classifies the whole plan as unresolved,
-        // so the summary reports the LEGACY treatment and lists no exception.
+        // Missing end: the resolver classifies the plan unresolved, so the summary reports the legacy treatment and lists no exception.
         statusWindows: [{ status: 'QSS', start: { kind: 'year', year: 2031 } }],
       } as unknown as TaxFilingPlan,
       hasSecondaryMember: true,
@@ -951,17 +879,9 @@ describe('summarizeFilingPlan', () => {
     expect(summary.headline).toBe('Married filing jointly');
   });
 
-  // A STANDING (open-ended) window can reach a couple's plan without any
-  // filing-editor control showing it: a joint plan whose spouse was temporarily
-  // removed picks one up from the one-person "Files as" control, and once the
-  // spouse is back the couple's controls neither display it nor list it among the
-  // exception years. The resolver still applies it to the survivor's return
-  // forever, so the death sentence must name THAT status — hardcoding "single"
-  // would make the summary disagree with the engine.
+  // A standing (open-ended) window can reach a couple's plan with no control showing it; the resolver applies it to the survivor, so the sentence must name that status, not "single".
   describe('a standing window the couple cannot see still drives the summary', () => {
-    /** The plan the editor really writes for that sequence: still `joint`
-     *  (the radio was never touched), carrying the one-person control's
-     *  open-ended head-of-household status. */
+    // The plan the editor writes: still joint, carrying the one-person control's open-ended HoH status.
     const jointWithStandingHoH: JointFilingPlan = {
       kind: 'joint',
       statusWindows: [openEndedStatusWindow('HoH')],
@@ -973,8 +893,6 @@ describe('summarizeFilingPlan', () => {
         hasSecondaryMember: true,
         taxYear: 2030,
       });
-      // Both spouses alive → still one joint return (a window never overrides a
-      // live MFJ year), so only the LATER years are at stake.
       expect(summary.headline).toBe('Married filing jointly');
       const postDeath = resolveFilingPlanForYear({
         taxFilingPlan: jointWithStandingHoH,
@@ -987,7 +905,6 @@ describe('summarizeFilingPlan', () => {
         kind: 'resolved',
         taxUnits: [{ memberIds: ['primary'], filingStatus: 'HoH' }],
       });
-      // The sentence names what the engine files, not an assumed `Single`.
       expect(summary.afterADeath).toMatch(/later years file head of household/i);
       expect(summary.afterADeath).not.toMatch(/file single/i);
     });
@@ -1002,9 +919,6 @@ describe('summarizeFilingPlan', () => {
     });
 
     it('should_name_the_exception_years_in_either_stored_order', () => {
-      // A year-bounded exception outranks the standing window whichever
-      // order the two are stored in, so the sentence names the standing status for
-      // the later years AND the exception that interrupts it, from either payload.
       const qss: FilingStatusWindow = {
         status: 'QSS',
         start: { kind: 'year', year: 2036 },
@@ -1054,9 +968,7 @@ describe('summarizeFilingPlan', () => {
     });
 
     it('should_keep_the_legacy_single_default_when_the_plan_is_not_applied', () => {
-      // An `individual` plan on a couple is UNRESOLVED: the engines ignore
-      // the plan and keep the legacy derivation, whose post-death status is
-      // `Single`. Its standing window must not colour the sentence.
+      // An individual plan on a couple is unresolved: the engines keep the legacy derivation, whose post-death status is Single.
       const summary = summarizeFilingPlan({
         taxFilingPlan: { kind: 'individual', statusWindows: [openEndedStatusWindow('HoH')] },
         hasSecondaryMember: true,
@@ -1077,7 +989,6 @@ describe('summarizeFilingPlan', () => {
   });
 
   it('should_not_throw_when_the_stored_plan_is_not_an_object', () => {
-    // Same corrupt values the resolver tolerates.
     for (const stored of [null, [], 'joint', 42]) {
       expect(() =>
         summarizeFilingPlan({

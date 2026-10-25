@@ -1,18 +1,11 @@
-/**
- * Tests for AppToastRegion — the one shared bottom-anchored toast region
- * Both toast kinds are enqueued directly
- * against the shared `appToastQueue` (VersionBanner's own subscription is
- * tested separately in VersionBanner.test.tsx; the raisers that feed the
- * `'wait'` kind are tested at their own call sites).
- */
+/** AppToastRegion: the shared bottom-anchored toast region; both toast kinds are enqueued directly on the shared queue. */
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppToastRegion } from './AppToastRegion';
 import { appToastQueue, raiseWaitNotice } from '../lib/toast-queue';
 import { expectNoA11yViolations } from '../test/a11y';
 
-/** Clear any toast a test left live so it can't leak into the next one —
- *  the queue is a module-level singleton. */
+// The queue is a module-level singleton, so clear any toast a test left live.
 afterEach(() => {
   for (const t of appToastQueue.visibleToasts) appToastQueue.close(t.key);
   vi.useRealTimers();
@@ -25,9 +18,6 @@ describe('AppToastRegion — one region, both kinds', () => {
     raiseWaitNotice(5_000);
     render(<AppToastRegion />);
 
-    // The visual-collision regression this whole lift exists to prevent:
-    // assert on the COUNT of regions, not merely that both toasts appear
-    // somewhere.
     expect(screen.getAllByRole('region')).toHaveLength(1);
     expect(screen.getByTestId('version-banner')).toBeInTheDocument();
     expect(screen.getByTestId('wait-notice')).toBeInTheDocument();
@@ -41,8 +31,7 @@ describe('AppToastRegion — one region, both kinds', () => {
 
 describe('AppToastRegion — wait notice countdown and dismissal', () => {
   it('counts down live and removes itself at zero', async () => {
-    // Fake timers BEFORE render (SyncContext.test.tsx discipline) so the
-    // component's mount-armed interval is a fake timer this test drives.
+    // Fake timers before render so the mount-armed interval is one this test drives.
     vi.useFakeTimers();
     try {
       raiseWaitNotice(3_000);
@@ -60,7 +49,6 @@ describe('AppToastRegion — wait notice countdown and dismissal', () => {
       });
       expect(screen.getByTestId('wait-notice').textContent).toContain('1');
 
-      // The final tick crosses the deadline — the notice removes itself.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1_000);
       });
@@ -83,8 +71,6 @@ describe('AppToastRegion — wait notice countdown and dismissal', () => {
       expect(screen.queryByTestId('wait-notice')).toBeNull();
       expect(clearIntervalSpy).toHaveBeenCalled();
 
-      // No further ticking now that the timer is torn down — advancing
-      // time must not resurrect the notice or throw.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
@@ -125,8 +111,6 @@ describe('AppToastRegion — wait notice countdown and dismissal', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1_000);
       });
-      // The sr-only accessible text is unaffected by the per-second tick —
-      // only the aria-hidden digits change.
       expect(notice.querySelector('.sr-only')!.textContent).toBe(srTextBefore);
     } finally {
       vi.useRealTimers();
@@ -135,7 +119,7 @@ describe('AppToastRegion — wait notice countdown and dismissal', () => {
 });
 
 describe('AppToastRegion — coalescing', () => {
-  it('a later Retry-After observation extends the SAME notice rather than stacking a second toast', () => {
+  it('a later Retry-After observation extends the same notice rather than stacking a second toast', () => {
     vi.useFakeTimers();
     try {
       raiseWaitNotice(3_000);
@@ -149,11 +133,7 @@ describe('AppToastRegion — coalescing', () => {
     }
   });
 
-  // 3.experience.1: N concurrent requests served the SAME Retry-After land a
-  // few ms apart. Each must coalesce into the live toast WITHOUT replacing
-  // it — a close+re-add mounts a fresh `role="alert"` (re-announced in full
-  // once per response) and re-targets a keyboard user who was on Close. So
-  // the assertion is DOM-node identity, not merely "one toast exists".
+  // Concurrent requests served the same Retry-After must coalesce into the live toast without replacing it, so the assertion is DOM-node identity.
   it('a same-wait observation a few ms later leaves the live toast node untouched', async () => {
     vi.useFakeTimers();
     try {

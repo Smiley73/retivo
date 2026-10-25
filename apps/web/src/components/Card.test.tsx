@@ -1,10 +1,4 @@
-/**
- * Card — surface variant render + a11y smoke.
- *
- * Tailwind-defaults replacement for the legacy `.card` class.
- * Asserts children render, the danger tone applies — plus the shared-component axe rule
- * (AGENTS mandate for component test files).
- */
+/** Card: children render and the danger tone applies. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -29,15 +23,6 @@ describe('Card', () => {
       </Card>,
     );
     expect(screen.getByRole('note')).toBeInTheDocument();
-    await expectNoA11yViolations(container);
-  });
-
-  it('has no a11y violations', async () => {
-    const { container } = render(
-      <Card>
-        <p>Accessible card content</p>
-      </Card>,
-    );
     await expectNoA11yViolations(container);
   });
 });

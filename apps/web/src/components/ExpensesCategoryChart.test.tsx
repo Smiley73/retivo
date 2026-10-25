@@ -1,30 +1,12 @@
-/**
- * ExpensesCategoryChart — the /expenses "by category" tab path, on the
- * SVG chart engine.
- *
- *   - the per-category stacked series each render (legend entry per
- *     category name);
- *   - the death + retirement marker labels render above the plot;
- *   - the empty-state guard renders when there are no rows / categories;
- *   - tooltip lists categories A→Z (copy, never mutating the prop);
- *   - Series color + grid chrome flip light↔dark;
- *   - axe smoke against the resolved chart (AGENTS mandate).
- *
- * The chart is lazy-loaded behind Suspense, so the legend assertions
- * await the resolved `…Inner` chart, never the Suspense fallback.
- */
 import React from 'react';
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ExpensesCategoryChart } from './ExpensesCategoryChart';
-import ExpensesCategoryChartInner, {
-  makeTooltip,
-} from './ExpensesCategoryChartInner';
+import ExpensesCategoryChartInner from './ExpensesCategoryChartInner';
 import type { ExpenseCategoryMonthlyPoint } from '../lib/expense-projection';
 import type { CashflowChartMarker } from './CashflowProjectionChart';
 import type { TooltipMember } from './tooltip-member';
-import type { ChartDatum } from './charts';
 import { expectNoA11yViolations } from '../test/a11y';
 import { renderWithTheme, seriesColor, withTheme } from '../test/theme-render';
 import { CHART_CHROME, CHART_COLORS } from '../lib/tokens';
@@ -59,10 +41,6 @@ const MARKERS: CashflowChartMarker[] = [
 ];
 
 const MEMBERS: TooltipMember[] = [{ firstName: 'Alex', birthYear: 1975 }];
-
-function tooltipDatum(values: Record<string, number>): ChartDatum {
-  return { x: 2040, fractionalYear: 2040, year: 2040, month0: 0, ...values };
-}
 
 describe('ExpensesCategoryChart — category-tab path', () => {
   it('renders one legend entry per category plus the death/retirement markers', async () => {
@@ -107,51 +85,48 @@ describe('ExpensesCategoryChart — tooltip alphabetical order', () => {
     { id: 'c-housing', name: 'Housing', color: '#1f77b4' },
   ];
 
-  it('lists tooltip categories strictly A→Z regardless of prop order', () => {
-    const tooltip = makeTooltip(unsorted, [], CHART_CHROME.light);
-    const node = tooltip(
-      tooltipDatum({
-        total: 6_000,
-        'cat-c-travel': 1_000,
-        'cat-c-auto': 2_000,
-        'cat-c-housing': 3_000,
-      }),
+  function hoverTooltipNames(byCategoryId: Record<string, number>): string[] {
+    const row: ExpenseCategoryMonthlyPoint = {
+      ...point(2035, 0),
+      byCategoryId,
+      total: Object.values(byCategoryId).reduce((a, b) => a + b, 0),
+    };
+    const { container } = render(
+      withTheme(
+        'light',
+        <ExpensesCategoryChartInner
+          rows={[row, point(2036, 0)]}
+          categories={unsorted}
+          markers={[]}
+          members={[]}
+        />,
+      ),
     );
-    const { container } = render(<>{node}</>);
-    const names = Array.from(
-      container.querySelectorAll('div.flex.justify-between > span:first-child'),
-    )
-      .map((el) => el.textContent)
+    const svg = container.querySelector('svg') as SVGSVGElement;
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, width: 800, height: 256, right: 800, bottom: 256, x: 0, y: 0, toJSON: () => ({}),
+    } as DOMRect);
+    fireEvent.pointerMove(svg, { clientX: 100 });
+    const tooltip = container.querySelector('[role="tooltip"]') as HTMLElement;
+    return Array.from(tooltip.querySelectorAll('div.flex.justify-between > span:first-child'))
+      .map((el) => el.textContent ?? '')
       .filter((t) => t !== 'Total');
-    expect(names).toEqual(['Auto', 'Housing', 'Travel']);
+  }
+
+  it('lists tooltip categories strictly A→Z regardless of prop order', () => {
+    expect(hoverTooltipNames({ 'c-travel': 1_000, 'c-auto': 2_000, 'c-housing': 3_000 })).toEqual([
+      'Auto',
+      'Housing',
+      'Travel',
+    ]);
   });
 
   it('omits zero-value categories from the tooltip', () => {
-    const tooltip = makeTooltip(unsorted, [], CHART_CHROME.light);
-    const node = tooltip(
-      tooltipDatum({
-        total: 3_000,
-        'cat-c-travel': 0,
-        'cat-c-auto': 0,
-        'cat-c-housing': 3_000,
-      }),
-    );
-    const { queryByText } = render(<>{node}</>);
-    expect(queryByText('Housing')).toBeTruthy();
-    expect(queryByText('Auto')).toBeNull();
-    expect(queryByText('Travel')).toBeNull();
+    expect(hoverTooltipNames({ 'c-travel': 0, 'c-auto': 0, 'c-housing': 3_000 })).toEqual(['Housing']);
   });
 
-  it('sorts a copy — never mutates the caller-supplied stack order', () => {
-    const tooltip = makeTooltip(unsorted, [], CHART_CHROME.light);
-    tooltip(
-      tooltipDatum({
-        total: 6_000,
-        'cat-c-travel': 1_000,
-        'cat-c-auto': 2_000,
-        'cat-c-housing': 3_000,
-      }),
-    );
+  it('sorts a copy, never mutating the caller-supplied stack order', () => {
+    hoverTooltipNames({ 'c-travel': 1_000, 'c-auto': 2_000, 'c-housing': 3_000 });
     expect(unsorted.map((c) => c.name)).toEqual(['Travel', 'Auto', 'Housing']);
   });
 });

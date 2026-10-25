@@ -1,25 +1,5 @@
-/**
- * Builds the ACCOUNT half of "Export my data":
- * every store the database holds with rows attributable to the signed-in
- * person, as field-level projections — never whole rows where a row carries
- * a secret. The workspace half (the encrypted aggregates) is unchanged and
- * lives entirely client-side (apps/web/src/lib/server-data-export.ts); this
- * service is reached only through `GET /auth/account-export`
- * (account-export.controller.ts), which also requires the session-bound
- * export-authorization cookie.
- *
- * NON-PAGING sections below are fully materialized in ONE call (every
- * repository already loops its own internal DynamoDB pagination) and
- * returned on the FIRST page only. The sign-in/security history
- * (`AuthEvent` — the whole retained history, no window) is the one
- * section large enough to need HTTP-level paging; it pages behind an opaque
- * cursor and the response always carries `nextCursor`.
- *
- * `ACCOUNT_EXPORT_SECTION_KEYS` is the single source of truth for "every section this builder
- * assembles" — the API integration test asserts it against the accounted-for table in the test file
- * (derived independently from the `TABLE_*` config names), so dropping a section from the builder
- * OR from this constant both fail the test rather than passing silently.
- */
+// Builds the account half of "Export my data": field-level projections of every store holding the user rows, never a whole row that
+// carries a secret. Behind `GET /auth/account-export`.
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
@@ -71,44 +51,9 @@ import type {
 } from '../dynamo/types.js';
 
 /**
- * The complete, ordered set of account-export sections. This IS the
- * accounted-for enumeration: `apps/api/src/test/account-export.spec.ts`
- * derives its own expected set independently (from the `TABLE_*` config
- * names) and asserts it against this constant, so deleting a section here —
- * or from {@link AccountExportService.build} — fails the test either way.
- */
-export const ACCOUNT_EXPORT_SECTION_KEYS = [
-  'workspaceMeta',
-  'mutationLog',
-  'aggregateVersion',
-  'idempotencyKey',
-  'deviceRegistry',
-  'user',
-  'emailReservations',
-  'emailVerifications',
-  'passwordReset',
-  'signupApprovals',
-  'credential',
-  'passkeys',
-  'refreshTokens',
-  'revokedTokens',
-  'failedLoginAttempt',
-  'history', // AuthEvent — the one paging section
-  'householdKeyEnvelope',
-  'userMfa',
-  'mfaEmailOtp',
-  'trustedDevices',
-  's3SnapshotInventory',
-] as const;
-
-/**
- * Thrown when the User row is gone by the time `buildNonPagingSections`
- * reads it — the only way to reach here despite `JwtAuthGuard` is a session
- * whose account was deleted mid-request (a concurrent `DELETE /auth/account`
- * in another tab). Building a bundle around a fabricated empty User record
- * would return `200` with a subset of rows the deletion sweep happened to
- * race past, presented to the browser as a complete export. Failing closed
- * here means no bundle is ever silently partial.
+ * Thrown when the User row is gone when read, i.e. a concurrent `DELETE /auth/account`. A bundle around a fabricated
+ * empty record would be presented as a complete export while holding only the rows the sweep raced past, so it fails
+ * closed.
  */
 export class AccountExportUserGoneError extends Error {
   constructor(message = 'Account export could not be completed: the account no longer exists.') {
@@ -118,13 +63,9 @@ export class AccountExportUserGoneError extends Error {
 }
 
 /**
- * Thrown when the bracketed, strongly-consistent User read around the
- * email-keyed sections (`emailReservations`, `failedLoginAttempt`) cannot
- * settle within the bounded retry: the live/pending email kept changing
- * between the two consistent reads. Exporting anyway risks keying those
- * lookups off an `emailLowercase` this user has since released — which,
- * once another signup recycles the address, would attach a stranger's
- * reservation row or sign-in backoff activity to this export.
+ * Thrown when the bracketed consistent User read around the email-keyed sections cannot settle within the bounded
+ * retry. Exporting anyway could key them off an `emailLowercase` this user released, attaching a stranger reservation
+ * or backoff activity once another signup recycles it.
  */
 export class AccountExportEmailKeyReadConflictError extends Error {
   constructor(message = 'Account export could not read email-keyed records consistently; retry later.') {
@@ -133,18 +74,12 @@ export class AccountExportEmailKeyReadConflictError extends Error {
   }
 }
 
-/** Bounded attempts for the bracketed consistent-User-read around the
- *  email-keyed sections (mirrors `HouseholdKeyEnvelopesRepository`'s own
- *  stable-set bracketing read). */
+// Bounded attempts for the bracketed User read, as in `HouseholdKeyEnvelopesRepository` stable-set read.
 const MAX_EMAIL_KEY_READ_ATTEMPTS = 3;
 
-/** Login-credential KDF: every `argon2.hash()` call
- *  in this codebase (`signup.service.ts`, `change-password.service.ts`,
- *  `password-reset.service.ts`) passes only `{ type: argon2.argon2id }`, so
- *  these are node-argon2's own Argon2id defaults — the ACTUAL cost
- *  parameters every live credential is hashed under, not per-row stored
- *  state (the row holds only the resulting digest, which is why
- *  `argon2Hash` itself is omitted from the export). */
+// Login-credential KDF: every `argon2.hash()` call passes only `{ type: argon2.argon2id }`, so these are node-argon2
+// defaults, the actual cost under which live credentials are hashed (the row stores only the digest, which is
+// omitted).
 const LOGIN_CREDENTIAL_KDF = {
   algorithm: 'Argon2id',
   memoryCost: 65536,
@@ -152,52 +87,43 @@ const LOGIN_CREDENTIAL_KDF = {
   parallelism: 4,
 } as const;
 
-/** Projected `User` row: the readable account record plus status and counters.
- *  The three `current*Token` pointer fields are omitted
- *  — they are live bearer-token handles. */
+// Projected `User` row; the three `current*Token` fields are live bearer-token handles and are omitted.
 type UserExportRow = Omit<
   UserRow,
   'currentVerificationToken' | 'currentResetToken' | 'currentPendingEmailToken'
 >;
 
-/** Projected `MutationLog` row: metadata only. `payload` (ciphertext) is
- *  omitted — its plaintext is already the workspace `aggregates` section. */
+// Metadata only: `payload` ciphertext is omitted, its plaintext being the workspace `aggregates` section.
 type MutationLogExportRow = Omit<MutationLogRow, 'payload'>;
 
-/** Projected `EmailVerification` row: `verificationToken` (the PK — a live
- *  bearer token) is omitted. */
+// `verificationToken` (the PK) is a live bearer token and is omitted.
 type EmailVerificationExportRow = Omit<EmailVerificationRow, 'verificationToken'>;
 
-/** Projected `PasswordReset` row: timestamps only. */
 interface PasswordResetExportRow {
   createdAt: string;
   expiresAt: number;
 }
 
-/** Projected `SignupApproval` row: email + timestamps. `approvalToken` (the
- *  PK — a live bearer token) and the redundant `userId` are omitted. */
+// Email and timestamps; `approvalToken` (the PK, a live bearer token) and the redundant `userId` are omitted.
 interface SignupApprovalExportRow {
   email: string;
   createdAt: string;
   expiresAt: number;
 }
 
-/** Projected `Credential` row: `updatedAt` plus the login KDF's algorithm
- *  and cost parameters. `argon2Hash` (salt + digest) is omitted. */
+// `updatedAt` plus the login KDF algorithm and cost; `argon2Hash` is omitted.
 interface CredentialExportRow {
   updatedAt: string;
   kdf: typeof LOGIN_CREDENTIAL_KDF;
 }
 
-/** Projected `Passkey` row. Every field here is already non-secret (the
- *  public key, not the private key, lives server-side for WebAuthn). */
+// Every field is non-secret (the public key is stored, not the private).
 type PasskeyExportRow = Pick<
   PasskeyRow,
   'credentialId' | 'publicKey' | 'counter' | 'deviceType' | 'backedUp' | 'transports' | 'createdAt' | 'lastUsedAt'
 >;
 
-/** Projected `RefreshToken` row. `tokenHash` (the SK) and `rotatedFrom` are
- *  omitted — both are token hashes. */
+// `tokenHash` (the SK) and `rotatedFrom` are token hashes and are omitted.
 interface RefreshTokenExportRow {
   deviceId: string;
   tokenFamilyId: string;
@@ -209,19 +135,16 @@ interface RefreshTokenExportRow {
   revokedAt: string | null;
 }
 
-/** Projected `FailedLoginAttempt` row. Labelled explicitly in the bundle as
- *  24-hour sign-in backoff state — NOT the retained sign-in history (that is
- *  `history`, below). */
+// 24-hour sign-in backoff state, labelled so in the bundle; not the retained sign-in history (`history`).
 interface FailedLoginAttemptExportRow {
-  /** Absent on a row holding only the guessing-notice stamp — no counter to report. */
+  /** Absent on a row holding only the guessing-notice stamp. */
   consecutiveFailures?: number;
   lastFailedAt?: string;
   expiresAt: number;
   note: 'This is 24-hour sign-in backoff state, not your full sign-in history. See "history" for that.';
 }
 
-/** Projected `HouseholdKeyEnvelope` slot row. `wrappedKey`, `kdf.salt`,
- *  `prfSalt`, and `credentialBinding` are omitted. */
+// `wrappedKey`, `kdf.salt`, `prfSalt` and `credentialBinding` are omitted.
 interface HouseholdKeyEnvelopeSlotExportRow {
   slotId: string;
   slotType: HouseholdKeyEnvelopeRow['slotType'];
@@ -232,16 +155,14 @@ interface HouseholdKeyEnvelopeSlotExportRow {
   rotatedAt?: string;
 }
 
-/** Projected `HouseholdKeyEnvelope` section: the slots above plus the meta
- *  row's `envelopeSetVersion` + `updatedAt` ONLY — `envelopeSetTag` is
- *  omitted (it is a tag computed from the household key and would be an
- *  offline oracle for it). */
+// The slots plus the meta `envelopeSetVersion` and `updatedAt` only: `envelopeSetTag` is computed from the household
+// key and would be an offline oracle for it.
 interface HouseholdKeyEnvelopeExportSection {
   slots: HouseholdKeyEnvelopeSlotExportRow[];
   meta: { envelopeSetVersion: number; updatedAt: string } | null;
 }
 
-/** Projected `UserMfa` row. TOTP secrets and unknown legacy attributes are omitted. */
+// TOTP secrets and unknown legacy attributes are omitted.
 interface UserMfaExportRow {
   totpEnabled: boolean;
   enrolledAt?: string;
@@ -249,7 +170,7 @@ interface UserMfaExportRow {
   updatedAt: string;
 }
 
-/** Projected `MfaEmailOtp` row. `codeHash` is omitted. */
+// `codeHash` is omitted.
 interface MfaEmailOtpExportRow {
   sentAt: string;
   expiresAt: number;
@@ -257,14 +178,13 @@ interface MfaEmailOtpExportRow {
   purpose?: string;
 }
 
-/** Both `MfaEmailOtp` rows attributable to a user: the login/change-email
- *  code and the namespaced step-up code. */
+// Both MfaEmailOtp rows for a user: the login or change-email code and the step-up code.
 interface MfaEmailOtpExportSection {
   login: MfaEmailOtpExportRow | null;
   stepUp: MfaEmailOtpExportRow | null;
 }
 
-/** Projected `TrustedDevice` row. `tokenHash` is omitted. */
+// `tokenHash` is omitted.
 interface TrustedDeviceExportRow {
   deviceId: string;
   createdAt: string;
@@ -274,15 +194,10 @@ interface TrustedDeviceExportRow {
   userAgent: string | null;
 }
 
-/** Projected `WorkspaceMeta` row. `cursorTag` is omitted: it is
- *  `HMAC(HKDF(HDK,"cursor-auth"), canonical(freshnessCounter))` — the same
- *  export also carries `freshnessCounter` (the known message), so serializing
- *  `cursorTag` wholesale would hand anyone with the export an offline oracle
- *  to verify candidate household data keys, the same class of leak
- *  `envelopeSetTag` is already excluded for above. */
+// `cursorTag` is an HMAC over the exported `freshnessCounter`, so exporting it would give anyone with the bundle an
+// offline oracle for candidate household data keys, as with `envelopeSetTag`.
 type WorkspaceMetaExportRow = Omit<WorkspaceMetaRow, 'cursorTag'>;
 
-/** One S3 snapshot object's inventory metadata (no bytes). */
 export interface SnapshotInventoryExportRow {
   key: string;
   size: number;
@@ -290,7 +205,6 @@ export interface SnapshotInventoryExportRow {
   isLive: boolean;
 }
 
-/** Every non-paging section, fully materialized. */
 export interface AccountExportSections {
   workspaceMeta: WorkspaceMetaExportRow | null;
   mutationLog: MutationLogExportRow[];
@@ -314,15 +228,11 @@ export interface AccountExportSections {
   s3SnapshotInventory: SnapshotInventoryExportRow[];
 }
 
-/** The first-page response: every non-paging section plus the first page of
- *  `history`. */
 export interface AccountExportFirstPage extends AccountExportSections {
   history: AuthEventPage['items'];
   nextCursor: string | null;
 }
 
-/** A subsequent-page response: `history` only ("non-paging sections are returned on the first page
- * only"). */
 export interface AccountExportNextPage {
   history: AuthEventPage['items'];
   nextCursor: string | null;
@@ -360,11 +270,8 @@ export class AccountExportService {
   }
 
   /**
-   * Build one page of the account export for `(userId, householdId)`. `cursor`
-   * is the opaque `history` cursor from a prior call, or `null`/`undefined`
-   * for the first page. The first page carries every non-paging section fully
-   * materialized (each already loops its own DynamoDB pagination — never
-   * silently truncated); every later page carries `history` only.
+   * Builds one page of the export. `cursor` is the opaque `history` cursor from a prior page (null for the first).
+   * The first page carries every non-paging section fully materialized; later pages carry `history` only.
    */
   async build(
     userId: string,
@@ -387,14 +294,9 @@ export class AccountExportService {
     userId: string,
     householdId: string,
   ): Promise<AccountExportSections> {
-    // Bracketed, strongly-consistent User read around the email-keyed
-    // sections (`emailReservations`, `failedLoginAttempt`) — throws
-    // {@link AccountExportUserGoneError} if the User row is gone (a
-    // concurrent account deletion) rather than fabricating an empty account
-    // record, and {@link AccountExportEmailKeyReadConflictError} if the
-    // live/pending email cannot be confirmed stable within the bounded
-    // retry, so this export never keys those two sections off a recycled
-    // `emailLowercase`.
+    // Bracketed consistent User read around the email-keyed sections: throws AccountExportUserGoneError if the User
+    // is gone (no fabricated record) and AccountExportEmailKeyReadConflictError if the email cannot be confirmed
+    // stable, so those sections are never keyed off a recycled address.
     const { user, emailReservationRows, failedLoginAttemptRow } =
       await this.readUserAndEmailKeyedSections(userId);
     const userExport: UserExportRow = stripUserSecrets(user);
@@ -429,10 +331,8 @@ export class AccountExportService {
       this.passkeys.listForUser(userId),
       this.refreshTokens.listAllForUser(userId),
       this.revokedTokens.listForUser(userId),
-      // Bracketed, strongly-consistent read — slots and meta come from
-      // the SAME stable snapshot rather than two independent eventually
-      // consistent reads, which could otherwise race a concurrent rotation
-      // and combine old slots with new meta or vice versa.
+      // Slots and meta come from one stable snapshot, not two eventually consistent reads that could pair old slots
+      // with new meta.
       this.householdKeyEnvelopes.getStableEnvelopeSet(householdId),
       this.userMfa.get(userId),
       this.mfaEmailOtp.get(userId),
@@ -441,9 +341,7 @@ export class AccountExportService {
       this.listSnapshotInventory(householdId),
     ]);
 
-    // The live snapshot's key needs the (now-resolved) WorkspaceMeta pointer,
-    // so annotate `isLive` after both are in hand rather than threading the
-    // pointer through `listSnapshotInventory`.
+    // The live-snapshot key needs the resolved WorkspaceMeta pointer, so `isLive` is annotated afterwards.
     const livePointer = workspaceMetaRow?.latestSnapshotId
       ? `${householdId}/${workspaceMetaRow.latestSnapshotId}.json.gz`
       : null;
@@ -497,28 +395,11 @@ export class AccountExportService {
     };
   }
 
-  /**
-   * The User row plus the two sections keyed off its email addresses rather
-   * than its `userId` (`emailReservations`, `failedLoginAttempt`), read
-   * together inside a bracketed, strongly-consistent User read.
-   *
-   * `EmailReservation` and `FailedLoginAttempt` are both keyed by
-   * `emailLowercase`, and an email address is RECYCLABLE: once a user
-   * confirms an email change, the released address can be claimed by a
-   * different signup. A plain eventually-consistent `findById` can hand back
-   * a stale `emailLowercase` the caller has already released — and once
-   * another account claims it, `findByEmail`/`find` on that address returns
-   * THAT account's rows, not this caller's. Bracketing two strongly-
-   * consistent reads around the email-keyed lookups (mirroring the
-   * key-envelope stable-set read) catches a change that lands mid-read;
-   * {@link listEmailReservations}'s own `userId` check below is the
-   * remaining defense for a release+reuse that completes strictly between
-   * the two brackets.
-   *
-   * @throws {AccountExportUserGoneError} if the User row is gone.
-   * @throws {AccountExportEmailKeyReadConflictError} if the live/pending
-   *   email cannot be confirmed stable within the bounded retry.
-   */
+  // The User row plus the two sections keyed by email (`emailReservations`, `failedLoginAttempt`), read inside a
+  // bracketed strongly consistent User read. An email is recyclable: a stale `emailLowercase` released by a change
+  // and claimed by another signup would return that account rows. Two consistent reads around the lookups catch a
+  // mid-read change; `listEmailReservations` userId check is the defense for a release and reuse between the
+  // brackets.
   private async readUserAndEmailKeyedSections(userId: string): Promise<{
     user: UserRow;
     emailReservationRows: EmailReservationRow[];
@@ -546,11 +427,8 @@ export class AccountExportService {
     throw new AccountExportEmailKeyReadConflictError();
   }
 
-  /** Both reservation rows attributable to the user: the live email and,
-   *  when a change-email request is in flight, the pending one. Verifies
-   *  `userId` on every returned row — never exports a reservation that does
-   *  not actually belong to this user, even if it was reached by a recycled
-   *  `emailLowercase` key (see {@link readUserAndEmailKeyedSections}). */
+  // Both reservation rows for the user (live and pending email), verifying `userId` on each so a recycled key never
+  // exports a stranger row.
   private async listEmailReservations(user: UserRow): Promise<EmailReservationRow[]> {
     const out: EmailReservationRow[] = [];
     const live = await this.emailReservations.findByEmail(user.emailLowercase);
@@ -562,12 +440,8 @@ export class AccountExportService {
     return out;
   }
 
-  /**
-   * Raw S3 object inventory under `<householdId>/`, no bytes, no cap
-   * (Snapshots.list() is capped at 50 for the self-service UI; the export
-   * must never silently truncate). Reuses the already-granted `ListBucket` +
-   * bucket-scoped resource — no new grant.
-   */
+  // Raw S3 inventory under `<householdId>/`, with no cap (the self-service list is capped at 50, but the export must
+  // not truncate), reusing the existing ListBucket grant.
   private async listSnapshotInventory(
     householdId: string,
   ): Promise<Omit<SnapshotInventoryExportRow, 'isLive'>[]> {

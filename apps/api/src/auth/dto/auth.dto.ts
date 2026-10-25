@@ -1,7 +1,4 @@
-/**
- * Request/response DTOs for the auth controller. All request DTOs are
- * validated by the global ValidationPipe with whitelist + forbidNonWhitelisted.
- */
+// Request DTOs for the auth controller, validated by the global ValidationPipe with whitelist and forbidNonWhitelisted.
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -30,6 +27,11 @@ import {
   type ValidationArguments,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  ENCRYPTED_WORKSPACE_RESET_PHRASE,
+  SLOT_TYPES,
+  type SlotType,
+} from '@retirement/contracts';
 import { WebAuthnAuthenticationResponseDto } from './passkey.dto.js';
 import type { FactorUndoKind } from '../factor-notice-mail.js';
 import {
@@ -45,25 +47,13 @@ const FACTOR_UNDO_KINDS: FactorUndoKind[] = [
   'totp_remove',
 ];
 
-// Re-exported so the ~7 existing call sites across this file + `mfa.dto.ts`
-// keep importing from `auth.dto.ts` unchanged. The definitions moved to
-// `step-up-proof.dto.ts` so `passkey.dto.ts` can depend
-// on them too without a cycle (see that file's header comment).
 export { STEP_UP_FACTOR_METHODS, StepUpProofMatchesMethodConstraint, type StepUpFactorMethod };
 
-/**
- * The exact confirmation phrase the user must type to reset the encrypted
- * workspace. Shared with the web client.
- */
-const ENCRYPTED_WORKSPACE_RESET_PHRASE = 'DELETE';
-
-/** Cap on opaque base64url blobs (wrappedKey/tag) — generous, bounds abuse.
- * Declared here (rather than beside the key-envelope DTOs below) because
- * `ChangePasswordDto`'s re-wrapped-slot fields
- * need the value at class-definition time, before those DTOs are defined. */
+// Cap on opaque base64url blobs. Declared here, before the key-envelope DTOs, because `ChangePasswordDto` needs it at
+// class-definition time.
 const MAX_OPAQUE_BLOB_LEN = 8192;
 
-export function birthdateBoundsForUtcDate(today: string): {
+function birthdateBoundsForUtcDate(today: string): {
   min: string;
   max: string;
 } {
@@ -78,15 +68,9 @@ export function birthdateBoundsForUtcDate(today: string): {
   };
 }
 
-/**
- * Server-side belt-and-suspenders for the signup birthdate: enforce the same
- * inclusive UTC today-through-120-years-ago range as the client. The client
- * DatePicker is the UX gate; this guards an API-direct caller. `@MaxDate` can't be used here —
- * `birthdate` stays a `YYYY-MM-DD` string, so we compare zero-padded strings
- * (lexicographic order matches chronological order). Skips undefined (the field
- * is `@IsOptional`) and any non-`YYYY-MM-DD` value (the `@Matches` regex already
- * rejects those with its own error).
- */
+// Server-side guard for the signup birthdate range, for API-direct callers. `@MaxDate` does not apply because the
+// value stays a `YYYY-MM-DD` string, compared lexicographically. Skips undefined and non-matching values, which
+// `@Matches` already rejects.
 @ValidatorConstraint({ name: 'birthdateInSupportedRange', async: false })
 class BirthdateInSupportedRangeConstraint implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
@@ -123,14 +107,8 @@ export class SignupDto {
   @MaxLength(80)
   lastName?: string;
 
-  // Date-only `YYYY-MM-DD`. The `@Matches` regex rejects full ISO
-  // datetimes (`2026-01-01T00:00:00Z`) and pins the length to exactly 10
-  // characters; strict `@IsDateString` rejects impossible calendar dates
-  // (`2026-02-29` non-leap, `2026-06-31`) while still accepting real leap days
-  // (`2024-02-29`); the future-date guard rejects a birthdate after today (bad
-  // SS age math). Together they give exact date-only, real, past-only
-  // validation. Kept `@IsOptional()` so old clients without the field are not
-  // rejected.
+  // `@Matches` pins date-only; strict `@IsDateString` rejects impossible calendar dates; the range constraint
+  // rejects a future birthdate (bad age math). Optional so old clients are not rejected.
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   @IsDateString({ strict: true })
@@ -139,14 +117,8 @@ export class SignupDto {
 }
 
 /**
- * Body for `PATCH /auth/me`. Corrects
- * the account-record `firstName`/`lastName`/`birthdate` on the `User` row.
- * Unlike `SignupDto`, all three fields are REQUIRED here — this is the
- * correction form, not a pre-capture client, so an account that predates
- * signup capture can fill them in for the first time. `birthdate` reuses
- * `SignupDto`'s exact validation trio (`@Matches` / strict `@IsDateString` /
- * `BirthdateInSupportedRangeConstraint`). The `@Matches(/\S/)` guard on each
- * name rejects a whitespace-only string that `@IsNotEmpty()` alone would pass.
+ * Body for `PATCH /auth/me`. Unlike `SignupDto` all three fields are required, so an account that predates signup
+ * capture can fill them in. `@Matches(/\S/)` rejects a whitespace-only name that `@IsNotEmpty()` passes.
  */
 export class UpdateAccountDto {
   @IsString()
@@ -168,14 +140,9 @@ export class UpdateAccountDto {
 }
 
 export class LoginDto {
-  // Intentionally no @IsEmail(): malformed emails must follow the same
-  // 401 INVALID_CREDENTIALS / "Invalid email or password." branch as unknown
-  // emails (avoids leaking format validity and preserves the constant-time
-  // posture). @IsNotEmpty
-  // still applies — an empty string is a structurally malformed body and
-  // would otherwise hit DynamoDB as an empty-string key (ValidationException
-  // → 500); this carve-out surfaces it as
-  // 400 BAD_REQUEST instead.
+  // Deliberately no @IsEmail(): a malformed email must take the same 401 INVALID_CREDENTIALS branch as an unknown
+  // one, avoiding an email-format oracle. @IsNotEmpty stays, since an empty key would hit DynamoDB as a
+  // ValidationException (500).
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
@@ -185,7 +152,7 @@ export class LoginDto {
   @MaxLength(256)
   password!: string;
 
-  // Client-generated UUID, persisted in IndexedDB across sessions.
+  // Client-generated UUID, persisted in IndexedDB.
   @IsUUID()
   deviceId!: string;
 }
@@ -204,11 +171,8 @@ export class ResendVerificationDto {
 }
 
 /**
- * Body for `POST /auth/request-password-reset`. Intentionally NO
- * `@IsEmail()`: a malformed email must follow the same opaque-202 no-op
- * branch as an unknown email so the endpoint never leaks email-format
- * validity (the same anti-oracle carve-out LoginDto uses). `@IsNotEmpty`
- * still rejects a structurally empty body before it reaches the service.
+ * Body for `POST /auth/request-password-reset`. Deliberately no `@IsEmail()`: a malformed email must take the same
+ * opaque-202 no-op branch as an unknown one, so the endpoint is not an email-format oracle (as in LoginDto).
  */
 export class RequestPasswordResetDto {
   @IsString()
@@ -218,11 +182,8 @@ export class RequestPasswordResetDto {
 }
 
 /**
- * Body for `POST /auth/reset-password`. The new password is validated
- * against the password policy in PasswordResetService via
- * PasswordValidatorService (so a policy failure is a 400 with the policy
- * error code, identical to signup / change-password). Token bounds match
- * the other consume DTOs (VerifyEmailDto / ApproveSignupDto).
+ * Body for `POST /auth/reset-password`. The new password is validated by PasswordValidatorService in
+ * PasswordResetService, so a policy failure is a 400 with the policy code.
  */
 export class ResetPasswordDto {
   @IsString()
@@ -237,16 +198,9 @@ export class ResetPasswordDto {
 }
 
 /**
- * Body for `POST /auth/factor-undo/consume`. The
- * mail link carries `userId` alongside the opaque `token` in the URL
- * fragment — the consume endpoint has no session to resolve the account
- * from otherwise. Token bounds match `ResetPasswordDto` (both mint a
- * `randomBytes(32).toString('base64url')` token). `kind` is REQUIRED and
- * validated against the token's stored kind server-side: the landing page's
- * copy is chosen from this same field read out of the unauthenticated URL
- * fragment, so the server must confirm it matches before acting rather than
- * letting a truncated or altered link's page describe one action while a
- * different, stored one actually runs.
+ * Body for `POST /auth/factor-undo/consume`. `kind` is required and checked against the stored kind: the landing page
+ * copy comes from the same field in the unauthenticated URL fragment, so a truncated or altered link must not
+ * describe one action while another runs.
  */
 export class FactorUndoConsumeDto {
   @IsUUID()
@@ -263,62 +217,34 @@ export class FactorUndoConsumeDto {
 
 // ---------- Zero-knowledge key-envelope DTOs ----------
 //
-// Declared here — BEFORE `ChangePasswordDto` — because `emitDecoratorMetadata`
-// evaluates a decorated property's TYPE eagerly at class-definition time, and
-// `ChangePasswordDto.slot` is typed
-// `UpsertKeyEnvelopeSlotDto` — a forward reference here throws a TDZ error.
-
-/** Slot kinds the server accepts. The HDK wrap itself is always opaque. */
-const KEY_ENVELOPE_SLOT_TYPES = [
-  'password',
-  'recovery',
-  'passkey_prf',
-  'oidc',
-] as const;
+// Declared before `ChangePasswordDto` because `emitDecoratorMetadata` evaluates a decorated property type eagerly,
+// so a forward reference to `UpsertKeyEnvelopeSlotDto` throws a TDZ error.
 
 /**
- * KDF metadata for a password slot. Shape-only validation: the server stores it
- * verbatim and never derives a key from it (it holds no password). The client
- * binds these fields into the wrap AAD, so a server tampering with them fails
- * the unlock closed on the client.
- *
- * Two algorithm variants share one DTO, discriminated by `algorithm`: the
- * Argon2id default for new slots (`m`/`t`/`p`) and the legacy
- * PBKDF2-HMAC-SHA-256 (`iterations`) retained read-only for pre-existing
- * slots. The variant-specific work-factor fields are `@IsOptional()` so BOTH
- * shapes clear the global `whitelist: true, forbidNonWhitelisted: true`
- * ValidationPipe — an Argon2id body carries no `iterations` and a PBKDF2 body
- * carries no `m`/`t`/`p`, and neither set of extras may be rejected. The server
- * never validates which fields pair with which algorithm (it derives no key);
- * the client's wrap AAD binds the exact KDF shape, so a tampered/mismatched
- * combination fails the unlock closed there.
+ * KDF metadata for a password slot, shape-only: the server stores it verbatim and derives no key. The Argon2id and
+ * legacy PBKDF2 work-factor fields are all `@IsOptional()` so either shape clears `forbidNonWhitelisted`; the client
+ * wrap AAD binds the exact shape, so a tampered combination fails the unlock closed there.
  */
 export class KeyEnvelopeKdfDto {
   @IsString()
   @MaxLength(64)
   algorithm!: string;
 
-  // Legacy PBKDF2-HMAC-SHA-256 work factor. Optional so an Argon2id body
-  // (which omits it) is not rejected by forbidNonWhitelisted.
   @IsOptional()
   @IsInt()
   @Min(1)
   iterations?: number;
 
-  // Argon2id memory cost in KiB. Optional so a PBKDF2 body (which
-  // omits it) is not rejected by forbidNonWhitelisted.
   @IsOptional()
   @IsInt()
   @Min(1)
   m?: number;
 
-  // Argon2id time cost / passes.
   @IsOptional()
   @IsInt()
   @Min(1)
   t?: number;
 
-  // Argon2id parallelism / lanes.
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -330,11 +256,7 @@ export class KeyEnvelopeKdfDto {
   salt!: string;
 }
 
-/**
- * One key-envelope slot in an upsert body. The server stores every field
- * OPAQUELY: it never unwraps, decrypts, or logs `wrappedKey`, and never
- * recomputes the envelope-set HMAC. Only the shape is validated.
- */
+/** One key-envelope slot in an upsert body; only the shape is validated, the server stores every field opaquely. */
 export class UpsertKeyEnvelopeSlotDto {
   @IsString()
   @MaxLength(80)
@@ -344,8 +266,8 @@ export class UpsertKeyEnvelopeSlotDto {
   @MaxLength(80)
   slotId!: string;
 
-  @IsIn(KEY_ENVELOPE_SLOT_TYPES as readonly string[])
-  slotType!: (typeof KEY_ENVELOPE_SLOT_TYPES)[number];
+  @IsIn(SLOT_TYPES)
+  slotType!: SlotType;
 
   @IsOptional()
   @ValidateNested()
@@ -357,17 +279,13 @@ export class UpsertKeyEnvelopeSlotDto {
   @MaxLength(256)
   prfSalt?: string;
 
-  // Flat credential binding: for a `passkey_prf`
-  // slot this is the WebAuthn credential ID the slot is bound to. 2048 covers
-  // any WebAuthn-conformant credential ID (max 1023 raw bytes ≈ 1364 chars
-  // base64url). The server stores it verbatim and, for `passkey_prf` slots,
-  // verifies it belongs to the caller — but never derives a key from it.
+  // For a `passkey_prf` slot, the WebAuthn credential ID; 2048 covers any conformant ID (max 1023 raw bytes). The
+  // controller verifies it belongs to the caller.
   @IsOptional()
   @IsString()
   @MaxLength(2048)
   credentialBinding?: string;
 
-  // Opaque base64url AES-256-GCM wrap of the HDK — never validated/decrypted.
   @IsString()
   @IsNotEmpty()
   @MaxLength(MAX_OPAQUE_BLOB_LEN)
@@ -392,28 +310,16 @@ export class UpsertKeyEnvelopeSlotDto {
 }
 
 /**
- * Body for `POST /auth/change-password`. The current+new password gate is unchanged;
- * when `AUTH_MFA_ENFORCED` is on the caller ALSO carries a fresh step-up
- * factor proof (`method` + `code`|`response`). The proof fields are OPTIONAL
- * at the DTO level — the flag-off floor is password-only; the server
- * enforces the factor when the flag is on.
- *
- * The re-wrapped `password` slot travels in this same body so the
- * server commits the credential + the slot atomically: `slot` mirrors
- * `UpsertKeyEnvelopeSlotDto`'s validated shape (minus any server-authored
- * field — the credential revision the slot is stamped with is NEVER a body
- * field on any DTO), alongside the recomputed `envelopeSetVersion` /
- * `expectedEnvelopeSetVersion` / `envelopeSetTag`. All four are OPTIONAL: a
- * body with none of them is either the server-confirmed no-password-slot
- * (recovery-only) credential-only change, or — from a household that DOES
- * hold a password slot — answered with the upgrade-required response rather
- * than performed.
+ * Body for `POST /auth/change-password`. When `AUTH_MFA_ENFORCED` is on the caller also carries a fresh step-up
+ * factor proof; the proof fields are optional at the DTO level. The re-wrapped `password` slot travels in the body so
+ * the server commits credential and slot atomically; the slot revision is never a body field. The slot fields are
+ * optional: a body without them is either a credential-only change for a recovery-only household, or, from a
+ * household with a password slot, answered with the upgrade-required response.
  */
 export class ChangePasswordDto {
   @IsString()
   @MaxLength(256)
-  // Anchor the optional-proof XOR here (always present) so it validates the
-  // proof shape even when `method` is omitted.
+  // Anchored here (always present) so the proof XOR validates even when `method` is omitted.
   @Validate(StepUpProofMatchesMethodConstraint)
   currentPassword!: string;
 
@@ -464,17 +370,13 @@ export class ChangePasswordDto {
 }
 
 /**
- * Body for `DELETE /auth/account`. The
- * password gate is unchanged; when `AUTH_MFA_ENFORCED` is on the caller ALSO
- * carries a fresh step-up factor proof (`method` + `code`|`response`). The
- * proof fields are OPTIONAL at the DTO level — the flag-off floor is
- * password-only, and the server enforces the factor when the flag is on.
+ * Body for `DELETE /auth/account`. The password gate always applies; with `AUTH_MFA_ENFORCED` on the caller also
+ * carries a fresh step-up proof (optional at the DTO level).
  */
 export class DeleteAccountDto {
   @IsString()
   @MaxLength(256)
-  // Anchor the XOR here (always present) so it validates the optional proof
-  // shape even when `method` is omitted.
+  // Anchored here (always present) so the proof XOR validates even when `method` is omitted.
   @Validate(StepUpProofMatchesMethodConstraint)
   currentPassword!: string;
 
@@ -496,11 +398,8 @@ export class DeleteAccountDto {
 }
 
 /**
- * Body for `POST /auth/passkey/:credentialId/remove`. Passkey removal was session-only; it now
- * REQUIRES a password re-verify baseline (present regardless of the flag) and — when
- * `AUTH_MFA_ENFORCED` is on — a fresh step-up factor proof on top. The body- bearing `POST …
- * /remove` replaces the old `DELETE …` so the password + factor payload is well-formed. Shape
- * mirrors `DeleteAccountDto`.
+ * Body for `POST /auth/passkey/:credentialId/remove`: a password re-verify always, plus a fresh step-up proof when
+ * `AUTH_MFA_ENFORCED` is on. A POST with a body so the payload is well-formed.
  */
 export class PasskeyRemoveDto {
   @IsString()
@@ -530,27 +429,17 @@ export class VerifyPasswordDto {
   @MaxLength(256)
   currentPassword!: string;
 
-  // Optional re-auth purpose discriminator. When `'data_export'`, the server
-  // records the verification as a `data_export` / `data_export_failed` audit
-  // event instead of the generic `password_verify` pair. `'change_password'`
-  // and `'password_slot_rewrap'` are accepted and keep the generic audit
-  // event: `change_password` is the change-password commit's leading session-
-  // authority repair call;
-  // `password_slot_rewrap` is the derived post-reset re-wrap prompt's answer.
-  // Omitted by the import/demo/reset
-  // callers, which keep their generic events.
+  // Optional re-auth purpose: `data_export` records a `data_export` audit event instead of the generic
+  // `password_verify` pair; `change_password` and `password_slot_rewrap` keep the generic event.
   @IsOptional()
   @IsIn(['data_export', 'change_password', 'password_slot_rewrap'])
   purpose?: 'data_export' | 'change_password' | 'password_slot_rewrap';
 }
 
 /**
- * Body for `POST /auth/encrypted-workspace-reset`. The caller must type the exact confirmation
- * phrase; any other value is a 400 so an accidental call cannot wipe a household. The phrase now
- * also carries a REQUIRED `currentPassword` re-verify (the weakest gate, phrase-only, is raised to
- * phrase + password) plus, when `AUTH_MFA_ENFORCED` is on, the OPTIONAL fresh step-up factor proof.
- * The password check always runs regardless of the flag; only the factor is flag-gated (the
- * flag-off floor is phrase + password).
+ * Body for `POST /auth/encrypted-workspace-reset`. The exact confirmation phrase is required (any other value is a
+ * 400, so an accidental call cannot wipe a household), plus `currentPassword` always, and a step-up proof when
+ * `AUTH_MFA_ENFORCED` is on.
  */
 export class EncryptedWorkspaceResetDto {
   @IsString()
@@ -559,7 +448,7 @@ export class EncryptedWorkspaceResetDto {
 
   @IsString()
   @MaxLength(256)
-  // Anchor the optional-proof XOR here — `currentPassword` is always present.
+  // Anchored here: `currentPassword` is always present.
   @Validate(StepUpProofMatchesMethodConstraint)
   currentPassword!: string;
 
@@ -583,12 +472,8 @@ export class EncryptedWorkspaceResetDto {
 }
 
 /**
- * Body for `POST /auth/change-email/request`.
- * Starts a verified email change: the caller proves their current password
- * and supplies the new address. The `@IsEmail()/@MaxLength(255)` pair mirrors
- * `SignupDto.email` so the new address is validated exactly like a signup
- * address. The password is re-verified server-side (mirrors
- * change-password / verify-password); a wrong password → `401`.
+ * Body for `POST /auth/change-email/request`: the current password and the new address, validated like
+ * `SignupDto.email`.
  */
 export class ChangeEmailRequestDto {
   @IsEmail()
@@ -600,11 +485,8 @@ export class ChangeEmailRequestDto {
   currentPassword!: string;
 }
 
-/**
- * Class-level XOR for `ChangeEmailVerifyStepUpDto`: a code factor must
- * carry a `code` and no `response`; `passkey` a `response` and no `code`.
- * Mirrors `MfaProofMatchesMethodConstraint`.
- */
+// XOR for `ChangeEmailVerifyStepUpDto`: a code factor carries `code` and no `response`; `passkey` carries `response`
+// and no `code`.
 @ValidatorConstraint({ name: 'changeEmailProofMatchesMethod', async: false })
 class ChangeEmailProofMatchesMethodConstraint implements ValidatorConstraintInterface {
   validate(_value: unknown, args: ValidationArguments): boolean {
@@ -619,11 +501,8 @@ class ChangeEmailProofMatchesMethodConstraint implements ValidatorConstraintInte
 }
 
 /**
- * Body for `POST /auth/change-email/verify-step-up`. Completes the fresh MFA factor for the pending
- * change-email intent on the authenticated session. `method` mirrors the login MFA verify set
- * INCLUDING `passkey` (newly accepted); the two code factors carry a `code`, `passkey` carries a
- * WebAuthn `response`. The class-level XOR constraint (shared with `MfaVerifyDto`) rejects the
- * wrong-shaped pair as 400.
+ * Body for `POST /auth/change-email/verify-step-up`: completes the fresh MFA factor for the pending change-email
+ * intent. The class-level XOR rejects a wrong-shaped pair as 400.
  */
 export class ChangeEmailVerifyStepUpDto {
   @IsIn(STEP_UP_FACTOR_METHODS as readonly string[])
@@ -643,11 +522,7 @@ export class ChangeEmailVerifyStepUpDto {
   response?: WebAuthnAuthenticationResponseDto;
 }
 
-/**
- * Body for `POST /auth/change-email/confirm`. The new-address
- * verification link lands the SPA here; it POSTs the token. Token bounds match
- * the other consume DTOs (`VerifyEmailDto` / `ResetPasswordDto`).
- */
+/** Body for `POST /auth/change-email/confirm`; token bounds match the other consume DTOs. */
 export class ChangeEmailConfirmDto {
   @IsString()
   @MinLength(32)
@@ -670,32 +545,15 @@ export class DeclineSignupDto {
 }
 
 /**
- * Body for `PUT /auth/key-envelopes/:slotId`. Carries the full slot to upsert plus the recomputed
- * household envelope-set version/tag. The server applies both under a
- * conditional monotonic-version bump, storing the opaque `envelopeSetTag`
- * verbatim (never recomputed — the server holds no household data key).
- *
- * The OPTIONAL step-up factor proof (`method` + `code`|`response`) is
- * required only when the controller's exemption matrix says this write
- * displaces existing key material AND `AUTH_MFA_ENFORCED` is on (same
- * shape as `DeleteAccountDto`) — genuine first activation (a
- * household with no live slot rows) and an owed post-reset password re-wrap
- * never need it; every other write into a non-empty envelope set does,
- * including a brand-new slot id. Anchored on `envelopeSetTag` (always
- * present) so the XOR validates even when `method` is omitted.
- *
- * `currentPassword` is OPTIONAL and opaque — never logged, never
- * stored. It carries the password floor the controller requires for a
- * proof-required write of a `passkey_prf` slot (the passkey-encryption
- * enrollment on the Security page), in EITHER `AUTH_MFA_ENFORCED` state; every
- * other write ignores it.
+ * Body for `PUT /auth/key-envelopes/:slotId`: the full slot plus the recomputed envelope-set version and tag, stored
+ * verbatim (the server holds no household data key). The step-up proof is optional here and required only when the
+ * exemption matrix says the write displaces key material and `AUTH_MFA_ENFORCED` is on; anchored on `envelopeSetTag`.
+ * `currentPassword` carries the password floor for a proof-required `passkey_prf` write in either flag state; it is
+ * never logged or stored.
  */
 export class UpsertKeyEnvelopeDto {
-  // `@IsDefined()` + `@IsObject()` guard the field before `@ValidateNested()`
-  // descends into it. Without them a body missing `slot` (or sending a
-  // non-object) passes validation, then the controller throws on
-  // `body.slot.slotType` → 500. The guards turn a missing/malformed `slot`
-  // into a 400 at the boundary (fail fast).
+  // `@IsDefined()` and `@IsObject()` guard `slot` before `@ValidateNested()`; without them a missing or non-object
+  // slot passes validation and the controller throws a 500.
   @IsDefined()
   @IsObject()
   @ValidateNested()
@@ -706,11 +564,8 @@ export class UpsertKeyEnvelopeDto {
   @Min(1)
   envelopeSetVersion!: number;
 
-  // The envelope-set version the client currently has: the atomic
-  // slot+meta transaction conditions the meta write on exact equality with the
-  // stored version, and the controller requires the proposed
-  // `envelopeSetVersion` to be exactly this value + 1 (no version skips). Zero
-  // permits an absent meta row (the first write). Nonnegative safe integer.
+  // The version the client currently holds: the meta write conditions on exact equality, and the proposed version
+  // must be this + 1. Zero permits an absent meta row.
   @IsInt()
   @Min(0)
   @Max(Number.MAX_SAFE_INTEGER)
@@ -745,19 +600,9 @@ export class UpsertKeyEnvelopeDto {
 }
 
 /**
- * Body for `POST /auth/key-envelopes/activate`. Atomically writes a household's ENTIRE initial slot
- * set — every slot this device is activating with, one server-side transaction, ONE version bump —
- * so the intermediate "password slot committed, recovery slot not yet" state a two-PUT activation
- * could leave behind stops occurring. Always proofless (no
- * `method`/`code`/`response`/`currentPassword` fields): the controller refuses this route outright
- * when the envelope set is not genuinely empty, so there is never anything here to prove a factor
- * against.
- *
- * `slots` mirrors `UpsertKeyEnvelopeSlotDto`'s per-slot shape; the per-slot
- * invariants `PUT :slotId` enforces (canonical `password` id, reserved-id
- * rejection, `passkey_prf` credential ownership) apply to every element.
- * Length-capped well above any real activation (password + recovery, or
- * fewer/more device-chosen slots) — bounds abuse, not a product limit.
+ * Body for `POST /auth/key-envelopes/activate`: the household entire initial slot set in one transaction at one
+ * version bump. Always proofless, since the controller refuses a non-empty set. The per-slot invariants of `PUT
+ * :slotId` apply to every element; the length cap bounds abuse, not a product limit.
  */
 export class ActivateKeyEnvelopesDto {
   @IsDefined()
@@ -784,19 +629,15 @@ export class ActivateKeyEnvelopesDto {
 }
 
 /**
- * Body for `DELETE /auth/key-envelopes/:slotId`. After a slot is removed the client recomputes the
- * HMAC over the remaining slots and supplies the bumped version + new tag; the server stores them
- * verbatim. A DELETE is never exempt from the step-up proof (when `AUTH_MFA_ENFORCED` is on) — see
- * `UpsertKeyEnvelopeDto`'s proof fields, mirrored here.
+ * Body for `DELETE /auth/key-envelopes/:slotId`: the bumped version and recomputed tag, stored verbatim. A DELETE is
+ * never exempt from the step-up proof.
  */
 export class DeleteKeyEnvelopeMetaDto {
   @IsInt()
   @Min(1)
   envelopeSetVersion!: number;
 
-  // The envelope-set version the client currently has. The atomic
-  // slot-delete + meta transaction conditions on exact equality; the proposed
-  // `envelopeSetVersion` must be exactly this + 1. Nonnegative safe integer.
+  // The version the client currently holds; the proposed version must be this + 1.
   @IsInt()
   @Min(0)
   @Max(Number.MAX_SAFE_INTEGER)

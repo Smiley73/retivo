@@ -1,13 +1,4 @@
-/**
- * Integration tests for `MfaEmailOtpRepository` against DynamoDB Local.
- * Covers the get/put/delete contract:
- *  - get on a missing row returns null;
- *  - put round-trips the live code-hash row;
- *  - delete removes the row.
- *
- * Uses fresh userIds per case so suites stay independent on the shared
- * DynamoDB Local instance.
- */
+// MfaEmailOtpRepository on DynamoDB Local: a missing row is null, put round-trips the live code-hash row, and delete removes it.
 import { randomUUID } from 'node:crypto';
 import { bootstrapTestApp, type TestApp } from '../test/test-helpers.js';
 import { MfaEmailOtpRepository } from './mfa-email-otp.repository.js';
@@ -42,7 +33,7 @@ describe('MfaEmailOtpRepository', () => {
     await repo.put(row);
     const got = await repo.get(userId);
     expect(got).toEqual(row);
-    // The stored TTL value is a Number so DynamoDB TTL can auto-purge it.
+    // The TTL is a Number so DynamoDB TTL can auto-purge it.
     expect(typeof got?.expiresAt).toBe('number');
   });
 

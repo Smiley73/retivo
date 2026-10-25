@@ -1,15 +1,5 @@
-/**
- * Snapshot janitor integration tests against the local emulator.
- *
- * Verifies the retention rules (CODING_STANDARDS atomic-test
- * minimums + janitor.service.ts header):
- *   - At least `SNAPSHOT_MIN_KEEP` (default 10) most-recent snapshots
- *     per household are always kept, regardless of age.
- *   - Of the remainder, only objects older than
- *     `SNAPSHOT_MIN_AGE_DAYS` (default 90) are deleted.
- *   - Households with fewer total snapshots than the floor lose
- *     nothing even if every object is ancient.
- */
+// Snapshot janitor retention against the local emulator: the SNAPSHOT_MIN_KEEP (10) newest snapshots per household are kept regardless of age, of the rest only
+// objects older than SNAPSHOT_MIN_AGE_DAYS (90) are deleted, and a household under the floor loses nothing.
 import {
   DeleteObjectsCommand,
   ListObjectsV2Command,
@@ -22,8 +12,7 @@ import { S3_CLIENT } from '../aws/aws.module.js';
 import { JanitorService } from '../janitor/janitor.service.js';
 
 function snapshotKey(household: string, atMs: number): string {
-  // Mirror the compactor's key shape so the janitor's age parser sees
-  // the same format in tests as in production.
+  // Mirrors the compactor's key shape so the janitor's age parser sees the production format.
   const iso = new Date(atMs).toISOString().replace(/[:.]/g, '-');
   return `${household}/${iso}.json.gz`;
 }
@@ -144,7 +133,6 @@ describe('snapshot janitor', () => {
 
   it('keeps the 10 most-recent snapshots even when every object is ancient', async () => {
     const household = 'household-all-old';
-    // 15 snapshots, all > 90 days old, spaced 1 hour apart.
     const timestamps = Array.from({ length: 15 }, (_, i) =>
       OLD_MS - i * 3600_000,
     );
@@ -155,7 +143,6 @@ describe('snapshot janitor', () => {
     expect(summary.totalDeleted).toBeGreaterThanOrEqual(5);
     const remaining = await listKeysForHousehold(s3, bucket, household);
     expect(remaining).toHaveLength(10);
-    // The 10 retained must be the *newest* 10, sorted descending by key.
     const expected = timestamps
       .slice(0, 10)
       .map((t) => snapshotKey(household, t))
@@ -178,10 +165,7 @@ describe('snapshot janitor', () => {
 
   it('mixes recent + ancient correctly: keep all recent + always-keep the floor', async () => {
     const household = 'household-mixed';
-    // 12 recent (< 90d) + 8 ancient (> 90d). Floor=10.
-    // Newest 10 are all recent → kept.
-    // Positions 10-11 are recent → kept (under cutoff).
-    // Positions 12-19 are ancient → deleted.
+    // 12 recent (<90d) and 8 ancient (>90d) with floor 10: the newest 10 and positions 10-11 are kept, positions 12-19 are deleted.
     const recent = Array.from({ length: 12 }, (_, i) =>
       RECENT_MS - i * 60_000,
     );
@@ -193,7 +177,6 @@ describe('snapshot janitor', () => {
     expect(summary.totalDeleted).toBeGreaterThanOrEqual(8);
     const remaining = await listKeysForHousehold(s3, bucket, household);
     expect(remaining).toHaveLength(12);
-    // Every remaining object must be a "recent" key.
     for (const key of remaining) {
       expect(recent.map((t) => snapshotKey(household, t))).toContain(key);
     }
@@ -209,13 +192,9 @@ describe('snapshot janitor', () => {
 
   it('keeps objects with malformed keys instead of silently deleting them', async () => {
     const household = 'household-malformed';
-    // 12 ancient snapshots whose key shape we *can* parse.
     const ancient = Array.from({ length: 12 }, (_, i) => OLD_MS - i * 60_000);
     await seedKeys(s3, bucket, household, ancient);
-    // One additional object whose key the parser can't decode. Use a
-    // leading `0` so it sorts AFTER every `2025-…`/`2026-…` key in
-    // descending order — i.e. lands past the minKeep floor where the
-    // age check actually runs.
+    // A leading `0` sorts the undecodable key after every 2025-/2026- key in descending order, past the minKeep floor where the age check runs.
     const malformedKey = `${household}/0broken-timestamp.json.gz`;
     await s3.send(
       new PutObjectCommand({

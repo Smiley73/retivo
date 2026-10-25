@@ -1,19 +1,5 @@
-/**
- * Tests for `BalanceProjectionSwrSection` — the "Safe withdrawal rate" tab
- * panel body.
- *
- * The resolver is mocked (module-scoped mutable `result`, reassigned per
- * test) so this file
- * proves the panel's own wiring in isolation: which state renders which
- * body, the card figures (each read through its own label, never a bare
- * `getAllByText` — the fixture's figures are deliberately distinct so a
- * figure wired to the wrong quantity fails a test), the resolver's forwarded
- * input, the chart mount gate, card-and-chart agreement (hovered), the
- * basis-aware valuation-year disclosure, and that the two "inherited" states plus the
- * one bespoke `mc-index-out-of-range` state render the intended copy.
- * The resolver's own arithmetic and the chart's internals are proven in their own
- * suites, not re-tested here.
- */
+// BalanceProjectionSwrSection, the "Safe withdrawal rate" tab panel body. The resolver is mocked (module-scoped `result`, reassigned per test) to prove the panel's own wiring in isolation: which state renders which body, the card figures, the forwarded resolver input, the chart mount gate and the valuation-year disclosure.
+// The resolver's arithmetic and the chart's internals are proven in their own suites.
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -31,10 +17,7 @@ import type {
 import type { UseBalanceProjectionSwrDataInput } from './use-balance-projection-swr-data';
 
 let result: SwrComparisonResult;
-// Records the resolver's own argument object (never read by the plain
-// `() => result` stub this replaced) so a test can prove `displayMode` /
-// `activeMethod` / `activeMcBasis` actually reach 01's resolver, not just
-// that SOME result renders.
+// Records the resolver's argument object so a test can prove `displayMode`, `activeMethod` and `activeMcBasis` actually reach the resolver, not just that some result renders.
 let lastResolverInput: UseBalanceProjectionSwrDataInput | undefined;
 vi.mock('./use-balance-projection-swr-data', () => ({
   useBalanceProjectionSwrData: (input: UseBalanceProjectionSwrDataInput) => {
@@ -47,23 +30,13 @@ function makeVm(primaryRetirementYear: number | null): BalanceProjectionViewMode
   return { primaryRetirementYear } as unknown as BalanceProjectionViewModel;
 }
 
-/** Reads one `<Stat>` tile's rendered value through its label — never a
- *  bare `getAllByText(value)`, which cannot tell one card figure from
- *  another figure that happens to share the same formatted text. */
+// Read a Stat tile through its label, never a bare `getAllByText(value)`, which cannot tell one card figure from another sharing the same formatted text.
 function statText(label: string): string {
   const wrapper = screen.getByText(label).parentElement as HTMLElement;
   return wrapper.children[1]?.textContent ?? '';
 }
 
-// Every fixture figure below is deliberately a DIFFERENT number: the
-// anchor draw (37_000, == rows[0].afterTaxDraw), the 4% rule's implied
-// spend (40_000), the 4.5% rule's implied spend (45_000), and the
-// portfolio (1_000_000) never collide, and `anchorYear` (2033) never
-// collides with `vm.primaryRetirementYear` (2032, set by `renderPanel`'s
-// default `makeVm(2032)`) — so a figure wired to the wrong quantity, or the
-// "Retirement year" Stat silently falling back to `bundle.anchorYear`
-// instead of reading `vm.primaryRetirementYear`, fails a test instead of
-// passing under a shared value.
+// Every fixture figure is a different number (anchor draw 37_000, 4% implied spend 40_000, 4.5% implied spend 45_000, portfolio 1_000_000) and `anchorYear` (2033) never collides with `vm.primaryRetirementYear` (2032), so a figure wired to the wrong quantity, or "Retirement year" falling back to `bundle.anchorYear`, fails a test.
 function makeBundle(over: Partial<SwrComparisonBundle> = {}): SwrComparisonBundle {
   return {
     rows: [
@@ -163,18 +136,13 @@ describe('BalanceProjectionSwrSection — state routing', () => {
   it('renders a bespoke, non-blank state for mc-index-out-of-range — it is NOT an inherited state', () => {
     result = { state: 'mc-index-out-of-range', bundle: null };
     renderPanel({ isMcBasisActive: true, resolvedLabel: 'Typical' });
-    // The heading still renders (unlike the two inherited states above) —
-    // the tier stays enabled on the Basis select, so a blank panel with no
-    // heading would leave the user with no explanation at all.
+    // The heading still renders (unlike the two inherited states) because the tier stays enabled on the Basis select; a blank panel would leave no explanation.
     expect(
       screen.getByRole('heading', { name: /Safe withdrawal rate comparison \(Typical\)/ }),
     ).toBeInTheDocument();
     expect(screen.getByText(/no earlier year-end balance/)).toBeInTheDocument();
     expect(screen.queryByText('$0')).not.toBeInTheDocument();
-    // The copy must NOT send the user to "Show another likely path": the
-    // reroll replays a different seed against the SAME `firstYear`, so the
-    // state's index test comes out identical every press. Only a different
-    // basis can clear it, and that is what the copy names.
+    // The copy must not point to "Show another likely path": the reroll replays a different seed against the same `firstYear`, so the index test comes out identical every press; only a different basis clears it.
     expect(screen.queryByText(/reroll/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/another likely path/i)).not.toBeInTheDocument();
     expect(screen.getByText(/different basis/)).toBeInTheDocument();
@@ -219,11 +187,7 @@ describe('BalanceProjectionSwrSection — state routing', () => {
 describe('BalanceProjectionSwrSection — card figures (ready state)', () => {
   it('states the retirement year, portfolio, first-full-year after-tax draw, both implied spends, and two SEPARATE deltas', () => {
     renderPanel();
-    // Every figure below is a distinct fixture value (see `makeBundle`), and
-    // each is read through its OWN Stat label, so a figure wired to the
-    // wrong quantity — e.g. the after-tax draw fed from the 4% implied
-    // spend, or the retirement year falling back to `bundle.anchorYear`
-    // instead of `vm.primaryRetirementYear` — fails here.
+    // Each figure is read through its own Stat label, so a figure wired to the wrong quantity (the after-tax draw fed from the 4% implied spend) fails here.
     expect(statText('Retirement year')).toBe('2032'); // vm.primaryRetirementYear, NOT bundle.anchorYear (2033).
     expect(statText('Portfolio at retirement')).toBe('$1.0M');
     expect(statText('First-full-year portfolio draw (after tax)')).toBe('$37k');
@@ -365,15 +329,10 @@ describe('BalanceProjectionSwrSection — Monte Carlo tier', () => {
     expect(statText('Portfolio at retirement')).toBe('$1.0M');
     expect(statText('4% rule: implied spend')).toBe('$40k');
     expect(statText('4.5% rule: implied spend')).toBe('$45k');
-    // A fresh mount (not a `rerender`) mirrors how the panel actually learns
-    // of a reroll: a NEW bundle object from 01's resolver, not a mutation of
-    // the old one — the prior render must fully unmount first, or both
-    // panels' identically-labelled Stats collide.
+    // A fresh mount, not a `rerender`, mirrors how the panel learns of a reroll: a new bundle object from the resolver. The prior render must unmount first or both panels' identically labelled Stats collide.
     unmount();
 
-    // Simulates 01's resolver responding to "Show another path" with a new
-    // representative run's bundle — a different portfolio AND both rule
-    // lines (struck off that SAME portfolio figure) move together.
+    // A new representative run's bundle: a different portfolio, and both rule lines (struck off that same portfolio figure) move together.
     result = {
       state: 'ok',
       bundle: makeBundle({
@@ -426,11 +385,7 @@ describe('BalanceProjectionSwrSection — the disclosure is basis-aware', () => 
   });
 
   it('under a two-year MC offset, names the earlier valuation year AND the distinct partial transition year — never the same year twice', () => {
-    // Retirement 2032-07-01 under Typical: anchorYear 2033,
-    // valuationOffsetYears 2 (valuationYear 2031, a full pre-retirement
-    // accumulation year, NOT charted); 2032 is the partial retirement-
-    // transition year, marked via the first row's `isPartialYear` — the
-    // exact case this test guards.
+    // Retirement 2032-07-01 under Typical: anchorYear 2033, valuationOffsetYears 2 (valuation year 2031, a full accumulation year, not charted); 2032 is the partial retirement-transition year, marked via the first row's `isPartialYear`.
     result = {
       state: 'ok',
       bundle: makeBundle({
@@ -452,8 +407,7 @@ describe('BalanceProjectionSwrSection — the disclosure is basis-aware', () => 
     expect(
       screen.getByText(/2032, the year in between, is a partial retirement-transition year/),
     ).toBeInTheDocument();
-    // 2031 — the valuation year, a full accumulation year not even in the
-    // charted window — must never be called the partial year.
+    // 2031, the valuation year and not in the charted window, must never be called the partial year.
     expect(screen.queryByText(/2031 is a partial year/)).not.toBeInTheDocument();
   });
 });

@@ -1,31 +1,5 @@
-/**
- * `ThrottlerStorage` backed by the shared `ThrottleCounterRepository`.
- * Wired into `ThrottlerModule` in
- * `app.module.ts` in place of `@nestjs/throttler`'s default per-process
- * `ThrottlerStorageService`, so the global `ThrottlerGuard`'s count is the
- * same across every warm Lambda instance rather than per-instance.
- *
- * Owns four things: the atomic increment (delegated
- * to the repository), the expiry-from-stored-value window rule (also the
- * repository's job), the store-call deadline, and the bounded degraded-mode
- * fallback with its observability.
- *
- * **Failure policy — bounded degraded mode, not fail-open or fail-closed.**
- * A DynamoDB blip must never turn into an outage for an app holding
- * people's retirement plans (fail-closed), but it also must not silently
- * restore today's no-protection state without anyone finding out (plain
- * fail-open). So a failed or slow store call falls back to the package's
- * own in-memory `ThrottlerStorageService` — today's per-instance behaviour,
- * never worse — held as a single per-process instance here, and the
- * degradation is reported once per episode (a structured warning + an
- * allow-listed CloudWatch metric), not once per request: a store outage
- * means every request fails, and per-request emission would turn a
- * dependency blip into a log flood and a second incident. An episode isn't
- * over on the first success, either — the common DynamoDB failure shape is
- * a flap (fail, succeed, fail), not a clean outage, so the episode only
- * closes (and a distinct recovery line logs) once the store has gone
- * `RECOVERY_QUIET_MS` without another failure.
- */
+// `ThrottlerStorage` backed by ThrottleCounterRepository so the global ThrottlerGuard counts across warm Lambda instances. Failure
+// policy: a failed or slow store call degrades to the in-memory storage, reported once per episode.
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { ThrottlerStorage } from '@nestjs/throttler';
@@ -34,44 +8,25 @@ import type { EnvConfig } from '../common/env.config.js';
 import { emitOperationalMetric } from '../common/operational-metrics.js';
 import { ThrottleCounterRepository } from '../dynamo/throttle-counter.repository.js';
 
-// `ThrottlerStorageRecord` isn't re-exported from the package root (only
-// `ThrottlerStorage` is) — derive it structurally from the interface method
-// this class implements rather than reaching into the package's dist path.
+// `ThrottlerStorageRecord` is not exported from the package root; derive it from the interface method.
 type ThrottlerStorageRecord = Awaited<ReturnType<ThrottlerStorage['increment']>>;
 
-/**
- * Store-call deadline (a couple of hundred milliseconds). Bounds a
- * hung DynamoDB dependency without touching the shared `DYNAMO_DOC_CLIENT`'s
- * own retry/timeout policy, which every other repository also relies on.
- */
+// Store-call deadline: bounds a hung DynamoDB dependency without touching the shared client retry policy.
 const STORE_DEADLINE_MS = 200;
 
-/**
- * How long the store must succeed continuously before a degradation episode
- * is considered over. A partial DynamoDB failure (a p99 latency shift, a hot
- * counter item, a cold Lambda's first call) flaps — fail, succeed, fail —
- * rather than failing every call the way a total outage does. Clearing the
- * degraded flag on the first success would end the episode on that flap and
- * re-report on the very next failure, collapsing to per-request emission.
- * Requiring a quiet period of sustained success keeps a flapping run inside
- * one episode.
- */
+// Quiet period before a degradation episode ends: DynamoDB failures flap, and clearing the flag on the first success
+// would re-report on the next failure and collapse to per-request emission.
 const RECOVERY_QUIET_MS = 60_000;
 
 @Injectable()
 export class DynamoThrottlerStorage implements ThrottlerStorage {
   private readonly logger = new Logger(DynamoThrottlerStorage.name);
-  /** The package's own storage, reused unmodified as the degraded-mode
-   *  fallback — never a reimplementation. */
+  // The package own storage, reused as the degraded-mode fallback.
   private readonly fallback = new ThrottlerStorageService();
   private readonly stack: string;
-  /** True while the current degradation episode has already been reported,
-   *  so a sustained (or flapping) outage logs/emits exactly once until the
-   *  store has recovered for `RECOVERY_QUIET_MS`. */
+  // True while the current episode was already reported, so an outage or flap logs and emits once.
   private degraded = false;
-  /** Set on every failed store call, degraded or not, so a later success can
-   *  tell whether the store has been quiet for long enough to count as
-   *  recovered. */
+  // Set on every failed store call, so a later success can tell whether the store has been quiet long enough.
   private lastFailureAt = 0;
 
   constructor(
@@ -90,16 +45,12 @@ export class DynamoThrottlerStorage implements ThrottlerStorage {
   ): Promise<ThrottlerStorageRecord> {
     const controller = new AbortController();
     const primary = this.repo.increment(key, ttl, controller.signal);
-    // The deadline below can win the race while `primary` is still in
-    // flight; it goes on to reject from the abort a tick later. Attach a
-    // no-op handler now so that later rejection is never unhandled — the
-    // race's loser is intentionally ignored, not a bug.
+    // The deadline can win while `primary` is in flight, which later rejects from the abort; the no-op handler
+    // keeps that loser from being unhandled.
     primary.catch(() => undefined);
     let timer: ReturnType<typeof setTimeout>;
-    // A second, independent bound alongside `abortSignal`: `abortSignal`
-    // asks the SDK to stop the outbound call promptly (saving wasted
-    // DynamoDB capacity), but this class's own deadline guarantee must not
-    // depend on the dependency actually honouring it.
+    // A second bound beside `abortSignal`: the abort asks the SDK to stop, but this class deadline must not depend
+    // on the dependency honouring it.
     const deadline = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
         controller.abort();
@@ -118,13 +69,8 @@ export class DynamoThrottlerStorage implements ThrottlerStorage {
     }
   }
 
-  /**
-   * This app never configures a `blockDuration` distinct from `ttl` (every
-   * `@Throttle` call site omits it, so the guard defaults it to `ttl`), so a
-   * fixed window that blocks until it rolls over — the counter's only
-   * stored notion of "when does this reset" — is equivalent to the
-   * package's separate block-expiry tracking for every route this app has.
-   */
+  // No route sets a `blockDuration` distinct from `ttl`, so a fixed window blocking until it rolls over matches the
+  // package block-expiry tracking.
   private toRecord(hits: number, windowEndMs: number, limit: number): ThrottlerStorageRecord {
     const timeToExpire = Math.max(0, Math.ceil((windowEndMs - Date.now()) / 1000));
     const isBlocked = hits > limit;
@@ -136,14 +82,8 @@ export class DynamoThrottlerStorage implements ThrottlerStorage {
     };
   }
 
-  /**
-   * Once per degradation episode: a structured warning naming the store
-   * error, and the allow-listed `ThrottleStoreDegraded` metric (dev + prod,
-   * mirroring the other security-namespace metrics — never emitted for a
-   * `local` stack). Never logs the throttle key, tracker, or a client IP.
-   * A call that fails while an episode is already open only refreshes
-   * `lastFailureAt` — it never re-reports.
-   */
+  // Once per episode: a structured warning plus the `ThrottleStoreDegraded` metric (never on `local`). Never logs the
+  // throttle key, tracker or client IP.
   private reportDegradation(err: unknown): void {
     this.lastFailureAt = Date.now();
     if (this.degraded) return;
@@ -161,15 +101,8 @@ export class DynamoThrottlerStorage implements ThrottlerStorage {
     }
   }
 
-  /**
-   * Ends the current degradation episode, but only once the store has gone
-   * `RECOVERY_QUIET_MS` without a failure — a single success amid a flapping
-   * failure pattern is not sustained recovery, and clearing the flag on it
-   * would let the very next failure open (and report) a "new" episode that
-   * is really the same incident continuing. Logs a one-line recovery
-   * message distinct from the degradation warning so the two are never
-   * confused in a log search.
-   */
+  // Ends the episode only after `RECOVERY_QUIET_MS` without a failure, since a success amid a flap is not recovery; the
+  // log line differs from the degradation warning.
   private reportRecovery(): void {
     if (!this.degraded) return;
     if (Date.now() - this.lastFailureAt < RECOVERY_QUIET_MS) return;

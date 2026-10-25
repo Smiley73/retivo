@@ -1,29 +1,5 @@
-/**
- * Shared step-up re-authentication primitive.
- *
- * A stateless factor-verification helper — NOT a persisted pending-intent flow.
- * Each sensitive operation calls `verify` with a fresh second-factor proof
- * (TOTP / Email-OTP / passkey assertion), plus an optional
- * password re-verify where the op warrants one, and executes inline on success.
- * Per-operation single-use + freshness are enforced by the underlying factor
- * services:
- *   - TOTP: the matched RFC-6238 time step is consumed per user
- *     (`MfaService.verifyTotpForStepUp`), so a step-up code is single-use.
- *   - Passkey: the challenge lives in the purpose-scoped `stepup:<userId>:<purpose>`
- *     namespace, distinct from the login `mfa:` namespace.
- *   - Email-OTP: the code row is purpose-bound (`<userId>#stepup` carrying a
- *     `purpose`) with its own send budget; change-email keeps the legacy
- *     `<userId>` row (bound by its pending-email intent) — the source is a
- *     parameter so the one helper serves both.
- *
- * This service owns the SINGLE shared factor-eligibility computation
- * (`computeFactors` — `methods` / `recoveryMethods`, mirroring login-MFA)
- * every consumer calls, and emits the `step_up_*` audit family carrying the
- * operation `purpose` + factor `method`. It NEVER logs `currentPassword`, factor
- * codes, or the WebAuthn assertion (only `purpose` + `method` reach `metadata`).
- *
- * See docs/security.md, "Step-up for sensitive actions".
- */
+// Shared step-up re-authentication: a stateless fresh-factor check (TOTP, Email-OTP, passkey) with the single factor-eligibility computation.
+// It emits the `step_up_*` audit and never logs the password, codes or assertion. See docs/security.md, "Step-up for sensitive actions".
 import {
   BadRequestException,
   Injectable,
@@ -39,9 +15,8 @@ import { PasskeyAssertionService } from './passkey-assertion.service.js';
 import { VerifyPasswordService } from './verify-password.service.js';
 
 /**
- * The sensitive operations a step-up can gate. Each value is the purpose stamp
- * for the generic prep endpoints. Used to scope the passkey challenge namespace
- * and the Email-OTP code `purpose`.
+ * The sensitive operations a step-up can gate; each is the purpose stamp that scopes the passkey challenge namespace
+ * and the Email-OTP code.
  */
 export const STEP_UP_PURPOSES = [
   'change_email',
@@ -51,34 +26,22 @@ export const STEP_UP_PURPOSES = [
   'mfa_totp_disable',
   'passkey_remove',
   'workspace_clear',
-  // A stolen bearer session must not be able to
-  // destroy a household's ability to unlock its own data. Two purposes, not
-  // one, so the passkey/Email-OTP challenge namespace + audit trail record
-  // which write shape ran — `replace` covers a PUT that displaces an existing
-  // slot (the canonical `password` slot only when a re-wrap is NOT owed, and
-  // every other existing slot); `delete` covers DELETE unconditionally. See
-  // key-envelope-step-up.ts for the exemption matrix.
+  // A stolen bearer session must not be able to destroy a household ability to unlock its data. `replace` covers a
+  // PUT that displaces an existing slot (the canonical password slot only when a re-wrap is not owed), `delete`
+  // covers DELETE; the split records which write shape ran. See key-envelope-step-up.ts.
   'key_envelope_replace',
   'key_envelope_delete',
-  // Factor-enrollment gate: distinct purposes so
-  // the passkey challenge namespace (`stepup:<userId>:<purpose>`) and the
-  // purpose-bound Email-OTP row cannot be satisfied by a proof produced for
-  // some other operation. Also reused, unchanged, as the purpose for the
-  // matching `confirm-restriction` lift (the server-side check that a
-  // restricted factor's own enrollment predates the reset request rides on
-  // top of this same purpose-scoped proof, not a third purpose).
+  // Factor-enrollment gate: distinct purposes so a proof for another operation cannot satisfy it. Reused for the
+  // matching `confirm-restriction` lift.
   'passkey_enroll',
   'mfa_totp_enroll',
 ] as const;
 
 export type StepUpPurpose = (typeof STEP_UP_PURPOSES)[number];
 
-/** The accepted step-up factor methods. */
 export type StepUpMethod = 'totp' | 'email_otp' | 'passkey';
 
-/** Routine (primary) step-up factors, strongest first (mirrors login-MFA). */
 type StepUpRoutineMethod = 'passkey' | 'totp' | 'email_otp';
-/** Recovery step-up factors. */
 type StepUpRecoveryMethod = 'email_otp';
 
 export interface StepUpFactors {
@@ -90,21 +53,15 @@ export interface StepUpVerifyArgs {
   userId: string;
   purpose: StepUpPurpose;
   method: StepUpMethod;
-  /** Present for the two code factors (totp / email_otp). */
   code?: string;
-  /** Present for `method: 'passkey'` — the WebAuthn assertion. */
   assertion?: AuthenticationResponseJSON;
-  /**
-   * When present, a password re-verify runs BEFORE the factor. Never
-   * logged. The caller decides whether the op warrants it (e.g. encrypted-reset).
-   */
+  /** When present, a password re-verify runs before the factor; never logged. */
   currentPassword?: string;
   ip: string | null;
   userAgent: string | null;
   /**
-   * Email-OTP source. `'stepup'` (default) = the purpose-bound
-   * `<userId>#stepup` row; `'legacy'` = the existing `<userId>` row (change-email,
-   * bound by its own pending-email intent). Ignored for non-email factors.
+   * Email-OTP source: `stepup` (default) is the purpose-bound `<userId>#stepup` row; `legacy` is the `<userId>` row
+   * (change-email, bound by its pending intent).
    */
   emailOtpSource?: 'legacy' | 'stepup';
 }
@@ -122,23 +79,16 @@ export class StepUpService {
   ) {}
 
   /**
-   * The account's eligible step-up factors, computed exactly like login-MFA
-   * builds its challenge `methods` / `recoveryMethods`: routine factors strongest
-   * first — `passkey` when ≥1 is enrolled, `totp` when enrolled, else `email_otp`
-   * as the universal zero-enrollment floor; recovery is always Email-OTP.
-   * Email-OTP is the no-lockout floor, so a
-   * user with a verified email can always complete their own operation.
+   * The account eligible step-up factors, computed like login-MFA `methods` and `recoveryMethods`: passkey when
+   * enrolled, totp when enrolled, else `email_otp` as the no-lockout floor; recovery is always Email-OTP.
    */
   async computeFactors(userId: string): Promise<StepUpFactors> {
     const [mfa, passkeys] = await Promise.all([
       this.userMfa.get(userId),
       this.passkeys.listForUser(userId),
     ]);
-    // A factor restricted post-reset is not an
-    // eligible step-up factor — it stays refused even if named directly (see
-    // `verifyFactor`'s dispatch into `MfaService.verifyTotpForStepUp` /
-    // `PasskeyAssertionService.verifyStepUpAssertion`, both of which check the
-    // resolved row, not this list).
+    // A factor restricted post-reset is not eligible and stays refused if named directly; the verifiers check the
+    // resolved row, not this list.
     const totpEnabled = !!mfa?.totpEnabled && !mfa.totpRestrictedPostReset;
     const hasPasskey = passkeys.some((p) => !p.restrictedPostReset);
     const methods: StepUpRoutineMethod[] = [];
@@ -152,12 +102,9 @@ export class StepUpService {
   }
 
   /**
-   * Verify a fresh second factor for `purpose` on the authenticated session. On
-   * success emits `step_up_passed` and returns the `method` used; on a failed
-   * factor emits `step_up_failed` and throws `MFA_CODE_INVALID` (passkey /
-   * Email-OTP surface their own specific codes on the way out). An optional
-   * `currentPassword` is re-verified first (its own `password_verify*` audit; a
-   * wrong password throws `INVALID_CREDENTIALS` before any factor work).
+   * Verifies a fresh second factor for `purpose` on the session: emits `step_up_passed` and returns the method, or
+   * `step_up_failed` and throws MFA_CODE_INVALID (passkey and Email-OTP surface their own codes). An optional
+   * `currentPassword` is re-verified first.
    */
   async verify(args: StepUpVerifyArgs): Promise<{ method: StepUpMethod; factorId?: string }> {
     if (args.currentPassword !== undefined) {
@@ -173,8 +120,8 @@ export class StepUpService {
     try {
       result = await this.verifyFactor(args);
     } catch (err) {
-      // A factor service threw a typed failure (expired/UV/counter). Record the
-      // step-up failure with op context, then re-surface the specific code.
+      // A factor service threw a typed failure: record the step-up failure with operation context, then rethrow the
+      // specific code.
       await this.recordFailed(args);
       throw err;
     }
@@ -193,21 +140,14 @@ export class StepUpService {
       userAgent: args.userAgent,
       metadata: { purpose: args.purpose, method: args.method },
     });
-    // `factorId` is the resolved passkey
-    // credentialId when `method: 'passkey'` — absent for the code factors
-    // (`totp` resolves to the user's singular TOTP row; `email_otp` has no
-    // enrollment record). Consumed by `confirmRestrictedPasskey` /
-    // `confirmRestrictedTotp` to identify which factor proved the step-up.
+    // `factorId` is the passkey credentialId for `passkey`, absent for the code factors; `confirmRestricted*` uses
+    // it to identify the proving factor.
     return { method: args.method, factorId: result.factorId };
   }
 
   /**
-   * Record a `step_up_failed` audit for a missing-factor rejection — the case
-   * where a gated op demands a fresh factor (flag on) but the caller sent
-   * none, so the op throws `STEP_UP_PROOF_MISSING` BEFORE reaching `verify`.
-   * Keeps missing AND wrong factors both audited for these ops. No
-   * factor work runs; `method: 'none'` marks the absent proof. Callers audit
-   * via this shared method, then throw their op-specific `STEP_UP_PROOF_MISSING`.
+   * Audits `step_up_failed` for a missing proof, so missing and wrong factors are both audited; callers then throw
+   * STEP_UP_PROOF_MISSING. `method: none` marks the absent proof.
    */
   async recordMissingProofFailure(args: {
     userId: string;
@@ -225,12 +165,9 @@ export class StepUpService {
   }
 
   /**
-   * Record a `step_up_failed` audit for a proof naming a factor the operation
-   * does not accept on THIS account — the factor-enrollment gate's refusal of
-   * `email_otp` once an eligible passkey/authenticator exists
-   * (see `FactorEnrollmentGuardService`). No
-   * factor work runs and nothing is consumed; `reason: 'factor_not_eligible'`
-   * keeps it distinguishable from a wrong or missing proof in the audit trail.
+   * Audits `step_up_failed` for a factor the operation does not accept on this account (the enrollment gate refusing
+   * `email_otp` once a passkey or authenticator exists); `reason: factor_not_eligible` separates it from a wrong or
+   * missing proof.
    */
   async recordIneligibleFactorFailure(args: {
     userId: string;
@@ -248,7 +185,7 @@ export class StepUpService {
     });
   }
 
-  /** Dispatch to the per-factor verifier. Never logs the proof. */
+  // Dispatches to the per-factor verifier; never logs the proof.
   private async verifyFactor(
     args: StepUpVerifyArgs,
   ): Promise<{ ok: boolean; factorId?: string }> {
@@ -295,7 +232,7 @@ export class StepUpService {
             message: 'A passkey assertion is required for this factor.',
           });
         }
-        // Throws on every failure mode; a clean return means verified.
+        // Throws on every failure; a clean return means verified.
         const { credentialId } = await this.passkeyAssertions.verifyStepUpAssertion(
           args.userId,
           args.purpose,
@@ -327,19 +264,13 @@ export class StepUpService {
   }
 
   // ---------- Restricted-factor confirmation ----------
-  // Lifts the post-reset restriction on one named factor. Restriction is the
-  // compensating control for the reset→inbox-takeover path; removal is always
-  // available as the escape hatch (already step-up-gated under
-  // `passkey_remove` / `mfa_totp_disable`) when nothing predates the reset.
+  // Lifts the post-reset restriction on one named factor. Removal stays the escape hatch (already step-up-gated) when
+  // nothing predates the reset.
 
   /**
-   * Lift the restriction on ONE named passkey. Requires a fresh step-up proof
-   * from a DIFFERENT, already-enrolled, non-restricted factor whose own
-   * enrollment predates the reset request that opened the window — resolved
-   * and checked server-side (the client never asserts which factor predates
-   * what). Throws `FACTOR_NOT_RESTRICTED` (400) when the named passkey isn't
-   * currently restricted, or `STEP_UP_FACTOR_RESTRICTED` (401) when the
-   * proving factor can't confirm it.
+   * Lifts the restriction on one named passkey. Needs a fresh proof from a different, already-enrolled,
+   * non-restricted factor whose enrollment predates the reset request that opened the window, checked server-side.
+   * Throws FACTOR_NOT_RESTRICTED (400) or STEP_UP_FACTOR_RESTRICTED (401).
    */
   async confirmRestrictedPasskey(args: {
     userId: string;
@@ -383,8 +314,10 @@ export class StepUpService {
     });
   }
 
-  /** Lift the restriction on the user's (singular) TOTP factor. Same proof +
-   * predates-the-reset requirement as {@link confirmRestrictedPasskey}. */
+  /**
+   * Lifts the restriction on the singular TOTP factor, with the same proof and predates-the-reset requirement as
+   * `confirmRestrictedPasskey`.
+   */
   async confirmRestrictedTotp(args: {
     userId: string;
     method: 'totp' | 'passkey';
@@ -414,9 +347,8 @@ export class StepUpService {
       method: args.method,
       factorId,
       restrictedByResetRequestedAt: target.totpRestrictedByResetRequestedAt,
-      // TOTP is a singleton — a proving `method: 'totp'` always resolves to
-      // THIS row below, which is already restricted and fails the
-      // not-restricted check there; no separate exclusion id is needed.
+      // TOTP is a singleton: a proving `totp` resolves to this already-restricted row and fails the not-restricted
+      // check, so no exclusion id is needed.
     });
     await this.userMfa.clearTotpRestriction(args.userId);
     await this.auth.record({
@@ -428,17 +360,9 @@ export class StepUpService {
     });
   }
 
-  /**
-   * Server-side check that the PROVING factor (the one `verify` above just
-   * verified) both is NOT itself restricted and was enrolled BEFORE the reset
-   * request that opened the window being lifted. Restriction never auto-lifts
-   * on read and marking runs at every enrollment write, so "not restricted"
-   * is exactly "enrolled before the request that opened whichever window is
-   * still open on this account" — but this method also checks the exact
-   * timestamp explicitly, so the guarantee doesn't rest solely on that
-   * invariant holding elsewhere. Throws `STEP_UP_FACTOR_RESTRICTED` (401) on
-   * any failure to confirm.
-   */
+  // Checks the proving factor is not itself restricted and was enrolled before the reset request that opened the
+  // window. Restriction never auto-lifts and is marked at every enrollment write, but the timestamp is also checked
+  // explicitly so the guarantee does not rest on that invariant alone. Throws STEP_UP_FACTOR_RESTRICTED (401).
   private async assertProvingFactorPredates(args: {
     userId: string;
     method: 'totp' | 'passkey';
@@ -462,9 +386,8 @@ export class StepUpService {
       return;
     }
 
-    // totp — a singleton factor; `this.userMfa.get` always resolves the SAME
-    // row a restricted TOTP target would, so a TOTP proving itself is caught
-    // by the `totpRestrictedPostReset` check below.
+    // A TOTP proving factor resolves to the same row a restricted TOTP target would, so the
+    // `totpRestrictedPostReset` check catches it.
     const proving = await this.userMfa.get(args.userId);
     if (!proving?.totpEnabled || proving.totpRestrictedPostReset || !proving.enrolledAt) {
       throw cannotConfirm();

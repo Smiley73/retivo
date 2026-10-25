@@ -1,8 +1,4 @@
-/**
- * The activity viewer: newest call first, the sent text shown exactly as captured, the byte count in
- * UTF-8 bytes, no body for an error, Copy writing the verbatim text, live updates while open, the
- * dropped-count note and the empty state, plus the axe smoke with one entry expanded.
- */
+/** The activity viewer: newest call first, verbatim sent text, UTF-8 byte counts, Copy, live updates, dropped note and empty state. */
 import React from 'react';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -82,7 +78,6 @@ describe('AssistantActivityViewer', () => {
   it('shows the sent text exactly as captured, not re-serialized', async () => {
     const user = userEvent.setup();
     setup({ audit: [auditEntry({ payload: VERBATIM, bytes: new TextEncoder().encode(VERBATIM).length })] });
-    // The fixture really would change under a round trip.
     expect(JSON.stringify(JSON.parse(VERBATIM))).not.toBe(VERBATIM);
     await expand(user, 'retivo_status');
     const sent = screen.getByRole('region', { name: /^Sent text for retivo_status/ });

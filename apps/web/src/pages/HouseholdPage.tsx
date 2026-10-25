@@ -1,12 +1,4 @@
-/**
- * Household management page.
- *
- * Reads `householdMembers` from IndexedDB; mutations flow through
- * `queueLocalMutation` and the SyncProvider's polling loop. The
- * primary member is added on first visit (no SetupPage anymore);
- * after that the page mirrors the legacy UX: add/edit/remove
- * secondary, double-confirm if accounts attach to the member.
- */
+/** Household management: add the primary member on first visit, then add, edit and remove the secondary, with a double-confirm when accounts attach to the member. Mutations go through queueLocalMutation. */
 import React, { useMemo, useRef, useState } from 'react';
 import { PlusIcon, CheckIcon, PencilIcon, TrashIcon } from '../components/icons';
 import { useAuth } from '../auth/AuthContext';
@@ -51,10 +43,6 @@ export const HouseholdPage: React.FC = () => {
   const { householdId, me } = useAuth();
   const { notifyPending } = useSync();
   const { confirm, dialog } = useConfirm();
-  // Reactive reads: members + accounts re-read on any write to their store
-  // (single edits via the fine signal, bulk fills via the coarse workspace
-  // event). The add/edit drafts are seeded in click handlers, never from a
-  // load effect, so auto-re-read never clobbers an in-progress member edit.
   const memberQuery = useAggregates('householdMember');
   const accountQuery = useAggregates('account');
   const [error, setError] = useState<string | null>(null);
@@ -62,22 +50,12 @@ export const HouseholdPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState(EMPTY_FORM);
-  // Stable baseline captured when the edit opens, compared against `editForm`
-  // for the dirty guard. Reading `members.find(editingId)` here would let a
-  // background fine-signal re-read (a sync writing the editing member to the
-  // user's draft values) silently flip the guard off; the captured snapshot
-  // keeps the unsaved draft protected regardless of reactive re-reads. This is
-  // why the page is exempt from the form-page rule against reactive reads
-  // despite holding `useUnsavedChangesGuard`: the load effect never
-  // seeded the edit draft/baseline, and the dirty-guard baseline is separately
-  // ref-captured at `onStartEdit`, so an auto-re-read can never clobber it.
+  // A baseline captured when the edit opens, not members.find(editingId): a background re-read (a sync writing the member) would silently flip the dirty guard off.
+  // The edit draft is seeded in click handlers, never a load effect, so a re-read can't clobber it.
   const editBaselineRef = useRef<HouseholdMemberView | null>(null);
 
   const loading = !memberQuery.ready || !accountQuery.ready;
 
-  // Join members to their owned-account counts. Derived from the reactive
-  // hook outputs so the cards refresh after an add/edit/delete or a bulk
-  // fill without a manual reload.
   const members = useMemo<HouseholdMemberView[]>(() => {
     const counts = new Map<string, number>();
     for (const a of accountQuery.aggregates as Aggregate<AccountPayload>[]) {
@@ -315,8 +293,6 @@ export const HouseholdPage: React.FC = () => {
       </Muted>
 
       {!primary ? (
-        // First run: the "add yourself as primary" card stays full-width
-        // above the (not-yet-rendered) member grid.
         <Card>
           <h2 className="m-0 mb-2 text-lg font-semibold text-ink">
             Welcome! Add yourself as the primary member
@@ -339,8 +315,6 @@ export const HouseholdPage: React.FC = () => {
           />
         </Card>
       ) : (
-        // The primary + secondary (or add-member fallback) member cards share
-        // the Graphite Spectrum two-column member grid (`.dash-2`).
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
           {memberCard(primary, {
             editingId,

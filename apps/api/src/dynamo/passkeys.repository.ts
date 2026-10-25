@@ -31,10 +31,8 @@ export class PasskeysRepository extends BaseRepository {
   }
 
   /**
-   * Every passkey row for a user. Loops on `LastEvaluatedKey` — a user's partition can exceed
-   * DynamoDB's 1 MB `Query` response limit if enough credentials are
-   * enrolled (no TTL or count cap on this table), and a single-page read
-   * would silently truncate both `deleteAllForUser` and the account export.
+   * Every passkey row for a user, looping on `LastEvaluatedKey`: the partition has no count cap and can exceed 1 MB,
+   * and one page would truncate `deleteAllForUser` and the export.
    */
   async listForUser(userId: string): Promise<PasskeyRow[]> {
     const out: PasskeyRow[] = [];
@@ -61,25 +59,11 @@ export class PasskeysRepository extends BaseRepository {
   }
 
   /**
-   * Advance the credential's signature counter + stamp `lastUsedAt` as a
-   * conditional write that closes the TOCTOU. Two auth paths (passkey
-   * login + the MFA passkey factor) can race a counter advance for the same
-   * credential; a blind `SET` would let a stale/lost-update assertion overwrite
-   * a newer counter and defeat clone detection.
-   *
-   * The condition preserves the (majority) zero-signCount authenticators and
-   * keys the zero-exception on the STORED counter, never the presented value (a
-   * presented-0 rollback against a stored-9 counter must be rejected, not roll
-   * the stored counter back to 0):
-   *  - `attribute_not_exists(#counter)` — first write after enrollment.
-   *  - `#counter = :zero` — a zero-counter authenticator (most platform /
-   *    synced passkeys report `counter: 0` forever; SimpleWebAuthn only flags a
-   *    regression when both counters are non-zero), so a `0 → 0` assertion still
-   *    updates `lastUsedAt` without rejection.
-   *  - `#counter < :counter` — strict monotonicity once the STORED counter `> 0`,
-   *    so a genuine regression / lost update on a counter-using authenticator is
-   *    rejected (`ConditionalCheckFailedException`); the caller surfaces it as
-   *    `PASSKEY_COUNTER_ANOMALY`.
+   * Advances the signature counter and stamps `lastUsedAt` as a conditional write, since passkey login and the MFA
+   * passkey factor can race and a blind SET would let a stale assertion overwrite a newer counter, defeating clone
+   * detection. The condition keys on the stored counter: `attribute_not_exists` (first write), `= 0` (most platform
+   * and synced passkeys report 0 forever, so 0 to 0 still updates `lastUsedAt`), or `< :counter` (strictly increasing
+   * once the stored counter is above 0). A failure surfaces as `PASSKEY_COUNTER_ANOMALY`.
    */
   async updateCounterAndLastUsed(
     userId: string,
@@ -106,11 +90,8 @@ export class PasskeysRepository extends BaseRepository {
   }
 
   /**
-   * Lift a passkey's post-reset restriction —
-   * removes BOTH restriction attributes so a subsequent read has no leftover
-   * `restrictedByResetRequestedAt` from a cleared restriction. Unconditional:
-   * the caller (`StepUpService.confirmRestrictedPasskey`) has already verified
-   * the fresh proof + the predates-the-reset check before calling this.
+   * Lifts a passkey post-reset restriction, removing both attributes; the caller
+   * (`StepUpService.confirmRestrictedPasskey`) has already verified the proof.
    */
   async clearRestriction(userId: string, credentialId: string): Promise<void> {
     await this.doc.send(
@@ -123,12 +104,8 @@ export class PasskeysRepository extends BaseRepository {
   }
 
   /**
-   * Delete a passkey credential and report whether a row actually existed to delete, via
-   * `ReturnValues: 'ALL_OLD'` (DynamoDB returns the deleted item's attributes only when one was
-   * present). Callers that gate a side effect on an ACTUAL removal — e.g. the factor-change notice,
-   * which must not fire for a no-op delete of an unknown/already-removed credential) — need this
-   * distinction; the endpoint itself stays idempotent (still `204` either
-   * way).
+   * Deletes a credential and reports whether a row existed (`ALL_OLD`), for callers that gate a side effect on an
+   * actual removal, such as the factor-change notice. The endpoint stays idempotent.
    */
   async remove(userId: string, credentialId: string): Promise<boolean> {
     const r = await this.doc.send(
@@ -142,13 +119,9 @@ export class PasskeysRepository extends BaseRepository {
   }
 
   /**
-   * The same credential delete as {@link remove}, as a `TransactWriteItems`
-   * item for the factor-undo consume:
-   * `UsersRepository.consumeFactorUndo` commits it in the SAME transaction
-   * as the single-use token clear, so the credential can only be deleted
-   * while the token that names it is still the active one. Unconditional on
-   * the passkey row itself — a `Delete` of an already-absent row succeeds
-   * (idempotent, like `remove`).
+   * The credential delete as a transact item for the factor-undo consume: committed with the single-use token clear,
+   * so the credential is only deleted while its token is still active. Unconditional on the row, so deleting an
+   * absent row succeeds.
    */
   removeTransactItem(userId: string, credentialId: string): TransactItem {
     return { Delete: { TableName: this.tableName, Key: { userId, credentialId } } };

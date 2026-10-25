@@ -1,10 +1,3 @@
-/**
- * account-bucket — exhaustive AccountType → AccountBucket mapping.
- *
- * Covers every enum value so a future AccountType addition that the
- * classifier doesn't intend to fall through to `pretax` is caught here.
- * HSA maps to its own teal `tax_free` bucket (triple-tax-advantaged).
- */
 import { describe, expect, it } from 'vitest';
 import type { AccountType } from '../db/types';
 import { accountBucket, type AccountBucket } from './account-bucket';

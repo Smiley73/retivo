@@ -1,17 +1,5 @@
-/**
- * Empty-state + grid helpers for `optimizer-mc-runner-helpers.ts`:
- *  - `hasResolvedRetirementDate` — per-scenario probe mirroring the
- *    deterministic worker's check (drives "no-retirement-date" vs
- *    "missing-pia"/"past-window" routing).
- *  - `noRetirementDateOutcome` / `pastWindowOrMissingPia` — pre-seed
- *    outcomes for empty-grid scenarios that never reach the worker.
- *  - `ageYearsToday` — birthdate→years helper feeding `buildCandidateGrid`.
- *
- * Split out of `optimizer-mc-runner-helpers.ts` to keep that file under
- * the ≤400-ln shape cap.
- * Pure mechanical extraction; no
- * logic change.
- */
+// Empty-state and grid helpers split out of `optimizer-mc-runner-helpers.ts`: pre-seed outcomes for empty-grid scenarios that never reach the worker, and the retirement-date probe.
+
 import { resolveScenario, type ScenarioAggregate } from './scenario-resolution';
 import { resolveMemberRetirementDates } from './retirement-date-math';
 import type {
@@ -22,9 +10,7 @@ import type { OptimizerMcOutcome } from './optimizer-mc-runner-types';
 import type { PiaState } from './optimizer-mc-runner-helpers';
 
 export function pastWindowOrMissingPia(piaState: PiaState): OptimizerMcOutcome {
-  // The page derives row variants from `winner === null` (past-window)
-  // + `missingPiaMembers` (both-missing-pia / PIA-not-set cells). Emit
-  // `winner: null` so the page picks the right variant.
+  // `winner: null` is how the page picks the past-window and missing-PIA row variants.
   return {
     kind: 'result',
     winner: null,
@@ -35,20 +21,10 @@ export function pastWindowOrMissingPia(piaState: PiaState): OptimizerMcOutcome {
 }
 
 export function noRetirementDateOutcome(): OptimizerMcOutcome {
-  // Per-scenario empty-state. The page maps this to the
-  // "Set a primary retirement age…" EmptyReasonRow copy.
   return { kind: 'empty', reason: 'no-retirement-date' };
 }
 
-/**
- * Per-scenario "primary's resolved retirement date exists?"
- * probe. Mirrors `hasResolvedRetirementDate` in
- * `claim-age-optimizer.worker.ts`. Walks the scenario chain via
- * `resolveScenario`, then runs `resolveMemberRetirementDates` against
- * the resolved override; returns false when the primary's date can't
- * be resolved (no `retirementAge` override anywhere on the chain, or
- * the primary's birthdate is unusable for date math).
- */
+/** Whether the primary's retirement date resolves for the scenario (mirrors the deterministic worker's check); false with no `retirementAge` on the chain or an unusable birthdate. */
 export function hasResolvedRetirementDate(args: {
   readonly scenarioId: string;
   readonly scenarios: ReadonlyArray<ScenarioAggregate>;

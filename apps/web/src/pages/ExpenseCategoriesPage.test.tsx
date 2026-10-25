@@ -1,8 +1,4 @@
-/**
- * ExpenseCategoriesPage render + mutation tests. Drives the page
- * through fake-indexeddb so listAggregates + queueLocalMutation run
- * end-to-end. Auth/Sync contexts mocked at the module boundary.
- */
+// ExpenseCategoriesPage over fake-indexeddb, with the Auth and Sync contexts mocked at the module boundary.
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -194,7 +190,6 @@ describe('ExpenseCategoriesPage', () => {
     renderPage();
     await screen.findByText('Medical', { selector: 'strong' });
     fireEvent.click(screen.getByRole('button', { name: /^Rename/ }));
-    // The toggle reflects the persisted flag.
     expect(screen.getByRole('switch', { name: 'Medical category' })).toBeChecked();
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Healthcare' } });
     await act(async () => {
@@ -213,7 +208,6 @@ describe('ExpenseCategoriesPage', () => {
     renderPage();
     await screen.findByText('Food');
     fireEvent.click(screen.getByRole('button', { name: /^Rename/ }));
-    // Flip ONLY the toggle (name unchanged). Save becomes visible when dirty.
     fireEvent.click(screen.getByRole('switch', { name: 'Medical category' }));
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
     await act(async () => {
@@ -254,13 +248,10 @@ describe('ExpenseCategoriesPage', () => {
     await seedCategory('cat-1', 'Misc');
     renderPage();
     await screen.findByText('Misc');
-    // Click the row's Delete button to open the in-app confirm modal
-    // (replaced window.confirm for consistency with other pages).
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /^Delete/ }));
     });
-    // The shared confirm (useConfirm) is a React Aria alertdialog;
-    // it renders its own Delete button — pick that one.
+    // The shared confirm (useConfirm) is a React Aria alertdialog with its own Delete button; pick that one.
     const dialog = await screen.findByRole('alertdialog');
     const confirmBtn = Array.from(dialog.querySelectorAll('button')).find(
       (b) => b.textContent?.trim() === 'Delete',
@@ -281,8 +272,7 @@ describe('ExpenseCategoriesPage', () => {
     renderPage();
     expect(await screen.findByText(/No categories yet/i)).toBeInTheDocument();
 
-    // A single-row write fires only the per-store fine signal — no
-    // notifyWorkspaceChanged() — proving the useAggregates subscription wakes.
+    // A single-row write fires only the per-store signal, no notifyWorkspaceChanged(); the useAggregates subscription must still wake.
     await act(async () => {
       await seedCategory('cat-1', 'Housing');
     });
@@ -293,9 +283,6 @@ describe('ExpenseCategoriesPage', () => {
   });
 });
 
-// Characterization net for the BlockOnDeleteDialog extraction.
-// These exercise the *existing local* dialog and must stay green
-// through the extraction so the refactor is provably byte-identical.
 describe('ExpenseCategoriesPage — block-on-delete dialog (characterization)', () => {
   beforeEach(() => {
     setupContexts();

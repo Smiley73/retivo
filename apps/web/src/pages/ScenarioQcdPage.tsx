@@ -1,18 +1,5 @@
-/**
- * QCD sub-screen at /scenarios/:id/qcd.
- *
- * A dedicated list editor for the per-scenario Qualified Charitable
- * Distributions: each entry directs a fixed REAL annual gift from a designated
- * traditional IRA (a `RETIREMENT_IRA` with `PRE_TAX` treatment) owned by the
- * chosen member to charity at 70½+. The gift stays out of that member's taxable
- * income, and once required minimum distributions apply it counts toward them.
- *
- * Mirrors ScenarioRothConversionsPage's data-load shape: a mount-only load (no
- * workspace-revision dep: an explicit-Save
- * guarded editor must not remount mid-edit and drop the draft), then hosts the
- * non-modal QcdEditor keyed to the scenario version so a successful save reload
- * remounts it clean.
- */
+/** /scenarios/:id/qcd: list editor for per-scenario Qualified Charitable Distributions, each a fixed real annual gift from a traditional IRA to charity at 70½+ that stays out of taxable income and counts toward RMDs.
+* Mount-only load: an explicit-Save guarded editor must not remount mid-edit and drop the draft. */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAuth } from '../auth/AuthContext';
@@ -46,9 +33,7 @@ export const ScenarioQcdPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Reads + applies the workspace data. THROWS on failure so the post-save
-  // caller can surface the distinct "saved; refresh failed" state. The mount
-  // loader below wraps this in its own try/catch.
+  // Throws on failure so the post-save caller can surface the distinct "saved; refresh failed" state.
   const loadData = useCallback(async () => {
     const [allScenarios, allMembers, allAccounts] = await Promise.all([
       listAggregates('scenario') as Promise<Aggregate<ScenarioPayload>[]>,
@@ -73,8 +58,6 @@ export const ScenarioQcdPage: React.FC = () => {
     }
   }, [loadData]);
 
-  // Mount-only load (no workspace revision) so a mid-edit bulk event cannot
-  // remount the editor and drop the draft.
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -135,9 +118,7 @@ export const ScenarioQcdPage: React.FC = () => {
       >
         {TAX_SNAPSHOT_NOTE}
       </InlineDisclaimerCard>
-      {/* Remount key keyed to the just-saved version: a successful save reload
-          re-fetches the version-bumped scenario, the key changes, and the
-          editor remounts clean so Save re-disables. */}
+      {/* Keyed to the just-saved version so a successful save reload remounts the editor clean and Save re-disables. */}
       <QcdEditor
         key={`qcd-${scenario.id}-${scenario.version}`}
         scenario={scenario}
@@ -148,8 +129,7 @@ export const ScenarioQcdPage: React.FC = () => {
         backPath={backPath}
         onSaved={async () => {
           notifyPending();
-          // Propagate a reload failure so the editor can show the
-          // "saved; refresh failed" state — the save is already durable.
+          // Propagate a reload failure so the editor can show "saved; refresh failed": the save is already durable.
           await loadData();
         }}
       />

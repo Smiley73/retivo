@@ -1,15 +1,4 @@
-/**
- * WithdrawalStrategyEditor — Strategy-tab layman description.
- *
- * Covers: the Strategy tab renders a plain-English description of the seeded
- * strategy below the picker; switching the picker swaps the description to the
- * new kind's copy; every StrategyKind has a non-empty description that renders;
- * a11y smoke on the rendered editor. (The page-level intro copy — now the
- * PageHeader subtitle — is asserted in ScenarioWithdrawalStrategyPage.test.)
- *
- * Focused file (not part of the ScenarioWithdrawalStrategyCards.editor test,
- * which is already over the 800-line shape cap).
- */
+// WithdrawalStrategyEditor Strategy-tab description: the seeded strategy's plain-English description below the picker, swapped on switching, and non-empty for every StrategyKind. The page-level intro (the PageHeader subtitle) is asserted in ScenarioWithdrawalStrategyPage.test.
 import 'fake-indexeddb/auto';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -87,13 +76,11 @@ describe('WithdrawalStrategyEditor — Strategy-tab description', () => {
     await screen.findByRole('tab', { name: /Strategy/ });
     const description = screen.getByText(STRATEGY_DESCRIPTIONS.taxEfficient);
     expect(description).toBeTruthy();
-    // AGENTS Typography: body-copy surfaces render at text-sm.
     expect(description).toHaveClass('text-sm');
   });
 
   it('swaps the description text when the picker selects a different kind', async () => {
-    // Seed proportional (whose description shares no substring with rothFirst's)
-    // so the post-switch assertion cannot false-pass on shared copy.
+    // Seed proportional (whose description shares no substring with rothFirst's) so the post-switch assertion can't false-pass on shared copy.
     renderModalForKind('proportional');
     await screen.findByRole('tab', { name: /Strategy/ });
     expect(screen.getByText(STRATEGY_DESCRIPTIONS.proportional)).toBeTruthy();
@@ -106,8 +93,6 @@ describe('WithdrawalStrategyEditor — Strategy-tab description', () => {
     expect(screen.queryByText(STRATEGY_DESCRIPTIONS.proportional)).toBeNull();
   });
 
-  // The four offered strategies (the retired Combined Pot description is no
-  // longer surfaced in the picker).
   it.each(
     (['taxEfficient', 'proportional', 'rothFirst', 'customOrder'] as StrategyKind[]).map(
       (kind) => ({ kind }),

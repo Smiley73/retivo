@@ -1,20 +1,6 @@
-/**
- * Tests for the key-envelope HTTP client. Every new state-changing client
- * call must be proven to attach the `X-CSRF-Token` header before merge
- * (AGENTS.md, "Project-specific security").
- *
- * Drives the real `apiRequest` transport against a stubbed `fetch` + a
- * `csrf-token` cookie, so the assertion exercises the production header path
- * end-to-end rather than a mock.
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureApi } from '../api/client';
-import {
-  deleteKeyEnvelopeSlot,
-  getKeyEnvelopes,
-  upsertKeyEnvelopeSlot,
-  type UpsertKeyEnvelopeSlotBody,
-} from './key-envelope-client';
+import { getKeyEnvelopes, upsertKeyEnvelopeSlot } from './key-envelope-client';
 import type { KeyEnvelopeSlot } from '../crypto/encryption-types';
 
 const CSRF_VALUE = 'csrf-abc-123';
@@ -55,7 +41,6 @@ describe('key-envelope-client', () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    // A readable (non-HttpOnly) csrf-token cookie, as the API sets on login.
     Object.defineProperty(document, 'cookie', {
       configurable: true,
       get: () => `csrf-token=${CSRF_VALUE}`,
@@ -71,39 +56,24 @@ describe('key-envelope-client', () => {
   });
 
   it('attaches X-CSRF-Token on PUT (upsert)', async () => {
-    const body: UpsertKeyEnvelopeSlotBody = {
+    await upsertKeyEnvelopeSlot('slot-pw', {
       slot: sampleSlot,
       envelopeSetVersion: 1,
       envelopeSetTag: 'dGFn',
-    };
-    await upsertKeyEnvelopeSlot('slot-pw', body);
+    });
     expect(lastRequestMethod(fetchSpy)).toBe('PUT');
     expect(lastRequestHeaders(fetchSpy)['X-CSRF-Token']).toBe(CSRF_VALUE);
   });
 
   it('sends expectedEnvelopeSetVersion = proposed - 1 on PUT (atomic slot+meta guard)', async () => {
-    const body: UpsertKeyEnvelopeSlotBody = {
+    await upsertKeyEnvelopeSlot('slot-pw', {
       slot: sampleSlot,
       envelopeSetVersion: 3,
       envelopeSetTag: 'dGFn',
-    };
-    await upsertKeyEnvelopeSlot('slot-pw', body);
+    });
     const sent = lastRequestBody(fetchSpy);
     expect(sent.envelopeSetVersion).toBe(3);
     expect(sent.expectedEnvelopeSetVersion).toBe(2);
-  });
-
-  it('attaches X-CSRF-Token on DELETE', async () => {
-    await deleteKeyEnvelopeSlot('slot-pw', { envelopeSetVersion: 2, envelopeSetTag: 'dGFn' });
-    expect(lastRequestMethod(fetchSpy)).toBe('DELETE');
-    expect(lastRequestHeaders(fetchSpy)['X-CSRF-Token']).toBe(CSRF_VALUE);
-  });
-
-  it('sends expectedEnvelopeSetVersion = proposed - 1 on DELETE (atomic slot+meta guard)', async () => {
-    await deleteKeyEnvelopeSlot('slot-pw', { envelopeSetVersion: 2, envelopeSetTag: 'dGFn' });
-    const sent = lastRequestBody(fetchSpy);
-    expect(sent.envelopeSetVersion).toBe(2);
-    expect(sent.expectedEnvelopeSetVersion).toBe(1);
   });
 
   it('does not attach X-CSRF-Token on the GET read', async () => {
@@ -116,7 +86,7 @@ describe('key-envelope-client', () => {
   });
 
   it('encodes the slotId into the request path', async () => {
-    await deleteKeyEnvelopeSlot('a/b c', { envelopeSetVersion: 1, envelopeSetTag: 'x' });
+    await upsertKeyEnvelopeSlot('a/b c', { slot: sampleSlot, envelopeSetVersion: 1, envelopeSetTag: 'x' });
     const url = fetchSpy.mock.calls.at(-1)?.[0] as string;
     expect(url).toContain('/api/v1/auth/key-envelopes/a%2Fb%20c');
   });

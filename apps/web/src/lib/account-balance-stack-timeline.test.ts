@@ -1,14 +1,3 @@
-/**
- * account-balance-stack-timeline — unified-timeline assembly.
- *
- * Behavior-named coverage:
- *  - historical region stays nominal under both display modes; projected region
- *    deflates (the display-toggle contract);
- *  - accumulation source switches between deterministic + MC shapes (the rows
- *    differ when the source differs);
- *  - drawdown overrides accumulation for shared years;
- *  - the boundary year equals the last actual year.
- */
 import { describe, expect, it } from 'vitest';
 import {
   assembleAccountBalanceStackTimeline,
@@ -72,12 +61,10 @@ describe('assembleAccountBalanceStackTimeline', () => {
 
     const histToday = todayDollars.rows.filter((r) => r.year <= 2021);
     const histFuture = futureDollars.rows.filter((r) => r.year <= 2021);
-    // Pre-boundary (historical) values are byte-identical across modes.
     expect(histToday.map((r) => r.accountBalances.get('a')?.balance)).toEqual(
       histFuture.map((r) => r.accountBalances.get('a')?.balance),
     );
 
-    // Post-boundary (projected) values differ: 120 * 0.5 vs 120 * 1.
     const projToday = todayDollars.rows.find((r) => r.year === 2022);
     const projFuture = futureDollars.rows.find((r) => r.year === 2022);
     expect(projToday?.accountBalances.get('a')?.balance).toBe(60);

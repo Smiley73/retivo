@@ -1,14 +1,5 @@
-/**
- * Pure escalating-delay-from-a-running-count derivation.
- * `FailedLoginService`'s password backoff (`failed-login.service.ts`) uses this
- * exact growth shape today; the per-account TOTP lock (`MfaService`) reuses it
- * so the two behave alike without importing it OUT of `FailedLoginService`,
- * which would couple the two controls. Lifted here instead as a small,
- * dependency-free module.
- *
- * The first `graceFailures` misses are free (delay 0); from there the wait
- * grows `2^1, 2^2, ...` seconds, held at `2^maxExponent`.
- */
+// Pure escalating-delay derivation shared by the password backoff (`failed-login.service.ts`) and the per-account TOTP lock (`MfaService`),
+// kept dependency-free so neither control couples to the other.
 
 export interface EscalatingBackoffParams {
   /** Free misses before any wait applies. */
@@ -37,11 +28,9 @@ export interface EscalatingBackoffState {
 }
 
 /**
- * Derive the current window state from a running failure count + the ISO
- * timestamp of the latest failure — never a separately stored/raced "next
- * attempt after" value (mirrors `FailedLoginService.checkBackoff`'s
- * reasoning). A missing/unparseable timestamp fails open (not blocked): the
- * count alone can never lock an account with no recorded failure time.
+ * Derives the window state from a running failure count and the latest failure timestamp, never a stored raceable
+ * "next attempt after". A missing or unparseable timestamp fails open: the count alone cannot lock an account with no
+ * recorded failure.
  */
 export function escalatingBackoffState(
   failureCount: number,

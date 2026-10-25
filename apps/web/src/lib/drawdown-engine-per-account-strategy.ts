@@ -1,27 +1,7 @@
 /**
- * Strategy-aware year-by-year drawdown path extracted from
- * `drawdown-engine-per-account.ts` to keep each file under the 400-line
- * shape cap. Consumed only by `simulatePerAccountMonthly` in the parent
- * module; not part of the public drawdown-engine surface.
- *
- * The RMD floor is computed INSIDE the year loop using
- * each owner's current per-account balances (year-0 uses initial ledger
- * balances; year y>0 uses the year-(y-1) Dec-31 sub-bucket the engine
- * just finished). The per-account floor is enforced per-owner against
- * only that owner's qualifying accounts.
- *
- * Per-account `preWithdrawnCents` / `postWithdrawnCents` surface
- * on `DrawdownAccountYear` so the tax post-pass can route MIXED
- * withdrawals correctly.
- *
- * SHAPE-LIMIT EXCEPTION (recorded justification; CODING_STANDARDS ≤ 800 lines):
- * this file is over the 800-line limit. Why it cannot be split: it
- * is the per-account strategy-aware year loop — the per-run tier prebuild
- * (`prebuiltTiers`) sits on the SAME per-run precompute seam as this file's
- * existing per-year RMD-floor work, so peeling it out would split one cohesive
- * per-run loop for no boundary gain. Trigger: a change adding 5 or more lines
- * here must either refactor the file back under the limit or re-justify this
- * exception in this note.
+ * Strategy-aware year-by-year drawdown loop used by `simulatePerAccountMonthly`: RMD floor, QCD, tax-cashflow
+ * solve, MAGI cap and Fill conversion.
+ * See `docs/math-withdrawals.md` ("How a year runs").
  */
 import { monthlyEquivalent } from './projection-engine/monthly-conversion';
 import type { MonthlyCashflowSeries } from './monthly-cashflow';
@@ -82,45 +62,34 @@ import {
 } from './guardrails';
 
 /**
- * Per-path downturn-guardrail runtime context threaded
- * into `runYearByYearStrategyAware`. Present only on a Monte Carlo named-
- * strategy path with an ENABLED config; absent everywhere else.
- *
- * The engine fires the guardrail once per drawdown year at the year-START
- * (pre-withdrawal) pool: it computes the funded ratio from the currently-
- * settled spend path, steps the settled spend factor via `applyGuardrailStep`,
- * then SCALES that year's 12 `expense` months in place by the resulting factor.
- * The scaled expense flows through the whole year (RMD/tax solve + monthly
- * withdrawal) so BOTH tax passes see the same guardrail-adjusted spending
- * — the caller runs the guardrail on pass 1 only, leaving the already-
- * scaled shared `expense` array for pass 2 (no re-evaluation).
- *
- * All REAL series are today's-dollar, index 0 = the first drawdown year, length
- * = the drawdown-year count.
+ * Per-path downturn-guardrail runtime context, present only on a Monte Carlo named-strategy path with an
+ * enabled config.
+ * At each year start the engine steps the settled spend factor from the funded ratio and scales that year's
+ * 12 `expense` months in place; the caller runs it on tax pass 1 only, so pass 2 reuses the scaled array.
+ * Real series are today's dollars, indexed from the first drawdown year.
  */
 export interface GuardrailRuntimeContext {
   readonly config: GuardrailConfig;
-  /** REAL total spending on the 100% baseline path, per drawdown year. */
+  /** Real total spending on the 100% baseline path, per drawdown year. */
   readonly baselineTotalRealByYear: readonly number[];
-  /** REAL net spending need (total − guaranteed income) on the baseline
-   *  path, per drawdown year. */
+  /** Real net spending need (total less guaranteed income) on the baseline path, per drawdown year. */
   readonly baselineNetNeedRealByYear: readonly number[];
-  /** REAL essential-only spending on the baseline path, per drawdown year —
-   *  the per-year cut floor. */
+  /** Real essential-only spending on the baseline path, per drawdown year: the per-year cut floor. */
   readonly essentialRealByYear: readonly number[];
-  /** Cumulative CPI factor at the START of each drawdown year (this path's
-   *  own sampled CPI), index 0 = first drawdown year. Deflates the nominal
-   *  year-start pool to today's dollars. */
+  /**
+   * Cumulative CPI factor at the start of each drawdown year (this path's sampled CPI); deflates the nominal
+   * year-start pool to today's dollars.
+   */
   readonly cumCpiAtYearStart: readonly number[];
   /** Effective-tax gross-up fraction for the funded-ratio liability. */
   readonly effectiveTaxRate: number;
-  /** Mutable per-year output: the settled spend factor the guardrail applied
-   *  to each year (index 0 = first drawdown year). Filled by the engine on the
-   *  pass it evaluates; length = drawdown-year count. */
+  /**
+   * Mutable per-year output: the settled spend factor applied to each year, filled on the pass that evaluates
+   * it.
+   */
   readonly appliedFactorByYear: number[];
 }
 
-/** Stamp the tax-cashflow diagnostic fields onto a year row. */
 function stampTaxCashflowRow(row: DrawdownYear, outcome: TaxCashflowYearOutcome): void {
   row.federalTaxCashNeedCents = outcome.federalTaxCashNeedCents;
   row.irmaaWithheldFromSsCents = outcome.irmaaWithheldFromSsCents;
@@ -135,16 +104,9 @@ function stampTaxCashflowRow(row: DrawdownYear, outcome: TaxCashflowYearOutcome)
 
 export type {  MagiCapRuntimeConfig,   } from './drawdown-engine-per-account-strategy-helpers';
 
-/** Read a monthly cashflow series into a typed buffer of length `stepCount`.
- *  Exported for unit testing the fast path — not part of the module's
- *  public API. */
-export function readSeriesIntoBuffer(series: MonthlyCashflowSeries, stepCount: number): Float64Array {
-  // An exact-length `Float64Array` is already the buffer we would
-  // build — return it directly (no defensive copy). Verified safe: the resulting
-  // `state.deposits` / `state.depositsPost` are only ever READ downstream
-  // (`applyMonthlyDeposits`, drawdown-engine-per-account-strategy-cap.ts), never
-  // written, and the MC caller's per-path buffers are private. A shorter (or
-  // non-typed) array still zero-pads via the copy path below.
+function readSeriesIntoBuffer(series: MonthlyCashflowSeries, stepCount: number): Float64Array {
+  // An exact-length `Float64Array` is returned as is: downstream only reads `deposits` and `depositsPost`,
+  // and the MC per-path buffers are private. Anything shorter or untyped zero-pads via the copy below.
   if (series.values instanceof Float64Array && series.values.length === stepCount) {
     return series.values;
   }
@@ -155,10 +117,6 @@ export function readSeriesIntoBuffer(series: MonthlyCashflowSeries, stepCount: n
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface RunYearByYearArgs {
   readonly input: DrawdownInput;
   readonly yearCount: number;
@@ -166,37 +124,35 @@ export interface RunYearByYearArgs {
   readonly expense: Float64Array;
   readonly income: Float64Array;
   readonly householdDeposit: Float64Array;
-  /** Strategy kind for the year-by-year path. `proportional` distributes
-   *  proportional-to-balance across all accounts (single tier); others use
-   *  tax-class priority ordering. */
+  /** Strategy kind; `proportional` is one balance-proportional tier, the others use tax-class priority. */
   readonly strategyKind: StrategyAwareKind;
-  /** Per-account RMD context. When undefined the engine skips RMD
-   *  enforcement entirely (legacy behaviour for callers that haven't
-   *  threaded it yet). */
+  /** Per-account RMD context; when undefined the engine skips RMD enforcement. */
   readonly rmdContext?: RmdContextInput;
-  /** Per-owner QCD context. When supplied, the engine runs the
-   *  70½-gated forced-outflow pass each year before the RMD floor pre-pass. */
+  /**
+   * Per-owner QCD context; when supplied, the 70½-gated forced-outflow pass runs each year before the RMD
+   * floor pre-pass.
+   */
   readonly qcdContext?: QcdContextInput;
-  /** Pre-built custom-order tier arrays (state indices). Required when
-   *  `strategyKind === 'customOrder'`. Tier[0] drained first. */
+  /**
+   * Pre-built custom-order tier arrays (state indices); required for `customOrder`, tier 0 drained first.
+   */
   readonly customTiers?: ReadonlyArray<ReadonlyArray<number>>;
   /** Excluded account state indices for the custom-order path. */
   readonly excludedIndices?: ReadonlySet<number>;
-  /** MAGI-cap WINDOW SCHEDULE. When supplied,
-   *  the engine selects ≤ 1 active window per projection year
-   *  (`selectActiveMagiCapWindow`) and enforces that window's per-year pre-tax
-   *  withdrawal cap with skip-ahead routing. A gap year is cap-off. Active for
-   *  both strategy-based AND custom-order paths. */
+  /**
+   * MAGI-cap window schedule; the engine selects at most one active window per year
+   * (`selectActiveMagiCapWindow`) and a gap year is cap-off. Applies to preset and custom-order strategies.
+   */
   readonly magiCapWindows?: ReadonlyArray<MagiCapWindowRuntime>;
-  /** Per-year tax-cashflow hook. When supplied, each year's net
-   *  withdrawal target is raised by the solver's tax cashflow need. */
+  /**
+   * Per-year tax-cashflow hook; when supplied, each year's net withdrawal target is raised by the solver's
+   * tax cashflow need.
+   */
   readonly taxCashflow?: TaxCashflowHook;
-  /** Downturn-guardrail runtime context. When supplied AND
-   *  `config.enabled`, the engine fires the funded-ratio spending guardrail at
-   *  each year-START boundary and SCALES that year's `expense` months in place.
-   *  Absent / disabled → no guardrail. Supplied on the pass that EVALUATES the
-   *  factor (tax pass 1); the caller reuses the already-scaled `expense` for
-   *  pass 2. */
+  /**
+   * Downturn-guardrail runtime context; when supplied and enabled, scales each year's `expense` months in
+   * place at the year-start boundary. Supplied on tax pass 1, which evaluates the factor.
+   */
   readonly guardrail?: GuardrailRuntimeContext;
 }
 
@@ -208,57 +164,40 @@ interface YearStepArgs {
   readonly income: Float64Array;
   readonly householdDeposit: Float64Array;
   readonly strategyKind: StrategyAwareKind;
-  /** Per-account RMD floor in dollars. Index aligned with `state`.
-   *  Zero entries skip the per-account forced draw. */
+  /** Per-account RMD floor in dollars, index-aligned with `state`; zero entries skip the forced draw. */
   readonly rmdFloorByAccountDollars: number[];
   readonly perMonthWithdrawal: Float64Array;
   readonly retirementYear: number;
   readonly customTiers?: ReadonlyArray<ReadonlyArray<number>>;
   readonly excludedIndices?: ReadonlySet<number>;
-  /** The per-year ACTIVE window's runtime config, selected from the schedule
-   *  by `selectActiveMagiCapWindow(calendarYear)`. `undefined` in a gap year
-   *  (cap off) or when no schedule was supplied. */
+  /** The active window's runtime config for this year; `undefined` in a gap year or without a schedule. */
   readonly magiCapConfig?: MagiCapRuntimeConfig;
   readonly taxCashflow?: TaxCashflowHook;
-  /** State indices of the HSA-treatment accounts. The year loop runs
-   *  the medical + emergency two-pass HSA routing against these; the ordinary
-   *  router never touches them (`buildStrategyTiers` holds HSA out). */
+  /**
+   * State indices of the HSA accounts, drawn by the medical and emergency passes only (`buildStrategyTiers`
+   * holds them out of the ordinary tiers).
+   */
   readonly hsaIndices: ReadonlyArray<number>;
-  /** Per-month HSA-qualified medical demand in DOLLARS. Sub-slice of
-   *  the same projection that built `expense`; aligned to the run step domain.
-   *  Empty / absent ⇒ 0 every month (medical pass is a no-op). */
+  /**
+   * Per-month HSA-qualified medical demand in dollars, aligned to the run step domain; empty or absent means
+   * 0 and the medical pass does nothing.
+   */
   readonly medicalDemand: Float64Array;
-  /** QCD pre-pass outcome for the year. Already debited the gift from
-   *  the source IRA + reduced the IRA-pool RMD floor before this step ran;
-   *  carried here only to stamp `qcdCents` / `netTaxableRmdCents` on the row.
-   *  Undefined → no QCD context. */
+  /**
+   * QCD pre-pass outcome for the year, carried only to stamp `qcdCents` and `netTaxableRmdCents` on the row.
+   */
   readonly qcdResult?: QcdPrePassResult;
-  /** Tiers built ONCE per `runYearByYearStrategyAware` call
-   *  (never for `customOrder`). Both per-month consumers (the cap-active
-   *  preset branch below, `distributeWithdrawalByStrategy`) fall back to
-   *  building when absent, so non-MC / pre-feature callers are unchanged. */
+  /**
+   * Tiers built once per `runYearByYearStrategyAware` call (never for `customOrder`); consumers build their
+   * own when absent.
+   */
   readonly prebuiltTiers?: ReadonlyArray<ReadonlyArray<number>>;
 }
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-
 /**
- * Year-by-year per-account drawdown that respects withdrawal-order
- * strategy and (when `rmdContext` supplied) the per-owner RMD floor.
- *
- * Algorithm per year:
- *   1. Compute the per-account RMD floor from each qualifying
- *      account's pre-tax sub-bucket entering the year. Year-0 uses
- *      `accountsIn[*].initialPre/initialPost`; year y>0 uses the
- *      year-(y-1) Dec-31 sub-bucket carried in `state[a].pre/post`.
- *   2. Apply RMD floor pre-pass: force withdrawals from the owner's
- *      qualifying PRE_TAX + MIXED-preTax accounts; surplus (when forced
- *      > net need) credits the first POST_TAX-non-Roth account.
- *   3. For each month: apply deposits, grow accounts, withdraw remaining
- *      monthly net need in strategy-priority order.
- *   4. Year-end: capture per-account balances + pre/post split totals.
+ * Year-by-year per-account drawdown honoring the withdrawal-order strategy and, with `rmdContext`, the
+ * per-owner RMD floor. Each year: RMD floor, forced-draw pre-pass (surplus credits the first POST_TAX
+ * non-Roth account), then monthly deposits, growth and strategy-ordered withdrawal, and year-end balances.
  */
 export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
   years: DrawdownYear[];
@@ -269,7 +208,6 @@ export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
     customTiers, excludedIndices, magiCapWindows, taxCashflow, qcdContext } = args;
   const stepCount = yearCount * 12;
 
-  // Per-account running state — separate pre/post buckets per account.
   const state: AccountRunState[] = accountsIn.map((a) => ({
     id: a.id,
     pre: a.initialPre,
@@ -279,40 +217,21 @@ export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
     taxTreatment: a.taxTreatment,
     accountType: a.accountType,
     deposits: readSeriesIntoBuffer(a.depositsByMonth, stepCount),
-    // The post-primary spouse contribution's designated-Roth slice routes
-    // to `post` regardless of treatment. Absent on callers with no split.
+    // The post-primary designated-Roth slice routes to `post` regardless of treatment.
     depositsPost: a.depositsPostByMonth
       ? readSeriesIntoBuffer(a.depositsPostByMonth, stepCount)
       : new Float64Array(stepCount),
-    // Carry the MC per-month return series onto run state
-    // so `applyMonthlyGrowth(state, i)` grows on the path's sampled returns.
-    // Absent on the deterministic/optimizer path → scalar-rate growth.
     returnPctByMonth: a.returnPctByMonth,
-    // Carry the per-account floor + HSA mode
-    // onto run state. Eligibility (taxTreatment ∈ {POST_TAX, HSA}) is enforced
-    // by the `floorEligibleDollars` read point, so an entry on an ineligible
-    // account is inert. Absent → no floor.
     floorDollars: a.floorDollars,
     floorHsaMode: a.floorHsaMode,
-    // The inherited marker the per-account draw classifier needs. Sourced from
-    // the RMD context — present on BOTH engines (the deterministic runner builds
-    // it; Monte Carlo rebuilds it in `buildStrategyRmdContext` from the already
-    // serialized `McRmdContext`) — so this adds no new serialized MC input field.
-    // Read from `args.rmdContext`, not `input.rmdContext`: they are the same object
-    // on the deterministic path, and the MC path supplies only the former.
+    // The inherited marker comes from `args.rmdContext` (not `input.rmdContext`: the MC path supplies only
+    // the former), which both engines carry, so no new serialized MC input field is needed.
     inheritedAccount:
       args.rmdContext?.rmdFactsByAccountId?.[a.id]?.inheritedAccount === true,
   }));
 
-  // When the household has NO real POST_TAX-non-Roth account to reinvest
-  // RMD surplus into, pre-append a zero-balance synthetic cash-like carrier so
-  // overflow surplus stays in the portfolio (preserved in `totalBalance`)
-  // instead of leaking out of the projection. Materialized once at run START
-  // (never mid-loop) and APPENDED LAST so every real-account state index — and
-  // the upstream-built custom tiers / excluded indices keyed off `accountsIn`
-  // order — stays aligned. The carrier is a member of `CASH_LIKE_ACCOUNT_TYPES`
-  // (`SAVINGS` + `POST_TAX`) so the existing $0-MAGI / tax-free machinery fires;
-  // it grows 0% (annualRatePct 0) and is spent first via `consumeOverflowCashFirst`.
+  // With no real POST_TAX non-Roth account to take RMD surplus, pre-append a zero-balance cash-like carrier
+  // at run start, last, so state indices and custom tiers stay aligned and surplus stays in `totalBalance`.
   const hasRealPostTaxNonRoth = state.some(
     (st) => isPostTaxNonRoth(st) && !isRmdOverflowCashAccountId(st.id),
   );
@@ -327,34 +246,20 @@ export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
       accountType: 'SAVINGS',
       deposits: new Float64Array(stepCount),
       depositsPost: new Float64Array(stepCount),
-      // No per-month return series → flat 0% growth on every path (incl. MC).
     });
   }
 
-  // HSA medical-reserve routing: HSA accounts are held out of the
-  // ordinary tiers; the year loop runs the medical + emergency two-pass against
-  // these indices. Computed once over the (immutable) account ordering — the
-  // synthetic RMD-overflow carrier is POST_TAX so it never appears here.
-  //
-  // For `customOrder` the drawdown is fully user-controlled — an HSA is
-  // drawn ONLY if the user placed it in a tier. An HSA the user left in
-  // `excludedAccountIds` (the default) must stay UNTOUCHED, so the medical + emergency two-pass must NOT
-  // target an excluded HSA. The built-in strategies pass no `excludedIndices`
-  // (they hold HSA out of the ORDINARY tiers via `buildStrategyTiers` but DO
-  // intend the reserve passes to draw it), so this filter is a no-op for them.
+  // For `customOrder` an HSA is drawn only if the user placed it in a tier, so excluded HSAs stay out of the
+  // medical and emergency passes; built-in strategies pass no `excludedIndices`, so the filter is a no-op for
+  // them.
   const hsaIndices =
     strategyKind === 'customOrder' && excludedIndices !== undefined
       ? hsaStateIndices(state).filter((a) => !excludedIndices.has(a))
       : hsaStateIndices(state);
-  // Tier membership depends only on account type/treatment,
-  // which never changes mid-run — build ONCE here (state ordering is final
-  // now that the synthetic RMD-overflow carrier has been pushed) instead of
-  // every month × year × tax pass. NEVER for `customOrder` (`buildStrategyTiers`
-  // throws on it; custom tiers arrive prebuilt from the caller already).
+  // Tier membership depends only on account type, so build once here after the carrier is pushed; never for
+  // `customOrder`, since `buildStrategyTiers` throws on it.
   const prebuiltTiers =
     strategyKind === 'customOrder' ? undefined : buildStrategyTiers(state, strategyKind);
-  // Per-month medical demand in DOLLARS (the input carries integer cents). Empty
-  // / absent ⇒ all-zero so the medical pass is a no-op.
   const medicalDemand = new Float64Array(stepCount);
   const demandCents = input.medicalDemandByMonth;
   if (demandCents) {
@@ -367,16 +272,12 @@ export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
   const years: DrawdownYear[] = [];
   let depletionYear: number | null = null;
 
-  // The year-START sub-buckets of the PREVIOUS loop iteration — i.e. Dec 31
-  // of `taxYear − 2` — which is the base a first-year-deferral catch-up ("two RMDs
-  // in one year") is sized from. Tracked only when the household actually records
-  // RMD facts, so a fact-free run allocates nothing and stays byte-identical.
+  // Previous iteration's year-start sub-buckets (Dec 31 of `taxYear - 2`): the base of a first-year-deferral
+  // catch-up, tracked only when RMD facts are recorded.
   const tracksRmdFacts = args.rmdContext?.rmdFactsByAccountId !== undefined;
   let twoYearsPriorDollars: { pre: number; post: number }[] | undefined;
 
-  // Downturn guardrail. Per-path state RESETS here at
-  // path entry (never leaks across paths). Evaluated ONLY when an enabled config
-  // is supplied — otherwise the year loop is unaffected.
+  // Guardrail state resets at path entry and never leaks across paths.
   const guardrail = args.guardrail;
   const guardrailActive = guardrail !== undefined && guardrail.config.enabled === true;
   const guardrailState: GuardrailPathState | undefined = guardrailActive
@@ -385,12 +286,8 @@ export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
 
   for (let y = 0; y < yearCount; y += 1) {
     const calendarYear = input.retirementYear + y;
-    // (0) Guardrail firing at the year-START boundary: evaluate the funded
-    // ratio from the CURRENTLY-SETTLED spend path on the pre-withdrawal pool,
-    // step the settled factor, and SCALE this year's 12 `expense` months in
-    // place. Scaling the (per-path-inflated nominal) expense flows the adjusted
-    // spending through the RMD/tax solve AND the monthly withdrawal, so both
-    // tax passes tax the adjusted withdrawals.
+    // Scaling the nominal `expense` months in place flows the adjusted spending through the RMD/tax solve and
+    // the monthly withdrawal, so both tax passes tax the adjusted withdrawals.
     if (guardrailActive && guardrail !== undefined && guardrailState !== undefined) {
       const factor = evaluateGuardrailForYear({
         y,
@@ -404,14 +301,9 @@ export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
         for (let m = 0; m < 12; m += 1) expense[base + m] *= factor;
       }
     }
-    // Snapshot the year-START sub-buckets (= Dec 31 of `calendarYear − 1`) BEFORE
-    // any pass mutates them, then hand the PREVIOUS iteration's snapshot (Dec 31 of
-    // `calendarYear − 2`) to the floor builder as the catch-up base. Withheld for
-    // the first TWO drawdown years — `y === 1`'s predecessor snapshot is the
-    // at-retirement ledger balance, which the deterministic tax floor
-    // (`priorPriorYear = i > 1 ? years[i - 2] : undefined`) does NOT have, so
-    // supplying it here would make the forced draw exceed the floor it is measured
-    // against. Both engines withhold the catch-up for those years instead.
+    // The catch-up base is withheld for the first two drawdown years: the deterministic tax floor has no
+    // `priorPriorYear` then, and supplying the at-retirement balance would make the forced draw exceed the
+    // floor it is measured against.
     const yearStartDollars = tracksRmdFacts
       ? state.map((st) => ({ pre: st.pre, post: st.post }))
       : undefined;
@@ -425,12 +317,8 @@ export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
         })
       : new Array<number>(state.length).fill(0);
     twoYearsPriorDollars = yearStartDollars;
-    // QCD forced-outflow pass — gated on the 70½ floor only,
-    // INDEPENDENT of the RMD trigger age. Runs BEFORE the RMD floor pre-pass so
-    // the forced TAXABLE RMD is `gross − min(Q, gross)`. Debits the gift from the
-    // source IRA + reduces the IRA-pool floor in place; returns the totals stamped
-    // on the year row. Needs the owner→account map from `rmdContext` (always built
-    // when the ledger has accounts).
+    // Runs before the RMD floor pre-pass so the forced taxable RMD is `gross - min(Q, gross)`; the QCD floor
+    // is the 70½ age, independent of the RMD trigger age.
     const qcdResult =
       qcdContext && args.rmdContext
         ? applyQcdPrePass({
@@ -441,9 +329,7 @@ export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
             taxYear: calendarYear,
           })
         : undefined;
-    // Select the per-year active window's runtime config from the cap
-    // schedule (gap year / no schedule → undefined → cap off this year). Leaf
-    // distributors + the conversion fill stay time-unaware.
+    // A gap year or no schedule gives `undefined` (cap off); leaf distributors stay time-unaware.
     const magiCapConfig =
       magiCapWindows !== undefined
         ? selectActiveMagiCapWindow(magiCapWindows, calendarYear)?.config
@@ -475,23 +361,9 @@ export function runYearByYearStrategyAware(args: RunYearByYearArgs): {
   return { years, depletionYear, perMonthWithdrawal };
 }
 
-// ---------------------------------------------------------------------------
-// Downturn guardrail
-// ---------------------------------------------------------------------------
-
-/**
- * Evaluate + apply the guardrail for one drawdown year.
- * Computes the funded ratio from the year-START pre-withdrawal pool against the
- * currently-settled spend path, steps `guardrailState.settledFactor`, and
- * returns the new settled factor to scale this year's spending by.
- *
- * The funded-ratio denominator uses the settled factor ENTERING the year (the
- * factor from prior adjustments, before this year's step): the remaining
- * years `y..end` are held at that factor. Net need on the settled path =
- * `baselineNetNeedReal + baselineTotalReal × (settled − 1)` — the guardrail
- * scales TOTAL spending, and guaranteed income (baselineTotal − baselineNetNeed)
- * is unaffected, so netNeed shifts by the spending delta only.
- */
+// The funded-ratio denominator uses the settled factor entering the year: net need on the settled path is
+// `baselineNetNeedReal + baselineTotalReal * (settled - 1)`, since guaranteed income is unaffected by the
+// spending scale.
 function evaluateGuardrailForYear(args: {
   readonly y: number;
   readonly state: ReadonlyArray<AccountRunState>;
@@ -501,11 +373,9 @@ function evaluateGuardrailForYear(args: {
   const { y, state, guardrail, guardrailState } = args;
   const priorSettled = guardrailState.settledFactor;
 
-  // Year-start (pre-withdrawal) pool, nominal dollars.
   let poolNominal = 0;
   for (let a = 0; a < state.length; a += 1) poolNominal += state[a].pre + state[a].post;
 
-  // Remaining-years settled real net need + flat (real-series pass-through) CPI.
   const n = guardrail.baselineNetNeedRealByYear.length;
   const remaining = Math.max(0, n - y);
   const netNeedReal = new Array<number>(remaining);
@@ -514,8 +384,6 @@ function evaluateGuardrailForYear(args: {
     const idx = y + k;
     const baseNet = guardrail.baselineNetNeedRealByYear[idx] ?? 0;
     const baseTotal = guardrail.baselineTotalRealByYear[idx] ?? 0;
-    // Settled-path net need: scale TOTAL spending by the settled factor; leave
-    // guaranteed income (baseTotal − baseNet) untouched.
     netNeedReal[k] = baseNet + baseTotal * (priorSettled - 1);
     cumOnes[k] = 1; // series is already REAL (path-CPI-independent)
   }
@@ -529,9 +397,7 @@ function evaluateGuardrailForYear(args: {
     effectiveTaxRate: guardrail.effectiveTaxRate,
   });
 
-  // Essential floor factor for this year: essential real spending ÷ baseline
-  // total real spending. A zero-baseline year yields a 0 floor (a cut
-  // could reach 0, but a zero-baseline year has no spending to cut anyway).
+  // A zero-baseline year gets a 0 essential floor; it has no spending to cut.
   const baseTotalThisYear = guardrail.baselineTotalRealByYear[y] ?? 0;
   const essentialThisYear = guardrail.essentialRealByYear[y] ?? 0;
   const essentialFloorFactor =
@@ -546,14 +412,8 @@ function evaluateGuardrailForYear(args: {
   return stepped.factor;
 }
 
-// ---------------------------------------------------------------------------
-// Per-year step
-// ---------------------------------------------------------------------------
-
-/** Run the per-year tax-cashflow solve via the hook. Returns the outcome
- *  (added need + diagnostics) or `undefined` when no hook is configured.
- *  The classifier deep-copies state for a non-committing trial draw, so
- *  the real run state (which RMD already mutated) is untouched. */
+// Runs the tax-cashflow solve via the hook (`undefined` without one); the classifier trial-copies state, so
+// the RMD-mutated run state is untouched.
 function solveYearTaxCashflow(args: {
   readonly taxCashflow: TaxCashflowHook | undefined;
   readonly yearIndex: number;
@@ -563,14 +423,16 @@ function solveYearTaxCashflow(args: {
   readonly customTiers?: ReadonlyArray<ReadonlyArray<number>>;
   readonly excludedIndices?: ReadonlySet<number>;
   readonly rmdResult: RmdFloorPrePassResult;
-  /** Active MAGI-cap config + the post-RMD pre-tax cap budget, threaded
-   *  so the TRIAL classifier routes tax funding to taxable/Roth before capped
-   *  pre-tax — exactly as the committing path does. */
+  /**
+   * Active MAGI-cap config and post-RMD cap budget, so the trial routes tax funding to taxable/Roth before
+   * capped pre-tax.
+   */
   readonly magiCapConfig?: MagiCapRuntimeConfig;
   readonly capRemainingDollars: number | null;
-  /** Within-year per-month deposit/income/expense context so the trial
-   *  simulation mirrors the committing within-year deposits → growth →
-   *  withdrawal sequence (years with post-retirement cash inflows). */
+  /**
+   * Within-year deposit, income and expense context, so the trial mirrors the committing deposit, growth,
+   * withdrawal sequence.
+   */
   readonly within: TrialWithinYearInputs;
 }): TaxCashflowYearOutcome | undefined {
   const { taxCashflow, yearIndex, ordinaryNetNeed, state, strategyKind,
@@ -596,14 +458,12 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
     perMonthWithdrawal, retirementYear, customTiers, excludedIndices, magiCapConfig, taxCashflow,
     hsaIndices, medicalDemand, qcdResult } = args;
   const calendarYear = retirementYear + y;
-  // Snapshot per-account totals over the year for the year row.
   const yearWithdrawnByAcct = new Array<number>(state.length).fill(0);
   const yearPreWithdrawnByAcct = new Array<number>(state.length).fill(0);
   const yearPostWithdrawnByAcct = new Array<number>(state.length).fill(0);
   const yearDepositByAcct = new Array<number>(state.length).fill(0);
-  // HSA medical-qualified dollars per account. The emergency residual
-  // is `committed HSA withdrawn − this` (the residual rule), derived at row
-  // assembly so the two buckets reconcile to the cent.
+  // HSA medical-qualified dollars per account; the emergency residual is `committed - this`, derived at row
+  // assembly so both reconcile to the cent.
   const yearMedicalQualifiedByAcct = new Array<number>(state.length).fill(0);
   let yearWithdrawn = 0;
   let yearDeposit = 0;
@@ -611,36 +471,25 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
   let yearExpense = 0;
   let yearIncome = 0;
 
-  // MAGI-cap tracking for the year.
   let yearMagiCapBreachDollars = 0;
   let yearMagiCapTierOverrideDollars = 0;
-  // Remaining pre-tax cap budget for the year (null = cap not active).
   const capActive = magiCapConfig !== undefined && calendarYear < magiCapConfig.capOffYear;
   let capRemainingDollars = capActive ? magiCapConfig!.capDollars : null;
 
-  // (1) RMD floor pre-pass at year-start. The MANDATORY forced draw only —
-  // the surplus disposition is deferred to AFTER the tax solve so the
-  // tax portion of the forced RMD is funded out of the portfolio, not
-  // reinvested back into it.
+  // RMD forced draw only: the surplus disposition waits for the tax solve so the tax portion of the forced
+  // RMD is funded from the portfolio, not reinvested.
   const yearNetNeed = sumYearWindow(expense, income, y);
   const rmdResult = applyRmdFloorPrePass({
     state,
     rmdFloorByAccountDollars,
   });
-  // Record RMD forced-draw per-account effects. The pre-pass draws ONLY from
-  // the pre-tax bucket (qualifying accounts), so the withdrawn amount
-  // lands entirely in `pre`. (Surplus deposits are recorded after the tax
-  // solve via `disposeRmdSurplus`.)
   for (let a = 0; a < state.length; a += 1) {
     yearWithdrawnByAcct[a] += rmdResult.preTaxWithdrawn[a];
     yearPreWithdrawnByAcct[a] += rmdResult.preTaxWithdrawn[a];
     yearWithdrawn += rmdResult.preTaxWithdrawn[a];
   }
-  // RMD pre-pass may itself draw pre-tax dollars — deduct from cap budget.
-  // When the forced RMD pre-tax exceeds the cap, the overage is an
-  // unavoidable cap breach (RMD is mandatory). Record the excess in
-  // `yearMagiCapBreachDollars` so the UI reports the breach even when the
-  // year's discretionary withdrawals stay within cap.
+  // The forced RMD may itself exceed the cap; that overage is an unavoidable breach recorded in
+  // `yearMagiCapBreachDollars`.
   if (capRemainingDollars !== null) {
     const rmdPreTax = rmdResult.totalForcedPreTaxWithdrawn;
     if (rmdPreTax > capRemainingDollars) {
@@ -649,32 +498,19 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
     capRemainingDollars = Math.max(0, capRemainingDollars - rmdPreTax);
   }
 
-  // (1b) Tax-cashflow solve. Raise the year's net need by the
-  // solver's tax cashflow need so federal tax + the IRMAA cash portion
-  // (minus the ACA PTC offset) are funded from the portfolio. The added
-  // need is spread across the months proportional to monthly net need
-  // (evenly when there is no ordinary need, e.g. an all-RMD year).
+  // The tax cashflow need is spread across the months proportionally to monthly net need, evenly when there
+  // is none.
   const taxOutcome = solveYearTaxCashflow({
     taxCashflow, yearIndex: y, ordinaryNetNeed: yearNetNeed,
     state, strategyKind, customTiers, excludedIndices, rmdResult,
-    // Thread the active cap + post-RMD budget so the trial classifier
-    // routes tax funding the same cap-aware way the committing path does.
     magiCapConfig, capRemainingDollars,
-    // Thread the within-year per-month deposit/income/expense context so
-    // the trial sim mirrors the committing deposits → growth → withdrawal order.
-    // Also thread the HSA indices + medical demand so the trial mirrors the
-    // committing two-pass HSA routing (medical-first, emergency-after).
     within: { yearIndex: y, expense, income, householdDeposit, yearNetNeed, hsaIndices, medicalDemand },
   });
   const taxAddedNeed = taxOutcome?.addedNeedDollars ?? 0;
 
-  // (1c) RMD surplus disposition AFTER the tax solve. The retained
-  // surplus excludes the same-year tax cashflow add-on, because in an over-RMD
-  // year the monthly RMD credit drives `monthTargetGross → 0` and the tax cash
-  // is funded out of the forced RMD itself. Runs BEFORE the monthly loop so the
-  // synthetic carrier balance exists for any later-year spend-first (same-year
-  // spend cannot occur — `monthTargetGross → 0` in a surplus year). The deposit
-  // is a transfer (no income), so it does not affect the tax solve above.
+  // Surplus disposition runs after the tax solve (the retained surplus excludes the tax add-on, which the
+  // forced RMD funds in an over-RMD year) and before the monthly loop, so the carrier exists for later-year
+  // spend-first. The deposit is a transfer, not income.
   const surplusResult = disposeRmdSurplus({
     state,
     totalForcedPreTaxWithdrawn: rmdResult.totalForcedPreTaxWithdrawn,
@@ -694,7 +530,6 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
     const taxMonthShare =
       yearNetNeed > 0 ? ordinaryMonthlyNeed / yearNetNeed : 1 / 12;
     const monthlyNetNeed = ordinaryMonthlyNeed + taxAddedNeed * taxMonthShare;
-    // Apply deposits (per-account + household-split).
     const depositSum = applyMonthlyDeposits({
       state,
       stepIdx: i,
@@ -702,23 +537,13 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
       yearDepositByAcct,
     });
     yearDeposit += depositSum;
-    // Apply monthly growth — captured in yearGrowth. Pass the step index so
-    // an MC path grows on its per-month sampled returns; the
-    // deterministic path (no `returnPctByMonth`) ignores it and uses the
-    // scalar monthly rate.
+    // The step index lets an MC path grow on its per-month sampled returns.
     yearGrowth += applyMonthlyGrowth(state, i);
-    // Distribute month's needed withdrawal across strategy tiers.
-    // The portion of the month's need still covered after the RMD
-    // pre-pass credit. Spread the credit proportional to the ORDINARY
-    // monthly need (RMD funds ordinary spending, not the tax add-on).
+    // The RMD credit is spread by the ordinary monthly need: RMD funds ordinary spending, not the tax add-on.
     const monthShareOfYearNeed = yearNetNeed > 0 ? ordinaryMonthlyNeed / yearNetNeed : 0;
     const monthRmdCredit = rmdResult.totalForcedPreTaxWithdrawn * monthShareOfYearNeed;
     const monthTargetGross = Math.max(0, monthlyNetNeed - monthRmdCredit);
 
-    // Universal spend-first: consume the synthetic RMD-overflow cash carrier
-    // for this month's discretionary need BEFORE the strategy router draws any
-    // real account — strategy-agnostic, so held cash is always spent before
-    // tapping pre-tax again (reducing this year's discretionary pre-tax draw).
     const cashSpent = consumeOverflowCashFirst({
       state,
       target: monthTargetGross,
@@ -727,11 +552,8 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
     });
     const afterCashTarget = monthTargetGross - cashSpent;
 
-    // HSA PASS A — medical-qualified (pinned before the ordinary drain).
-    // Fund modeled `isMedical` demand from HSA balances tax-free, up to
-    // min(this month's remaining need, the month's medical demand, HSA balance).
-    // Fires only when a positive portfolio need exists, so surplus-income years
-    // leave HSA untouched.
+    // HSA pass A: fund modeled medical demand tax-free, up to min(remaining need, medical demand, HSA
+    // balance), only when a positive portfolio need exists.
     const medicalHsaSpent = drawHsaMedical({
       state,
       hsaIndices,
@@ -745,9 +567,6 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
 
     let monthWithdrawn: number;
     if (strategyKind === 'customOrder' && customTiers !== undefined) {
-      // Custom-order path with optional MAGI-cap enforcement:
-      // accounts drain within each tier in the user-specified order, diverting
-      // to a cap-safe source only at the breach dollar.
       monthWithdrawn = distributeWithdrawalByCustomTiersWithCap({
         state,
         tiers: customTiers,
@@ -766,11 +585,6 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
         sequentialWithinTier: true,
       });
     } else if (capRemainingDollars !== null && magiCapConfig !== undefined) {
-      // Preset strategy with an active MAGI cap (the cap applies to all
-      // named strategies). Build tiers from the preset strategy and
-      // route through the cap-aware distributor.
-      // strategyKind !== 'customOrder' guaranteed by the outer if-branch above.
-      // Reuse the per-run prebuilt tiers when available.
       const presetTiers = args.prebuiltTiers ?? buildStrategyTiers(state, strategyKind);
       monthWithdrawn = distributeWithdrawalByCustomTiersWithCap({
         state,
@@ -796,15 +610,12 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
         yearWithdrawnByAcct,
         yearPreWithdrawnByAcct,
         yearPostWithdrawnByAcct,
-        // Reuse the per-run prebuilt tiers when available.
         tiers: args.prebuiltTiers,
       });
     }
-    // HSA PASS B — emergency reserve (pinned AFTER the ordinary router).
-    // The ordinary router holds HSA out of its tiers, so a residual after
-    // the router means every non-HSA account is exhausted. Only then does HSA
-    // act as a last-resort reserve. These dollars are NOT medical-qualified, so
-    // they form the emergency residual the pct + 20% additional tax govern.
+    // HSA pass B: the ordinary router holds HSA out, so a residual means every non-HSA account is exhausted.
+    // These dollars are not medical-qualified, so they form the emergency residual the percentage and the 20%
+    // additional tax govern.
     const emergencyResidual = monthTarget - monthWithdrawn;
     const emergencyHsaSpent = emergencyResidual > 1e-9
       ? drawHsaEmergency({
@@ -815,13 +626,8 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
           yearPostWithdrawnByAcct,
         })
       : 0;
-    // LAST-RESORT floor-reserve draw.
-    // Only when unmet need STILL remains after every ordinary path (incl. the
-    // HSA emergency pass) — drain protected floor reserves so a truly depleted
-    // plan reaches $0 instead of stranding cash behind a floor. HSA reserve
-    // draws route through the withdrawn + post accumulators only (never the
-    // medical accumulator), so the residual rule taxes them as emergency /
-    // nonmedical. Excluded accounts stay untouched.
+    // Last-resort floor-reserve draw, only when need remains after every other path; HSA reserve draws skip
+    // the medical accumulator, so the residual rule taxes them as emergency.
     const reserveResidual = emergencyResidual - emergencyHsaSpent;
     const reserveSpent = reserveResidual > 1e-9
       ? drawFloorReserve({
@@ -838,23 +644,15 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
           sequentialWithinTier: strategyKind === 'customOrder',
         })
       : 0;
-    // `cashSpent` (synthetic carrier) + the medical HSA draw + the router draw +
-    // the emergency HSA draw + the last-resort floor-reserve draw all fund this
-    // month's need; the forced-RMD credit is the remaining source. Depletion is
-    // measured AFTER this pass via `yearWithdrawn`, so a reserve-funded
-    // year keeps `depleted = false`.
+    // Depletion is measured after this pass via `yearWithdrawn`, so a reserve-funded year keeps
+    // `depleted = false`.
     perMonthWithdrawal[i] =
       cashSpent + medicalHsaSpent + monthWithdrawn + emergencyHsaSpent + reserveSpent + monthRmdCredit;
     yearWithdrawn += cashSpent + medicalHsaSpent + monthWithdrawn + emergencyHsaSpent + reserveSpent;
   }
 
-  // (4) Fill-mode Roth-conversion fill. AFTER the monthly loop —
-  // the residual cap room is only known now. Gated on an ACTIVE cap under FILL
-  // mode; converts leftover headroom (the gross-dollar residual cap room)
-  // into the target Roth, sized by the outer bisection against the actual MAGI
-  // line so realized MAGI lands AT the ceiling. Commits the principal move ONCE
-  // (debit pre-tax / MIXED-pre, credit the target Roth) and is excluded from the
-  // §72(t) penalty by NOT touching the withdrawal accumulators.
+  // Fill-mode conversion runs after the monthly loop, when the residual cap room is known. Its principal move
+  // leaves the withdrawal accumulators untouched, so it is outside the §72(t) penalty.
   const conversionResult = applyRothConversionFill({
     state,
     magiCapConfig,
@@ -865,23 +663,17 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
     yearPreWithdrawnByAcct,
     yearPostWithdrawnByAcct,
     yearWithdrawnByAcct,
-    // Excluded accounts are never a conversion or tax-funding source.
     excludedIndices,
   });
-  // The conversion's same-year incremental tax is FUNDED from cap-safe
-  // balances inside `applyRothConversionFill` (recorded in the per-account
-  // accumulators); fold the FUNDED portion into the year's total withdrawal so
-  // the projected balance drops by it (balance conserved MINUS funded conversion
-  // tax). The full NEED drives depletion — an unfundable conversion tax (cap-safe
-  // balances exhausted) is a depletion.
+  // Fold the funded portion of the conversion tax into the year's withdrawal so the balance drops by it; the
+  // full need drives depletion, so an unfundable conversion tax is a depletion.
   const conversionFundedTax = conversionResult.fundedTaxCents / 100;
   const conversionTaxNeed = conversionResult.taxNeedCents / 100;
   yearWithdrawn += conversionFundedTax;
 
   const yearNetNeedRow = Math.max(0, yearExpense - yearIncome);
-  // Depletion measures against the FULL funded target (ordinary spending + the
-  // tax cashflow add-on + the conversion tax NEED) — a year that can cover
-  // spending but not the grossed-up tax bill is still a depletion.
+  // Depletion measures the full funded target (spending, tax add-on and conversion tax need): a year that
+  // covers spending but not the grossed-up tax bill is still a depletion.
   const depleted = yearWithdrawn + 1e-6 < yearNetNeedRow + taxAddedNeed + conversionTaxNeed;
 
   const row = assembleStrategyYearRow({
@@ -904,35 +696,28 @@ function runOneStrategyYear(args: YearStepArgs): DrawdownYear {
     rothConversionDegradedNoTarget: conversionResult.degradedNoTargetRoth,
     taxFundingCentsByAccount: conversionResult.taxFundingCentsByAccount,
   });
-  // The strategy path keeps the solver's own (non-honest) shortfall, so
-  // it stamps via the PLAIN row stamper — never the honest-shortfall variant
-  // (which the single-pool all-pre-tax paths use to recompute post-draw).
+  // The strategy path keeps the solver's own shortfall, so it uses the plain row stamper, not the
+  // honest-shortfall variant of the single-pool paths.
   if (taxOutcome) stampTaxCashflowRow(row, taxOutcome);
-  // QCD display fields. Stamp only in a year a QCD applied — the band /
-  // tax-detail tiles are conditional on `qcdCents > 0`. `netTaxableRmdCents` is
-  // the IRA-pool RMD the user still owes income tax on after the QCD offset
-  // (gross IRA-pool RMD − offset); 0 when the QCD ≥ the gross IRA RMD.
+  // Stamp QCD fields only in a year a QCD applied; `netTaxableRmdCents` is the IRA-pool RMD still taxable
+  // after the offset.
   if (qcdResult && qcdResult.totalQcdCents > 0) {
     row.qcdCents = qcdResult.totalQcdCents;
     row.netTaxableRmdCents = Math.max(
       0,
       qcdResult.grossIraPoolRmdCents - qcdResult.rmdOffsetCents,
     );
-    // Carry the per-owner IRA-pool RMD offset so the deterministic tax
-    // post-pass credits it toward the owner's IRA aggregation pool — the QCD
-    // counts toward the IRA RMD (§408(d)(8)), so no phantom shortfall surfaces.
+    // The per-owner offset lets the tax post-pass credit the QCD toward the owner's IRA pool (§408(d)(8)), so
+    // no phantom shortfall surfaces.
     row.qcdRmdOffsetCentsByOwner = qcdResult.rmdOffsetCentsByOwner;
-    // DISPLAY-only: the EXACT factor this engine used to inflate the REAL gift to
-    // nominal `qcdCents` (year-END December factor deterministic, path year-END
-    // `cumCpi` under the MC representative replay). The today's-dollars QCD
-    // surfaces divide it out so a configured REAL QCD round-trips exactly.
+    // Display only: the factor used to inflate the real gift to nominal, so today's-dollars surfaces divide
+    // it out exactly.
     row.qcdInflationFactor = qcdResult.inflationFactor;
   }
   return row;
 }
 
-/** Build the per-account balance map + `DrawdownYear` row at year-end.
- *  Extracted from `runOneStrategyYear` to keep that function tractable. */
+// Builds the per-account balance map and `DrawdownYear` row at year end.
 function assembleStrategyYearRow(args: {
   readonly state: AccountRunState[];
   readonly calendarYear: number;
@@ -945,14 +730,11 @@ function assembleStrategyYearRow(args: {
   readonly yearPreWithdrawnByAcct: number[];
   readonly yearPostWithdrawnByAcct: number[];
   readonly yearDepositByAcct: number[];
-  /** HSA medical-qualified dollars per account. */
   readonly yearMedicalQualifiedByAcct: number[];
   readonly surplusResult: RmdSurplusDispositionResult;
   readonly yearMagiCapBreachDollars: number;
   readonly yearMagiCapTierOverrideDollars: number;
-  /** Fill-mode converted principal for the year, integer cents. */
   readonly rothConvertedCents: number;
-  /** True when Fill mode had room but no target Roth resolved. */
   readonly rothConversionDegradedNoTarget: boolean;
   /** Draws that paid the conversion's tax, when the hook records them. */
   readonly taxFundingCentsByAccount?: ReadonlyMap<string, number>;
@@ -967,10 +749,8 @@ function assembleStrategyYearRow(args: {
   for (let a = 0; a < state.length; a += 1) {
     const preEnd = state[a].pre;
     const postEnd = state[a].post;
-    // Medical-qualified HSA cents, capped at the account's committed
-    // withdrawal cents so the emergency residual (`withdrawn − medical`) is
-    // never negative under fp residue (the residual rule keeps them summing
-    // to the committed cents exactly).
+    // Medical-qualified HSA cents are capped at the committed withdrawal cents so the emergency residual is
+    // never negative; the two sum to the committed cents exactly.
     const withdrawnCents = Math.round(yearWithdrawnByAcct[a] * 100);
     const medicalCents = state[a].taxTreatment === 'HSA' && yearMedicalQualifiedByAcct[a] > 0
       ? Math.min(withdrawnCents, Math.round(yearMedicalQualifiedByAcct[a] * 100))
@@ -981,8 +761,6 @@ function assembleStrategyYearRow(args: {
       postEnd,
       withdrawn: yearWithdrawnByAcct[a],
       deposit: yearDepositByAcct[a],
-      // Per-account pre/post withdrawn split (cents). Tax post-pass
-      // routes MIXED withdrawals via these fields.
       preWithdrawnCents: Math.round(yearPreWithdrawnByAcct[a] * 100),
       postWithdrawnCents: Math.round(yearPostWithdrawnByAcct[a] * 100),
       ...(medicalCents > 0 ? { medicalQualifiedWithdrawnCents: medicalCents } : {}),
@@ -1016,6 +794,3 @@ function assembleStrategyYearRow(args: {
       : {}),
   };
 }
-
-// Re-export helpers consumed by sibling tests / callers.
-

@@ -1,6 +1,3 @@
-/**
- * Unit tests for the scenario-resolution helpers.
- */
 import { describe, it, expect, vi } from 'vitest';
 import {
   resolveScenario,
@@ -272,13 +269,10 @@ describe('wouldCreateCycle', () => {
   });
 
   it('flags a descendant as a parent', () => {
-    // Re-parenting A under C (its grandchild) would form a cycle.
     expect(wouldCreateCycle('a', 'c', all)).toBe(true);
   });
 
   it('allows re-parenting upward to an ancestor', () => {
-    // C currently → B → A → primary. Re-parenting C directly to A
-    // (its grandparent) does not form a cycle.
     expect(wouldCreateCycle('c', 'a', all)).toBe(false);
   });
 
@@ -447,8 +441,7 @@ describe('resolvePreRetirementRothConversions', () => {
   });
 
   it('drops a denied pair: MIXED source + cross-account dedicated-Roth 401k target (deferral)', () => {
-    // A separate RETIREMENT_ROTH_401K account — a deferred case; only
-    // same-account MIXED in-plan conversions are accepted, not separate Roth employer targets.
+    // A separate RETIREMENT_ROTH_401K account is a deferred case: only same-account MIXED in-plan conversions are accepted.
     const accts = [
       makeAccount('pre', { type: 'RETIREMENT_401K', taxTreatment: 'MIXED', ownerId: 'm1' }),
       makeAccount('roth', { type: 'RETIREMENT_ROTH_401K', taxTreatment: 'ROTH', ownerId: 'm1' }),
@@ -458,7 +451,6 @@ describe('resolvePreRetirementRothConversions', () => {
   });
 
   it('drops an entry whose target is NOT a Roth IRA and NOT the same-account MIXED (§408A guard)', () => {
-    // A designated Roth 401(k) as a separate account would silently no-op the basis fold.
     const accts = [
       makeAccount('pre', { type: 'RETIREMENT_401K', taxTreatment: 'PRE_TAX', ownerId: 'm1' }),
       makeAccount('roth', { type: 'RETIREMENT_401K', taxTreatment: 'ROTH', ownerId: 'm1' }),
@@ -545,7 +537,6 @@ describe('resolveQcdForScenario', () => {
   });
 
   it('clamps the start up to the 70½ first-eligible tax year', () => {
-    // start 2020 < floor 2024 → clamped to 2024.
     const r = resolveQcdForScenario(
       'p',
       [withQcd([entry({ start: { kind: 'year', year: 2020 } })])],
@@ -556,8 +547,6 @@ describe('resolveQcdForScenario', () => {
   });
 
   it('resolves numeric startYear (clamped to the 70½ floor) + exclusive endYear', () => {
-    // start 2020 < floor 2024 → startYear clamped to 2024; a `year` end of 2040
-    // resolves to the EXCLUSIVE boundary 2041 (active through 2040).
     const r = resolveQcdForScenario(
       'p',
       [withQcd([entry({ start: { kind: 'year', year: 2020 }, end: { kind: 'year', year: 2040 } })])],
@@ -635,8 +624,6 @@ describe('resolveQcdForScenario', () => {
   });
 
   it('keeps a single-year YEAR window {start:Y, end:Y} (end is inclusive)', () => {
-    // Y comfortably above m1's 70½ floor (2024). The `year` end resolves to the
-    // EXCLUSIVE boundary Y+1, so startYear 2030 < endYear 2031 → kept.
     const r = resolveQcdForScenario(
       'p',
       [withQcd([entry({ start: { kind: 'year', year: 2030 }, end: { kind: 'year', year: 2030 } })])],
@@ -649,7 +636,6 @@ describe('resolveQcdForScenario', () => {
   });
 
   it('drops a genuinely inverted YEAR window {start:Y+1, end:Y}', () => {
-    // startYear 2031 >= exclusive endYear 2031 (2030 + 1) → empty span, dropped.
     const r = resolveQcdForScenario(
       'p',
       [withQcd([entry({ start: { kind: 'year', year: 2031 }, end: { kind: 'year', year: 2030 } })])],
@@ -660,7 +646,6 @@ describe('resolveQcdForScenario', () => {
   });
 
   it('resolves an age-anchored window against the owner birth year', () => {
-    // m1 born 1954 → age 75 = 2029, age 90 = 2044; floor 2024 < 2029.
     const r = resolveQcdForScenario(
       'p',
       [
@@ -679,8 +664,7 @@ describe('resolveQcdForScenario', () => {
   });
 
   it('is prototype-safe against an Object.create(null) account map edge case', () => {
-    // A source id matching a dangerous prototype key must not resolve via the
-    // prototype chain — the resolver uses a Map, so "__proto__" is a miss.
+    // A source id matching a dangerous prototype key must not resolve via the prototype chain (the resolver uses a Map).
     const r = resolveQcdForScenario(
       'p',
       [withQcd([entry({ sourceAccountId: '__proto__' })])],
@@ -722,10 +706,7 @@ describe('resolveQcdForScenario', () => {
   });
 
   it('honors `months` on an age anchor that crosses into the next tax year', () => {
-    // Owner born December 1950. Age {years:80, months:11} resolves month-precise:
-    // birth month index = 1950*12 + 11; + (80*12 + 11) months crosses December
-    // into the next calendar year → tax year 2031, not 2030 (birthYear+years).
-    // Start well above 70½ (floor 2021) so the clamp does not mask the month.
+    // Born December 1950: age 80y11m is month-precise, crossing December into 2031 (not birthYear + years = 2030); the start is well above the 70½ floor so the clamp does not mask it.
     const decMembers = [makeMember('m1', '1950-12-15'), makeMember('m2', '1980-01-01')];
     const r = resolveQcdForScenario(
       'p',
@@ -741,7 +722,6 @@ describe('resolveQcdForScenario', () => {
       decMembers,
     );
     expect(r.entries).toHaveLength(1);
-    // years-only would give 1950 + 80 = 2030; month-crossing pushes to 2031.
     expect(r.entries[0].start).toEqual({ kind: 'year', year: 2031 });
   });
 
@@ -816,9 +796,6 @@ describe('resolveAccountContributionsForScenario', () => {
   });
 
   it('walks the chain per-account: child override on A, parent override on B', () => {
-    // The point: child overrides only account A; account B's parent
-    // override survives in the resolved view. This is the per-key
-    // inheritance the UI's "resolved-from-parent" baseline depends on.
     const primary = scenario('p', {
       name: 'Base',
       isPrimary: true,
@@ -847,12 +824,10 @@ describe('resolveAccountContributionsForScenario', () => {
       makeAccount('b', { plannedContributionPreTax: 50, plannedContributionPostTax: 50 }),
     ];
     const result = resolveAccountContributionsForScenario('c', [primary, child], accts);
-    // A: pre overridden in child → 9999. Post not set in child → falls to parent's 100.
     expect(result.get('a')).toEqual({
       plannedContributionPreTax: 9999,
       plannedContributionPostTax: 100,
     });
-    // B: no override in child → parent's values both survive.
     expect(result.get('b')).toEqual({
       plannedContributionPreTax: 2000,
       plannedContributionPostTax: 200,
@@ -863,7 +838,6 @@ describe('resolveAccountContributionsForScenario', () => {
     const base = scenario('base', {
       name: 'Base',
       isPrimary: true,
-      // No accountContributions in base — exercises the account-baseline fallback.
     });
     const middle = scenario('mid', {
       name: 'Middle',
@@ -1035,7 +1009,6 @@ describe('resolveInflationForScenario', () => {
     const r = resolveInflationForScenario('b', [base]);
     expect(r.ratePct).toBe(3);
     expect(r.categoryRates.get('cat-medical')).toBe(5);
-    // A non-medical category has no entry → defaults to general at read.
     expect(r.categoryRates.get('cat-food')).toBeUndefined();
   });
 
@@ -1058,8 +1031,6 @@ describe('resolveInflationForScenario', () => {
       ratePct: 4,
       categoryRates: { 'cat-housing': 6 },
     }, true);
-    // Child sets only Food; it must NOT clobber parent general (4) or the
-    // parent's Housing override.
     const child = inflationScenario('c', 'p', {
       ratePct: 4,
       categoryRates: { 'cat-food': 2 },
@@ -1068,7 +1039,6 @@ describe('resolveInflationForScenario', () => {
     expect(r.ratePct).toBe(4);
     expect(r.categoryRates.get('cat-food')).toBe(2);
     expect(r.categoryRates.get('cat-housing')).toBe(6);
-    // Medical default tracks the resolved general (4 + 2).
     expect(r.categoryRates.get('cat-medical')).toBe(6);
   });
 
@@ -1085,9 +1055,7 @@ describe('resolveInflationForScenario', () => {
     const base = inflationScenario('b', null, { ratePct: 3 }, true);
     const set = new Set(['cat-medical-recreated-uuid', 'cat-second-medical']);
     const r = resolveInflationForScenario('b', [base], set);
-    // A recreated Medical (new id) flagged in the set now GETS +2pp (inverts
-    // the legacy "recreated defaults to general" behaviour). The seeded id is
-    // NOT in this set, so it has no default entry.
+    // A recreated Medical (new id) flagged in the set now gets +2pp; the seeded id is not in this set.
     expect(r.categoryRates.get('cat-medical-recreated-uuid')).toBe(5);
     expect(r.categoryRates.get('cat-second-medical')).toBe(5);
     expect(r.categoryRates.get('cat-medical')).toBeUndefined();
@@ -1115,8 +1083,6 @@ describe('resolveInflationForScenario', () => {
       categoryRates: { 'cat-deleted-orphan': 7, 'cat-food': 2 },
     }, true);
     const r = resolveInflationForScenario('b', [base]);
-    // The orphan key is preserved in the resolved map (inert — no expense
-    // carries it) but does not affect the live Food rate.
     expect(r.categoryRates.get('cat-deleted-orphan')).toBe(7);
     expect(r.categoryRates.get('cat-food')).toBe(2);
   });
@@ -1142,7 +1108,6 @@ describe('resolveInflationForScenario', () => {
     expect(r.categoryRates.get('cat-too-high')).toBeUndefined();
     expect(r.categoryRates.get('cat-negative')).toBeUndefined();
     expect(r.categoryRates.get('cat-ok')).toBe(5);
-    // No prototype pollution.
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect((Object.prototype as Record<string, unknown>)['9']).toBeUndefined();
   });
@@ -1218,8 +1183,6 @@ describe('resolveContributionGrowth', () => {
   });
 
   it('resolves growth independently of the contribution AMOUNT override', () => {
-    // Child overrides only the amount; the growth rate must still resolve
-    // from the parent's growth override (per-key independence).
     const primary = scenario('p', {
       name: 'Base',
       isPrimary: true,
@@ -1243,8 +1206,7 @@ describe('resolveContributionGrowth', () => {
   });
 
   it('independence from categoryRates — never reads a category rate', () => {
-    // A Medical category rate must not leak into the contribution-growth
-    // default; the default is the GENERAL inflation rate only.
+    // A Medical category rate must not leak into the contribution-growth default, which is the general inflation rate only.
     const primary = scenario('p', {
       name: 'Base',
       isPrimary: true,
@@ -1325,7 +1287,6 @@ describe('resolveAccountFloorsForScenario', () => {
       isPrimary: true,
       overrides: {
         accountFloors: {
-          // A corrupt import value that is not strictly 'strict'.
           perAccount: { a: { floorDollars: 1000, hsaMode: 'STRICT' as never } },
         },
       },
@@ -1397,7 +1358,6 @@ describe('resolveAccountFloorsForScenario', () => {
     const child = scenario('c', {
       name: 'C',
       parentScenarioId: 'p',
-      // Child overrides only the dollar amount — hsaMode must inherit 'strict'.
       overrides: { accountFloors: { perAccount: { a: { floorDollars: 12000 } } } },
     });
     const acct = makeAccount('a', { taxTreatment: 'HSA', type: 'HSA' });
@@ -1406,10 +1366,7 @@ describe('resolveAccountFloorsForScenario', () => {
   });
 
   it("null hsaMode on the child clears the ancestor's 'strict' (defaults to emergencyOnly)", () => {
-    // F-07: an explicit `null` hsaMode is a DEFINED value that clears the
-    // ancestor's setting; the per-field first-ancestor-wins walk stops at the
-    // null, and the CWE-20 default (anything not strictly 'strict') resolves to
-    // emergencyOnly. The dollar floor still inherits from the ancestor.
+    // An explicit `null` hsaMode is a defined value that clears the ancestor's setting; the walk stops at null and the CWE-20 default resolves to emergencyOnly, while the dollar floor still inherits.
     const primary = scenario('p', {
       name: 'P',
       isPrimary: true,
@@ -1445,8 +1402,6 @@ describe('resolveDownturnGuardrailsForScenario', () => {
 
   it('resolves the scenario own config when set', () => {
     const p = scenario('p', { name: 'P', isPrimary: true, overrides: { downturnGuardrails: cfg } });
-    // The resolver materializes the discretionary-floor default (50) on top of
-    // the stored config, so the own-config result is `cfg` + floor 50.
     expect(resolveDownturnGuardrailsForScenario('p', [p])).toEqual({ ...cfg, discretionaryFloorPct: 50 });
   });
 
@@ -1488,10 +1443,7 @@ describe('resolveDownturnGuardrailsForScenario', () => {
   it('materializes the default discretionaryFloorPct (50) when the source config does not set it', () => {
     const p = scenario('p', { name: 'P', isPrimary: true, overrides: { downturnGuardrails: cfg } });
     const r = resolveDownturnGuardrailsForScenario('p', [p]);
-    // An enabled guardrail always resolves to an explicit floor (keep-50% default),
-    // so the editor card / report / engine / cache key all agree. The
-    // resolver is the single source of truth for the default (not `?? 0` scattered
-    // across each consumer).
+    // An enabled guardrail always resolves to an explicit floor (default 50%) so the card, report, engine and cache key agree.
     expect(r?.discretionaryFloorPct).toBe(50);
   });
 
@@ -1504,9 +1456,7 @@ describe('resolveDownturnGuardrailsForScenario', () => {
   });
 
   it('returns undefined without throwing when the resolved config is null (corrupt import)', () => {
-    // A malformed import bundle can carry `downturnGuardrails: null`; the merge
-    // only skips `undefined`, so it reaches the resolver. It must not throw a
-    // TypeError from destructuring null in the validity check.
+    // A malformed import can carry `downturnGuardrails: null`; the merge only skips `undefined`, so the resolver must not throw destructuring null.
     const p = scenario('p', {
       name: 'P',
       isPrimary: true,

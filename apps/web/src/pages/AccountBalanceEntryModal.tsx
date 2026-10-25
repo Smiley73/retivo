@@ -1,10 +1,4 @@
-/**
- * The annual-balance add/edit dialog, extracted from `AccountBalancesPage`
- * so that already-oversized page shrinks rather than grows. Pure
- * presentational shell: all state + the save/close behavior (dirty-guard,
- * `MoneyInput` parsing, `Modal` centering/width/Enter) stays owned by the
- * page and is threaded in via props; the markup uses Tailwind defaults.
- */
+/** The annual-balance add/edit dialog: a presentational shell whose state, save and close behavior (dirty guard, MoneyInput parsing) the page owns and threads in via props. */
 import React from 'react';
 import { Modal } from '../components/Modal';
 import { TextInput } from '../components/TextInput';
@@ -17,52 +11,30 @@ import { formatCurrency, formatCurrencyShort } from '../lib/format-currency';
 
 const FIELD_LABEL_CLASS =
   'mb-1 block text-sm font-medium text-ink';
-// Mock `add-year`/`edit-year` `.form-grid`: two equal columns
-// (`1fr 1fr`, ~18px row / ~22px col gap). Each field already carries its
-// own `mb-3`, so a light `gap-y-1` keeps the row rhythm consistent.
 const FIELD_GRID_CLASS =
   'mb-3 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2';
-/** The dated-Roth pairs only. Their labels are long enough that one wraps to two
- *  lines while its partner does not, which left the two inputs sitting at
- *  different heights. Bottom-aligning the row pins the CONTROLS to a common
- *  baseline and lets the taller label grow upward instead. */
+// Bottom-aligns the dated-Roth pairs: one label wraps to two lines while its partner does not, so a common control baseline lets the taller label grow upward.
 const ROTH_FIELD_GRID_CLASS = `${FIELD_GRID_CLASS} sm:items-end`;
-/** Totals rail: the three roll-up tiles sit in their own right-hand column on a
- *  wide screen, stacked, instead of a full-width three-across band under the
- *  amount fields — that band was the single biggest contributor to the dialog's
- *  height. Below `lg` the rail falls back to a normal row. */
 const TOTALS_SPLIT_CLASS =
   'lg:grid lg:grid-cols-3 lg:items-start lg:gap-x-6';
-/** ONE bordered panel of three divided rows, not three separate tiles. Three
- *  floating tiles left an obvious block of dead space beneath them in the rail;
- *  a single block reads as a deliberate summary rather than an unfinished
- *  column. Below `lg` it becomes a normal three-across row under the fields, so
- *  the dividers switch axis with it. */
 const TOTALS_RAIL_CLASS =
   'mb-4 grid grid-cols-1 divide-y divide-line rounded-xl border border-line ' +
   'bg-surface-raised sm:grid-cols-3 sm:divide-x sm:divide-y-0 ' +
   'lg:mb-0 lg:mt-6 lg:grid-cols-1 lg:divide-x-0 lg:divide-y';
-// `lg:mt-6` above drops the panel by exactly one field-label box so its top edge
-// meets the top of the first INPUT on the left rather than the label above it:
-// FIELD_LABEL_CLASS is `text-sm` (20px line box) + `mb-1` (4px) = 24px = mt-6.
-// Keep the two in sync if that label's type scale ever changes.
+// lg:mt-6 drops the panel by one field-label box (text-sm 20px + mb-1 4px = 24px) so its top edge meets the first input; keep in sync if the label's type scale changes.
 
 const TOTAL_ROW_CLASS = 'px-4 py-3';
 const TOTAL_LABEL_CLASS =
   'font-mono text-xs font-semibold uppercase tracking-wide text-muted';
 const TOTAL_VALUE_CLASS =
   'mt-1 font-mono text-xl font-bold tabular-nums text-ink';
-// Control boundary uses the dedicated `input-line` token — AA-safe
-// non-text (1.4.11 ≥ 3.0) in both themes via the `.dark` variable swap;
-// the pair is checked in `lib/contrast.ts`.
+// The input-line token clears the WCAG 1.4.11 non-text contrast gate in both themes (pair checked in lib/contrast.ts).
 const INPUT_CLASS =
   'block w-full min-w-0 rounded-md border border-input-line bg-surface px-3 py-2 ' +
   'text-ink placeholder:text-muted ' +
   'focus:border-accent focus:outline-none focus:ring-2 focus:ring-ring ' +
   'disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-muted';
 
-/** Mirror of the page's BalanceFormState (kept structural to avoid a
- *  cross-file type export churn — the page owns the canonical type). */
 interface BalanceModalFormState {
   year: number;
   lastUpdated: string;
@@ -96,13 +68,9 @@ interface BalanceEntryModalProps {
   form: BalanceModalFormState;
   setForm: React.Dispatch<React.SetStateAction<BalanceModalFormState>>;
   yearLocked: boolean;
-  /** Roth IRA only — the per-year conversion amounts are tax history for the
-   *  §408A ordering rules, so they are offered only where that ordering can
-   *  apply. */
+  /** Roth IRA only: per-year conversion amounts are §408A ordering history. */
   showRothConversion: boolean;
-  /** Designated-Roth employer plans only — the per-year IN-PLAN ROLLOVER amounts,
-   *  the §402A(c)(4) equivalent of a conversion. Mutually exclusive with
-   *  `showRothConversion` in practice: no account type is both. */
+  /** Designated-Roth employer plans only: per-year in-plan rollover amounts (§402A(c)(4)); never both with showRothConversion. */
   showRothInPlanRollover: boolean;
   onClose: () => void;
   onCancel: () => void;
@@ -126,9 +94,6 @@ export const BalanceEntryModal: React.FC<BalanceEntryModalProps> = ({
   onSave,
   getDefaultLastUpdated,
 }) => {
-  // The three roll-up totals, resolved once. The MIXED layout sums its split
-  // pre/post-tax pairs; every other type reads the single-column fields. They
-  // used to be computed inline in each branch beside an identical StatGrid.
   const totalStarting = isMixed
     ? form.startingBalancePreTax + form.startingBalancePostTax
     : form.startingBalance;
@@ -142,9 +107,6 @@ export const BalanceEntryModal: React.FC<BalanceEntryModalProps> = ({
     ? form.endingBalancePreTax + form.endingBalancePostTax
     : form.endingBalance;
   return (
-  // Panel width: the totals now sit in their own right-hand rail, so the panel
-  // has to carry that column on top of the field grid. The wider step is for the
-  // MIXED split columns and the dated-Roth pairs, whose labels are long.
   <Modal
     open={open}
     onClose={onClose}

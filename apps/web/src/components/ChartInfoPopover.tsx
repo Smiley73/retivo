@@ -1,36 +1,18 @@
 /**
- * Reusable chart "explain this" info-icon disclosure.
- *
- * A small `(i)` trigger sits next to a chart's title; pressing it (mouse
- * or keyboard) opens a React Aria Popover holding that chart's
- * methodology caption, dismissed by Esc or an outside press. Replaces the
- * always-on caption that previously sat below each Balance Projection
- * chart — the caption length is too long for a tooltip and a full modal is
- * heavier than a caption needs, so this uses the Popover/Dialog primitives.
- *
- * Self-contained: it owns its own `DialogTrigger` + trigger Button (like
- * `MonteCarloMethodologyModal`), unlike `SyncDetailsPopover` whose
- * `DialogTrigger` lives on the badge. The icon is decorative
- * (`aria-hidden`); the Button + Dialog carry the per-chart accessible name
- * via `label`. React Aria owns focus management, Esc, and outside-press.
- *
- * Built on React Aria's `Popover`/`Dialog`, reusing
- * `SyncDetailsPopover`'s Dialog chrome classes.
+ * Info-icon disclosure beside a chart title that opens a React Aria Popover with the chart's methodology caption.
+ * Self-contained: owns its `DialogTrigger`; the icon is decorative and `label` carries the accessible name.
  */
 import React from 'react';
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components';
 import { InfoCircleIcon } from './InfoCircleIcon';
 
 export interface ChartInfoPopoverProps {
-  /** Per-chart accessible name for the trigger Button + the Dialog
-   *  (e.g. "About the Per-year projection chart"). */
+  /** Per-chart accessible name for the trigger and the dialog. */
   readonly label: string;
-  /** The caption content rendered inside the popover. */
   readonly children: React.ReactNode;
 }
 
-// `report-print-hide` is part of the trigger class: every info-popover trigger hides in
-// print with one edit — popovers are never useful on paper. Harmless app-wide.
+// `report-print-hide`: popovers are never useful on paper.
 const TRIGGER_CLASS =
   'report-print-hide inline-flex cursor-pointer items-center rounded text-muted hover:text-ink ' +
   'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';

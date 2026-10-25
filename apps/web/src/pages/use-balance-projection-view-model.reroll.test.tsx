@@ -1,18 +1,5 @@
-/**
- * View-model reroll behavior ("show another likely path").
- *
- * Drives `useBalanceProjectionViewModel`'s session-only reroll state through a
- * mocked `usePlanStressTestVm`: a stub `MonteCarloSummary` carrying a per-tier
- * `representativeBandsByBasis` + `representativeByBasis`, and a `replayPath`
- * spy. Asserts:
- *   - `showAnotherPath()` swaps `activeRepresentativeRun` to a replayed
- *     alternative band path (not the default element 0);
- *   - the depletion cards + percentile series on the summary are byte-for-byte
- *     unchanged after a reroll (only the basis line moves);
- *   - `canShowAnotherPath` is false when the active tier's band has <2 members
- *     or no MC basis is active;
- *   - a new summary clears the override (session-only).
- */
+// View-model reroll ("show another likely path"): drives `useBalanceProjectionViewModel`'s session-only override through a mocked `usePlanStressTestVm` (a stub summary with `representativeBandsByBasis` / `representativeByBasis` and a `replayPath` spy).
+// `showAnotherPath()` swaps to a replayed alternative band path; cards and percentile series stay byte-identical; `canShowAnotherPath` is false with <2 band members or no MC basis; a new summary clears the override.
 import React from 'react';
 import { describe, expect, it, vi, beforeEach, type Mock } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
@@ -20,13 +7,11 @@ import type { MonteCarloSummary, RepresentativeRun, McBasis } from '../lib/monte
 import type { PlanStressTestVm } from '../components/PlanStressTestSection';
 import { ThemeProvider } from '../contexts/ThemeContext';
 
-// The view model reads chart tokens via `useChartColors()`, which needs the
-// ThemeProvider context.
+// The view model reads chart tokens via `useChartColors()`, which needs the ThemeProvider context.
 function wrapper({ children }: { children: React.ReactNode }) {
   return <ThemeProvider>{children}</ThemeProvider>;
 }
 
-// Controllable mock surface for the stress VM the view model consumes.
 let mockResult: MonteCarloSummary | null = null;
 const replayPathMock: Mock = vi.fn();
 
@@ -42,11 +27,9 @@ vi.mock('../components/PlanStressTestSection', () => ({
 }));
 
 import { useBalanceProjectionViewModel } from './use-balance-projection-view-model';
-import type { PipelineData } from './balance-projection-page-pipeline';
+import type { PipelineData } from './balance-projection-page-data';
 
-/** Minimal `PipelineData` stub carrying just the `pageResult.sharedCtx`
- *  fields the toggle-availability + fallback-disclosure derivations read.
- *  Other `data.*` consumers tolerate the empty / null fields. */
+// Minimal `PipelineData` stub carrying only the `pageResult.sharedCtx` fields the toggle-availability and fallback-disclosure derivations read.
 function makeData(opts: {
   methodAvailable: boolean;
   fallbackAccounts: ReadonlyArray<{ id: string; name: string }>;
@@ -74,8 +57,7 @@ function makeData(opts: {
   } as unknown as PipelineData;
 }
 
-/** Minimal `RepresentativeRun` tagged with `seed` so the spy + assertions can
- *  tell the default pick from a replayed alternative. */
+// Minimal `RepresentativeRun` tagged with `seed` so assertions can tell the default pick from a replayed alternative.
 function makeRun(seed: number, depletionYear: number | null): RepresentativeRun {
   return {
     firstYear: 2026,
@@ -125,7 +107,7 @@ function makeSummary(
     plannedOverlay: [],
     representativeByBasis: byBasis,
     representativeBandsByBasis: {
-      // Element 0 = the default reconciled pick's seed; 1..N−1 are alternatives.
+      // Element 0 is the default reconciled pick's seed; 1..N−1 are alternatives.
       'mc-typical': [500],
       'mc-pessimistic': [DEFAULT_PESS_SEED, ...ALT_SEEDS],
       'mc-bad-luck': [100, 999],
@@ -177,11 +159,9 @@ describe('useBalanceProjectionViewModel — reroll (show another likely path)', 
       { initialProps: { activeMcBasis }, wrapper },
     );
 
-    // Default: element-0 pick.
     expect(result.current.activeRepresentativeRun?.seed).toBe(DEFAULT_PESS_SEED);
     expect(result.current.canShowAnotherPath).toBe(true);
 
-    // Snapshot the summary cards/percentiles BEFORE the reroll.
     const cardsBefore = {
       median: mockResult!.medianDepletionYear,
       p25: mockResult!.p25DepletionYear,
@@ -195,17 +175,14 @@ describe('useBalanceProjectionViewModel — reroll (show another likely path)', 
     });
     rerender({ activeMcBasis });
 
-    // replayPath was called with one of the ALTERNATIVE band seeds (never the
-    // default element-0 seed).
+    // replayPath is called with an alternative band seed, never the default element-0 seed.
     expect(replayPathMock).toHaveBeenCalledTimes(1);
     const calledSeed = replayPathMock.mock.calls[0][0] as number;
     expect(ALT_SEEDS).toContain(calledSeed);
     expect(calledSeed).not.toBe(DEFAULT_PESS_SEED);
 
-    // The basis line is now the replayed alternative.
     expect(result.current.activeRepresentativeRun?.seed).toBe(ALT_SEEDS[0]);
 
-    // Cards + percentile series are byte-for-byte unchanged (same summary object).
     expect(mockResult!.medianDepletionYear).toBe(cardsBefore.median);
     expect(mockResult!.p25DepletionYear).toBe(cardsBefore.p25);
     expect(mockResult!.p10DepletionYear).toBe(cardsBefore.p10);
@@ -224,7 +201,6 @@ describe('useBalanceProjectionViewModel — reroll (show another likely path)', 
       { wrapper },
     );
     expect(result.current.canShowAnotherPath).toBe(false);
-    // showAnotherPath is a guarded no-op — replayPath never called.
     act(() => {
       result.current.showAnotherPath();
     });
@@ -261,8 +237,7 @@ describe('useBalanceProjectionViewModel — reroll (show another likely path)', 
     rerender();
     expect(result.current.activeRepresentativeRun?.seed).toBe(ALT_SEEDS[0]);
 
-    // A fresh worker run lands (new summary object) → override drops, basis line
-    // reverts to the new summary's default element-0 pick.
+    // A fresh worker run lands (a new summary object): the override drops and the basis line reverts to the new summary's default element-0 pick.
     act(() => {
       mockResult = makeSummary();
     });
@@ -272,9 +247,7 @@ describe('useBalanceProjectionViewModel — reroll (show another likely path)', 
 });
 
 describe('useBalanceProjectionViewModel — Historical toggle availability', () => {
-  // A mixed portfolio (≥1 empirical + ≥1 fallback) keeps Historical
-  // available — sourced from the runner's `methodAvailable`, NOT
-  // `outputs.twr !== null` (which is always true).
+  // A mixed portfolio (≥1 empirical, ≥1 fallback) keeps Historical available, sourced from the runner's `methodAvailable`, not `outputs.twr !== null` (always true).
   it('enables Historical from the methodAvailable flag and surfaces fallbacks', () => {
     const { result } = renderHook(
       () =>
@@ -295,8 +268,7 @@ describe('useBalanceProjectionViewModel — Historical toggle availability', () 
     ]);
   });
 
-  // Degenerate: no non-CBP account has empirical history → Historical
-  // hidden even though `outputs.twr` is non-null for every account.
+  // Degenerate: no non-CBP account has empirical history, so Historical is hidden even though `outputs.twr` is non-null for every account.
   it('hides Historical in the degenerate all-fallback case', () => {
     const { result } = renderHook(
       () =>

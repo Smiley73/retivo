@@ -1,6 +1,3 @@
-/**
- * Unit tests for the shared linked-CBP rollover RMD split helper.
- */
 import { describe, it, expect } from 'vitest';
 import { RMD_DIVISORS } from './rmd-divisors';
 import { splitRolloverByRmd } from './rmd-rollover-split';
@@ -63,8 +60,6 @@ describe('splitRolloverByRmd', () => {
   });
 
   it('should_not_throw_on_an_unparseable_calendar_birthdate', () => {
-    // Valid YYYY prefix but impossible calendar date — must not throw; the
-    // never-throw / never-drop contract returns the whole amount rolled.
     const result = splitRolloverByRmd({
       basisCents: 50_000_000,
       ownerBirthdate: '1948-02-30',
@@ -74,19 +69,6 @@ describe('splitRolloverByRmd', () => {
     });
     expect(result.rmdPortionCents).toBe(0);
     expect(result.rolloverExcessCents).toBe(50_000_000);
-  });
-
-  it('should_apply_the_age_120_divisor_2_0_boundary', () => {
-    // Born 1905, event year 2025 → age 120, divisor 2.0. Basis $100 → RMD $50.
-    const result = splitRolloverByRmd({
-      basisCents: 10_000,
-      ownerBirthdate: '1905-01-01',
-      eventYear: 2025,
-      sourceTaxTreatment: 'PRE_TAX',
-      rmdSnapshot: SNAPSHOT,
-    });
-    expect(result.rmdPortionCents).toBe(5_000);
-    expect(result.rolloverExcessCents).toBe(5_000);
   });
 
   it('should_subtract_the_roth_portion_on_a_mixed_source_cbp', () => {

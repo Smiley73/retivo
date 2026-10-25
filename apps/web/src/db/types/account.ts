@@ -1,11 +1,6 @@
-/**
- * Account + account-balance aggregate payloads, plus the asset-mix vocabulary
- * and per-type default helpers.
- */
+// Account and account-balance aggregate payloads, the asset-mix vocabulary and per-type default helpers.
 
-// Beneficiary-category vocabulary for an INHERITED account.
-// The SSOT union + validator live in `db/rmd-fact-validation.ts` so the
-// migration sanitiser and any runtime boundary share one definition.
+// The beneficiary-category union and validator live in `db/rmd-fact-validation.ts`, shared by migration and runtime.
 import type { RmdBeneficiaryType, RmdBeneficiaryElection } from '../rmd-fact-validation';
 
 export type AccountType =
@@ -35,38 +30,15 @@ export type AccountTaxTreatment =
   | 'HSA'
   | 'ROTH';
 
-// CBP payout elections live on the linked IncomeStream via
-// `IncomeStreamPayload.linkedCbpAccountId`. The
-// former `CashBalancePayoutAtRetirement` discriminated union and the
-// `ScenarioOverrides.cashBalancePayouts` section were removed in the
-// same remodel. No migration is provided — old IndexedDB rows /
-// import-file rows that still carry `cashBalancePayouts` or
-// `sourceAccountId` simply parse with those fields as unknown extras;
-// they're never read by the new code. Re-configure linked elections
-// via the Income form's "Linked CBP account" dropdown.
+// CBP payout elections live on the linked IncomeStream (`IncomeStreamPayload.linkedCbpAccountId`); old rows carrying
+// `cashBalancePayouts` or `sourceAccountId` parse as unknown extras that nothing reads.
 
 /**
- * Asset allocation for the account, in percent. Each value 0–100 with
- * one-decimal precision; the three must sum to 100.0 ± 0.05 (the
- * tolerance window covers float-rounding from one-decimal inputs).
- *
- * Drives the Monte Carlo projection's per-year return draw via the
- * historical bootstrap: blended return for year y =
- * `stocksPct·rStock[y] + bondsPct·rBond[y] + cashPct·rCash[y]` (each
- * divided by 100). Annual rebalance is implicit — sub-balances are not
- * tracked.
- *
- * Cash Balance Pension (`RETIREMENT_CASH_BALANCE`) accounts store a
- * placeholder `{ 0, 0, 100 }` because the engine ignores their mix in
- * favour of the account's existing `planningReturnPct` deterministically
- * applied every year of every path. The form hides the section for CBP.
- *
- * Defaults applied at new-account creation by the AccountForm; no
- * migration (pre-launch v1 reset):
- *   - `SAVINGS` / `MONEY_MARKET` / `CD`        → `{ 0, 0, 100 }`
- *   - `RETIREMENT_CASH_BALANCE`                → `{ 0, 0, 100 }` (ignored)
- *   - `RETIREMENT_*` / `BROKERAGE` / `HSA`     → `{ 70, 25, 5 }`
- *   - `OTHER`                                  → `{ 70, 25, 5 }`
+ * Asset allocation in percent: each 0-100 with one decimal, summing to 100.0 ± 0.05 (covers float rounding). Drives the
+ * Monte Carlo per-year return draw via the historical bootstrap: blended return = `stocksPct·rStock + bondsPct·rBond +
+ * cashPct·rCash` (each /100), with an implicit annual rebalance. Cash Balance Pension accounts store a placeholder `{
+ * 0, 0, 100 }` because the engine applies the account's `planningReturnPct` deterministically instead; the form hides
+ * the section for CBP. The AccountForm sets defaults at creation via `defaultAssetMixForAccountType`.
  */
 export interface AssetMix {
   stocksPct: number;
@@ -76,8 +48,7 @@ export interface AssetMix {
 
 export const ASSET_MIX_SUM_TOLERANCE = 0.05;
 
-/** Built-in AccountType → AssetMix defaults. Pure function — applied at
- *  new-account creation in the form; no migration (pre-launch v1 reset). */
+/** Default asset mix per account type, applied by the form at creation. */
 export function defaultAssetMixForAccountType(t: AccountType): AssetMix {
   switch (t) {
     case 'SAVINGS':
@@ -114,158 +85,111 @@ export interface AccountPayload extends Record<string, unknown> {
   active: boolean;
   plannedContributionPreTax: number;
   plannedContributionPostTax: number;
-  /** Optional per-account annual-increase rate for the planned
-   *  contribution (percent, e.g. 3 for 3 %/yr). The configured
-   *  contribution figure is interpreted as a TODAY'S-dollars amount that
-   *  grows across accumulation steps so it holds its real value in the
-   *  default Today's-dollars projection view.
-   *
-   *  Presence is the mode flag (mirrors income's `tracksInflation` vs
-   *  explicit `colaPct`):
-   *  - **absent** → "tracks inflation": grows at the resolved scenario
-   *    general inflation rate (per-path CPI in Monte Carlo → flat-real).
-   *  - **explicit number (incl. `0`)** → fixed COLA at that percent
-   *    (`0` = flat-nominal/old behavior, `>inflation` = real raises).
-   *
-   *  Accepted domain: finite and `-100 < pct ≤ 25`. An out-of-band
-   *  / non-finite stored value (corrupt import) degrades to the
-   *  tracks-inflation default at the resolver/engine boundary. Resolved
-   *  per-account first-ancestor-wins (override → baseline → absent) by
-   *  `resolveContributionGrowth` in `scenario-resolution.ts`. */
+  /**
+   * Annual-increase rate for the planned contribution (percent), read in today's dollars so it holds its real value in
+   * the default projection view. Presence is the mode flag (like income's `tracksInflation` vs `colaPct`): absent
+   * tracks the scenario's general inflation (per-path CPI in Monte Carlo); an explicit number, `0` included, is a fixed
+   * COLA (`0` flat-nominal, above inflation real raises). Domain: finite and `-100 < pct <= 25`; an out-of-band or
+   * non-finite stored value (corrupt import) degrades to tracks-inflation at the resolver/engine boundary. Resolved
+   * first-ancestor-wins by `resolveContributionGrowth` in `scenario-resolution.ts`.
+   */
   contributionGrowthPct?: number;
-  /** Per-account stocks/bonds/cash mix in percent. Drives Monte Carlo
-   *  return sampling. CBP accounts ignore the field; engine consults
-   *  `planningReturnPct` directly for them. See `AssetMix`. */
+  /** Stocks/bonds/cash mix in percent driving Monte Carlo return sampling; CBP accounts ignore it (see `AssetMix`). */
   assetMix: AssetMix;
-  /** The tax year of the account owner's first Roth-IRA
-   *  contribution, starting the §408A five-tax-year qualification clock. On an
-   *  INHERITED account (`rmdInheritedAccount`) the year asked for is the
-   *  DECEDENT's, but no engine consults it: an inherited Roth IRA forms no
-   *  §408A pool, no clock is resolved for it, and its withdrawals are assumed
-   *  fully qualified. The field itself is unchanged — still collected,
-   *  stored, and scoring completeness. **Absent → the five-year rule is treated
-   *  as NOT satisfied** (conservative — earnings are taxed). */
+  /**
+   * Tax year of the owner's first Roth-IRA contribution, starting the §408A five-tax-year qualification clock. On an
+   * inherited account the year asked for is the decedent's, but no engine consults it (an inherited Roth IRA forms no
+   * §408A pool; withdrawals are assumed fully qualified); it is still collected and scored for completeness. Absent:
+   * the five-year rule is treated as not satisfied (conservative, earnings are taxed).
+   */
   rothIraFirstContributionTaxYear?: number;
-  // Roth-IRA conversions are NOT stored here. A conversion happens in one tax
-  // year, so it is recorded on that year's row on the Account Balances page
-  // (`AccountBalancePayload.rothConversionTaxableAmount` /
-  // `rothConversionNontaxableAmount`) and the engine reads its lots from there.
-  // The former `rothIraConversionLots` field was dropped outright — no schema
-  // bump and no migration, because nothing reads the key. The
-  // designated-Roth IN-PLAN ROLLOVER lots went the same way — see the note
-  // further down.
-  /** The tax year this designated-Roth account's OWN
-   *  applicable five-taxable-year period begins. This is normally the year the
-   *  owner first participated in THIS account, but per IRS designated-Roth rules
-   *  it must reflect any EARLIER start date carried over from a qualifying DIRECT
-   *  ROLLOVER from a distributing designated-Roth plan — the receiving account
-   *  inherits the distributing plan's participation-start year, so the recorded
-   *  value is the account's own applicable clock start, not merely first
-   *  participation in the receiving account itself. **Absent → not
-   *  satisfied** (conservative). (No rollover-carryover
-   *  STORAGE mechanism is added here; the separate in-plan-rollover concept is
-   *  recorded per year on the balance rows — this field's value is simply the
-   *  correct clock-start year including any such carryover.) */
+  // Roth-IRA conversions and designated-Roth in-plan rollovers happen in one tax year, so they are recorded on that
+  // year's balance row (`AccountBalancePayload.rothConversion*` / `rothInPlanRollover*`), where the engine reads its
+  // lots, not here.
+  /**
+   * Tax year this designated-Roth account's own five-taxable-year period begins: normally the owner's first
+   * participation, but per IRS rules an earlier start carried over from a qualifying direct rollover from a
+   * distributing designated-Roth plan, so the value is the correct clock start including any carryover. Absent: not
+   * satisfied (conservative).
+   */
   designatedRothFirstParticipationTaxYear?: number;
-  // Designated-Roth IN-PLAN ROLLOVERS are NOT stored here. Like a Roth-IRA
-  // conversion, an in-plan rollover happens in one tax year, so it is recorded on
-  // that year's row on the Account Balances page
-  // (`AccountBalancePayload.rothInPlanRolloverTaxableAmount` /
-  // `rothInPlanRolloverNontaxableAmount`) and the engine reads its lots from
-  // there. The former `designatedRothInPlanRolloverLots` field was dropped
-  // outright — no schema bump and no migration, because nothing reads the key.
 
-  // -------------------------------------------------------------------------
-  // Required-Minimum-Distribution profile facts.
-  // Sparse-optional and additive; the fact-based RMD engine reads them in
-  // projection output. Every field's ABSENCE resolves to the
-  // one-sided conservative default at the engine boundary — the migration
-  // never invents a stored value, and an INHERITED account with incomplete
-  // beneficiary facts WITHHOLDS its RMD (never guesses a rule). Facts flow into
-  // the account-level RMD-rule selector (`resolveRmdRule` in `rmd.ts`) and its
-  // still-working / first-year-deferral helpers; `rmd-life-expectancy-tables.ts`
-  // holds only the table/divisor selector (`selectRmdTableDivisor`) that
-  // `resolveRmdRule` calls.
-  // -------------------------------------------------------------------------
+  // Required-Minimum-Distribution profile facts: sparse-optional and additive, read by the fact-based RMD engine
+  // (`resolveRmdRule` in `rmd.ts`; `rmd-life-expectancy-tables.ts` holds only the divisor selector). Absence resolves
+  // to the one-sided conservative default at the engine boundary; migration never invents a value, and an inherited
+  // account with incomplete beneficiary facts withholds its RMD rather than guess a rule.
 
-  /** This account was INHERITED (the member is a beneficiary, not the
-   *  original owner). **Absent → owner account** (owner RMD rules: Uniform
-   *  Lifetime Table III by default). When `true`, the inherited-account facts
-   *  below become required to compute an RMD; incomplete facts WITHHOLD the
-   *  result. */
+  /**
+   * Inherited account (the member is a beneficiary). Absent: owner account (Uniform Lifetime Table III). When true, the
+   * inherited-account facts below are required; incomplete facts withhold the RMD.
+   */
   rmdInheritedAccount?: boolean;
-  /** The plan is the owner's CURRENT employer's plan (a precondition of the
-   *  §401(a)(9)(C) still-working exception). **Absent → not a current-employer
-   *  plan** → no still-working deferral → the RMD is required (conservative).
-   *  Meaningful only on employer plans (401(k)/403(b)/457(b)/TSP/cash-balance);
-   *  the exception never applies to IRAs. */
+  /**
+   * The plan is the owner's current employer's, a precondition of the §401(a)(9)(C) still-working exception (employer
+   * plans only, never IRAs). Absent: not current-employer, so no deferral and the RMD is required (conservative).
+   */
   rmdCurrentEmployerPlan?: boolean;
-  /** The owner is a >5% owner of the employer sponsoring the plan. A 5%
-   *  owner CANNOT use the still-working exception (§401(a)(9)(C)(ii)). **Absent
-   *  → treated as a 5% owner WHEN the still-working exception is otherwise
-   *  claimed** → the exception is denied and the RMD is required (conservative;
-   *  never optimistically defers). */
+  /**
+   * The owner is a >5% owner of the sponsoring employer, which bars the still-working exception (§401(a)(9)(C)(ii)).
+   * Absent: treated as a 5% owner when the exception is otherwise claimed, so the RMD is required (never optimistically
+   * defers).
+   */
   rmdFivePercentOwner?: boolean;
-  /** The plan's own terms force distributions at the statutory RMD age
-   *  regardless of continued employment (some plans do). The still-working
-   *  exception is granted ONLY when this is explicitly `false` (an affirmative
-   *  "the plan does NOT force distribution"); **absent/unknown → the exception is
-   *  DENIED**, never granted on missing plan terms. `true` also denies
-   *  it. */
+  /**
+   * The plan's terms force distributions at the statutory RMD age regardless of employment. The still-working exception
+   * is granted only when this is explicitly `false`; absent or `true` denies it.
+   */
   rmdPlanRequiresDistributionAtStatutoryAge?: boolean;
-  /** The owner ELECTS to defer their FIRST RMD to April 1 of the year after
-   *  the trigger year (the required-beginning-date grace), taking two RMDs in
-   *  that second year. **Absent → false** (the engine's default calendar-year
-   *  RMD is taken in the trigger year). Modeled as a timing/tax-and-IRMAA
-   *  consequence, not a change to the annual amount. */
+  /**
+   * The owner elects to defer the first RMD to April 1 of the year after the trigger year (taking two RMDs that year).
+   * Absent: false. A timing/tax-and-IRMAA consequence, not a change to the annual amount.
+   */
   rmdFirstYearDeferralElected?: boolean;
-  /** Records that the owner's SOLE beneficiary is a spouse. Whether the
-   *  Joint Life and Last Survivor Table (Table II) applies is DERIVED from the
-   *  owner + spouse birthdates (the anniversary-safe ">10 years younger" test) —
-   *  this boolean is never trusted alone for the age gap. **Absent →
-   *  Uniform Lifetime Table III** (larger-RMD default; conservative). When set,
-   *  missing/malformed owner or spouse birthdates WITHHOLD (never a silent Table
-   *  III downgrade); a birthdate-derived "not more than 10 years younger"
-   *  uses Table III. */
+  /**
+   * The owner's sole beneficiary is a spouse. Whether Table II (Joint Life and Last Survivor) applies is derived from
+   * the owner and spouse birthdates (the anniversary-safe ">10 years younger" test); this boolean alone is never
+   * trusted for the gap. Absent: Uniform Lifetime Table III (larger RMD, conservative). When set, missing or malformed
+   * birthdates withhold rather than silently downgrade to Table III; a gap of not more than 10 years uses Table III.
+   */
   rmdSoleSpouseBeneficiary?: boolean;
-  /** ISO `YYYY-MM-DD` birthdate of the sole spouse beneficiary. When the
-   *  sole-spouse designation is set it both VERIFIES the ">10 years younger" gap
-   *  and supplies the spouse's attained age for the Table II divisor lookup
-   *  (derived from this birthdate + the tax year — no separate age fact). A missing
-   *  or malformed value with the designation set WITHHOLDS (never a silent Table
-   *  III fallback). Unused when the designation is absent. */
+  /**
+   * Birthdate (ISO `YYYY-MM-DD`) of the sole spouse beneficiary: verifies the ">10 years younger" gap and supplies the
+   * attained age for the Table II divisor. Missing or malformed with the designation set withholds. Unused when the
+   * designation is absent.
+   */
   rmdSpouseBeneficiaryBirthdate?: string;
-  /** Beneficiary category of an INHERITED account, selecting the applicable
-   *  10-year / life-expectancy / 5-year post-death rule. **Absent on an inherited
-   *  account → the RMD is WITHHELD** and the missing fact is listed.
-   *  Ignored on owner accounts. */
+  /**
+   * Beneficiary category of an inherited account, selecting the 10-year, life-expectancy or 5-year post-death rule.
+   * Absent on an inherited account withholds the RMD and lists the missing fact; ignored on owner accounts.
+   */
   rmdBeneficiaryType?: RmdBeneficiaryType;
-  /** ISO `YYYY-MM-DD` date the ORIGINAL owner of an inherited account died,
-   *  which (with `rmdInheritedOwnerDiedOnOrAfterRbd`) determines the applicable
-   *  post-death schedule. **Absent on an inherited account → WITHHELD**. */
+  /**
+   * Death date (ISO `YYYY-MM-DD`) of the original owner of an inherited account; with
+   * `rmdInheritedOwnerDiedOnOrAfterRbd` it determines the post-death schedule. Absent on an inherited account:
+   * withheld.
+   */
   rmdInheritedOwnerDeathDate?: string;
-  /** Whether the original owner of an inherited account died ON OR AFTER
-   *  their required beginning date (RBD). Governs whether annual life-expectancy
-   *  distributions are required within the 10-year window. **Absent on an
-   *  inherited account → WITHHELD**. */
+  /**
+   * Whether the original owner died on or after their required beginning date (RBD), governing whether annual
+   * life-expectancy distributions are required within the 10-year window. Absent on an inherited account: withheld.
+   */
   rmdInheritedOwnerDiedOnOrAfterRbd?: boolean;
-  /** ISO `YYYY-MM-DD` birthdate of the ORIGINAL account owner (the decedent).
-   *  Needed for the decedent's-remaining-life "longer-of" comparison when the
-   *  owner died on/after their RBD, and for the surviving-spouse delayed-start year
-   *  (the year the owner would have reached their RBD). **Absent when a result
-   *  depends on it → WITHHELD**. */
+  /**
+   * Birthdate (ISO `YYYY-MM-DD`) of the original owner (decedent), needed for the remaining-life "longer-of" comparison
+   * when death was on or after the RBD and for the surviving-spouse delayed-start year. Absent when a result depends on
+   * it: withheld.
+   */
   rmdOriginalOwnerBirthdate?: string;
-  /** ISO `YYYY-MM-DD` birthdate of the BENEFICIARY (this member), needed for
-   *  the Single Life Table (Table I) life-expectancy lookup when a stretch
-   *  distribution applies. **Absent when a life-expectancy stretch applies →
-   *  WITHHELD**. */
+  /**
+   * Birthdate (ISO `YYYY-MM-DD`) of the beneficiary (this member), needed for the Single Life Table (Table I) lookup
+   * when a stretch applies. Absent then: withheld.
+   */
   rmdBeneficiaryBirthdate?: string;
-  /** The post-death distribution ELECTION an ELIGIBLE DESIGNATED beneficiary
-   *  of an inherited account affirmatively made: the life-expectancy stretch or
-   *  the 10-year rule. The engine must never INVENT this choice — **absent on an
-   *  eligible-designated-beneficiary inherited account → WITHHELD**.
-   *  Ignored for a non-eligible designated beneficiary (10-year rule applies) and
-   *  a non-person beneficiary. */
+  /**
+   * The post-death election an eligible designated beneficiary of an inherited account made: life-expectancy stretch or
+   * the 10-year rule. The engine never invents it, so absent on such an account withholds. Ignored for a non-eligible
+   * designated beneficiary (10-year rule) and a non-person beneficiary.
+   */
   rmdBeneficiaryElection?: RmdBeneficiaryElection;
 }
 
@@ -288,40 +212,30 @@ export interface AccountBalancePayload extends Record<string, unknown> {
   endingBalancePostTax: number | null;
   totalContributions: number;
   comment: string | null;
-  /** Roth engine — the part of this year's Roth conversion that was TAXED when
-   *  it was converted, in **dollars with cents** (like every other money field
-   *  on this payload — not whole dollars, not cents). Only the taxed portion
-   *  enters the IRC §72(t) recapture base, which is why the taxable and
-   *  nontaxable halves are stored apart rather than as one total.
-   *
-   *  Sparse-optional: the key is OMITTED when nothing was converted that year.
-   *  **Absent means "nothing recorded"**, which is a weaker claim than a stored
-   *  `0` — a `0` asserts the user recorded a year with no conversion. */
+  /**
+   * Roth engine: the part of this year's Roth conversion that was taxed when converted, in dollars with cents like
+   * every money field here. Only the taxed part enters the IRC §72(t) recapture base, hence taxable and nontaxable are
+   * stored apart. Sparse-optional: omitted when nothing was converted; absent means "nothing recorded", a weaker claim
+   * than a stored `0` (a year recorded with no conversion).
+   */
   rothConversionTaxableAmount?: number;
-  /** Roth engine — the part of this year's Roth conversion that came from
-   *  after-tax money and was NOT taxed at conversion, in **dollars with cents**.
-   *  Sparse-optional with the same absent-means-nothing-recorded semantics as
-   *  {@link AccountBalancePayload.rothConversionTaxableAmount}. */
+  /**
+   * Roth engine: the part of this year's conversion that came from after-tax money and was not taxed at conversion, in
+   * dollars with cents. Sparse-optional, absent-means-nothing-recorded like {@link
+   * AccountBalancePayload.rothConversionTaxableAmount}.
+   */
   rothConversionNontaxableAmount?: number;
-  /** Roth engine — the part of this year's designated-Roth IN-PLAN ROLLOVER that
-   *  WAS included in income when it moved, in **dollars with cents**.
-   *
-   *  An in-plan Roth rollover moves money from an employer plan's pre-tax side
-   *  into its own Roth side (IRC §402A(c)(4)). It is NOT a Roth-IRA conversion:
-   *  it lands inside the same plan and starts its own separate five-tax-year
-   *  §402A(c)(4)(D) recapture clock. Recorded here rather than on the account so
-   *  it sits on the year it happened, like every other yearly figure — and so a
-   *  plan's Roth history has exactly one home, matching the conversion fields
-   *  above.
-   *
-   *  Meaningful on designated-Roth employer accounts (pure Roth
-   *  401(k)/403(b)/457(b)/TSP, or the Roth-designated side of a MIXED
-   *  401(k)/403(b)/457(b)/TSP). Sparse-optional with the same
-   *  absent-means-nothing-recorded semantics as the conversion pair. */
+  /**
+   * Roth engine: the part of this year's designated-Roth in-plan rollover that was included in income, in dollars with
+   * cents. An in-plan rollover moves an employer plan's pre-tax side into its own Roth side (IRC §402A(c)(4)); it is
+   * not a Roth-IRA conversion and starts its own five-tax-year §402A(c)(4)(D) recapture clock. Recorded here, on the
+   * year it happened, so a plan's Roth history has one home. Meaningful on designated-Roth employer accounts (pure Roth
+   * 401(k)/403(b)/457(b)/TSP or the Roth side of a MIXED one); sparse-optional like the conversion pair.
+   */
   rothInPlanRolloverTaxableAmount?: number;
-  /** Roth engine — the already-after-tax part of this year's designated-Roth
-   *  in-plan rollover, in **dollars with cents**. Never taxed and never
-   *  penalized, but still basis. Same absent semantics as
-   *  {@link AccountBalancePayload.rothInPlanRolloverTaxableAmount}. */
+  /**
+   * Roth engine: the already-after-tax part of this year's in-plan rollover, in dollars with cents; never taxed or
+   * penalized but still basis. Absent semantics as {@link AccountBalancePayload.rothInPlanRolloverTaxableAmount}.
+   */
   rothInPlanRolloverNontaxableAmount?: number;
 }

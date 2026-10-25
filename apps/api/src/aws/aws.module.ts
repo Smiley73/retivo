@@ -1,12 +1,5 @@
-/**
- * AWS clients module. Provides typed singletons for DynamoDB Document
- * Client, S3, SES, and Lambda — used by the repository layer in `dynamo/`
- * and by the auth services (the Lambda client invokes the dedicated
- * account-deletion snapshot-purge Lambda). Honors DYNAMODB_ENDPOINT /
- * S3_ENDPOINT / SES_ENDPOINT
- * env vars so the same code runs against DynamoDB Local + Moto in dev
- * (Scenario 2/3) and real AWS in dev/prod (Scenario 4).
- */
+// Typed AWS client singletons (DynamoDB Document Client, S3, SES, Lambda); the *_ENDPOINT env vars point them at DynamoDB Local and
+// Moto in dev.
 import { Module, Global } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
@@ -32,19 +25,14 @@ export const LAMBDA_CLIENT = Symbol('LAMBDA_CLIENT');
         const endpoint = config.get('DYNAMODB_ENDPOINT', { infer: true });
         const client = new DynamoDBClient({
           region,
-          // Explicit per-call timeouts (repo non-negotiable: every
-          // outbound call is bounded; the sync-path DynamoDB budget is <= 5 s).
-          // Bounds a hung socket on the synchronous push-response path (the
-          // post-commit strand re-append's GetItem + PutItem) so it
-          // can never stall an already-committed, acknowledged write toward
-          // the ~30 s API Gateway ceiling. requestTimeout sits under 5 s with
-          // headroom; connectionTimeout is shorter still.
+          // Every outbound call is bounded, and this one sits on the synchronous push-response path (the strand
+          // re-append), so a hung socket must not stall an acknowledged write toward the ~30 s API Gateway ceiling.
+          // requestTimeout is under 5 s; connectionTimeout is shorter.
           requestHandler: {
             requestTimeout: 4_500,
             connectionTimeout: 2_000,
           },
-          // Local emulators (DynamoDB Local) require fake credentials.
-          // Real AWS uses the default credential chain (IAM role for Lambda).
+          // Local emulators need fake credentials; real AWS uses the default chain.
           ...(endpoint
             ? {
                 endpoint,
@@ -68,10 +56,7 @@ export const LAMBDA_CLIENT = Symbol('LAMBDA_CLIENT');
         const endpoint = config.get('S3_ENDPOINT', { infer: true });
         return new S3Client({
           region,
-          // Explicit per-call timeouts (repo non-negotiable: every
-          // outbound call is bounded). Used by
-          // sync bootstrap/pull GetObject + the /health/dependencies
-          // GetBucketLocation probe; sized under the API Gateway budget.
+          // Bounded, sized under the API Gateway budget; used by sync GetObject and the /health/dependencies probe.
           requestHandler: {
             requestTimeout: 25_000,
             connectionTimeout: 3_000,
@@ -87,11 +72,8 @@ export const LAMBDA_CLIENT = Symbol('LAMBDA_CLIENT');
       },
     },
     {
-      // Invokes the dedicated account-deletion snapshot-purge Lambda
-      // synchronously (RequestResponse). Explicit socket/connection
-      // timeouts sized to tolerate a purge-Lambda cold start while
-      // staying within the api's 30s API Gateway budget — the call sits
-      // inside DELETE /auth/account, which must return 204.
+      // Invokes the snapshot-purge Lambda synchronously inside `DELETE /auth/account`, so the timeouts tolerate its
+      // cold start within the 30 s API Gateway budget.
       provide: LAMBDA_CLIENT,
       inject: [ConfigService],
       useFactory: (config: ConfigService<EnvConfig, true>) => {
@@ -113,13 +95,8 @@ export const LAMBDA_CLIENT = Symbol('LAMBDA_CLIENT');
         const endpoint = config.get('SES_ENDPOINT', { infer: true });
         return new SESClient({
           region,
-          // Explicit per-call timeouts (repo non-negotiable: every outbound
-          // call is bounded).
-          // Bounds a hung SES socket on the step-up email-OTP send path
-          // (step-up.controller.ts → mfa-email-otp.service.ts sendStepUp) plus
-          // the existing MFA/verification sends, so it can never stall a
-          // request toward the ~30 s API Gateway ceiling. requestTimeout sits
-          // under 5 s with headroom; connectionTimeout is shorter still.
+          // Bounded so a hung SES socket on the OTP and verification send paths cannot stall a request toward the ~30 s
+          // ceiling; requestTimeout is under 5 s.
           requestHandler: {
             requestTimeout: 4_500,
             connectionTimeout: 2_000,

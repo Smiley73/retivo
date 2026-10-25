@@ -1,6 +1,3 @@
-/**
- * Schema validation + source-pin spot checks for QCD_LIMITS.
- */
 import { describe, it, expect } from 'vitest';
 import { QCD_LIMITS } from './qcd-limits';
 
@@ -13,8 +10,7 @@ describe('QCD_LIMITS', () => {
   });
 
   it('should_pin_the_Pub_590-B_permalink_substring_and_exact_asOfDate', () => {
-    // Source must be a stable permalink. The Pub. 590-B PDF
-    // carries the indexed §408(d)(8) limit.
+    // The Pub. 590-B PDF carries the indexed §408(d)(8) limit.
     expect(QCD_LIMITS.metadata.source).toContain('p590b');
     expect(QCD_LIMITS.metadata.asOfDate).toBe('2026-06-28');
   });

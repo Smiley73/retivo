@@ -1,14 +1,4 @@
-/**
- * Unit tests for the RMD floor + QCD forced-outflow pass in
- * drawdown-engine-per-account-qcd-hsa.ts.
- *
- * Focus: the per-owner RMD floor basis tracks only the drawable pre-tax pocket,
- * the FORCED withdrawal resolves recorded RMD facts through the shared
- * fact-aware engine (still-working deferral, inherited beneficiary schedule,
- * first-year deferral + catch-up, withheld results), and the 70½-gated QCD forced
- * outflow debits the source IRA and offsets only the owner's IRA-pool RMD floor
- * (IRC §408(d)(8), SECURE 2.0 §325).
- */
+/** Unit tests for the RMD floor and QCD forced-outflow pass in `drawdown-engine-per-account-qcd-hsa.ts`. */
 import { describe, it, expect } from 'vitest';
 import {
   applyQcdPrePass,
@@ -18,10 +8,6 @@ import type { AccountRunState } from './drawdown-engine-per-account-strategy-hel
 import { RMD_DIVISORS } from './rmd-divisors';
 import { computeRmd, type RmdAccountProfileFacts } from './rmd';
 import type { QcdContextInput, RmdContextInput } from './drawdown-engine-types';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function makeState(
   overrides: Partial<AccountRunState> & {
@@ -41,11 +27,6 @@ function makeState(
   };
 }
 
-// ---------------------------------------------------------------------------
-// buildPerOwnerRmdFloor — RMD basis = drawable pre-tax pocket only
-// ---------------------------------------------------------------------------
-
-/** Single-owner RMD context whose owner is past the trigger age in `taxYear`. */
 function rmdContextFor(
   accountIds: ReadonlyArray<string>,
   isoBirthdate = '1957-06-15',
@@ -59,13 +40,10 @@ function rmdContextFor(
 }
 
 describe('buildPerOwnerRmdFloor — required-withdrawal floor tracks only what can be withdrawn', () => {
-  // Owner born 1957 → age 73 in 2030 → trigger fires; divisor 26.5.
   const taxYear = 2030;
   const divisor = 26.5;
 
   it('does not raise a required-withdrawal floor on after-tax dollars a retirement account cannot draw', () => {
-    // A qualifying PRE_TAX IRA with $0 pre-tax and a large after-tax balance
-    // must produce a $0 floor — forced RMD can only draw `pre`.
     const state: AccountRunState[] = [
       makeState({ id: 'ira', pre: 0, post: 500_000, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
     ];
@@ -78,15 +56,11 @@ describe('buildPerOwnerRmdFloor — required-withdrawal floor tracks only what c
       makeState({ id: 'ira', pre: 100_000, post: 400_000, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
     ];
     const floors = buildPerOwnerRmdFloor({ taxYear, state, rmdContext: rmdContextFor(['ira']) });
-    // Floor = pre / divisor, NOT (pre + post) / divisor.
     expect(floors[0]).toBeCloseTo(100_000 / divisor, 0);
     expect(floors[0]).toBeLessThan(500_000 / divisor);
   });
 
   it('builds a mixed account floor from its pre-tax pocket only (Roth slice excluded)', () => {
-    // Unconditional MIXED basis: a qualifying MIXED account with both
-    // pockets yields a floor on `pre` only — the post (designated-Roth) slice
-    // is subtracted, independent of how the MIXED branch is implemented.
     const state: AccountRunState[] = [
       makeState({ id: 'mix', pre: 120_000, post: 80_000, taxTreatment: 'MIXED', accountType: 'RETIREMENT_401K' }),
     ];
@@ -96,18 +70,10 @@ describe('buildPerOwnerRmdFloor — required-withdrawal floor tracks only what c
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildPerOwnerRmdFloor — fact-based rules reach the FORCED withdrawal, not
-// just the tax floor / disclosures
-// ---------------------------------------------------------------------------
-
 describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD facts', () => {
-  // Owner born 1957 → age 73 in 2030 → trigger fires; Uniform Lifetime divisor 26.5.
   const taxYear = 2030;
   const divisor = 26.5;
 
-  /** An inherited traditional IRA with complete beneficiary facts: a spouse who
-   *  elected lifetime withdrawals, original owner died before their start date. */
   const INHERITED_FACTS: RmdAccountProfileFacts = {
     inheritedAccount: true,
     beneficiaryType: 'SPOUSE',
@@ -118,7 +84,6 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
     originalOwnerBirthdate: '1949-01-05',
   };
 
-  /** §401(a)(9)(C) still-working preconditions all affirmatively met. */
   const STILL_WORKING_FACTS: RmdAccountProfileFacts = {
     currentEmployerPlan: true,
     fivePercentOwner: false,
@@ -141,8 +106,7 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
   }
 
   it('does not force a withdrawal from a plan the still-working exception postpones', () => {
-    // The disclosure surface tells the user "no withdrawal is required yet because
-    // you are still working"; the money-moving pass must agree.
+    // The disclosure surface says no withdrawal is required while still working (§401(a)(9)(C)); the money-moving pass must agree.
     const state: AccountRunState[] = [
       makeState({ id: 'plan', pre: 300_000, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_401K' }),
     ];
@@ -152,7 +116,6 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
       rmdContext: contextWithFacts({
         accountIds: ['plan'],
         facts: { plan: STILL_WORKING_FACTS },
-        // Separation is still ahead of the tax year → the exception defers.
         retirementYear: taxYear + 5,
       }),
     });
@@ -176,9 +139,8 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
   });
 
   it('forces an inherited account BELOW the beneficiary’s own trigger age', () => {
-    // A beneficiary obligation is never gated by the beneficiary's own trigger
-    // age. Pre-fix this returned $0 forever while the shortfall flag measured
-    // against a real Table I requirement the model refused to take.
+    // A beneficiary obligation is never gated by the beneficiary's own trigger age; $0 here would contradict the shortfall
+    // flag's real Table I requirement.
     const state: AccountRunState[] = [
       makeState({ id: 'inh', pre: 200_000, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
     ];
@@ -188,7 +150,6 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
       rmdContext: contextWithFacts({
         accountIds: ['inh'],
         facts: { inh: INHERITED_FACTS },
-        // Born 1980 → age 50 in 2030, far below any trigger age.
         isoBirthdate: '1980-05-04',
       }),
     });
@@ -196,8 +157,8 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
   });
 
   it('agrees exactly with the shared engine on the inherited beneficiary schedule', () => {
-    // Not the Uniform Lifetime divisor: the inherited account must resolve through
-    // the SAME `computeRmd` the tax floor and the report disclosures resolve.
+    // Not the Uniform Lifetime divisor: the inherited account resolves through the same computeRmd the tax floor and
+    // disclosures use.
     const state: AccountRunState[] = [
       makeState({ id: 'inh', pre: 200_000, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
     ];
@@ -235,7 +196,6 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
       state,
       rmdContext: contextWithFacts({
         accountIds: ['inh'],
-        // No beneficiary category / death date / on-or-after-RBD flag.
         facts: { inh: { inheritedAccount: true } },
       }),
     });
@@ -243,16 +203,9 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
   });
 
   it('forces $0 from an inherited pure-Roth account whichever pocket holds the balance', () => {
-    // `isQualifyingAccount` rejects the pure Roth types (a living Roth owner has no
-    // RMD) while `isInheritedRmdSubjectType` admits them, because a BENEFICIARY does
-    // owe post-death distributions. The DISCLOSED LIMITATION is that such an account
-    // still forces $0: its whole balance IS the SECURE 2.0 §325 Roth-designated
-    // pocket, so its §325-net base is $0 — and the forced pass can debit only `pre`
-    // anyway. That holds whichever bucket the run happens to hold the
-    // balance in, so no surface of one run can read a different base for the same
-    // account (a `pre`-side artifact used to produce a real forced floor here while
-    // the display surfaces read $0). Pinned so the behaviour is a recorded decision
-    // rather than an accident.
+    // isQualifyingAccount rejects pure Roth types while isInheritedRmdSubjectType admits them; such an account still forces $0
+    // because its whole balance is the §325 Roth-designated pocket (net base $0) and the forced pass can debit only pre,
+    // whichever bucket holds the balance.
     const forPockets = (pre: number, post: number): number =>
       buildPerOwnerRmdFloor({
         taxYear,
@@ -296,9 +249,8 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
   });
 
   it('sizes a deferred first-year catch-up from the balance two years earlier', () => {
-    // Owner born 1957 attains 73 in 2030 (their first RMD year) and elected the
-    // April-1 deferral, so 2031 carries TWO required withdrawals: 2031's own plus
-    // the 2030 amount, sized on Dec 31 2029 — the caller's two-years-prior base.
+    // Born 1957 attains 73 in 2030 and elected the April-1 deferral, so 2031 carries two required withdrawals: its own plus the
+    // 2030 amount, sized on Dec 31 2029 (the caller's two-years-prior base).
     const state: AccountRunState[] = [
       makeState({ id: 'ira', pre: 200_000, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
     ];
@@ -313,9 +265,8 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
       rmdContext,
       twoYearsPriorDollars: [{ pre: 265_000, post: 0 }],
     });
-    // Without the base the catch-up is a blocker, never guessed.
     expect(withBase[0]).toBeGreaterThan(withoutBase[0]);
-    // $265,000 / 26.5 = exactly $10,000 of catch-up on top of 2031's own amount.
+    // $265,000 / 26.5 = $10,000 of catch-up on top of 2031's own amount.
     expect(withBase[0] - withoutBase[0]).toBeCloseTo(10_000, 0);
   });
 
@@ -335,8 +286,7 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
   });
 
   it('keeps a fact-free account on the legacy Uniform Lifetime result', () => {
-    // The one guarantee the frozen parity fixtures rest on: recording facts on ONE
-    // account must not move a sibling that records none.
+    // Recording facts on one account must not move a sibling that records none (the frozen parity fixtures rest on it).
     const state: AccountRunState[] = [
       makeState({ id: 'ira', pre: 200_000, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
       makeState({ id: 'inh', pre: 100_000, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
@@ -353,12 +303,6 @@ describe('buildPerOwnerRmdFloor — the forced withdrawal honours recorded RMD f
   });
 });
 
-// ---------------------------------------------------------------------------
-// applyQcdPrePass — 70½-gated QCD forced outflow + IRA-pool offset
-// ---------------------------------------------------------------------------
-
-/** QCD context for one owner with a single source IRA, $50k/yr REAL, window
- *  2028..2034 exclusive, owner 70½-eligible from 2026 (born 1955). */
 function qcdContextFor(args: {
   sourceAccountId: string;
   annualAmountDollars?: number;
@@ -402,22 +346,18 @@ describe('applyQcdPrePass — QCD forced outflow + IRA-pool RMD offset', () => {
     });
     // Q = min(50k inflated, 111k limit, 500k balance) = $50,000.
     expect(result.totalQcdCents).toBe(5_000_000);
-    // Offset = min(Q, gross IRA-pool RMD = $18k) = $18,000.
+    // Offset = min(Q, gross IRA-pool RMD $18k) = $18,000.
     expect(result.rmdOffsetCents).toBe(1_800_000);
     expect(result.grossIraPoolRmdCents).toBe(1_800_000);
-    // The IRA floor is fully offset to 0; the 401k floor is untouched.
     expect(rmdFloor[0]).toBe(0);
     expect(rmdFloor[1]).toBe(12_000);
-    // The gift left the source IRA's pre-tax bucket.
     expect(state[0].pre).toBe(450_000);
     expect(state[1].pre).toBe(300_000);
   });
 
   it('returns the EXACT inflation factor it used, so qcdCents ÷ factor round-trips to the configured REAL amount (display-anchor fix)', () => {
-    // A $10,000 REAL gift inflated by a year-average factor of 1.25 → $12,500
-    // nominal. The pass surfaces that exact factor so the today's-dollars display
-    // can divide it back out to the configured $10,000 (NOT the year-end deflator,
-    // which would under-state the gift).
+    // A $10,000 REAL gift inflated by a year-average factor of 1.25 is $12,500 nominal; the pass surfaces the factor so the
+    // display can divide it back out (the year-end deflator would under-state the gift).
     const factor = 1.25;
     const state: AccountRunState[] = [
       makeState({ id: 'ira', pre: 500_000, post: 0, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
@@ -434,11 +374,8 @@ describe('applyQcdPrePass — QCD forced outflow + IRA-pool RMD offset', () => {
       ownerByAccountId: new Map([['ira', 'owner-1']]),
       taxYear,
     });
-    // Nominal qcdCents = round(10_000 × 1.25 × 100) = 1_250_000.
     expect(result.totalQcdCents).toBe(1_250_000);
-    // The pass exposes the EXACT factor it inflated with.
     expect(result.inflationFactor).toBe(factor);
-    // Round-trip: nominal ÷ factor === the configured REAL amount.
     expect(result.totalQcdCents / 100 / result.inflationFactor).toBeCloseTo(10_000, 6);
   });
 
@@ -449,7 +386,6 @@ describe('applyQcdPrePass — QCD forced outflow + IRA-pool RMD offset', () => {
     const result = applyQcdPrePass({
       state,
       rmdFloorByAccountDollars: [0],
-      // Window 2028..2034 exclusive; 2027 is inactive → no entries grouped.
       qcdContext: qcdContextFor({ sourceAccountId: 'ira', inflationFactor: 1.4 }),
       ownerByAccountId: new Map([['ira', 'owner-1']]),
       taxYear: 2027,
@@ -499,7 +435,6 @@ describe('applyQcdPrePass — QCD forced outflow + IRA-pool RMD offset', () => {
     const result = applyQcdPrePass({
       state,
       rmdFloorByAccountDollars: rmdFloor,
-      // Window 2035..2040 — taxYear 2030 is before it.
       qcdContext: qcdContextFor({ sourceAccountId: 'ira', startYear: 2035, endYear: 2040 }),
       ownerByAccountId: new Map([['ira', 'owner-1']]),
       taxYear,
@@ -522,15 +457,12 @@ describe('applyQcdPrePass — QCD forced outflow + IRA-pool RMD offset', () => {
     });
     expect(result.totalQcdCents).toBe(3_000_000);
     expect(result.rmdOffsetCents).toBe(3_000_000); // min(30k, 40k)
-    // Remaining taxable RMD floor = gross − Q = $10,000.
     expect(rmdFloor[0]).toBeCloseTo(10_000, 2);
   });
 
   it('two same-owner IRAs — the offset distributes largest-floor-first, no floor negative', () => {
-    // One owner with two RETIREMENT_IRA accounts pooling into one IRA RMD pool.
-    // Combined gross IRA-pool RMD = $15k + $5k = $20k. A $30k QCD (≥ gross) fully
-    // offsets the pool; the offset is distributed largest-floor-first so no
-    // per-account floor goes negative.
+    // Two IRAs pool into one IRA RMD pool ($15k + $5k = $20k gross); a $30k QCD fully offsets it, distributed
+    // largest-floor-first so no per-account floor goes negative.
     const state: AccountRunState[] = [
       makeState({ id: 'ira-a', pre: 600_000, post: 0, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
       makeState({ id: 'ira-b', pre: 400_000, post: 0, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
@@ -561,19 +493,15 @@ describe('applyQcdPrePass — QCD forced outflow + IRA-pool RMD offset', () => {
     expect(result.totalQcdCents).toBe(3_000_000);
     expect(result.grossIraPoolRmdCents).toBe(2_000_000);
     expect(result.rmdOffsetCents).toBe(2_000_000);
-    // Per-owner offset is keyed by owner.
     expect(result.rmdOffsetCentsByOwner['owner-1']).toBe(2_000_000);
-    // Largest-floor-first: ira-a ($15k) absorbs first, then ira-b ($5k); both → 0,
-    // neither goes negative.
     expect(rmdFloor[0]).toBe(0);
     expect(rmdFloor[1]).toBe(0);
     expect(rmdFloor.every((f) => f >= 0)).toBe(true);
   });
 
   it('two owners — per-person limit + offset computed independently', () => {
-    // Each owner has their own source IRA + IRA-pool RMD floor; the per-person
-    // §408(d)(8) limit is consumed per owner-year (not shared) and the offset is
-    // scoped to each owner's own IRA pool.
+    // Each owner has their own source IRA and IRA-pool floor; the §408(d)(8) limit is consumed per owner-year and the offset is
+    // scoped to each owner's own pool.
     const state: AccountRunState[] = [
       makeState({ id: 'ira-1', pre: 500_000, post: 0, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
       makeState({ id: 'ira-2', pre: 500_000, post: 0, taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
@@ -611,17 +539,13 @@ describe('applyQcdPrePass — QCD forced outflow + IRA-pool RMD offset', () => {
       ownerByAccountId: new Map([['ira-1', 'owner-1'], ['ira-2', 'owner-2']]),
       taxYear,
     });
-    // owner-1: Q = min(30k, 35k limit, 500k bal) = $30k.
-    // owner-2: Q = min(40k, 35k limit, 500k bal) = $35k (limit binds independently).
+    // owner-1: Q = min(30k, 35k, 500k) = $30k. owner-2: Q = min(40k, 35k, 500k) = $35k.
     expect(result.totalQcdCents).toBe(6_500_000);
-    // Offsets scoped to each owner's own IRA pool: owner-1 min(30k,18k)=18k,
-    // owner-2 min(35k,25k)=25k.
+    // Offsets: owner-1 min(30k, 18k) = 18k, owner-2 min(35k, 25k) = 25k.
     expect(result.rmdOffsetCentsByOwner['owner-1']).toBe(1_800_000);
     expect(result.rmdOffsetCentsByOwner['owner-2']).toBe(2_500_000);
-    // owner-1 source IRA debited $30k; owner-2 source IRA debited $35k.
     expect(state[0].pre).toBe(470_000);
     expect(state[1].pre).toBe(465_000);
-    // Each owner's IRA floor reduced by its own offset only.
     expect(rmdFloor[0]).toBe(0); // 18k − 18k
     expect(rmdFloor[1]).toBe(0); // 25k − 25k
   });

@@ -1,19 +1,9 @@
 /**
- * Per-account drawdown branch of the household simulation.
- *
- * Strategy-aware (`taxEfficient`/`rothFirst`/`proportional`/`customOrder`): a
- * year-by-year manual stepping path that enforces the optional per-owner
- * RMD floor on PRE_TAX + MIXED-preTax accounts BEFORE strategy allocation
- * distributes the remaining net need in priority order. The strategy drives
- * which account depletes first — multi-year balance trajectories DIVERGE
- * between `taxEfficient`/`rothFirst`/`proportional` for the same scenario.
- *
- * Produces `DrawdownYear`/`DrawdownAccountYear` shapes so consumers
- * (`balance-projection-runner-tax.ts`) see one contract.
+ * Per-account drawdown branch: strategy-aware year-by-year stepping that enforces the per-owner RMD floor
+ * before allocating the net need.
  */
 import type { MonthlyCashflowSeries } from './monthly-cashflow';
 import type {
-  DrawdownAccountInput,
   DrawdownInput,
   DrawdownOutput,
 } from './drawdown-engine-types';
@@ -52,13 +42,10 @@ export function simulatePerAccountMonthly(
   const income = readSeriesIntoBuffer(input.incomeByMonth, stepCount);
   const householdDeposit = readSeriesIntoBuffer(input.depositsByMonth, stepCount);
 
-  // Guard: customOrder with no layout is a caller error — throw early rather
-  // than silently falling back to an empty tier set inside the year loop.
   if (strategy.kind === 'customOrder' && !input.customDrawdownOrder) {
     throw new MissingCustomDrawdownOrderError();
   }
 
-  // Build custom-order tier arrays and MAGI-cap config.
   const { customTiers, excludedIndices } =
     strategy.kind === 'customOrder' && input.customDrawdownOrder
       ? buildCustomTierIndices(accountsIn, input.customDrawdownOrder.tiers, input.customDrawdownOrder.excludedAccountIds)
@@ -76,39 +63,9 @@ export function simulatePerAccountMonthly(
     qcdContext: input.qcdContext,
     customTiers,
     excludedIndices,
-    // The runner pre-resolves the window list (sorted +
-    // broken-anchor flagged); the engine selects ≤ 1 active window per year.
     magiCapWindows: input.magiCapWindows,
     taxCashflow: input.taxCashflow,
   });
-}
-
-/**
- * RMD floor check helper (exported). Given a pre-computed total RMD floor
- * (in dollars) and per-account withdrawal totals, compute the RMD-eligible
- * withdrawal sum and any shortfall.
- *
- * Only the unit tests call this today; no production code path does. The
- * forced-withdrawal pre-pass that enforces the floor is the separate
- * `applyRmdFloorPrePass`, which the strategy-aware year loop
- * (`drawdown-engine-per-account-strategy.ts`) runs each year against a floor
- * built from `DrawdownInput.rmdContext` (`buildPerOwnerRmdFloor`, from the
- * prior year's December balances).
- */
-export function rmdFloorEnforcePrePass(args: {
-  accounts: ReadonlyArray<DrawdownAccountInput>;
-  withdrawnByAccountId: ReadonlyMap<string, number>;
-  rmdFloorDollars: number;
-}): { rmdEligibleWithdrawn: number; rmdShortfall: number } {
-  const { accounts, withdrawnByAccountId, rmdFloorDollars } = args;
-  const RMD_ELIGIBLE_TREATMENTS = new Set<string>(['PRE_TAX']);
-  let rmdEligibleWithdrawn = 0;
-  for (const a of accounts) {
-    if (!RMD_ELIGIBLE_TREATMENTS.has(a.taxTreatment)) continue;
-    rmdEligibleWithdrawn += withdrawnByAccountId.get(a.id) ?? 0;
-  }
-  const rmdShortfall = Math.max(0, rmdFloorDollars - rmdEligibleWithdrawn);
-  return { rmdEligibleWithdrawn, rmdShortfall };
 }
 
 function readSeriesIntoBuffer(series: MonthlyCashflowSeries, stepCount: number): Float64Array {

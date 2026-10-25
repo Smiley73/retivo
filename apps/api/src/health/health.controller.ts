@@ -1,24 +1,5 @@
-/**
- * Health endpoints. Lambda + API Gateway don't need Kubernetes-style
- * liveness/readiness/startup probes, so we keep two signals:
- *
- *  - `GET /api/v1/health` — PUBLIC, shallow liveness. Returns
- *    `{ status: "ok" }` with no DynamoDB / S3 SDK calls and no secrets.
- *    Safe for an external uptime monitor; falls under the global
- *    ThrottlerGuard (600/min per IP, shared across instances) like every other route.
- *  - `GET /api/v1/health/dependencies` — AUTHENTICATED (the global
- *    JwtAuthGuard APP_GUARD protects it; no `@Public()`). Probes
- *    DynamoDB + S3 reachability and returns
- *    `{ status, dynamodb, s3 }` or `503` if a dependency is unhealthy.
- *
- * The dependency probe issues GetBucketLocation on the snapshots bucket
- * (covered by the api role's narrow `s3:GetBucketLocation` grant) rather
- * than HeadObject or HeadBucket. A HeadObject on a missing key returns
- * `403 AccessDenied` (not 404) when the caller lacks `s3:ListBucket`, so
- * it cannot distinguish "healthy bucket, absent key" from a real
- * permission/reachability failure. GetBucketLocation is a bucket-level
- * metadata read that needs neither `s3:ListBucket` nor object access.
- */
+// Health endpoints: public shallow liveness at `/health`, and an authenticated `/health/dependencies` probe of DynamoDB and S3 (503
+// when unhealthy).
 import {
   Controller,
   Get,
@@ -47,11 +28,7 @@ export class HealthController {
     this.snapshotsBucket = config.get('SNAPSHOTS_BUCKET', { infer: true });
   }
 
-  /**
-   * Shallow public liveness — "is the process up and serving HTTP". No
-   * dependency probes, no secrets, no SDK calls. Dependency health lives
-   * behind authentication at `/health/dependencies`.
-   */
+  /** Shallow public liveness: no dependency probes, secrets or SDK calls. */
   @Public()
   @Get()
   liveness(): { status: 'ok' } {
@@ -59,9 +36,8 @@ export class HealthController {
   }
 
   /**
-   * Authenticated dependency probe. DynamoDB DescribeTable + S3
-   * GetBucketLocation on the snapshots bucket; `503
-   * DEPENDENCY_UNAVAILABLE` if either is unhealthy.
+   * Authenticated dependency probe: DynamoDB DescribeTable plus S3 GetBucketLocation; 503 DEPENDENCY_UNAVAILABLE if
+   * either is unhealthy.
    */
   @Get('dependencies')
   async dependencies() {
@@ -84,15 +60,9 @@ export class HealthController {
     return result;
   }
 
-  /**
-   * Read the snapshots bucket's location metadata. A successful response
-   * proves the bucket is reachable and the credentials are valid →
-   * healthy. ANY thrown error (AccessDenied, network, 5xx) → unhealthy.
-   * Uses GetBucketLocation (covered by the api role's narrow
-   * `s3:GetBucketLocation` grant) — it needs neither `s3:ListBucket` nor
-   * object access, and unlike HeadObject it doesn't return 403 for a
-   * missing key when ListBucket is withheld.
-   */
+  // Probes the snapshots bucket with GetBucketLocation, which needs neither `s3:ListBucket` nor object access.
+  // HeadObject cannot tell a healthy bucket with an absent key from a permission failure: without ListBucket it
+  // returns 403, not 404.
   private async probeS3(): Promise<'ok' | 'error'> {
     try {
       await this.s3.send(

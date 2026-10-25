@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ExpensePayload } from '../db/types';
 import {
   resolveReportExpenseOrderMonths,
-  selectReportByAccountAccounts,
+  buildReportPdfAccountLists,
   sortReportAccounts,
   sortReportExpenses,
   sortReportIncomeStreams,
@@ -76,7 +76,7 @@ describe('report table ordering', () => {
     expect(ids(sortReportIncomeStreams(input))).toEqual(['a', 'b', 's', 'u']);
     expect(ids(input)[0]).toBe('u');
   });
-  it('sorts accounts by name, owner, and ID and filters excluded accounts', () => {
+  it('sorts accounts by name, owner, and ID, and keeps the full list beside the by-account list without excluded ones', () => {
     const input = [
       { id: 'ten', name: 'Account 10', ownerDisplayName: 'Alex' },
       { id: 'z', name: 'account 2', ownerDisplayName: 'Zoe' },
@@ -84,8 +84,9 @@ describe('report table ordering', () => {
       { id: 'excluded', name: 'Account 1', ownerDisplayName: 'Alex' },
     ];
     expect(ids(sortReportAccounts(input))).toEqual(['excluded', 'a', 'z', 'ten']);
-    expect(ids(selectReportByAccountAccounts(input, ['excluded'])))
-      .toEqual(['a', 'z', 'ten']);
+    const lists = buildReportPdfAccountLists(input, ['excluded']);
+    expect(ids(lists.byAccountAccounts)).toEqual(['a', 'z', 'ten']);
+    expect(lists.allAccounts).toBe(input);
     expect(ids(input)[0]).toBe('ten');
   });
 });

@@ -1,11 +1,5 @@
-/**
- * Route guard for `GET /auth/account-export`: ALWAYS requires a valid session-bound
- * export-authorization cookie. A bearer token alone is never sufficient to
- * download the full account export — the route requires a password
- * re-verification (`POST /auth/verify-password` with `purpose: 'data_export'`).
- * This guard re-checks `DataExportAuthorizationService` against the
- * authenticated `userId` / `householdId` / `jti` on every request.
- */
+// Route guard for `GET /auth/account-export`: always requires the session-bound export-authorization cookie, so a bearer token alone never
+// downloads the export.
 import {
   CanActivate,
   ExecutionContext,
@@ -22,9 +16,7 @@ export class ExportAuthorizationGuard implements CanActivate {
   canActivate(ctx: ExecutionContext): boolean {
     const req = ctx.switchToHttp().getRequest<Request>();
     const claims = req.auth;
-    // JwtAuthGuard (global, registered before this route guard) already
-    // requires a verified bearer token — `claims` is always set in practice.
-    // Fail closed regardless, rather than assume it.
+    // Fail closed even though JwtAuthGuard already requires a bearer, so `claims` is set in practice.
     if (!claims) {
       throw new UnauthorizedException({
         code: 'EXPORT_AUTHORIZATION_REQUIRED',

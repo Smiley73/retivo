@@ -1,32 +1,10 @@
 /**
- * Fail-safe serialization of console / error arguments for the on-device
- * diagnostics log. The captured args are arbitrary app console output,
- * so a key-name *denylist* would fail open (CWE-532; ASVS V7.1.1/V8.3.4):
- * any unanticipated key carrying a secret/balance/PII would slip through.
- * Instead this serializer is **allowlist-based** — object args emit only a
- * fixed safe-key set and drop every other key — layered with an entropy /
- * digit masker so any secret/balance/PII that reaches a captured *string*
- * (including a truncated `Error.message`) is defanged by construction.
- *
- * Bounds (depth / total length / array width) borrow the `data-import.ts`
- * cap VALUES so the two boundary serializers stay aligned. The redaction is
- * best-effort defense-in-depth: it removes structured secrets/PII but
- * cannot guarantee a free-text prose string is PII-free — the export carries
- * a "may contain personal data" warning on top.
+ * Fail-safe serialization of console and error arguments for the on-device diagnostics log: allowlist-based, because a key denylist fails open (CWE-532).
+ * An entropy/digit masker defangs secrets in strings; best-effort, so the export also carries a "may contain personal data" warning.
  */
 
-/**
- * The ONLY object keys whose values survive serialization. Everything else
- * on an object arg is dropped. Keep this list intentionally small + boring —
- * codes/ids/HTTP-status fields that help debugging without carrying secrets or
- * balances. A generic `name` is deliberately NOT here: an object arg's `name`
- * is most often a member/account/scenario/household label (PII in a
- * zero-knowledge app), so it is dropped by construction. `Error.name` is
- * captured separately by `redactError` (the `Error` branch), never via this
- * allowlist, so dropping the generic key keeps error class names. Account
- * balances (integer cents) and member PII live under other keys and are
- * therefore dropped by construction.
- */
+// Allowlist: every other key is dropped. `name` is excluded because it is usually a member, account
+// or scenario label (PII); `redactError` captures `Error.name` separately.
 const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'code',
   'status',
@@ -46,26 +24,16 @@ const ALLOWED_KEYS: ReadonlySet<string> = new Set([
 // Borrowed from data-import.ts so the two boundary serializers share caps.
 const MAX_NESTING_DEPTH = 32;
 const MAX_ARRAY_LENGTH = 100_000;
-// Per-string cap: keep entries small; truncate long blobs (an Error.message
-// or a serialized payload that slipped a giant string in).
 const MAX_STRING_LENGTH = 2_000;
-// Total serialized-message cap so one chatty arg can't bloat a ring entry.
 const MAX_MESSAGE_LENGTH = 8_000;
 
-// High-entropy / base64url blob: a run of ≥20 url-safe-base64 chars. Masks
-// JWTs, refresh tokens, the 256-bit HDK, and similar secrets that leak into a
-// captured string. Global so every occurrence in a string is masked.
+// Run of 20+ url-safe-base64 chars: masks JWTs, refresh tokens and the 256-bit HDK.
 const ENTROPY_RE = /[A-Za-z0-9_-]{20,}/g;
-// Long digit run (≥7): defangs account balances (integer cents) and other
-// numeric secrets/PII embedded in a string.
+// Run of 7+ digits: defangs account balances (integer cents) and numeric PII.
 const DIGIT_RUN_RE = /\d{7,}/g;
 
 const MASK = '[redacted]';
 
-/**
- * Mask high-entropy blobs + long digit runs inside a string, then truncate.
- * Applied to every captured string value (and `Error.message`).
- */
 function maskString(value: string): string {
   const masked = value
     .replace(ENTROPY_RE, MASK)
@@ -75,26 +43,18 @@ function maskString(value: string): string {
     : masked;
 }
 
-/**
- * Reduce an `Error` to a safe shape: `name`, a redacted + truncated
- * `message`, and the stack's class-name path only (never the raw message
- * body, never enumerable own-props which can carry attached PII).
- */
 function redactError(err: Error): Record<string, unknown> {
   const out: Record<string, unknown> = {
     name: typeof err.name === 'string' ? err.name : 'Error',
     message: maskString(typeof err.message === 'string' ? err.message : ''),
   };
-  // Stack: keep only the error-class line(s), drop file paths / arg dumps
-  // that can carry PII. The first line is conventionally `Name: message`,
-  // so re-derive a class-name path rather than echoing the raw stack.
+  // Keep only the error-class path: file paths and arg dumps can carry PII.
   if (typeof err.stack === 'string') {
     const frames = err.stack
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line.startsWith('at '))
       .map((line) => {
-        // `at fnName (file:line:col)` → keep only `fnName`.
         const match = /^at\s+([^(\s]+)/.exec(line);
         return match ? match[1] : 'at <anonymous>';
       })
@@ -104,11 +64,6 @@ function redactError(err: Error): Record<string, unknown> {
   return out;
 }
 
-/**
- * Serialize a single arg fail-safe. Primitives pass (strings masked); arrays
- * recurse (width-capped); plain objects emit ONLY allowlisted keys; `Error`
- * is handled specially; anything else collapses to its type tag.
- */
 function redactValue(value: unknown, depth: number): unknown {
   if (depth > MAX_NESTING_DEPTH) return '[depth-limit]';
   if (value === null || value === undefined) return value ?? null;
@@ -143,12 +98,7 @@ function redactValue(value: unknown, depth: number): unknown {
   return `[${t}]`;
 }
 
-/**
- * Serialize a captured first-arg into the human-readable `message`. A string
- * is masked + truncated in place; anything else is JSON-ified through the
- * allowlist serializer. Never throws (the caller is must-not-throw) —
- * any serialization failure collapses to a placeholder.
- */
+/** Serialize a captured first arg into the `message`; never throws (the caller must not). */
 export function redactMessage(first: unknown): string {
   try {
     if (typeof first === 'string') return maskString(first);
@@ -163,9 +113,7 @@ export function redactMessage(first: unknown): string {
 }
 
 /**
- * Redact + serialize a full console/error arg list into a `detail` string,
- * or `undefined` when there are no extra args beyond the message. Allowlist
- * serialization + entropy/digit masking + `Error` handling. Never
+ * Redact a console/error arg list into a `detail` string, or `undefined` when there are none; never
  * throws.
  */
 export function redactArgs(args: readonly unknown[]): string | undefined {

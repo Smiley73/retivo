@@ -101,7 +101,7 @@ export async function readLocalNetworkPermission(): Promise<PermissionAnswer> {
 
 export type BrowserFamily = 'unsupported' | 'brave' | 'firefox' | 'chromium' | 'other';
 
-/** Which remedy to show. Safari and every iOS browser are unsupported (O4); Brave hides itself from the UA. */
+/** Which remedy to show. Safari and every iOS browser are unsupported; Brave hides itself from the UA. */
 export function browserFamily(userAgent: string, isBrave: boolean): BrowserFamily {
   const ios = /iPhone|iPad|iPod/.test(userAgent) || (/Macintosh/.test(userAgent) && /Mobile\//.test(userAgent));
   if (ios) return 'unsupported';

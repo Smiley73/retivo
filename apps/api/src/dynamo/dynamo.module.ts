@@ -1,8 +1,4 @@
-/**
- * Repository layer for every DynamoDB table the api Lambda touches.
- * One repository per table — keeps SDK calls out of the auth services
- * and makes per-table mocking trivial in tests.
- */
+// Repository layer for every DynamoDB table the api Lambda touches, one repository per table.
 import { Global, Module } from '@nestjs/common';
 import { AwsModule } from '../aws/aws.module.js';
 import { AggregateVersionRepository } from './aggregate-version.repository.js';

@@ -97,9 +97,8 @@ export const SocialSecuritySummaryCard: React.FC<SummaryCardProps> = ({
   const inheritedSS = inheritedOverrides?.socialSecurity ?? DEFAULT_SS_CLAIM;
   const effective = ownOverride ?? inheritedSS;
 
-  // Resolved scenario inflation — the rate the engines apply when the SS
-  // COLA tracks inflation (default-on), so the summary shows the number
-  // actually in effect rather than the dormant fixed colaPct.
+  // The rate the engines apply when the SS COLA tracks inflation, so the summary shows the number
+  // in effect.
   const scenarioInflationPct = useMemo(() => {
     const resolved = resolveScenario(scenario.id, scenarios);
     return resolved.inflation?.ratePct ?? DEFAULT_INFLATION_PCT;

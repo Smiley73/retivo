@@ -1,39 +1,6 @@
-/**
- * Server-authoritative "Export my data" preparation.
- *
- * The export reads `GET /sync/bootstrap` + `GET /sync/pull` and the account
- * record under a valid five-minute export-authorization cookie (set by
- * `POST /auth/verify-password` with the `data_export` purpose); the cookie
- * is what lets the account-record section be served. This module turns that
- * cookie-authorized read into an honest, complete export bundle:
- *
- *   1. Read the existing device's tombstone-preserving local aggregates and
- *      every retained mutation-queue row WITHOUT changing either store — taken
- *      BEFORE the server fetch so a concurrent background push that drains a
- *      queue row mid-fetch cannot silently drop the edit from the bundle.
- *   2. FETCH + DECRYPT the current server state in memory (forced bootstrap plus
- *      any required pull pages), never writing it to IndexedDB — and MIGRATE
- *      each served row to this build's payload schema on the way in, the
- *      migration the IndexedDB read path would otherwise have applied.
- *   3. OVERLAY only the aggregate ids that still carry retained unsynced intent
- *      (`pending` / `pushing` / `failed-conflict` / `failed-error`) onto the
- *      server baseline for the importable `aggregates` view — an unrelated stale
- *      local row never beats current server data; a retained local delete stays
- *      absent from `aggregates`.
- *   4. Preserve BOTH the server and local variants (plus the ordered queue
- *      stack) for every overlaid id in an additive `unresolvedLocalChanges`
- *      section, so a newer server update is never silently lost when the local
- *      view wins.
- *
- * READ-ONLY GUARANTEE. This path writes only the downloaded file. It does not
- * write aggregate or mutation rows, alter the queue, enqueue mutations, push,
- * or start background sync. Opening the IndexedDB layer to READ may initialize
- * an empty schema on a genuinely fresh browser profile (no workspace/user data)
- * — the sole allowed local side effect. Any failure to prepare the server
- * baseline, the local overlay, or the supplemental records fails VISIBLY
- * (throws) rather than silently downloading a stale / empty / local-only /
- * conflict-lossy bundle.
- */
+// Server-authoritative "Export my data". Read-only: it writes only the downloaded
+// file, and throws rather than ship a stale, partial, ciphertext or conflict-lossy bundle.
+
 import type { Aggregate, AggregateType, PendingMutation } from '../db/types';
 import {
   AGGREGATE_TYPES_IN_DEPENDENCY_ORDER,
@@ -60,32 +27,25 @@ import type { BootstrapResponseBody, PullResponseBody } from '../sync/types';
 import { raiseWaitNotice } from './toast-queue';
 
 /**
- * Mutation-queue statuses whose rows represent unsynced local INTENT the export
- * must preserve. A `pushing` row is an interrupted in-flight push; a
- * `failed-conflict` / `failed-error` row is a parked failure. All four mean the
- * server has not yet accepted the edit, so the local view — not the server
- * baseline — owns that aggregate id in the importable bundle.
+ * Queue statuses the server has not yet accepted: for these ids the local view,
+ * not the server baseline, owns the importable bundle.
  */
-export const RETAINED_INTENT_STATUSES: ReadonlySet<PendingMutation['status']> =
+const RETAINED_INTENT_STATUSES: ReadonlySet<PendingMutation['status']> =
   new Set(['pending', 'pushing', 'failed-conflict', 'failed-error']);
 
-/** Safety ceiling on the pull-page loop so a misbehaving/never-`hasMore:false`
- *  server can never spin the export forever. Far above any realistic page count
- *  for a single household's tail. */
+// Ceiling so a server that never reports `hasMore: false` cannot spin the export.
 const MAX_PULL_PAGES = 10_000;
 
-export type ServerDataExportErrorCode =
+type ServerDataExportErrorCode =
   | 'MALFORMED_LOCAL_MUTATION'
   | 'SERVER_STATE_UNAVAILABLE';
 
 /**
- * Thrown when the export cannot be prepared honestly: a malformed retained
- * queue row, or a missing server baseline. Surfaced to the UI so the user sees
- * a visible failure instead of a silently wrong/partial download. Transport
- * failures (bad/expired export cookie, network, freshness rollback) propagate
- * as-is from the sync client and are likewise never swallowed here.
+ * Thrown when the export cannot be prepared honestly (a malformed retained
+ * queue row or a missing server baseline), so the user sees a failure and not
+ * a partial download.
  */
-export class ServerDataExportError extends Error {
+class ServerDataExportError extends Error {
   constructor(
     public readonly code: ServerDataExportErrorCode,
     message: string,
@@ -95,14 +55,8 @@ export class ServerDataExportError extends Error {
   }
 }
 
-/** Narrow a served payload to the plaintext record the bundle stores, FAILING
- *  VISIBLY if it is still an encrypted envelope. The sync client decrypts every
- *  envelope in place when the HDK is unlocked; but when `getHdk()` returns null
- *  its `pull()`/`bootstrap()` skip decryption AND freshness/tamper verification
- *  and hand back the raw response body (sync-client.ts null-HDK skip). An export
- *  whose whole purpose is a complete, importable bundle must never bake a
- *  still-ciphertext row into the file, so reject it here rather than casting it
- *  blindly — the whole export then fails visibly. */
+// An undecrypted envelope reaches here when `getHdk()` is null: the sync client
+// then skips decryption and verification. Reject it rather than bake ciphertext into the file.
 function assertPlaintextPayload(
   payload: unknown,
   aggregateId: string,
@@ -117,20 +71,9 @@ function assertPlaintextPayload(
   return payload as Record<string, unknown>;
 }
 
-/**
- * Bring a served row up to this build's payload schema, in memory. The normal
- * bootstrap/pull apply writes a served row into IndexedDB at the server's
- * `schemaVersion` as-is and relies on every READ migrating on the way out
- * (`listAggregates` / `listAggregatesIncludingDeleted`); this export never
- * writes the server state to IndexedDB, so it has to run the same `migrate()`
- * chain itself — otherwise a snapshot or pull row still at an older schema
- * would carry a field a later migration removed (the `account` v6 Roth-basis
- * dollar totals dropped at v7) straight into the downloaded file, both as an
- * importable `aggregates` row and as an `unresolvedLocalChanges.serverAggregate`
- * variant. A row already at (or ahead of) current is returned as-is; the
- * schema-ahead case is the importing client's refusal to handle, not this
- * module's.
- */
+// Runs the migration an IndexedDB read would have applied: this export never
+// writes server state to IndexedDB, and a stale row could carry a field a later
+// migration removed (the `account` v6 Roth-basis totals dropped at v7).
 function migrateServerAggregate(aggregate: Aggregate): Aggregate {
   const current = currentSchemaVersion(aggregate.aggregateType);
   if (aggregate.schemaVersion >= current) return aggregate;
@@ -147,13 +90,8 @@ function emptyByType(): Map<AggregateType, Map<string, Aggregate>> {
   return m;
 }
 
-/** Apply one server-side change (post-snapshot mutation or pulled change) onto
- *  the in-memory server map. A `delete` becomes a `deletedAt` tombstone; a
- *  `create`/`update` clears any prior tombstone. Later writes override earlier
- *  ones by id (server order is authoritative). Unlike the normal bootstrap/pull
- *  apply (which warns-and-skips unknown/retired types for rolling-deploy
- *  tolerance), an export must be COMPLETE, so an unrecognized type fails the
- *  whole export visibly rather than silently dropping the row. */
+// Unlike the normal apply, which warns and skips unknown types, an export must
+// be complete, so an unrecognized type fails it.
 function applyServerChange(
   byType: Map<AggregateType, Map<string, Aggregate>>,
   change: PullResponseBody['changes'][number],
@@ -185,13 +123,10 @@ function applyServerChange(
 }
 
 /**
- * Materialize the current server-authoritative aggregate state in memory from a
- * forced bootstrap plus its pull tail. The result is tombstone-preserving:
- * server-side deletes are retained as `deletedAt` rows so a deletion is honestly
- * reflected (the row is dropped from the importable view later, but its variant
- * survives into `unresolvedLocalChanges` when the id also has retained intent).
+ * Builds the server aggregate state in memory from a forced bootstrap plus its
+ * pull tail; server deletes stay as `deletedAt` tombstones.
  */
-export function materializeServerState(
+function materializeServerState(
   bootstrap: BootstrapResponseBody,
   pulls: readonly PullResponseBody[],
   householdId: string,
@@ -230,20 +165,8 @@ export function materializeServerState(
   return byType;
 }
 
-/**
- * Run one `SyncTransport` call, raising the shared "please wait" notice
- * when it fails with a throttling `429`
- * `SyncApiError` carrying a `Retry-After` — then rethrow unchanged.
- * `HttpSyncClient` itself deliberately never raises (it is shared with the
- * sync loop, and the sync loop is excluded by CALL SITE, not by error
- * type): this export path is a different call site over the same
- * transport, and the export UI otherwise shows only a spinner while it
- * fails. Gated on `429`, not on the header alone: the S3
- * bootstrap contract returns `503` WITH
- * `Retry-After` on persistent failure, and an
- * enveloped `5xx` raises nothing — a "please wait" toast on an export that
- * has already failed for a non-throttle reason would be misleading.
- */
+// Raises the wait notice only for a 429 with `Retry-After`: `HttpSyncClient` never
+// raises (the sync loop shares it), and a 503 with `Retry-After` is not throttling.
 async function raiseOnWait<T>(op: () => Promise<T>): Promise<T> {
   try {
     return await op();
@@ -256,13 +179,10 @@ async function raiseOnWait<T>(op: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Fetch the current server state under the export-authorization cookie: force a
- * fresh bootstrap, then walk pull pages from the bootstrap cursor until the
- * server reports no more. Any transport error (bad/expired cookie, freshness
- * rollback, network) throws out of here — the caller must NOT fall back to a
- * local-only bundle.
+ * Forces a fresh bootstrap, then walks pull pages to the end. Any transport
+ * error throws; the caller must not fall back to a local-only bundle.
  */
-export async function fetchServerAuthoritativeState(
+async function fetchServerAuthoritativeState(
   transport: SyncTransport,
 ): Promise<{ bootstrap: BootstrapResponseBody; pulls: PullResponseBody[] }> {
   const bootstrap = await raiseOnWait(() => transport.bootstrap({ force: true }));
@@ -272,9 +192,7 @@ export async function fetchServerAuthoritativeState(
     const pull = await raiseOnWait(() => transport.pull({ since }));
     pulls.push(pull);
     if (!pull.hasMore) break;
-    // No-progress guard: a server that reports `hasMore` without advancing the
-    // cursor would loop forever otherwise. `hasMore` is still true here, so the
-    // baseline is provably incomplete — fail visibly rather than build from it.
+    // No-progress guard: `hasMore` without an advancing cursor would loop forever.
     if (pull.newCursor === since) {
       throw new ServerDataExportError(
         'SERVER_STATE_UNAVAILABLE',
@@ -284,9 +202,7 @@ export async function fetchServerAuthoritativeState(
     }
     since = pull.newCursor;
   }
-  // Page-cap guard: if we exhausted MAX_PULL_PAGES the last page still reported
-  // `hasMore: true` (the loop only continues while that holds), so the baseline
-  // is incomplete — fail visibly rather than silently exporting a partial pull.
+  // The loop ran out of pages with `hasMore` still true: the baseline is incomplete.
   if (pulls[pulls.length - 1]?.hasMore) {
     throw new ServerDataExportError(
       'SERVER_STATE_UNAVAILABLE',
@@ -297,16 +213,10 @@ export async function fetchServerAuthoritativeState(
   return { bootstrap, pulls };
 }
 
-/** The exact aggregate-type set the export bundle supports (its dependency
- *  order). A retained row for a type outside this set can't be placed in the
- *  bundle, so it is treated as malformed. */
 const SUPPORTED_EXPORT_TYPES: ReadonlySet<string> = new Set(
   AGGREGATE_TYPES_IN_DEPENDENCY_ORDER,
 );
 
-/** A retained queue row must be well-formed enough to reason about. A malformed
- *  row (unsupported type, bad operation, non-object payload) fails the export
- *  visibly rather than producing a wrong/partial bundle. */
 function assertValidRetainedMutation(m: PendingMutation): void {
   const ok =
     typeof m.aggregateId === 'string' &&
@@ -327,43 +237,32 @@ function assertValidRetainedMutation(m: PendingMutation): void {
   }
 }
 
-/** Deterministic queue order: by mutation timestamp, ties broken by mutation id
- *  (the same total order the flush path relies on). */
+// Same total order the flush path relies on.
 function byTimestampThenId(a: PendingMutation, b: PendingMutation): number {
   if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-export interface MergeExportInput {
+interface MergeExportInput {
   serverByType: Map<AggregateType, Map<string, Aggregate>>;
-  /** Local aggregates INCLUDING tombstones, keyed by id per type. */
+  /** Includes tombstones. */
   localByType: Map<AggregateType, Map<string, Aggregate>>;
-  /** Every mutation-queue row (any status). */
   mutations: readonly PendingMutation[];
   householdId: string;
   deviceId: string;
 }
 
 /**
- * Pure merge: combine the server-authoritative baseline, the tombstone-aware
- * local view, and the retained queue into the importable `aggregates` field +
- * the additive `unresolvedLocalChanges` section.
- *
- * For each aggregate id:
- *   - WITH retained intent → the importable view uses the LOCAL variant (local
- *     wins). A retained local delete leaves the local row a tombstone, so it is
- *     omitted from `aggregates`. An `unresolvedLocalChanges` entry preserves the
- *     nullable, tombstone-preserving server + local variants and the ordered
- *     queue stack.
- *   - WITHOUT retained intent → the server baseline wins; server tombstones are
- *     omitted from the importable view (an unrelated stale local row can never
- *     overwrite current server data).
+ * Pure merge into the importable `aggregates` plus `unresolvedLocalChanges`. An
+ * id with retained intent takes the local variant (a retained delete leaves it
+ * out), and its entry keeps both variants and the ordered queue stack. Any other
+ * id takes the server baseline, so a stale local row never overwrites current
+ * server data.
  */
-export function mergeServerExportBundle(input: MergeExportInput): ExportBundle {
+function mergeServerExportBundle(input: MergeExportInput): ExportBundle {
   const retained = input.mutations.filter((m) => RETAINED_INTENT_STATUSES.has(m.status));
   for (const m of retained) assertValidRetainedMutation(m);
 
-  // Retained stacks grouped by (type, id), each deterministically ordered.
   const retainedByType = new Map<AggregateType, Map<string, PendingMutation[]>>();
   for (const t of AGGREGATE_TYPES_IN_DEPENDENCY_ORDER) retainedByType.set(t, new Map());
   for (const m of retained) {
@@ -385,22 +284,16 @@ export function mergeServerExportBundle(input: MergeExportInput): ExportBundle {
     const retainedMap = retainedByType.get(type)!;
     const out: Aggregate[] = [];
 
-    // Server-baseline rows for ids WITHOUT retained intent (non-deleted only).
     for (const [id, serverAgg] of serverMap) {
       if (retainedMap.has(id)) continue;
       if (serverAgg.deletedAt) continue;
       out.push(serverAgg);
     }
 
-    // Retained-intent ids: local view wins the importable slot; both variants +
-    // the queue stack go into the supplemental record. Iterate ids in a stable
-    // order so the output is deterministic.
     for (const id of [...retainedMap.keys()].sort()) {
       const stack = retainedMap.get(id)!;
       const serverAgg = serverMap.get(id) ?? null;
       const localAgg = localMap.get(id) ?? null;
-      // Local view: include only when the local row is live (a retained delete
-      // leaves a tombstone → omitted from the importable view).
       if (localAgg && !localAgg.deletedAt) out.push(localAgg);
       unresolvedLocalChanges.push({
         aggregateType: type,
@@ -424,8 +317,7 @@ export function mergeServerExportBundle(input: MergeExportInput): ExportBundle {
     deviceId: input.deviceId,
     aggregates,
   };
-  // Additive + optional: omit entirely when empty so the file stays
-  // byte-compatible with a version-1 bundle without it.
+  // Omitted when empty so the file stays byte-compatible with a bundle without it.
   if (unresolvedLocalChanges.length > 0) {
     bundle.unresolvedLocalChanges = unresolvedLocalChanges;
   }
@@ -436,40 +328,26 @@ export interface BuildServerExportOptions {
   transport: SyncTransport;
   householdId: string;
   deviceId: string;
-  /** Injection seams for tests; default to the real read-only IDB helpers. */
+  /** Test seams; default to the read-only IndexedDB helpers. */
   readLocalAggregates?: (type: AggregateType) => Promise<Aggregate[]>;
   readAllMutations?: () => Promise<PendingMutation[]>;
-  /**
-   * Fetch the account-record section under the export-authorization cookie
-   * Default is the real `fetchAccountExport`
-   * client bound to the current access token; tests inject a stub. Optional
-   * so the local-only round-trip drill (`buildExportBundle`, which has no
-   * server session) never needs one.
-   */
+  /** Fetches the account-record section; the local-only drill has no server session and omits it. */
   fetchAccount?: () => Promise<Record<string, unknown>>;
 }
 
 /**
- * Build the complete server-authoritative export bundle. Read-only: fetches +
- * decrypts server state, reads local aggregates (tombstone-preserving) and the
- * full mutation queue, fetches the account-record section, and merges. Never
- * writes workspace/queue state.
+ * Builds the complete server-authoritative bundle. Read-only: never writes
+ * workspace or queue state.
  */
-export async function buildServerAuthoritativeExportBundle(
+async function buildServerAuthoritativeExportBundle(
   opts: BuildServerExportOptions,
 ): Promise<ExportBundle> {
   const readLocalAggregates = opts.readLocalAggregates ?? listAggregatesIncludingDeleted;
   const readAllMutations = opts.readAllMutations ?? listAllMutations;
 
-  // Snapshot the local aggregates and the mutation queue FIRST, then fetch the
-  // server state. Ordering matters for concurrency: if a background push
-  // completes and removes a queue row DURING the server fetch, that edit is
-  // still captured in this already-taken local snapshot — its retained-intent
-  // record survives into the bundle — so it can never silently drop out (and if
-  // the later server fetch happens to reflect the just-pushed change, the merge
-  // already prefers the local view for that id). Reading the server first would
-  // leave a window where the row vanishes from both the retained set and the
-  // (stale) server baseline, silently losing the edit.
+  // Read local aggregates and the queue before the server fetch: a background
+  // push that drains a queue row mid-fetch would otherwise vanish from both the
+  // retained set and the stale server baseline, dropping the edit.
   const localByType = emptyByType();
   for (const type of AGGREGATE_TYPES_IN_DEPENDENCY_ORDER) {
     const map = localByType.get(type)!;
@@ -488,11 +366,7 @@ export async function buildServerAuthoritativeExportBundle(
     deviceId: opts.deviceId,
   });
 
-  // Account-record section. Fetched under the same
-  // export-authorization cookie the workspace fetch above rode on — any
-  // failure (expired cookie, network) throws out of here, same as
-  // `fetchServerAuthoritativeState`: the export must never silently ship
-  // without its account half.
+  // A failure (expired export cookie, network) throws: the export must never ship without its account half.
   if (opts.fetchAccount) {
     bundle.account = await opts.fetchAccount();
   }
@@ -500,14 +374,11 @@ export async function buildServerAuthoritativeExportBundle(
   return bundle;
 }
 
-/** Which file format "Export my data" downloads. */
 export type ExportFileFormat = 'gzip' | 'json';
 
 /**
- * Build the server-authoritative bundle and trigger the browser download.
- * Returns the number of unresolved local-change records so the completion UI can
- * tell the user how many are included (and to keep the file even after an
- * import). This is the entry point the "Export my data" flows call.
+ * Builds the bundle and triggers the download; returns the unresolved
+ * local-change count for the completion UI.
  */
 export async function exportServerData(
   opts: BuildServerExportOptions,

@@ -1,13 +1,5 @@
-/**
- * ScenarioExpenseOverridesCard — Edit-button navigation + per-key
- * merged badges, and the regression guard that the old per-row
- * "Override amount" button + amount-only modal are gone (replaced by
- * the shared expense editor in scenario-patch mode).
- *
- * Drives IndexedDB through fake-indexeddb; mocks SyncContext like the
- * sibling page tests. The card takes `scenario` / `scenarios` /
- * `householdId` / `onChanged` as props (no AuthContext dependency).
- */
+// ScenarioExpenseOverridesCard Edit navigation, per-key merged badges, and the guard that the old "Override amount" button and amount-only modal are gone (replaced by the shared expense editor in scenario-patch mode).
+// The card takes `scenario` / `scenarios` / `householdId` / `onChanged` props (no AuthContext).
 import 'fake-indexeddb/auto';
 import {
   act,
@@ -239,7 +231,6 @@ describe('ScenarioExpenseOverridesCard', () => {
     renderCard(child, [parent, child]);
 
     const row = (await screen.findByText('Travel')).closest('li') as HTMLElement;
-    // Per-key merged resolver classifies it as patched ⇒ "Modified".
     expect(within(row).getByText('Modified')).toBeInTheDocument();
   });
 
@@ -247,9 +238,7 @@ describe('ScenarioExpenseOverridesCard', () => {
     await seedMember();
     await seedCategory();
     await seedExpense('exp-1', { name: 'Travel', amount: 1000 });
-    // The patch lives on the PARENT; the child inherits the patched resolution
-    // but owns no `patches` key, so Reset (which deletes only the current
-    // scenario's key) would be a no-op and must not render.
+    // The patch lives on the parent; the child inherits the resolution but owns no `patches` key, so Reset (which deletes only the current scenario's key) would be a no-op and must not render.
     const parent = scenarioAgg('scn-p', {
       name: 'Parent',
       isPrimary: true,
@@ -328,8 +317,7 @@ describe('ScenarioExpenseOverridesCard', () => {
       within(row).getByRole('button', { name: 'Move to household list' }),
     );
 
-    // Confirm the move in the prompt dialog. The shared confirm
-    // (useConfirm) is a React Aria alertdialog.
+    // The shared confirm (useConfirm) is a React Aria alertdialog.
     const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(
       within(dialog).getByRole('button', { name: 'Move to household list' }),
@@ -343,7 +331,6 @@ describe('ScenarioExpenseOverridesCard', () => {
       expect(m).toBeDefined();
       const pl = m?.payload as ExpensePayload;
       expect(pl.name).toBe('Sabbatical');
-      // The user-entered glide survives the promotion to canonical.
       expect(pl.discretionaryGlide).toEqual(glide);
     });
   });
@@ -431,9 +418,7 @@ describe('ScenarioExpenseOverridesCard', () => {
     });
     renderCard(child, [parent, child]);
 
-    // The inherited (parent-owned) added row resolves into this child card
-    // but its actions would mutate the child's own `added[]` only, so they
-    // must not render.
+    // The inherited (parent-owned) added row resolves into this child card but its actions would mutate only the child's own `added[]`, so they must not render.
     const inheritedRow = (await screen.findByText('Parent Sabbatical')).closest(
       'li',
     ) as HTMLElement;
@@ -448,7 +433,6 @@ describe('ScenarioExpenseOverridesCard', () => {
       within(inheritedRow).queryByRole('button', { name: 'Delete' }),
     ).toBeNull();
 
-    // The child's own added row keeps its full action set.
     const ownRow = (await screen.findByText('Child Trip')).closest(
       'li',
     ) as HTMLElement;
@@ -492,9 +476,7 @@ describe('ScenarioExpenseOverridesCard', () => {
     });
     renderCard(child, [child]);
 
-    // One canonical expense, patched ⇒ 0 disabled · 1 modified · 0 scenario-only.
-    // Testing-library collapses whitespace, so the split text nodes
-    // normalise to one line.
+    // Testing-library collapses whitespace, so the split text nodes normalise to one line.
     expect(
       await screen.findByText('0 disabled · 1 modified · 0 scenario-only.'),
     ).toBeInTheDocument();
@@ -508,12 +490,9 @@ describe('ScenarioExpenseOverridesCard', () => {
     renderCard(base, [base]);
 
     await screen.findByText('Travel');
-    // The Add action is now the page-header primary button.
     expect(
       screen.getByRole('button', { name: 'Add scenario-only expense' }),
     ).toBeInTheDocument();
-    // The single page heading is the PageHeader title; no second
-    // in-card "Expenses" heading exists.
     expect(
       screen.getByRole('heading', { name: /Expenses: Base/ }),
     ).toBeInTheDocument();
@@ -530,10 +509,8 @@ describe('ScenarioExpenseOverridesCard', () => {
     expect(
       screen.queryByRole('button', { name: /override amount/i }),
     ).toBeNull();
-    // The deleted PatchAmountModal surfaced an "Override amount" /
-    // amount-input dialog — none of that copy should exist anymore.
+    // The deleted PatchAmountModal surfaced an "Override amount" dialog; none of that copy may exist.
     expect(screen.queryByText(/override amount/i)).toBeNull();
-    // The shared editor is reached via Edit, not an inline modal.
     expect(
       screen.getByRole('button', { name: 'Edit' }),
     ).toBeInTheDocument();
@@ -547,12 +524,11 @@ describe('ScenarioExpenseOverridesCard — reactive read layer', () => {
     const base = scenarioAgg('scn-base', { name: 'Base', isPrimary: true });
     renderCard(base, [base]);
 
-    // Mounted with no canonical expenses: the empty-state copy renders.
     expect(
       await screen.findByText(/No expenses to adjust yet/i),
     ).toBeInTheDocument();
 
-    // Bulk fill lands after mount, then the coarse workspace-change event.
+    // A bulk fill lands after mount, then the coarse workspace-change event.
     await seedExpense('exp-1', { name: 'Travel' });
     const { notifyWorkspaceChanged } = await import('../lib/workspace-events');
     await act(async () => {
@@ -572,7 +548,7 @@ describe('ScenarioExpenseOverridesCard — reactive read layer', () => {
       await screen.findByText(/No expenses to adjust yet/i),
     ).toBeInTheDocument();
 
-    // Single-row write fires only the per-store fine signal — no coarse event.
+    // A single-row write fires only the per-store signal, no coarse event.
     await act(async () => {
       await seedExpense('exp-1', { name: 'Travel' });
     });

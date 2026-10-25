@@ -1,46 +1,28 @@
 /**
- * Working-years Roth-conversion eligibility predicates.
- *
- * Single source of truth for source/target/pair validation shared by the
- * editor picker, save helpers, scenario resolver, and projection pre-pass.
- * Keep this module free of UI/React imports so it can be loaded in any
- * engine context.
- *
- * - `isConvertibleRothConversionSource`  — active, non-CBP, PRE_TAX or MIXED.
- * - `isWorkingYearsRothConversionTarget` — active, NON-INHERITED RETIREMENT_ROTH_IRA.
- * - `isSameAccountMixedInPlanConversion` — same id + active MIXED + Roth-designated.
- * - `isValidWorkingYearsRothConversionPair` — source is convertible, same owner,
- *    and target is a Roth IRA target OR a same-account in-plan conversion.
- *    Cross-owner pairs → false.
- * - `shouldCreditWorkingYearsConversionBasisSeparately` — true only for Roth
- *    IRA targets; false for same-account MIXED in-plan targets (no double-credit).
+ * Working-years Roth-conversion eligibility predicates: the one source of truth for source, target and pair
+ * validation shared by the editor, save helpers, scenario resolver and projection pre-pass. UI-free.
  */
 import type { AccountPayload, AccountType } from '../db/types';
 import { isRothDesignatedPostBucket } from './balance-calc';
 
-/** Minimal account shape consumed by these predicates. Full `AccountPayload`
- *  satisfies this; callers may pass slimmer objects in tests. */
+/** Minimal account shape the predicates read. */
 export interface AccountEligibilityPayload {
   readonly active: boolean;
   readonly taxTreatment: AccountPayload['taxTreatment'];
   readonly type: AccountType;
   readonly ownerId: string;
-  /** The account is INHERITED (`AccountPayload.rmdInheritedAccount`).
-   *  Absent → an owner account. Read by the target predicate only. */
+  /** Inherited account (`AccountPayload.rmdInheritedAccount`); absent means an owner account. */
   readonly rmdInheritedAccount?: boolean;
 }
 
-export interface AccountEligibilityRecord {
+interface AccountEligibilityRecord {
   readonly id: string;
   readonly payload: AccountEligibilityPayload;
 }
 
 /**
- * True when an account is a valid working-years Roth-conversion source:
- * active, NOT a cash-balance pension, and PRE_TAX or MIXED tax treatment.
- *
- * `RETIREMENT_CASH_BALANCE` is excluded: CBP value is projected via the
- * cash-balance formula + linked income streams, not as a sliceable balance.
+ * Valid source: active, PRE_TAX or MIXED, and not a cash-balance pension (its value is projected by the
+ * cash-balance formula and linked income streams, not as a sliceable balance).
  */
 export function isConvertibleRothConversionSource(
   payload: AccountEligibilityPayload,
@@ -51,16 +33,9 @@ export function isConvertibleRothConversionSource(
 }
 
 /**
- * True when an account is a valid working-years Roth-conversion target:
- * active, of type `RETIREMENT_ROTH_IRA`, and NOT inherited.
- *
- * An INHERITED Roth IRA cannot receive a conversion: §408A(e) admits a rollover
- * only from the individual's own plan, and a beneficiary may not roll into an
- * inherited IRA. Accepting one also credited the converted principal to the
- * BENEFICIARY's own §408A pool (`computePreRetirementRothConversions` keys the
- * basis map by owner id, and `mergeFactBasedRothIraSeeds` merges it into the
- * bare-owner pool key), so dollars deposited into the inherited account bought
- * tax-free basis on the owner's own Roth IRAs.
+ * Valid target: an active, non-inherited `RETIREMENT_ROTH_IRA`. §408A(e) admits a rollover only from the
+ * individual's own plan, and accepting an inherited one would credit the converted principal to the
+ * beneficiary's own §408A pool (keyed by owner id), buying tax-free basis on the owner's own Roth IRAs.
  */
 export function isWorkingYearsRothConversionTarget(
   payload: AccountEligibilityPayload,
@@ -70,14 +45,9 @@ export function isWorkingYearsRothConversionTarget(
 }
 
 /**
- * True when `source` and `target` are the SAME account (same id) AND the
- * account is an active MIXED Roth-designated employer-plan type (401k/403b/457b/TSP).
- *
- * Models a same-account in-plan Roth conversion: the pre-tax sub-bucket shrinks
- * and the Roth-designated post sub-bucket grows within one account.
- *
- * MIXED OTHER accounts are excluded: their post-tax sub-bucket is plain taxable
- * money, not Roth-designated.
+ * Same account (same id) that is an active MIXED Roth-designated employer-plan type (401k/403b/457b/TSP): an
+ * in-plan conversion moving pre-tax to the Roth-designated sub-bucket. MIXED OTHER is excluded because its
+ * post-tax sub-bucket is plain taxable money.
  */
 export function isSameAccountMixedInPlanConversion(
   source: AccountEligibilityRecord,
@@ -91,12 +61,8 @@ export function isSameAccountMixedInPlanConversion(
 }
 
 /**
- * True when `source` + `target` form a valid working-years Roth-conversion
- * pair: source is convertible, both accounts share an owner (`ownerId`), and
- * target is a Roth IRA target OR a same-account MIXED in-plan conversion.
- *
- * Cross-owner pairs → false. IRC §408A is per-individual; converting one
- * spouse's pre-tax money into the other's Roth is not a valid rollover.
+ * Valid pair: convertible source, same owner, and a Roth IRA target or a same-account in-plan conversion.
+ * IRC §408A is per-individual, so cross-owner pairs are invalid.
  */
 export function isValidWorkingYearsRothConversionPair(
   source: AccountEligibilityRecord,
@@ -111,18 +77,9 @@ export function isValidWorkingYearsRothConversionPair(
 }
 
 /**
- * True when a same-account MIXED in-plan conversion target should credit
- * `preRetirementConversionBasisCentsByOwner` separately — i.e., ONLY for Roth
- * IRA targets.
- *
- * Same-account MIXED in-plan targets must NOT credit `preRetirementConversionBasisCentsByOwner`
- * (they use a separate deterministic-only carrier). Crediting both would double-shield the same
- * dollars.
- *
- * Instead, callers accumulate the converted amount into `mixedInPlanBasisCentsByOwner` (the
- * `PreRetirementRothConversionResult` field), which is stored at context-build time in
- * `PipelineContext.mixedInPlanConversionBasisCentsByOwner` — kept separate from the
- * fact-mirroring `mixedRothDesignatedBasisCentsByOwner` (see `roth-conversion-projection.ts`).
+ * True only for Roth IRA targets: a same-account MIXED in-plan target must not credit
+ * `preRetirementConversionBasisCentsByOwner` (callers use `mixedInPlanBasisCentsByOwner`, a separate
+ * deterministic-only carrier), or the same dollars would be double-shielded.
  */
 export function shouldCreditWorkingYearsConversionBasisSeparately(
   target: AccountEligibilityRecord,

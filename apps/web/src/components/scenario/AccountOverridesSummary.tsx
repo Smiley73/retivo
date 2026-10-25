@@ -84,10 +84,10 @@ export const AccountReturnsOverridesSummaryCard: React.FC<AccountOverridesSummar
   );
 };
 
-/** "Account limits" summary card. Shows how many
- *  accounts carry a minimum-balance floor. Configure navigates to the
- *  `/scenarios/:id/floors` editor; Reset clears the local `accountFloors`
- *  override (non-base scenario with a local override). */
+/**
+ * "Account limits" summary: counts the accounts with a minimum-balance floor; Configure opens
+ * `/scenarios/:id/floors`, Reset clears the local `accountFloors` override.
+ */
 export const AccountFloorsOverridesSummaryCard: React.FC<{
   scenarioId: string;
   scenario: ScenarioAggregate;
@@ -96,16 +96,14 @@ export const AccountFloorsOverridesSummaryCard: React.FC<{
   onResetToInherited: () => void;
 }> = ({ scenarioId, scenario, scenarios, accounts, onResetToInherited }) => {
   const navigate = useNavigate();
-  // Count the RESOLVED floors the engine actually enforces (inherited floors
-  // from a parent included), not just this scenario's local override entries —
-  // a child that inherits a floor still has it enforced.
+  // Counts resolved floors including inherited ones, since a child that inherits a floor still has
+  // it enforced.
   const resolvedFloors = useMemo(
     () => resolveAccountFloorsForScenario(scenario.id, scenarios, accounts),
     [scenario.id, scenarios, accounts],
   );
-  // Only count floors the engine actually enforces (POST_TAX / HSA eligible).
-  // Floors on ineligible account types are resolved but silently ignored by
-  // the engine (isFloorEligible gate) — exclude them from the display count.
+  // Only POST_TAX / HSA floors are enforced (`isFloorEligible`); floors on ineligible types are
+  // ignored, so exclude them.
   const flooredCount = [...resolvedFloors.keys()].filter(id => {
     const acct = accounts.find(a => a.id === id);
     return (
@@ -113,9 +111,8 @@ export const AccountFloorsOverridesSummaryCard: React.FC<{
       acct?.payload.taxTreatment === 'HSA'
     );
   }).length;
-  // The "Customized" pill reflects LOCAL customization only (mirrors the
-  // sibling account-override cards), distinct from the inherited-inclusive
-  // resolved count shown in the body.
+  // The "Customized" pill reflects local customization only, unlike the inherited-inclusive body
+  // count.
   const localOverrides = scenario.payload.overrides.accountFloors?.perAccount ?? {};
   const hasLocalOverride = Object.keys(localOverrides).length > 0;
   const canResetToInherited = hasLocalOverride && !scenario.payload.isPrimary;

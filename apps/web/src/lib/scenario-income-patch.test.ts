@@ -24,7 +24,6 @@ describe('buildScenarioIncomePatchWrite', () => {
       other: { amount: 5 },
       [PREFIXED]: { name: 'new' },
     });
-    // Input is not mutated.
     expect(scenario.overrides.income?.patches?.[RAW]).toEqual({ name: 'old' });
   });
 

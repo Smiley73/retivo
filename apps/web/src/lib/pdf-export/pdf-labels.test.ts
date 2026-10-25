@@ -5,8 +5,6 @@ import {
   buildMcMethodologyLabel,
   buildReportSectionNote,
   buildSectionLabel,
-  displayModeLabel,
-  formatIsoDate,
 } from './pdf-labels';
 
 const DATE = { year: 2026, month: 6, day: 20 };
@@ -21,7 +19,7 @@ describe('buildCoverLabels', () => {
       date: DATE,
     });
     expect(labels.scenarioName).toBe('Base Case');
-    expect(labels.basisLabel).toBe('Typical'); // MC tier label
+    expect(labels.basisLabel).toBe('Typical');
     expect(labels.displayModeLabel).toBe("Today's dollars");
     expect(labels.generatedOn).toBe('Generated on 2026-06-20');
     expect(labels.title.length).toBeGreaterThan(0);
@@ -33,10 +31,11 @@ describe('buildCoverLabels', () => {
       activeMcBasis: null,
       activeMethod: 'twr',
       displayMode: 'future',
-      date: DATE,
+      date: { year: 2026, month: 1, day: 5 },
     });
     expect(labels.basisLabel).toBe('Historical');
     expect(labels.displayModeLabel).toBe('Future dollars');
+    expect(labels.generatedOn).toBe('Generated on 2026-01-05');
   });
 });
 
@@ -77,16 +76,5 @@ describe('report notes', () => {
 
   it('inventory note is a non-empty string', () => {
     expect(buildInventoryNote().length).toBeGreaterThan(0);
-  });
-});
-
-describe('display + date helpers', () => {
-  it('displayModeLabel maps both modes', () => {
-    expect(displayModeLabel('today')).toBe("Today's dollars");
-    expect(displayModeLabel('future')).toBe('Future dollars');
-  });
-
-  it('formatIsoDate zero-pads', () => {
-    expect(formatIsoDate({ year: 2026, month: 1, day: 5 })).toBe('2026-01-05');
   });
 });

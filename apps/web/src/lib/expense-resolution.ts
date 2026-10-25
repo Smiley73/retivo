@@ -1,11 +1,4 @@
-/**
- * Resolves the active expense list for a given scenario.
- *
- * Thin wrapper that delegates to the per-id sparse resolver in
- * [expense-override-resolution.ts]. Kept as the public name the planning
- * engines and the Balance Projection page consume so callers don't need to
- * track the rename.
- */
+// Public name the planning engines and the Balance Projection page use for the active expense list; delegates to `expense-override-resolution.ts`.
 import {
   resolveExpensesForScenarioSparse,
   type ResolvedExpense as SparseResolvedExpense,

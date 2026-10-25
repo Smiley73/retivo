@@ -1,18 +1,5 @@
-/**
- * Self-service snapshot restore integration tests against the local
- * emulator (DynamoDB Local + Moto S3).
- *
- * Covers GET /sync/snapshots (list, household isolation, auth) and
- * POST /sync/restore (sweep + reinit + AggregateVersion reseed, 404 on
- * unknown snapshot, auth/CSRF rejection, idempotent retry, the
- * CONFLICT-free round-trip, and a compactor-no-op-post-restore
- * durability check).
- *
- * Per the repo's testing convention, sync/auth API behaviour is verified
- * end-to-end here (emulator-backed) rather than via shallow unit tests in
- * `apps/api/src/sync/`; this exercises SnapshotsService, RestoreService,
- * and the controller through the real HTTP + DynamoDB + S3 path.
- */
+// Self-service snapshot restore against DynamoDB Local and Moto S3: GET /sync/snapshots and POST /sync/restore (sweep, reinit, AggregateVersion
+// reseed, rejection paths, idempotent retry, janitor and compactor interplay).
 import request from 'supertest';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
@@ -34,7 +21,6 @@ import { SnapshotsService } from '../sync/snapshots.service.js';
 import { AggregateVersionRepository } from '../dynamo/aggregate-version.repository.js';
 import type { EnvConfig } from '../common/env.config.js';
 
-/** A strict encrypted-envelope payload. */
 function encryptedPayload(): Record<string, unknown> {
   return {
     encryptionVersion: 1,
@@ -45,24 +31,13 @@ function encryptedPayload(): Record<string, unknown> {
   };
 }
 
-/**
- * Mint a sequenceId backdated past the compactor's 60 s safety margin
- *: rows at/above the boundary KSUID are excluded from every run, so
- * seeds that expect compaction must sit outside it. The slot (whole seconds)
- * keeps intra-test ordering deterministic — KSUID timestamps carry 1 s
- * precision, so same-second random payloads would order randomly.
- */
+// Backdated past the compactor's 60 s safety margin (rows at or above the boundary KSUID are excluded from every run). The slot keeps
+// intra-test ordering deterministic, since KSUID timestamps have 1 s precision.
 function backdatedSeq(slot: number): string {
   return KSUID.fromParts(Date.now() - 10 * 60_000 + slot * 1000, Buffer.alloc(16)).string;
 }
 
-/**
- * Seed the full sync state for one mutation directly — WorkspaceMeta (so the
- * compactor scans the household), MutationLog (so compaction has something to
- * fold), AND AggregateVersion (so restore's reseed assertions see the row).
- * This bypasses `POST /sync/push`, which 403s on any plaintext payload.
- * Used wherever push is setup-only (not the behavior under test).
- */
+// Seeds WorkspaceMeta, MutationLog and AggregateVersion directly, since a plaintext push 403s; for setup where push is not under test.
 async function seedOne(
   t: TestApp,
   s: Session,
@@ -99,7 +74,7 @@ async function seedOne(
       TableName: logTable,
       Item: {
         householdId: s.householdId,
-        // Default sits outside the 60 s margin so compaction sees the row.
+        // The default sits outside the 60 s margin so compaction sees the row.
         sequenceId: opts?.sequenceId ?? KSUID.fromParts(Date.now() - 10 * 60_000, randomBytes(16)).string,
         deviceId: s.deviceId,
         aggregateId,
@@ -127,11 +102,7 @@ async function seedOne(
   );
 }
 
-/**
- * Push one ENCRYPTED mutation through the real HTTP path.
- * Every push must carry a strict encrypted payload + freshnessHead. Used where
- * push itself is the behavior under test.
- */
+// Pushes one encrypted mutation through the real HTTP path, where push itself is under test.
 async function pushOne(
   t: TestApp,
   s: Session,
@@ -190,9 +161,6 @@ function bootstrap(t: TestApp, s: Session): Promise<request.Response> {
     .set('Authorization', `Bearer ${s.accessToken}`);
 }
 
-/** Write a snapshot object directly to S3 so list/restore have an
- *  object to read without running the compactor (used for the
- *  household-isolation + list-shape tests). */
 async function seedSnapshot(
   s3: S3Client,
   bucket: string,
@@ -211,10 +179,7 @@ async function seedSnapshot(
   );
 }
 
-/** Write a snapshot object whose body is NOT valid gzip, so the fetch
- *  path's `gunzipSync` throws — exercising the corrupt-object branch
- *  (a real read failure must surface a non-404 error, not a
- *  misleading SNAPSHOT_NOT_FOUND). */
+// A body that is not valid gzip makes `gunzipSync` throw: a real read failure must surface a non-404 error, not a misleading SNAPSHOT_NOT_FOUND.
 async function seedCorruptSnapshot(
   s3: S3Client,
   bucket: string,
@@ -231,10 +196,7 @@ async function seedCorruptSnapshot(
   );
 }
 
-/** Write a snapshot object that is valid gzip + valid JSON but malformed
- *  in SHAPE (the decoded body has no `aggregates` array). The fetch path
- *  must reject this instead of coercing it to an empty snapshot, so a
- *  restore cannot sweep the household and reseed nothing. */
+// Valid gzip and JSON but no `aggregates` array: fetch must reject it, not coerce it to an empty snapshot, or a restore would sweep the household and reseed nothing.
 async function seedMalformedSnapshot(
   s3: S3Client,
   bucket: string,
@@ -303,7 +265,6 @@ describe('snapshot restore API', () => {
       );
       expect(ids).toContain('2026-01-01T00-00-00-000Z');
       expect(ids).toContain('2026-03-01T00-00-00-000Z');
-      // Each item carries a parseable ISO timestamp from S3 LastModified.
       for (const item of res.body as Array<{ timestamp: string }>) {
         expect(Number.isNaN(Date.parse(item.timestamp))).toBe(false);
       }
@@ -327,11 +288,7 @@ describe('snapshot restore API', () => {
     it('restores the chosen snapshot: bootstrap serves it and a subsequent push does not CONFLICT', async () => {
       const s = await loginAsFreshUser(t);
       const aggregateId = randomUUID();
-      // Snapshot the household at v1 (single create — avoids relying on
-      // intra-second KSUID ordering of multiple compacted mutations).
-      // Seed directly (push is not under test here): A plaintext push
-      // 403s, and seedOne writes the WorkspaceMeta + MutationLog +
-      // AggregateVersion rows the compactor + restore assertions need.
+      // A single create keeps the snapshot independent of intra-second KSUID ordering.
       await seedOne(t, s, aggregateId, { operation: 'create', version: 0, sequenceId: backdatedSeq(0) });
       const compactor = t.module.get(CompactorService);
       await compactor.runOnce();
@@ -340,16 +297,12 @@ describe('snapshot restore API', () => {
       const snapshotId = snapBoot.body.snapshotId as string;
       expect(snapshotId).toBeTruthy();
 
-      // Diverge from the snapshot: update v1 → v2 (now the current
-      // server state is ahead of the snapshot we'll restore).
       await seedOne(t, s, aggregateId, { operation: 'update', version: 1, sequenceId: backdatedSeq(1) });
 
-      // Restore back to the v1 snapshot.
       const res = await restore(t, s, snapshotId);
       expect(res.status).toBe(201);
       expect(res.body).toEqual({ ok: true });
 
-      // MutationLog is swept clean.
       const logRows = await t.doc.send(
         new QueryCommand({
           TableName: mutationLogTable,
@@ -359,9 +312,7 @@ describe('snapshot restore API', () => {
       );
       expect(logRows.Items ?? []).toHaveLength(0);
 
-      // WorkspaceMeta points at a FRESH minted snapshot key,
-      // NOT the chosen (old) one — so the janitor's newest-N retention
-      // always protects the live pointer.
+      // WorkspaceMeta points at a freshly minted snapshot key, not the chosen old one, so the janitor's newest-N retention always protects the live pointer.
       const meta = await t.doc.send(
         new GetCommand({ TableName: metaTable, Key: { householdId: s.householdId } }),
       );
@@ -369,12 +320,9 @@ describe('snapshot restore API', () => {
       expect(freshId).toBeTruthy();
       expect(freshId).not.toBe(snapshotId);
 
-      // A snapshot object exists at the fresh key carrying the restored
-      // aggregate at v1.
       const fresh = await snapshotsService.fetchStrict(s.householdId, freshId);
       expect(fresh.aggregates.find((a) => a.id === aggregateId)?.version).toBe(1);
 
-      // Bootstrap serves the restored snapshot's aggregate at v1.
       const boot = await bootstrap(t, s);
       expect(boot.body.snapshotId).toBe(freshId);
       const restored = (
@@ -382,8 +330,6 @@ describe('snapshot restore API', () => {
       ).find((a) => a.id === aggregateId);
       expect(restored?.version).toBe(1);
 
-      // A push at the restored version (update v1 → v2) succeeds — the
-      // AggregateVersion reseed means no spurious CONFLICT.
       const after = await pushOne(t, s, aggregateId, { operation: 'update', version: 1 });
       expect(after.status).toBe(201);
       expect(after.body.applied).toHaveLength(1);
@@ -395,11 +341,8 @@ describe('snapshot restore API', () => {
       const aggregateId = randomUUID();
       const DAY_MS = 24 * 60 * 60 * 1000;
 
-      // The CHOSEN snapshot is an OLD object (>90 days) carrying a real
-      // aggregate. On its own it would rank past MIN_KEEP and be older
-      // than MIN_AGE_DAYS → janitor-deletable. Pre-fix, restore repointed
-      // WorkspaceMeta at THIS key, so the janitor could delete the live
-      // pointer → next bootstrap NoSuchKey → empty workspace.
+      // The chosen snapshot is old enough (>90 days) and ranks past MIN_KEEP, so it is janitor-deletable. Restore used to repoint WorkspaceMeta at
+      // this key, letting the janitor delete the live pointer and the next bootstrap hit NoSuchKey.
       const chosenTs = Date.now() - 200 * DAY_MS;
       const chosenId = new Date(chosenTs).toISOString().replace(/[:.]/g, '-');
       await seedSnapshot(s3, bucket, s.householdId, chosenId, {
@@ -417,39 +360,30 @@ describe('snapshot restore API', () => {
         ],
         cutoff: '0',
       });
-      // 12 additional OLD keys, all newer than the chosen one but still
-      // >90 days old, so the chosen key ranks > MIN_KEEP (10) AND is past
-      // MIN_AGE_DAYS — i.e. squarely in the janitor's delete set.
+      // 12 more keys, newer than the chosen one but still >90 days old, put the chosen key past MIN_KEEP (10) and MIN_AGE_DAYS, squarely in the janitor's delete set.
       for (let i = 1; i <= 12; i++) {
         const ts = chosenTs + i * DAY_MS;
         const id = new Date(ts).toISOString().replace(/[:.]/g, '-');
         await seedSnapshot(s3, bucket, s.householdId, id, { aggregates: [], cutoff: '0' });
       }
 
-      // Restore to the chosen OLD snapshot.
       const res = await restore(t, s, chosenId);
       expect(res.status).toBe(201);
 
-      // WorkspaceMeta points at a FRESH (current-timestamp) key, not the
-      // old chosen one.
       const meta = await t.doc.send(
         new GetCommand({ TableName: metaTable, Key: { householdId: s.householdId } }),
       );
       const freshId = meta.Item?.latestSnapshotId as string;
       expect(freshId).not.toBe(chosenId);
 
-      // Run the janitor immediately. It deletes the old keys past the
-      // floor + age, but the freshly minted key is the newest → kept.
+      // The janitor deletes old keys past the floor and age, but the freshly minted key is the newest and is kept.
       const janitor = t.module.get(JanitorService);
       await janitor.runOnce();
 
-      // The live pointer still exists in S3.
       const fresh = await snapshotsService.fetch(s.householdId, freshId);
       expect(fresh).not.toBeNull();
       expect(fresh?.aggregates.find((a) => a.id === aggregateId)?.version).toBe(1);
 
-      // And a subsequent bootstrap returns the restored aggregates — NOT
-      // an empty workspace.
       const boot = await bootstrap(t, s);
       expect(boot.body.snapshotId).toBe(freshId);
       const got = (
@@ -472,7 +406,6 @@ describe('snapshot restore API', () => {
         aggregates: [],
         cutoff: '0',
       });
-      // owner's household has no such key → 404, never reads other's data.
       const res = await restore(t, owner, '2026-04-04T00-00-00-000Z');
       expect(res.status).toBe(404);
       expect(res.body.error.code).toBe('SNAPSHOT_NOT_FOUND');
@@ -480,36 +413,25 @@ describe('snapshot restore API', () => {
 
     it('surfaces a non-404 server error for a corrupt (un-gunzippable) snapshot object, not SNAPSHOT_NOT_FOUND', async () => {
       const s = await loginAsFreshUser(t);
-      // A snapshot object exists but its body is not valid gzip → the
-      // fetch path's gunzip throws. This is a real read failure, NOT a
-      // missing object, so it must NOT be swallowed into a 404.
+      // A real read failure (gunzip throws), not a missing object, so it must not be swallowed into a 404.
       await seedCorruptSnapshot(s3, bucket, s.householdId, '2026-05-05T00-00-00-000Z');
       const res = await restore(t, s, '2026-05-05T00-00-00-000Z');
       expect(res.status).not.toBe(404);
       expect(res.status).toBeGreaterThanOrEqual(500);
       expect(res.body?.error?.code).not.toBe('SNAPSHOT_NOT_FOUND');
-      // NOTE: the S3-dependency-5xx case (GetObject returns 503) follows
-      // the same rethrow path but is impractical to drive deterministically
-      // against the Moto emulator; the corrupt-object branch above is the
-      // deterministic proxy that proves real failures are not masked as 404.
+      // A 503 from S3 GetObject follows the same rethrow path but cannot be driven deterministically against Moto; the corrupt-object case is the proxy.
     });
 
     it('surfaces a non-404 server error for a shape-malformed snapshot and does NOT sweep the household', async () => {
       const s = await loginAsFreshUser(t);
       const aggregateId = randomUUID();
-      // Establish real sync state: a compacted snapshot + an
-      // AggregateVersion row. This is the state a swept-but-not-reseeded
-      // restore would silently destroy.
-      // Seed directly (push is setup-only here, not under test): A
-      // plaintext push 403s; seedOne writes WorkspaceMeta + MutationLog +
-      // AggregateVersion so the compactor + restore assertions have real state.
+      // A compacted snapshot plus an AggregateVersion row: the state a swept-but-not-reseeded restore would silently destroy.
       await seedOne(t, s, aggregateId, { operation: 'create', version: 0 });
       const compactor = t.module.get(CompactorService);
       await compactor.runOnce();
       const goodSnapshotId = (await bootstrap(t, s)).body.snapshotId as string;
       expect(goodSnapshotId).toBeTruthy();
 
-      // Capture the pre-restore sync state.
       const metaBefore = await t.doc.send(
         new GetCommand({ TableName: metaTable, Key: { householdId: s.householdId } }),
       );
@@ -524,17 +446,14 @@ describe('snapshot restore API', () => {
         true,
       );
 
-      // A snapshot object that is valid gzip + valid JSON but malformed in
-      // SHAPE (`{}` — no `aggregates` array). The fetch path must reject it
-      // BEFORE the sweep rather than coerce it to an empty snapshot.
+      // A malformed shape (`{}`, no `aggregates`) must be rejected before the sweep.
       await seedMalformedSnapshot(s3, bucket, s.householdId, '2026-06-06T00-00-00-000Z', {});
       const res = await restore(t, s, '2026-06-06T00-00-00-000Z');
       expect(res.status).not.toBe(404);
       expect(res.status).toBeGreaterThanOrEqual(500);
       expect(res.body?.error?.code).not.toBe('SNAPSHOT_NOT_FOUND');
 
-      // The household was NOT swept/reinitialised — WorkspaceMeta and the
-      // AggregateVersion row are byte-for-byte the pre-restore state.
+      // Not swept or reinitialised: WorkspaceMeta and the AggregateVersion row are byte-for-byte the pre-restore state.
       const metaAfter = await t.doc.send(
         new GetCommand({ TableName: metaTable, Key: { householdId: s.householdId } }),
       );
@@ -559,9 +478,6 @@ describe('snapshot restore API', () => {
     it('is idempotent: restoring the same snapshot twice yields the same state', async () => {
       const s = await loginAsFreshUser(t);
       const aggregateId = randomUUID();
-      // Seed directly (push is setup-only here, not under test): A
-      // plaintext push 403s; seedOne writes WorkspaceMeta + MutationLog +
-      // AggregateVersion so the compactor + restore assertions have real state.
       await seedOne(t, s, aggregateId, { operation: 'create', version: 0 });
       const compactor = t.module.get(CompactorService);
       await compactor.runOnce();
@@ -572,7 +488,6 @@ describe('snapshot restore API', () => {
       const second = await restore(t, s, snapshotId);
       expect(second.status).toBe(201);
 
-      // AggregateVersion holds exactly one (idempotent) row at v1.
       const rows = await t.doc.send(
         new QueryCommand({
           TableName: aggregateVersionTable,
@@ -590,9 +505,6 @@ describe('snapshot restore API', () => {
     it('durability: running the compactor immediately after restore is a no-op', async () => {
       const s = await loginAsFreshUser(t);
       const aggregateId = randomUUID();
-      // Seed directly (push is setup-only here, not under test): A
-      // plaintext push 403s; seedOne writes WorkspaceMeta + MutationLog +
-      // AggregateVersion so the compactor + restore assertions have real state.
       await seedOne(t, s, aggregateId, { operation: 'create', version: 0 });
       const compactor = t.module.get(CompactorService);
       await compactor.runOnce();
@@ -602,12 +514,10 @@ describe('snapshot restore API', () => {
       const before = await t.doc.send(
         new GetCommand({ TableName: metaTable, Key: { householdId: s.householdId } }),
       );
-      // Restore points at a FRESH minted key, not the chosen old one.
       const freshId = before.Item?.latestSnapshotId as string;
       expect(freshId).not.toBe(snapshotId);
 
-      // No pushes since restore → the compactor's queryAllSince(> cutoff)
-      // is empty → it must not move the snapshot pointer.
+      // No pushes since the restore, so the compactor has nothing past the cutoff and must not move the snapshot pointer.
       await compactor.runOnce();
       const after = await t.doc.send(
         new GetCommand({ TableName: metaTable, Key: { householdId: s.householdId } }),
@@ -639,24 +549,19 @@ describe('snapshot restore API', () => {
       const crashed = await restore(t, s, snapshotId);
       expect(crashed.status).toBeGreaterThanOrEqual(500);
 
-      // The reorder's whole point: the pointer flip is the LAST step, so a
-      // throw during the reseed (which runs BEFORE it) leaves WorkspaceMeta
-      // absent — the sweep already deleted it — rather than pointing at a
-      // fresh snapshot whose AggregateVersion rows don't all exist yet.
+      // The pointer flip is the last step, so a throw during the reseed leaves WorkspaceMeta absent (the sweep deleted it) rather than pointing at a snapshot whose AggregateVersion rows are incomplete.
       const metaAfterCrash = await t.doc.send(
         new GetCommand({ TableName: metaTable, Key: { householdId: s.householdId } }),
       );
       expect(metaAfterCrash.Item).toBeUndefined();
 
-      // Best-effort structured log — never silently swallowed.
+      // Best-effort structured log, never silently swallowed.
       expect(warnCalls.some((line) => line.includes('RestoreReseedIncomplete'))).toBe(true);
 
       putSpy.mockRestore();
       warnSpy.mockRestore();
 
-      // Idempotent re-run converges to the FINAL state: WorkspaceMeta points
-      // at a fresh snapshot again and the AggregateVersion row exists — no
-      // permanent NOT_FOUND on the next push.
+      // An idempotent re-run converges: WorkspaceMeta points at a fresh snapshot again and the AggregateVersion row exists.
       const retried = await restore(t, s, snapshotId);
       expect(retried.status).toBe(201);
       const metaAfterRetry = await t.doc.send(
@@ -675,14 +580,8 @@ describe('snapshot restore API', () => {
   });
 });
 
-// SnapshotsService.fetch only treats a genuine object-miss
-// (`NoSuchKey`) as the soft null case. A 404-shaped INFRA error such as
-// `NoSuchBucket` (deleted / misconfigured bucket) shares httpStatusCode
-// 404 but is NOT an object miss — swallowing it to null would hide a real
-// infra fault behind an empty bootstrap / a misleading SNAPSHOT_NOT_FOUND.
-// Driven via a stubbed S3 client (the NoSuchBucket shape is impractical to
-// produce against the Moto emulator), matching the unit-stub pattern in
-// account-snapshot-purge-service.spec.ts.
+// `SnapshotsService.fetch` soft-nulls only a genuine `NoSuchKey`. A 404-shaped infra error such as `NoSuchBucket` must surface, not hide behind an
+// empty bootstrap; the stubbed S3 client stands in because Moto cannot produce that shape.
 describe('SnapshotsService.fetch — 404-shaped infra errors are not soft-null', () => {
   function makeConfig(): ConfigService<EnvConfig, true> {
     const values: Partial<EnvConfig> = { SNAPSHOTS_BUCKET: 'snapshots-bucket' };
@@ -704,7 +603,6 @@ describe('SnapshotsService.fetch — 404-shaped infra errors are not soft-null',
       }),
     );
     const service = makeService(send);
-    // Must SURFACE as a real error, not be swallowed into a soft null.
     await expect(service.fetch('hh-1', 'snap-1')).rejects.toMatchObject({
       name: 'NoSuchBucket',
     });

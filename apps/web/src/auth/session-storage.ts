@@ -1,32 +1,16 @@
-/**
- * localStorage-backed auth session helpers (device id, last-known email, idle
- * marker, blocked-reset marker).
- *
- * Extracted from `AuthContext.tsx`.
- * Pure module helpers — no React. Every key here is a session guard flag, NOT
- * persisted user data; the wholesale local-data nuke
- * (`clearStoragePreserving(localStorage, …)` in `lib/local-data.ts`) clears them
- * all by clearing the store outright.
- */
+// localStorage-backed auth session helpers: device id, last-known email, idle marker, blocked-reset marker.
+// Session guard flags, not user data; the local-data nuke clears them by clearing the store outright.
 import { cryptoUuid } from '../lib/crypto-uuid';
 
 const EMAIL_STORAGE_KEY = 'retivo.auth.email';
 export const DEVICE_ID_STORAGE_KEY = 'retivo.auth.deviceId';
 const ACTIVITY_STORAGE_KEY = 'retivo.auth.lastActivityAt';
-// Cross-reload "blocked reset" marker. When a cross-user IDB drop fails
-// closed AND the best-effort revoke of the new user's session also fails, the
-// new user's refresh cookie may survive the reload — refresh would then mint the
-// new user's token and expose their household over the previous user's stale
-// IDB. We persist the new user's userId here BEFORE attempting the revoke (so it
-// survives even if the revoke throws). On the next boot refresh, a matching
-// userId forces a retry of the IDB drop before the claims are ever adopted: the
-// drop must succeed (or the blocking modal is shown) before `updateFromToken`
-// runs. localStorage (not sessionStorage) so it survives a full page reload; not
-// IDB because IDB is exactly what is blocked. This is a session guard flag, not
-// persisted user data — the wholesale local-data nuke clears it by name prefix.
+// Cross-reload "blocked reset" marker, written before the revoke attempt when a cross-user IDB drop failed closed: a
+// surviving refresh cookie would otherwise expose the new user's household over the previous user's stale IDB. A
+// matching userId on the next boot forces the drop retry before claims are adopted. localStorage, not sessionStorage
+// (must survive a reload) and not IDB (the thing that is blocked).
 const BLOCKED_RESET_STORAGE_KEY = 'retivo:blocked-reset:pending';
-// Key prefix of the retired per-user signup-profile handoff. Only the start-up
-// sweep refers to it; nothing writes or reads these keys any more.
+// Prefix of the legacy per-user signup-profile keys; only the start-up sweep touches it.
 const LEGACY_PROFILE_HANDOFF_PREFIX = 'retivo:signup-profile:';
 
 export function readOrInitDeviceId(): string {
@@ -44,8 +28,7 @@ export function readStoredEmail(): string {
   return localStorage.getItem(EMAIL_STORAGE_KEY) ?? '';
 }
 
-/** Best-effort last-known account email, for password-manager username
- *  association on pages with no session (ResetPasswordPage). */
+/** Last-known email for password-manager association on pages with no session (ResetPasswordPage). */
 export function readStoredAuthEmail(): string {
   return readStoredEmail();
 }
@@ -80,24 +63,20 @@ export function writeBlockedResetMarker(userId: string): void {
   localStorage.setItem(BLOCKED_RESET_STORAGE_KEY, userId);
 }
 
-/** Read the pending blocked-reset userId, or null when none is set. */
 export function readBlockedResetMarker(): string | null {
   if (typeof localStorage === 'undefined') return null;
   return localStorage.getItem(BLOCKED_RESET_STORAGE_KEY);
 }
 
-/** Clear the blocked-reset marker after a successful IDB drop. */
 export function clearBlockedResetMarker(): void {
   if (typeof localStorage === 'undefined') return;
   localStorage.removeItem(BLOCKED_RESET_STORAGE_KEY);
 }
 
 /**
- * Remove `retivo:signup-profile:<userId>` keys left behind by earlier builds,
- * which kept the signup name and birthdate in localStorage. Remove-only: keys
- * are matched by prefix and their values are never read. Matches are collected
- * before removal because removing while iterating by index skips keys. Must
- * not throw into boot (some private-browsing modes throw on storage access).
+ * Removes legacy `retivo:signup-profile:*` keys by prefix (values never read). Matches are collected first because
+ * removing while iterating by index skips keys. Must not throw into boot: some private-browsing modes throw on storage
+ * access.
  */
 export function sweepLegacySignupProfileKeys(): void {
   if (typeof localStorage === 'undefined') return;

@@ -1,20 +1,4 @@
-/**
- * Balance Projection page — "Required Minimum Distributions" card.
- * Renders a summary stat row (first RMD year, total RMD years, peak
- * annual requirement, and — each only when present — total shortfall,
- * total RMD surplus, the net taxable IRA RMD after a QCD, and the part of
- * the IRA RMD a QCD covered) above a stacked-bar chart of the RMD met vs.
- * shortfall per year, followed — in QCD years that carry a gross IRA RMD —
- * by the QCD → net-taxable IRA RMD split chart under its own sub-heading.
- *
- * Returns `null` when there are no RMD rows, so the card disappears
- * entirely for scenarios with no RMD-eligible accounts (or a projection
- * that ends before the trigger age). The host decides whether to render
- * the wrapping <section> on the same `rows.length > 0` condition. Roth
- * conversions and the QCD gift chart are sibling cards
- * (`balance-projection-page-roth-band.tsx`,
- * `balance-projection-page-qcd-band.tsx`), not part of this one.
- */
+/** RMD card: summary tiles above a stacked-bar chart of RMD met vs shortfall, plus the QCD to net-taxable split chart in QCD years. Returns null with no RMD rows; the Roth and QCD cards are siblings. */
 import React, { useCallback, useMemo } from 'react';
 import { RmdChart, type RmdChartRow } from '../components/RmdChart';
 import {
@@ -31,26 +15,11 @@ import type { CashflowChartMarker } from '../components/CashflowProjectionChart'
 import { formatCurrencyShort } from '../lib/format-currency';
 import { bandSectionH2Class } from './accounts-page-chrome';
 
-/**
- * Summary figures derived from the RMD rows: the first RMD calendar
- * year, the count of RMD years, the peak single-year requirement
- * (`max(rmdMet + rmdShortfall)`), and the lifetime shortfall total. All
- * dollar inputs are already deflated by the caller so these match the
- * chart column-sums by construction.
- */
-export function summarizeRmd(
+/** First RMD year, RMD year count, peak single-year requirement and lifetime shortfall; inputs are already deflated so these match the chart sums. */
+function summarizeRmd(
   rows: ReadonlyArray<RmdChartRow>,
-  /** Lifetime retained RMD surplus (reinvested + held-as-cash),
-   *  already deflated by the caller to match the chart/tile basis. The
-   *  single combined figure for the "Total RMD surplus" tile. */
   totalSurplus = 0,
-  /** Lifetime net TAXABLE IRA RMD after the QCD offset (`gross − min(Q, gross)`),
-   *  already deflated by the caller on the RMD basis. Shown only
-   *  when the plan makes a QCD (the caller's `hasQcd` gate). */
   totalNetTaxableRmd = 0,
-  /** Lifetime RMD-offset — the part of the gross IRA RMD the QCD covered
-   *  (`Σ min(Q, gross)`), already deflated by the caller on the RMD basis.
-   *  Drives the conditional "RMD covered by QCD" tile (shown only when > 0). */
   totalRmdOffset = 0,
 ): {
   firstYear: number | null;
@@ -78,15 +47,6 @@ export function summarizeRmd(
   };
 }
 
-/**
- * Summary-tile row for the RMD card — first RMD year, total RMD years,
- * peak annual requirement, and the conditional tiles: shortfall (only when
- * the plan misses an RMD), "Total RMD surplus" (only when required
- * withdrawals exceed spending in some year), "Net taxable IRA RMD"
- * (only when the plan makes a QCD) and "RMD covered by QCD" (only when a
- * QCD offset a gross IRA RMD). Column count grows with the number of
- * conditional tiles present.
- */
 const STAT_GRID_COLS = ['three', 'four', 'five', 'six'] as const;
 
 const RmdSummaryTiles: React.FC<{
@@ -139,18 +99,9 @@ const RmdSummaryTiles: React.FC<{
   );
 };
 
-/**
- * Methodology prose for the RMD card's `(i)` info popover — the always-on main
- * RMD caption plus the conditional explainers: RMD surplus, the net taxable
- * IRA RMD after a QCD, and — when the split chart renders — the split-bar
- * captions. Each renders only when its gating value is present.
- */
 const RmdMethodologyContent: React.FC<{
   readonly totalSurplus: number;
-  /** True when the plan makes a QCD — adds the "Net taxable IRA RMD" explainer. */
   readonly hasQcd: boolean;
-  /** True when the QCD → net-taxable IRA RMD split bar renders (a QCD year
-   *  carries a gross IRA RMD). Adds the split-bar captions. */
   readonly hasSplitChart: boolean;
 }> = ({ totalSurplus, hasQcd, hasSplitChart }) => (
   <div className="flex flex-col gap-2">
@@ -220,41 +171,16 @@ const RmdMethodologyContent: React.FC<{
 
 export interface RmdBandProps {
   readonly rows: ReadonlyArray<RmdChartRow>;
-  /** Lifetime retained RMD surplus (reinvested + held-as-cash),
-   *  already deflated to the resolved basis by the caller. Drives the
-   *  conditional "Total RMD surplus" tile + explainer (shown only when > 0). */
   readonly totalSurplus?: number;
-  /** True when the plan makes a QCD from a traditional IRA in any year (the
-   *  host passes `totalQcd > 0`). Gates the "Net taxable IRA RMD" tile + its
-   *  explainer only — the gift figure itself lives on the sibling QCD card. */
   readonly hasQcd?: boolean;
-  /** Lifetime net TAXABLE RMD after the QCD offset (`gross − min(Q, gross)`),
-   *  already deflated by the caller on the RMD basis. */
   readonly totalNetTaxableRmd?: number;
-  /** Lifetime RMD-offset — the part of the gross IRA RMD the QCD covered
-   *  (`Σ min(Q, gross)`), already deflated by the caller on the RMD basis.
-   *  Drives the conditional "RMD covered by QCD" tile (shown only when > 0).
-   *  Distinct from the QCD card's "QCD distributed" (the full gift, on the
-   *  gift basis). */
+  /** The part of the gross IRA RMD the QCD covered; distinct from the QCD card's "QCD distributed" (the full gift, on the gift basis). */
   readonly totalRmdOffset?: number;
-  /** Per-year QCD → net-taxable IRA RMD split-bar rows
-   *  (`{ year, rmdOffsetDollars, netTaxableDollars }`), already deflated to the
-   *  resolved basis by the caller (both slices on the RMD's year-end
-   *  `basisDeflator`) and FILTERED to QCD years that carry a gross IRA RMD
-   *  (`offset + net > 0` — RMD years without a QCD are not plotted).
-   *  Drives the split chart under its own sub-heading after the RMD chart. */
+  /** QCD → net-taxable split-bar rows on the RMD's year-end basisDeflator, filtered to QCD years carrying a gross IRA RMD (offset + net > 0). */
   readonly splitRows?: ReadonlyArray<QcdRmdSplitRow>;
-  /** Retirement + death markers rendered as dashed reference lines. */
   readonly markers?: ReadonlyArray<CashflowChartMarker>;
-  /** Household members shown in tooltip header — "<First> (age N)". */
   readonly members?: ReadonlyArray<TooltipMember>;
-  /** Basis label suffixed onto the card title so the user can tell which basis
-   *  this reflects — the MC tier under an MC basis, else the deterministic
-   *  method (Planned / Historical). */
   readonly methodLabel: string;
-  /** Optional small note rendered below the card title (shown only under an MC
-   *  basis: "Based on one example simulated path."). Absent under a
-   *  deterministic method. */
   readonly subLabel?: string;
 }
 
@@ -335,14 +261,7 @@ export const RmdBand: React.FC<RmdBandProps> = ({
         isDragging={zoom.isDragging}
       />
       {splitRows.length > 0 && (
-        // The QCD → net-taxable IRA RMD split bar gets its OWN distinct
-        // sub-heading id (`qcd-rmd-split-heading`) so the card never carries a
-        // second `rmd-heading`. Shown only in QCD years that carry a gross IRA
-        // RMD (the caller filters `offset + net > 0`) — the heading + `(i)`
-        // prose say so in plain English, because RMD years without a QCD are
-        // NOT plotted here (the aggregate RMD chart covers the full horizon).
-        // The "RMD covered by QCD" tile lives in RmdSummaryTiles above and the
-        // split explainer prose in the card `(i)` above.
+        // Own sub-heading id (qcd-rmd-split-heading) so the card never carries a second rmd-heading; plotted only in QCD years that carry a gross IRA RMD, which the heading and (i) prose say.
         <>
           <h2
             id="qcd-rmd-split-heading"

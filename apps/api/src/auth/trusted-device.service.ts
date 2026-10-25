@@ -1,22 +1,5 @@
-/**
- * Manages the "remember this device for ~30 days" MFA-skip trust window.
- * Mirrors the refresh-token at-rest pattern:
- * an opaque random secret rides in an httpOnly `SameSite=Strict` cookie scoped
- * to `/api/v1` (widened from `/api/v1/auth` so the same
- * cookie also reaches `POST /sync/workspace/clear` — see cookie-config.ts);
- * only its SHA-256 hash is stored in the `TrustedDevice` row. A device whose
- * presented cookie secret hashes to the stored `tokenHash` (and whose row has
- * not expired) skips the MFA challenge at login.
- *
- * Keyed `(userId, deviceId)` so device trust is per-user-per-device — user B
- * signing in on the same browser misses user A's row and is correctly
- * challenged (cross-user isolation).
- *
- * The raw secret is NEVER stored or logged (only the SHA-256 hash reaches
- * DynamoDB), mirroring RefreshToken.
- *
- * See docs/security.md, "Trust this device".
- */
+// The "remember this device" MFA-skip trust (~30 days): an opaque secret in an httpOnly SameSite=Strict cookie at `/api/v1`, only
+// its SHA-256 stored per (userId, deviceId). See docs/security.md, "Trust this device".
 import { Injectable, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import { randomBytes } from 'node:crypto';
@@ -33,9 +16,8 @@ import {
 } from './cookie-config.js';
 
 /**
- * Display-safe trusted-device listing entry. `expiresAt` is an ISO string
- * converted from the stored numeric epoch-second TTL at the response boundary;
- * the at-rest `tokenHash` is never surfaced.
+ * Display-safe trusted-device listing entry; `expiresAt` is converted to an ISO string at the response boundary and
+ * `tokenHash` is never surfaced.
  */
 export interface TrustedDeviceListItem {
   deviceId: string;
@@ -46,38 +28,31 @@ export interface TrustedDeviceListItem {
   userAgent: string | null;
 }
 
-/**
- * Per-device ceiling: a trusted device serves NO
- * backoff wait, only this ceiling. One MFA re-challenge is a cheap false
- * positive; it bounds how long a stolen device-trust cookie can guess.
- */
+// Per-device failure ceiling: a trusted device serves no backoff wait, only this. One MFA re-challenge is a cheap
+// false positive and bounds how long a stolen cookie can guess.
 const DEVICE_FAILURE_CEILING = 5;
 
-/** Lookup key `resolveTrust` uses for an unresolved (unknown-email) identity —
- *  no genuine user row can ever carry this id, so the trusted-device Get always
- *  misses, exactly like the dummy argon2 hash it mirrors. */
+// Lookup id for an unknown-email identity: no real user can carry it, so the Get always misses, like the dummy argon2
+// hash it mirrors.
 const UNRESOLVED_TRUST_LOOKUP_USER_ID = 'unresolved-trust-lookup';
 
-/** A device's resolved trust state for the shared backoff primitive
- *  (`FailedLoginService`), plus the identity the per-device counter is keyed
- *  on. `userId` is a real id only when `trusted` is true from a genuine
- *  lookup — see {@link TrustedDeviceService.resolveTrust}. */
+/**
+ * A device resolved trust state for the shared backoff primitive plus the identity the per-device counter keys on;
+ * `userId` is real only when `trusted` came from a genuine lookup.
+ */
 export interface DeviceTrustContext {
   trusted: boolean;
   userId: string;
   deviceId: string;
-  /** The matched trust row's epoch-second expiry — present only when
-   *  `trusted`, so a trusted login can re-issue the presented cookie at the
-   *  widened path with exactly its remaining lifetime
-   *  ({@link TrustedDeviceService.reissueCookie}). */
+  /**
+   * The matched row expiry, present only when `trusted`, so the login can re-issue the cookie with exactly its
+   * remaining lifetime.
+   */
   expiresAt?: number;
 }
 
-/**
- * Live-expiry guard for the numeric epoch-second TTL. Returns `true` only when `expiresAt` is a
- * finite number strictly in the future. A legacy ISO-string value (`typeof === 'string'`), a
- * NaN/Infinity, or an already-elapsed numeric value all return `false`.
- */
+// Live-expiry guard: true only for a finite number strictly in the future, so a legacy ISO string, NaN or an elapsed
+// value is false.
 function isLiveEpochSeconds(expiresAt: unknown, nowMs = Date.now()): boolean {
   return (
     typeof expiresAt === 'number' &&
@@ -96,14 +71,9 @@ export class TrustedDeviceService {
   ) {}
 
   /**
-   * Verify a presented device-trust cookie value against the stored row for
-   * `(userId, deviceId)`. Returns `true` only when the row exists, the secret
-   * hash matches, and the trust has not expired. A miss (no cookie, no row,
-   * wrong user, expired) returns `false` so the caller falls back to the MFA
-   * challenge. An expired row is best-effort deleted. On a successful match,
-   * best-effort stamps `lastUsedAt` so the
-   * manage-devices list reflects the latest use, not just the enrolment time —
-   * a stamp failure must never fail the login it is riding along with.
+   * Verifies a presented cookie against the stored row for `(userId, deviceId)`; any miss falls back to the MFA
+   * challenge. An expired row is best-effort deleted, and a match best-effort stamps `lastUsedAt`, which must never
+   * fail the login.
    */
   async verify(
     userId: string,
@@ -113,11 +83,8 @@ export class TrustedDeviceService {
     return (await this.matchLiveRow(userId, deviceId, cookieValue)) !== null;
   }
 
-  /**
-   * The row behind {@link verify}: the live `TrustedDevice` row whose stored
-   * hash the presented cookie matches, or `null` for every miss. Split out so
-   * {@link resolveTrust} can carry the row's expiry without a second Get.
-   */
+  // The live row whose stored hash matches the cookie, or null; split out so `resolveTrust` can carry the expiry
+  // without a second Get.
   private async matchLiveRow(
     userId: string,
     deviceId: string,
@@ -127,18 +94,14 @@ export class TrustedDeviceService {
     const row = await this.trustedDevices.get(userId, deviceId);
     if (!row) return null;
 
-    // Constant-ish: hash regardless, compare hash-to-hash. The stored value is
-    // the SHA-256 of the opaque secret (never the raw secret).
+    // Hash regardless and compare hash-to-hash.
     if (sha256(cookieValue) !== row.tokenHash) return null;
 
-    // Numeric epoch-second TTL: a nonnumeric
-    // (legacy ISO-string) or elapsed value fails and the row is best-effort
-    // deleted — a pre-cutover trust row no longer skips the MFA challenge.
+    // A nonnumeric (legacy ISO) or elapsed expiry fails and the row is best-effort deleted, so a pre-cutover trust
+    // row no longer skips MFA.
     if (!isLiveEpochSeconds(row.expiresAt)) {
-      // Best-effort hygiene delete of the stale/legacy row. A transient fault
-      // on the delete must NEVER crash the request — swallow + warn, then fall
-      // through to the same MFA re-challenge (return false) the caller takes on
-      // the success path. Never log the cookie secret / token hash.
+      // A transient fault on the hygiene delete must never crash the request: swallow and warn, then fall through to
+      // the MFA re-challenge. Never log the cookie secret or hash.
       try {
         await this.trustedDevices.delete(userId, deviceId);
       } catch (err) {
@@ -150,9 +113,7 @@ export class TrustedDeviceService {
       }
       return null;
     }
-    // Best-effort — a transient DynamoDB fault stamping the last-use time must
-    // never fail the login it is riding along with (fire-and-forget
-    // posture, mirrored from the audit-write pattern above).
+    // Fire-and-forget: a fault stamping the last-use time must never fail the login.
     try {
       await this.trustedDevices.stampLastUsed(userId, deviceId);
     } catch (err) {
@@ -166,14 +127,9 @@ export class TrustedDeviceService {
   }
 
   /**
-   * Resolve whether `deviceId` is trusted for `userId`, in the SAME shape
-   * whether or not `userId` is real (the constant-time
-   * hazard). Login must decide trust ahead of the per-address backoff check,
-   * but that decision needs a user lookup; an unknown email has none, so this
-   * always issues the identical `TrustedDeviceRepository.get` shape — against
-   * a lookup key nothing can ever match — rather than skipping the DB round
-   * trip only on the known-email branch. Mirrors the dummy-argon2-hash
-   * pattern one layer up.
+   * Resolves whether `deviceId` is trusted for `userId` in the same shape whether or not `userId` is real: login
+   * decides trust ahead of the backoff check, so an unknown email issues the identical Get against a key nothing can
+   * match, rather than skipping the round trip (the constant-time hazard).
    */
   async resolveTrust(
     userId: string | null,
@@ -188,11 +144,8 @@ export class TrustedDeviceService {
   }
 
   /**
-   * Record one failed password attempt from a device already resolved as
-   * trusted. Crossing {@link DEVICE_FAILURE_CEILING}
-   * revokes THIS device's trust only — never the account, never the
-   * per-address counter. A device whose row is already gone (increment
-   * returns `null`) has nothing to revoke.
+   * Records one failed password attempt from a trusted device; crossing the ceiling revokes this device trust only,
+   * never the account or the per-address counter.
    */
   async recordDeviceFailure(
     userId: string,
@@ -206,17 +159,14 @@ export class TrustedDeviceService {
     }
   }
 
-  /** Clear a trusted device's failure counter on a successful password
-   *  verification from it. */
+  /** Clears a trusted device failure counter after a successful password verification. */
   async clearDeviceFailures(userId: string, deviceId: string): Promise<void> {
     await this.trustedDevices.clearFailure(userId, deviceId);
   }
 
   /**
-   * Mint a fresh device-trust secret, store its hash in the `TrustedDevice`
-   * row, and set the httpOnly device-trust cookie on the response. Replaces any
-   * prior trust for `(userId, deviceId)` (a single keyed Put). Audits
-   * `mfa_device_trusted`.
+   * Mints a fresh device-trust secret, stores its hash, and sets the cookie; replaces any prior trust for the pair.
+   * Audits `mfa_device_trusted`.
    */
   async set(
     userId: string,
@@ -232,7 +182,7 @@ export class TrustedDeviceService {
       deviceId,
       tokenHash: sha256(secret),
       createdAt: now.toISOString(),
-      // Numeric epoch-second TTL so DynamoDB auto-purges an abandoned trust row.
+      // Numeric epoch-second TTL so DynamoDB purges an abandoned row.
       expiresAt: Math.floor(now.getTime() / 1000) + DEVICE_TRUST_TTL_SEC,
       lastUsedAt: now.toISOString(),
       ip,
@@ -250,18 +200,10 @@ export class TrustedDeviceService {
   }
 
   /**
-   * Re-issue an ALREADY-VERIFIED device-trust secret at the widened `/api/v1`
-   * path with exactly its remaining lifetime (`expiresAtSec` is the matched
-   * row's TTL), expiring any same-name copy still scoped to the pre-widening
-   * `/api/v1/auth` path. This is the migration for devices remembered before
-   * the cookie was widened: their cookie reaches
-   * `POST /auth/login` but was never sent to `POST /sync/workspace/clear`,
-   * and nothing else re-mints it until the trust expires (~30 days). Called
-   * by the login controller after every trusted-device login — the server
-   * cannot tell which path a presented cookie was scoped to, and the re-set
-   * is idempotent for a cookie already at `/api/v1`. No secret is rotated,
-   * no row is touched, no audit event is added: the trust itself is
-   * unchanged, only the cookie's path.
+   * Re-issues an already-verified secret at the widened `/api/v1` path with its remaining lifetime and expires any
+   * copy at the pre-widening `/api/v1/auth` path, migrating devices remembered before the widening (their cookie
+   * reached login but not `POST /sync/workspace/clear`). Idempotent for a cookie already at `/api/v1`; nothing is
+   * rotated, no row touched, no audit.
    */
   reissueCookie(res: Response, secret: string, expiresAtSec: number): void {
     const remainingMs = expiresAtSec * 1000 - Date.now();
@@ -269,24 +211,16 @@ export class TrustedDeviceService {
     this.writeCookie(res, secret, remainingMs);
   }
 
-  /**
-   * Write the device-trust cookie at its current `/api/v1` path AND expire
-   * the copy a pre-widening browser still holds at `/api/v1/auth`. A cookie's
-   * identity is (name, domain, path), so without the clear a re-remembered
-   * legacy browser would hold two same-name cookies and `parseCookies`'
-   * last-wins read would depend on RFC 6265's SHOULD-level path ordering.
-   */
+  // Writes the cookie at `/api/v1` and expires the pre-widening copy: a cookie identity is (name, domain, path), so
+  // otherwise a legacy browser would hold two and `parseCookies` last-wins would depend on path ordering.
   private writeCookie(res: Response, secret: string, maxAgeMs: number): void {
     res.clearCookie(DEVICE_TRUST_COOKIE_NAME, legacyDeviceTrustCookieOptions());
     res.cookie(DEVICE_TRUST_COOKIE_NAME, secret, deviceTrustCookieOptions(maxAgeMs));
   }
 
   /**
-   * Forget one device's trust (keyed delete). Audits `mfa_device_forgotten` (carries the caller's
-   * `ip`/`userAgent` like the login/step-up events already do). Does NOT clear the cookie — the
-   * caller may be forgetting a device other than the one issuing the request; the cookie
-   * self-expires. `reason` is an additive metadata field distinguishing an owner-initiated "forget
-   * this device" from an automatic ceiling revocation — no new event type.
+   * Forgets one device trust (keyed delete) and audits `mfa_device_forgotten`. Does not clear the cookie, since the
+   * caller may be forgetting another device. `reason` separates an owner action from an automatic ceiling revocation.
    */
   async revoke(
     userId: string,
@@ -306,11 +240,8 @@ export class TrustedDeviceService {
   }
 
   /**
-   * Every STILL-TRUSTED device for the user (for the manage-devices listing).
-   * Expired rows are excluded by a listing-time filter on the numeric TTL (the
-   * filter — not whether a row happens to still exist — is the source of truth
-   * for what is "still trusted"). Each entry's numeric epoch-second
-   * `expiresAt` is converted to an ISO string at this response boundary.
+   * Every still-trusted device for the manage-devices list; expired rows are excluded by a filter on the numeric TTL,
+   * which is the truth for what is still trusted.
    */
   async list(userId: string): Promise<TrustedDeviceListItem[]> {
     const nowMs = Date.now();
@@ -328,13 +259,8 @@ export class TrustedDeviceService {
   }
 
   /**
-   * Clear the device-trust cookie on the response (used when forgetting
-   * all). Also clears it at the older `/api/v1/auth` path —
-   * a browser that minted its cookie before the
-   * path was widened to `/api/v1` still holds a same-name cookie scoped to
-   * that narrower path, which the wider-path clear cannot reach (a cookie
-   * clear only matches its own exact path), so without this it would keep
-   * being resent indefinitely after a "forget all devices".
+   * Clears the device-trust cookie (forget all), also at the older `/api/v1/auth` path: a clear only matches its
+   * exact path, so a browser that minted its cookie before the widening would otherwise keep resending it.
    */
   clearCookie(res: Response): void {
     res.clearCookie(DEVICE_TRUST_COOKIE_NAME, clearDeviceTrustCookieOptions());

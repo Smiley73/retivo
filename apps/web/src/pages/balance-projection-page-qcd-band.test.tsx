@@ -1,12 +1,4 @@
-/**
- * QcdBand — render + tile + popover + null-gate + a11y smoke.
- *
- * Covers the card's own surface: the basis-suffixed heading that owns
- * `qcd-heading`, the single "QCD distributed" tile (the RMD-side QCD tiles
- * live on the RMD card), the per-year gift bars, the `(i)` popover carrying
- * the QCD explainer and none of the split-bar prose, the MC sub-label, and
- * the null gate when nothing was given.
- */
+// QcdBand: the basis-suffixed heading that owns `qcd-heading`, the single "QCD distributed" tile (RMD-side QCD tiles live on the RMD card), per-year gift bars, the (i) popover with the QCD explainer and none of the split-bar prose, the MC sub-label and the null gate.
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -32,7 +24,6 @@ function renderBand(overrides: Partial<QcdBandProps> = {}) {
   );
 }
 
-/** Open the card's `(i)` info popover and return the opened dialog. */
 async function openInfo(): Promise<HTMLElement> {
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: INFO }));
@@ -48,7 +39,6 @@ describe('QcdBand', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText('QCD distributed')).toBeInTheDocument();
-    // $30,000 + $18,000 = $48,000 → "$48k" (the tile ties out to the bars).
     expect(screen.getByText('$48k')).toBeInTheDocument();
     await waitFor(() =>
       expect(container.querySelectorAll(BAR)).toHaveLength(2),

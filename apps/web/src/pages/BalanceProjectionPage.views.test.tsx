@@ -1,21 +1,9 @@
-/**
- * Shell invariants for the tabbed views + pinned controls strip.
- * `BalanceProjectionPage.test.tsx` is already over the 800-line shape cap, so
- * these assertions live here instead of growing that file.
- *
- * jsdom applies no stylesheet and `@testing-library/dom` ignores `inert`, so
- * a query can find content inside a hidden panel exactly as happily as
- * inside the selected one — the width/pinning guarantees are a browser-only
- * concern (see the new e2e spec). What jsdom CAN prove, and what this file
- * proves once rather than per content test: the URL/selection/keyboard
- * contract, the scroll-on-switch-only behavior, the controls group's
- * singularity, and the `[data-inert]` shell invariant (a selected view's
- * marker content has no `data-inert` ancestor; another view's does).
- */
+// Shell invariants for the tabbed views and pinned controls strip.
+// jsdom applies no stylesheet and ignores `inert`, so a query finds content in a hidden panel as readily as in the selected one; width and pinning are browser-only, and this file proves the URL, selection, keyboard and scroll contracts and the `data-inert` shell invariant.
 import 'fake-indexeddb/auto';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, useLocation, useNavigationType } from 'react-router';
+import { useLocation, useNavigationType } from 'react-router';
 import {
   afterAll,
   afterEach,
@@ -26,13 +14,8 @@ import {
   it,
   vi,
 } from 'vitest';
-import React, { useEffect } from 'react';
-import { clearAllStores } from '../db/store';
-import { loadDemoData } from '../lib/demo-data-loader';
-import { BalanceProjectionPage } from './BalanceProjectionPage';
-import { MonteCarloProvider } from '../monte-carlo/MonteCarloProvider';
-import { withTheme } from '../test/theme-render';
-import { renderOnce } from '../test/render-once';
+import { useEffect } from 'react';
+import { mountSharedPage, pageElement, resetWorkspace, seedDemo } from './balance-projection-page.test-harness';
 import {
   VIEW_LABELS,
   VIEW_ORDER,
@@ -60,26 +43,12 @@ function LocationProbe({
   return null;
 }
 
-function pageAtPath(path: string, log: ProbeEntry[]): React.ReactElement {
-  return withTheme(
-    'light',
-    <MemoryRouter initialEntries={[path]}>
-      <MonteCarloProvider>
-        <LocationProbe onEntry={(e) => log.push(e)} />
-        <BalanceProjectionPage />
-      </MonteCarloProvider>
-    </MemoryRouter>,
-  );
-}
-
 function renderAtPath(path: string): { log: ProbeEntry[] } {
   const log: ProbeEntry[] = [];
-  render(pageAtPath(path, log));
+  render(pageElement(path, <LocationProbe onEntry={(e) => log.push(e)} />));
   return { log };
 }
 
-/** One marker per view — content that only that view's panel renders,
- *  chosen so it settles without waiting on the Monte Carlo stress run. */
 const VIEW_MARKERS: Readonly<
   Record<BalanceProjectionViewId, () => Promise<HTMLElement>>
 > = {
@@ -118,9 +87,7 @@ const VIEW_MARKERS: Readonly<
     ),
 };
 
-/** True when `el` or an ancestor carries `data-inert` — the attribute React
- *  Aria's `Tabs` sets on exactly the non-selected force-mounted panels. Unit
- *  tests must assert on this, not on visibility (jsdom applies no CSS). */
+// True when `el` or an ancestor carries `data-inert`, which React Aria's Tabs sets on the non-selected force-mounted panels; assert on this, not visibility (jsdom applies no CSS).
 function hasInertAncestor(el: HTMLElement): boolean {
   let node: HTMLElement | null = el;
   while (node) {
@@ -130,23 +97,10 @@ function hasInertAncestor(el: HTMLElement): boolean {
   return false;
 }
 
-async function seedDemo(): Promise<void> {
-  await clearAllStores();
-  window.localStorage.clear();
-  await loadDemoData({
-    householdId: 'hh-test',
-    email: 'demo@example.test',
-    displayName: 'Demo User',
-  });
-}
-
-describe('BalanceProjectionPage — tabbed views shell (02)', () => {
+describe('BalanceProjectionPage — tabbed views shell', () => {
   beforeEach(seedDemo);
 
-  afterEach(async () => {
-    await clearAllStores();
-    window.localStorage.clear();
-  });
+  afterEach(resetWorkspace);
 
   it('defaults to Overview with an unrecognised param', async () => {
     renderAtPath('/balance-projection?view=bogus');
@@ -182,9 +136,7 @@ describe('BalanceProjectionPage — tabbed views shell (02)', () => {
     "shows %s's marker with no data-inert ancestor, while another view's does",
     async (id) => {
       renderAtPath(`/balance-projection?view=${id}`);
-      // The first render of the full page can outlast the default 1 s waits
-      // on a loaded coverage runner, so both waits carry the same 5 s budget
-      // the marker lookups below use.
+      // The first render of the full page can outlast the default 1 s waits on a loaded coverage runner, so both carry the 5 s budget of the marker lookups.
       const tab = await screen.findByRole(
         'tab',
         { name: VIEW_LABELS[id] },
@@ -204,17 +156,14 @@ describe('BalanceProjectionPage — tabbed views shell (02)', () => {
     const user = userEvent.setup();
     const { log } = renderAtPath('/balance-projection');
     await screen.findByRole('tab', { name: 'Overview' }, { timeout: 5000 });
-    // The switch scroll runs only when the strip has scrolled out of view
-    // above; jsdom lays nothing out, so stand the anchor 120px above the
-    // viewport for this test (the in-view case is covered below).
+    // The switch scroll runs only when the strip is scrolled out of view; jsdom lays nothing out, so stand the anchor 120px above the viewport.
     const anchor = screen.getByRole('group', { name: 'Projection controls' })
       .parentElement!.parentElement!;
     vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue({
       top: -120,
     } as DOMRect);
 
-    // Overview is already selected on load, so it is clicked last: a click
-    // on the current tab is a no-op (see the re-select test below).
+    // Overview is selected on load, so click it last: a click on the current tab is a no-op.
     for (const id of [...VIEW_ORDER.slice(1), VIEW_ORDER[0]]) {
       let selectedAtScroll: string | null = null;
       const scrollSpy = vi
@@ -230,8 +179,6 @@ describe('BalanceProjectionPage — tabbed views shell (02)', () => {
           screen.getByRole('tab', { name: VIEW_LABELS[id] }),
         ).toHaveAttribute('aria-selected', 'true'),
       );
-      // A click-driven switch scrolls the strip's non-sticky ancestor:
-      // the one element wrapping both the controls strip and the panels.
       expect(scrollSpy).toHaveBeenCalledTimes(1);
       expect(scrollSpy).toHaveBeenCalledWith(
         expect.objectContaining({ behavior: 'instant', block: 'start' }),
@@ -240,14 +187,11 @@ describe('BalanceProjectionPage — tabbed views shell (02)', () => {
       const strip = screen.getByRole('group', { name: 'Projection controls' });
       expect(scrolled.contains(strip)).toBe(true);
       expect(scrolled.contains(await VIEW_MARKERS[id]())).toBe(true);
-      // And only once the incoming view is selected — a scroll measured
-      // against the outgoing view clamps short when that view is shorter,
-      // and the new view then renders beneath a misplaced strip.
+      // Scroll only once the incoming view is selected: a scroll measured against a shorter outgoing view clamps short and leaves the strip misplaced.
       expect(selectedAtScroll).toBe(VIEW_LABELS[id]);
       scrollSpy.mockRestore();
       const last = log.at(-1)!;
-      // Always written explicitly, including Overview; REPLACE,
-      // never PUSH — Back must leave the page, not step back through tabs.
+      // Always written explicitly, including Overview, with REPLACE never PUSH: Back must leave the page, not step back through tabs.
       expect(last.search).toBe(`?view=${id}`);
       expect(last.navType).toBe('REPLACE');
       expect(log.some((e) => e.navType === 'PUSH')).toBe(false);
@@ -258,8 +202,7 @@ describe('BalanceProjectionPage — tabbed views shell (02)', () => {
     const user = userEvent.setup();
     renderAtPath('/balance-projection');
     await screen.findByRole('tab', { name: 'Overview' }, { timeout: 5000 });
-    // jsdom's default rect (top 0) is the page-at-the-top case: the strip is
-    // visible, the new view already starts beneath it, nothing to scroll.
+    // jsdom's default rect (top 0) is the page-at-the-top case: nothing to scroll.
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
     const cashflowTab = screen.getByRole('tab', { name: 'Cash flow' });
     await user.click(cashflowTab);
@@ -301,22 +244,19 @@ describe('BalanceProjectionPage — tabbed views shell (02)', () => {
     overviewTab.focus();
     expect(overviewTab).toHaveFocus();
 
-    // Arrow-right moves DOM focus to the next tab, but keyboardActivation
-    // "manual" means the selection — and the URL — do not change.
+    // Arrow-right moves focus, but `keyboardActivation: manual` leaves the selection and URL unchanged.
     await user.keyboard('{ArrowRight}');
     const cashflowTab = screen.getByRole('tab', { name: 'Cash flow' });
     expect(cashflowTab).toHaveFocus();
     expect(overviewTab).toHaveAttribute('aria-selected', 'true');
     expect(cashflowTab).toHaveAttribute('aria-selected', 'false');
 
-    // Enter on the focused (not yet selected) tab switches it.
     await user.keyboard('{Enter}');
     await waitFor(() =>
       expect(cashflowTab).toHaveAttribute('aria-selected', 'true'),
     );
     expect(overviewTab).toHaveAttribute('aria-selected', 'false');
 
-    // Space behaves the same way, one tab further along the row.
     await user.keyboard('{ArrowRight}');
     const accountsTab = screen.getByRole('tab', { name: 'Accounts' });
     expect(accountsTab).toHaveFocus();
@@ -328,30 +268,15 @@ describe('BalanceProjectionPage — tabbed views shell (02)', () => {
   });
 });
 
-describe('BalanceProjectionPage — tabbed views shell (02), read-only checks', () => {
-  let dispose: () => void;
+describe('BalanceProjectionPage — tabbed views shell, read-only checks', () => {
+  let dispose: () => Promise<void>;
 
   beforeAll(async () => {
-    await seedDemo();
-    ({ dispose } = renderOnce(pageAtPath('/balance-projection', [])));
+    ({ dispose } = await mountSharedPage());
   }, 30_000);
 
   afterAll(async () => {
-    dispose();
-    await clearAllStores();
-    window.localStorage.clear();
-  });
-
-  it('defaults to Overview with no param', async () => {
-    const overviewTab = await screen.findByRole(
-      'tab',
-      { name: 'Overview' },
-      { timeout: 5000 },
-    );
-    await waitFor(() =>
-      expect(overviewTab).toHaveAttribute('aria-selected', 'true'),
-    );
-    expect(hasInertAncestor(await VIEW_MARKERS.overview())).toBe(false);
+    await dispose();
   });
 
   it('renders the "Projection controls" group exactly once, outside every panel', async () => {
@@ -368,9 +293,6 @@ describe('BalanceProjectionPage — tabbed views shell (02), read-only checks', 
   it('renders the `.bp-view-panel`s in VIEW_ORDER document order — the DOM/print order', async () => {
     await screen.findByRole('tab', { name: 'Overview' }, { timeout: 5000 });
 
-    // Every view force-mounts, so every marker is findable without switching
-    // tabs — the same guarantee the two `it.each(VIEW_ORDER)` suites above
-    // rely on.
     const expectedPanels = await Promise.all(
       VIEW_ORDER.map(async (id) => {
         const marker = await VIEW_MARKERS[id]();
@@ -382,10 +304,7 @@ describe('BalanceProjectionPage — tabbed views shell (02), read-only checks', 
       }),
     );
     const domPanels = Array.from(document.querySelectorAll('.bp-view-panel'));
-    // Asserts document order matches VIEW_ORDER exactly — a JSX panel
-    // reordered from VIEW_ORDER (the panels are hand-written, not mapped
-    // from it) fails this even though the tab row and every other test
-    // above stay green.
+    // Fails if a hand-written JSX panel is reordered away from VIEW_ORDER, which the tab row and the other tests would not catch.
     expect(domPanels).toEqual(expectedPanels);
   });
 });

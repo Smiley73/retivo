@@ -1,7 +1,3 @@
-/**
- * Tests for `hasRetypeBlockingHistory` (`account-retype-block.ts`). Every case of
- * the retype-block rule lives here, grouped by the rule's terms.
- */
 import { describe, expect, it } from 'vitest';
 
 import { hasRetypeBlockingHistory, type RetypeHistoryRow } from './account-retype-block';
@@ -9,9 +5,7 @@ import { isReturnBearingRow } from './balance-calc';
 import { contributionCentsOf } from './roth-basis-derivation';
 import type { AccountBalancePayload } from '../db/types';
 
-/** Full all-zero `AccountBalancePayload`; the four Roth fact keys are omitted
- *  (sparse-optional, absent means "nothing recorded"). A case lists only what
- *  it overrides. */
+// Full all-zero payload; the four Roth fact keys are omitted (absent means nothing recorded).
 function payload(overrides: Partial<AccountBalancePayload> = {}): AccountBalancePayload {
   return {
     accountId: 'acc-1',
@@ -241,9 +235,6 @@ describe('hasRetypeBlockingHistory — term 3 (personal contribution share)', ()
   });
 
   it('contains every row shape the retired hasRecordedPersonalContributions fired on: personalCents > 0n implies blocked', () => {
-    // The retired predicate's own trigger table (roth-pool-warnings.test.ts)
-    // — reproduced here as plain payloads, never through the retired
-    // predicate itself.
     const shapes: ReadonlyArray<AccountBalancePayload> = [
       payload({ totalContributions: 6_000, endingBalance: 6_000 }),
       payload({

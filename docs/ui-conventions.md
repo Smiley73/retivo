@@ -144,9 +144,10 @@ from `use-chart-tokens`. Worker-safe code imports values and types from
 
 ## Buttons and destructive actions
 
-The class strings are in
-[dialog-chrome.ts](../apps/web/src/components/dialog-chrome.ts) and
-[accounts-page-chrome.tsx](../apps/web/src/pages/accounts-page-chrome.tsx).
+The primary, secondary, danger and small-secondary strings are defined once in
+[dialog-chrome.ts](../apps/web/src/components/dialog-chrome.ts).
+[accounts-page-chrome.tsx](../apps/web/src/pages/accounts-page-chrome.tsx)
+re-exports them for pages and defines the other compact and toolbar variants.
 
 | Variant | Look |
 |---|---|

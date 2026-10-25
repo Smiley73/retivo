@@ -1,9 +1,4 @@
-/**
- * Characterization tests for the error-classification helpers split out of
- * SyncContext.tsx to keep that file under the shape limit. These pin each function's CURRENT
- * input→output behavior as a regression net independent of the
- * CPU-load-sensitive `SyncContext.test.tsx` integration suite.
- */
+// Pins each error-classification helper's input-to-output behaviour independently of the SyncContext integration suites.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { FreshnessError } from '../crypto/freshness';
@@ -61,9 +56,6 @@ describe('isRollbackDetectedRejection', () => {
     expect(isRollbackDetectedRejection(new Error('other'))).toBe(false);
   });
 
-  // The transport guard's dedicated error also maps to the
-  // rollback-detected badge, and the rejection is recorded via the shared
-  // diagnostics helper with the phase/reason only — never payload content.
   it('is true for UnauthenticatedPayloadError, and records a payload-free breadcrumb', () => {
     expect(
       isRollbackDetectedRejection(new UnauthenticatedPayloadError('pull', 'not-envelope')),
@@ -71,8 +63,6 @@ describe('isRollbackDetectedRejection', () => {
     const entries = getEntries();
     const last = entries.at(-1);
     expect(last?.source).toBe('sync');
-    // Built from the phase/reason only — no payload content was ever passed in
-    // (the `[sync]` prefix is parsed off into `namespace` by the logger).
     expect(last?.namespace).toBe('sync');
     expect(last?.message).toBe(
       'rejected served payload — pull/not-envelope: not authenticated, no local write',
@@ -83,10 +73,7 @@ describe('isRollbackDetectedRejection', () => {
 describe('setOnRollbackDetectedOutsideSync / notifyRollbackDetectedOutsideSync', () => {
   afterEach(() => setOnRollbackDetectedOutsideSync(() => {}));
 
-  // The forced-export transport (createExportSyncTransport)
-  // catches a rollback-detected rejection outside SyncProvider's own
-  // pull/bootstrap poll, so it must be able to flip the shared badge through
-  // this hook rather than silently leaving it `synced`.
+  // The forced-export transport catches a rollback-detected rejection outside the poll, so this hook must be able to flip the shared badge.
   it('invokes the registered handler when notified', () => {
     let called = false;
     setOnRollbackDetectedOutsideSync(() => {

@@ -1,22 +1,5 @@
-// JWT key-age warning regression guard.
-//
-// bootstrap-stack.sh prints a non-blocking deploy-time warning when the
-// newest JWT signing key (kid format `key-YYYYMM`) is more than 3 months
-// old. The kid-age arithmetic is factored into a pure-shell helper,
-// `jwt_key_age_months`, so it can be exercised in isolation here without a
-// real AWS/Pulumi environment.
-//
-// We extract the function definition from the script as text, source it in a
-// `bash` subshell, and assert the computed age for fixed sample kids:
-//
-//   - `key-202601`        → 5 months old at today's date (2026-06) → warns (>3)
-//   - `key-<current YYYYMM>` → 0 months old → no warning
-//   - an unparseable kid   → -1 (age undetermined sentinel)
-//
-// No infra harness, no new dependency, infrastructure/ code untouched. Runs
-// under `pnpm test:scripts` (already invoked by `pnpm test`). Lives in
-// scripts/test/ so Node's test runner does not match the built-in
-// `test-*.mjs` discovery glob. Pattern: scripts/test/csp-contract.test.mjs.
+// bootstrap-stack.sh's `jwt_key_age_months` is extracted as text and run under bash: a kid older than 3 months warns,
+// the current month does not, and an unparseable kid is -1.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,8 +15,7 @@ const BOOTSTRAP_SRC = resolve(
 );
 const SOURCE = readFileSync(BOOTSTRAP_SRC, 'utf8');
 
-// Pull the `jwt_key_age_months` function definition out of the script as text
-// (from the `name() {` line through the first column-0 closing brace).
+// The function definition: from the `name() {` line through the first column-0 closing brace.
 function extractFunction(name) {
   const lines = SOURCE.split('\n');
   const start = lines.findIndex((l) => l.startsWith(`${name}() {`));
@@ -51,8 +33,7 @@ function extractFunction(name) {
 
 const FN = extractFunction('jwt_key_age_months');
 
-// Source the extracted function in a bash subshell and print its result for
-// the given kid. Returns the integer age (or -1 sentinel).
+// Age in months for a kid, or -1.
 function ageMonths(kid) {
   const script = `${FN}\njwt_key_age_months ${JSON.stringify(kid)}\n`;
   const out = execFileSync('bash', ['-c', script], { encoding: 'utf8' });
@@ -68,8 +49,7 @@ function currentYyyymm() {
 
 test('jwt_key_age_months: an old kid (key-202601) reports > 3 months → warns', () => {
   const age = ageMonths('key-202601');
-  // 2026-01 vs today (2026-06 at authoring) is 5 months; always > 3 once the
-  // calendar is past 2026-04, which is the only window this warning matters in.
+  // Always > 3 once the calendar is past 2026-04.
   assert.ok(
     age > 3,
     `expected key-202601 to be > 3 months old (got ${age}); the >3 warning must fire`,
@@ -94,7 +74,7 @@ test('jwt_key_age_months: an unparseable kid reports the -1 sentinel', () => {
 });
 
 test('jwt_key_age_months: a leading-zero month is parsed as base-10', () => {
-  // key-202509 → Sep 2025. Guards against octal-parse / leading-zero bugs.
+  // Month 09 would fail an octal parse.
   const age = ageMonths('key-202509');
   assert.ok(
     Number.isInteger(age) && age > 0,

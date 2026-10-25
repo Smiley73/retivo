@@ -1,22 +1,5 @@
-/**
- * Roth conversion comparison page. For the selected scenario, computes
- * Vanguard's break-even tax rate (BETR) across four tax-payment-source variants,
- * shows the working-years bracket headroom + convert/hold verdicts and the
- * per-year retirement BETR table, and lets the user apply a bracket-fill
- * working-years conversion schedule or a pre-RMD MAGI-cap Fill window to the
- * active scenario.
- *
- * Read-only by default; the mutation paths (the taxable-income field, and
- * the two Apply dialogs) write through `saveScenario` / `queueLocalMutation`
- * with `expectedVersion`. Deterministic projection only — no Monte Carlo. The
- * plan-comparison panel runs its own search in a Web Worker, on request, and
- * writes nothing until the user confirms Save on a ranked plan, which goes
- * through the same `persistOverrides`.
- *
- * Subcomponents + the projection/context build live under `./roth-betr/` so
- * this shell stays within the ≤400-line shape cap; it owns state + the React
- * tree only.
- */
+/** Roth conversion comparison page: Vanguard's break-even tax rate (BETR) across four tax-payment-source variants, bracket headroom, convert/hold verdicts, and Apply for a bracket-fill conversion schedule or a pre-RMD MAGI-cap Fill window.
+* Read-only except the taxable-income field, the two Apply dialogs and a confirmed plan Save, which write through persistOverrides; deterministic projection only, the plan search runs in a Web Worker on request. */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { PageHeader } from '../components/PageHeader';
@@ -67,10 +50,7 @@ export const RothBETRPage: React.FC = () => {
   const [wyDialogOpen, setWyDialogOpen] = useState(false);
   const [retDialogOpen, setRetDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Draft taxable income — edited per keystroke, persisted once on blur so a
-  // single edit queues one scenario mutation (not one per character) and never
-  // races stale `expectedVersion` saves. `null` follows the persisted
-  // scenario value until the user types.
+  // Persisted once on blur so one edit queues one scenario mutation and never races stale expectedVersion saves; null follows the persisted value.
   const [draftIncome, setDraftIncome] = useState<number | null>(null);
 
   const selectedScenarioId = scenarioOverride ?? data.selectedScenarioId ?? '';
@@ -96,10 +76,7 @@ export const RothBETRPage: React.FC = () => {
         todayMonthIndex: now.getMonth(),
       });
     } catch (e) {
-      // Known empty-data domain signals collapse to the empty state: an
-      // unprojectable tax input, or an incomplete household with no primary
-      // member / no resolvable retirement date. Any other error is a real bug
-      // and re-throws to ErrorBoundary rather than being silently swallowed.
+      // Known empty-data signals (unprojectable tax input, no primary member or retirement date) collapse to the empty state; any other error is a real bug and re-throws to ErrorBoundary.
       if (isEmptyProjectionDataError(e)) return null;
       throw e;
     }
@@ -115,9 +92,7 @@ export const RothBETRPage: React.FC = () => {
     data.incomeStreams,
   ]);
 
-  // Persist the whole scenario payload with the merged override fragment. One
-  // path for the taxable-income field, both Apply dialogs and the plan
-  // comparison's save. Resolves true when the scenario was written.
+  // One path for the taxable-income field, both Apply dialogs and the plan comparison's save; resolves true when the scenario was written.
   const persistOverrides = useCallback(
     async (fragment: Partial<ScenarioPayload['overrides']>): Promise<boolean> => {
       if (!householdId || selectedScenario === null) return false;
@@ -126,8 +101,6 @@ export const RothBETRPage: React.FC = () => {
         overrides: { ...selectedScenario.payload.overrides, ...fragment },
       };
       try {
-        // Clear any stale banner from a prior failed save so a later success
-        // doesn't leave the error pinned.
         setError(null);
         await saveScenario({ scenario: selectedScenario, payload, householdId });
         return true;
@@ -139,8 +112,7 @@ export const RothBETRPage: React.FC = () => {
     [householdId, selectedScenario],
   );
 
-  // Drop the in-progress draft when the user switches scenarios so one
-  // scenario's unsaved income can't leak into another.
+  // Drop the draft on a scenario switch so one scenario's unsaved income can't leak into another.
   useEffect(() => {
     setDraftIncome(null);
     setLeftoverTaxOverride(null);

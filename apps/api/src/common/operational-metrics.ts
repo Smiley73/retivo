@@ -1,30 +1,10 @@
-/**
- * Minimal, dependency-free CloudWatch Embedded Metric Format (EMF) writer for
- * the event-time operational metrics.
- *
- * A metric is one standard-resolution EMF JSON line written to stdout; the
- * Lambda's CloudWatch Logs subscription auto-extracts it into the metric's
- * namespace. No `cloudwatch:PutMetricData` IAM grant is needed (matches the
- * compactor emitter). The writer is deliberately narrow:
- *   - only an allow-listed metric NAME is ever written (no user-derived or
- *     arbitrary names, no arbitrary extra fields — the EMF body is built from
- *     the three known fields only);
- *   - no dimensions (metrics are stack-scoped via the namespace);
- *   - a write failure or a rejected name is non-fatal and PII-free — auth and
- *     bootstrap flows must never break because a metric line could not be
- *     emitted.
- *
- * `mapAuthEventToMetrics` is the single event-type -> metric table plus the
- * emission policy (nothing on `local`, the security counts on every other
- * stack); `AuthEventsRepository.record()` calls it after a durable AuthEvent
- * write and feeds each result here.
- */
+// Dependency-free CloudWatch EMF writer for event-time operational metrics (one stdout JSON line, no PutMetricData grant). Only
+// allow-listed names are written; a failure is non-fatal and PII-free.
 import fs from 'node:fs';
 
 import type { AuthEventType } from '../dynamo/types.js';
 
-/** A single standard-resolution `Count` datapoint destined for one namespace. */
-export interface MetricSpec {
+interface MetricSpec {
   /** CloudWatch namespace, e.g. `Retivo/prod/Security`. */
   namespace: string;
   /** Allow-listed metric name (see `ALLOWED_METRIC_NAMES`). */
@@ -33,35 +13,28 @@ export interface MetricSpec {
   value: number;
 }
 
-/**
- * The exhaustive set of metric names this writer will emit. Anything else is
- * rejected before a byte reaches stdout, so a caller can never publish an
- * arbitrary (potentially high-cardinality or user-derived) metric name.
- */
+// The exhaustive set of metric names the writer emits, so a caller can never publish an arbitrary or user-derived
+// name.
 const ALLOWED_METRIC_NAMES: ReadonlySet<string> = new Set([
   'LoginFailed',
   'MfaVerifyFailed',
   'RefreshTokenReuse',
-  // The shared DynamoDB-backed throttle
-  // counter fell back to instance-local counting for a degradation episode.
+  // The shared DynamoDB-backed throttle counter fell back to instance-local counting.
   'ThrottleStoreDegraded',
 ]);
 
 /**
- * Emit one EMF metric line. Rejects a non-allow-listed name and reads only the
- * three known `MetricSpec` fields, so an arbitrary extra field on the argument
- * object can never be written. Never throws.
+ * Emits one EMF metric line, rejecting a non-allow-listed name and reading only the three known `MetricSpec` fields.
+ * Never throws.
  */
 export function emitOperationalMetric(spec: MetricSpec): void {
   try {
     if (!ALLOWED_METRIC_NAMES.has(spec.name)) {
-      // PII-free: the rejected name is one of ours or a coding mistake, not
-      // user data — but we still don't echo it into the fallback line.
+      // PII-free: the rejected name is ours or a coding mistake, but it is not echoed into the fallback line.
       console.error('operational-metrics: rejected non-allow-listed metric name');
       return;
     }
-    // Build the EMF body from known fields ONLY — no spread of `spec`, so an
-    // arbitrary extra field on the argument is never serialized to stdout.
+    // Build the body from known fields only, so an extra field on the argument is never serialized.
     const emf = {
       _aws: {
         Timestamp: Date.now(),
@@ -75,33 +48,18 @@ export function emitOperationalMetric(spec: MetricSpec): void {
       },
       [spec.name]: spec.value,
     };
-    // Synchronous fd-1 write (`fs.writeSync`), NOT `process.stdout.write`.
-    // Under Lambda's freeze-after-return execution model stdout is a pipe that
-    // Node buffers in userland, so an async `process.stdout.write` issued near
-    // the end of an invocation can sit unflushed when the environment freezes
-    // and the metric line silently disappears — the exact failure the
-    // logger.module.ts SonicBoom `sync: true` destination repairs. `writeSync`
-    // hands the bytes to the OS before this call returns, keeping the writer
-    // dependency-free (no pino/SonicBoom import here) as the file header intends.
+    // Synchronous fd-1 write, not `process.stdout.write`: under Lambda freeze an async write can sit unflushed and
+    // vanish (the failure logger.module.ts SonicBoom `sync: true` repairs). Keeps the writer dependency-free.
     fs.writeSync(1, `${JSON.stringify(emf)}\n`);
   } catch {
-    // A failed synchronous write (e.g. EPIPE) must never break the
-    // auth/bootstrap flow. Emit a fixed, PII-free breadcrumb and swallow.
+    // A failed write (e.g. EPIPE) must never break the auth or bootstrap flow: emit a fixed breadcrumb and swallow.
     console.error('operational-metrics: failed to write metric line');
   }
 }
 
 /**
- * Map a durably-recorded AuthEvent to the operational metrics it should emit:
- *   - `local`/unset stack: emit nothing.
- *   - every other stack name: emit only the three security metrics
- *     (LoginFailed, MfaVerifyFailed, RefreshTokenReuse) that the security
- *     alarms read.
- *
- * Every event type not in the table (successful login, signup, account
- * deletion, refresh, step-up, password change, MFA-challenge issuance, etc.)
- * maps to nothing. Security metrics carry the per-stack `Retivo/<stack>/
- * Security` namespace.
+ * Maps a recorded AuthEvent to its operational metrics: nothing on `local`, and on every other stack only the
+ * security counts (LoginFailed, MfaVerifyFailed, RefreshTokenReuse) under `Retivo/<stack>/Security`.
  */
 export function mapAuthEventToMetrics(
   eventType: AuthEventType,
@@ -110,7 +68,7 @@ export function mapAuthEventToMetrics(
   if (stack === 'local') return [];
   const securityNamespace = `Retivo/${stack}/Security`;
 
-  // Security metrics — emitted on every non-local stack.
+  // Emitted on every non-local stack.
   switch (eventType) {
     case 'login_failed':
       return [{ namespace: securityNamespace, name: 'LoginFailed', value: 1 }];
@@ -118,8 +76,7 @@ export function mapAuthEventToMetrics(
     case 'mfa_email_otp_failed':
     // Historical-only classification retained for old audit-event replay.
     case 'mfa_backup_code_failed':
-    // Per-account TOTP lock threshold crossing — no
-    // new metric name/alarm; mapped onto the same existing metric.
+    // Maps onto the existing MfaVerifyFailed metric; no new alarm.
     case 'mfa_totp_locked':
       return [{ namespace: securityNamespace, name: 'MfaVerifyFailed', value: 1 }];
     case 'refresh_reuse_detected':

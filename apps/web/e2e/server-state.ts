@@ -1,22 +1,6 @@
 /**
- * Server-side state reset for the e2e suite.
- *
- * The suite runs against a real local API (emulator-backed `pnpm dev`
- * stack) signed in as the seeded dev user, so per-test independence
- * needs the household-scoped server state wiped between tests — local
- * IndexedDB wipes alone would just re-pull the previous test's data on
- * the next bootstrap. Purging the key envelope also re-arms the
- * first-time encryption setup, which is what hands each test the
- * fresh, unkeyed household the first-run demo flow expects.
- *
- * Deliberately NOT purged: User / Credential / EmailReservation /
- * RefreshToken / auth tables — the seeded `dev@local.test` login the
- * fixture depends on lives there (the fixture's `clearCookies` already
- * drops the browser's session).
- *
- * Table names are the API's local-dev defaults (see `.env.example` —
- * `retirement-local-*`); DynamoDB Local runs `-sharedDb` so the fake
- * credentials below are accepted.
+ * Purges the household-scoped DynamoDB Local rows between tests; User, Credential and auth tables stay so the seeded dev login survives.
+ * Table names are the API's local-dev defaults (`.env.example`).
  */
 import {
   DynamoDBClient,
@@ -79,9 +63,7 @@ async function purgeOnce(): Promise<number> {
             ) as Record<string, AttributeValue>,
           },
         }));
-        // Re-submit UnprocessedItems until the batch fully lands —
-        // dropping them silently leaves rows behind and the next
-        // bootstrap pulls the "purged" data right back.
+        // Resubmit UnprocessedItems: dropping them leaves rows behind.
         while (requests.length > 0) {
           const w = await ddb().send(
             new BatchWriteItemCommand({ RequestItems: { [t.name]: requests } }),
@@ -95,23 +77,12 @@ async function purgeOnce(): Promise<number> {
   return seen;
 }
 
-/**
- * Purge every row of the household-scoped tables, then KEEP sweeping
- * until a full pass finds nothing. A single scan+delete races
- * concurrent writers — the previous test's just-closed page draining
- * its final push, or the API's janitor/compactor rewriting the
- * mutation log — and rows written behind the scan resurrect the
- * "purged" household on the next bootstrap. (Observed in CI as the
- * first-run demo modal never opening: leftover members make the app
- * treat the workspace as established.)
- */
+/** Sweep the household tables until a full pass finds nothing: a single scan+delete races concurrent writers (a closing page's final push, the compactor). */
 export async function purgeHouseholdState(): Promise<void> {
   const MAX_PASSES = 8;
   for (let pass = 1; pass <= MAX_PASSES; pass += 1) {
     const seen = await purgeOnce();
     if (seen === 0) return;
-    // Rows existed this pass — give any in-flight writer a beat to
-    // finish, then sweep again until a clean pass proves quiescence.
     await new Promise((resolve) => setTimeout(resolve, 250 * pass));
   }
   throw new Error(

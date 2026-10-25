@@ -1,15 +1,5 @@
-/**
- * Draft-state hook for the working-years Roth-conversions sub-page. Mirrors
- * the inflation / withdrawal-strategy draft hooks: seeds
- * the editable list + scenario-level rate from the parent-chain
- * `effective` overrides (so an inherited config shows from first paint), tracks
- * its own `isDirty` via a frozen-at-mount baseline JSON snapshot, and exposes
- * add / update / remove / reset helpers.
- *
- * The conversions list is one inheritable key (first-ancestor-wins; a child
- * that sets it replaces the whole parent list — same shape as `magiCap`), so
- * the draft seeds from `effective` and Save writes the whole list.
- */
+/** Draft-state hook for the working-years Roth-conversions sub-page: seeds the list and rate from the parent-chain effective overrides, tracks isDirty against a frozen-at-mount baseline snapshot, and exposes add / update / remove / reset.
+* The conversions list is one inheritable key: a child that sets it replaces the whole parent list. */
 import { useMemo, useState } from 'react';
 import { resolveScenario, scenarioChain } from '../lib/scenario-resolution';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
@@ -18,22 +8,15 @@ import { cryptoUuid } from '../lib/crypto-uuid';
 
 type ScenarioOverrides = ScenarioPayload['overrides'];
 
-/** A persisted conversion entry — the exact stored shape. */
 type PersistedRothConversion = NonNullable<
   ScenarioOverrides['preRetirementRothConversions']
 >[number];
 
-/** One editable conversion entry. The persisted field shape plus a transient
- *  per-entry `draftId` — a stable React key so removing a middle row never
- *  mis-associates uncommitted picker UI state. The `draftId` is UI-only and is
- *  STRIPPED before persist (see toPersistedConversion in the save helpers). */
+/** One editable conversion entry plus a transient draftId, a stable React key so removing a middle row never mis-associates picker state; stripped before persist. */
 export type DraftRothConversion = PersistedRothConversion & {
   draftId: string;
 };
 
-/** Resolve the parent-chain effective overrides for the scenario. Falls back
- *  to local overrides if resolution throws (consistent with the other draft
- *  hooks). */
 function resolveEffectiveOverrides(
   scenario: ScenarioAggregate,
   scenarios: ScenarioAggregate[],
@@ -56,9 +39,7 @@ interface RothConversionsDraftState {
   taxRatePct: number;
 }
 
-/** Pure: JSON snapshot of the dirty-tracked fields. Symmetric with the
- *  baseline so a single string-equality check decides `isDirty`. The transient
- *  per-entry `draftId` is STRIPPED so it never influences dirty tracking. */
+// The draftId is stripped so it never influences dirty tracking.
 function snapshot(state: RothConversionsDraftState): string {
   return JSON.stringify({
     conversions: state.conversions.map((c) => ({
@@ -76,8 +57,7 @@ export interface RothConversionsDraftResult {
   draft: RothConversionsDraftState;
   localOverrides: ScenarioOverrides;
   effective: ScenarioOverrides;
-  /** Name of the nearest ancestor whose conversions this child inherits (the
-   *  list is shown but not locally overridden). `null` when local or absent. */
+  /** Nearest ancestor whose conversions this child inherits; null when local or absent. */
   inheritedFromName: string | null;
   addConversion: (entry: DraftRothConversion) => void;
   updateConversion: (index: number, entry: DraftRothConversion) => void;
@@ -110,18 +90,13 @@ export function useRothConversionsDraft(
     useState<DraftRothConversion[]>(seededConversions);
   const [taxRatePct, setTaxRatePct] = useState<number>(seededRate);
 
-  // Inherited-from name: the child shows a list it has not locally overridden.
-  // Effective is first-ancestor-wins, so walk the chain to the NEAREST ancestor
-  // that actually sets `preRetirementRothConversions` (mirrors
-  // resolveMagiCapInheritedName), not just the immediate parent.
+  // Effective is first-ancestor-wins, so walk to the nearest ancestor that sets preRetirementRothConversions, not just the parent.
   const inheritedFromName = useMemo<string | null>(() => {
     if (localOverrides.preRetirementRothConversions !== undefined) return null;
     if ((effective.preRetirementRothConversions ?? []).length === 0) return null;
     if (!scenario.payload.parentScenarioId) return null;
     try {
       const chain = scenarioChain(scenario.id, scenarios);
-      // Skip the current scenario (index 0); find the nearest ancestor that
-      // sets the conversions key.
       for (let i = 1; i < chain.length; i += 1) {
         if (
           chain[i].payload.overrides.preRetirementRothConversions !== undefined

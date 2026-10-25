@@ -1,17 +1,5 @@
-/**
- * Resolves the write authority a request's session carries for password-slot
- * mutations: the credential revision recorded
- * on the server-side `RefreshTokenRow` at issuance, read per request from the
- * refresh cookie — never a client-supplied value, and never an access-token
- * claim (a signed claim can't be amended mid-session, which is exactly what
- * the derived post-reset-rewrap prompt needs). Works on the key-envelope
- * routes and `verify-password` because the refresh cookie's path is
- * `/api/v1/auth` and every route involved sits under it (cookie-config.ts).
- *
- * `parseCookies` is the same parser `auth.controller.ts`'s `logout` /
- * `refresh` / `login` handlers use — factored out here rather than copied a
- * further time.
- */
+// Resolves the write authority a session carries for password-slot mutations: the credential revision on the server-side RefreshTokenRow, read
+// per request from the refresh cookie, never client-supplied and never an access-token claim.
 import type { Request } from 'express';
 import { REFRESH_COOKIE_NAME } from './cookie-config.js';
 import { sha256 } from './refresh-token.service.js';
@@ -27,21 +15,10 @@ export function parseCookies(cookieHeader: string): Record<string, string> {
   return out;
 }
 
-/**
- * Resolve the presented refresh cookie's row, the same way `logout` does:
- * parse the cookie, check the leading `userId` segment against the caller's
- * JWT `userId`, then `sha256(cookie)` for the row key. Returns `null` when the
- * cookie is absent, does not belong to `userId`, its row cannot be found, the
- * row is revoked or expired, or its recorded `jti` does not match the
- * bearer's current access-token `jti` — every one of those is "no session to
- * resolve", handled uniformly by the caller.
- *
- * The revoked/expired/jti checks close
- * a lending vector: without them, ANY refresh row that still parses for this
- * user — including one already revoked, or one belonging to a different, live
- * session than the bearer presenting it — would hand its recorded
- * write-authority revision to a request it was never issued for.
- */
+// Resolves the presented refresh cookie row as `logout` does (cookie `userId` matches the JWT, `sha256` as the key).
+// Null when the cookie is absent or foreign, the row is missing, revoked or expired, or its `jti` differs from the
+// bearer: the revoked, expired and jti checks stop a revoked or other-session row from lending its recorded authority
+// to a request it was never issued for.
 async function resolveSessionRow(
   req: Request,
   userId: string,
@@ -62,14 +39,9 @@ async function resolveSessionRow(
 }
 
 /**
- * Resolve the current session's recorded write authority. Returns
- * {@link NO_SESSION_REVISION_SENTINEL} — a value no credential row can ever
- * carry — when the session cannot be resolved at all, so a session with no
- * recorded authority always fails the `ConditionCheck`/conditional `Put` it
- * is compared against as a condition of the write, rather than short-
- * circuiting on a preceding branch. `currentJti` is the bearer access
- * token's own `jti` claim — the row must still be paired to it, never merely
- * "any unrevoked row for this user".
+ * Resolves the current session recorded write authority, or `NO_SESSION_REVISION_SENTINEL` (which no credential
+ * carries) when no session resolves, so the write ConditionCheck fails as a condition of the write. The row must be
+ * paired to the bearer `currentJti`, never just any unrevoked row for the user.
  */
 export async function resolveSessionCredentialRevision(
   req: Request,
@@ -82,13 +54,8 @@ export async function resolveSessionCredentialRevision(
 }
 
 /**
- * Resolve the current session's refresh-token hash, under the SAME active-
- * session + jti-pairing guard as {@link resolveSessionCredentialRevision} —
- * used by `POST /auth/verify-password`'s
- * in-place session-authority update so a revoked or different session can
- * never inherit another session's grant. Returns `undefined` when no matching
- * live session can be resolved, exactly the shape `verify-password`'s
- * controller/service already treat as "nothing to update".
+ * Resolves the current session refresh-token hash under the same active-session and jti-pairing guard, for the
+ * in-place authority update of `verify-password`; undefined when no live session matches.
  */
 export async function resolveSessionTokenHash(
   req: Request,

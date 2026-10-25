@@ -1,15 +1,5 @@
-/**
- * Compact header chip surfacing live Plan stress-test run status.
- * Visible across all pages whenever a run is in flight or has just
- * finished. Click → opens the page. After a completed run, the
- * "Results ready" badge auto-dismisses after 5 seconds.
- *
- * Placed next to `SyncBadge` in the header.
- *
- * Status is shown as a copy-only badge (no percentage); runs at the
- * fixed 10k path count finish sub-second on modern hardware, so the
- * percentage churned for no informational benefit.
- */
+// Header chip for live Plan stress-test status beside `SyncBadge`: running, error, and "Results ready" for 5 s.
+// Copy-only (no percentage): fixed 10k-path runs finish sub-second, so a percentage only churned.
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { useMonteCarlo } from './MonteCarloProvider';
@@ -17,11 +7,7 @@ import { CheckIcon } from '../components/icons';
 
 const READY_DISMISS_MS = 5000;
 
-// Header-chip pill base (legacy `.badge` re-expressed in Tailwind
-// defaults). Per-state tone classes replace the deleted bespoke
-// `var(--accent-*)` / `var(--danger-*)` / `var(--success)` inline
-// colors. Every
-// fg/bg pair is an AA-safe Tailwind-default pair (contrast.ts).
+// Pill base with per-state tones; every fg/bg pair is an AA-safe Tailwind default pair (contrast.ts).
 const CHIP_BASE =
   'inline-flex items-center gap-2 rounded-full border px-2 py-0.5 ' +
   'text-xs font-medium no-underline';

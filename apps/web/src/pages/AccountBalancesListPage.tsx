@@ -1,11 +1,4 @@
-/**
- * Household-wide account balances overview.
- *
- * Reads `account` + `accountBalance` + `householdMember` aggregates
- * from IndexedDB; portfolio TWR / GainLoss come from
- * `apps/web/src/lib/balance-calc.ts`. Edit on a row jumps to the
- * per-account annual entries page.
- */
+/** Household-wide account balances overview from account, accountBalance and householdMember aggregates; Edit on a row jumps to the per-account entries page. */
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -75,11 +68,7 @@ function ownerDisplay(
   return m.firstName?.trim() || 'Member';
 }
 
-// A summary-card label paired with an info (i) tooltip giving a plain-English
-// description of what the figure means. The whole label (text + icon) is the
-// hover/focus target, so the icon stays decorative (aria-hidden) and the
-// trigger's accessible name is just the label text, with the description wired
-// in via the tooltip's `aria-describedby` (React Aria owns that contract).
+// The whole label (text + icon) is the hover/focus target, so the icon stays aria-hidden and the accessible name is the label text, with the description wired via the tooltip's aria-describedby.
 function statLabel(text: string, hint: string): React.ReactNode {
   return (
     <Tooltip multiline content={hint}>
@@ -93,10 +82,6 @@ function statLabel(text: string, hint: string): React.ReactNode {
 
 export const AccountBalancesListPage: React.FC = () => {
   const navigate = useNavigate();
-  // Reactive reads: each store re-reads on any write to its type (single
-  // saves/deletes via the per-store fine signal, sync bootstrap / demo fill
-  // via the coarse workspace event), so the household summary + history chart
-  // refresh without a manual reload dep.
   const accountQuery = useAggregates('account');
   const balanceQuery = useAggregates('accountBalance');
   const memberQuery = useAggregates('householdMember');
@@ -107,8 +92,6 @@ export const AccountBalancesListPage: React.FC = () => {
       ? 'Failed to load account balances'
       : null;
 
-  // Raw aggregates retained for the bottom "Account balances over time" chart
-  // (historical-only, all accounts incl. inactive), name-sorted.
   const rawAccounts = useMemo<ReadonlyArray<Aggregate<AccountPayload>>>(
     () =>
       [...(accountQuery.aggregates as ReadonlyArray<Aggregate<AccountPayload>>)].sort(
@@ -120,8 +103,6 @@ export const AccountBalancesListPage: React.FC = () => {
     Aggregate<AccountBalancePayload>
   >;
 
-  // Household portfolio summary — derived from the reactive hook outputs;
-  // `null` until every slice settles so the page keeps its loading copy.
   const data = useMemo<SummaryResult | null>(() => {
     if (!ready) return null;
     const members = memberQuery.aggregates as ReadonlyArray<
@@ -138,9 +119,7 @@ export const AccountBalancesListPage: React.FC = () => {
     );
   }, [ready, memberQuery.aggregates, rawAccounts, rawBalances]);
 
-  // Historical-only timeline rows for the bottom chart: all
-  // accounts incl. inactive, nominal (no display toggle on this page), zone
-  // 'actual' so every span renders as recorded history (no projected region).
+  // Historical-only rows (zone 'actual', nominal) so every span renders as recorded history with no projected region.
   const stackRows = React.useMemo<StackBandYear[]>(() => {
     return buildAccountBalanceStackHistory(rawAccounts, rawBalances).map(
       (h) => ({
@@ -164,7 +143,6 @@ export const AccountBalancesListPage: React.FC = () => {
     [rawAccounts],
   );
 
-  // Render the chart only when ≥ 2 distinct balance years exist.
   const showStackChart = distinctBalanceYearCount(rawBalances, rawAccounts) >= 2;
 
   if (data === null && error === null) {
@@ -176,9 +154,7 @@ export const AccountBalancesListPage: React.FC = () => {
     );
   }
 
-  // No header add-action here: adding a balance year is a per-account act, so
-  // it lives only on the individual account's balances sub-page (reached via the
-  // per-row Edit). The list page is a read-only overview across all accounts.
+  // No header add-action: adding a balance year is a per-account act, on the account's balances sub-page.
 
   return (
     <section aria-labelledby="account-balances-heading">
@@ -201,8 +177,6 @@ export const AccountBalancesListPage: React.FC = () => {
             cls ? <span className={cls}>{text}</span> : text;
           return (
             <>
-              {/* Same 2×4 arrangement as the per-account Account Balances
-                  page: headline figures up top, pre-/post-tax split below. */}
               <div className="mb-5" aria-label="Portfolio summary">
                 <StatGrid cols="four">
                   <Stat
@@ -275,10 +249,7 @@ export const AccountBalancesListPage: React.FC = () => {
                     )}
                     value={formatPercent(summary.postTaxPct)}
                   />
-                  {/* Tax-free bucket (Roth + HSA). HSA accounts carry the
-                      'HSA' treatment, so they sit here rather than in the
-                      pre/post split — the three buckets reconstitute the
-                      total. */}
+                  {/* HSA accounts carry the HSA treatment, so they sit in this tax-free bucket rather than the pre/post split; the three buckets reconstitute the total. */}
                   <Stat
                     label={statLabel(
                       'Tax-Free Balance',
@@ -305,10 +276,7 @@ export const AccountBalancesListPage: React.FC = () => {
                 </EmptyState>
               ) : (
                 <>
-                  {/* scroll={false}: this table's rows use the hover-revealed
-                      `.row-actions` cluster, and WebKit leaves a row's :hover
-                      stuck while it sits inside an overflow container (see
-                      "Tables" in docs/ui-conventions.md). */}
+                  {/* scroll={false}: WebKit leaves a row's :hover stuck inside an overflow container (see "Tables" in docs/ui-conventions.md). */}
                   <TableScroll label="Household account balances" scroll={false}>
                     <Table
                       aria-label="Household account balances"
@@ -333,8 +301,6 @@ export const AccountBalancesListPage: React.FC = () => {
                           const bucket = accountBucket(a.type);
                           return (
                             <Row key={a.id} id={a.id} className="group/row">
-                              {/* Name cell hosts the absolutely-positioned
-                                  bucket bar, so it must be `relative`. */}
                               <Cell className={`${cell} relative`}>
                                 <BucketBar bucket={bucket} />
                                 <span className="inline-flex items-center gap-1.5">
@@ -367,12 +333,7 @@ export const AccountBalancesListPage: React.FC = () => {
                                 {colored(fmtPct(a.twr), colorPct(a.twr))}
                               </Cell>
                               <Cell className={cell}>
-                                {/* Single action: edit (active) or view
-                                    (inactive), as an icon button.
-                                    The aria-label keeps the prior
-                                    "Edit/View balances for X" accessible name
-                                    (a11y + the existing tests). The eye glyph
-                                    is the inactive view-only affordance. */}
+                                {/* The aria-label keeps the "Edit/View balances for X" accessible name; the eye glyph is the inactive view-only affordance. */}
                                 <div className="row-actions items-center">
                                   <button
                                     type="button"
@@ -407,9 +368,6 @@ export const AccountBalancesListPage: React.FC = () => {
           );
         })()}
 
-      {/* Bottom "Account balances over time" chart — historical-only,
-          all accounts incl. inactive, no Show-excluded toggle and no
-          method suffix. Omitted with < 2 distinct balance years. */}
       {showStackChart && (
         <section
           className={`${CARD_SECTION_CLASS} mt-6`}

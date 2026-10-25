@@ -1,45 +1,29 @@
 /**
- * Reusable determinate Monte-Carlo progress bar — a React Aria
- * `ProgressBar` driven by `done` / `total` path counts. The verbatim
- * "Simulating market histories — X of Y paths" label rides on
- * `aria-label`; sighted users see a short text line + the visual bar.
- *
- * When `total` is 0 or unknown (the worker hasn't reported a path total
- * yet), the bar renders in indeterminate mode (no `value`/`maxValue`,
- * an animated full-width sweep) so the running state still reads as
- * "working" without a misleading 0 %.
- *
- * Mirrors the SS-optimizer MC progress-bar a11y pattern
- * (`ss-optimizer-mc-progress-bar.tsx`): label on `aria-label`, a small
- * visible text line, and the `valueText` exposed `sr-only`.
+ * Determinate Monte Carlo progress bar on React Aria `ProgressBar`, indeterminate while `total` is 0 or unknown; the
+ * label rides on `aria-label` and the `valueText` is `sr-only`.
  */
 import React from 'react';
 import { ProgressBar } from 'react-aria-components';
 
 export interface McProgressBarProps {
-  /** Paths completed so far. */
   readonly done: number;
-  /** Total paths in the sweep. `0` (or unknown) → indeterminate mode. */
+  /** Total in the sweep; `0` or unknown renders indeterminate. */
   readonly total: number;
-  /** Override the accessible/visible label prefix. Defaults to
-   *  "Simulating market histories". */
+  /** Label prefix; defaults to "Simulating market histories". */
   readonly label?: string;
-  /** What `done`/`total` are counted in, for the "X of Y <unit>" reading.
-   *  Defaults to "paths". Pass this whenever the bar counts something else
-   *  (cases, scenarios) so the label does not claim path units it isn't in. */
+  /**
+   * Unit `done` / `total` are counted in; defaults to "paths". Set it when the bar counts cases or
+   * scenarios.
+   */
   readonly unit?: string;
-  /** Hide the visible text line (the bar shows alone); the label still
-   *  rides `aria-label` + the `sr-only` value for assistive tech. Use when
-   *  the surrounding context already names what is running. */
+  /** Hides the visible text line; the label still rides `aria-label` and the `sr-only` value. */
   readonly hideLabel?: boolean;
-  /** Override the wrapper className (sizing/layout). Defaults to a
-   *  `min-w-48` stacked bar; pass a narrower width for inline placements. */
+  /** Wrapper className; defaults to a `min-w-48` stacked bar. */
   readonly className?: string;
 }
 
 const DEFAULT_LABEL = 'Simulating market histories';
 
-/** Compact thousands-grouped count (e.g. `6,200`). */
 function fmtCount(n: number): string {
   return n.toLocaleString('en-US');
 }

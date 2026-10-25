@@ -1,22 +1,6 @@
 /**
- * Inner SVG-engine impl for the QCD → net-taxable IRA RMD split chart.
- * Uses the in-house SVG chart engine.
- *
- * One stacked bar per gift year that carries a gross IRA RMD = that year's
- * gross traditional-IRA required minimum, split into two segments:
- *  - Bottom: covered by the QCD (tax-free), amber `qcdOffset`
- *    token — deliberately NOT the gift chart's `qcd` pink, so the adjacent
- *    Charitable-distributions chart (full gift, gift basis) never reads as
- *    the same series as this capped, RMD-basis offset slice.
- *  - Top: net taxable, teal `rmdMet` token.
- *
- * Total bar height = the year's gross IRA-pool RMD (offset + net). The offset
- * slice is `min(gift, gross)` per owner, so an excess gift never overshoots
- * the bar — the gift beyond the RMD shows on the standalone QCD chart,
- * not here. Rows arrive already deflated to the page's display-dollars basis
- * (both slices on the RMD's year-end `basisDeflator`), so bar heights are
- * read verbatim with no re-deflation and each column-sum ties to its tile.
- * Mirrors `RmdChartInner` (the stacked-bar exemplar). NO recharts import.
+ * Inner SVG-engine chart for the QCD / net-taxable RMD split: amber covered slice (deliberately not the gift chart's
+ * pink) under a teal taxable slice; the offset caps at `min(gift, gross)`.
  */
 import React from 'react';
 import type { QcdRmdSplitRow } from './QcdRmdSplitChart';
@@ -33,7 +17,6 @@ interface InnerProps {
   members?: ReadonlyArray<TooltipMember>;
 }
 
-/** Series labels shared by the bars, legend, and tooltip. */
 const OFFSET_NAME = 'Covered by QCD (tax-free)';
 const NET_NAME = 'Net taxable';
 
@@ -97,19 +80,16 @@ const InnerChart: React.FC<InnerProps> = ({ rows, members }) => {
   const colors = useChartColors();
   const chrome = useChartChrome();
   const { hidden, toggle } = useSeriesVisibility();
-  // Bars map by `x` = their integer `year` (mirrors the RMD chart — every bar
-  // is a full-value bar at its calendar year).
+  // Bars sit on their integer `year`.
   const data: ChartDatum[] = React.useMemo(
     () => rows.map((r) => ({ ...r, x: r.year })),
     [rows],
   );
   const xs = rows.map((r) => r.year);
-  // Empty rows: the caller gates the chart out in practice, but guard a bare
-  // empty series so the domain math never produces NaN bounds.
+  // The caller gates out empty rows; guard a bare empty series so the domain stays finite.
   const xMin = xs.length > 0 ? xs[0] : 0;
   const xLast = xs.length > 0 ? xs[xs.length - 1] : 0;
-  // Inset the first/last bars from the plot edges (bars are centered on their
-  // x). ~0.6yr is wider than a half bar at any zoom; mirrors the RMD chart.
+  // Inset the edge bars, which are centred on x.
   const BAR_EDGE_PAD = 0.6;
   const xMinPadded = Math.floor(xMin) - BAR_EDGE_PAD;
   const xMax = xLast + BAR_EDGE_PAD;

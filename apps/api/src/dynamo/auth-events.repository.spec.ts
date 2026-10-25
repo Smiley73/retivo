@@ -1,15 +1,5 @@
-/**
- * Event-time metric mapping exercised through `AuthEventsRepository.record()`
- * (the single emission point). Uses a stubbed doc client + config so the
- * pure mapping/policy is verified without the emulator; the emulator-backed
- * append behaviour is covered elsewhere.
- *
- * Covers: every selected event family; each MFA-failure subtype individually;
- * no activity metric for `login`, `passkey_assert`, `signup` or
- * `account_deletion_completed`; the security mappings on dev, prod and any
- * other non-local stack; unrelated + `local` negatives; no metric on a failed
- * durable write; and the absence of high-cardinality fields (userId) in EMF.
- */
+// Event-time metric mapping through AuthEventsRepository.record(), the single emission point, with a stubbed doc client and config: every selected event family, each MFA-failure subtype, the security mappings per stack,
+// no metric for login/passkey_assert/signup/account_deletion_completed or on a failed durable write, and no high-cardinality userId in EMF.
 import fs from 'node:fs';
 
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
@@ -44,9 +34,7 @@ async function recordAndCapture(
   send: () => Promise<unknown> = () => Promise.resolve({}),
 ): Promise<CapturedMetric[]> {
   const captured: CapturedMetric[] = [];
-  // The writer emits EMF via `fs.writeSync(1, ...)` (synchronous fd-1 write —
-  // see common/operational-metrics.ts), so capture at that layer and pass every
-  // other fd through to the real implementation.
+  // The writer emits EMF via `fs.writeSync(1, ...)` (see common/operational-metrics.ts), so capture at that layer and pass other fds through.
   const realWriteSync = fs.writeSync.bind(fs);
   const spy = jest.spyOn(fs, 'writeSync').mockImplementation(((
     fd: number,
@@ -57,8 +45,7 @@ async function recordAndCapture(
       return (realWriteSync as (...a: unknown[]) => number)(fd, data, ...rest);
     }
     const raw = String(data);
-    // fd 1 also carries the Nest console-logger's failure warning on the
-    // rejected-write path; only EMF metric lines are captured here.
+    // fd 1 also carries the Nest console-logger's failure warning on the rejected-write path; only EMF metric lines are captured.
     let parsed: {
       _aws?: { CloudWatchMetrics: { Namespace: string; Metrics: { Name: string }[] }[] };
       [key: string]: unknown;
@@ -125,10 +112,9 @@ describe('AuthEventsRepository event-time metrics', () => {
     it.each<AuthEventType>([
       'mfa_totp_failed',
       'mfa_email_otp_failed',
-      // Historical-only event retained for pre-2026-08-24 audit replay.
+      // Historical-only event retained for audit replay.
       'mfa_backup_code_failed',
-      // Per-account TOTP lock threshold crossing — no
-      // new metric name/alarm; mapped onto the same existing metric.
+      // Per-account TOTP lock threshold crossing, mapped onto an existing metric.
       'mfa_totp_locked',
     ])('should_map_%s_to_a_single_MfaVerifyFailed', async (eventType) => {
       const metrics = await recordAndCapture('prod', eventType);

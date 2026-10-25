@@ -1,6 +1,3 @@
-/**
- * Safe Roth-clock inference from annual account-balance evidence.
- */
 import { describe, expect, it } from 'vitest';
 import type { AccountBalancePayload, AccountPayload, Aggregate } from '../db/types';
 import { resolveEffectiveRothStartYear, resolveRothStartYear } from './roth-start-year';

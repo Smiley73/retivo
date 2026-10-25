@@ -1,8 +1,4 @@
-/**
- * Expenses page — "Expenses by Category" chart section card.
- * Hosts ExpensesCategoryChart + zoom state. Tab switcher lives in
- * ExpensesPage.tsx; only the per-tab body lives here.
- */
+/** Expenses page "Expenses by Category" chart section: ExpensesCategoryChart plus zoom state; the tab switcher lives in ExpensesPage.tsx. */
 import React, { useCallback, useMemo } from 'react';
 import { ExpensesCategoryChart } from '../components/ExpensesCategoryChart';
 import type { TooltipMember } from '../components/ExpensesProjectionChart';
@@ -39,7 +35,6 @@ export const ExpensesCategorySection: React.FC<ExpensesCategorySectionProps> = (
     [categoryRows],
   );
 
-  // Y-range for visible category expense values so the y-axis auto-fits on zoom.
   const computeY = useCallback(
     (visibleRows: readonly { x: number }[]): [number, number] | null => {
       const xs = new Set(visibleRows.map((r) => r.x));

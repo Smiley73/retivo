@@ -1,8 +1,4 @@
-/**
- * IndexedDB layer tests. Covers the read/write
- * helpers + the dev-only `dropLocalDatabase` reset path. Uses
- * `fake-indexeddb` so the real `idb` code paths run end-to-end.
- */
+// IndexedDB layer tests over `fake-indexeddb`, so the real `idb` code paths run end to end.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -11,7 +7,7 @@ import {
   clearAllStores,
   ConcurrentQueueMutationError,
   DatabaseDropBlockedError,
-  DatabaseUpgradeBlockedError,
+  db,
   deleteAggregateLocally,
   dropLocalDatabase,
   collapseToFailedConflict,
@@ -37,7 +33,6 @@ import {
   subscribeToStoreChanges,
   updateMutationStatus,
   withBatchedStoreSignals,
-  wrapOpenWithBlockedTimeout,
   writeAccountWithRetypeGuard,
   writeDeviceMetadata,
   writeKeyCacheEntry,
@@ -135,8 +130,7 @@ describe('IndexedDB store', () => {
         ...memberAgg('hm-1'),
         deletedAt: '2026-05-01T01:00:00Z',
       });
-      // getAggregate filters the tombstone; the include-deleted accessor keeps it
-      // (the discard convergence check reads the adopted remote deletion here).
+      // getAggregate filters the tombstone; the include-deleted accessor keeps it (the discard convergence check reads the adopted remote deletion there).
       expect(await getAggregate('householdMember', 'hm-1')).toBeNull();
       const kept = await getAggregateIncludingDeleted('householdMember', 'hm-1');
       expect(kept?.id).toBe('hm-1');
@@ -190,11 +184,8 @@ describe('IndexedDB store', () => {
       const accountsListener = vi.fn();
       const unsubscribe = subscribeToStoreChanges('accounts', accountsListener);
       const before = getStoreVersion('accounts');
-      // Write only to the householdMembers store.
       await putAggregate('householdMember', memberAgg('hm-1'));
       expect(accountsListener).not.toHaveBeenCalled();
-      // The accounts version counter must also be untouched (a useAggregates
-      // reader snapshots the version, not just the listener call).
       expect(getStoreVersion('accounts')).toBe(before);
       unsubscribe();
     });
@@ -231,12 +222,10 @@ describe('IndexedDB store', () => {
         await putAggregate('householdMember', memberAgg('hm-1'), batch);
         await putAggregate('householdMember', memberAgg('hm-2'), batch);
         await putAggregate('householdMember', memberAgg('hm-3'), batch);
-        // No signal fires while still inside the scope.
         expect(listener).not.toHaveBeenCalled();
         expect(getStoreVersion('householdMembers')).toBe(before);
       });
 
-      // Exactly one fine signal + one version bump for the three writes.
       expect(listener).toHaveBeenCalledTimes(1);
       expect(getStoreVersion('householdMembers')).toBe(before + 1);
       unsubscribe();
@@ -257,8 +246,6 @@ describe('IndexedDB store', () => {
         await putAggregate('account', accountAgg('acc-1'), batch);
       });
 
-      // One signal each for the two touched stores; the untouched scenarios
-      // store never fires and its version counter is unchanged.
       expect(membersListener).toHaveBeenCalledTimes(1);
       expect(accountsListener).toHaveBeenCalledTimes(1);
       expect(scenariosListener).not.toHaveBeenCalled();
@@ -280,8 +267,6 @@ describe('IndexedDB store', () => {
         }),
       ).rejects.toThrow('mid-batch boom');
 
-      // A thrown error mid-bulk must not strand readers on stale data: the
-      // touched store is still flushed once on the way out.
       expect(listener).toHaveBeenCalledTimes(1);
       expect(getStoreVersion('householdMembers')).toBe(before + 1);
       unsubscribe();
@@ -293,10 +278,7 @@ describe('IndexedDB store', () => {
       const unsubMembers = subscribeToStoreChanges('householdMembers', membersListener);
       const unsubAccounts = subscribeToStoreChanges('accounts', accountsListener);
 
-      // Batch A writes only to householdMembers; batch B only to accounts.
-      // Drive both concurrently with alternated writes so they overlap in
-      // time. Each owns its own touched-store Set, so on exit each flushes
-      // only its own store (the concurrency-isolation guard).
+      // Each batch owns its own touched-store set, so concurrent batches flush only their own store.
       let resolveA!: () => void;
       let resolveB!: () => void;
       const gateA = new Promise<void>((r) => { resolveA = r; });
@@ -305,10 +287,8 @@ describe('IndexedDB store', () => {
       const runA = withBatchedStoreSignals(async (batch) => {
         await putAggregate('householdMember', memberAgg('hm-a1'), batch);
         resolveA();
-        // Wait for B to have written before A exits, guaranteeing overlap.
         await gateB;
         await putAggregate('householdMember', memberAgg('hm-a2'), batch);
-        // While inside A, neither store has flushed yet.
         expect(membersListener).not.toHaveBeenCalled();
       });
 
@@ -321,7 +301,6 @@ describe('IndexedDB store', () => {
 
       await Promise.all([runA, runB]);
 
-      // Each batch flushed exactly its own store once — no cross-contamination.
       expect(membersListener).toHaveBeenCalledTimes(1);
       expect(accountsListener).toHaveBeenCalledTimes(1);
       unsubMembers();
@@ -337,11 +316,7 @@ describe('IndexedDB store', () => {
     });
 
     it('listPendingMutations returns rows in timestamp (creation) order, not UUID order', async () => {
-      // Regression: the `status` index orders ties by primary key
-      // (random UUID), so a later-created update could be pushed before
-      // its create. listPendingMutations must sort by the monotonic
-      // `timestamp` instead. Queue a create whose UUID sorts AFTER the
-      // update's, but whose timestamp is EARLIER.
+      // The `status` index orders ties by primary key (a random UUID), so listPendingMutations must sort by `timestamp`: a create whose UUID sorts after the update's but whose timestamp is earlier must still come first.
       await queueMutation(
         pendingMutation('zzz-create', {
           aggregateId: 'agg-x',
@@ -394,17 +369,13 @@ describe('IndexedDB store', () => {
     it('updateMutationStatus without a reason clears a stale one', async () => {
       await queueMutation(pendingMutation('mut-1'));
       await updateMutationStatus('mut-1', 'failed-conflict', 'SCHEMA_MISMATCH');
-      // A non-failure transition (retry back to pending) carries no reason,
-      // which must clear the previously-stamped one.
       await updateMutationStatus('mut-1', 'pending');
       const [pending] = await listPendingMutations();
       expect(pending?.reason).toBeUndefined();
     });
 
     it('updateMutationStatus with an off-allowlist reason is the caller’s job; the store persists exactly what it is given', async () => {
-      // The store writes whatever reason it receives verbatim; the SyncContext
-      // rejection loop is what normalises an off-allowlist wire reason to
-      // `undefined` before calling here (asserted in SyncContext.test.tsx).
+      // The store writes the reason verbatim; the SyncContext rejection loop normalises an off-allowlist wire reason before calling here.
       await queueMutation(pendingMutation('mut-1'));
       await updateMutationStatus('mut-1', 'failed-conflict', undefined);
       const [failed] = await listFailedConflicts();
@@ -453,10 +424,7 @@ describe('IndexedDB store', () => {
     });
 
     it('collapseToFailedConflict aborts (throws, no stomp) when a concurrent row landed after the snapshot', async () => {
-      // A user edit (queueLocalMutation) for the SAME aggregate lands AFTER the
-      // caller snapshotted [rep, sib-1]. The transactional collapse re-reads the
-      // live stack, sees the extra row, and aborts rather than folding a stale
-      // collapse that would drop it — the check-and-mutate TOCTOU.
+      // A user edit landing after the caller snapshotted the stack must survive: the transactional collapse re-reads the live stack and aborts rather than folding a stale collapse.
       await queueMutation(pendingMutation('rep', { aggregateId: 'agg-x', timestamp: 1001 }));
       await queueMutation(pendingMutation('sib-1', { aggregateId: 'agg-x', timestamp: 1000 }));
       await queueMutation(pendingMutation('concurrent', { aggregateId: 'agg-x', timestamp: 1002 }));
@@ -468,7 +436,6 @@ describe('IndexedDB store', () => {
           facts: { reason: 'CONFLICT', currentVersion: 7, currentUpdatedAt: '2026-07-02T00:00:00.000Z' },
         }),
       ).rejects.toBeInstanceOf(ConcurrentQueueMutationError);
-      // All three rows survive untouched — nothing parked, nothing deleted.
       const all = await listAllMutations();
       expect(all.map((m) => m.id).sort()).toEqual(['concurrent', 'rep', 'sib-1']);
       expect(all.every((m) => m.status === 'pending')).toBe(true);
@@ -487,14 +454,12 @@ describe('IndexedDB store', () => {
       );
       await reEnqueueMutationWithFreshId('old', 'fresh');
       const all = await listAllMutations();
-      // Old id gone, fresh id present (guards the 7-day rejection cache).
       expect(all.map((m) => m.id)).toEqual(['fresh']);
       expect(all[0]).toMatchObject({
         status: 'pending',
         payload: { name: 'keep me' },
         expectedVersion: 5,
       });
-      // Rejection facts are cleared so the fresh push re-drives auto-repair cleanly.
       expect(all[0].reason).toBeUndefined();
       expect(all[0].currentVersion).toBeUndefined();
       expect(all[0].currentUpdatedAt).toBeUndefined();
@@ -535,8 +500,6 @@ describe('IndexedDB store', () => {
     });
 
     it('removeMutations deletes every listed row and leaves the rest (poison-train drop)', async () => {
-      // A create-over-tombstone whose local stack ends in a delete clears the
-      // WHOLE stack in one pass; an unrelated aggregate's row is untouched.
       await queueMutation(pendingMutation('a', { aggregateId: 'agg-x', operation: 'create' }));
       await queueMutation(pendingMutation('b', { aggregateId: 'agg-x', operation: 'update', expectedVersion: 1 }));
       await queueMutation(pendingMutation('c', { aggregateId: 'agg-x', operation: 'delete', expectedVersion: 2 }));
@@ -553,13 +516,8 @@ describe('IndexedDB store', () => {
       expect((await listAllMutations()).map((m) => m.id)).toEqual(['keep']);
     });
 
-    // Regression: a mutation queued by the preceding v6
-    // build round-trips `rothIraRegularContributionBasis` /
-    // `designatedRothBasis` (migrateAccountV6ToV7 drops both). The
-    // `mutations` store is not migrated on load like the aggregate stores
-    // are — only on read via these list functions — so a stale row must be
-    // upgraded (and the upgrade persisted) before it can reach a push or an
-    // export, or it would keep carrying the retired field off the device.
+    // The `mutations` store is not migrated on load like the aggregate stores, only on read through these list functions, so a
+    // stale row must be upgraded and the upgrade persisted before it reaches a push or an export.
     it('listPendingMutations upgrades a schema-behind row to the current schema before it can be pushed', async () => {
       await queueMutation(
         pendingMutation('mut-1', {
@@ -626,15 +584,8 @@ describe('IndexedDB store', () => {
       expect(error?.payload.rothIraRegularContributionBasis).toBeUndefined();
     });
 
-    // Regression: listAllMutations feeds the
-    // server-authoritative export's default readAllMutations, which is
-    // documented (and relied on by a concurrent background push) as
-    // read-only. Unlike the push-serving list functions above, it must
-    // migrate a schema-behind row's payload for its OWN return value without
-    // writing the upgrade back to IndexedDB — asserted directly against the
-    // raw IDBObjectStore.put the `idb` wrapper calls under the hood, since a
-    // second read-back can't distinguish "already persisted" from
-    // "re-migrated in memory again".
+    // listAllMutations feeds the export's default `readAllMutations`, which must stay read-only: it migrates a schema-behind row
+    // for its return value without writing back. Asserted on the raw IDBObjectStore.put, since a read-back cannot tell the difference.
     it('listAllMutations migrates the returned payload but does not persist the upgrade (export stays read-only)', async () => {
       await queueMutation(
         pendingMutation('mut-1', {
@@ -650,8 +601,7 @@ describe('IndexedDB store', () => {
       expect(putSpy).not.toHaveBeenCalled();
       putSpy.mockRestore();
 
-      // Confirm the row really is still schema-6 on disk: the push-serving
-      // read migrates AND persists it, so it still has an upgrade to do.
+      // The push-serving read migrates and persists, so the row is still schema-6 on disk until then.
       const persistPutSpy = vi.spyOn(IDBObjectStore.prototype, 'put');
       const [pending] = await listPendingMutations();
       expect(pending?.schemaVersion).toBe(7);
@@ -670,14 +620,8 @@ describe('IndexedDB store', () => {
       expect(pending).toEqual(seeded);
     });
 
-    // Regression: the persisted upgrade is cleanup,
-    // not a precondition of the read. When the write fails (origin storage at
-    // quota is the realistic case — exactly the upgrade window this code
-    // exists for), listPendingMutations must still hand the flush its rows,
-    // because draining the queue is what frees the space; throwing would
-    // stall the flush on the very fault the flush would clear. The mock
-    // mirrors what a real QuotaExceededError does to the transaction (aborts
-    // it, so `tx.done` rejects) so the swallow path is the one exercised.
+    // The persisted upgrade is cleanup, not a precondition: when the write fails (storage at quota is the realistic case),
+    // listPendingMutations must still hand the flush its rows, because draining the queue is what frees the space.
     it('listPendingMutations still returns the upgraded rows when persisting the upgrade fails (persist is best-effort)', async () => {
       await queueMutation(
         pendingMutation('mut-1', {
@@ -704,8 +648,6 @@ describe('IndexedDB store', () => {
         warn.mockRestore();
       }
 
-      // The row is still schema-6 on disk, so the next read has the upgrade
-      // to re-do — and this time persists it.
       const persistPutSpy = vi.spyOn(IDBObjectStore.prototype, 'put');
       const [pending] = await listPendingMutations();
       expect(pending?.schemaVersion).toBe(7);
@@ -713,10 +655,7 @@ describe('IndexedDB store', () => {
       persistPutSpy.mockRestore();
     });
 
-    // The persist re-reads each row INSIDE its own readwrite transaction and
-    // writes the migrated copy of what it finds there, so a writer that lands
-    // between the readonly list and the persist is never clobbered by a stale
-    // put — a row a completed push removed stays removed.
+    // The persist re-reads each row inside its own readwrite transaction, so a writer landing after the readonly list is never clobbered by a stale put.
     it('the persisted upgrade never resurrects a row removed between the read and the write', async () => {
       await queueMutation(
         pendingMutation('mut-1', {
@@ -725,8 +664,7 @@ describe('IndexedDB store', () => {
           payload: { type: 'RETIREMENT_ROTH_IRA', rothIraRegularContributionBasis: 25000 },
         }),
       );
-      // Land the removal from inside the persist transaction's own `get`, i.e.
-      // after the readonly list has already taken its snapshot.
+      // Land the removal from inside the persist transaction's own `get`, after the readonly list took its snapshot.
       const originalGet = IDBObjectStore.prototype.get;
       const getSpy = vi
         .spyOn(IDBObjectStore.prototype, 'get')
@@ -1017,8 +955,6 @@ describe('IndexedDB store', () => {
       await clearAllStores();
       expect(await listAggregates('householdMember')).toEqual([]);
       expect(await listPendingMutations()).toEqual([]);
-      // Device metadata is preserved across clearAllStores so devices
-      // do not lose their `deviceId` on a force-bootstrap.
       expect(await readDeviceMetadata()).not.toBeNull();
     });
 
@@ -1030,8 +966,6 @@ describe('IndexedDB store', () => {
       });
       expect(await readKeyCacheEntry()).not.toBeNull();
       await clearAllStores();
-      // After a Full Sync wipes all sync data the device must not still hold a
-      // cached key (would appear "unlocked" over freshly-wiped data).
       expect(await readKeyCacheEntry()).toBeNull();
     });
   });
@@ -1049,7 +983,6 @@ describe('IndexedDB store', () => {
 
     it('returns true when any aggregate row carries a different householdId', async () => {
       await putAggregate('householdMember', memberAgg('hm-1'));
-      // A row from a previous user — householdId ≠ HH.
       await putAggregate('householdMember', {
         ...memberAgg('hm-2'),
         householdId: 'hh-previous-user',
@@ -1058,8 +991,6 @@ describe('IndexedDB store', () => {
     });
 
     it('returns true when ALL rows belong to a foreign household (the leak case)', async () => {
-      // Mirrors the upgrade-path bug: the device has only the prior
-      // user's data and a brand-new user logs in.
       await putAggregate('householdMember', {
         ...memberAgg('hm-1'),
         householdId: 'hh-previous-user',
@@ -1068,9 +999,7 @@ describe('IndexedDB store', () => {
     });
 
     it('returns true when foreign rows live in a non-householdMember store', async () => {
-      // Defensive: the audit must walk every store, not just the
-      // first one. Stash a foreign row in `accounts` and confirm the
-      // helper still surfaces the mismatch.
+      // The audit must walk every store, not just the first.
       await putAggregate('account', {
         id: 'acc-1',
         householdId: 'hh-previous-user',
@@ -1101,25 +1030,17 @@ describe('IndexedDB store', () => {
         displayName: '',
       });
       await dropLocalDatabase();
-      // After drop, opening a fresh handle should see an empty schema.
       expect(await listAggregates('householdMember')).toEqual([]);
       expect(await listPendingMutations()).toEqual([]);
       expect(await readDeviceMetadata()).toBeNull();
     });
 
     it('rejects with DatabaseDropBlockedError when the delete stays blocked past the timeout', async () => {
-      // Simulate another tab holding the DB open: deleteDatabase fires
-      // `onblocked` and never `onsuccess`. The 2 s cap must then reject so the
-      // caller fails closed (does not store the new lastUserId / expose the new
-      // household). Stub via the string-keyed spy (no raw `indexedDB.delete-
-      // Database` member access, so the audited-home ESLint guard is respected)
-      // and never actually delete — the afterEach `clearAllStores()` reopens the
-      // still-present DB cleanly.
+      // Another tab holding the DB open makes deleteDatabase fire `onblocked` and never `onsuccess`; the 2 s cap must reject so the caller fails closed. The string-keyed spy keeps raw `indexedDB.deleteDatabase` access out of this file (audited-home lint).
       const blockedReq = { onsuccess: null, onerror: null, onblocked: null } as unknown as IDBOpenDBRequest;
       const deleteSpy = vi
         .spyOn(indexedDB, 'deleteDatabase')
         .mockImplementation(() => {
-          // Fire onblocked asynchronously, mirroring a real blocked delete.
           queueMicrotask(() => blockedReq.onblocked?.(new Event('blocked') as never));
           return blockedReq;
         });
@@ -1138,95 +1059,70 @@ describe('IndexedDB store', () => {
     });
   });
 
-  describe('wrapOpenWithBlockedTimeout (v9 blocked-open bounded timeout)', () => {
-    // `fake-indexeddb` cannot drive a real `onblocked`, so the bounded-wait that
-    // `db()` arms from its `blocked()` callback is unit-tested in isolation here
-    // (the helper is factored out for exactly this reason). The
-    // helper only ever calls `handle.close()`, so a minimal stub stands in for
-    // the full `IDBPDatabase` (typed here without importing `idb` — restricted
-    // outside store.ts).
-    type StubHandle = { close: () => void };
-    function fakeHandle(): { handle: StubHandle; closed: () => boolean } {
-      let closed = false;
-      const handle: StubHandle = {
-        close() {
-          closed = true;
-        },
-      };
-      return { handle, closed: () => closed };
+  describe('db() upgrade blocked by an older connection', () => {
+    // fake-indexeddb cannot raise a real `blocked`, so the test drives a bare open request.
+    function stubOpenRequest(): { request: IDBOpenDBRequest; open: ReturnType<typeof vi.spyOn> } {
+      const request = new IDBOpenDBRequest();
+      const open = vi.spyOn(indexedDB, 'open').mockImplementation(() => {
+        queueMicrotask(() => request.dispatchEvent(new IDBVersionChangeEvent('blocked')));
+        return request;
+      });
+      return { request, open };
     }
 
-    it('resolves with the handle on a normal (un-armed) open and never rejects', async () => {
-      const { handle } = fakeHandle();
-      const { promise } = wrapOpenWithBlockedTimeout(
-        Promise.resolve(handle) as never,
-      );
-      await expect(promise).resolves.toBe(handle);
+    function stubHandle(): EventTarget & { close: ReturnType<typeof vi.fn> } {
+      return Object.assign(new EventTarget(), { close: vi.fn() });
+    }
+
+    function resolveOpen(request: IDBOpenDBRequest, handle: EventTarget): void {
+      Object.defineProperty(request, 'result', { value: handle });
+      request.dispatchEvent(new IDBVersionChangeEvent('success'));
+    }
+
+    beforeEach(async () => {
+      await dropLocalDatabase();
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    });
+    afterEach(async () => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      await dropLocalDatabase();
     });
 
-    it('rejects with DatabaseUpgradeBlockedError when armed and the open never resolves past the cap', async () => {
-      vi.useFakeTimers();
-      try {
-        // An open that stays pending forever (the blocking v8 tab never releases).
-        const { promise, armBlockedTimeout } = wrapOpenWithBlockedTimeout(
-          new Promise<never>(() => {}),
-          2000,
-        );
-        const assertion = expect(promise).rejects.toBeInstanceOf(
-          DatabaseUpgradeBlockedError,
-        );
-        armBlockedTimeout(); // mirrors the openDB blocked() callback firing.
-        await vi.advanceTimersByTimeAsync(2000);
-        await assertion;
-      } finally {
-        vi.useRealTimers();
-      }
+    it('rejects with DatabaseUpgradeBlockedError once the cap passes, then retries the open', async () => {
+      const { open } = stubOpenRequest();
+      const first = expect(db()).rejects.toMatchObject({ name: 'DatabaseUpgradeBlockedError' });
+      await vi.advanceTimersByTimeAsync(2000);
+      await first;
+
+      const retry = expect(db()).rejects.toMatchObject({ name: 'DatabaseUpgradeBlockedError' });
+      await vi.advanceTimersByTimeAsync(2000);
+      await retry;
+      expect(open).toHaveBeenCalledTimes(2);
     });
 
-    it('discards a late real open that resolves AFTER the timeout (no double-settle, handle closed)', async () => {
-      vi.useFakeTimers();
-      try {
-        let resolveOpen!: (h: StubHandle) => void;
-        const rawOpen = new Promise<StubHandle>((r) => {
-          resolveOpen = r;
-        });
-        const { promise, armBlockedTimeout } = wrapOpenWithBlockedTimeout(
-          rawOpen as never,
-          2000,
-        );
-        const assertion = expect(promise).rejects.toBeInstanceOf(
-          DatabaseUpgradeBlockedError,
-        );
-        armBlockedTimeout();
-        await vi.advanceTimersByTimeAsync(2000);
-        await assertion;
-        // The blocking tab finally closes and the real open resolves late: its
-        // handle must be closed + discarded, never surfaced as a half-state.
-        const { handle, closed } = fakeHandle();
-        resolveOpen(handle);
-        await Promise.resolve();
-        expect(closed()).toBe(true);
-      } finally {
-        vi.useRealTimers();
-      }
+    it('closes and discards a handle that resolves after the timeout', async () => {
+      const { request } = stubOpenRequest();
+      const timedOut = expect(db()).rejects.toMatchObject({ name: 'DatabaseUpgradeBlockedError' });
+      await vi.advanceTimersByTimeAsync(2000);
+      await timedOut;
+
+      const late = stubHandle();
+      resolveOpen(request, late);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(late.close).toHaveBeenCalledTimes(1);
     });
 
-    it('does not reject after a successful resolve clears the armed timer', async () => {
-      vi.useFakeTimers();
-      try {
-        const { handle } = fakeHandle();
-        const { promise, armBlockedTimeout } = wrapOpenWithBlockedTimeout(
-          Promise.resolve(handle) as never,
-          2000,
-        );
-        // Arm the timer, but the open resolves first (a transient block that
-        // released before the cap) — the timer must be cleared, not fire.
-        armBlockedTimeout();
-        await expect(promise).resolves.toBe(handle);
-        await vi.advanceTimersByTimeAsync(2000); // would reject if not cleared.
-      } finally {
-        vi.useRealTimers();
-      }
+    it('resolves with the handle when the block lifts before the cap', async () => {
+      const { request } = stubOpenRequest();
+      const handle = stubHandle();
+      const opened = db();
+      await vi.advanceTimersByTimeAsync(1000);
+      resolveOpen(request, handle);
+      await expect(opened).resolves.toBe(handle);
+      await vi.advanceTimersByTimeAsync(5000);
+      await expect(db()).resolves.toBe(handle);
     });
   });
 });

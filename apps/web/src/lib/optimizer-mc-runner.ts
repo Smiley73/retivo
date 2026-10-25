@@ -1,45 +1,6 @@
-/**
- * Monte Carlo orchestrator for the claim-age optimizer. Walks every
- * `(scenario, primaryAge, secondaryAge)` candidate triple, assembles a
- * `MonteCarloInput` per triple via `runBalanceProjectionMc`, dispatches
- * each input across a pool of owned `monte-carlo.worker.ts` instances,
- * accumulates the max `summary.successProbability` per scenario, reports
- * progress scenario-by-scenario, and supports cancellation via an
- * `AbortSignal`.
- *
- * Each candidate triple is fully independent and posts a constant seed,
- * so its result is a pure function of its input — execution order
- * does not affect any winner. The orchestrator therefore fans triples
- * out across a {@link createMcPool} worker pool (the dominant slow case is
- * a single couple scenario with a 9×9 = 81-triple grid, so the
- * parallelism has to work *within* a scenario, not just across
- * scenarios) and handles replies as they land rather than in dispatch
- * order. The pool workers are the **sole** site that executes
- * `runMonteCarlo` — the orchestrator never calls it on the main thread.
- *
- * Every triple posts `seed = 1` (constant) so tie-break
- * determinism on flat metric surfaces is stable across runs. Reusing
- * the scenario's persisted MC seed would couple the optimizer to the
- * Plan-stress-test card.
- *
- * Per-scenario return contract. The orchestrator
- * returns one outcome per scenario in a `Map`. Each outcome is one of:
- *  - `result` — winner + partial + missingPiaMembers + alreadyAtOptimum
- *    (matches the deterministic `OptimizerResult` shape so the page's
- *    Apply gate + tooltip + missing-PIA callout work without per-metric
- *    branches). `winner === null` here means past-window (both grids
- *    empty) — same convention as the deterministic path.
- *  - `unsupported` — single `cbp-unconfigured` reason; the runner
- *    throws `CbpUnconfiguredError` on the first triple and the
- *    orchestrator surfaces it for that scenario alone.
- *  - `error` — non-`CbpUnconfigured` throw on assembly, OR a worker
- *    `{ kind: 'error' }` reply mid-run. Other scenarios keep running
- *    so a single bad scenario does not abort the whole sweep.
- *
- * Helpers (PIA derivation, triple-building per empty-grid branch,
- * already-at-optimum check) live in `optimizer-mc-runner-helpers.ts`
- * so this file stays under the ≤400-ln shape cap.
- */
+// Monte Carlo orchestrator for the claim-age optimizer: fans every `(scenario, primaryAge, secondaryAge)`
+// triple across a pool of `monte-carlo.worker.ts` workers and keeps the best success probability per scenario.
+
 import {
   CbpUnconfiguredError,
   NoPrimaryRetirementError,
@@ -64,7 +25,7 @@ import type {
 import { DEFAULT_LIFE_EXPECTANCY_AGE } from '../db/types';
 import type { MonteCarloInput } from './monte-carlo';
 import { totalMonths } from './claim-age-optimizer/pick-winner';
-// Vite `?worker` import — same pattern as `MonteCarloProvider.tsx`.
+// Vite `?worker` import.
 import MCWorker from '../workers/monte-carlo.worker.ts?worker';
 import {
   createMcPool,
@@ -94,48 +55,21 @@ export type {
   OptimizerMcScenarioProgress,
 } from './optimizer-mc-runner-types';
 
-// Re-exported so existing callers/tests keep importing the worker shape
-// from the orchestrator; the canonical definition now lives with the pool.
-export type { MinimalMcWorker } from '../monte-carlo/mc-worker-pool';
-
-/** Whole-year grid step. Increase to 2 → `{62, 64, 66, 68, 70}` (25-pair
- *  coarse grid) without restructuring the orchestrator. */
+// Whole-year grid step; 2 gives the coarse 25-pair grid.
 const OPTIMIZER_MC_CANDIDATE_STEP_YEARS = 1;
-/** Default MC path count per triple. The page exposes a 1k/5k/10k
- *  selector backed by the {@link RunOptimizerMonteCarloArgs.pathCount}
- *  override; this is the fallback. Tests + headless callers that
- *  don't pass `pathCount` get this value. */
+/** Fallback MC path count per triple when the caller passes no `pathCount`. */
 export const OPTIMIZER_MC_DEFAULT_PATH_COUNT = 1000;
 
-/* ---------- in-memory session outcome cache ---------- */
+// Bounded so adversarial input variation cannot grow the cache without limit; LRU eviction.
+const OPTIMIZER_MC_CACHE_MAX_ENTRIES = 500;
 
-/** Max in-memory cache entries. The optimizer grid is ~81 candidates per
- *  scenario, so a session never approaches this cap in normal use; the
- *  bound (CODING_STANDARDS stateful-singleton rule) prevents unbounded
- *  growth under adversarial input variation. LRU eviction on overflow. */
-export const OPTIMIZER_MC_CACHE_MAX_ENTRIES = 500;
-
-/** Module-level session cache: per-scenario final optimizer outcome keyed
- *  on a stable hash of every optimizer-relevant input. Warm within a page
- *  session; cold on reload (no persistence). A `Map` preserves
- *  insertion order, so the first key is the LRU victim; a hit re-inserts to
- *  mark most-recently-used. */
+// Per-scenario outcome keyed on a hash of every optimizer-relevant input. Warm for the page session, cold on reload.
+// A Map keeps insertion order, so the first key is the LRU victim and a hit re-inserts.
 const optimizerOutcomeCache = new Map<string, OptimizerMcOutcome>();
-
-/** Test-only: clear the session cache so a fresh run recomputes. */
-export function clearOptimizerMcCache(): void {
-  optimizerOutcomeCache.clear();
-}
-
-/** Test-only: current cache entry count (for the max-bound AC). */
-export function optimizerMcCacheSize(): number {
-  return optimizerOutcomeCache.size;
-}
 
 function cacheGet(key: string): OptimizerMcOutcome | undefined {
   const hit = optimizerOutcomeCache.get(key);
   if (hit === undefined) return undefined;
-  // LRU touch: move to most-recently-used position.
   optimizerOutcomeCache.delete(key);
   optimizerOutcomeCache.set(key, hit);
   return hit;
@@ -151,9 +85,6 @@ function cacheSet(key: string, outcome: OptimizerMcOutcome): void {
   }
 }
 
-/** FNV-1a 32-bit hash of a string — fast, synchronous, dependency-free.
- *  Collision probability is negligible for a per-session cache keyed on a
- *  full input serialisation. */
 function fnv1a(s: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i += 1) {
@@ -163,10 +94,7 @@ function fnv1a(s: string): string {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-/** Compact, change-sensitive snapshot of one aggregate array — id +
- *  version + payload — sorted by id for order-independence. Any payload
- *  edit bumps `version`, but the payload is serialised too so a test that
- *  mutates a payload without bumping the version still produces a miss. */
+// Sorted by id; the payload is serialised too so a payload edit without a version bump still misses.
 function aggregateSignature(
   list: ReadonlyArray<{ id: string; version: number; payload: unknown }>,
 ): unknown {
@@ -175,10 +103,7 @@ function aggregateSignature(
     .sort((x, y) => x.id.localeCompare(y.id));
 }
 
-/** Per-scenario session cache key. Includes every optimizer-relevant
- *  input so any change — scenario graph, accounts, balances, members, SS
- *  benefits, expenses, income streams, path count, today anchor, candidate
- *  step, pinned seed, or `ENGINE_VERSION` — produces a fresh key (miss). */
+// Includes every optimizer-relevant input (scenario graph, data, path count, today, step, seed, `ENGINE_VERSION`).
 function optimizerCacheKey(
   args: RunOptimizerMonteCarloArgs,
   scenarioId: string,
@@ -194,8 +119,7 @@ function optimizerCacheKey(
     ssBenefits: aggregateSignature(args.ssBenefits),
     expenses: aggregateSignature(args.expenses),
     incomeStreams: aggregateSignature(args.incomeStreams),
-    // A flag-set change must produce a fresh key (sorted for
-    // order-independence) so a stale cached setup never returns wrong rankings.
+    // Sorted, so a flag-set change gives a fresh key and a stale cached setup never returns wrong rankings.
     medicalCategoryIds: [...(args.medicalCategoryIds ?? [])].sort(),
     pathCount,
     stepYears,
@@ -210,8 +134,7 @@ function optimizerCacheKey(
 export interface OptimizerMcProgress {
   readonly scenarioIdx: number;
   readonly pairIdx: number;
-  /** Global 1-based triple index; bar uses this so 1-D fallbacks
-   *  don't overshoot the joint-product expectation. */
+  /** Global 1-based triple index, so 1-D fallbacks do not overshoot the joint-product expectation. */
   readonly cumulativeIdx: number;
   readonly totals: {
     readonly scenarios: number;
@@ -228,44 +151,26 @@ export interface RunOptimizerMonteCarloArgs {
   readonly ssBenefits: ReadonlyArray<Aggregate<SocialSecurityBenefitPayload>>;
   readonly expenses: ReadonlyArray<Aggregate<ExpensePayload>>;
   readonly incomeStreams: ReadonlyArray<Aggregate<IncomeStreamPayload>>;
-  /** Flag-derived medical category ids — threaded into each scenario's
-   *  MC setup so the +2pp medical-inflation default follows the flag, AND
-   *  into the FNV setup-cache signature so a flag-set change can't collide on
-   *  a stale cached setup. */
+  /** Flag-derived medical category ids: they set the +2pp medical-inflation default and are part of the cache signature. */
   readonly medicalCategoryIds?: ReadonlyArray<string>;
   readonly today: Date;
   readonly candidateStepYears?: number;
   readonly pathCount?: number;
   readonly onProgress?: (p: OptimizerMcProgress) => void;
-  /** Fires once per scenario the moment its outcome is final — pre-
-   *  seeded empty/past-window scenarios up-front, terminated
-   *  (unsupported/error) scenarios when they terminate, and normal
-   *  scenarios when their last candidate triple resolves. Lets the page
-   *  fill the table scenario-by-scenario instead of waiting for the
-   *  whole sweep (mirrors the deterministic path's `onMethodResult`).
-   *  The end-of-run return map stays the authoritative reconcile. */
+  /** Fires once per scenario when its outcome is final, so the page fills the table incrementally; the returned map stays authoritative. */
   readonly onScenarioResult?: (
     scenarioId: string,
     outcome: OptimizerMcOutcome,
   ) => void;
-  /** Smooth per-scenario progress in path units, emitted as the
-   *  in-flight scenario's grid simulates (sampled from the MC worker's
-   *  own `{ kind: 'progress' }` messages). Lets the page drive a
-   *  per-row bar that climbs to 100 % before `onScenarioResult` fires. */
+  /** Per-scenario progress in path units, sampled from the worker's progress messages. */
   readonly onScenarioProgress?: (
     scenarioId: string,
     progress: OptimizerMcScenarioProgress,
   ) => void;
   readonly signal?: AbortSignal;
-  /** Injected for tests to bypass the real `?worker` import. The pool
-   *  calls this once per worker, so a factory that returns a shared
-   *  instance only models a single-worker pool — pass `concurrency: 1`
-   *  with it, or return a fresh worker per call to exercise the pool. */
+  /** Test injection point. The pool calls it once per worker, so a shared instance needs `concurrency: 1`. */
   readonly workerFactory?: () => MinimalMcWorker;
-  /** Worker-pool size override. Defaults to {@link mcPoolSize}
-   *  (the logical cores minus one, capped to the triple count). Tests pin it
-   *  for deterministic dispatch; a value of `1` reproduces the legacy
-   *  single-worker serial path exactly. */
+  /** Worker-pool size override; defaults to `mcPoolSize`. */
   readonly concurrency?: number;
 }
 
@@ -275,13 +180,9 @@ export async function runOptimizerMonteCarlo(
   const stepYears = args.candidateStepYears ?? OPTIMIZER_MC_CANDIDATE_STEP_YEARS;
   const pathCount = args.pathCount ?? OPTIMIZER_MC_DEFAULT_PATH_COUNT;
   const winnersByScenario = new Map<string, OptimizerMcWinner | null>();
-  // Per-scenario MC success probability at the user's current claim ages
-  // — captured when a candidate triple lands exactly on the resolved
-  // whole-year pair. Drives the "current → recommended" metric cell.
+  // Success probability at the user's current claim ages, for the "current → recommended" cell.
   const baselinesByScenario = new Map<string, number>();
-  // Memoised resolved SS override per scenario — the baseline the
-  // recommendation is compared against. Resolved once per scenario so the
-  // per-triple match check stays cheap.
+  // Memoised per scenario so the per-triple match check stays cheap.
   const currentSsByScenario = new Map<string, SocialSecurityOverride | undefined>();
   const currentSsFor = (scenarioId: string): SocialSecurityOverride | undefined => {
     if (currentSsByScenario.has(scenarioId)) return currentSsByScenario.get(scenarioId);
@@ -290,12 +191,7 @@ export async function runOptimizerMonteCarlo(
     return ss;
   };
   const outcomesByScenario = new Map<string, OptimizerMcOutcome>();
-  // Emit the same `empty` variants the deterministic worker
-  // emits when household state can't resolve a primary retirement
-  // date. The page maps `empty` → `EmptyReasonRow` copy ("Set a
-  // primary retirement age on the Scenarios page") instead of the
-  // generic ErrorRow with raw error text. Scoped per-scenario because
-  // each scenario can have its own retirementAge override.
+  // Same `empty` outcome the deterministic worker emits when no primary retirement date resolves.
   const emptyReason = derivePrecheckEmpty({ members: args.members });
   if (emptyReason) {
     for (const sc of args.scenarios.filter((s) => !s.deletedAt)) {
@@ -305,9 +201,7 @@ export async function runOptimizerMonteCarlo(
     }
     return outcomesByScenario;
   }
-  // Build triples first so pre-seeded outcomes (no-PIA / past-window /
-  // no-retirement-date) are preserved even on a pre-aborted signal.
-  // Triple-build is pure compute, no worker.
+  // Built first so pre-seeded outcomes survive a pre-aborted signal.
   const triples = buildTriples({
     scenarios: args.scenarios,
     members: args.members,
@@ -315,9 +209,7 @@ export async function runOptimizerMonteCarlo(
     today: args.today,
     stepYears,
   });
-  // Derived once and shared by the live per-scenario emit + the final
-  // collapse so an incrementally-emitted row matches the end-of-run
-  // reconcile exactly.
+  // Shared by the live per-scenario emit and the final collapse, so they match.
   const ctx: ResolveCtx = {
     piaState: derivePiaState(args.members, args.ssBenefits),
     hasSecondary: args.members.some((m) => !m.payload.isPrimary),
@@ -326,10 +218,7 @@ export async function runOptimizerMonteCarlo(
     outcomesByScenario.set(seed.scenarioId, seed.outcome);
     args.onScenarioResult?.(seed.scenarioId, seed.outcome);
   }
-  // Session cache: serve any scenario whose full input signature
-  // hits the in-memory cache, skipping all MC work for it. Pre-seeded
-  // scenarios already have a terminal outcome, so they are never re-keyed.
-  // Cache keys are reused at finalise to store freshly-computed outcomes.
+  // Scenarios whose full input signature hits the session cache skip all MC work; pre-seeded ones are never re-keyed.
   const cacheKeyByScenario = new Map<string, string>();
   const servedFromCache = new Set<string>();
   for (const sc of args.scenarios.filter((s) => !s.deletedAt)) {
@@ -343,25 +232,16 @@ export async function runOptimizerMonteCarlo(
       args.onScenarioResult?.(sc.id, hit);
     }
   }
-  // Pre-aborted signal: skip worker construction (leak guard).
-  // `finalise` collapses unprocessed scenarios to `cancelled`.
+  // Pre-aborted: skip worker construction (leak guard); `finalise` marks the rest `cancelled`.
   if (args.signal?.aborted) {
     return finalise(args, outcomesByScenario, winnersByScenario, baselinesByScenario, ctx);
   }
-  // Triples for cache-served scenarios are dropped — their outcome is
-  // already emitted from the session cache, so no MC work runs for them.
   const dispatchTriples = triples.list.filter(
     (t) => !servedFromCache.has(t.scenarioId),
   );
-  // Per-scenario triple tally — decremented as each triple is accounted
-  // (dispatched, skipped, errored, or aborted). When a scenario's count
-  // hits 0 its grid is exhausted, so we collapse + emit its final
-  // outcome. Driven by completion, not dispatch order, so it is correct
-  // under out-of-order replies from the pool.
+  // Triples left per scenario, decremented as each is accounted (so correct under out-of-order replies); at 0 the outcome is emitted.
   const remainingByScenario = new Map<string, number>();
-  // Static per-scenario grid size — denominator for the smooth per-row
-  // progress bar (total = triples × pathCount). Mirrors the tally above
-  // but never decremented.
+  // Static grid size: the denominator of the per-row progress bar.
   const totalTriplesByScenario = new Map<string, number>();
   for (const t of dispatchTriples) {
     remainingByScenario.set(
@@ -373,11 +253,8 @@ export async function runOptimizerMonteCarlo(
       (totalTriplesByScenario.get(t.scenarioId) ?? 0) + 1,
     );
   }
-  // Per-scenario MC setup: the invariant `MonteCarloInput` is built
-  // once per scenario and the candidate `ssByYear` overlay is swapped per
-  // triple. Lazily memoised; a thrown setup (no-primary / CBP-unconfigured)
-  // is cached as the error so the remaining triples reuse the terminal
-  // outcome without re-running the failing pipeline.
+  // The invariant input is built once per scenario and only the candidate `ssByYear` overlay swaps per
+  // triple. A thrown setup is cached as the error so later triples reuse the terminal outcome.
   const setupByScenario = new Map<string, OptimizerMcScenarioSetup | { error: unknown }>();
   const factory = args.workerFactory ?? (() => createDefaultMcWorker());
   const poolSize = mcPoolSize(dispatchTriples.length, args.concurrency);
@@ -387,16 +264,9 @@ export async function runOptimizerMonteCarlo(
     pairs: triples.pairCount,
     totalPairs: triples.list.length,
   };
-  // Cumulative bar counter — incremented as triples are *dispatched*.
-  // Drivers pull triples in list order, so even with a multi-worker pool
-  // the bar advances in grid order and never overshoots `totalPairs`.
+  // Advances at dispatch in grid order, so it never overshoots `totalPairs`.
   let cumulativeIdx = 0;
-  // Per-scenario smooth-progress accumulator (path units). Multiple
-  // triples of one scenario can be in flight at once, so the numerator
-  // sums the completed-triple base with every in-flight triple's latest
-  // path progress. Collapses to the legacy `completed × pathCount +
-  // donePaths` formula when only one triple of the scenario runs at a
-  // time (e.g. `concurrency: 1`).
+  // Several triples of one scenario can be in flight, so progress sums the completed base and every in-flight triple's latest paths.
   const progressByScenario = new Map<
     string,
     { completedTriples: number; inflight: Map<Triple, number> }
@@ -411,8 +281,6 @@ export async function runOptimizerMonteCarlo(
     }
     return p;
   };
-  // Account one triple as consumed: decrement its scenario's tally and,
-  // when the grid is exhausted, collapse + emit the final outcome.
   const accountDone = (scenarioId: string): void => {
     const remaining = (remainingByScenario.get(scenarioId) ?? 1) - 1;
     remainingByScenario.set(scenarioId, remaining);
@@ -428,16 +296,12 @@ export async function runOptimizerMonteCarlo(
       args.onScenarioResult?.(scenarioId, outcome);
     }
   };
-  // First terminal outcome wins (stable under concurrent assembly throws
-  // / worker errors). A scenario with a terminal outcome has no numeric
-  // winner, so which triple set it never affects determinism.
+  // First terminal outcome wins; a terminal scenario has no numeric winner, so determinism is unaffected.
   const setTerminal = (scenarioId: string, outcome: OptimizerMcOutcome): void => {
     const existing = outcomesByScenario.get(scenarioId);
     if (existing && existing.kind !== 'result') return;
     outcomesByScenario.set(scenarioId, outcome);
   };
-  // Build (or reuse) the per-scenario invariant MC setup. Throws are
-  // converted to terminal outcomes by the caller.
   const setupFor = (scenarioId: string): OptimizerMcScenarioSetup => {
     const cached = setupByScenario.get(scenarioId);
     if (cached) {
@@ -455,8 +319,7 @@ export async function runOptimizerMonteCarlo(
         expenses: args.expenses,
         incomeStreams: args.incomeStreams,
         medicalCategoryIds: args.medicalCategoryIds,
-        // numbers-in. Optimizer keeps UTC so the candidate grid
-        // ranks identically across machines/timezones.
+        // UTC, so the candidate grid ranks identically across timezones.
         todayYear: args.today.getUTCFullYear(),
         todayMonthIndex: args.today.getUTCMonth(),
       });
@@ -477,16 +340,12 @@ export async function runOptimizerMonteCarlo(
           accountDone(triple.scenarioId);
           return;
         }
-        // Skip remaining triples for a scenario already terminated
-        // (unsupported / error / empty) — still accounted so the
-        // final-triple emit fires. Saves the main-thread assembly cost
-        // for not-yet-pulled triples.
+        // Skip triples of an already-terminated scenario, still accounted so the final emit fires.
         const existing = outcomesByScenario.get(triple.scenarioId);
         if (existing !== undefined && existing.kind !== 'result') {
           accountDone(triple.scenarioId);
           return;
         }
-        // Cumulative bar advances at dispatch, in grid order.
         cumulativeIdx += 1;
         args.onProgress?.({
           scenarioIdx: triple.scenarioIdx,
@@ -496,10 +355,7 @@ export async function runOptimizerMonteCarlo(
         });
         let input: MonteCarloInput;
         try {
-          // Build the invariant per-scenario setup once, then swap only
-          // the candidate `ssByYear` overlay. `successOnly` skips the
-          // worker's `runPlannedOverlay` call — the optimizer reads
-          // only `successProbability`, never the planned overlay.
+          // `successOnly` skips the worker's planned overlay: the optimizer reads only `successProbability`.
           input = setupFor(triple.scenarioId).mcInputForCandidate(triple.overlay, {
             successOnly: true,
           });
@@ -510,15 +366,11 @@ export async function runOptimizerMonteCarlo(
               reason: 'cbp-unconfigured',
             });
           } else if (e instanceof NoPrimaryRetirementError) {
-            // Scenario-level retirement-age unresolvable → match
-            // the deterministic worker's `empty` variant.
             setTerminal(triple.scenarioId, {
               kind: 'empty',
               reason: 'no-retirement-date',
             });
           } else {
-            // non-CBP throw on assembly surfaces as a per-scenario
-            // error; remaining scenarios continue.
             setTerminal(triple.scenarioId, {
               kind: 'error',
               message: (e as Error).message ?? String(e),
@@ -544,8 +396,7 @@ export async function runOptimizerMonteCarlo(
             total: scenarioTotalPaths,
           });
         });
-        // A triple that actually ran on a worker advances the smooth-bar
-        // base; an aborted one leaves it untouched.
+        // Only a triple that ran on a worker advances the progress base.
         if (reply.kind === 'result' || reply.kind === 'error') {
           const sp = progressFor(triple.scenarioId);
           sp.completedTriples += 1;
@@ -556,8 +407,6 @@ export async function runOptimizerMonteCarlo(
           return;
         }
         if (reply.kind === 'error') {
-          // Worker error for one triple — surface as per-scenario
-          // error and skip the rest of that scenario's triples.
           setTerminal(triple.scenarioId, {
             kind: 'error',
             message: reply.message,
@@ -565,9 +414,7 @@ export async function runOptimizerMonteCarlo(
           accountDone(triple.scenarioId);
           return;
         }
-        // result → accumulate the per-scenario winner (max success
-        // probability, lower-age tie-break). Both are order-independent,
-        // so the winner is identical regardless of reply ordering.
+        // Max success probability with a lower-age tie-break: both are order-independent.
         const candidate: OptimizerMcWinner = {
           primaryAgeYears: triple.primaryAgeYears,
           ...(triple.primaryAgeMonths !== undefined
@@ -579,8 +426,7 @@ export async function runOptimizerMonteCarlo(
             : {}),
           metricValue: reply.summary.successProbability,
         };
-        // Capture the baseline (success at the user's current claim ages)
-        // when this triple sits exactly on the resolved pair, months included.
+        // Baseline: success at the current claim ages, when this triple sits exactly on the resolved pair.
         if (
           matchesCurrentClaim(
             triple.primaryAgeYears,
@@ -611,11 +457,7 @@ export async function runOptimizerMonteCarlo(
       baselinesByScenario,
       ctx,
     );
-    // Store freshly-computed outcomes in the session cache so a repeat run
-    // with identical inputs hits the cache and skips MC entirely. A
-    // `cancelled` outcome (aborted before its grid resolved) is never
-    // cached. Scenarios served from the cache or pre-seeded (no cache key)
-    // are skipped.
+    // Cache fresh outcomes, never a `cancelled` one; cache-served and pre-seeded scenarios have no key to store.
     if (!args.signal?.aborted) {
       for (const [scenarioId, key] of cacheKeyByScenario) {
         if (servedFromCache.has(scenarioId)) continue;
@@ -630,12 +472,9 @@ export async function runOptimizerMonteCarlo(
 }
 
 /**
- * Run `handler` over `items` with at most `limit` invocations active at
- * once. `limit` drivers pull from a shared cursor in list order, so the
- * synchronous prefix of each `handler` (the cumulative-bar emit) runs in
- * grid order even though the awaited tails complete out of order. Stops
- * pulling once `signal` aborts — un-pulled items are left for `finalise`
- * to collapse to `cancelled`.
+ * Runs `handler` over `items` with at most `limit` active. The drivers pull from
+ * a shared cursor in list order, so each handler's synchronous prefix (the bar
+ * emit) runs in grid order. Un-pulled items are left for `finalise` to cancel.
  */
 async function runWithConcurrency(
   items: ReadonlyArray<Triple>,
@@ -659,23 +498,13 @@ async function runWithConcurrency(
   await Promise.all(drivers);
 }
 
-/** Derived state shared by the live per-scenario emit + the final
- *  collapse. Kept on one object so both paths stay in lock-step. */
 interface ResolveCtx {
   readonly piaState: PiaState;
   readonly hasSecondary: boolean;
 }
 
-/**
- * Collapse one scenario's running winner-accumulator into its final
- * outcome — or return the already-set terminal outcome (unsupported /
- * error / empty / pre-seeded past-window) untouched.
- * `alreadyAtOptimum` is computed here so the row contract matches the
- * deterministic worker output. An aborted scenario with no
- * accumulated winner is `cancelled`, never a `result` with
- * `winner: null` (which the page renders as past-window). Sets the
- * outcome into `outcomes` and returns it so callers can emit it.
- */
+// Collapses a scenario's winner into its outcome, or returns an existing terminal one. An
+// aborted scenario with no winner is `cancelled`, not `winner: null`, which the page renders as past-window.
 function resolveOutcome(
   args: RunOptimizerMonteCarloArgs,
   scenarioId: string,
@@ -696,7 +525,6 @@ function resolveOutcome(
   const alreadyAtOptimum = winner
     ? isAlreadyAtOptimum(winner, resolved.socialSecurity)
     : false;
-  // Disclosure only: the fixed primary death age assumed this run.
   const assumedDeathAge =
     resolved.lifeExpectancy?.primary ?? DEFAULT_LIFE_EXPECTANCY_AGE;
   const outcome: OptimizerMcOutcome = {
@@ -739,7 +567,6 @@ function breaksTieLowerAge(
   candidate: OptimizerMcWinner,
   prior: OptimizerMcWinner,
 ): boolean {
-  // Total months, so 66 beats 66 years 4 months on an exact tie.
   const cp = totalMonths(candidate.primaryAgeYears, candidate.primaryAgeMonths);
   const pp = totalMonths(prior.primaryAgeYears, prior.primaryAgeMonths);
   if (cp !== pp) return cp < pp;

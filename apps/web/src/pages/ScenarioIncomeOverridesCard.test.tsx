@@ -1,15 +1,4 @@
-/**
- * ScenarioIncomeOverridesCard — Edit-button navigation for canonical /
- * patched / scenario-only rows, the "Add scenario-only income" header
- * navigation, and the regression guard that the old amount-only
- * `PatchAmountModal` ("Override amount") is gone (replaced by the shared
- * income editor in scenario-patch / add-edit mode).
- *
- * Drives IndexedDB through fake-indexeddb; mocks SyncContext like the
- * sibling page tests. The card takes `scenario` / `scenarios` /
- * `householdId` / `onChanged` as props (no AuthContext dependency).
- * Mirrors ScenarioExpenseOverridesCard.test.tsx.
- */
+// ScenarioIncomeOverridesCard Edit navigation for canonical, patched and scenario-only rows, the "Add scenario-only income" header navigation, and the guard that the old "Override amount" modal is gone. Mirrors ScenarioExpenseOverridesCard.test.tsx.
 import 'fake-indexeddb/auto';
 import {
   act,
@@ -204,9 +193,7 @@ describe('ScenarioIncomeOverridesCard', () => {
   it('a patched row whose patch is ancestor-only renders Edit but NO Reset', async () => {
     await seedMember();
     await seedStream('inc-1', { name: 'ACME Pension', monthlyBenefit: 1200 });
-    // The patch lives on the PARENT; the child inherits the patched resolution
-    // but owns no `patches` key, so Reset (which deletes only the current
-    // scenario's key) would be a no-op and must not render.
+    // The patch lives on the parent; the child inherits the resolution but owns no `patches` key, so Reset (which deletes only the current scenario's key) would be a no-op and must not render.
     const parent = scenarioAgg('scn-p', {
       name: 'Parent',
       isPrimary: true,
@@ -337,9 +324,7 @@ describe('ScenarioIncomeOverridesCard', () => {
     });
     renderCard(child, [parent, child]);
 
-    // The inherited (parent-owned) added row resolves into this child card
-    // but its actions would mutate the child's own `added[]` only, so they
-    // must not render.
+    // The inherited (parent-owned) added row resolves into this child card but its actions would mutate only the child's own `added[]`, so they must not render.
     const inheritedRow = (await screen.findByText('Parent gig')).closest(
       'li',
     ) as HTMLElement;
@@ -356,7 +341,6 @@ describe('ScenarioIncomeOverridesCard', () => {
       within(inheritedRow).queryByRole('button', { name: 'Delete' }),
     ).toBeNull();
 
-    // The child's own added row keeps its full action set.
     const ownRow = (await screen.findByText('Child gig')).closest(
       'li',
     ) as HTMLElement;
@@ -395,13 +379,11 @@ describe('ScenarioIncomeOverridesCard', () => {
     renderCard(base, [base]);
 
     await screen.findByText('ACME Pension');
-    // The deleted PatchAmountModal surfaced an "Override amount" trigger +
-    // dialog — none of that copy should exist anymore.
+    // The deleted PatchAmountModal surfaced an "Override amount" dialog; none of that copy may exist.
     expect(
       screen.queryByRole('button', { name: /override amount/i }),
     ).toBeNull();
     expect(screen.queryByText(/override amount/i)).toBeNull();
-    // The shared editor is reached via Edit, not an inline modal.
     expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
   });
 });
@@ -412,12 +394,11 @@ describe('ScenarioIncomeOverridesCard — reactive read layer', () => {
     const base = scenarioAgg('scn-base', { name: 'Base', isPrimary: true });
     renderCard(base, [base]);
 
-    // Mounted with no canonical income: the empty-state copy renders.
     expect(
       await screen.findByText(/No income to adjust yet/i),
     ).toBeInTheDocument();
 
-    // Bulk fill lands after mount, then the coarse workspace-change event.
+    // A bulk fill lands after mount, then the coarse workspace-change event.
     await seedStream('inc-1', { name: 'ACME Pension' });
     const { notifyWorkspaceChanged } = await import('../lib/workspace-events');
     await act(async () => {
@@ -436,7 +417,7 @@ describe('ScenarioIncomeOverridesCard — reactive read layer', () => {
       await screen.findByText(/No income to adjust yet/i),
     ).toBeInTheDocument();
 
-    // Single-row write fires only the per-store fine signal — no coarse event.
+    // A single-row write fires only the per-store signal, no coarse event.
     await act(async () => {
       await seedStream('inc-1', { name: 'ACME Pension' });
     });

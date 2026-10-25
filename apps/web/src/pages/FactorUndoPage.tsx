@@ -1,27 +1,5 @@
-/**
- * Factor-change undo landing page. Reached from the
- * "we noticed a change to your sign-in methods" mail, usually while the
- * person is signed out everywhere. Sits OUTSIDE `RequireAuth` — see
- * `App.tsx`'s public route block.
- *
- * Reads `userId` + `token` + `kind` from the URL fragment, never the server
- * (mail clients and mail-security scanners prefetch links; a GET that
- * performed the undo would fire itself in the recipient's inbox). The undo
- * only runs on an explicit button click — this component does nothing on
- * mount besides reading and scrubbing the fragment.
- *
- * `kind` chooses the page's pre-click copy AND is sent back with the consume
- * request: the server validates it against the token's stored kind before
- * acting, so a truncated or altered link's copy can never describe one
- * action (e.g. "sign out only") while a different, more destructive one
- * (e.g. deleting a passkey) actually runs. A missing or unrecognised `kind`
- * is treated the same as a missing token — the page refuses rather than
- * falling back to generic copy for an unconfirmed action.
- *
- * The consume response is opaque (`{ ok }`) — an unknown/wrong/expired/
- * already-used token renders the identical "expired or already used" state
- * as a genuinely superseded one, never a distinguishing error.
- */
+/** Factor-change undo landing page, reached from the "we noticed a change to your sign-in methods" mail (usually while signed out), outside RequireAuth.
+* userId, token and kind come from the URL fragment, never the server, and the undo runs only on an explicit click, because mail scanners prefetch links and a GET that undid would fire itself. */
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { apiRequest } from '../api/client';
@@ -78,8 +56,6 @@ function isAddKind(kind: FactorUndoKind | null): boolean {
   return kind === 'passkey_add' || kind === 'totp_add';
 }
 
-/** Pre-click body copy, tailored to the kind when the link's `k` field named
- *  one, else the generic "a sign-in method" wording. */
 function bodyCopy(kind: FactorUndoKind | null): string {
   const label = kind ? FACTOR_LABEL[kind] : 'sign-in method';
   return isAddKind(kind)
@@ -103,8 +79,8 @@ const EXPIRED_OR_USED_MESSAGE =
   'This link has already been used or has expired. Sign in and check your sign-in methods on the Security page.';
 
 export const FactorUndoPage: React.FC = () => {
-  // Read once on mount; the effect below scrubs the fragment before any
-  // subsequent render so this state is the only surviving copy.
+  // Read once on mount; the effect below scrubs the fragment before any later render, so this state is the only surviving copy.
+  // kind is sent with the consume request and validated server-side against the token's stored kind, so an altered link's copy can never describe a different action than the one that runs; a missing or unknown kind refuses like a missing token.
   const [fields] = useState<FragmentFields>(readFieldsFromFragment);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<'success' | 'failed' | null>(null);
@@ -135,8 +111,7 @@ export const FactorUndoPage: React.FC = () => {
       });
       setResult(res.ok ? 'success' : 'failed');
     } catch {
-      // A network/server error is not "expired or used" — say so plainly
-      // rather than the misleading expired/used copy.
+      // A network or server error is not "expired or used"; say so plainly.
       setError('Something went wrong. Try again in a moment.');
     } finally {
       setSubmitting(false);

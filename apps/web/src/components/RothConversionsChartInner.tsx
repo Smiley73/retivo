@@ -1,13 +1,6 @@
 /**
- * Inner SVG-engine impl for the Roth conversions chart.
- * Uses the in-house SVG chart engine.
- *
- * One bar per conversion year — the amount moved from pre-tax savings
- * into a Roth account that year (`useChartColors().acctRoth`, violet,
- * the app's semantic Roth-account colour). The rows arrive already
- * deflated to the page's display-dollars basis, so bar heights + any
- * derived figure are read verbatim with no re-deflation, keeping
- * the bars summing to the adjacent "Total Roth converted" tile.
+ * Inner SVG-engine chart for Roth conversions: one bar per year, rows already deflated to the display basis so bars
+ * sum to the "Total Roth converted" tile.
  */
 import React from 'react';
 import type { RothConversionsChartRow } from './RothConversionsChart';
@@ -66,17 +59,14 @@ function makeTooltip(
 const InnerChart: React.FC<InnerProps> = ({ rows, members }) => {
   const colors = useChartColors();
   const chrome = useChartChrome();
-  // Bars map by `x` = their integer `year` (mirrors the RMD chart — every
-  // bar is a full-value bar at its calendar year).
+  // Bars sit on their integer `year`.
   const data: ChartDatum[] = React.useMemo(
     () => rows.map((r) => ({ ...r, x: r.year })),
     [rows],
   );
   const xs = rows.map((r) => r.year);
   const xMin = xs[0];
-  // Inset the first/last bars from the plot edges (bars are centered on
-  // their x). ~0.6yr is wider than a half bar at any zoom; mirrors the
-  // RMD chart.
+  // Inset the edge bars, which are centred on x.
   const BAR_EDGE_PAD = 0.6;
   const xMinPadded = Math.floor(xMin) - BAR_EDGE_PAD;
   const xMax = xs[xs.length - 1] + BAR_EDGE_PAD;

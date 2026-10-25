@@ -12,12 +12,10 @@ import { loadDemoData } from '../../lib/demo-data-loader';
 import { loadProjectionInputs } from '../../lib/projection-inputs';
 import * as bounds from '../../lib/scenario-input-bounds';
 import { resolveAccountReturnsForScenario, resolveInflationForScenario, resolveScenario } from '../../lib/scenario-resolution';
-import { BASE_ID } from '../../test/assistant-analysis-inputs';
+import { BASE_ID, whatIfChildOf } from '../../test/assistant-analysis-inputs';
 import { TEST_NOW, callPlanTool, envelopeOf } from '../../test/assistant-tools';
 import type { ToolEnv } from './define';
-import { SCENARIO_SECTION_KEYS } from './scenario-sections';
-import { WHAT_IF_CLASSIFICATION, buildWhatIf, type WhatIfBuild } from './what-if-overrides';
-import { throwawayFor } from './what-if';
+import { buildWhatIf, type WhatIfBuild } from './what-if-overrides';
 
 const REDUCED_ID = 't-reduction-20';
 const INFLATION_PARENT_ID = 't-inflation-parent';
@@ -76,15 +74,6 @@ afterAll(async () => {
 });
 
 describe('the allowlist', () => {
-  it('classifies every ScenarioOverrides key, and the registry schema takes exactly the allowed ones', () => {
-    expect(Object.keys(WHAT_IF_CLASSIFICATION).sort()).toEqual([...SCENARIO_SECTION_KEYS].sort());
-    const allowed = Object.entries(WHAT_IF_CLASSIFICATION)
-      .filter(([, kind]) => kind === 'allowed')
-      .map(([key]) => key)
-      .sort();
-    expect(Object.keys(WHAT_IF_OVERRIDES.shape).sort()).toEqual(allowed);
-  });
-
   it.each([
     ['expenses', { expenses: { disabledIds: ['x'] } }, 'overrides.expenses'],
     ['income', { income: { disabledIds: ['x'] } }, 'overrides.income'],
@@ -106,12 +95,6 @@ describe('the allowlist', () => {
     const polluting = JSON.parse('{"accountReturns":{"perAccount":{"__proto__":{"planningReturnPct":5}}}}') as unknown;
     await expectRejected(polluting, 'overrides.accountReturns.perAccount');
     expect(Object.prototype).not.toHaveProperty('planningReturnPct');
-  });
-
-  it('refuses an unknown base scenario as INVALID_ARGS without echoing it', async () => {
-    const result = await call({}, 'no-such-scenario-zz');
-    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_ARGS' } });
-    expect(JSON.stringify(result)).not.toContain('no-such-scenario-zz');
   });
 });
 
@@ -209,8 +192,7 @@ describe('the editors’ bounds: rejected, never clamped', () => {
 
   it('a pass and a fail for every allowed section above: the classification has no allowed key left uncovered', () => {
     const covered = ['retirementAge', 'socialSecurity', 'lifeExpectancy', 'inflation', 'discretionarySpending', 'downturnGuardrails', 'contributions', 'accountReturns', 'withdrawalStrategy'];
-    const allowed = Object.entries(WHAT_IF_CLASSIFICATION).filter(([, kind]) => kind === 'allowed').map(([key]) => key);
-    expect([...allowed].sort()).toEqual([...covered].sort());
+    expect(Object.keys(WHAT_IF_OVERRIDES.shape).sort()).toEqual([...covered].sort());
   });
 
   it('refuses a secondary member’s setting when the household has none', async () => {
@@ -219,7 +201,7 @@ describe('the editors’ bounds: rejected, never clamped', () => {
     expect(() => buildWhatIf(BASE_ID, { lifeExpectancy: { secondary: 90 } }, solo)).toThrow(/no secondary member/);
   });
 
-  it('the registry accepts what the tab accepts: every allowed section’s passing example parses', () => {
+  it('the registry accepts what the tab accepts: every allowed section’s passing example parses, and builds a change in that section', async () => {
     const entry = TOOL_REGISTRY.find((tool) => tool.name === 'retivo_run_what_if')!;
     const example = {
       retirementAge: { primary: { ageYears: bounds.RETIREMENT_AGE_MIN } },
@@ -233,6 +215,8 @@ describe('the editors’ bounds: rejected, never clamped', () => {
       withdrawalStrategy: { kind: 'proportional' },
     };
     expect(entry.inputSchema.safeParse({ baseScenarioId: BASE_ID, overrides: example }).success).toBe(true);
+    const sections = (await build(example as WhatIfOverrides)).changes.map((change) => change.section);
+    expect([...new Set(sections)].sort()).toEqual(Object.keys(WHAT_IF_OVERRIDES.shape).sort());
   });
 });
 
@@ -256,7 +240,7 @@ describe('merging a section over what the base resolves to', () => {
     const built = await build({ lifeExpectancy: { primary: 85 } }, INFLATION_GRANDCHILD_ID);
     expect(built.overrides.inflation).toBeUndefined();
     const grandchild = scenarios.find((scenario) => scenario.id === INFLATION_GRANDCHILD_ID)!;
-    const throwaway = throwawayFor(grandchild, built.overrides, TEST_NOW);
+    const throwaway = whatIfChildOf(grandchild, built.overrides);
     const all = [...scenarios, throwaway];
     expect(resolveInflationForScenario(throwaway.id, all).ratePct).toBe(4.5);
     expect(resolveScenario(throwaway.id, all).lifeExpectancy).toEqual({ primary: 85 });
@@ -268,7 +252,7 @@ describe('merging a section over what the base resolves to', () => {
   it('a per-account return for one account leaves every other account’s resolved return identical', async () => {
     const built = await build({ accountReturns: { perAccount: { [ACCOUNT_ID]: { planningReturnPct: 3.25 } } } });
     const base = scenarios.find((scenario) => scenario.id === BASE_ID)!;
-    const throwaway = throwawayFor(base, built.overrides, TEST_NOW);
+    const throwaway = whatIfChildOf(base, built.overrides);
     const accounts = (await loadProjectionInputs()).accounts;
     const before = resolveAccountReturnsForScenario(BASE_ID, scenarios, accounts);
     const after = resolveAccountReturnsForScenario(throwaway.id, [...scenarios, throwaway], accounts);

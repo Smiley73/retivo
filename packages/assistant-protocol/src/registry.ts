@@ -14,7 +14,7 @@ import {
 import { toolResultSchema } from './result.js';
 
 /** One tool: input schema written once in Zod, converted to JSON Schema at the package boundary. */
-export const toolEntrySchema = z.object({
+const toolEntrySchema = z.object({
   name: z.string().regex(/^retivo_[a-z_]+$/),
   description: z.string().min(1),
   inputSchema: z.custom<z.ZodObject>((value) => value instanceof z.ZodObject),
@@ -45,7 +45,7 @@ export const PLAN_DATA_SECTIONS = [
 export type PlanDataSection = (typeof PLAN_DATA_SECTIONS)[number];
 
 /** The headline numbers `retivo_explain` can trace; the tab maps each one to the inputs and math page behind it. */
-export const EXPLAIN_METRICS = [
+const EXPLAIN_METRICS = [
   'ending_balance',
   'run_out_year',
   'portfolio_at_retirement',
@@ -57,14 +57,14 @@ export const EXPLAIN_METRICS = [
 export type ExplainMetric = (typeof EXPLAIN_METRICS)[number];
 
 /** The two deterministic views the Balance Projection page offers. */
-export const PROJECTION_METHODS = ['planned', 'historical'] as const;
+const PROJECTION_METHODS = ['planned', 'historical'] as const;
 export type ProjectionMethod = (typeof PROJECTION_METHODS)[number];
 
 /**
  * What the bridge allows `retivo_get_stress_test`: above the tab's own 60 second wall clock, so an agent that
  * waits sees the tab's `COMPUTE_CAP_EXCEEDED` and not the bridge's `CALL_TIMEOUT`. Below `MAX_CALL_TIMEOUT_MS`.
  */
-export const STRESS_TEST_CALL_TIMEOUT_MS = 90_000;
+const STRESS_TEST_CALL_TIMEOUT_MS = 90_000;
 
 /** Names that must never be a key of a plain object built from agent input (prototype pollution). */
 const DANGEROUS_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
@@ -235,7 +235,7 @@ export const TOOL_REGISTRY: readonly ToolEntry[] = [
 const RESULT_OUTPUT_SCHEMA = { ...z.toJSONSchema(toolResultSchema, { io: 'output' }), type: 'object' as const };
 
 /** A tool as `tools/list` declares it. */
-export interface McpToolDeclaration {
+interface McpToolDeclaration {
   name: string;
   description: string;
   inputSchema: Record<string, unknown> & { type: 'object' };
@@ -253,7 +253,7 @@ export function toMcpToolDeclaration(entry: ToolEntry): McpToolDeclaration {
 }
 
 /** A static MCP prompt, served on `prompts/get` without a round trip to the tab. */
-export const promptEntrySchema = z.object({
+const promptEntrySchema = z.object({
   name: z.string().regex(/^retivo_[a-z_]+$/),
   description: z.string().min(1),
   messages: z

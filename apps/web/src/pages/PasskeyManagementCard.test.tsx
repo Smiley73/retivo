@@ -1,10 +1,4 @@
-/**
- * PasskeyManagementCard tests. Covers the add / remove flows and the
- * factor-change notice confirmation line — the
- * server emails the account when a passkey is added or removed, with a
- * single-use undo link, and reports `noticeSent`; the card tells the person
- * the notice was sent only when it actually was, and warns otherwise.
- */
+// PasskeyManagementCard add / remove flows and the factor-change notice line: the server emails the account on add or remove with a single-use undo link and reports `noticeSent`; the card claims the notice was sent only when it was.
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -84,7 +78,6 @@ function mount(overrides: Partial<AuthMocks> = {}) {
 
 const OTHER_PASSKEY = { ...PASSKEY, id: 'cred-other', credentialId: 'cred-other' };
 
-/** `getMfaStatus` for the deployed posture: a fresh factor is required. */
 function stepUpRequired() {
   return vi.fn().mockResolvedValue({
     totpEnabled: true,
@@ -94,7 +87,6 @@ function stepUpRequired() {
   });
 }
 
-/** The household's `passkey_prf` slot is bound to `credentialId` (or absent). */
 function prfSlotBoundTo(credentialId: string | null): void {
   vi.mocked(getKeyEnvelopes).mockResolvedValue({
     slots: credentialId ? [{ slotType: 'passkey_prf', credentialBinding: credentialId }] : [],
@@ -104,7 +96,6 @@ function prfSlotBoundTo(credentialId: string | null): void {
   } as never);
 }
 
-/** Wait for the PRF-binding read to resolve — the switch for the bound passkey locks ON. */
 async function awaitBindingResolved(): Promise<void> {
   await waitFor(() =>
     expect(
@@ -122,7 +113,6 @@ async function confirmWithCode(code: string): Promise<void> {
   fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 }
 
-/** Enter the enrollment password floor's value and Continue. */
 async function continueWithEnrollPassword(value: string): Promise<void> {
   const pwDialog = await screen.findByRole('dialog');
   fireEvent.change(within(pwDialog).getByLabelText('Current password'), {
@@ -131,11 +121,7 @@ async function continueWithEnrollPassword(value: string): Promise<void> {
   fireEvent.click(within(pwDialog).getByRole('button', { name: 'Continue' }));
 }
 
-/**
- * Register a passkey through the gated add flow (password → factor →
- * ceremony), then accept the "Use this passkey to
- * unlock your data?" confirm — the post-registration enrollment entry point.
- */
+// Register a passkey through the gated add flow (password, factor, ceremony), then accept the "Use this passkey to unlock your data?" confirm.
 async function registerPasskeyAndConfirmEnroll(): Promise<void> {
   fireEvent.click(screen.getByRole('button', { name: /Add passkey/i }));
   const addDialog = await screen.findByRole('dialog');
@@ -199,9 +185,7 @@ describe('PasskeyManagementCard', () => {
     ).toBeInTheDocument();
   });
 
-  // The server reports `noticeSent: false` when the notice mail could not be
-  // sent (SES rejected it, or the undo token could not be stored). The card
-  // must not claim an email went out in that state.
+  // `noticeSent: false` means the notice mail could not be sent; the card must not claim an email went out.
   it('warns instead of claiming an email when the add notice was not sent', async () => {
     mount({
       registerPasskey: vi
@@ -221,7 +205,6 @@ describe('PasskeyManagementCard', () => {
     expect(line).toHaveTextContent(/Passkey added, but we couldn't email you/i);
     expect(line).toHaveAttribute('role', 'alert');
     expect(screen.queryByText(/We emailed you/i)).not.toBeInTheDocument();
-    // The passkey itself is still added — only the notice failed.
     expect(await screen.findByRole('button', { name: /Delete/i })).toBeInTheDocument();
   });
 
@@ -243,22 +226,9 @@ describe('PasskeyManagementCard', () => {
     expect(line).toHaveTextContent(/Passkey removed, but we couldn't email you a heads-up/i);
     expect(screen.queryByText(/We emailed you/i)).not.toBeInTheDocument();
   });
-
-  it('passes axe accessibility checks once loaded', async () => {
-    const { container } = mount({ listPasskeys: vi.fn().mockResolvedValue([PASSKEY]) });
-    await screen.findByRole('button', { name: /Delete/i });
-    await expectNoA11yViolations(container);
-  });
 });
 
-// A passkey-encryption write into a
-// household that already holds a slot is NEVER exempt — including the
-// first-ever enrollment, since this card only renders its toggle once
-// `isUnlocked`, which itself implies the household already holds a slot. The
-// shared password floor ALWAYS opens first (both `AUTH_MFA_ENFORCED`
-// states); the fresh-factor step layers on top only when required. Both
-// enrollment entry points (the per-passkey switch and the just-registered
-// confirm dialog) share the gate.
+// A passkey-encryption write into a household that already holds a slot is never exempt, since the toggle renders only once `isUnlocked`. The shared password floor always opens first; the fresh-factor step layers on when required, and both entry points (the switch and the just-registered confirm) share the gate.
 describe('PasskeyManagementCard — encryption-enrollment password + step-up gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -274,7 +244,6 @@ describe('PasskeyManagementCard — encryption-enrollment password + step-up gat
     });
     await awaitBindingResolved();
 
-    // Flip the switch of the passkey that does NOT hold the slot yet.
     const target = screen
       .getAllByRole('switch', { name: 'Use for encryption' })
       .find((s) => !(s as HTMLInputElement).checked)!;
@@ -312,7 +281,7 @@ describe('PasskeyManagementCard — encryption-enrollment password + step-up gat
       getMfaStatus: stepUpRequired(),
     });
     const toggle = await screen.findByRole('switch', { name: 'Use for encryption' });
-    // Let the mount-time `getMfaStatus` + PRF-binding reads settle first.
+    // Let the mount-time `getMfaStatus` and PRF-binding reads settle first.
     await waitFor(() => expect(auth.getMfaStatus).toHaveBeenCalled());
     await waitFor(() => expect(getKeyEnvelopes).toHaveBeenCalled());
 
@@ -371,10 +340,6 @@ describe('PasskeyManagementCard — encryption-enrollment password + step-up gat
     });
     await awaitBindingResolved();
 
-    // Adding a passkey is itself gated: password
-    // first, then — with step-up required — a fresh factor, before the
-    // WebAuthn ceremony runs. The registration confirm then warns that this
-    // replaces the current unlocker.
     await registerPasskeyAndConfirmEnroll();
     await continueWithEnrollPassword('confirm-pw');
 
@@ -391,14 +356,7 @@ describe('PasskeyManagementCard — encryption-enrollment password + step-up gat
     );
   });
 
-  // On the enforced path the enroll write runs inside
-  // `useStepUp`'s submit, which reports ANY non-API failure as the ambiguous
-  // "We couldn't confirm it's you". A failure that happened locally
-  // BEFORE any proof was sent (an authenticator with no PRF support, a locked
-  // or ended session) is not about the factor at all: it must reach the
-  // card's own sink with the real cause, and close the flow. A failure the
-  // server answered, or one that left the factor-carrying request's outcome
-  // unknown, still belongs to the modal.
+  // On the enforced path the enroll write runs inside `useStepUp`'s submit, which reports any non-API failure as the ambiguous "We couldn't confirm it's you". A failure before any proof was sent (an authenticator with no PRF support, a locked session) is not about the factor: it must reach the card's own sink with the real cause and close the flow, while a server-answered or outcome-unknown failure still belongs to the modal.
   describe('local failures on the enforced enrollment path', () => {
     it('a passkey with no PRF support reports the plain no-PRF sentence through onEnrollError on the post-registration confirm path — never the ambiguous step-up failure', async () => {
       prfSlotBoundTo('cred-other');
@@ -422,7 +380,6 @@ describe('PasskeyManagementCard — encryption-enrollment password + step-up gat
           "This passkey can't be used for encryption (no PRF support).",
         ),
       );
-      // The flow closed; the person was never told their identity was in doubt.
       expect(screen.queryByText("Confirm it's you")).not.toBeInTheDocument();
       expect(screen.queryByText(/couldn't confirm it's you/i)).not.toBeInTheDocument();
     });

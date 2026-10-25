@@ -1,11 +1,4 @@
-/**
- * AccountBalancesListPage render tests.
- *
- * Drives IndexedDB through fake-indexeddb and asserts the empty,
- * populated, and inactive-row paths. Computation correctness is
- * covered by `lib/balance-calc.test.ts`; this file only checks that
- * the page wires the store reads through to the rendered table.
- */
+// Page-level wiring of the store reads into the balances table; calculation correctness lives in `lib/balance-calc.test.ts`.
 import 'fake-indexeddb/auto';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -23,9 +16,6 @@ import { AccountBalancesListPage } from './AccountBalancesListPage';
 const HH = 'hh-test';
 
 function renderPage() {
-  // ThemeProvider: the bottom "Account balances over time" chart (rendered
-  // when ≥ 2 distinct balance years exist) reads the theme-reactive chart
-  // tokens, so the page needs a theme context.
   return render(
     <ThemeProvider>
       <MemoryRouter>
@@ -156,20 +146,13 @@ describe('AccountBalancesListPage', () => {
 
   it('shows the eight-tile KPI grid, with $0 for an empty tax bucket', async () => {
     await seedMember();
-    // Default seeded account is PRE_TAX, so the post-tax bucket is empty.
     await seedAccount('acc-1', 'My 401k');
     await seedBalance('acc-1', 2025, 50000);
     renderPage();
     await waitFor(() =>
       expect(screen.getByText('Tax-Deferred Balance')).toBeInTheDocument(),
     );
-    // The Graphite Spectrum mock pins the portfolio summary to exactly eight
-    // KPI tiles in a 2×4 grid. Scope the lookups to the KPI grid — "Current
-    // Balance" also appears as a table column header, so an unscoped getByText
-    // would match multiple elements.
-    // Each KPI label now carries an info-(i) tooltip, so the label text sits a
-    // couple of spans deep; climb to the stable `Portfolio summary` wrapper
-    // rather than counting parentElement hops.
+    // Scoped to the KPI grid: "Current Balance" is also a table column header.
     const kpiGrid = screen
       .getByText('Tax-Deferred Balance')
       .closest('[aria-label="Portfolio summary"]') as HTMLElement;
@@ -185,8 +168,6 @@ describe('AccountBalancesListPage', () => {
     ]) {
       expect(within(kpiGrid).getByText(label)).toBeInTheDocument();
     }
-    // The granular contribution + distribution tiles were trimmed to match
-    // the mock's eight-tile grid.
     for (const removed of [
       'Company Contributions',
       'Pre-Tax Contributions',
@@ -195,7 +176,6 @@ describe('AccountBalancesListPage', () => {
     ]) {
       expect(screen.queryByText(removed)).not.toBeInTheDocument();
     }
-    // PRE_TAX account → all balance lands in the tax-deferred bucket, taxable reads $0.
     const postTaxCard = screen
       .getByText('Taxable Balance')
       .closest('.bg-surface-raised') as HTMLElement;
@@ -210,9 +190,6 @@ describe('AccountBalancesListPage', () => {
     await waitFor(() =>
       expect(screen.getByText('Tax-Free %')).toBeInTheDocument(),
     );
-    // Every summary label gets an info-(i) tooltip so a user can hover/focus
-    // for a plain-English description. The tooltip anchor is keyboard-focusable
-    // (tabIndex 0) and carries the `cursor-help` affordance.
     for (const label of [
       'Contributions',
       'Tax-Deferred %',
@@ -234,8 +211,7 @@ describe('AccountBalancesListPage', () => {
     const grid = await screen.findByRole('grid', {
       name: 'Household account balances',
     });
-    // The header row can mount a tick after the grid landmark under parallel
-    // load; `findByRole` retries until the columnheader is present.
+    // The header row can mount a tick after the grid landmark under parallel load.
     expect(
       await within(grid).findByRole('columnheader', { name: 'Historical' }),
     ).toBeInTheDocument();
@@ -266,11 +242,8 @@ describe('AccountBalancesListPage', () => {
       name: 'Household account balances',
     });
     expect(grid).toBeInTheDocument();
-    // findAll (retrying): the React Aria grid mounts before the IDB rows
-    // land, so a synchronous getAll races the row population on slow
-    // (instrumented CI) runs.
+    // findAll retries: the React Aria grid mounts before its IDB rows land.
     const rows = await within(grid).findAllByRole('row');
-    // 1 header + 2 data rows.
     expect(rows.length).toBeGreaterThanOrEqual(3);
   });
 
@@ -289,8 +262,6 @@ describe('AccountBalancesListPage', () => {
   });
 
   it('renders the in-row Edit control as keyboard-focusable', async () => {
-    // RA Table arrow-key keyboard model exercised by Adobe upstream;
-    // here we sanity-check that an in-row Edit button can hold focus.
     await seedMember();
     await seedAccount('acc-1', 'My 401k');
     await seedBalance('acc-1', 2025, 50000);
@@ -301,14 +272,7 @@ describe('AccountBalancesListPage', () => {
   });
 
   it('exposes the React Aria Table grid for arrow-key navigation across rows', async () => {
-    // jsdom can't reliably synthesize RA Table's focus-manager
-    // events for grid ArrowUp/ArrowDown; the robust jsdom assertion is
-    // that the grid's accessible name is queryable AND each row's
-    // focusable descendant can independently hold focus — the surface
-    // arrow-key navigation moves between. Real-DOM grid arrow nav is
-    // covered by Adobe's upstream tests + a manual keyboard walkthrough
-    // (Chromium / Firefox / Safari arrow keys + Home / End + typeahead)
-    // before merge.
+    // jsdom cannot synthesize React Aria Table focus-manager arrow-key events, so assert that each row's control can hold focus.
     await seedMember();
     await seedAccount('acc-1', 'First 401k');
     await seedAccount('acc-2', 'Second IRA');
@@ -319,8 +283,7 @@ describe('AccountBalancesListPage', () => {
       name: 'Household account balances',
     });
     expect(grid).toBeInTheDocument();
-    // The per-row Edit controls mount a tick after the grid landmark under
-    // parallel load; `findByLabelText` retries until both rows are present.
+    // The Edit controls mount a tick after the grid landmark under parallel load.
     const firstRowEdit = await screen.findByLabelText(
       'Edit balances for First 401k',
     );
@@ -349,7 +312,6 @@ describe('AccountBalancesListPage', () => {
     await seedAccount('acc-1', 'My 401k');
     await seedBalance('acc-1', 2025, 100_000);
     renderPage();
-    // Wait for the page to fully mount (row renders, which means IDB loaded)
     await screen.findByLabelText('Edit balances for My 401k');
     expect(
       screen.queryByRole('heading', { name: 'Account balances over time' }),
@@ -361,8 +323,7 @@ describe('AccountBalancesListPage', () => {
     renderPage();
     expect(await screen.findByText(/No accounts yet/i)).toBeInTheDocument();
 
-    // A single-row write fires only the per-store fine signal — no
-    // notifyWorkspaceChanged() — proving the useAggregates subscription wakes.
+    // A single-row write fires only the per-store signal, no notifyWorkspaceChanged(); the useAggregates subscription must still wake.
     await act(async () => {
       await seedAccount('acc-1', 'My 401k');
       await seedBalance('acc-1', 2025, 50000);

@@ -1,20 +1,5 @@
-/**
- * Unit tests for the shared `runTransactWrite` primitive.
- *
- * Focused unit test (not an emulator integration test): the local DynamoDB
- * emulator cannot deterministically produce a `TransactionConflict`
- * cancellation, so we stub the document client's `send` to throw crafted
- * `TransactionCanceledException`s (mirroring
- * `apps/api/src/test/push-transient-cancel.spec.ts`) and assert the per-reason
- * decode + bounded transient retry contract:
- *
- *   (a) a `ConditionalCheckFailed` reason invokes the `onConditionFailed`
- *       callback (and does NOT retry);
- *   (b) a persistent transient reason retries up to the bound, then throws
- *       `TransientTransactionError`;
- *   (c) a transient reason that clears on a later attempt resolves normally;
- *   (d) any non-`TransactionCanceledException` error rethrows untouched, no retry.
- */
+// The shared runTransactWrite primitive with a stubbed document client throwing crafted TransactionCanceledExceptions (the emulator cannot produce a TransactionConflict): a ConditionalCheckFailed reason fires
+// onConditionFailed with no retry, a persistent transient reason retries to the bound then throws TransientTransactionError, a transient reason that clears resolves, and any other error rethrows untouched.
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import type {
   DynamoDBDocumentClient,
@@ -66,13 +51,11 @@ describe('runTransactWrite', () => {
     await expect(runTransactWrite(doc, ITEMS, onConditionFailed)).rejects.toBe(
       sentinel,
     );
-    // The callback fired exactly once with the decoded reasons array…
     expect(onConditionFailed).toHaveBeenCalledTimes(1);
     expect(reasonsSeen[0]).toEqual([
       { Code: 'ConditionalCheckFailed' },
       { Code: 'None' },
     ]);
-    // …and a condition failure is terminal — no retry.
     expect(send).toHaveBeenCalledTimes(1);
   });
 
@@ -85,7 +68,6 @@ describe('runTransactWrite', () => {
     await expect(
       runTransactWrite(doc, ITEMS, onConditionFailed),
     ).rejects.toBeInstanceOf(TransientTransactionError);
-    // Bounded at 3 attempts (MAX_TRANSACTION_ATTEMPTS).
     expect(send).toHaveBeenCalledTimes(3);
     expect(onConditionFailed).not.toHaveBeenCalled();
   });
@@ -103,7 +85,6 @@ describe('runTransactWrite', () => {
     await expect(
       runTransactWrite(doc, ITEMS, onConditionFailed),
     ).resolves.toBeUndefined();
-    // One transient failure + one success.
     expect(send).toHaveBeenCalledTimes(2);
     expect(onConditionFailed).not.toHaveBeenCalled();
   });

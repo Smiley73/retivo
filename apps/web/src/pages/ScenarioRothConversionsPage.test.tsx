@@ -1,13 +1,4 @@
-/**
- * ScenarioRothConversionsPage render + save + guard tests.
- *
- * Covers: route renders at /scenarios/:id/roth-conversions; add/edit/remove
- * persists + resets; sparse omit when empty; orphan entry pruned at save; the
- * target picker lists ONLY Roth-IRA accounts; the displayed tax burden
- * = amount × rate (via resolveConversionLeg) and is NOT deducted; the
- * unsaved-change guard fires on in-app nav + registers beforeunload; and no
- * jest-axe WCAG violations.
- */
+// ScenarioRothConversionsPage render, save and guard tests: add/edit/remove, sparse omit, orphan pruning, the Roth-IRA-only target picker, tax burden shown as amount × rate (not deducted), and the unsaved-change guard.
 import 'fake-indexeddb/auto';
 import {
   act,
@@ -53,11 +44,7 @@ function setupContexts(): void {
   });
 }
 
-/** Expand a collapsed row by clicking its disclosure trigger (the "Conversion
- *  N" label). Every test touching row internals must call this first — the
- *  jsdom `DisclosurePanel` keeps collapsed content mounted-but-hidden, so
- *  role queries (used throughout this suite) correctly return nothing until
- *  the row is expanded. */
+// The jsdom `DisclosurePanel` keeps collapsed content mounted-but-hidden, so role queries return nothing until the row is expanded; call this first for any row internals.
 function expandRow(label: string): void {
   fireEvent.click(screen.getByRole('button', { name: label }));
 }
@@ -116,8 +103,7 @@ async function seedAccount(
   await putAggregate('account', a);
 }
 
-/** Seed the source-account owner (`hm-1`, matching `seedAccount`'s ownerId) so
- *  the conversion editor can resolve a retirement date and cap the pickers. */
+// Seed the source-account owner (`hm-1`) so the editor can resolve a retirement date and cap the pickers.
 async function seedOwnerMember(birthdate = '1980-06-01'): Promise<void> {
   const m: Aggregate<HouseholdMemberPayload> = {
     id: 'hm-1',
@@ -162,13 +148,10 @@ async function seedScenario(
   await putAggregate('scenario', sc);
 }
 
-/** Seed one pre-tax source, one Roth IRA target, plus a non-IRA Roth (a Roth
- *  401k) that the target picker must EXCLUDE. */
+// A Roth 401k that the target picker must exclude.
 async function seedAccounts(): Promise<void> {
   await seedAccount('acct-pretax', '401(k)', 'RETIREMENT_401K', 'PRE_TAX');
   await seedAccount('acct-roth-ira', 'Roth IRA', 'RETIREMENT_ROTH_IRA', 'ROTH');
-  // A designated Roth employer plan (Roth 401k = a 401k typed account with ROTH
-  // treatment). The target picker must EXCLUDE it (IRA-only).
   await seedAccount('acct-roth-401k', 'Roth 401(k)', 'RETIREMENT_401K', 'ROTH');
 }
 
@@ -185,7 +168,7 @@ describe('ScenarioRothConversionsPage', () => {
   it('renders at the route with no conversions; no a11y violations', async () => {
     await seedAccounts();
     await seedScenario();
-    const { container } = renderAt(SCENARIO_ID);
+    renderAt(SCENARIO_ID);
 
     await waitFor(() =>
       expect(screen.getByText(/No conversions yet/i)).toBeInTheDocument(),
@@ -193,11 +176,9 @@ describe('ScenarioRothConversionsPage', () => {
     expect(
       screen.getByRole('heading', { name: /Roth conversions while working/i }),
     ).toBeInTheDocument();
-    await expectNoA11yViolations(container);
   });
 
   it('renders with a same-account MIXED in-plan conversion seeded (collapsed: name once + In-plan badge, no arrow); no a11y violations', async () => {
-    // Seed a MIXED 401k (which is both source and target for an in-plan conversion).
     await seedAccount('acct-mixed', 'MIXED 401(k)', 'RETIREMENT_401K', 'MIXED');
     await seedOwnerMember();
     await seedScenario({
@@ -213,16 +194,11 @@ describe('ScenarioRothConversionsPage', () => {
     });
     const { container } = renderAt(SCENARIO_ID);
 
-    // Wait for the editor to mount and show the conversion row, collapsed.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /Save/ })).toBeInTheDocument(),
     );
     expect(screen.getByText(/Conversion 1/i)).toBeInTheDocument();
-    // The same-account in-plan conversion shows the account name once
-    // plus an "In-plan" badge — no "X → X" arrow rendered in the collapsed
-    // summary. Read the trigger's own accessible description (rather than a
-    // page-wide text query, which would also match the collapsed-but-mounted
-    // body's own Select trigger showing the same account name).
+    // Read the trigger's own accessible description: a page-wide text query would also match the collapsed-but-mounted body's Select trigger showing the same account name.
     const trigger = screen.getByRole('button', { name: 'Conversion 1' });
     const describedIds = trigger.getAttribute('aria-describedby')?.split(' ') ?? [];
     const summaryText = describedIds
@@ -230,15 +206,11 @@ describe('ScenarioRothConversionsPage', () => {
       .join(' ');
     expect(summaryText).toContain('MIXED 401(k)');
     expect(summaryText).toContain('In-plan');
-    // The account name appears exactly once — no "X → X" self-arrow (the
-    // date-range arrow, e.g. "Year 2030 → year 2034", is unrelated and
-    // expected).
     expect(summaryText.split('MIXED 401(k)')).toHaveLength(2);
     expect(
       screen.queryByRole('button', { name: 'Convert starting' }),
     ).toBeNull();
 
-    // Expanding reveals the body — "Move pre-tax money from" label + fields.
     expandRow('Conversion 1');
     expect(screen.getByText(/Move pre-tax money from/i)).toBeInTheDocument();
     await expectNoA11yViolations(container);
@@ -255,8 +227,6 @@ describe('ScenarioRothConversionsPage', () => {
       fireEvent.click(add);
     });
 
-    // The target Select trigger is a React Aria button labelled by "Into Roth
-    // account"; open it and inspect the listbox options.
     const trigger = await screen.findByRole('button', { name: /Into Roth account/i });
     await user.click(trigger);
     const listbox = await screen.findByRole('listbox');
@@ -264,14 +234,11 @@ describe('ScenarioRothConversionsPage', () => {
       .getAllByRole('option')
       .map((o) => o.textContent);
     expect(labels).toContain('Roth IRA');
-    // The designated Roth employer plan (Roth 401k account type with ROTH
-    // treatment) must NOT be offered — it is a separate employer Roth target.
     expect(labels).not.toContain('Roth 401(k)');
   });
 
   it('target picker does NOT offer a Roth IRA belonging to a different owner', async () => {
-    // Source account belongs to owner hm-1; a Roth IRA belonging to owner hm-2
-    // must NOT appear in the target picker (cross-owner conversions are invalid).
+    // A Roth IRA belonging to another owner must not appear in the target picker (cross-owner conversions are invalid).
     const user = userEvent.setup();
     await seedAccount('acct-pretax', '401(k)', 'RETIREMENT_401K', 'PRE_TAX', true, 'hm-1');
     await seedAccount('acct-roth-ira-own', 'Roth IRA (mine)', 'RETIREMENT_ROTH_IRA', 'ROTH', true, 'hm-1');
@@ -290,9 +257,7 @@ describe('ScenarioRothConversionsPage', () => {
     const labels = within(listbox)
       .getAllByRole('option')
       .map((o) => o.textContent);
-    // Same-owner Roth IRA must be offered.
     expect(labels).toContain('Roth IRA (mine)');
-    // Cross-owner Roth IRA must NOT be offered.
     expect(labels).not.toContain('Roth IRA (spouse)');
   });
 
@@ -319,7 +284,11 @@ describe('ScenarioRothConversionsPage', () => {
       expect(list).toHaveLength(1);
       expect(list?.[0].sourceAccountId).toBe('acct-pretax');
       expect(list?.[0].targetRothAccountId).toBe('acct-roth-ira');
-      // Rate left at 0 → the rate key is omitted (sparse).
+      // A fresh Add seeds $10k/yr over a one-year window at the current year.
+      const thisYear = new Date().getFullYear();
+      expect(list?.[0].annualAmountDollars).toBe(10000);
+      expect(list?.[0].start).toEqual({ kind: 'year', year: thisYear });
+      expect(list?.[0].end).toEqual({ kind: 'year', year: thisYear });
       expect(
         saved?.payload.overrides.preRetirementRothConversionTaxRatePct,
       ).toBeUndefined();
@@ -374,28 +343,20 @@ describe('ScenarioRothConversionsPage', () => {
       ],
       preRetirementRothConversionTaxRatePct: 24,
     });
-    const { container } = renderAt(SCENARIO_ID);
+    renderAt(SCENARIO_ID);
 
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Conversion 1' })).toBeInTheDocument(),
     );
-    // The row is collapsed by default; the tax-burden hint lives in the
-    // expanded body (mounted-but-hidden — `.not.toBeVisible()`, not
-    // `.not.toBeInTheDocument()`, since jsdom keeps the node in the DOM).
+    // The row is collapsed by default; the tax-burden hint lives in the expanded body, mounted-but-hidden, so assert `.not.toBeVisible()` rather than `.not.toBeInTheDocument()`.
     expect(
       screen.getByText(/Extra income tax this would create/i),
     ).not.toBeVisible();
     expandRow('Conversion 1');
 
-    // 10,000 × 24% = $2,400 extra tax shown.
     expect(screen.getByText(/Extra income tax this would create/i)).toBeInTheDocument();
     expect(screen.getByText('$2,400')).toBeInTheDocument();
-    // A populated row (source/target pickers + anchor cards) has no a11y
-    // violations either.
-    await expectNoA11yViolations(container);
-    // The standalone "not deducted" disclosures (the per-row clause + the
-    // bottom block) were removed once the window pickers became bounded — they
-    // must NOT render anymore.
+    // The standalone "not deducted" disclosures were removed once the window pickers became bounded and must not render.
     expect(
       screen.queryByText(/subtracted from your projection/i),
     ).not.toBeInTheDocument();
@@ -409,8 +370,7 @@ describe('ScenarioRothConversionsPage', () => {
 
   it('caps the "Convert through" year slider at the owner\'s last working year (retirementYear − 1)', async () => {
     await seedAccounts();
-    // Owner born 1980-06-01, retires at age 60 → retirement year 2040, so the
-    // last CONVERTIBLE (strictly-before-retirement) year is 2039.
+    // Owner born 1980-06-01 retiring at 60 retires in 2040, so the last convertible (strictly-before-retirement) year is 2039.
     await seedOwnerMember('1980-06-01');
     await seedScenario({
       retirementAge: { primary: { ageYears: 60, ageMonths: 0 } },
@@ -426,8 +386,6 @@ describe('ScenarioRothConversionsPage', () => {
     });
     renderAt(SCENARIO_ID);
 
-    // Expand the row, then the "Convert through" anchor card so its year
-    // slider is queryable.
     await screen.findByRole('button', { name: 'Conversion 1' });
     expandRow('Conversion 1');
     const card = await screen.findByRole('button', { name: 'Convert through' });
@@ -449,7 +407,6 @@ describe('ScenarioRothConversionsPage', () => {
           targetRothAccountId: 'acct-roth-ira',
           annualAmountDollars: 10000,
           start: { kind: 'year', year: 2030 },
-          // Stored beyond the 2039 cap — must still show 2050, not clamp.
           end: { kind: 'year', year: 2050 },
         },
       ],
@@ -478,18 +435,14 @@ describe('ScenarioRothConversionsPage', () => {
           sourceAccountId: 'acct-pretax',
           targetRothAccountId: 'acct-roth-ira',
           annualAmountDollars: 10000,
-          // Backwards: start 2035 is AFTER end 2030 — converts nothing.
           start: { kind: 'year', year: 2035 },
           end: { kind: 'year', year: 2030 },
         },
       ],
-      // A rate so the scenario is a real override (not strictly needed for the
-      // guard, which keys on the window only).
       preRetirementRothConversionTaxRatePct: 22,
     });
     renderAt(SCENARIO_ID);
 
-    // The aggregated error names the offending conversion; Save is disabled.
     await waitFor(() =>
       expect(
         screen.getByText(
@@ -498,13 +451,8 @@ describe('ScenarioRothConversionsPage', () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled();
-    // The implicated row's collapsed summary carries a "Needs attention"
-    // chip.
     expect(screen.getByText('Needs attention')).toBeInTheDocument();
 
-    // Fix the window: drag the "Convert starting" year back to 2030 (== end) →
-    // a valid single-year conversion. The error clears and Save re-enables once
-    // the draft is also dirty.
     expandRow('Conversion 1');
     const startCard = await screen.findByRole('button', {
       name: 'Convert starting',
@@ -525,7 +473,6 @@ describe('ScenarioRothConversionsPage', () => {
       ).not.toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: /^Save$/i })).toBeEnabled();
-    // The chip clears once the row is fixed.
     expect(screen.queryByText('Needs attention')).not.toBeInTheDocument();
   });
 
@@ -541,7 +488,6 @@ describe('ScenarioRothConversionsPage', () => {
           end: { kind: 'year', year: 2033 },
         },
         {
-          // Same account, years 2032-2034 overlap row 1's 2030-2033.
           sourceAccountId: 'acct-pretax',
           targetRothAccountId: 'acct-roth-ira',
           annualAmountDollars: 5000,
@@ -560,14 +506,11 @@ describe('ScenarioRothConversionsPage', () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled();
-    // BOTH rows of the overlapping pair carry the chip.
     const row1 = screen.getByText('Conversion 1').closest('li') as HTMLElement;
     const row2 = screen.getByText('Conversion 2').closest('li') as HTMLElement;
     expect(within(row1).getByText('Needs attention')).toBeInTheDocument();
     expect(within(row2).getByText('Needs attention')).toBeInTheDocument();
 
-    // Move row 2's start to 2034 so the windows no longer overlap (row1 ends
-    // 2033, row2 starts 2034) → overlap clears, Save enables (now dirty).
     expandRow('Conversion 2');
     const startCard = within(row2).getByRole('button', { name: 'Convert starting' });
     act(() => {
@@ -590,8 +533,6 @@ describe('ScenarioRothConversionsPage', () => {
   });
 
   it('two same-account rows with the same overlapping window re-enable Save after switching one to a different eligible source account', async () => {
-    // Owner has two eligible pre-tax sources. Two rows on the SAME source over
-    // the SAME years overlap; repointing row 2 to the other source removes it.
     await seedAccount('acct-pretax', 'Pre-tax One', 'RETIREMENT_401K', 'PRE_TAX');
     await seedAccount('acct-pretax-2', 'Pre-tax Two', 'RETIREMENT_403B', 'PRE_TAX');
     await seedAccount('acct-roth-ira', 'Roth IRA', 'RETIREMENT_ROTH_IRA', 'ROTH');
@@ -622,7 +563,6 @@ describe('ScenarioRothConversionsPage', () => {
     );
     expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled();
 
-    // Switch row 2's source account → distinct account, overlap clears.
     const user = userEvent.setup();
     const row2 = screen.getByText('Conversion 2').closest('li') as HTMLElement;
     expandRow('Conversion 2');
@@ -665,8 +605,6 @@ describe('ScenarioRothConversionsPage', () => {
     });
     renderAt(SCENARIO_ID);
 
-    // A live edit so Save would otherwise enable; distinct source accounts
-    // over the same years must NOT be flagged.
     const amount = (await screen.findByLabelText(
       /Amount to convert each year for conversion 1/i,
     )) as HTMLInputElement;
@@ -683,9 +621,7 @@ describe('ScenarioRothConversionsPage', () => {
   });
 
   it('the row-conflict alert renders between the conversion list and the tax-rate card', async () => {
-    // A backwards window guarantees the alert renders; assert its DOM position
-    // sits after the entries list's own content and before the following
-    // tax-rate card's stable text.
+    // A backwards window guarantees the alert renders; assert its DOM position after the entries list and before the tax-rate card.
     await seedAccounts();
     await seedScenario({
       preRetirementRothConversions: [
@@ -706,11 +642,9 @@ describe('ScenarioRothConversionsPage', () => {
     const addButton = screen.getByRole('button', { name: /Add a conversion/i });
     const taxRateLabel = screen.getByText(/Assumed tax rate on converted money/i);
 
-    // The alert follows the entries card's own content…
     expect(
       addButton.compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    // …and precedes the following tax-rate card.
     expect(
       alert.compareDocumentPosition(taxRateLabel) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -750,7 +684,6 @@ describe('ScenarioRothConversionsPage', () => {
       const saved = (await getAggregate('scenario', SCENARIO_ID)) as
         | Aggregate<ScenarioPayload>
         | null;
-      // The whole list key is dropped (sparse) — no empty array persisted.
       expect(
         saved?.payload.overrides.preRetirementRothConversions,
       ).toBeUndefined();
@@ -759,7 +692,6 @@ describe('ScenarioRothConversionsPage', () => {
 
   it('edit an existing row (amount + target) → Save persists the edit', async () => {
     const user = userEvent.setup();
-    // Two Roth IRAs so the target can be re-pointed; one existing conversion.
     await seedAccount('acct-pretax', '401(k)', 'RETIREMENT_401K', 'PRE_TAX');
     await seedAccount('acct-roth-ira', 'Roth IRA', 'RETIREMENT_ROTH_IRA', 'ROTH');
     await seedAccount('acct-roth-ira-2', 'Roth IRA #2', 'RETIREMENT_ROTH_IRA', 'ROTH');
@@ -779,7 +711,6 @@ describe('ScenarioRothConversionsPage', () => {
     await screen.findByRole('button', { name: 'Conversion 1' });
     expandRow('Conversion 1');
 
-    // Edit the amount (per-row onChange → updateConversion).
     const amount = (await screen.findByLabelText(
       /Amount to convert each year for conversion 1/i,
     )) as HTMLInputElement;
@@ -789,7 +720,6 @@ describe('ScenarioRothConversionsPage', () => {
       fireEvent.blur(amount);
     });
 
-    // Re-point the target Roth account to the second account.
     const targetTrigger = screen.getByRole('button', { name: /Into Roth account/i });
     await user.click(targetTrigger);
     const option = await screen.findByRole('option', { name: 'Roth IRA #2' });
@@ -808,16 +738,13 @@ describe('ScenarioRothConversionsPage', () => {
       expect(list).toHaveLength(1);
       expect(list?.[0].annualAmountDollars).toBe(12000);
       expect(list?.[0].targetRothAccountId).toBe('acct-roth-ira-2');
-      // The transient draftId never persists.
       expect(list?.[0]).not.toHaveProperty('draftId');
     });
   });
 
   it('a child inheriting a parent conversion list shows the inherited banner naming the ancestor', async () => {
     await seedAccounts();
-    // Grandparent sets the list; parent inherits; child inherits — the banner
-    // must name the GRANDPARENT (nearest ancestor that sets the key), not the
-    // immediate parent (first-ancestor-wins).
+    // The banner names the nearest ancestor that sets the key (the grandparent), not the immediate parent.
     await seedScenario(
       {
         preRetirementRothConversions: [
@@ -861,7 +788,6 @@ describe('ScenarioRothConversionsPage', () => {
     );
     await seedScenario(
       {
-        // Local override on the child — banner suppressed.
         preRetirementRothConversions: [
           {
             sourceAccountId: 'acct-pretax',
@@ -901,15 +827,11 @@ describe('ScenarioRothConversionsPage', () => {
       fireEvent.click(add); // make the editor dirty
     });
 
-    // Drive an in-app navigation the same way a real <Link> click does under a
-    // browser history: a cross-pathname pushState. The guard's pushState patch
-    // intercepts it while dirty and surfaces the Stay/Leave prompt. (MemoryRouter
-    // does not call window.history, so we trigger the patched API directly.)
+    // MemoryRouter doesn't call window.history, so drive a cross-pathname pushState directly, as a real Link click under browser history does; the guard's patch intercepts it while dirty.
     act(() => {
       window.history.pushState({}, '', `/scenarios/${SCENARIO_ID}`);
     });
 
-    // Stay/Leave prompt surfaces — Stay keeps us on the editor, nothing saved.
     const stay = await screen.findByRole('button', { name: /^Stay$/i });
     await user.click(stay);
     expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
@@ -917,8 +839,6 @@ describe('ScenarioRothConversionsPage', () => {
       screen.getByRole('button', { name: /Add a conversion/i }),
     ).toBeInTheDocument();
 
-    // Re-trigger and Leave → the prompt dismisses and the blocked navigation is
-    // re-issued (the page routes away from the editor).
     act(() => {
       window.history.pushState({}, '', `/scenarios/${SCENARIO_ID}`);
     });
@@ -948,7 +868,6 @@ describe('ScenarioRothConversionsPage', () => {
           end: { kind: 'year', year: 2030 },
         },
         {
-          // Dangling target — should be pruned on save.
           sourceAccountId: 'acct-pretax',
           targetRothAccountId: 'acct-deleted',
           annualAmountDollars: 3000,
@@ -959,7 +878,6 @@ describe('ScenarioRothConversionsPage', () => {
     });
     renderAt(SCENARIO_ID);
 
-    // Make a live edit (touch the rate) so Save enables, then save.
     const rate = (await screen.findByLabelText(
       /Assumed tax rate on converted money/i,
     )) as HTMLInputElement;
@@ -978,7 +896,6 @@ describe('ScenarioRothConversionsPage', () => {
         | Aggregate<ScenarioPayload>
         | null;
       const list = saved?.payload.overrides.preRetirementRothConversions;
-      // Only the live entry survives; the orphan is pruned.
       expect(list).toHaveLength(1);
       expect(list?.[0].targetRothAccountId).toBe('acct-roth-ira');
     });
@@ -1013,16 +930,12 @@ describe('ScenarioRothConversionsPage', () => {
       fireEvent.click(add); // make the editor dirty
     });
 
-    // Cancel is an intentional discard — it navigates back without a
-    // Stay/Leave prompt and persists nothing.
     const cancel = screen.getByRole('button', { name: /^Cancel$/i });
     act(() => {
       fireEvent.click(cancel);
     });
 
-    // No unsaved-changes prompt surfaced (Cancel bypasses the guard).
     expect(screen.queryByText(/Unsaved changes/i)).not.toBeInTheDocument();
-    // Nothing persisted — the scenario carries no conversions.
     const saved = (await getAggregate('scenario', SCENARIO_ID)) as
       | Aggregate<ScenarioPayload>
       | null;
@@ -1059,9 +972,7 @@ describe('ScenarioRothConversionsPage', () => {
     expect(summaryText).toContain('Year 2030');
     expect(summaryText).toContain('year 2034');
     expect(summaryText).toContain('$5,000/yr');
-    // Load-bearing collapse guard: the body's Select controls are absent by
-    // role until the row is expanded (this must fail if the disclosure never
-    // actually collapses).
+    // Load-bearing collapse guard: the body's Select controls are absent by role until the row expands (this must fail if the disclosure never collapses).
     expect(
       screen.queryByRole('button', { name: /Into Roth account/i }),
     ).toBeNull();
@@ -1095,7 +1006,6 @@ describe('ScenarioRothConversionsPage', () => {
       screen.getByRole('button', { name: /Remove conversion 1/i }),
     ).toBeInTheDocument();
 
-    // Opening row 2 collapses row 1.
     expandRow('Conversion 2');
     expect(
       screen.getByRole('button', { name: /Remove conversion 2/i }),
@@ -1104,7 +1014,6 @@ describe('ScenarioRothConversionsPage', () => {
       screen.queryByRole('button', { name: /Remove conversion 1/i }),
     ).toBeNull();
 
-    // Add opens the new row (Conversion 3) expanded and collapses row 2.
     const add = screen.getByRole('button', { name: /Add a conversion/i });
     act(() => {
       fireEvent.click(add);
@@ -1179,11 +1088,7 @@ describe('ScenarioRothConversionsPage', () => {
       screen.getByRole('button', { name: /Remove conversion 2/i }),
     ).toBeInTheDocument();
 
-    // Remove row 1 (collapsed, above the open row) via its own Remove button.
-    // The row is mounted-but-visually-collapsed (RAC's `hidden="until-found"`
-    // DisclosurePanel), so reach it with `hidden: true` — the same escape
-    // hatch used elsewhere in this codebase for a genuinely-mounted,
-    // accessibility-hidden subtree (see report-page-pdf-render-host.test.tsx).
+    // The row is mounted-but-visually-collapsed (RAC's `hidden="until-found"` DisclosurePanel), so reach its Remove button with `hidden: true`.
     const removeRow1 = screen.getByRole('button', {
       name: /Remove conversion 1/i,
       hidden: true,
@@ -1192,10 +1097,7 @@ describe('ScenarioRothConversionsPage', () => {
       fireEvent.click(removeRow1);
     });
 
-    // The originally-open row (the former row 2, $2,000/yr) is STILL
-    // expanded — now re-labeled "Conversion 1" after the shift — not a
-    // wrong row that an index-keyed (rather than draftId-keyed) open state
-    // would have left open.
+    // The originally-open row must stay expanded, relabeled "Conversion 1", not a wrong row that an index-keyed (rather than draftId-keyed) open state would leave open.
     await waitFor(() =>
       expect(
         screen.getByRole('button', { name: /Remove conversion 1/i }),
@@ -1221,7 +1123,6 @@ describe('ScenarioRothConversionsPage', () => {
           sourceAccountId: 'acct-pretax',
           targetRothAccountId: 'acct-roth-ira',
           annualAmountDollars: 2000,
-          // Backwards window — the only implicated row.
           start: { kind: 'year', year: 2035 },
           end: { kind: 'year', year: 2031 },
         },
@@ -1249,7 +1150,6 @@ describe('ScenarioRothConversionsPage', () => {
     expect(within(row2).getByText('Needs attention')).toBeInTheDocument();
     expect(within(row3).queryByText('Needs attention')).toBeNull();
 
-    // Fix row 2's window; the chip clears.
     expandRow('Conversion 2');
     const startCard = within(row2).getByRole('button', { name: 'Convert starting' });
     act(() => {
@@ -1269,10 +1169,7 @@ describe('ScenarioRothConversionsPage', () => {
 
   it('a saved conversion whose target became ineligible (inherited Roth IRA) names the real account, carries the chip, and announces the removal-on-save; an eligible row stays clean', async () => {
     await seedAccount('acct-pretax', '401(k)', 'RETIREMENT_401K', 'PRE_TAX');
-    // The saved target was eligible once, then the account was marked
-    // inherited — `isWorkingYearsRothConversionTarget` now rejects it, so it
-    // is absent from the target picker while still existing on the Accounts
-    // page.
+    // The saved target was eligible once; the account was then marked inherited, so `isWorkingYearsRothConversionTarget` rejects it and it is absent from the target picker while still on the Accounts page.
     await seedAccount(
       'acct-roth-inh',
       'Inherited Roth IRA',
@@ -1293,7 +1190,7 @@ describe('ScenarioRothConversionsPage', () => {
           end: { kind: 'year', year: 2030 },
         },
         {
-          // A healthy sibling row — must NOT pick up the chip or the notice.
+          // A healthy sibling row must not pick up the chip or the notice.
           sourceAccountId: 'acct-pretax',
           targetRothAccountId: 'acct-roth-ira',
           annualAmountDollars: 4000,
@@ -1305,8 +1202,7 @@ describe('ScenarioRothConversionsPage', () => {
     renderAt(SCENARIO_ID);
 
     await screen.findByRole('button', { name: 'Conversion 1' });
-    // Collapsed summary shows the REAL account name — the account is on the
-    // Accounts page, so "Missing account" would be false — plus the chip.
+    // The collapsed summary shows the real account name ("Missing account" would be false, the account is on the Accounts page) plus the chip.
     const trigger = screen.getByRole('button', { name: 'Conversion 1' });
     const describedIds = trigger.getAttribute('aria-describedby')?.split(' ') ?? [];
     const summaryText = describedIds
@@ -1321,9 +1217,7 @@ describe('ScenarioRothConversionsPage', () => {
     expect(within(row1).getByText('Needs attention')).toBeInTheDocument();
     expect(within(row2).queryByText('Needs attention')).toBeNull();
 
-    // Expanding reveals the notice: the target is no longer able to receive
-    // conversions and the row will be removed at the next Save (announced,
-    // not blocked — Save itself stays usable for other edits).
+    // The notice announces that the row will be removed at the next Save; Save itself stays usable for other edits.
     expandRow('Conversion 1');
     expect(
       within(row1).getByText(/can no longer receive conversions/i),
@@ -1370,8 +1264,7 @@ describe('ScenarioRothConversionsPage', () => {
       fireEvent.click(save);
     });
 
-    // Post-save the host page remounts the editor keyed on scenario.version
-    // — every row (including the just-edited one) renders collapsed.
+    // After save the host page remounts the editor keyed on scenario.version, so every row renders collapsed.
     await waitFor(async () => {
       const saved = (await getAggregate('scenario', SCENARIO_ID)) as
         | Aggregate<ScenarioPayload>

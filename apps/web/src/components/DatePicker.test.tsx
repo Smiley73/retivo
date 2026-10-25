@@ -1,12 +1,4 @@
-/**
- * DatePicker — shared React Aria date field. Asserts the
- * FROZEN value contract (the public value is the same `YYYY-MM-DD`
- * string the native `<input type="date">` emitted): controlled value
- * round-trips through the CalendarDate adapter, the calendar popover
- * opens and selecting a day emits the string, an empty string means no
- * value, and the shared-component axe rule (AGENTS mandate).
- * Interaction goes through `@testing-library/user-event`.
- */
+/** DatePicker: the shared React Aria date field keeps the frozen YYYY-MM-DD value contract. */
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -21,21 +13,14 @@ describe('DatePicker', () => {
       <DatePicker ariaLabel="Birthdate" value="1965-03-20" onChange={() => {}} />,
     );
     const group = screen.getByRole('group', { name: 'Birthdate' });
-    // The date field renders one editable segment per unit; the
-    // adapter round-trips the YYYY-MM-DD string into the locale date
-    // (en-US → M/D/YYYY) without changing the stored value contract.
     expect(group).toHaveTextContent('3/20/1965');
-    // Each segment is a spinbutton labelled by the field name.
     expect(
       screen.getByRole('spinbutton', { name: /month/ }),
     ).toHaveAttribute('aria-valuetext', expect.stringContaining('March'));
   });
 
   it('renders date segments at the text-sm page baseline (font-size regression guard)', () => {
-    // Segments set no `text-*` and don't inherit from GROUP_CLASS, so
-    // the visible date read at the 16px browser default while page
-    // text is 14px. jsdom cannot measure computed px, so the segment
-    // class is the contract.
+    // jsdom cannot measure computed px, so the segment class is the contract for matching the page text size.
     render(
       <DatePicker ariaLabel="Birthdate" value="1965-03-20" onChange={() => {}} />,
     );
@@ -48,7 +33,6 @@ describe('DatePicker', () => {
     render(
       <DatePicker ariaLabel="Birthdate" value="" onChange={() => {}} />,
     );
-    // Placeholder segments render (mm/dd/yyyy) — no concrete date.
     expect(
       screen.getByRole('group', { name: 'Birthdate' }),
     ).toBeInTheDocument();
@@ -65,11 +49,9 @@ describe('DatePicker', () => {
         onChange={onChange}
       />,
     );
-    // React Aria composes the trigger button's accessible name from
-    // its label + the field value; match the stable "calendar" token.
+    // React Aria composes the trigger name from label plus value; match the stable "calendar" token.
     await user.click(screen.getByRole('button', { name: /calendar/i }));
     const grid = await screen.findByRole('application');
-    // React Aria names each day cell with its full localized date.
     await user.click(
       within(grid).getByRole('button', { name: /Friday, May 15, 2026/ }),
     );
@@ -87,7 +69,6 @@ describe('DatePicker', () => {
       />,
     );
     await user.tab();
-    // Focus lands on the first (month) segment; ArrowUp increments it.
     await user.keyboard('{ArrowUp}');
     expect(onChange).toHaveBeenCalledWith('2026-06-10');
   });
@@ -99,9 +80,6 @@ describe('DatePicker', () => {
         <DatePicker id="bd" value="1965-03-20" onChange={() => {}} />
       </>,
     );
-    // id + external label, NO ariaLabel: the date-field group must be
-    // named by the visible label (RA would otherwise label the group
-    // by itself → no accessible name).
     expect(
       screen.getByRole('group', { name: 'Birthdate' }),
     ).toBeInTheDocument();
@@ -116,8 +94,6 @@ describe('DatePicker', () => {
         <DatePicker id="bd3" value="1965-03-20" onChange={() => {}} />
       </>,
     );
-    // The label already has an id — point `aria-labelledby` at THAT
-    // id, never overwrite it, so a pre-wired reference stays valid.
     expect(document.getElementById('my-own-bd-label')?.id).toBe(
       'my-own-bd-label',
     );
@@ -127,9 +103,6 @@ describe('DatePicker', () => {
   });
 
   it('resolves an unambiguous accessible name when a same-named id already exists', () => {
-    // An unrelated element pre-occupies the id the legacy
-    // `${id}-label` derivation produced; the date-field group must be
-    // named by the visible label, not the decoy text.
     render(
       <>
         <span id="bd4-label">Some other text</span>

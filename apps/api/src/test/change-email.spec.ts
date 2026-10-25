@@ -1,20 +1,5 @@
-/**
- * Self-service email-change flow integration tests against the local emulator.
- *
- * Covers: GET /auth/me (typed record + unauthenticated rejection); the happy
- * path (confirm swaps email + moves the EmailReservation); new-email collision
- * (EMAIL_TAKEN) at request + at confirm-race; the per-user change-email send
- * cooldown / daily cap; wrong password; the password-only path (MFA off) +
- * the failed/absent MFA step-up (MFA on, separate app); expired/absent pending
- * intent rejected at send-otp + verify-step-up; stale/superseded change-email
- * token rejected at confirm; pending-PasswordReset invalidated on swap;
- * unauthenticated rejection on every authenticated endpoint; CSRF positive/
- * negative on the authenticated state-changing endpoints (confirm exempt);
- * purpose cross-consumption rejected both ways.
- *
- * The MFA-on block sets AUTH_MFA_ENFORCED=true before bootstrap (read at
- * service construction), restored after — mirrors mfa.spec.ts.
- */
+// Self-service email change against the local emulator: GET /auth/me, the happy path, collisions, rate limits, stale tokens, step-up, auth rejection
+// and purpose cross-consumption. The MFA-on block sets AUTH_MFA_ENFORCED=true before bootstrap (read at service construction) and restores it.
 import request from 'supertest';
 import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { generateSync } from 'otplib';
@@ -87,8 +72,7 @@ async function readUser(t: TestApp, userId: string): Promise<UserRow> {
   return row!;
 }
 
-/** Clear the change-email send cooldown so a second mint in the same test
- * second is not blocked by the 60s window. */
+// Clears the 60s change-email send cooldown so a second mint is not blocked.
 async function clearChangeEmailCooldown(t: TestApp, userId: string): Promise<void> {
   await t.doc.send(
     new UpdateCommand({
@@ -118,7 +102,7 @@ describe('self-service email change', () => {
       );
       expect(res.status).toBe(200);
       expect(res.body.email).toBe(s.email);
-      // The typed serializer never leaks token / pending / cooldown fields.
+      // The typed serializer never leaks token, pending or cooldown fields.
       expect(res.body).not.toHaveProperty('currentVerificationToken');
       expect(res.body).not.toHaveProperty('pendingEmail');
       expect(res.body).not.toHaveProperty('emailLowercase');
@@ -134,7 +118,6 @@ describe('self-service email change', () => {
       const req = await changeEmailRequest(t, s, newEmail);
       expect(req.status).toBe(200);
       const body = req.body as ChangeEmailRequestResponse;
-      // MFA off → no step-up, token echoed in dev.
       expect(body.stepUpRequired).toBe(false);
       expect(body.changeEmailToken).toBeTruthy();
       expect(await countAuthEvents(t, s.userId, 'email_change_requested')).toBe(1);
@@ -144,14 +127,12 @@ describe('self-service email change', () => {
       expect(conf.body.changed).toBe(true);
       expect(conf.body.email).toBe(newEmail);
 
-      // User row swapped + pending cleared.
       const user = await readUser(t, s.userId);
       expect(user.email).toBe(newEmail);
       expect(user.emailLowercase).toBe(newEmail.toLowerCase());
       expect(user.pendingEmail ?? null).toBeNull();
       expect(user.currentPendingEmailToken ?? null).toBeNull();
 
-      // EmailReservation moved old→new.
       const reservations = await scanAll<EmailReservationRow>(
         t.doc,
         table(t, 'TABLE_EMAIL_RESERVATION'),
@@ -163,7 +144,6 @@ describe('self-service email change', () => {
         reservations.find((r) => r.emailLowercase === s.email.toLowerCase()),
       ).toBeUndefined();
 
-      // email_change audit recorded; the new email can sign in.
       expect(await countAuthEvents(t, s.userId, 'email_change')).toBe(1);
       const login = await request(t.app.getHttpServer())
         .post('/api/v1/auth/login')
@@ -174,7 +154,6 @@ describe('self-service email change', () => {
 
     it('invalidates a pending PasswordReset on the swap', async () => {
       const s = await signupVerifyLogin(t);
-      // Mint a real reset token for this user.
       const reset = await request(t.app.getHttpServer())
         .post('/api/v1/auth/request-password-reset')
         .set('Origin', ORIGIN())
@@ -188,7 +167,6 @@ describe('self-service email change', () => {
       const conf = await confirm(t, (req.body as ChangeEmailRequestResponse).changeEmailToken);
       expect(conf.status).toBe(200);
 
-      // The PasswordReset row is gone + the handle cleared → the link is dead.
       const resetRows = await scanAll<PasswordResetRow>(
         t.doc,
         table(t, 'TABLE_PASSWORD_RESET'),
@@ -235,10 +213,9 @@ describe('self-service email change', () => {
       const req = await changeEmailRequest(t, s, targetEmail);
       const token = (req.body as ChangeEmailRequestResponse).changeEmailToken;
 
-      // Someone else claims the target address before confirm.
       const claimant = await signupVerifyLogin(t);
       const claimReq = await changeEmailRequest(t, claimant, targetEmail);
-      // The claimant pre-check passes (not yet taken at their request time)…
+      // The claimant's pre-check passes (the address is not yet taken at their request time), so when the first user confirms the reservation is gone: EMAIL_TAKEN.
       expect(claimReq.status).toBe(200);
       const claimConf = await confirm(
         t,
@@ -246,11 +223,9 @@ describe('self-service email change', () => {
       );
       expect(claimConf.status).toBe(200);
 
-      // …so when the first user confirms, the reservation is gone → EMAIL_TAKEN.
       const conf = await confirm(t, token);
       expect(conf.status).toBe(409);
       expect(conf.body.error.code).toBe('EMAIL_TAKEN');
-      // The first user's email did NOT move.
       const user = await readUser(t, s.userId);
       expect(user.email).toBe(s.email);
     });
@@ -261,7 +236,6 @@ describe('self-service email change', () => {
       const s = await signupVerifyLogin(t);
       const first = await changeEmailRequest(t, s, freshEmail('new'));
       expect(first.status).toBe(200);
-      // Second request inside the 60s cooldown (no cooldown clear).
       const second = await changeEmailRequest(t, s, freshEmail('new'));
       expect(second.status).toBe(409);
       expect(second.body.error.code).toBe('CHANGE_EMAIL_RATE_LIMITED');
@@ -293,8 +267,7 @@ describe('self-service email change', () => {
       const tokenA = (a.body as ChangeEmailRequestResponse).changeEmailToken;
       expect(tokenA).toBeTruthy();
 
-      // A newer request (different address) supersedes token A. Clear the
-      // cooldown so the second mint isn't rate-limited.
+      // A newer request supersedes token A; clear the cooldown so the second mint is not rate-limited.
       await clearChangeEmailCooldown(t, s.userId);
       const secondEmail = freshEmail('second');
       const b = await changeEmailRequest(t, s, secondEmail);
@@ -302,13 +275,11 @@ describe('self-service email change', () => {
       expect(tokenB).toBeTruthy();
       expect(tokenB).not.toEqual(tokenA);
 
-      // Token A is superseded → 400, no swap.
       const confA = await confirm(t, tokenA);
       expect(confA.status).toBe(400);
       expect(confA.body.error.code).toBe('CHANGE_EMAIL_TOKEN_INVALID');
       expect((await readUser(t, s.userId)).email).toBe(s.email);
 
-      // Token B is the one authoritative link.
       const confB = await confirm(t, tokenB);
       expect(confB.status).toBe(200);
       expect(confB.body.email).toBe(secondEmail);
@@ -318,7 +289,6 @@ describe('self-service email change', () => {
       const s = await signupVerifyLogin(t);
       const req = await changeEmailRequest(t, s, freshEmail('new'));
       const token = (req.body as ChangeEmailRequestResponse).changeEmailToken!;
-      // Force the EmailVerification row past its TTL.
       await t.doc.send(
         new UpdateCommand({
           TableName: table(t, 'TABLE_EMAIL_VERIFICATION'),
@@ -361,7 +331,6 @@ describe('self-service email change', () => {
         .set('Origin', ORIGIN())
         .send({ token });
       expect(verify.status).toBe(400);
-      // The change-email token survives (not deleted by the rejected verify).
       const rows = await scanAll<EmailVerificationRow>(
         t.doc,
         table(t, 'TABLE_EMAIL_VERIFICATION'),
@@ -371,9 +340,7 @@ describe('self-service email change', () => {
   });
 
   describe('unauthenticated rejection on the authenticated endpoints', () => {
-    // A bare unauthenticated request is stopped by the CSRF middleware (403)
-    // before the JWT guard. To reach the guard (401) the request must carry a
-    // self-consistent double-submit CSRF pair but no bearer token.
+    // A bare request is stopped by the CSRF middleware (403) before the JWT guard; a self-consistent double-submit CSRF pair without a bearer token reaches the guard (401).
     const csrf = 'unauth-csrf-token';
     it.each([
       ['change-email/request', { newEmail: 'x@example.test', currentPassword: STRONG_PASSWORD }],
@@ -390,8 +357,7 @@ describe('self-service email change', () => {
     });
 
     it('change-email/confirm is public (no 401 for a missing session) but rejects a bad token', async () => {
-      // Confirm is token-authenticated, not session-authenticated — a missing
-      // session is fine; the invalid token is what's rejected (400).
+      // Confirm is token-authenticated, not session-authenticated: the invalid token is what is rejected.
       const res = await confirm(t, 'a'.repeat(43));
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('CHANGE_EMAIL_TOKEN_INVALID');
@@ -403,7 +369,6 @@ describe('self-service email change', () => {
       const s = await signupVerifyLogin(t);
       const req = await changeEmailRequest(t, s, freshEmail('new'));
       const token = (req.body as ChangeEmailRequestResponse).changeEmailToken;
-      // No CSRF cookie / header — if confirm were not exempt this would 403.
       const conf = await confirm(t, token);
       expect(conf.status).toBe(200);
     });
@@ -427,7 +392,6 @@ describe('self-service email change', () => {
 
     it('rejects an EXPIRED pending intent at send-otp', async () => {
       const s = await signupVerifyLogin(t);
-      // Persist a pending intent, then expire it.
       await changeEmailRequest(t, s, freshEmail('new'));
       await t.doc.send(
         new UpdateCommand({
@@ -470,7 +434,6 @@ describe('self-service email change — MFA enforced (AUTH_MFA_ENFORCED=true)', 
     expect(body.stepUpRequired).toBe(true);
     expect(body.changeEmailToken).toBeUndefined();
     expect(body.methods).toContain('email_otp');
-    // No EmailVerification token minted yet (no change_email row for this user).
     const evRows = await scanAll<EmailVerificationRow>(
       t.doc,
       table(t, 'TABLE_EMAIL_VERIFICATION'),
@@ -482,7 +445,6 @@ describe('self-service email change — MFA enforced (AUTH_MFA_ENFORCED=true)', 
 
   it('completes via a TOTP step-up factor and confirm swaps the email', async () => {
     const s = await signupAndLoginMfa(t);
-    // Enroll TOTP so the routine step-up factor is TOTP (no email send needed).
     const secret = await enrollTotp(t, s);
 
     const newEmail = freshEmail('new');
@@ -523,7 +485,6 @@ describe('self-service email change — MFA enforced (AUTH_MFA_ENFORCED=true)', 
 
   it('completes via an email-OTP step-up factor and confirm swaps the email', async () => {
     const s = await signupAndLoginMfa(t);
-    // No TOTP enrolled — email_otp is the primary MFA step-up factor.
     const newEmail = freshEmail('new');
     const req = await changeEmailRequest(t, s, newEmail);
     const reqBody = req.body as ChangeEmailRequestResponse;
@@ -531,9 +492,7 @@ describe('self-service email change — MFA enforced (AUTH_MFA_ENFORCED=true)', 
     expect(reqBody.stepUpRequired).toBe(true);
     expect(reqBody.methods).toContain('email_otp');
 
-    // The login flow just sent an email OTP, so the shared per-user Email-OTP
-    // cooldown is still active. Clear it so this fresh step-up send is not a
-    // silent no-op (mirrors clearChangeEmailCooldown for the reset-anchor case).
+    // The login just sent an Email-OTP, so the shared per-user cooldown is active; clear it so this step-up send is not a silent no-op.
     await t.doc.send(
       new UpdateCommand({
         TableName: table(t, 'TABLE_USER'),
@@ -542,16 +501,13 @@ describe('self-service email change — MFA enforced (AUTH_MFA_ENFORCED=true)', 
       }),
     );
 
-    // Trigger the OTP send.
     const sendOtp = await authSet(s)(
       request(t.app.getHttpServer()).post('/api/v1/auth/change-email/send-otp'),
     ).send({});
     expect(sendOtp.status).toBe(202);
 
-    // Recover the OTP preimage from the MFA email OTP table.
     const code = await recoverEmailOtp(t, s.userId);
 
-    // Verify step-up with the email_otp factor → mints the change-email token.
     const verify = await authSet(s)(
       request(t.app.getHttpServer()).post('/api/v1/auth/change-email/verify-step-up'),
     ).send({ method: 'email_otp', code });
@@ -559,10 +515,8 @@ describe('self-service email change — MFA enforced (AUTH_MFA_ENFORCED=true)', 
     const token = (verify.body as ChangeEmailRequestResponse).changeEmailToken;
     expect(token).toBeTruthy();
 
-    // Confirm the email swap.
     const conf = await confirm(t, token);
     expect(conf.status).toBe(200);
     expect(conf.body.email).toBe(newEmail);
   });
-
 });

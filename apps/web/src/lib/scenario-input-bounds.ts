@@ -1,10 +1,4 @@
-/**
- * The ranges the scenario editors accept for the settings a person can try as a
- * what-if. One definition: the editors (`pages/`) clamp to these, and the AI
- * assistant's `retivo_run_what_if` tool rejects anything outside them, so a
- * value the tool takes is a value the editor could have set. A bound changes
- * here and nowhere else.
- */
+/** Ranges the scenario editors accept for what-if settings; the editors clamp to them and the `retivo_run_what_if` tool rejects anything outside. */
 import { MAX_AGE } from '../db/types';
 
 /** Retirement age: whole years from this floor up to the app-wide `MAX_AGE`; months run a full 0 to 11. */
@@ -36,10 +30,7 @@ export const ADJUSTMENT_MAX = 100;
 export const DURATION_MIN = 1;
 export const DURATION_MAX = 50;
 
-/**
- * Downturn guardrail bands, in percent: a sub-range of what `isGuardrailConfigValid` allows, because a band,
- * step or cap outside these is not a realistic planning choice.
- */
+/** Downturn guardrail bands, in percent: a realistic sub-range of what `isGuardrailConfigValid` allows. */
 export const GUARDRAIL_LOWER_BAND_MIN = 50;
 export const GUARDRAIL_LOWER_BAND_MAX = 100;
 export const GUARDRAIL_UPPER_BAND_MIN = 100;

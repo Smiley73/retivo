@@ -1,9 +1,4 @@
-/**
- * Component tests for the Workspace page's Workspace tools card: Load demo data
- * (the three-gate overwrite flow), Delete workspace data (full reset), Clear
- * data on this device, and Reload from server. Renders through WorkspacePage,
- * which hosts the card.
- */
+// Workspace page Workspace tools card: Load demo data (three-gate overwrite flow), Delete workspace data, Clear data on this device and Reload from server, rendered through WorkspacePage.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { WorkspacePage } from '../pages/WorkspacePage';
@@ -76,27 +71,17 @@ const notifyPendingMock = vi.fn();
 const syncRoundTripMock = vi.fn().mockResolvedValue({ ok: true });
 const forceRefreshMock = vi.fn().mockResolvedValue({ ok: true, wiped: true });
 const recacheHdkMock = vi.fn().mockResolvedValue(undefined);
-// `runDestructive` fences the demo-overwrite wipe→load window in the real
-// provider; here it just runs `fn` through so the handler's body executes.
+// `runDestructive` fences the demo-overwrite wipe→load window in the real provider; here it just runs `fn`.
 const runDestructiveMock = vi.fn(async (fn: () => Promise<unknown>) => fn());
-// `clearWorkspace` is the server-authoritative Delete-workspace-data endpoint
-// call; the real provider fences it + clears the ZK freshness pin. Default:
-// a 2xx that did NOT erase backup history — matching the real server, which
-// returns `historyErased:false` for every clear where erase wasn't requested
-// (the default, checkbox-unticked path). That is a success, not a failure.
+// `clearWorkspace` is the server-authoritative Delete-workspace-data call. Default: a 2xx that did not erase backup history (`historyErased:false`, what the real server returns when erase wasn't requested); that is a success, not a failure.
 const clearWorkspaceMock = vi
   .fn()
   .mockResolvedValue({ ok: true, historyErased: false });
-// Configurable un-synced mutation lists surfaced by the sync inspector + the
-// Reload-from-server warn-before-discard. Default empty (the Reload dialog reads
-// as today); a test reassigns these before rendering to exercise the naming.
+// Configurable un-synced mutation lists for the sync inspector and the Reload-from-server warn-before-discard; default empty, a test reassigns them before rendering.
 let pendingMutationsMock: unknown[] = [];
 let conflictMutationsMock: unknown[] = [];
 let failedErrorMutationsMock: unknown[] = [];
-// Real typed error the card `instanceof`-checks to tell a POST-commit local
-// cleanup failure (server DID sweep) from a PRE-commit rejection. Hoisted
-// so the mocked SyncContext module can re-export the SAME class reference the
-// card imports, and the test below can construct it.
+// The card `instanceof`-checks this typed error to tell a post-commit local cleanup failure (server did sweep) from a pre-commit rejection; hoisted so the mocked SyncContext re-exports the same class the card imports.
 const { WorkspaceClearCleanupError } = vi.hoisted(() => {
   class WorkspaceClearCleanupError extends Error {
     result: { ok: boolean; historyErased: boolean };
@@ -145,7 +130,6 @@ vi.mock('../lib/data-import', async () => {
 });
 
 vi.mock('../auth/key-envelope-client', () => ({
-  ENCRYPTED_WORKSPACE_RESET_PHRASE: 'DELETE',
   resetEncryptedWorkspace: vi.fn().mockResolvedValue(undefined),
   getKeyEnvelopes: vi.fn().mockResolvedValue({
     slots: [],
@@ -183,11 +167,7 @@ function renderPage(overrides: Record<string, unknown> = {}) {
 describe('WorkspacePage Workspace tools — Load demo data', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    // Reset the syncRoundTrip mock fully — `clearAllMocks` clears call
-    // counts but leaves any `mockResolvedValueOnce` queued from a prior
-    // test in place. `mockReset` drains that queue; the
-    // `mockResolvedValue` below restores the success default for tests
-    // that don't override it.
+    // `clearAllMocks` clears call counts but leaves queued `mockResolvedValueOnce` values, so `mockReset` drains them; the `mockResolvedValue` below restores the success default.
     syncRoundTripMock.mockReset();
     syncRoundTripMock.mockResolvedValue({ ok: true });
     // mockImplementation persists across tests; reset to default before each.
@@ -215,9 +195,6 @@ describe('WorkspacePage Workspace tools — Load demo data', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Workspace' }),
     ).toBeInTheDocument();
-    // Row actions carry the full intent as their accessible name
-    // (aria-label) while the visible caption is the short verb
-    // (Load / Sync / Clear) — the mock `.kv` key/value rows.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Load demo data' })).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Clear data on this device' })).toBeInTheDocument();
     const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
@@ -225,7 +202,6 @@ describe('WorkspacePage Workspace tools — Load demo data', () => {
     const workspaceIdx = headings.indexOf('Workspace tools');
     expect(dataIdx).toBeGreaterThan(-1);
     expect(workspaceIdx).toBeGreaterThan(dataIdx);
-    // The Delete-account danger card moved to the Security page.
     expect(headings).not.toContain('Delete account');
   });
 
@@ -269,14 +245,11 @@ describe('WorkspacePage Workspace tools — Load demo data', () => {
     fireEvent.click(confirmBtn);
     await waitFor(() => expect(loadDemoData).toHaveBeenCalled());
     expect(notifyPendingMock).toHaveBeenCalled();
-    // The flow hard-reloads (a jsdom no-op), so the notice is stashed in
-    // sessionStorage rather than shown inline — otherwise the reload tears the
-    // component down before the user sees it.
+    // The flow hard-reloads (a jsdom no-op), so the notice is stashed in sessionStorage rather than shown inline.
     await waitFor(() =>
       expect(sessionStorage.getItem(WORKSPACE_NOTICE_KEY)).toBe('Demo data loaded.'),
     );
-    // On the next mount (post-reload) the notice surfaces once, then the key is
-    // consumed so it never re-appears.
+    // On the next mount (post-reload) the notice surfaces once, then the key is consumed.
     unmount();
     renderPage();
     await waitFor(() => expect(screen.getByText(/Demo data loaded/i)).toBeInTheDocument());
@@ -298,13 +271,11 @@ describe('WorkspacePage Workspace tools — Load demo data', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Load demo data' })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Load demo data' }));
 
-    // Stage 1: replace-everything warning.
     await waitFor(() =>
       expect(screen.getByText(/Replace all your data with demo data\?/i)).toBeInTheDocument(),
     );
     fireEvent.click(screen.getByRole('button', { name: /Yes, replace everything/i }));
 
-    // Stage 1.5: password re-auth gate (mirrors the import flow).
     await waitFor(() =>
       expect(screen.getByText(/Confirm with your password/i)).toBeInTheDocument(),
     );
@@ -314,7 +285,6 @@ describe('WorkspacePage Workspace tools — Load demo data', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(verifyPassword).toHaveBeenCalledWith('correct-pw'));
 
-    // Stage 2: final-check dialog appears; nothing destructive has run yet.
     await waitFor(() =>
       expect(screen.getByText(/Final check: really replace everything\?/i)).toBeInTheDocument(),
     );
@@ -326,8 +296,7 @@ describe('WorkspacePage Workspace tools — Load demo data', () => {
       expect(wipeWorkspaceForDemoReload).toHaveBeenCalledWith('hh-1'),
     );
     expect(loadDemoData).toHaveBeenCalled();
-    // wipe must precede load — otherwise the loader's precondition
-    // would refuse on the existing account.
+    // Wipe must precede load, or the loader's precondition would refuse on the existing account.
     const wipeOrder = (wipeWorkspaceForDemoReload as any).mock.invocationCallOrder[0];
     const loadOrder = (loadDemoData as any).mock.invocationCallOrder[0];
     expect(wipeOrder).toBeLessThan(loadOrder);
@@ -366,7 +335,6 @@ describe('WorkspacePage Workspace tools — Load demo data', () => {
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(/current password is incorrect/i),
     );
-    // Modal still open, final-check dialog never reached.
     expect(screen.getByText(/Confirm with your password/i)).toBeInTheDocument();
     expect(screen.queryByText(/Final check: really replace everything\?/i)).not.toBeInTheDocument();
     expect(wipeWorkspaceForDemoReload).not.toHaveBeenCalled();
@@ -430,7 +398,6 @@ describe('WorkspacePage Workspace tools — Load demo data', () => {
       expect(screen.getByText(/Final check: really replace everything\?/i)).toBeInTheDocument(),
     );
 
-    // Cancel from stage 2 — must close the dialog without wiping or loading.
     const dialog = screen.getByRole('alertdialog');
     const cancelBtn = Array.from(dialog.querySelectorAll('button')).find(
       (b) => b.textContent?.trim() === 'Cancel',
@@ -518,9 +485,7 @@ describe('WorkspacePage Workspace tools — Load demo data', () => {
 });
 
 describe('WorkspacePage Workspace tools — Delete workspace data', () => {
-  // listAggregates feeds the confirm-dialog local record count. The demo
-  // primary member builds a representative non-zero count — the row itself is
-  // always visible regardless of whether demo data is present.
+  // listAggregates feeds the confirm dialog's local record count; the row is visible regardless of demo data.
   const demoMembers = [
     {
       id: 'demo-member-primary',
@@ -537,18 +502,14 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
     const { listAggregates, clearAllStores } = await import('../db/store');
     (listAggregates as any).mockReset();
     (listAggregates as any).mockResolvedValue([]);
-    // Reset the local-wipe mock each test — `clearAllMocks` clears call counts
-    // but leaves any `mockRejectedValue`/`mockRejectedValueOnce` queued from a
-    // prior test in place (the retry-path tests below drive it to reject).
+    // `clearAllMocks` clears call counts but leaves queued `mockRejectedValue(Once)`, which the retry-path tests drive, so reset the local-wipe mock each test.
     (clearAllStores as any).mockReset();
     (clearAllStores as any).mockResolvedValue(undefined);
     clearWorkspaceMock.mockReset();
-    // Default: a 2xx non-erase clear returns historyErased:false (the real
-    // server's response when erase wasn't requested) — a success, not a latch.
+    // Default: a 2xx non-erase clear returns historyErased:false (the real server's response when erase wasn't requested), a success not a latch.
     clearWorkspaceMock.mockResolvedValue({ ok: true, historyErased: false });
     sessionStorage.clear();
-    // jsdom no-ops reload() without a spy — mock it so the 2xx-gated hard
-    // reload is assertable (idiom from the Clear-data suite below).
+    // jsdom no-ops reload() without a spy; mock it so the 2xx-gated hard reload is assertable.
     originalLocation = window.location;
     Object.defineProperty(window, 'location', {
       configurable: true,
@@ -564,8 +525,7 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
     sessionStorage.clear();
   });
 
-  // Drive the flow up to the open counts-confirm dialog: click Delete → enter
-  // password → Continue → confirm dialog. Returns the verifyPassword spy.
+  // Drive the flow to the open counts-confirm dialog: Delete, password, Continue. Returns the verifyPassword spy.
   async function openConfirmDialog(
     verifyPassword: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue(undefined),
   ) {
@@ -590,7 +550,6 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
   }
 
   it('always shows the Delete workspace data row, even on an empty workspace', async () => {
-    // No demo data, nothing in any store — the row is still present.
     renderPage();
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Load demo data' })).toBeInTheDocument(),
@@ -615,7 +574,6 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
 
   it('requires password verification, then shows a counts confirmation naming un-synced data — no pre-clear sync round-trip', async () => {
     const { listAggregates } = await import('../db/store');
-    // Demo member visible + a handful of accounts so the count is non-zero.
     (listAggregates as any).mockImplementation(async (type: string) => {
       if (type === 'householdMember') return demoMembers;
       if (type === 'account')
@@ -627,21 +585,16 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
     });
     const verifyPassword = await openConfirmDialog();
     expect(verifyPassword).toHaveBeenCalledWith('correct-pw');
-    // No client-driven pre-clear sync; the server sweep is authoritative.
     expect(syncRoundTripMock).not.toHaveBeenCalled();
-    // Counts confirmation: demoMembers (1 member) + 2 accounts = 3 records.
     const dialog = screen.getByRole('alertdialog');
     expect(dialog).toHaveTextContent(/3 records/i);
     expect(dialog).toHaveTextContent(/anything not yet synced to this device/i);
-    // Nothing destructive runs until the user confirms.
     expect(clearWorkspaceMock).not.toHaveBeenCalled();
   });
 
   it('confirming calls clearWorkspace (2xx), wipes local residue, suppresses the demo modal, stashes a notice, and reloads', async () => {
     const { clearAllStores, clearMutationQueue } = await import('../db/store');
-    // The per-browser first-run seeded flag: "Delete workspace data" must leave
-    // it, which is what makes the wipe stick on this browser (the first-run
-    // check then shows the prompt with no request instead of re-seeding).
+    // The per-browser first-run seeded flag must survive "Delete workspace data": that makes the wipe stick on this browser (first-run then shows the prompt instead of re-seeding).
     const seededKey = 'retivo:primary-member-seeded:hh-1';
     localStorage.setItem(seededKey, '1');
     await openConfirmDialog();
@@ -652,24 +605,16 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
         eraseHistory: false,
       }),
     );
-    // 2xx-gated local residue wipe.
     await waitFor(() => expect(clearAllStores).toHaveBeenCalled());
-    // The mutation-queue clear moved INTO SyncContext.clearWorkspace's
-    // destructive fence — which is mocked in this suite — so the card
-    // itself no longer clears the queue. The atomic queue clear (a stale create
-    // can't survive to re-push) is covered in SyncContext.test.tsx.
+    // The mutation-queue clear moved into SyncContext.clearWorkspace's destructive fence (mocked here), so the card no longer clears it; the atomic clear is covered in SyncContext.test.tsx.
     expect(clearMutationQueue).not.toHaveBeenCalled();
-    // First-run demo offer suppressed + a success notice survives the reload,
-    // and the hard reload fired.
     await waitFor(() =>
       expect(sessionStorage.getItem('suppressDemoModal')).toBe('1'),
     );
     expect(localStorage.getItem(seededKey)).toBe('1');
     localStorage.removeItem(seededKey);
     expect(sessionStorage.getItem(WORKSPACE_NOTICE_KEY)).toBe('Workspace data deleted.');
-    // Default path: erase-history was NOT requested (checkbox unticked, so
-    // eraseHistory:false), so the server's historyErased:false is the normal
-    // success case — the "couldn't erase backups" banner must NOT latch.
+    // Erase-history was not requested (checkbox unticked), so historyErased:false is the normal success case and the "couldn't erase backups" banner must not latch.
     expect(sessionStorage.getItem(WORKSPACE_HISTORY_NOT_ERASED_KEY)).toBeNull();
     expect(window.location.reload).toHaveBeenCalled();
   });
@@ -692,17 +637,13 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
     clearWorkspaceMock.mockResolvedValue({ ok: true, historyErased: false });
     const { clearAllStores } = await import('../db/store');
     await openConfirmDialog();
-    // Tick "Also erase backup history" so the purge is genuinely requested
-    // (eraseHistory:true). Only then does historyErased:false mean "the purge
-    // failed" — on the default path it just means "you didn't ask me to erase".
+    // Tick "Also erase backup history" so the purge is requested; only then does historyErased:false mean the purge failed.
     fireEvent.click(
       screen.getByRole('checkbox', { name: /erase backup history/i }),
     );
     fireEvent.click(screen.getByRole('button', { name: /Delete everything/i }));
-    // Still wipes + reloads (the clear DID commit server-side).
     await waitFor(() => expect(clearAllStores).toHaveBeenCalled());
     expect(window.location.reload).toHaveBeenCalled();
-    // The honest banner is latched across the reload; no generic "deleted" toast.
     await waitFor(() =>
       expect(sessionStorage.getItem(WORKSPACE_HISTORY_NOT_ERASED_KEY)).toBe('1'),
     );
@@ -710,9 +651,6 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
   });
 
   it('a 2xx historyErased:false when erase-history was NOT requested is a plain success — normal notice, no failure latch', async () => {
-    // The default (checkbox-unticked) path. The server returns
-    // historyErased:false because erase wasn't requested — that is NOT a purge
-    // failure, so the "couldn't erase backups" banner must never latch.
     clearWorkspaceMock.mockResolvedValue({ ok: true, historyErased: false });
     const { clearAllStores } = await import('../db/store');
     await openConfirmDialog();
@@ -723,10 +661,8 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
         eraseHistory: false,
       }),
     );
-    // Wipes + reloads as usual.
     await waitFor(() => expect(clearAllStores).toHaveBeenCalled());
     expect(window.location.reload).toHaveBeenCalled();
-    // Normal success notice, and NO failure latch.
     await waitFor(() =>
       expect(sessionStorage.getItem(WORKSPACE_NOTICE_KEY)).toBe('Workspace data deleted.'),
     );
@@ -734,10 +670,7 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
   });
 
   it('a POST-2xx local-cleanup failure still reloads and does NOT surface a "delete failed" error', async () => {
-    // The server clear committed (2xx); a throw from the post-commit local
-    // cleanup (e.g. clearAllStores) must NOT be reported as "couldn't delete
-    // workspace data" — the data WAS deleted server-side — and must still hard
-    // reload so the app converges on the now-empty, already-cleared workspace.
+    // The server clear committed (2xx); a throw from post-commit local cleanup (e.g. clearAllStores) must not be reported as "couldn't delete workspace data" (it was deleted server-side) and must still hard reload so the app converges on the cleared workspace.
     clearWorkspaceMock.mockResolvedValue({ ok: true, historyErased: true });
     const { clearAllStores } = await import('../db/store');
     (clearAllStores as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
@@ -745,20 +678,12 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
     );
     await openConfirmDialog();
     fireEvent.click(screen.getByRole('button', { name: /Delete everything/i }));
-    // The post-commit cleanup threw, but the flow still hard-reloads (the clear
-    // committed either way — converging beats a false failure).
     await waitFor(() => expect(window.location.reload).toHaveBeenCalled());
-    // No pre-commit "couldn't delete workspace data" error is surfaced.
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('retries the local wipe after a transient POST-2xx clearAllStores failure and converges', async () => {
-    // A single failed wipe used to fall through to a silent reload — but the
-    // post-reload initialSync takes the applyBootstrap(false) fresh-device path
-    // (SyncContext.clearWorkspace reset the cursor to '0'), which fetches the
-    // empty snapshot WITHOUT wiping local stores, so the deleted records would
-    // survive. The wipe is now retried: a transient failure recovers and the
-    // reload only fires once the stores are actually clear.
+    // A single failed wipe used to fall through to a silent reload, but the post-reload initialSync takes the applyBootstrap(false) fresh-device path (the cursor was reset to '0'), which fetches the empty snapshot without wiping local stores, so the deleted records survived. The wipe is retried: a transient failure recovers and the reload fires only once the stores are clear.
     clearWorkspaceMock.mockResolvedValue({ ok: true, historyErased: true });
     const { clearAllStores } = await import('../db/store');
     (clearAllStores as ReturnType<typeof vi.fn>).mockReset();
@@ -768,21 +693,14 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
     await openConfirmDialog();
     fireEvent.click(screen.getByRole('button', { name: /Delete everything/i }));
     await waitFor(() => expect(window.location.reload).toHaveBeenCalled());
-    // The wipe was retried (called more than once) and ultimately succeeded —
-    // the residue is actually cleared, not left behind by a silent reload.
     expect(
       (clearAllStores as ReturnType<typeof vi.fn>).mock.calls.length,
     ).toBeGreaterThan(1);
-    // Not a false "delete failed" surface.
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('keeps the user on the page with an honest message (no silent reload) when every local wipe attempt fails', async () => {
-    // The server clear committed (2xx), but clearAllStores fails on EVERY
-    // attempt. The flow must NOT silently reload — the post-reload
-    // applyBootstrap(false) path would not re-wipe, so the deleted aggregates
-    // would still be visible — and must NOT show the pre-commit "couldn't
-    // delete workspace data" copy (the server DID commit).
+    // The server clear committed but clearAllStores fails on every attempt: the flow must not silently reload (applyBootstrap(false) would not re-wipe, leaving deleted aggregates visible) nor show the pre-commit "couldn't delete workspace data" copy.
     clearWorkspaceMock.mockResolvedValue({ ok: true, historyErased: true });
     const { clearAllStores } = await import('../db/store');
     (clearAllStores as ReturnType<typeof vi.fn>).mockReset();
@@ -791,54 +709,38 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
     );
     await openConfirmDialog();
     fireEvent.click(screen.getByRole('button', { name: /Delete everything/i }));
-    // The honest, actionable recovery message appears.
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
         /couldn't finish clearing it from this device/i,
       ),
     );
-    // ...and it is NOT the pre-commit failure copy (the server committed).
     expect(screen.queryByText(/couldn't delete workspace data/i)).toBeNull();
-    // No silent reload into the non-wiping bootstrap path.
     expect(window.location.reload).not.toHaveBeenCalled();
-    // The wipe was actually retried (bounded), not attempted once.
     expect(
       (clearAllStores as ReturnType<typeof vi.fn>).mock.calls.length,
     ).toBeGreaterThan(1);
-    // Delete button re-enabled so the user can retry.
     expect(
       screen.getByRole('button', { name: /Delete workspace data/i }),
     ).toBeEnabled();
   });
 
   it('a POST-2xx SyncContext cleanup failure (WorkspaceClearCleanupError) shows the honest recovery copy — NOT the pre-commit copy — and never wipes/reloads', async () => {
-    // The server clear COMMITTED (2xx) but SyncContext.clearWorkspace could not
-    // finish its local sync-state cleanup (cursor / freshness pin / mutation
-    // queue) even after its bounded retries, so it rejected with the typed
-    // WorkspaceClearCleanupError and left the poll suspended. The card must tell
-    // this apart from a pre-commit rejection: it may NOT show "couldn't delete
-    // workspace data" (the data WAS deleted server-side), and must NOT reload —
-    // a resumed poll could re-push the still-queued mutations.
+    // The server clear committed (2xx) but SyncContext.clearWorkspace could not finish its local sync-state cleanup even after bounded retries, so it rejected with the typed WorkspaceClearCleanupError and left the poll suspended. The card must tell this apart from a pre-commit rejection: no "couldn't delete workspace data" (it was deleted server-side), and no reload, since a resumed poll could re-push the still-queued mutations.
     clearWorkspaceMock.mockRejectedValue(
       new WorkspaceClearCleanupError({ ok: true, historyErased: true }),
     );
     const { clearAllStores } = await import('../db/store');
     await openConfirmDialog();
     fireEvent.click(screen.getByRole('button', { name: /Delete everything/i }));
-    // Honest recovery copy (server committed, local cleanup couldn't finish).
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
         /couldn't finish clearing it from this device/i,
       ),
     );
-    // NOT the pre-commit "couldn't delete workspace data" copy.
     expect(screen.queryByText(/couldn't delete workspace data/i)).toBeNull();
-    // The card never reaches its own post-commit residue wipe (clearWorkspace
-    // threw), and must not silently reload into the non-wiping bootstrap path.
     expect(clearAllStores).not.toHaveBeenCalled();
     expect(window.location.reload).not.toHaveBeenCalled();
     expect(sessionStorage.getItem('suppressDemoModal')).toBeNull();
-    // Delete button re-enabled so the user can press Delete again to retry.
     expect(
       screen.getByRole('button', { name: /Delete workspace data/i }),
     ).toBeEnabled();
@@ -863,24 +765,21 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
 
   it('the counts + erase-history confirm dialog has no a11y violations', async () => {
     await openConfirmDialog();
-    // The dialog + its React Aria checkbox are portaled to document.body.
+    // The dialog and its React Aria checkbox are portaled to document.body.
     await expectNoA11yViolations(document.body);
   });
 
   it('after a historyErased:false reload, "Try erasing backups again" runs a PURGE-ONLY clear (no sweep, no local wipe)', async () => {
     // Simulate the post-reload mount: the latch is present.
     sessionStorage.setItem(WORKSPACE_HISTORY_NOT_ERASED_KEY, '1');
-    // The retry purge succeeds this time (historyErased:true), clearing the banner.
     clearWorkspaceMock.mockResolvedValue({ ok: true, historyErased: true });
     const verifyPassword = vi.fn().mockResolvedValue(undefined);
     const { clearAllStores } = await import('../db/store');
     renderPage({ verifyPassword });
-    // The banner surfaces, offering the retry.
     const retryBtn = await screen.findByRole('button', {
       name: /Try erasing backups again/i,
     });
     fireEvent.click(retryBtn);
-    // Password re-auth, then the purge-only retry.
     await waitFor(() =>
       expect(screen.getByText(/Confirm with your password/i)).toBeInTheDocument(),
     );
@@ -895,11 +794,9 @@ describe('WorkspacePage Workspace tools — Delete workspace data', () => {
         purgeHistoryOnly: true,
       }),
     );
-    // The purge-only retry must NOT sweep local data — guards the data loss a
-    // full-clear retry would cause to resumed post-reload work.
+    // The purge-only retry must not sweep local data, which a full-clear retry would, losing resumed post-reload work.
     expect(clearAllStores).not.toHaveBeenCalled();
     expect(window.location.reload).not.toHaveBeenCalled();
-    // Success message, banner cleared.
     await waitFor(() =>
       expect(screen.getByText(/backup history was erased/i)).toBeInTheDocument(),
     );
@@ -914,9 +811,7 @@ describe('WorkspacePage Workspace tools — Clear data on this device', () => {
     const { clearAllLocalData } = await import('../lib/local-data');
     (clearAllLocalData as any).mockReset();
     (clearAllLocalData as any).mockResolvedValue(undefined);
-    // jsdom no-ops reload() without a spy. Mock it (idiom from
-    // VersionBanner.test.tsx / ErrorBoundary.test.tsx) so we can assert
-    // the hard reload fires last.
+    // jsdom no-ops reload() without a spy; mock it so the hard reload firing last is assertable.
     originalLocation = window.location;
     Object.defineProperty(window, 'location', {
       configurable: true,
@@ -966,7 +861,6 @@ describe('WorkspacePage Workspace tools — Clear data on this device', () => {
     await waitFor(() => expect(screen.getByRole('alertdialog')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Clear and sign out' }));
     await waitFor(() => expect(window.location.reload).toHaveBeenCalled());
-    // Full wipe — no args (deviceId included).
     expect(clearAllLocalData).toHaveBeenCalledWith();
     expect(signOutForDeviceClear).toHaveBeenCalled();
     expect(order).toEqual(['signOut', 'clear', 'reload']);
@@ -986,8 +880,7 @@ describe('WorkspacePage Workspace tools — Clear data on this device', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear and sign out' }));
 
     const alert = await screen.findByRole('alert');
-    // Names the failure and points to the browser's own site-data settings —
-    // bind to that meaning, not to one exact sentence.
+    // Bind to the meaning (names the failure, points to the browser's site-data settings), not one exact sentence.
     expect(alert).toHaveTextContent(/We couldn't reach the server/i);
     expect(alert).toHaveTextContent(/still saved in this browser/i);
     expect(alert).toHaveTextContent(/browser's settings/i);
@@ -1027,7 +920,6 @@ describe('WorkspacePage Workspace tools — Clear data on this device', () => {
     await waitFor(() => expect(screen.getByText(/Couldn't clear data on this device: boom/)).toBeInTheDocument());
     expect(clearAllLocalData).not.toHaveBeenCalled();
     expect(window.location.reload).not.toHaveBeenCalled();
-    // The button is usable again — not stranded in the clearing state.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Clear data on this device' })).not.toBeDisabled(),
     );
@@ -1053,14 +945,12 @@ describe('WorkspacePage Workspace tools — Clear data on this device', () => {
 describe('WorkspacePage Workspace tools — Reload from server', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    // `clearAllMocks` wipes the resolved value too — restore the
-    // success default; per-test overrides use `mockResolvedValueOnce`.
+    // `clearAllMocks` wipes the resolved value too; restore the success default, per-test overrides use `mockResolvedValueOnce`.
     forceRefreshMock.mockReset();
     forceRefreshMock.mockResolvedValue({ ok: true, wiped: true });
     recacheHdkMock.mockReset();
     recacheHdkMock.mockResolvedValue(undefined);
-    // Default to no un-synced edits so the confirm reads as today; a test that
-    // exercises the warn-before-discard naming reassigns before rendering.
+    // Default to no un-synced edits; a test exercising the warn-before-discard naming reassigns before rendering.
     pendingMutationsMock = [];
     conflictMutationsMock = [];
     failedErrorMutationsMock = [];
@@ -1107,10 +997,7 @@ describe('WorkspacePage Workspace tools — Reload from server', () => {
     renderPage();
     await openFullSyncConfirm();
     const dialog = screen.getByRole('alertdialog');
-    // The confirm now lists exactly what a Reload would drop: a count line + the
-    // per-edit "what it was" descriptor (via REASON_LABEL). The item's resolved
-    // name is asynchronous (raw-id fallback here); the count + descriptor render
-    // synchronously with the list.
+    // The confirm lists exactly what a Reload would drop: a count line and a per-edit descriptor (via REASON_LABEL); the item's resolved name is asynchronous (raw-id fallback here), while the count and descriptor render with the list.
     expect(dialog).toHaveTextContent(/1 unsynced edit on this device will be permanently lost/i);
     await waitFor(() => expect(dialog).toHaveTextContent(/changed on another device/i));
   });
@@ -1162,7 +1049,6 @@ describe('WorkspacePage Workspace tools — Reload from server', () => {
     );
     expect(clearMonteCarloCache).not.toHaveBeenCalled();
     expect(clearSelectedScenario).not.toHaveBeenCalled();
-    // Button re-enabled (not stuck on "Reloading…").
     expect(screen.getByRole('button', { name: 'Reload from server' })).not.toBeDisabled();
   });
 

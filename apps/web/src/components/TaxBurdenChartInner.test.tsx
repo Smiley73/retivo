@@ -1,9 +1,4 @@
-/**
- * Render-level test for TaxBurdenChartInner on the SVG engine — asserts
- * positive cost bars (federal tax + IRMAA surcharge) render above zero
- * and the ACA-PTC subsidy bar (stored negative) renders below zero, plus
- * theme-reactivity for all three series colors.
- */
+/** TaxBurdenChartInner: cost bars above zero, the ACA-PTC subsidy bar below zero, and theme-reactive series colours. */
 import React from 'react';
 import { fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -68,7 +63,6 @@ describe('TaxBurdenChartInner', () => {
       expect(bar.y + bar.height).toBeGreaterThan(zeroY);
     }
 
-    // Drag selection renders the zoom marquee.
     expect(
       container.querySelector('[data-testid="chart-drag-marquee"]'),
     ).not.toBeNull();
@@ -102,9 +96,6 @@ describe('TaxBurdenChartInner', () => {
 });
 
 describe('TaxBurdenChartInner — integer death-year terminal bar + marker domain', () => {
-  // Death = Dec 31 of `deathYear` (the terminal year): the death-year bar
-  // is a FULL bar at its integer year and the death marker is the integer
-  // `deathYear`, landing on the last bar — no fractional terminal bar.
   it('lands the integer death-year marker on the last (full) bar with no fractional terminal bar', () => {
     const marker = {
       fractionalYear: 2029, // integer deathYear == the last data year
@@ -120,10 +111,7 @@ describe('TaxBurdenChartInner — integer death-year terminal bar + marker domai
       renderWithTheme('light', <InnerChart rows={rows} markers={[]} />),
       'Federal income tax',
     ).at(-1)!.x;
-    // No fractional row was injected — the terminal bar stays on its
-    // integer year (same X as the no-marker layout).
     expect(withMarkerX).toBeCloseTo(noMarkerX, 5);
-    // The death marker line renders (on the last bar).
     const container = renderWithTheme(
       'light',
       <InnerChart rows={rows} markers={[marker]} />,
@@ -163,7 +151,6 @@ describe('TaxBurdenChartInner — credit applied to premiums', () => {
     expect(tip.textContent).toContain('ACA-PTC subsidy');
     expect(tip.textContent).toContain('Credit applied to premiums (part of the subsidy above)');
     expect(tip.textContent).toContain('$5,134');
-    // Left out of the net cost: the whole subsidy is the only benefit counted.
     expect(tip.textContent).toContain('Net cost');
     expect(tip.textContent).toContain('-$5,134');
   });

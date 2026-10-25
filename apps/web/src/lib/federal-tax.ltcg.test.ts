@@ -1,15 +1,6 @@
-/**
- * LTCG/QDI preferential-rate tests for the federal income tax engine.
- * Covers: stacking method, 0%/15%/20% bands, marginalLtcgRate helper.
- */
-
 import { describe, expect, it } from 'vitest';
-import { computeFederalTax, marginalLtcgRate } from './federal-tax';
+import { computeFederalTax } from './federal-tax';
 import { FEDERAL_TAX_CONFIG } from './federal-tax-config';
-
-// ---------------------------------------------------------------------------
-// LTCG stacking — ordinary income fills LTCG brackets first
-// ---------------------------------------------------------------------------
 
 describe('LTCG stacking', () => {
   it('should_apply_0pct_ltcg_rate_when_stacked_income_below_threshold_single_2025', () => {
@@ -82,75 +73,7 @@ describe('LTCG stacking', () => {
     expect(result.ltcgTax).toBe(0);
     expect(result.marginalLtcgRate).toBe(0);
   });
-
-  it('should_include_ltcg_in_total_tax', () => {
-    const result = computeFederalTax(
-      { year: 2025, filingStatus: 'Single', ordinaryIncome: 80000, ltcgAndQdi: 5000 },
-      FEDERAL_TAX_CONFIG,
-    );
-    expect(result.totalTax).toBe(result.ordinaryTax + result.ltcgTax + result.niitTax);
-  });
 });
-
-// ---------------------------------------------------------------------------
-// marginalLtcgRate standalone helper
-// ---------------------------------------------------------------------------
-
-describe('marginalLtcgRate helper', () => {
-  it('should_return_0pct_for_total_taxable_income_below_0pct_threshold', () => {
-    // Single 2025: 0% floor is 0 (first bracket), 15% starts at $48,350
-    // Below $48,350 of total taxable → 0%
-    const rate = marginalLtcgRate(2025, 'Single', 30000, FEDERAL_TAX_CONFIG);
-    expect(rate).toBe(0);
-  });
-
-  it('should_return_15pct_for_total_taxable_income_in_15pct_band_single_2025', () => {
-    // $48,350–$533,400 → 15%
-    const rate = marginalLtcgRate(2025, 'Single', 100000, FEDERAL_TAX_CONFIG);
-    expect(rate).toBe(0.15);
-  });
-
-  it('should_return_20pct_for_total_taxable_income_above_20pct_threshold_single_2025', () => {
-    // Above $533,400 → 20%
-    const rate = marginalLtcgRate(2025, 'Single', 600000, FEDERAL_TAX_CONFIG);
-    expect(rate).toBe(0.20);
-  });
-
-  it('should_return_0pct_for_mfj_below_threshold', () => {
-    // MFJ 2025: 0% up to $96,700
-    const rate = marginalLtcgRate(2025, 'MFJ', 50000, FEDERAL_TAX_CONFIG);
-    expect(rate).toBe(0);
-  });
-
-  it('should_return_15pct_for_mfj_in_15pct_band', () => {
-    // MFJ 2025: 15% from $96,700
-    const rate = marginalLtcgRate(2025, 'MFJ', 200000, FEDERAL_TAX_CONFIG);
-    expect(rate).toBe(0.15);
-  });
-
-  it('should_return_0_for_zero_income', () => {
-    const rate = marginalLtcgRate(2025, 'Single', 0, FEDERAL_TAX_CONFIG);
-    expect(rate).toBe(0);
-  });
-
-  it('should_return_0_when_no_ltcg', () => {
-    // marginalLtcgRate on 0 ltcg should be 0
-    const result = computeFederalTax(
-      { year: 2025, filingStatus: 'Single', ordinaryIncome: 200000, ltcgAndQdi: 0 },
-      FEDERAL_TAX_CONFIG,
-    );
-    expect(result.marginalLtcgRate).toBe(0);
-  });
-
-  it('should_return_0_when_standalone_total_taxable_income_is_negative', () => {
-    // Negative totalTaxableIncome should return 0
-    expect(marginalLtcgRate(2025, 'Single', -1000, FEDERAL_TAX_CONFIG)).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// IRS Schedule D Worksheet — unused deduction absorbs LTCG
-// ---------------------------------------------------------------------------
 
 describe('unused deduction against LTCG (Schedule D)', () => {
   it('should_apply_unused_deduction_against_ltcg_when_ordinary_below_deduction', () => {
@@ -176,19 +99,17 @@ describe('unused deduction against LTCG (Schedule D)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2026 LTCG rates are unchanged by TCJA sunset
-// ---------------------------------------------------------------------------
-
-describe('2026 LTCG rates', () => {
-  it('should_keep_15pct_ltcg_rate_in_2026', () => {
-    // LTCG rates are not part of the TCJA rate sunset — should still be 15%
-    const rate = marginalLtcgRate(2026, 'Single', 100000, FEDERAL_TAX_CONFIG);
-    expect(rate).toBe(0.15);
-  });
-
-  it('should_keep_0pct_ltcg_rate_in_2026_below_threshold', () => {
-    const rate = marginalLtcgRate(2026, 'Single', 20000, FEDERAL_TAX_CONFIG);
-    expect(rate).toBe(0);
+describe('marginal LTCG rate', () => {
+  it.each([
+    [2025, 'Single', 40000, 10000, 0],
+    [2025, 'Single', 80000, 5000, 0.15],
+    [2025, 'Single', 600000, 20000, 0.2],
+    [2025, 'MFJ', 60000, 5000, 0],
+    [2025, 'MFJ', 100000, 40000, 0.15],
+    [2026, 'Single', 100000, 10000, 0.15],
+    [2026, 'Single', 20000, 5000, 0],
+  ] as const)('%i %s with ordinary %i and LTCG %i has marginal LTCG rate %f', (year, filingStatus, ordinaryIncome, ltcgAndQdi, rate) => {
+    const result = computeFederalTax({ year, filingStatus, ordinaryIncome, ltcgAndQdi }, FEDERAL_TAX_CONFIG);
+    expect(result.marginalLtcgRate).toBe(rate);
   });
 });

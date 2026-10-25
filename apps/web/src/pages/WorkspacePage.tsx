@@ -1,13 +1,4 @@
-/**
- * Workspace settings view (Settings → Workspace). Route shell + card layout
- * only; each settings card is its own component (see the `*Card` siblings in
- * this directory). The page owns the top-of-page error notice slot and the
- * paired-card grid; behavior lives in the cards.
- *
- * Hosts the data + workspace cards: the Data card (export / import / restore)
- * and the Workspace tools card (load demo / reload / clear / delete workspace).
- * Credential + account cards live on the Security page.
- */
+/** Workspace settings view: route shell and card layout (Data, Workspace tools, Diagnostics). It owns the top-of-page error slot and the paired-card grid; behavior lives in the cards. */
 import React, { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { Alert } from '../components/Alert';
@@ -20,8 +11,6 @@ import { DiagnosticsCard } from './DiagnosticsCard';
 export const WorkspacePage: React.FC = () => {
   const { me, householdId } = useAuth();
 
-  // Top-of-page error notice, surfaced by the Data card's flows. Kept on the
-  // page so it renders above the card rows.
   const [error, setError] = useState<string | null>(null);
 
   if (!me) return null;
@@ -48,8 +37,6 @@ export const WorkspacePage: React.FC = () => {
         />
       </CardPair>
 
-      {/* Second row: the Diagnostics card mounts in the left column;
-          the right column is intentionally empty for now. */}
       <CardPair>
         <DiagnosticsCard householdId={householdId} email={email} />
       </CardPair>

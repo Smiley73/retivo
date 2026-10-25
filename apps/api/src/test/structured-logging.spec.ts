@@ -1,19 +1,5 @@
-/**
- * Deployed-shape integration test for the Nest/Pino service-log contract.
- *
- * Production evidence showed service-level `warn`/`error` markers never reached
- * CloudWatch in the pino JSON shape the metric filters matched on. This test
- * boots the REAL Lambda app via `createApp()` (no SSM), then logs through a
- * `new Logger(name)` instance from `@nestjs/common` — the exact bridge every
- * service uses (`new Logger(ClassName.name)` -> `app.useLogger(app.get(Logger))`)
- * — and asserts the emitted stdout line is Lambda-compatible pino JSON with a
- * string `msg`, a severity, safe context, and the `[REDACTED]` censor applied
- * to every newly-redacted sensitive field family.
- *
- * `LOG_LEVEL` is forced to `info` BEFORE `../lambda.js` is dynamically imported,
- * so `logger.module.ts` is evaluated after the override (a static top-level
- * import would lock in jest.setup.ts's `LOG_LEVEL=silent`).
- */
+// Deployed-shape test of the Nest/Pino service-log contract: boots the real Lambda app via createApp() (no SSM), logs through a `new Logger(name)` and asserts a Lambda-compatible pino JSON line with a string `msg`, a severity, safe context and the `[REDACTED]` censor.
+// LOG_LEVEL is forced to info before ../lambda.js is dynamically imported, since a static import would lock in jest.setup.ts's silent level.
 import 'reflect-metadata';
 import fs from 'node:fs';
 import { Logger } from '@nestjs/common';
@@ -39,12 +25,8 @@ interface CapturedLog {
 
 function captureStdout(): { lines: CapturedLog[]; restore: () => void } {
   const lines: CapturedLog[] = [];
-  // The synchronous fd-1 destination writes with `fs.writeSync(1, ...)` (see
-  // logger.module.ts `createSyncStdoutDestination`), so it bypasses
-  // `process.stdout.write` — capture at the `fs.writeSync` layer for fd 1 and
-  // pass every other fd through to the real implementation. Returning the full
-  // byte length keeps SonicBoom's write accounting from looping on a perceived
-  // partial write.
+  // The synchronous fd-1 destination writes with `fs.writeSync(1, ...)`, bypassing `process.stdout.write`, so capture at that layer for fd 1 and pass
+  // other fds through; returning the full byte length keeps SonicBoom from looping on a perceived partial write.
   const realWriteSync = fs.writeSync.bind(fs);
   const spy = jest.spyOn(fs, 'writeSync').mockImplementation(((
     fd: number,
@@ -56,7 +38,6 @@ function captureStdout(): { lines: CapturedLog[]; restore: () => void } {
       try {
         lines.push({ raw, json: JSON.parse(raw) as Record<string, unknown> });
       } catch {
-        // Non-JSON stdout line (should not happen for pino) — record raw only.
         lines.push({ raw, json: {} });
       }
       return Buffer.byteLength(raw);
@@ -70,10 +51,7 @@ describe('structured logging — deployed Nest/Pino service-log contract', () =>
   let app: INestApplication;
 
   beforeAll(async () => {
-    // Create the emulator tables/bucket the AppModule's onApplicationBootstrap
-    // hooks (e.g. legal-document registration) write to — mirrors
-    // test-helpers.bootstrapTestApp. Dynamically imported after the LOG_LEVEL
-    // override above, alongside lambda.js.
+    // Creates the emulator tables and bucket that AppModule's bootstrap hooks write to, imported dynamically after the LOG_LEVEL override.
     const { ensureLocalAwsResources } = await import('../aws/local-bootstrap.js');
     const { validateEnv } = await import('../common/env.config.js');
     await ensureLocalAwsResources(validateEnv());
@@ -101,8 +79,7 @@ describe('structured logging — deployed Nest/Pino service-log contract', () =>
   it('emits a Lambda-compatible pino JSON line with msg + severity + context', () => {
     const cap = captureStdout();
     try {
-      // Object-first form so structured fields land in the JSON record (a
-      // string-first message drops trailing objects as interpolation args).
+      // Object-first form, so structured fields land in the JSON record (a string-first message drops trailing objects as interpolation args).
       new Logger('StructuredLoggingSpec').warn(
         { userId: 'user-visible-id' },
         'security_event_observed',
@@ -114,12 +91,9 @@ describe('structured logging — deployed Nest/Pino service-log contract', () =>
       (l) => l.json.msg === 'security_event_observed',
     );
     expect(line).toBeDefined();
-    // Single JSON object per line (Lambda/CloudWatch splits on newline).
     expect(line!.raw.endsWith('\n')).toBe(true);
-    // pino severity: numeric `level` (30 = info, 40 = warn, 50 = error).
     expect(typeof line!.json.level).toBe('number');
     expect(line!.json.level).toBe(40);
-    // Context is preserved and unredacted (internal opaque id, not a secret).
     expect(line!.json.context).toBe('StructuredLoggingSpec');
     expect(line!.json.userId).toBe('user-visible-id');
     expect(typeof line!.json.msg).toBe('string');
@@ -160,7 +134,6 @@ describe('structured logging — deployed Nest/Pino service-log contract', () =>
     ]) {
       expect(line!.json[field]).toBe('[REDACTED]');
     }
-    // Raw secret/PII values must be nowhere in the serialized line.
     expect(line!.raw).not.toContain('victim@example.com');
     expect(line!.raw).not.toContain('JBSWY3DPEHPK3PXP');
     expect(line!.raw).not.toContain('top-secret-value');

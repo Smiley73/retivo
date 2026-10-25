@@ -1,37 +1,18 @@
 /**
- * RMD Uniform Lifetime Table calibration seed.
- *
- * Source: IRS Publication 590-B, Appendix B, Table III (Uniform Lifetime).
- * Revision: Treasury Regulation TD 9930, effective 2022-01-01, still in force.
- * Ages covered: 73–120 (73 = minimum SECURE 2.0 trigger age; 120 = IRS cap).
- * Consumer: apps/web/src/lib/rmd.ts
+ * RMD Uniform Lifetime Table, ages 73 (SECURE 2.0 trigger age) to 120: IRS Pub 590-B Appendix B
+ * Table III, Treasury Regulation TD 9930 effective 2022-01-01. Refresh: docs/yearly-tax-refresh.md.
  */
 
 import type { CalibrationSnapshot } from './calibration';
 
 /**
- * Payload T for `CalibrationSnapshot<RmdTable>`.
- * Maps integer owner age (attained by Dec 31 of the RMD year) to the
- * IRS Pub 590-B Appendix B Table III (Uniform Lifetime) divisor.
- * Ages stored: 73–120 inclusive (73 = minimum trigger age under SECURE 2.0).
- *
- * Defined here (the leaf calibration-data module, no internal imports) rather
- * than in `rmd.ts` so both `rmd.ts` and `rmd-life-expectancy-tables.ts` can
- * depend on it without a cycle; `rmd.ts` re-exports it for existing callers.
+ * Maps attained age (by Dec 31 of the RMD year) to the Uniform Lifetime divisor. Defined here, the
+ * leaf calibration module, so rmd.ts and rmd-life-expectancy-tables.ts share it without a cycle.
  */
 export interface RmdTable {
   readonly uniformLifetime: Readonly<Record<number, number>>;
 }
 
-/**
- * IRS Pub 590-B Appendix B Table III — Uniform Lifetime Table.
- * One snapshot entry (`2024`) covers all tax years 2024+; the engine uses
- * clamp-to-latest resolution, so this entry applies until a new revision is
- * published and added here.
- *
- * Add a new year-keyed entry when the IRS publishes a revised Uniform Lifetime
- * Table. Update `metadata.asOfDate` at the same time.
- */
 export const RMD_DIVISORS: CalibrationSnapshot<RmdTable> = {
   values: {
     2024: {
@@ -96,29 +77,16 @@ export const RMD_DIVISORS: CalibrationSnapshot<RmdTable> = {
   },
 } as const;
 
-// ---------------------------------------------------------------------------
-// Shared table helpers (defined here, the leaf module, so both `rmd.ts` and
-// `rmd-life-expectancy-tables.ts` reuse ONE implementation without an import
-// cycle).
-// ---------------------------------------------------------------------------
-
-/** Clamp an attained age into `[minAge, 120]` (IRS "age 120 and older"
- *  convention). The single shared implementation for every RMD table lookup. */
+/** Clamps an attained age into `[minAge, 120]` (IRS "age 120 and older"). */
 export function clampAge(age: number, minAge: number): number {
   return Math.max(minAge, Math.min(120, age));
 }
 
-/** Sorted-numeric-year-keys cache per snapshot (only the sort is memoised; the
- *  linear clamp-to-latest scan still runs each call). Keyed by `object` so one
- *  WeakMap serves every `resolveSnapshotValueForYear<T>` instantiation. */
 const SNAPSHOT_YEAR_KEYS_CACHE = new WeakMap<object, number[]>();
 
 /**
- * Resolve a `CalibrationSnapshot` entry for `taxYear` via clamp-to-latest: the
- * value at the largest year-key ≤ taxYear. Returns `undefined` when the snapshot
- * has no key ≤ taxYear (empty snapshot, or a taxYear below every key) rather than
- * throwing — the single shared clamp-to-latest scan. Callers that need a throwing
- * miss (e.g. `rmd.ts`'s `UnsupportedTaxYearError`) wrap the `undefined` return.
+ * Resolves a snapshot entry by clamp-to-latest: the value at the largest year key <= `taxYear`, or
+ * `undefined` when there is none (callers that need a throw wrap it).
  */
 export function resolveSnapshotValueForYear<T>(
   snapshot: CalibrationSnapshot<T>,

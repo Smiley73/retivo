@@ -1,60 +1,5 @@
-// Least-privilege IAM roles (the role scopes are also listed in AGENTS.md →
-// "Project-specific security"):
-//   - api-lambda-role: per-table actions on every named table; s3
-//     GetObject on snapshot objects (read) + PutObject on snapshot
-//     objects (RestoreService mints a fresh restored snapshot at a
-//     current timestamp so the janitor's newest-N retention never
-//     deletes the live WorkspaceMeta pointer) +
-//     GetBucketLocation on the bucket (the /health/dependencies liveness
-//     probe) + bucket-wide ListBucket (the GET /sync/snapshots
-//     self-service restore listing — SnapshotsService.list enforces the
-//     per-household `${householdId}/` prefix at the code layer, so the
-//     bucket-level grant cannot enumerate cross-household; IAM cannot scope
-//     ListBucket to a per-caller prefix) — bucket-wide DeleteObject stays
-//     withheld (PutObject is object-scoped only; the account-deletion
-//     bulk purge stays in the dedicated snapshot-purge Lambda);
-//     lambda:InvokeFunction on the
-//     snapshot-purge Lambda only; ssm:GetParameter on auth/edge/SES
-//     paths; ses:SendEmail. BatchWriteItem on MutationLog,
-//     IdempotencyKey, AggregateVersion, DeviceRegistry is allowed only
-//     for the shared household-data sweep (HouseholdSweepService)
-//     used by `DELETE /auth/account`,
-//     `POST /auth/encrypted-workspace-reset`, and
-//     `POST /sync/restore` (RestoreService) — no
-//     other endpoint may use it. GetItem/PutItem/Query/UpdateItem/DeleteItem
-//     on HouseholdKeyEnvelope (zero-knowledge key slots) —
-//     api role ONLY; the compactor must not see wrapped key material.
-//     Point-ops (Get/Put/Update/Delete) on UserMfa + MfaEmailOtp, and the
-//     same point-ops PLUS Query on TrustedDevice (enforced MFA) —
-//     api role ONLY (compactor/janitor get none of the MFA
-//     tables), mirroring the HouseholdKeyEnvelope isolation boundary; no
-//     Scan and no BatchWriteItem on any MFA table (there is no
-//     `TransactWriteItems` IAM action to withhold; a transaction would
-//     ride the per-item actions above). NO dynamodb:* blanket.
-//   - compactor-lambda-role: Query + BatchWriteItem on MutationLog;
-//     GetItem + UpdateItem on WorkspaceMeta; GetObject + PutObject on
-//     snapshots. NO access to any auth table.
-//   - janitor-lambda-role: ListBucket + DeleteObject on snapshots only.
-//     No DynamoDB / SSM / SES. The janitor only enforces snapshot
-//     retention — it never reads or writes the sync tables.
-//   - snapshot-purge-lambda-role: ListBucket + DeleteObject on snapshots
-//     only (mirrors janitor). Used by the dedicated account-deletion
-//     snapshot-purge Lambda — the only path that bulk-deletes a
-//     household's S3 snapshots, isolated out of the api role.
-//   - probe-lambda-role: basic Lambda execution + logs only. The
-//     health-check probe makes an outbound HTTPS fetch to the public
-//     CloudFront /health endpoint and emits an EMF metric to stdout — it
-//     touches no DynamoDB, S3, SSM, or SES.
-//   - backup-role: AWS Backup SERVICE role (assumed by backup.amazonaws.com)
-//     for the immutable vault. Backup-only managed policies; no
-//     backup:Delete*/Disable* so it cannot weaken the GOVERNANCE Vault Lock.
-//   - backup-restore-role: SEPARATE restore-only role, assumed only
-//     during a restore drill/incident. Restore-only managed policies; also no
-//     backup:Delete*/Disable*. Both roles are created UNCONDITIONALLY on every
-//     stack (createRoles runs from index.ts regardless of enableBackups) but
-//     are inert/unused on a stack without a Backup Plan (enableBackups=false) —
-//     only the vault/plan/selection/RegionSettings/alarms are prod-gated. No
-//     EXISTING role gains AWS Backup delete/bypass.
+// Per-stack least-privilege IAM roles; the scope of each is in AGENTS.md "IAM scoping matters".
+// Every grant is enumerated: no `dynamodb:*`, no `*` resources except SES SendEmail.
 
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
@@ -65,11 +10,7 @@ interface IamOpts {
   readonly tables: Tables;
   readonly snapshotsBucketArn: pulumi.Output<string>;
   readonly ssmParameterArns: pulumi.Output<string[]>;
-  /**
-   * Optional permissions-boundary ARN stamped on every role here. For accounts
-   * whose policy requires every created role to carry a boundary; unset by
-   * default.
-   */
+  /** Permissions-boundary ARN stamped on every role, for accounts that require one. */
   readonly permissionsBoundaryArn?: string;
 }
 
@@ -94,9 +35,7 @@ const lambdaAssumeRolePolicy = aws.iam.getPolicyDocumentOutput({
   ],
 });
 
-// AWS Backup service principal assume-role doc. The shared
-// lambdaAssumeRolePolicy above hardcodes lambda.amazonaws.com and cannot be
-// reused for the backup + restore roles.
+// The backup roles trust backup.amazonaws.com; lambdaAssumeRolePolicy hardcodes lambda.amazonaws.com.
 const backupAssumeRolePolicy = aws.iam.getPolicyDocumentOutput({
   statements: [
     {
@@ -116,9 +55,7 @@ export function createRoles(opts: IamOpts): Roles {
     permissionsBoundaryArn,
   } = opts;
 
-  // Used to build the AWS-managed SSM KMS alias ARN for the api role's
-  // `kms:Decrypt` statement. Fetching the caller
-  // identity is a control-plane STS call resolved once at preview/up time.
+  // Builds the AWS-managed SSM KMS alias ARN for the api role's `kms:Decrypt`.
   const callerIdentity = aws.getCallerIdentityOutput({});
 
   // ---------------------------------------------------------------- api role
@@ -130,14 +67,11 @@ export function createRoles(opts: IamOpts): Roles {
       "Runtime role for the api Lambda. Per-table actions; BatchWriteItem on MutationLog/IdempotencyKey/AggregateVersion/DeviceRegistry is scoped to the shared household-data sweep (HouseholdSweepService) used by DELETE /auth/account, POST /auth/encrypted-workspace-reset, and POST /sync/restore (RestoreService).",
   });
 
-  // CloudWatch Logs.
   new aws.iam.RolePolicyAttachment(`${namePrefix}-api-logs`, {
     role: apiRole.name,
     policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
   });
 
-  // Per-table actions for tables the api Lambda may write to.
-  // Explicit enumeration — no `*` resources, no `dynamodb:*`.
   const apiTableArns: pulumi.Output<string>[] = [
     tables.workspaceMeta.arn,
     tables.mutationLog.arn, // intentionally no BatchWriteItem here
@@ -157,13 +91,9 @@ export function createRoles(opts: IamOpts): Roles {
     tables.signupApproval.arn,
   ];
 
-  // The User table's GSI also needs its ARN listed (DynamoDB requires this
-  // separately from the base table for Query-on-GSI).
+  // DynamoDB requires GSI ARNs to be listed separately from the base table.
   const apiGsiArns: pulumi.Output<string>[] = [
     pulumi.interpolate`${tables.user.arn}/index/EmailIndex`,
-    // RevokedToken's `UserIndex`: a Query-on-GSI read reaching a user's own
-    // revoked/denylisted-token rows for the account export. It adds no new
-    // action name to the api policy.
     pulumi.interpolate`${tables.revokedToken.arn}/index/UserIndex`,
   ];
 
@@ -172,12 +102,8 @@ export function createRoles(opts: IamOpts): Roles {
       {
         sid: "DynamoTableActions",
         effect: "Allow",
-        // No `dynamodb:TransactWriteItems` / `TransactGetItems` action is
-        // granted or needed: AWS's service-authorization catalog has no
-        // such action — a DynamoDB transaction is authorized by the real
-        // per-item operations below (Put/Update/Delete/ConditionCheck), which
-        // this statement already grants. The former inert strings were removed
-        // with no change to effective permissions.
+        // No `dynamodb:TransactWriteItems` / `TransactGetItems` IAM action exists; a transaction is
+        // authorized by the per-item actions below.
         actions: [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
@@ -185,26 +111,15 @@ export function createRoles(opts: IamOpts): Roles {
           "dynamodb:DeleteItem",
           "dynamodb:Query",
           "dynamodb:ConditionCheckItem",
-          // Read-only metadata: the /health endpoint runs DescribeTable
-          // against the User table to verify reachability. Cheap, scoped
-          // to the same resources as the data-plane actions.
+          // /health runs DescribeTable on the User table.
           "dynamodb:DescribeTable",
         ],
         resources: pulumi.all([...apiTableArns, ...apiGsiArns]).apply((arns) => arns),
       },
       {
-        // Scan is intentionally narrowed so a
-        // compromised dependency cannot enumerate the credential, refresh,
-        // revoked, or passkey tables. The four tables below are the only
-        // legitimate Scan callers:
-        //   - User: UsersRepository.hasAnyUser (setup-status redirect).
-        //   - IdempotencyKey: shared household-data sweep (account deletion +
-        //     encrypted-workspace reset), via HouseholdSweepService — no GSI
-        //     on householdId.
-        //   - EmailVerification, SignupApproval: account-deletion auth-state
-        //     sweep only (DeleteAccountService.sweepAuthState; the
-        //     encrypted-workspace reset never touches these — it only calls
-        //     HouseholdSweepService.revokeAllSessions + .sweepHouseholdData).
+        // Scan only where a caller needs it, so a compromised dependency cannot enumerate the
+        // credential, refresh, revoked or passkey tables. Callers: User (hasAnyUser), IdempotencyKey (the
+        // household sweep), EmailVerification and SignupApproval (the account-deletion auth-state sweep).
         sid: "ScanLimitedTables",
         effect: "Allow",
         actions: ["dynamodb:Scan"],
@@ -216,16 +131,8 @@ export function createRoles(opts: IamOpts): Roles {
         ],
       },
       {
-        // Scoped to the shared household-data sweep (HouseholdSweepService)
-        // — the audited sync-row sweep that serves
-        // `DELETE /auth/account`, `POST /auth/encrypted-workspace-reset`,
-        // and `POST /sync/restore` (RestoreService — the self-service
-        // snapshot restore, the third authorised consumer). DeviceRegistry
-        // is included because `sweepHouseholdData` calls
-        // `DeviceRegistryRepository.deleteAllForHousehold` (a BatchWriteItem)
-        // from these flows. See AGENTS.md → "Project-specific security" (IAM scoping).
-        // Adding BatchWriteItem on any other table or invoking it from any
-        // other code path needs an explicit scope-change proposal.
+        // BatchWriteItem for the household sweep only (HouseholdSweepService); any other table or
+        // caller needs a scope-change proposal.
         sid: "HouseholdSweepBatchWrites",
         effect: "Allow",
         actions: ["dynamodb:BatchWriteItem"],
@@ -237,26 +144,9 @@ export function createRoles(opts: IamOpts): Roles {
         ],
       },
       {
-        // Zero-knowledge key envelopes. Granted to the api
-        // role ONLY — the compactor role must never touch this table so
-        // wrapped key material stays outside the snapshot-compaction
-        // privilege boundary. Narrow action set (no BatchWriteItem, no Scan).
-        // The controller applies the slot write + the envelope-set meta
-        // bump as ONE atomic single-table `TransactWriteItems`; that
-        // transaction adds NO IAM action — it is authorized by the per-item
-        // `PutItem`/`UpdateItem`/`DeleteItem` actions below (there is no
-        // `dynamodb:TransactWriteItems` action to grant). It also does point
-        // reads/writes + a Query by householdId; the deleteAllForHousehold
-        // sweep deliberately Query-then-individual-DeleteItem loops
-        // (NOT BatchWriteItem) so it stays inside this grant — no widening.
-        // `dynamodb:ConditionCheckItem`:
-        // the credential-only change-password commit for a server-confirmed
-        // no-slot household asserts, as a ConditionCheck INSIDE that same
-        // transaction, that no `password`-type row exists at the canonical
-        // slot id on this table — never as a preceding read (the household
-        // could otherwise acquire a slot between the check and the write).
-        // Strictly weaker than the GetItem/PutItem this statement already
-        // grants on the same table; it authorizes no new read or write.
+        // Api role only: wrapped key material stays outside the compactor's privilege boundary. The
+        // deleteAllForHousehold sweep loops Query + DeleteItem rather than BatchWriteItem to stay
+        // inside this grant. ConditionCheckItem runs inside the change-password transaction.
         sid: "HouseholdKeyEnvelopeActions",
         effect: "Allow",
         actions: [
@@ -270,20 +160,8 @@ export function createRoles(opts: IamOpts): Roles {
         resources: [tables.householdKeyEnvelope.arn],
       },
       {
-        // Enforced second-factor (MFA) — UserMfa (TOTP enrollment state) and
-        // MfaEmailOtp (live code hash). Granted to the api role
-        // ONLY (compactor/janitor never see MFA secrets) — the same
-        // isolation boundary as HouseholdKeyEnvelope. Narrow
-        // POINT-OPS only: GetItem/PutItem/UpdateItem/DeleteItem. NO Query, NO
-        // Scan, NO BatchWriteItem — every access on these two tables is keyed
-        // by userId, and the account-deletion cascade deletes by userId (a
-        // keyed delete). NOT added to apiTableArns above precisely to keep
-        // Query (and BatchWriteItem/Scan) off these secret tables. There is no
-        // `TransactWriteItems` IAM action to withhold: a transaction, if
-        // one were ever added, would be authorized by the per-item actions
-        // above — so the real boundary here is this narrow point-ops set plus
-        // api-role-only access, NOT the absence of a nonexistent grant.
-        // See AGENTS.md → "Project-specific security" (IAM scoping).
+        // Api role only. Point-ops, no Query, Scan or BatchWriteItem: access is keyed by userId.
+        // Not in apiTableArns, to keep Query off these secret tables.
         sid: "MfaSecretPointOps",
         effect: "Allow",
         actions: [
@@ -295,14 +173,8 @@ export function createRoles(opts: IamOpts): Roles {
         resources: [tables.userMfa.arn, tables.mfaEmailOtp.arn],
       },
       {
-        // Enforced second-factor (MFA) — TrustedDevice (per-device MFA-skip
-        // trust, PK userId + SK deviceId). Granted to the api role ONLY. Same
-        // point-ops as MfaSecretPointOps PLUS dynamodb:Query — listByUser and
-        // the account-deletion cascade Query by the userId PK to enumerate /
-        // delete every SK row under a user (the "manage trusted devices"
-        // listing + the cascade). NO Scan, NO BatchWriteItem (and no
-        // `TransactWriteItems` IAM action exists to grant or withhold).
-        // See AGENTS.md → "Project-specific security" (IAM scoping).
+        // Api role only. The MfaSecretPointOps set plus Query: listByUser and the account-deletion
+        // cascade enumerate a user's rows by the userId key.
         sid: "TrustedDevicePointOpsAndQuery",
         effect: "Allow",
         actions: [
@@ -315,22 +187,9 @@ export function createRoles(opts: IamOpts): Roles {
         resources: [tables.trustedDevice.arn],
       },
       {
-        // Shared, single-use WebAuthn challenge storage PLUS the shared
-        // request-throttle counter (same table, distinct `key` namespace, no
-        // new billable resource). Granted to the api role
-        // ONLY — same isolation boundary as HouseholdKeyEnvelope/
-        // MfaSecretPointOps (compactor/janitor get none of it).
-        // The passkey-challenge repository issues `PutItem` (issue/
-        // overwrite) and `DeleteItem` with `ReturnValues: ALL_OLD` (the
-        // atomic single-use consume — one item-level op, not a
-        // read-then-delete pair). `UpdateItem` was added for the throttle
-        // counter's atomic `ADD`/window-reset increment (see
-        // `ThrottleCounterRepository`) — a deliberate widening of the
-        // challenge-store-only grant, not implicitly reused from another code
-        // path (AGENTS.md). Still NO `GetItem` (neither repository has a
-        // separate read path), NO `Query`, NO `Scan`, NO `BatchWriteItem` —
-        // every access on both namespaces is a keyed point-op on `key`. See
-        // AGENTS.md → "Project-specific security" (IAM scoping).
+        // Api role only. Challenge storage and the shared request-throttle counter (UpdateItem
+        // backs its atomic increment). Keyed point-ops on `key`: no GetItem, Query, Scan or
+        // BatchWriteItem.
         sid: "PasskeyChallengeAndThrottleCounter",
         effect: "Allow",
         actions: ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:UpdateItem"],
@@ -339,20 +198,9 @@ export function createRoles(opts: IamOpts): Roles {
       {
         sid: "S3SnapshotsRead",
         effect: "Allow",
-        // GetObject reads snapshot bytes (sync bootstrap + pull + the
-        // self-service restore fetch), scoped to objects under the
-        // bucket. ListBucket backs `GET /sync/snapshots`
-        // (SnapshotsService.list) — the self-service restore listing. The
-        // snapshot-bucket list grant is deliberately BUCKET-LEVEL
-        // (resource = the bucket ARN); it CANNOT be narrowed to a
-        // household prefix via an `s3:prefix` Condition because the
-        // prefix is dynamic per caller (the authenticated householdId),
-        // so household isolation is enforced at the code layer instead —
-        // SnapshotsService.list always passes `Prefix: ${householdId}/`
-        // to ListObjectsV2. Bucket-wide DeleteObject stays withheld: the
-        // account-deletion bulk purge runs in the dedicated
-        // snapshot-purge Lambda (see snapshot-purge role below + the
-        // InvokeSnapshotPurge statement).
+        // ListBucket is bucket-wide because IAM cannot scope it to a per-caller prefix;
+        // SnapshotsService enforces the `${householdId}/` prefix. No s3:DeleteObject: purges go
+        // through the snapshot-purge Lambda.
         actions: ["s3:GetObject", "s3:ListBucket"],
         resources: [
           snapshotsBucketArn,
@@ -362,36 +210,21 @@ export function createRoles(opts: IamOpts): Roles {
       {
         sid: "S3SnapshotsWrite",
         effect: "Allow",
-        // PutObject lets RestoreService (POST /sync/restore) MINT a fresh
-        // restored snapshot at the current timestamp so the daily
-        // janitor's newest-N retention always protects the live
-        // WorkspaceMeta pointer (pointing at an old chosen key
-        // let the janitor delete the object the workspace pointed at).
-        // Scoped to the bucket-OBJECTS ARN (`/*`) only, NOT the bucket
-        // ARN — it grants object writes, never bucket-level operations.
-        // This does NOT add s3:DeleteObject: the account-deletion bulk
-        // purge stays delegated to the dedicated snapshot-purge Lambda.
+        // Object-scoped (`/*`) only, so restores can mint a fresh snapshot. No s3:DeleteObject.
         actions: ["s3:PutObject"],
         resources: [pulumi.interpolate`${snapshotsBucketArn}/*`],
       },
       {
         sid: "S3SnapshotsLocation",
         effect: "Allow",
-        // Bucket-level metadata read for the /health/dependencies
-        // liveness probe (GetBucketLocation — proves bucket reachable +
-        // credentials valid). Strictly narrower than ListBucket: it
-        // cannot enumerate or read objects, so it does not reintroduce
-        // ListBucket or DeleteObject. Resource is the bucket ARN itself
-        // (no `/*`), as GetBucketLocation acts on the bucket.
+        // Bucket-level metadata read for /health/dependencies; the resource is the bucket ARN
+        // itself.
         actions: ["s3:GetBucketLocation"],
         resources: [snapshotsBucketArn],
       },
       {
-        // The api role invokes ONLY the account-deletion snapshot-purge
-        // Lambda, synchronously (RequestResponse). Scoped to that single
-        // function ARN — derived from the stack name pattern to avoid a
-        // role↔lambda dependency cycle (the Lambda is created after the
-        // roles). See AGENTS.md → "Project-specific security" (IAM scoping).
+        // Only the snapshot-purge Lambda; its ARN is derived from the stack name to avoid a
+        // role-lambda cycle.
         sid: "InvokeSnapshotPurge",
         effect: "Allow",
         actions: ["lambda:InvokeFunction"],
@@ -406,12 +239,7 @@ export function createRoles(opts: IamOpts): Roles {
         resources: ssmParameterArns,
       },
       {
-        // Scoped to the AWS-managed SSM key alias in this account/region
-        // The alias resolves to the per-account
-        // `aws/ssm` KMS key, which is what SecureString parameters are
-        // encrypted with by default. The `kms:ViaService` condition is
-        // kept as defence-in-depth so the grant only fires when SSM is
-        // the calling service.
+        // The AWS-managed SSM key alias only, and only when SSM is the calling service.
         sid: "KmsForSsm",
         effect: "Allow",
         actions: ["kms:Decrypt"],
@@ -427,10 +255,7 @@ export function createRoles(opts: IamOpts): Roles {
         ],
       },
       {
-        // The api only calls SendEmailCommand. SendRawEmail
-        // is intentionally withheld so a compromised
-        // Lambda cannot craft arbitrary MIME messages from the verified
-        // SES domain.
+        // SendRawEmail is withheld so a compromised Lambda cannot craft arbitrary MIME messages.
         sid: "SesSendVerification",
         effect: "Allow",
         actions: ["ses:SendEmail"],
@@ -445,6 +270,7 @@ export function createRoles(opts: IamOpts): Roles {
   });
 
   // ---------------------------------------------------------- compactor role
+  // MutationLog, WorkspaceMeta and snapshots only; no auth-table access.
   const compactorRole = new aws.iam.Role(`${namePrefix}-compactor-role`, {
     name: `${namePrefix}-compactor-role`,
     assumeRolePolicy: lambdaAssumeRolePolicy.json,
@@ -500,13 +326,7 @@ export function createRoles(opts: IamOpts): Roles {
   });
 
   // ------------------------------------------------------------ janitor role
-  // The janitor enforces snapshot retention: list everything in the
-  // snapshots bucket, group by `<householdId>/` prefix, delete the
-  // ones past the configurable age + count thresholds. Deliberately
-  // narrower than the compactor role — no DynamoDB, no SSM, no
-  // PutObject. If a future feature needs the janitor to read snapshot
-  // contents (e.g. integrity checks), add `s3:GetObject` explicitly
-  // and document the reason here.
+  // Snapshot retention only: no DynamoDB, SSM or PutObject.
   const janitorRole = new aws.iam.Role(`${namePrefix}-janitor-role`, {
     name: `${namePrefix}-janitor-role`,
     assumeRolePolicy: lambdaAssumeRolePolicy.json,
@@ -540,10 +360,7 @@ export function createRoles(opts: IamOpts): Roles {
   });
 
   // ----------------------------------------------- snapshot-purge role
-  // The account-deletion snapshot-purge Lambda's role. Mirrors the
-  // janitor grant exactly: ListBucket + DeleteObject on the snapshots
-  // bucket only — no DynamoDB, SSM, SES, or PutObject. Isolating the
-  // bulk-delete here is what lets the api role drop bucket-wide delete.
+  // Same grant as the janitor; isolating bulk delete here is what lets the api role drop DeleteObject.
   const snapshotPurgeRole = new aws.iam.Role(`${namePrefix}-snapshot-purge-role`, {
     name: `${namePrefix}-snapshot-purge-role`,
     assumeRolePolicy: lambdaAssumeRolePolicy.json,
@@ -577,14 +394,8 @@ export function createRoles(opts: IamOpts): Roles {
   });
 
   // ----------------------------------------------------------- backup role
-  // The always-on AWS Backup SERVICE role. Used by the
-  // Backup Plan + Selection to copy every DynamoDB table + the S3 snapshots
-  // bucket into the GOVERNANCE-locked vault. Attaches the two backup-ONLY
-  // AWS-managed policies; NEITHER includes backup:Delete*/backup:Disable*, so
-  // the standing role cannot weaken the vault's immutability. Assumed by
-  // backup.amazonaws.com (NOT lambda). Created UNCONDITIONALLY on every stack
-  // (createRoles always runs) but inert without a Backup Plan — only the
-  // vault/plan/selection/alarms are prod-gated behind enableBackups.
+  // AWS Backup service role. Its managed policies carry no backup:Delete*/Disable*, so it cannot weaken
+  // the vault lock. Created on every stack, inert without a Backup Plan.
   const backupRole = new aws.iam.Role(`${namePrefix}-backup-role`, {
     name: `${namePrefix}-backup-role`,
     assumeRolePolicy: backupAssumeRolePolicy.json,
@@ -601,19 +412,14 @@ export function createRoles(opts: IamOpts): Roles {
 
   new aws.iam.RolePolicyAttachment(`${namePrefix}-backup-s3`, {
     role: backupRole.name,
-    // NOTE: the S3 backup/restore managed policies live at the policy ROOT
-    // (no `service-role/` path segment), unlike the DynamoDB ones above.
+    // The S3 managed policies sit at the policy root, without `service-role/`.
     policyArn:
       "arn:aws:iam::aws:policy/AWSBackupServiceRolePolicyForS3Backup",
   });
 
   // --------------------------------------------------- backup-restore role
-  // A SEPARATE restore role, assumed ONLY during a documented
-  // restore drill or incident (not standing-on). Attaches the two restore-ONLY
-  // AWS-managed policies; like the backup role, neither grants
-  // backup:Delete*/backup:Disable*, so the vault's immutability stays inspectable
-  // per-role. Splitting backup vs restore keeps the always-on role's blast
-  // radius to backup-write only.
+  // Restore-only, assumed during a restore drill or incident; kept apart so the always-on role stays
+  // backup-write only.
   const backupRestoreRole = new aws.iam.Role(`${namePrefix}-backup-restore-role`, {
     name: `${namePrefix}-backup-restore-role`,
     assumeRolePolicy: backupAssumeRolePolicy.json,
@@ -630,8 +436,7 @@ export function createRoles(opts: IamOpts): Roles {
 
   new aws.iam.RolePolicyAttachment(`${namePrefix}-backup-restore-s3`, {
     role: backupRestoreRole.name,
-    // NOTE: the S3 backup/restore managed policies live at the policy ROOT
-    // (no `service-role/` path segment), unlike the DynamoDB ones above.
+    // The S3 managed policies sit at the policy root, without `service-role/`.
     policyArn:
       "arn:aws:iam::aws:policy/AWSBackupServiceRolePolicyForS3Restore",
   });
@@ -646,15 +451,7 @@ export function createRoles(opts: IamOpts): Roles {
   };
 }
 
-/**
- * Probe Lambda's least-privilege role: basic Lambda execution + logs only.
- * Created by `createProbeLambda()` in lambda.ts (the probe Lambda itself is
- * built after the CloudFront distribution so its API_ENDPOINT is available —
- * which is outside the `createRoles()` resource graph). The probe makes
- * an outbound HTTPS fetch and emits an EMF metric to stdout; it touches no
- * DynamoDB, S3, SSM, or SES, so no policy beyond the managed basic-execution
- * attachment is needed.
- */
+/** Probe Lambda role: basic execution and logs only. Created by `createProbeLambda()` in lambda.ts. */
 export function createProbeRole(
   namePrefix: string,
   permissionsBoundaryArn?: string,

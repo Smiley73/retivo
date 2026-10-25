@@ -1,14 +1,5 @@
-/**
- * Local-dev seed integration test (`aws/local-dev-user-seed.ts`).
- *
- * Covers the seed's idempotency contract (created → exists on a re-run)
- * and
- * that the credential row it writes carries a FRESH, non-empty
- * `credentialRevision` — the seed is one of the three writers required to
- * mint one on every credential write, alongside signup and password reset.
- * A regression that stopped it from minting one would leave every local-dev
- * account permanently in the "owed" legacy-resolution state.
- */
+// The local-dev seed (aws/local-dev-user-seed.ts) is idempotent (created, then exists) and its credential row carries a fresh credentialRevision: the seed is a writer that
+// must mint one on every credential write, or every local-dev account stays in the "owed" legacy-resolution state.
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
 import { ConfigService } from '@nestjs/config';
 import { bootstrapTestApp, type TestApp } from './test-helpers.js';
@@ -37,9 +28,7 @@ describe('local-dev user seed (aws/local-dev-user-seed.ts)', () => {
     const env = validateEnv();
 
     const first = await ensureLocalDevUser(env);
-    // Another suite in this worker namespace may have already seeded the
-    // fixed LOCAL_DEV_EMAIL row; either outcome proves the writer ran once
-    // (this run or a prior one) and left a resolvable credential.
+    // Another suite in this worker may have seeded the fixed LOCAL_DEV_EMAIL row already; either outcome proves the writer ran and left a resolvable credential.
     expect(['created', 'exists']).toContain(first);
 
     const second = await ensureLocalDevUser(env);

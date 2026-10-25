@@ -1,12 +1,5 @@
-// Runtime tests for the CloudFront Function code cloudfront.ts publishes
-// (infrastructure/src/edge-functions.mjs). The generators emit JavaScript
-// SOURCE; asserting on the text would not catch a broken handler, so each
-// test compiles the generated code with `new Function` and calls the
-// resulting `handler` with a fake viewer-request event shaped like
-// CloudFront's (`{ viewer: { ip }, request: { uri, headers } }`).
-//
-// Creds-free, dependency-free (node --test, run under `pnpm test:scripts`).
-// Pattern: scripts/test/config-coverage.test.mjs.
+// Runtime tests for the CloudFront Function code in infrastructure/src/edge-functions.mjs: each test compiles the generated source
+// with `new Function` and calls `handler` with a fake viewer event, because asserting on the text would not catch a broken handler.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -63,9 +56,6 @@ test('spaRouterCode — no allowlist code is emitted when ungated', () => {
   assert.doesNotMatch(spaRouterCode(), /ALLOW|FORBIDDEN|viewer/);
 });
 
-// Byte-identical to the code cloudfront.ts inlined before the generators moved
-// here, so an ungated stack (prod) sees NO spa-router function update on the
-// first preview after this change.
 test('spaRouterCode — ungated output is byte-identical to the previously inlined function', () => {
   assert.equal(
     spaRouterCode(),
@@ -169,10 +159,7 @@ test('generated code stays well under the 10 KB CloudFront limit for a realistic
   }
 });
 
-// The generators throw for an oversized allowlist; cloudfront.ts calls them
-// before its first `new aws.*`, which is what keeps the failure ahead of any
-// resource registration (that ordering is not observable here without a
-// Pulumi runtime).
+// cloudfront.ts calls the generators before its first `new aws.*`, so the throw precedes resource registration; that ordering is not observable here.
 test('assertFunctionSize — an allowlist that pushes the code past the ceiling throws from the generator', () => {
   const huge = Array.from({ length: 600 }, (_, i) =>
     ipv4CidrToRule(`${(i % 200) + 1}.${i % 256}.${(i * 7) % 256}.0/24`),
@@ -183,9 +170,7 @@ test('assertFunctionSize — an allowlist that pushes the code past the ceiling 
   assert.throws(() => assertFunctionSize('x'.repeat(CLOUDFRONT_FUNCTION_MAX_BYTES + 1), 't'), /"t"/);
 });
 
-// Style invariant: the emitted code stays in the ES5 subset by convention
-// (cloudfront-js-2.0 does accept let/const, but the templates are kept
-// lowest-common-denominator so a runtime downgrade is never a surprise).
+// The emitted code stays ES5 by convention (cloudfront-js-2.0 accepts let/const) so a runtime downgrade is no surprise.
 test('generated code never contains the insecure unsafe-eval token or ES2015+ syntax', () => {
   for (const code of [spaRouterCode(), gatedSpaRouterCode(RULES), gateOnlyCode(RULES)]) {
     assert.doesNotMatch(code, /'unsafe-eval'/);

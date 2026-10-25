@@ -1,10 +1,4 @@
-/**
- * Tests for the device-local HDK cache. The
- * household-mismatch guard and the corrupt-bytes catch are security
- * load-bearing: a stale or unusable cached key must surface as "no cache" so
- * the caller falls back to an explicit unlock rather than trusting it. Runs
- * against a real IDB via `fake-indexeddb`.
- */
+// A stale or unusable cached key must surface as "no cache" so the caller falls back to an explicit unlock rather than trusting it.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import { cacheHdk, clearCachedHdk, loadCachedHdk } from './key-cache';
@@ -40,8 +34,7 @@ describe('key-cache', () => {
   });
 
   it('returns null without throwing when the cached bytes are corrupt', async () => {
-    // Write an entry whose `hdkExported` is not a valid raw AES-GCM key
-    // (1 byte) so the re-import in loadCachedHdk throws and is swallowed.
+    // `hdkExported` is not a valid raw AES-GCM key, so the re-import throws and is swallowed.
     await writeKeyCacheEntry({
       id: KEY_CACHE_ID,
       householdId: 'hh-1',

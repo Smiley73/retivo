@@ -1,14 +1,4 @@
-/**
- * Pure helpers that build the override-key fragments for the withdrawal
- * strategy modal's Save path.
- *
- * Each helper returns either the override key + value (to persist) OR an
- * empty object (to omit the key — so it's inherited / unaffected). The
- * modal's `onSave` spreads each fragment into a single `nextOverrides`
- * object and dispatches one `saveScenario` call. Splitting the four-way
- * conditional out of `onSave` keeps that orchestrator under the 40-line
- * function cap.
- */
+/** Pure builders for the override-key fragments of the withdrawal-strategy modal's Save; an empty fragment omits the key so it is inherited. */
 import type {
   AccountPayload,
   Aggregate,
@@ -29,10 +19,6 @@ import type {
   DraftHealthCoverageRow,
   StrategyKind,
 } from './scenario-withdrawal-strategy-shared';
-// `buildNextMagiCap` lives in the lib/ layer (shared with the Roth conversion
-// comparison page's Apply builder) so the rule has one home and that page
-// doesn't reach up into pages/ for it. Re-exported here for this module's
-// existing callers.
 export { buildNextMagiCap } from '../lib/magi-cap-persistence';
 import {
   DEFAULT_COST_BASIS_PCT,
@@ -43,9 +29,7 @@ import {
 
 type ScenarioOverrides = ScenarioPayload['overrides'];
 
-/** Strategy-kind override — kept when the user changed kind OR the scenario
- *  already had a local override (don't silently drop a pre-existing override
- *  just because the user didn't touch the picker). */
+/** Kept when the user changed the kind or the scenario already had a local override, so an untouched picker doesn't drop it. */
 export function buildNextStrategy(args: {
   strategyKind: StrategyKind;
   effective: ScenarioOverrides;
@@ -59,9 +43,7 @@ export function buildNextStrategy(args: {
     : {};
 }
 
-/** Cost-basis fraction override — same persistence rule as
- *  `buildNextStrategy` but value is converted from the UI percent
- *  (0–100, slider) to the storage fraction (0–1). */
+/** Same persistence rule as buildNextStrategy; converts the UI percent (0–100) to the storage fraction (0–1). */
 export function buildNextCostBasis(args: {
   costBasisPct: number;
   effective: ScenarioOverrides;
@@ -83,22 +65,10 @@ export function buildNextCostBasis(args: {
 }
 
 /**
- * Tax-assumptions override fragment (emergency-HSA qualified % + penalty-exempt
- * account ids). The percentage governs only EMERGENCY HSA withdrawals — modeled
- * medical-qualified withdrawals are always 100% qualified. Same persistence rule
- * as `buildNextStrategy`: persist a key when the draft differs from the
- * inherited/effective value OR the scenario already had a local override (so an
- * unrelated save never silently drops a pre-existing one). Each key is decided
- * independently — the HSA percentage and the exempt list are separate fields on
- * `ScenarioOverrides`.
- *
- * Penalty-exempt prune-on-save: an account that gets hard-deleted leaves its
- * id orphaned in the exempt list (the engine ignores unmatched ids, but the
- * cruft rides along on every re-save). Saving drops any id that no longer
- * points to a live account. The comparison prunes BOTH the draft and the
- * effective list so a purely-inherited orphan doesn't spuriously materialise a
- * child override — only a LOCAL orphan (or a real user edit) writes the key.
- */
+* Tax-assumptions fragment (emergency-HSA qualified % + penalty-exempt account ids); the percentage governs only emergency HSA withdrawals.
+* Persists a key when the draft differs from the effective value or the scenario already had a local override.
+* Ids of deleted accounts are pruned from both sides so an inherited orphan does not materialise a child override.
+*/
 export function buildNextTaxAssumptions(args: {
   hsaQualifiedPct: number;
   penaltyExemptIds: string[];
@@ -123,8 +93,6 @@ export function buildNextTaxAssumptions(args: {
     out.hsaQualifiedMedicalExpensePct = hsaQualifiedPct;
   }
 
-  // Prune ids whose account no longer exists (hard-deleted). Inactive but
-  // still-present accounts are kept — they are restorable.
   const existingIds = new Set(accounts.map((a) => a.id));
   const prunedDraft = penaltyExemptIds.filter((id) => existingIds.has(id));
   const prunedEffective = (
@@ -140,20 +108,7 @@ export function buildNextTaxAssumptions(args: {
   return out;
 }
 
-/**
- * ACA Marketplace opt-out fragment — the member ids treated as NOT on the
- * Marketplace. Same persistence rule as `buildNextTaxAssumptions`: persist the
- * key when the pruned draft differs from the inherited/effective value OR the
- * scenario already had a local override (so an unrelated save never silently
- * drops a pre-existing one). Sparse: omitted (key absent) when neither applies.
- *
- * Prune-on-save: a member that gets hard-deleted leaves its id orphaned in
- * the opt-out list. Saving drops any id that no longer points to a live member
- * (mirrors the penalty-exempt account prune). The comparison prunes BOTH the
- * draft and the effective list so a purely-inherited orphan doesn't spuriously
- * materialise a child override — only a LOCAL orphan (or a real user edit) writes
- * the key.
- */
+/** ACA Marketplace opt-out member ids: same persistence rule and both-sides prune of deleted members as buildNextTaxAssumptions. */
 export function buildNextAcaCoverage(args: {
   acaOptOutMemberIds: string[];
   effective: ScenarioOverrides;
@@ -175,24 +130,9 @@ export function buildNextAcaCoverage(args: {
 }
 
 /**
- * The monthly health facts + FPL region + annual benchmark override
- * fragment. Same persistence rule as the sibling helpers:
- * persist a key when the pruned draft differs from the inherited/effective value
- * OR the scenario already had a local override, so an unrelated save neither
- * invents a stored default nor silently drops a pre-existing one. Each key is
- * decided independently.
- *
- * Pruning (mirrors the opt-out prune):
- *  - a coverage row whose member no longer exists is dropped;
- *  - a coverage row that states NO month at all is dropped (an empty row carries
- *    no user intent and would otherwise persist as `{}`);
- *  - each month is clamped to a whole number in the statutory 0..12 range;
- *  - a benchmark row with a non-finite / negative amount or a non-integer year is
- *    dropped, later rows win for a duplicated year, and the result is sorted so
- *    the stored order is stable.
- * The comparison prunes BOTH sides so a purely-inherited orphan does not
- * spuriously materialise a child override.
- */
+* Monthly health facts, FPL region and annual benchmark overrides; same persistence rule and both-sides prune as the sibling helpers.
+* Dropped: rows for deleted members, coverage rows with no month, and benchmark rows with a bad amount or year; months clamp to 0..12; later benchmark rows win a duplicated year.
+*/
 export function buildNextHealthCoverage(args: {
   fplRegion: AcaFplRegion;
   coverageRows: readonly DraftHealthCoverageRow[];
@@ -223,12 +163,7 @@ export function buildNextHealthCoverage(args: {
     toDraftHealthRows(effective.healthCoverageMonths),
     liveIds,
   );
-  // Compare CANONICALIZED maps. `JSON.stringify` is key-insertion-order
-  // sensitive: the draft rows arrive sorted by (taxYear, memberId) while the
-  // stored map keeps its own insertion order, so a two-member household whose
-  // orders differ compared unequal and a region-only save materialised a
-  // `healthCoverageMonths` child override the "does not materialise" contract
-  // forbids.
+  // Compare canonicalized maps: JSON.stringify is insertion-order sensitive, so differing orders made a region-only save materialise a healthCoverageMonths override.
   const monthsChanged =
     canonicalCoverageJson(draftMonths) !== canonicalCoverageJson(effectiveMonths);
   if (monthsChanged || localOverrides.healthCoverageMonths !== undefined) {
@@ -246,32 +181,14 @@ export function buildNextHealthCoverage(args: {
   return out;
 }
 
-/** Clamp a stated month count to a whole number of months in [0, 12]; `null` /
- *  non-finite → absent (the projection's own timing governs that field). */
 function normalizeMonths(value: number | null): number | undefined {
   if (value === null || !Number.isFinite(value)) return undefined;
   return Math.min(12, Math.max(0, Math.floor(value)));
 }
 
-/** Build the stored `perMember` map from editor rows, dropping dead members and
- *  rows that state no month at all.
- *
- *  A duplicated (memberId, taxYear) pair is MERGED field-wise (a later
- *  row's stated count wins for that FIELD only) rather than replacing the whole
- *  earlier row. Both Add buttons seed the same default key, so adding and
- *  filling two rows for the same member/year used to discard the first
- *  silently. Merging keeps every value the user actually typed.
- *
- *  CWE-1321 — both dictionaries are built with a NULL PROTOTYPE and the
- *  member id is rejected outright when it is a dangerous key. Household member
- *  ids come from an imported workspace bundle, whose validation rejects
- *  `"__proto__"` as a KEY but permits it as an aggregate-id VALUE. With a plain
- *  `{}` accumulator, `perMember["__proto__"]` resolved to `Object.prototype`,
- *  so saving that member's coverage row wrote the tax year onto
- *  `Object.prototype` (poisoning every object in the page) and stored no own
- *  entry for the member. A null-prototype dictionary makes the write an
- *  ordinary own property; dropping the id as well keeps a poisoned key out of
- *  the persisted map entirely. */
+// Builds the stored perMember map from editor rows; a duplicated (memberId, taxYear) pair merges field-wise (later stated counts win per field).
+// CWE-1321: both dictionaries use a null prototype and a dangerous member id is dropped, because imported bundles can carry "__proto__" as an aggregate-id value
+// that on a plain {} would write onto Object.prototype.
 function buildCoverageMonths(
   rows: readonly DraftHealthCoverageRow[],
   liveIds: ReadonlySet<string>,
@@ -301,8 +218,6 @@ function buildCoverageMonths(
   return perMember;
 }
 
-/** An insertion-order-INDEPENDENT serialization of a coverage map, so
- *  two semantically identical maps always compare equal. */
 function canonicalCoverageJson(
   perMember: Record<string, Record<number, MemberCoverageMonths>>,
 ): string {
@@ -322,23 +237,8 @@ function canonicalCoverageJson(
   );
 }
 
-/**
- * Drop unusable benchmark rows, dedupe by tax year (later wins), sort ascending.
- *
- * A NON-POSITIVE price is dropped, not stored. "Add a benchmark price"
- * seeds `$0`, and every engine treats a stored override as a VERBATIM benchmark
- * (bypassing the rough age-priced fallback entirely), so an added-but-unfilled
- * row would price the household's benchmark plan at $0, floor its premium tax
- * credit to $0, and raise the funded withdrawal — a silent projection change
- * from a row the user never filled in. A household that genuinely pays nothing
- * for its benchmark plan has no Marketplace coverage to model.
- *
- * Row validity itself comes from the ONE shared
- * `storedAcaBenchmarkOverrides` reader every engine, report and UI surface uses,
- * so the editor cannot accept a row the engines would refuse (and the STORED
- * side of the change comparison is shape-checked before it is compared, since it
- * arrives from an envelope-only-validated import).
- */
+// Drops unusable benchmark rows, dedupes by tax year (later wins), sorts ascending. A non-positive price is dropped: "Add a benchmark price" seeds $0,
+// and engines treat a stored override verbatim, so an unfilled row would zero the premium tax credit. Validity comes from the shared storedAcaBenchmarkOverrides reader.
 function pruneBenchmarkRows(
   rows: unknown,
 ): { taxYear: number; annualSlcspDollars: number }[] {
@@ -351,8 +251,6 @@ function pruneBenchmarkRows(
     .sort((a, b) => a.taxYear - b.taxYear);
 }
 
-/** Order-insensitive equality for two id lists (the exempt set has no
- *  meaningful order). */
 function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(a);
@@ -360,11 +258,7 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
   return true;
 }
 
-/** MAGI-bootstrap override — the single "pre-retirement income" UI input
- *  writes BOTH lookback fields (year 0 = MAGI(ret−2), year 1 = MAGI(ret−1)) to
- *  the same value. Engine-
- *  default toggle ON deletes both keys (parent chain / engine default takes
- *  over). OFF persists the whole dollar amount into both fields. */
+/** The single pre-retirement income input writes both lookback fields; the engine-default toggle ON deletes both keys. */
 export function buildNextMagiBootstrap(args: {
   useEngineDefault: boolean;
   magiDraft: number;
@@ -398,21 +292,10 @@ function sameCustomOrder(
   return true;
 }
 
-/** Custom-order override — persist only when `customOrder` is the active
- *  kind; explicit `undefined` when not, so stale layouts don't linger.
- *  When the tier layout is inherited (no local override) and the
- *  draft still deep-equals the inherited layout, omit the key entirely so
- *  saving an unrelated change doesn't freeze the inherited layout into
- *  the child override (same pattern as `buildNextStrategy` /
- *  `buildNextCostBasis`).
- *
- *  The draft tiers are already CBP-pruned by `seedTierState`, but the
- *  inherited `effective.customDrawdownOrder` can still carry a CBP id
- *  (legacy data, or a parent saved before CBP became non-orderable). So
- *  the comparison normalises the inherited order with the SAME prune
- *  predicate (`accounts` → placeable set) before comparing: a draft that
- *  differs from the inherited order ONLY by CBP pruning counts as
- *  unchanged, so the key is omitted and inheritance is preserved. */
+/**
+* Persists only when customOrder is the active kind (explicit undefined otherwise, so stale layouts don't linger); omitted when the draft equals the inherited layout.
+* The inherited order is normalised with the same CBP/stale prune as the draft, so a CBP-only difference counts as unchanged.
+*/
 export function buildNextCustomOrder(args: {
   strategyKind: StrategyKind;
   tiers: string[][];
@@ -429,9 +312,6 @@ export function buildNextCustomOrder(args: {
     return { customDrawdownOrder: undefined };
   }
   const hadLocal = localOverrides.customDrawdownOrder !== undefined;
-  // Normalise the inherited order with the same CBP/stale prune the draft
-  // already went through (seedTierState) so a CBP-only difference is not
-  // mistaken for a user edit.
   const inheritedPruned =
     effective.customDrawdownOrder === undefined
       ? undefined

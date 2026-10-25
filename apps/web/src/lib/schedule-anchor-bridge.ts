@@ -1,28 +1,6 @@
-/**
- * Owner-aware `GlideAnchor ↔ ScheduleStart` bridge.
- *
- * The shared `<ScheduleAnchorPicker>` is typed in `GlideAnchor`, the
- * richer schedule-anchor vocabulary used by the discretionary glide.
- * Both forms' Start pickers model the narrower `ScheduleStart` (the same
- * 3 kinds: `retirementStart` / `age` / `year`). This module is the
- * single place that widens `ScheduleStart` → `GlideAnchor` inbound and
- * narrows `GlideAnchor` → `ScheduleStart` outbound, so the two forms
- * never re-implement the conversion or the owner-implicit `memberId`
- * policy.
- *
- * Owner-implicit rule (`db/types.ts` `ScheduleStart`): an
- * omitted `age.memberId` means the stream's owner. Income relies on
- * this; Expense always sets `memberId` explicitly. The bridge keeps
- * income owner-implicit by being owner-aware:
- * - Inbound: an income owner-implicit `age` resolves to `ownerRole` so
- *   the picker displays/bounds the actual owner instead of always
- *   defaulting to 'primary'.
- * - Outbound: `memberId` is omitted when the member `<select>` is hidden
- *   (`!memberSelectable`) OR the resolved role equals `ownerRole`, and
- *   kept only when the user explicitly picks the non-owner. Expense
- *   passes no `ownerRole` (and `memberSelectable` defaults true), so
- *   `memberId` is always kept.
- */
+// Owner-aware `GlideAnchor` to `ScheduleStart` bridge: the one place the shared `<ScheduleAnchorPicker>` is
+// widened inbound and narrowed outbound. An omitted `age.memberId` means the stream's owner (income relies on it).
+
 import type {
   GlideAnchor,
   HouseholdRole,
@@ -30,18 +8,10 @@ import type {
   ScheduleStart,
 } from '../db/types';
 
-/** Default whole-year end age used when a cap-window END anchor can't be
- *  narrowed from the picker's `GlideAnchor` (the glide-only / `retirementStart`
- *  kinds are gated off the END picker; this is the defensive fallback).
- *  Extracted from the inline literal so the magic number has a single name. */
+// Fallback end age for a cap-window END anchor that cannot be narrowed.
 const DEFAULT_MAGI_CAP_END_AGE = 65;
 
-/**
- * Widen a `ScheduleStart` into the `GlideAnchor` the shared picker
- * consumes (inbound). For an `age` start, `memberId` resolves to the
- * stored role, else the caller's `memberRole` (income passes its owner
- * role), else `'primary'`.
- */
+/** Widens a `ScheduleStart` to the picker's `GlideAnchor`; an `age` memberId resolves to the stored role, else `memberRole`, else primary. */
 export function scheduleStartToGlideAnchor(
   start: ScheduleStart,
   opts: { memberRole?: HouseholdRole } = {},
@@ -62,16 +32,10 @@ export function scheduleStartToGlideAnchor(
 }
 
 /**
- * Narrow a `GlideAnchor` from the shared picker back into a
- * `ScheduleStart` (outbound). The two glide-only kinds
- * (`durationFromExpenseStart` / `expenseEnd`) are impossible for a Start
- * picker — the component never offers them when `relativeKind` /
- * `expenseEndKind` are off — so this guards against them (falls back to
- * `retirementStart`).
- *
- * `age.memberId` keep/omit: omit when `!memberSelectable` OR the
- * resolved role equals `ownerRole`; keep it only when the user picked
- * the non-owner. Expense omits both options → `memberId` always kept.
+ * Narrows a picker `GlideAnchor` to a `ScheduleStart`. `age.memberId` is omitted
+ * when the member select is hidden or the role is `ownerRole`, and kept only for a
+ * picked non-owner; Expense passes neither option, so it is always kept. The
+ * glide-only kinds fall back to `retirementStart`.
  */
 export function glideAnchorToScheduleStart(
   anchor: GlideAnchor,
@@ -97,23 +61,16 @@ export function glideAnchorToScheduleStart(
     }
     case 'durationFromExpenseStart':
     case 'expenseEnd':
-      // Impossible for a Start picker (these kinds are gated off). Guard
-      // exhaustively rather than trust the caller; fall back to the
-      // safest default start.
+      // Gated off the Start picker; fall back to the safest default.
       return { kind: 'retirementStart' };
   }
 }
 
-/** A cap window's START anchor is the same static subset as `ScheduleStart`
- *  (`retirementStart | age | year`). Alias for clarity at the cap call
- *  sites — the START picker is the default `ScheduleAnchorPicker`. */
+/** A cap window's START anchor has the same static kinds as `ScheduleStart`. */
 export type MagiCapStartAnchor = MagiCapWindow['start'];
-/** A cap window's END anchor (`age | year` only). */
 export type MagiCapEndAnchor = MagiCapWindow['end'];
 
-/** Widen a cap-window END anchor (`age | year`) into the `GlideAnchor` the
- *  shared picker consumes (inbound). Cap windows always carry an explicit
- *  `age.memberId` (migration seeds it; the UI writes it). */
+/** Widens a cap-window END anchor to the picker's `GlideAnchor`; cap windows always carry an explicit `age.memberId`. */
 export function magiCapEndToGlideAnchor(end: MagiCapEndAnchor): GlideAnchor {
   if (end.kind === 'year') return { kind: 'year', year: end.year };
   return {
@@ -124,12 +81,7 @@ export function magiCapEndToGlideAnchor(end: MagiCapEndAnchor): GlideAnchor {
   };
 }
 
-/** Narrow a `GlideAnchor` from the END picker (with `hideRetirementStart`) back
- *  into a cap-window END anchor (`age | year`). The glide-only kinds and
- *  `retirementStart` are gated off the END picker; this guards them defensively
- *  by falling back to an `age` anchor (the safe whole-year end). `age.memberId`
- *  is always KEPT — a cap window stores an explicit member on every age anchor
- *  so the resolver never needs an owner default. */
+/** Narrows an END-picker anchor to a cap-window END anchor, falling back to a whole-year `age` for the gated-off kinds; `age.memberId` is always kept. */
 export function glideAnchorToMagiCapEnd(anchor: GlideAnchor): MagiCapEndAnchor {
   if (anchor.kind === 'year') return { kind: 'year', year: anchor.year };
   if (anchor.kind === 'age') {
@@ -140,8 +92,7 @@ export function glideAnchorToMagiCapEnd(anchor: GlideAnchor): MagiCapEndAnchor {
       months: anchor.months,
     };
   }
-  // retirementStart / durationFromExpenseStart / expenseEnd are gated off the
-  // END picker — guard exhaustively with a safe whole-year age fallback.
+  // retirementStart and the glide-only kinds are gated off the END picker; fall back to a whole-year age.
   return {
     kind: 'age',
     memberId: 'primary',
@@ -150,25 +101,13 @@ export function glideAnchorToMagiCapEnd(anchor: GlideAnchor): MagiCapEndAnchor {
   };
 }
 
-/** Narrow a `GlideAnchor` from the START picker back into a cap-window START
- *  anchor (`retirementStart | age | year`). Always KEEPS `age.memberId`
- *  (cap windows store an explicit member). The glide-only kinds are gated off
- *  the START picker; guarded defensively to `retirementStart`.
- *
- *  Delegates to `glideAnchorToScheduleStart` (the cap START subset is
- *  exactly `ScheduleStart`'s static kinds) rather than re-implementing the
- *  per-kind switch. `memberSelectable: true` + no `ownerRole` forces the
- *  keep-`memberId` branch (cap windows store an explicit member). The
- *  delegate's exhaustive guard maps the impossible glide-only kinds to
- *  `retirementStart`, so its `ScheduleStart` result is always one of the three
- *  static `MagiCapStartAnchor` kinds. */
+/** Narrows a START-picker anchor to a cap-window START anchor by delegating to `glideAnchorToScheduleStart`; `memberSelectable: true` with no `ownerRole` keeps `age.memberId`. */
 export function glideAnchorToMagiCapStart(anchor: GlideAnchor): MagiCapStartAnchor {
   return glideAnchorToScheduleStart(anchor, {
     memberSelectable: true,
   }) as MagiCapStartAnchor;
 }
 
-/** Widen a cap-window START anchor into the picker's `GlideAnchor` (inbound). */
 export function magiCapStartToGlideAnchor(start: MagiCapStartAnchor): GlideAnchor {
   return scheduleStartToGlideAnchor(start);
 }

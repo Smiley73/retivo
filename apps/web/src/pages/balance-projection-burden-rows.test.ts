@@ -1,9 +1,4 @@
-/**
- * Focused unit tests for the pure Balance Projection burden row-builders.
- * Guards the death-year filtering, the MC drawdown-phase filter (tax), and the
- * positive-floor / positive-conversion skip conditions that BOTH the on-page
- * charts AND the Export PDF render host depend on.
- */
+// Pure Balance Projection burden row builders: death-year filtering, the MC drawdown-phase filter (tax) and the positive-floor / positive-conversion skips that both the on-page charts and the Export PDF render host depend on.
 import { describe, expect, it } from 'vitest';
 import {
   buildTaxBurdenRows,
@@ -15,7 +10,6 @@ import {
 import type { DrawdownByMethodResult } from './balance-projection-page-data';
 import type { DrawdownYear } from '../lib/drawdown-engine-types';
 
-/** Minimal DrawdownYear stub — only the fields the builders read. */
 function year(partial: Partial<DrawdownYear> & { year: number }): DrawdownYear {
   return partial as DrawdownYear;
 }
@@ -45,7 +39,6 @@ describe('buildTaxBurdenRows', () => {
 
   it('under an MC basis drops accumulation years with no accountBalances', () => {
     const dd = drawdown([
-      // Pre-retirement accumulation year: no accountBalances → dropped.
       year({ year: 2039, federalTaxCents: 999_00 }),
       year({ year: 2040, accountBalances: new Map(), federalTaxCents: 100_00 }),
     ]);
@@ -96,7 +89,7 @@ describe('buildTaxBurdenRows', () => {
       isMcBasisActive: false,
     });
     expect(row.acaCreditApplied).toBe(1_350);
-    // It is part of the subsidy bar, not an addition to it.
+    // The ACA credit is part of the subsidy bar, not an addition to it.
     expect(row.acaPtcSubsidy).toBeCloseTo(-2_567.1, 6);
   });
 
@@ -161,7 +154,6 @@ describe('buildRmdRows', () => {
       basisDeflator: () => 0.5,
       lastDeathFractional: null,
     });
-    // (1500 + 500) * 0.5 = 1000
     expect(row.rmdRetained).toBe(1000);
   });
 
@@ -189,14 +181,11 @@ describe('buildRmdRows', () => {
       lastDeathFractional: 2041,
     });
     expect(rows.map((r) => r.year)).toEqual([2040, 2041]);
-    // The post-death 2042 surplus never enters the emitted rows.
     expect(rows.reduce((s, r) => s + r.rmdRetained, 0)).toBe(3000);
   });
 
   it('carries rmdRetained === 0 in a year with a shortfall', () => {
-    // In a surplus year the portfolio funds the floor (shortfall === 0); the
-    // converse invariant — a shortfall year retains nothing — holds since no
-    // reinvested/overflow cents accrue when withdrawals fall short.
+    // In a surplus year the portfolio funds the floor (shortfall === 0); the converse holds too, since no reinvested/overflow cents accrue when withdrawals fall short.
     const dd = drawdown([
       year({
         year: 2041,
@@ -232,8 +221,6 @@ describe('buildRmdRows', () => {
       lastDeathFractional: null,
     });
     const rowSum = rows.reduce((s, r) => s + r.rmdRetained, 0);
-    // Reference: same source (reinvested + overflow cents), same per-year
-    // deflator, computed directly from the drawdown.
     const refSum = years.reduce(
       (s, y) =>
         s +
@@ -245,12 +232,9 @@ describe('buildRmdRows', () => {
   });
 
   it('ties Σ rmdRetained out under an MC-shaped drawdown (accumulation years present)', () => {
-    // MC-shaped: an accumulation year (no RMD floor) plus drawdown years. The
-    // builder skips the floor<=0 accumulation year, and the surplus tie-out
-    // still holds over the emitted (positive-floor) years.
+    // MC-shaped: an accumulation year (no RMD floor) plus drawdown years; the builder skips the floor<=0 year and the surplus tie-out holds over the emitted years.
     const deflator = (yr: number): number => 1 / (1 + (yr - 2039) * 0.025);
     const years = [
-      // Accumulation year: no RMD floor → skipped (no surplus to count).
       year({ year: 2039, rmdFloorCents: 0, rmdReinvestedCents: 50_00 }),
       year({ year: 2040, rmdFloorCents: 7_000_00, rmdReinvestedCents: 900_00 }),
       year({
@@ -266,7 +250,6 @@ describe('buildRmdRows', () => {
       lastDeathFractional: null,
     });
     const rowSum = rows.reduce((s, r) => s + r.rmdRetained, 0);
-    // Reference excludes the skipped floor<=0 year (matches the builder's gate).
     const refSum = years
       .filter((y) => (y.rmdFloorCents ?? 0) > 0)
       .reduce(
@@ -333,11 +316,9 @@ describe('buildRothConversionsSeries', () => {
 
   it('reports the NOMINAL cents/100 for every bar (no basis deflation)', () => {
     const dd: DrawdownByMethodResult = {
-      // Post-retirement Fill-mode auto-conversion (nominal year-end cents).
       years: [year({ year: 2046, rothConvertedCents: 30_000_00 })],
       depletionYear: null,
       perMonthWithdrawal: new Float64Array(),
-      // Pre-retirement working-years conversions (nominal cents).
       preRetirementConversionCentsByYear: new Map([[2044, 20_000_00], [2045, 20_000_00]]),
     };
     const series = buildRothConversionsSeries({
@@ -423,7 +404,7 @@ describe('buildQcdRows', () => {
   });
 
   it('deflates qcdDollars by 1/qcdInflationFactor in today mode', () => {
-    // qcdInflationFactor = 2 → today dollars = nominal / 2.
+    // qcdInflationFactor = 2 gives today's dollars = nominal / 2.
     const dd = drawdown([
       year({ year: 2040, qcdCents: 20_000_00, qcdInflationFactor: 2 }),
     ]);
@@ -446,7 +427,6 @@ describe('buildQcdRows', () => {
       lastDeathFractional: null,
       displayMode: 'future',
     });
-    // future mode: d = 1, so qcdDollars = 20_000 nominal.
     expect(row.qcdDollars).toBeCloseTo(20_000, 6);
   });
 
@@ -460,7 +440,7 @@ describe('buildQcdRows', () => {
       lastDeathFractional: null,
       displayMode: 'today',
     });
-    // factor=0 → guard activates → d=1 → qcdDollars = 10_000 (no division by zero).
+    // factor=0 activates the guard (d=1), so no division by zero.
     expect(row.qcdDollars).toBeCloseTo(10_000, 6);
   });
 
@@ -472,7 +452,6 @@ describe('buildQcdRows', () => {
       lastDeathFractional: null,
       displayMode: 'today',
     });
-    // qcdInflationFactor omitted → undefined → ?? 1 → d=1 → nominal cents/100.
     expect(row.qcdDollars).toBe(12_000);
   });
 
@@ -502,8 +481,6 @@ describe('buildQcdRows', () => {
     expect(row.netTaxableRmd).toBe(0);
   });
 
-  // --- rmdOffsetDollars (QCD → net-taxable IRA RMD split bar) ---------------
-
   it('sums qcdRmdOffsetCentsByOwner across owners and deflates on basisDeflator (RMD basis)', () => {
     const dd = drawdown([
       year({
@@ -511,7 +488,6 @@ describe('buildQcdRows', () => {
         qcdCents: 30_000_00,
         qcdInflationFactor: 1,
         netTaxableRmdCents: 5_000_00,
-        // two owners' per-owner-capped offsets: $8k + $12k = $20k
         qcdRmdOffsetCentsByOwner: { a: 8_000_00, b: 12_000_00 },
       }),
     ]);
@@ -521,12 +497,10 @@ describe('buildQcdRows', () => {
       lastDeathFractional: null,
       displayMode: 'today',
     });
-    // $20k offset × 0.5 = $10k (deflated on the RMD basis, not 1/qcdInflationFactor).
     expect(row.rmdOffsetDollars).toBeCloseTo(10_000, 6);
   });
 
   it('per-year invariant: rmdOffsetDollars + netTaxableRmd == gross IRA RMD each year', () => {
-    // offset ($18k) + net ($22k) = $40k gross IRA-pool RMD for the year.
     const dd = drawdown([
       year({
         year: 2040,
@@ -549,8 +523,6 @@ describe('buildQcdRows', () => {
       lastDeathFractional: null,
       displayMode: 'today',
     });
-    // Per-row (not just lifetime): the two split slices sum to the gross IRA RMD
-    // (both deflated on the same year-end basis).
     expect(rows[0].rmdOffsetDollars + rows[0].netTaxableRmd).toBeCloseTo(
       (18_000 + 22_000) * 0.9,
       6,
@@ -562,9 +534,7 @@ describe('buildQcdRows', () => {
   });
 
   it('excess gift: the offset is the per-owner-capped min(gift, gross), never the full gift', () => {
-    // Gift = $50k but the owner's gross IRA RMD is only $12k → the engine caps
-    // the stamped offset at $12k. buildQcdRows reads the CAPPED offset, so the
-    // bar (offset + net = $12k gross) never exceeds the gross RMD.
+    // The gift is $50k but the owner's gross IRA RMD is only $12k, so the engine caps the stamped offset at $12k; buildQcdRows reads the capped offset so the bar never exceeds the gross RMD.
     const dd = drawdown([
       year({
         year: 2040,
@@ -582,14 +552,12 @@ describe('buildQcdRows', () => {
     });
     expect(row.rmdOffsetDollars).toBe(12_000); // capped, NOT the $50k gift
     expect(row.netTaxableRmd).toBe(0);
-    // The bar (offset + net) equals the gross RMD ($12k), no third/negative segment.
     expect(row.rmdOffsetDollars + row.netTaxableRmd).toBe(12_000);
     expect(row.qcdDollars).toBe(50_000); // the full gift still surfaces on qcdDollars
   });
 
   it('pre-RMD gift year: qcdCents > 0 but no gross RMD → offset 0 and net 0 (excluded downstream)', () => {
-    // A gift before the RMD trigger age carries no offset map + no net-taxable
-    // RMD, so both split slices are 0 (the memo filters `offset + net > 0` out).
+    // A gift before the RMD trigger age carries no offset map or net-taxable RMD, so both split slices are 0 (the memo filters `offset + net > 0` out).
     const dd = drawdown([
       year({ year: 2040, qcdCents: 10_000_00, qcdInflationFactor: 1 }),
     ]);
@@ -642,7 +610,6 @@ describe('buildQcdRows', () => {
       lastDeathFractional: null,
       displayMode: 'today',
     });
-    // The NaN owner entry drops to 0; only b's $5k counts.
     expect(row.rmdOffsetDollars).toBe(5_000);
   });
 
@@ -665,8 +632,7 @@ describe('buildQcdRows', () => {
   });
 
   it('rounding: a fractional-cent deflation rounds once via the shared dollar value', () => {
-    // 1_234_567 cents = $12,345.67 × a fractional deflator; the row carries the
-    // raw dollar value so the tile/tooltip formatter rounds ONCE downstream.
+    // The row carries the raw dollar value (1_234_567 cents × a fractional deflator) so the tile/tooltip formatter rounds once, downstream.
     const dd = drawdown([
       year({
         year: 2040,

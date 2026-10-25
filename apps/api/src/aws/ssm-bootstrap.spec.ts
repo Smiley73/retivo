@@ -1,17 +1,5 @@
-/**
- * `loadSecretsFromSsm()` cold-start behaviour, mocked against
- * `@aws-sdk/client-ssm`'s `SSMClient.send` — no emulator, no real AWS.
- *
- * The fail-closed guarantee is specific to `edge/shared-secret`
- * (`required: true`): a throttled/denied/absent `GetParameter` for that
- * entry must reject the whole cold start, not degrade
- * `EdgeAuthMiddleware` to a pass-through for the life of the warm Lambda.
- * That is distinct from `validateEnv()` later failing on a missing env
- * var — this suite exercises the loader itself, which nothing else in
- * the repo does (grepping `ssm-bootstrap`/`loadSecretsFromSsm` otherwise
- * only turns up the lambda entry files and tests asserting the trimmed
- * Lambdas don't call it).
- */
+// loadSecretsFromSsm() cold-start behaviour with SSMClient.send mocked. A throttled, denied or absent GetParameter for the required edge/shared-secret entry must reject the whole cold start
+// rather than degrade EdgeAuthMiddleware to a pass-through for the life of the warm Lambda; this exercises the loader itself, which nothing else covers.
 const send = jest.fn();
 
 jest.mock('@aws-sdk/client-ssm', () => {
@@ -22,7 +10,6 @@ jest.mock('@aws-sdk/client-ssm', () => {
   };
 });
 
-// Imported after the mock is registered.
 import { loadSecretsFromSsm } from './ssm-bootstrap.js';
 
 type SendableCommand = { input: { Name: string } };
@@ -33,7 +20,6 @@ function resolved(value: string) {
   return Promise.resolve({ Parameter: { Value: value } });
 }
 
-/** Every entry other than the one under test resolves with a placeholder. */
 function mockAllExcept(name: string, behavior: () => Promise<unknown>) {
   send.mockImplementation((command: SendableCommand) => {
     if (command.input.Name.endsWith(name)) return behavior();
@@ -80,7 +66,6 @@ describe('loadSecretsFromSsm', () => {
 
     await expect(loadSecretsFromSsm()).resolves.toBeUndefined();
     expect(process.env.SES_FROM_ADDRESS).toBeUndefined();
-    // The required edge/shared-secret entry still succeeded.
     expect(process.env.EDGE_SHARED_SECRET).toBe('placeholder');
   });
 });

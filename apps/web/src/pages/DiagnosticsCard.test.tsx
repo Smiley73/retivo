@@ -1,11 +1,4 @@
-/**
- * DiagnosticsCard tests. Render + interaction (export, view modal re-queries
- * IDB, clear confirm) + a11y scan. Uses `fake-indexeddb/auto` so the real
- * `listDiagnosticLogs` / `clearAll` paths run. Cases needing a controlled
- * `ts`/`seq` (sort order, NaN fallback, time formatting) spy on
- * `listDiagnosticLogs` to inject fabricated entries instead, since
- * `recordError`/`flush` always stamp `ts = nowIso()`.
- */
+// DiagnosticsCard over real `fake-indexeddb` paths; cases needing a controlled `ts`/`seq` spy on `listDiagnosticLogs`, since `recordError`/`flush` always stamp `ts = nowIso()`.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -19,11 +12,8 @@ import type { DiagnosticLogEntry } from '../db/store';
 import type { PendingMutation } from '../db/types';
 import type { DiagnosticEntry } from '../lib/diagnostics/logger';
 
-// The card reads `useSync()` for the unsynced-items expander; mock it so the
-// tests don't need a SyncProvider.
 vi.mock('../sync/SyncContext', () => ({ useSync: vi.fn() }));
 
-// Resolve inspector labels synchronously to a known name.
 vi.mock('../sync/mutation-label', async () => {
   const actual =
     await vi.importActual<typeof import('../sync/mutation-label')>('../sync/mutation-label');
@@ -64,9 +54,7 @@ function conflictMutation(): PendingMutation {
   };
 }
 
-// Fabricated `listDiagnosticLogs` row (the store's `DiagnosticLogEntry` is
-// intentionally opaque past `id`/`seq`; a `DiagnosticEntry`'s fields are a
-// valid superset, hence the cast).
+// Fabricated row: `DiagnosticLogEntry` is opaque past `id`/`seq`, hence the cast.
 function entry(over: Partial<DiagnosticEntry> = {}): DiagnosticLogEntry {
   return {
     id: over.id ?? `diag-${Math.random().toString(36).slice(2)}`,
@@ -118,7 +106,6 @@ describe('DiagnosticsCard', () => {
     await flush();
     render(<DiagnosticsCard householdId="hh-1" email="a@b.test" />);
     fireEvent.click(screen.getByRole('button', { name: /view recent activity/i }));
-    // Modal heading + the captured message.
     await screen.findByRole('heading', { name: /recent activity/i });
     expect(screen.getByText('boom two')).toBeInTheDocument();
     expect(screen.getByText('boom one')).toBeInTheDocument();
@@ -130,7 +117,6 @@ describe('DiagnosticsCard', () => {
     expect(await listDiagnosticLogs()).toHaveLength(1);
     render(<DiagnosticsCard householdId="hh-1" email="a@b.test" />);
     fireEvent.click(screen.getByRole('button', { name: /clear diagnostics/i }));
-    // Confirm dialog → confirm.
     const confirm = await screen.findByRole('button', { name: /^clear diagnostics$/i });
     fireEvent.click(confirm);
     await waitFor(async () => {
@@ -174,7 +160,6 @@ describe('DiagnosticsCard', () => {
     expect(
       await screen.findByText('Could not check and repair sync. Please try again.'),
     ).toBeInTheDocument();
-    // The busy latch releases: the button leaves 'Checking…' and re-enables.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Check & repair' })).not.toBeDisabled(),
     );
@@ -241,10 +226,8 @@ describe('DiagnosticsCard', () => {
   });
 
   it('orders rows by capture time (ts) descending, seq breaking a ts tie', async () => {
-    // "A" has the highest seq of the three but the oldest ts — a naive
-    // seq/insertion-order sort would put it first; ts-descending must not.
+    // A has the highest seq but the oldest ts: ts-descending, not seq order, must decide.
     const oldTsHighSeq = entry({ seq: 100, ts: '2024-01-01T00:00:00.000Z', message: 'A' });
-    // "B" and "C" share a ts — seq must break the tie (C's higher seq wins).
     const newTsLowSeq = entry({ seq: 1, ts: '2024-06-01T00:00:00.000Z', message: 'B' });
     const newTsHigherSeq = entry({ seq: 5, ts: '2024-06-01T00:00:00.000Z', message: 'C' });
     vi.spyOn(store, 'listDiagnosticLogs').mockResolvedValue([
@@ -260,9 +243,7 @@ describe('DiagnosticsCard', () => {
   });
 
   it('sorts an entry with an unparseable ts as oldest among valid-ts entries', async () => {
-    // The comparator maps an unparseable `ts` to epoch 0 (`Number.isNaN(...)
-    // ? 0 : ...`) rather than `NaN`, so it must sort last among real
-    // (positive) timestamps instead of poisoning every comparison.
+    // An unparseable `ts` maps to epoch 0 rather than NaN, so it sorts last instead of poisoning every comparison.
     const newest = entry({ seq: 1, ts: '2024-06-01T00:00:00.000Z', message: 'X' });
     const older = entry({ seq: 1, ts: '2024-01-01T00:00:00.000Z', message: 'Y' });
     const unparseable = entry({ seq: 1, ts: 'not-a-date', message: 'Z' });

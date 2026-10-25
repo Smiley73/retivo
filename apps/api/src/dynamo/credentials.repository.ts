@@ -12,20 +12,13 @@ import type { EnvConfig } from '../common/env.config.js';
 import { BaseRepository } from './base.repository.js';
 import { LEGACY_CREDENTIAL_REVISION, type CredentialRow } from './types.js';
 
-/** One item of a `TransactWriteCommand`'s `TransactItems` array. */
 type TransactItem = NonNullable<
   ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']
 >[number];
 
-/**
- * The write-authority condition shared by the credential Put (change-password
- * commit) and the standalone ConditionCheck (envelope-write path):
- * `expectedRevision` must equal the row's stored `credentialRevision`, or the
- * row must carry none AND `expectedRevision` be the legacy sentinel.
- * A session that resolved to
- * `NO_SESSION_REVISION_SENTINEL` (dynamo/types.ts) can satisfy neither branch,
- * so the condition always fails for a session with no recorded authority.
- */
+// Write-authority condition shared by the credential Put and the standalone ConditionCheck: `expectedRevision` must
+// equal the stored `credentialRevision`, or the row carries none and `expectedRevision` is the legacy sentinel.
+// NO_SESSION_REVISION_SENTINEL satisfies neither, so a session with no recorded authority always fails.
 const REVISION_CONDITION_EXPRESSION =
   '(attribute_exists(credentialRevision) AND credentialRevision = :expectedRevision) OR ' +
   '(attribute_not_exists(credentialRevision) AND :expectedRevision = :legacyRevision)';
@@ -47,12 +40,8 @@ export class CredentialsRepository extends BaseRepository {
   }
 
   /**
-   * Strongly-consistent variant of {@link findByUserId}. `GET
-   * /auth/key-envelopes` echoes this row's revision as `currentCredentialRevision` so the client
-   * can decide whether a password-slot re-wrap is owed; an eventually-consistent replica read there
-   * can still see the PRE-reset revision for a moment after a reset commits revision B elsewhere,
-   * which would falsely read as "already reconciled" and suppress the repair. Only that read needs
-   * the stronger (costlier) read; every other caller here keeps the cheaper default.
+   * Strongly consistent `findByUserId`. `GET /auth/key-envelopes` echoes the revision so the client knows whether a
+   * re-wrap is owed, and a stale replica could show the pre-reset revision and falsely suppress the repair.
    */
   async findByUserIdConsistent(userId: string): Promise<CredentialRow | null> {
     const r = await this.doc.send(
@@ -78,13 +67,9 @@ export class CredentialsRepository extends BaseRepository {
   }
 
   /**
-   * Build the credential-row `Put` transact item for the atomic
-   * change-password commit, conditioned on the caller-supplied
-   * `expectedRevision` — the session's recorded write authority — matching
-   * the row's CURRENT revision at commit time. A superseded session (one
-   * whose sign-in predates a credential rotation that has since landed) or a
-   * session carrying no revision at all therefore fails this condition rather
-   * than a preceding read, closing the read-then-write race in miniature.
+   * Builds the credential-row Put for the change-password commit, conditioned on `expectedRevision` (the session
+   * recorded write authority) matching the current revision, so a superseded session fails the commit rather than a
+   * preceding read.
    */
   putTransactItem(row: CredentialRow, expectedRevision: string): TransactItem {
     return {
@@ -101,12 +86,9 @@ export class CredentialsRepository extends BaseRepository {
   }
 
   /**
-   * Build a `ConditionCheck`-only transact item asserting the credential
-   * row's CURRENT revision equals `expectedRevision`, without writing it.
-   * Used on the ordinary password-slot
-   * envelope-write path, where the credential row is not itself part of the
-   * write — the same write-authority gate as {@link putTransactItem}, applied
-   * as a condition of the slot's own commit.
+   * Builds a ConditionCheck-only item asserting the current revision equals `expectedRevision`: the same
+   * write-authority gate as `putTransactItem`, for the password-slot envelope write where the credential row is not
+   * itself written.
    */
   conditionCheckRevisionTransactItem(
     userId: string,

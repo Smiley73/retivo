@@ -1,6 +1,4 @@
-/**
- * BrandMark — the shared decorative Retivo dot used by every React lockup.
- */
+/** BrandMark — the shared decorative Retivo dot used by every React lockup. */
 import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';

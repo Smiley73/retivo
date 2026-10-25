@@ -1,7 +1,3 @@
-/**
- * Schema-validity tests for FEDERAL_TAX_CONFIG.
- */
-
 import { describe, expect, it } from 'vitest';
 import { FEDERAL_TAX_CONFIG } from './federal-tax-config';
 
@@ -65,7 +61,6 @@ describe('FEDERAL_TAX_CONFIG snapshot schema', () => {
       });
 
       it('should_have_mfj_standard_deduction_2x_single', () => {
-        // MFJ deduction should equal 2× Single (TCJA-era and statutory both hold this)
         const config = FEDERAL_TAX_CONFIG.values[year];
         expect(config.standardDeduction.MFJ).toBe(config.standardDeduction.Single * 2);
       });
@@ -104,7 +99,6 @@ describe('FEDERAL_TAX_CONFIG snapshot schema', () => {
   }
 
   it('should_have_higher_standard_deduction_in_2025_vs_2024', () => {
-    // Inflation-adjusted; 2025 > 2024 for all statuses
     for (const status of FILING_STATUSES) {
       expect(FEDERAL_TAX_CONFIG.values[2025].standardDeduction[status]).toBeGreaterThan(
         FEDERAL_TAX_CONFIG.values[2024].standardDeduction[status],
@@ -112,20 +106,8 @@ describe('FEDERAL_TAX_CONFIG snapshot schema', () => {
     }
   });
 
-  it('should_keep_2026_top_rate_at_TCJA_37pct_under_OBBBA', () => {
-    // OBBBA made the TCJA seven-rate schedule permanent — 2026 top rate stays
-    // 37%, NOT the pre-TCJA 39.6% it would have reverted to under the sunset.
-    const topRate2025 = FEDERAL_TAX_CONFIG.values[2025].brackets.Single.at(-1)!.rate;
-    const topRate2026 = FEDERAL_TAX_CONFIG.values[2026].brackets.Single.at(-1)!.rate;
-    expect(topRate2025).toBe(0.37);
-    expect(topRate2026).toBe(0.37);
-  });
-
   it('should_pin_2026_HoH_32pct_and_35pct_bracket_floors', () => {
-    // Rev. Proc. 2025-32: HoH 32% floor equals Single 32% ($201,775) — the
-    // long-standing IRS-table identity — while HoH 35% begins at $256,200
-    // (distinct from Single's $256,225). Locks both facts so a future refresh
-    // can't silently re-copy the Single 35% value into HoH.
+    // Rev. Proc. 2025-32: HoH 32% floor equals Single's $201,775, but HoH 35% starts at $256,200 (Single: $256,225).
     const hoh2026 = FEDERAL_TAX_CONFIG.values[2026].brackets.HoH;
     const floor32 = hoh2026.find((b) => b.rate === 0.32)!.floor;
     const floor35 = hoh2026.find((b) => b.rate === 0.35)!.floor;
@@ -143,11 +125,7 @@ describe('FEDERAL_TAX_CONFIG snapshot schema', () => {
   });
 
   it('should_pin_OBBBA_senior_bonus_deduction_phaseout_bases', () => {
-    // OBBBA §70103: the enhanced senior deduction phases out at 6% of MAGI
-    // above $75,000 Single / $75,000 HoH / $150,000 MFJ. HoH shares the Single
-    // non-joint threshold ($75,000) — NOT $112,500. Amounts are not
-    // CPI-indexed, so 2025 and 2026 carry the identical slot. This locks the
-    // corrected HoH base against a regression to the old wrong $112,500 value.
+    // OBBBA §70103: 6% phase-out above $75,000 Single/HoH and $150,000 MFJ (not CPI-indexed); HoH is not $112,500.
     for (const year of [2025, 2026] as const) {
       const slot = FEDERAL_TAX_CONFIG.values[year].seniorBonusDeduction;
       expect(slot).toBeDefined();

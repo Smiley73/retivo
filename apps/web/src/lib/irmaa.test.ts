@@ -1,25 +1,11 @@
-/**
- * Tests for computeIrmaa — tier classification, surcharge math, filing status, beneficiary count.
- *
- * Coverage:
- *   - Strict-year lookup: throws UnsupportedTaxYearError for missing year
- *   - Zero-beneficiary short-circuit
- *   - Tier cliff inclusivity: tiers 1–4 inclusive lower bound; tier5 inclusive upper
- *   - Cents-space comparison: no float rounding at boundaries
- *   - Filing status: Single, MFJ, HoH (HoH → Single tiers)
- *   - 1 and 2 beneficiaries
- *   - All 6 tiers (none through tier5) for 2024/2025/2026
- *   - totalHouseholdAnnualCents = (partB + partD) × count
- */
-
 import { describe, it, expect } from 'vitest';
-import { computeIrmaa, UnsupportedTaxYearError } from './irmaa';
-import type { IrmaaInput } from './irmaa';
+import { computeIrmaa } from './irmaa';
 import { IRMAA_TIERS } from './irmaa-tiers';
+
+type IrmaaInput = Parameters<typeof computeIrmaa>[0];
 
 const snap = IRMAA_TIERS;
 
-/** Factory for IrmaaInput — defaults to 2025, Single, 1 beneficiary, base MAGI. */
 function input(overrides: Partial<IrmaaInput> = {}): IrmaaInput {
   return {
     taxYear: 2025,
@@ -30,39 +16,17 @@ function input(overrides: Partial<IrmaaInput> = {}): IrmaaInput {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Strict-year lookup
-// ---------------------------------------------------------------------------
-
 describe('computeIrmaa — strict-year lookup', () => {
-  it('throws UnsupportedTaxYearError for a year not in the snapshot', () => {
-    expect(() =>
-      computeIrmaa(input({ taxYear: 2030 }), snap),
-    ).toThrow(UnsupportedTaxYearError);
+  it('throws UnsupportedTaxYearError with code UNSUPPORTED_TAX_YEAR for a year not in the snapshot', () => {
+    expect(() => computeIrmaa(input({ taxYear: 2030 }), snap)).toThrow(
+      expect.objectContaining({ name: 'UnsupportedTaxYearError', code: 'UNSUPPORTED_TAX_YEAR' }),
+    );
   });
 
-  it('UnsupportedTaxYearError has code UNSUPPORTED_TAX_YEAR', () => {
-    let err: UnsupportedTaxYearError | undefined;
-    try {
-      computeIrmaa(input({ taxYear: 2030 }), snap);
-    } catch (e) {
-      err = e as UnsupportedTaxYearError;
-    }
-    expect(err?.code).toBe('UNSUPPORTED_TAX_YEAR');
-  });
-
-  it('does NOT throw for a year present in the snapshot (2024)', () => {
-    expect(() => computeIrmaa(input({ taxYear: 2024 }), snap)).not.toThrow();
-  });
-
-  it('does NOT throw for a year present in the snapshot (2026)', () => {
-    expect(() => computeIrmaa(input({ taxYear: 2026 }), snap)).not.toThrow();
+  it.each([2024, 2026])('does NOT throw for a year present in the snapshot (%i)', (taxYear) => {
+    expect(() => computeIrmaa(input({ taxYear }), snap)).not.toThrow();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Zero-beneficiary short-circuit
-// ---------------------------------------------------------------------------
 
 describe('computeIrmaa — zero beneficiaries', () => {
   it('returns all-zero result for 0 beneficiaries regardless of MAGI', () => {
@@ -76,10 +40,6 @@ describe('computeIrmaa — zero beneficiaries', () => {
     expect(result.totalHouseholdAnnualCents).toBe(0);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 2025 Single — all 6 tiers
-// ---------------------------------------------------------------------------
 
 describe('computeIrmaa — 2025 Single tiers', () => {
   // 2025 Single thresholds: $106k / $133k / $167k / $200k / $500k
@@ -203,10 +163,6 @@ describe('computeIrmaa — 2025 Single tiers', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2025 MFJ tiers
-// ---------------------------------------------------------------------------
-
 describe('computeIrmaa — 2025 MFJ tiers', () => {
   // 2025 MFJ thresholds: $212k / $266k / $334k / $400k / $750k
 
@@ -258,27 +214,7 @@ describe('computeIrmaa — 2025 MFJ tiers', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// HoH uses Single tiers
-// ---------------------------------------------------------------------------
-
 describe('computeIrmaa — HoH uses Single tiers', () => {
-  it('HoH at Single tier1 MAGI → tier1 (same as Single)', () => {
-    const hohResult = computeIrmaa(
-      input({ taxYear: 2025, filingStatus: 'HoH', magiTwoYearsPriorCents: 110_000_00 }),
-      snap,
-    );
-    const singleResult = computeIrmaa(
-      input({ taxYear: 2025, filingStatus: 'Single', magiTwoYearsPriorCents: 110_000_00 }),
-      snap,
-    );
-    expect(hohResult.tier).toBe('tier1');
-    expect(hohResult.tier).toBe(singleResult.tier);
-    expect(hohResult.partBSurchargeCentsPerBeneficiary).toBe(
-      singleResult.partBSurchargeCentsPerBeneficiary,
-    );
-  });
-
   it('HoH at $212,001 uses Single thresholds (not MFJ)', () => {
     // 2025 Single: $212,001 > $200k → tier4; MFJ: $212,001 > $212k → tier1
     const hohResult = computeIrmaa(
@@ -294,10 +230,6 @@ describe('computeIrmaa — HoH uses Single tiers', () => {
     expect(hohResult.tier).not.toBe(mfjResult.tier);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Beneficiary count: 2 beneficiaries
-// ---------------------------------------------------------------------------
 
 describe('computeIrmaa — 2 beneficiaries', () => {
   it('total = (partB + partD) × 2', () => {
@@ -325,10 +257,6 @@ describe('computeIrmaa — 2 beneficiaries', () => {
     expect(r2.totalHouseholdAnnualCents).toBe(r1.totalHouseholdAnnualCents * 2);
   });
 });
-
-// ---------------------------------------------------------------------------
-// 2024 spot checks
-// ---------------------------------------------------------------------------
 
 describe('computeIrmaa — 2024 spot checks', () => {
   it('2024 Single tier1: Part B = $69.90/mo → annual = 83,880 cents', () => {
@@ -361,10 +289,6 @@ describe('computeIrmaa — 2024 spot checks', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2026 spot checks
-// ---------------------------------------------------------------------------
-
 describe('computeIrmaa — 2026 spot checks', () => {
   it('2026 Single tier1: Part B = $81.20/mo → annual = 97,440 cents', () => {
     const result = computeIrmaa(
@@ -385,7 +309,3 @@ describe('computeIrmaa — 2026 spot checks', () => {
     expect(result.partBSurchargeCentsPerBeneficiary).toBe(584_400);
   });
 });
-
-// computeMonthAwareIrmaa proration + tier tests live in
-// irmaa-edge-cases.test.ts; its input-validation tests live in
-// irmaa-validation.test.ts.

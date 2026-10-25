@@ -1,16 +1,6 @@
 /**
- * The consent dialog for the AI assistant connector. It opens in the signed-in
- * tab after the bridge proves itself and before the tab says `ready`: one switch
- * per sharing category with its default, the "keep me signed in" switch in its
- * own Session group, what goes to the model provider, that the defaults are
- * generous, what is never shared, and the assistant's self-reported name marked
- * as unverified.
- *
- * Allow resolves with the switches as they stand; Don't allow, Esc and a scrim
- * click all decline (the default `dismissable` modal, and no dirty-close guard:
- * a half-edited consent is not worth saving). The sentences, switch registry and
- * defaults come from `assistant/sharing/`, so the Settings card and this dialog
- * say the same things; this file only renders them.
+ * Consent dialog for the AI assistant connector, opened after the bridge proves itself. Allow resolves with the
+ * switches as they stand; Don't allow, Esc and scrim click decline.
  */
 import React, { useId, useState } from 'react';
 import {

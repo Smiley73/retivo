@@ -1,17 +1,5 @@
-/**
- * Endpoint-level integration test for the factor-change notice's SES
- * dispatch, mirroring
- * `auth-approval-notification.spec.ts`'s pattern: the default test harness
- * leaves SES disabled, so this suite builds its own Nest app with
- * `SES_ENDPOINT` set (flips `sesEnabled` true) and overrides the SES_CLIENT
- * provider with a capturing fake — no real AWS / Moto call.
- *
- * Proves: (1) a real enrollment sends the notice mail to the account's own
- * address with the expected subject and reports `noticeSent: true`; (2) a
- * failing SES send does not fail the enrollment response, does not roll back
- * the undo token already committed to the User row, and reports
- * `noticeSent: false` so the card never claims an email that never went out.
- */
+// The factor-change notice's SES dispatch: a real enrollment mails the account's own address and reports noticeSent: true, and a failing send neither fails the enrollment nor rolls back the undo token (noticeSent: false).
+// The default harness leaves SES disabled, so this suite builds its own app with SES_ENDPOINT set and a capturing SES_CLIENT fake.
 import 'reflect-metadata';
 import request from 'supertest';
 import { Reflector } from '@nestjs/core';

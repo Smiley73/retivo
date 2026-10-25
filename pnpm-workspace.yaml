@@ -26,10 +26,10 @@ minimumReleaseAge: 4320
 # new pin also needs its floor added to EXPECTED_OVERRIDES in
 # scripts/test/pnpm-config-contract.test.mjs.
 overrides:
-  # Two advisories in fast-uri: inconsistent host-name case handling and mailto
-  # header injection. Reached through @nestjs/cli > @angular-devkit/core > ajv
+  # Advisories in fast-uri: host-name case handling, mailto header injection,
+  # scheme spoofing and host confusion (fixed in 4.2.3). Reached through @nestjs/cli > @angular-devkit/core > ajv
   # (build tooling only).
-  fast-uri: ">=4.1.5"
+  fast-uri: ">=4.2.3"
   # CVE-2026-45149 / GHSA-jxxr-4gwj-5jf2: denial of service from unbounded
   # numeric brace-range allocation. Reached through the ESLint toolchain >
   # minimatch (dev tooling only).
@@ -48,23 +48,29 @@ overrides:
   # Published undici advisories fixed in 7.29.1, within the 7.x line. Reached
   # through jsdom > vitest (test tooling only).
   "undici@>=7.0.0 <7.29.1": ">=7.29.1 <8"
-  # Published undici advisories fixed in 6.27.0, within the 6.x line. Reached
+  # Published undici advisories (denial of service, Subresource Integrity
+  # bypass) fixed in 8.12.2, within the 8.x line. Reached through apps/web >
+  # jsdom (test tooling only).
+  "undici@>=8.0.0 <8.12.2": ">=8.12.2 <9"
+  # Published undici advisories fixed in 6.29.1, within the 6.x line. Reached
   # through node-gyp > infrastructure / Pulumi (deploy tooling only).
-  "undici@<6.27.0": ">=6.27.0 <7"
+  "undici@<6.29.1": ">=6.29.1 <7"
   # Published form-data advisory fixed in 4.0.6. Reached through supertest
   # (test tooling only).
   "form-data@>=4.0.0 <4.0.6": ">=4.0.6"
-  # Four denial-of-service advisories: GHSA-wc9g-mqfw-jrwm, GHSA-qfvm-cv95-jqjf,
-  # GHSA-535w-7cp7-47q4 and GHSA-3pph-fpjx-jg34. Reached through
+  # Five denial-of-service advisories: GHSA-wc9g-mqfw-jrwm, GHSA-qfvm-cv95-jqjf,
+  # GHSA-535w-7cp7-47q4, GHSA-3pph-fpjx-jg34 and GHSA-q7qp-rjg7-q26m (fixed in
+  # 2.5.0). Reached through
   # @nestjs/platform-express (API runtime); no file-upload route exercises it.
-  "multer@>=1.0.0 <2.4.0": ">=2.4.0"
-  # Published denial-of-service advisory fixed in 2.3.0, inside the 2.x line
+  "multer@>=1.0.0 <2.5.0": ">=2.5.0"
+  # Published denial-of-service advisories (latest GHSA-27r3-jxmh-p828) fixed in 2.4.0, inside the 2.x line
   # express already requires. Reached through express (API runtime).
-  "body-parser@>=2.0.0 <2.3.0": ">=2.3.0 <3"
-  # Published sanitizer advisories fixed in 3.4.16 (CUSTOM_ELEMENT_HANDLING
-  # bypass; two IN_PLACE hook/rawtext flaws). Reached through jspdf (web
+  "body-parser@>=2.0.0 <2.4.0": ">=2.4.0 <3"
+  # Published sanitizer advisories fixed in 3.4.17 (CUSTOM_ELEMENT_HANDLING
+  # bypass; IN_PLACE hook/rawtext flaws; SAFE_FOR_TEMPLATES shadow-root bypass;
+  # SMIL href guard skipped under xhtml). Reached through jspdf (web
   # runtime, PDF export).
-  "dompurify@<3.4.16": ">=3.4.16 <4"
+  "dompurify@<3.4.17": ">=3.4.17 <4"
   # GHSA-2v37-7h3g-55p8: custom generators loop forever when `size` is 0.
   # Capped below 4 on purpose: postcss declares ^3.3.16 and nanoid 4+ is
   # ESM-only, so an open floor would resolve a major the parent cannot load.
@@ -88,6 +94,10 @@ overrides:
   # GHSA-r4xh-jqrq-34v2: quadratic-time parse(), fixed in 1.9.0. Reached through
   # knip (dev tooling only).
   "smol-toml@<1.9.0": ">=1.9.0 <2"
+  # GHSA-rxp7-6hxx-x8q5: quadratic-time Address6 zone-identifier match, fixed in
+  # 10.7.4. Reached through infrastructure > @pulumi/pulumi > @npmcli/arborist >
+  # socks (deploy tooling only).
+  "ip-address@<=10.7.3": ">=10.7.4"
 
 # pnpm v11 renames onlyBuiltDependencies to allowBuilds; do not adopt while pinned to v10.
 onlyBuiltDependencies:

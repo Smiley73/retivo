@@ -1,9 +1,4 @@
-/**
- * StepUpModal + useStepUp tests. Covers the factor
- * picker + code path render, the verify interaction, the non-retryable
- * ambiguous-failure message, and the mandatory shared-component a11y smoke
- * (AGENTS.md → Testing setup).
- */
+/** StepUpModal and useStepUp: factor picker, code path, verify interaction and the non-retryable ambiguous failure. */
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -74,7 +69,6 @@ describe('StepUpModal', () => {
   it('offers a factor picker when more than one factor is eligible', () => {
     render(<Harness methods={['totp']} recoveryMethods={['email_otp']} />);
     expect(screen.getByRole('radiogroup', { name: 'Choose a factor' })).toBeInTheDocument();
-    // TOTP is the first (routine) factor → its code field shows by default.
     expect(screen.getByLabelText('Authenticator code')).toBeInTheDocument();
   });
 
@@ -104,8 +98,6 @@ describe('StepUpModal', () => {
   });
 
   it('shows a NON-retryable warning on an ambiguous confirm failure and does not report success', async () => {
-    // A dropped/timed-out confirm (non-ApiRequestError) is ambiguous: the factor
-    // may have been consumed server-side, so never silently retry.
     const onVerify = vi.fn().mockRejectedValue(new Error('network down'));
     const onVerified = vi.fn();
     render(<Harness methods={['totp']} onVerify={onVerify} onVerified={onVerified} />);
@@ -161,7 +153,6 @@ describe('StepUpModal', () => {
       />,
     );
 
-    // Passkey is the only eligible factor → selected by default, no code field.
     expect(screen.queryByLabelText(/code/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
@@ -180,7 +171,7 @@ describe('StepUpModal', () => {
     await waitFor(() => expect(onVerified).toHaveBeenCalled());
   });
 
-  it('renders owner-supplied extra fields AFTER the factor field and honours confirmDisabled', () => {
+  it('renders owner-supplied extra fields after the factor field and honours confirmDisabled', () => {
     const extra = (
       <label>
         Extra field
@@ -192,12 +183,9 @@ describe('StepUpModal', () => {
     );
     const emailCode = screen.getByLabelText('Email code');
     const extraField = screen.getByLabelText('Extra field');
-    // The extra field is the last thing typed before Confirm.
     expect(
       emailCode.compareDocumentPosition(extraField) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    // A ready factor code is not enough while the owner says the extra field
-    // is not ready.
     fireEvent.change(emailCode, { target: { value: '123456' } });
     expect(screen.getByRole('button', { name: 'Confirm' })).toBeDisabled();
     rerender(<Harness methods={['email_otp']} extraFields={extra} confirmDisabled={false} />);

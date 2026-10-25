@@ -1,9 +1,3 @@
-/**
- * Unit tests for the account ↔ income structural reference scan.
- * Pure function — no IO, no a11y surface. The "deleted-income
- * excluded" guarantee is a caller contract (tombstone-filtered
- * `listAggregates` input), asserted at the page boundary, not here.
- */
 import { describe, expect, it } from 'vitest';
 import { accountIncomeReferenceLabels } from './account-income-links';
 import type {
@@ -142,7 +136,6 @@ describe('accountIncomeReferenceLabels', () => {
       [stream('s1', { name: 'ACME Pension', linkedCbpAccountId: ACC })],
       [scenario('sc1', 'Disabled there', { disabledIds: ['s1'] })],
     );
-    // Canonical reference still counts — structural, not resolved-state.
     expect(labels).toEqual(['"ACME Pension" (Base)']);
   });
 

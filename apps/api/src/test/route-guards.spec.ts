@@ -1,15 +1,5 @@
-/**
- * Route guards, proven once per protected route.
- *
- * Every protected route sits behind the same three layers: the Origin check
- * and the CSRF double-submit check (state-changing methods only), then the
- * global JWT guard. This table-driven spec asserts the whole chain for each
- * route in one app boot, so individual feature specs do not each re-prove
- * "no token -> 401", "no CSRF header -> 403" and "bad Origin -> 403".
- *
- * Exemption-specific cases (CSRF-exempt pre-session routes, public routes)
- * stay in their own specs: they prove behaviour specific to one endpoint.
- */
+// Route guards, once per protected route: the Origin check and CSRF double-submit check (state-changing methods only), then the global JWT guard, so feature specs do not re-prove "no token -> 401", "no CSRF header -> 403" and "bad Origin -> 403".
+// Exemption-specific cases (CSRF-exempt pre-session routes, public routes) stay in their own specs.
 import request from 'supertest';
 import { CSRF_COOKIE_NAME } from '../auth/cookie-config.js';
 import {
@@ -21,7 +11,6 @@ import {
 
 type Method = 'get' | 'post' | 'put' | 'patch' | 'delete';
 
-/** Every JWT-guarded route that previously carried its own auth-gate cases. */
 const SAFE_ROUTES: Array<[Method, string]> = [
   ['get', '/api/v1/auth/me'],
   ['get', '/api/v1/auth/key-envelopes'],
@@ -102,8 +91,7 @@ describe('route guards', () => {
     it.each(STATE_CHANGING_ROUTES)(
       '%s %s -> 401 when CSRF and Origin pass but there is no bearer token',
       async (method, path) => {
-        // A self-consistent CSRF pair clears the middleware so the JWT guard
-        // itself is what rejects the request.
+        // A self-consistent CSRF pair clears the middleware, so the JWT guard is what rejects the request.
         const res = await call(method, path)
           .set('X-CSRF-Token', 'x')
           .set('Cookie', `${CSRF_COOKIE_NAME}=x`)

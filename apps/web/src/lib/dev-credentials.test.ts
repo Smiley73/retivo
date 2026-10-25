@@ -1,13 +1,4 @@
-/**
- * Dev-credential prefill tests.
- *
- * The module computes the prefill decision once at load from the browser
- * host + build mode, so each case stubs both, resets the module registry,
- * then dynamically imports a fresh copy. Covers: DEV + localhost/127.0.0.1
- * prefill; DEV + RFC1918 private IPv4 prefill; DEV + public host → blank;
- * non-DEV + private IP → blank; non-DEV + localhost → blank (the build-mode
- * gate strips the seeded literals from a production bundle).
- */
+// The prefill decision is computed once at load, so each case stubs host and build mode, resets modules and imports a fresh copy.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 async function loadModule(opts: {

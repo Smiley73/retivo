@@ -1,19 +1,6 @@
-/**
- * Shared resolver for `ScheduleStart` / `ScheduleEnd` anchors. Used by
- * both the expense and income projection engines so the start / end
- * vocabulary has one canonical implementation.
- *
- * Pure functions — no React, no I/O. Inputs are the anchor + a context
- * object carrying the calendar year of retirement, optional sub-year
- * month, the two members' birthdates, and (for `lifetime` ends) the
- * scenario's life-expectancy override.
- *
- * Owner-implicit `age` anchors: when `memberId` is absent on a
- * `ScheduleStart.age` / `ScheduleEnd.age`, the resolver reads `ctx.owner`
- * as the implicit member. Callers driving an income stream pass the
- * stream's owner role; callers driving an expense (which always sets
- * `memberId` explicitly) can omit `owner`.
- */
+// Shared resolver for `ScheduleStart` / `ScheduleEnd` anchors, used by the expense and income engines.
+// An `age` anchor with no `memberId` reads `ctx.owner` (income passes the stream's owner; expense always sets `memberId`).
+
 import {
   DEFAULT_LIFE_EXPECTANCY_AGE,
   type GlideAnchor,
@@ -24,27 +11,20 @@ import {
 } from '../db/types';
 
 interface ScheduleResolveMember {
-  /** ISO date `YYYY-MM-DD`. */
   birthdate: string;
 }
 
 export interface ScheduleResolveContext {
-  /** Calendar year retirement begins. For expense, this is the
-   *  household-level retirement year. For income, callers pass the
-   *  *owner's* retirement year (asymmetric). */
+  /** Household retirement year for expense; the owner's retirement year for income. */
   retirementYear: number;
-  /** 0-indexed calendar month (Jan = 0) retirement falls in.
-   *  Defaults to 0 (Jan) when callers only know the year. */
+  /** 0-indexed month (Jan = 0) retirement falls in; defaults to 0. */
   retirementMonth0?: number;
   primary?: ScheduleResolveMember;
   secondary?: ScheduleResolveMember;
-  /** Implicit member role for owner-default `age` anchors with no
-   *  `memberId` set. Required only when the caller may pass anchors
-   *  without `memberId` (i.e. income). */
+  /** Implicit role for `age` anchors with no `memberId`; needed only by income. */
   owner?: HouseholdRole;
   lifeExpectancy?: LifeExpectancyOverride;
-  /** When true, `lifetime` end anchors are treated as effectively
-   *  never-ending within the projection window. Off by default. */
+  /** Treats `lifetime` end anchors as never ending within the projection window. */
   extendBeyondLifetime?: boolean;
 }
 
@@ -65,8 +45,7 @@ const ageMember = (
   return role === 'primary' ? ctx.primary : ctx.secondary;
 };
 
-/** Resolve the calendar (year, month0) where the start anchor fires.
- *  Inclusive: this month is the first active month. */
+/** The (year, month0) where the start anchor fires; inclusive, the first active month. */
 export function resolveStartMonth(
   start: ScheduleStart,
   ctx: ScheduleResolveContext,
@@ -87,8 +66,7 @@ export function resolveStartMonth(
   }
 }
 
-/** Resolve the calendar (year, month0) for the *exclusive* end boundary
- *  (the first month the window is NOT active). */
+/** The (year, month0) of the exclusive end boundary, the first month the window is not active. */
 export function resolveEndMonth(
   end: ScheduleEnd,
   startMonth: { year: number; month0: number },
@@ -110,11 +88,7 @@ export function resolveEndMonth(
         return { year: 9999, month0: 0 };
       }
       const lifeExpFromOverride = ctx.lifeExpectancy;
-      // Death is modelled as Dec 31 of `deathYear`
-      // (`deathYear = birthYear + lifeExpectancyAge`); the member is alive
-      // through all of `deathYear`. The exclusive end boundary is therefore
-      // Jan 1 of `deathYear + 1`, regardless of birth month — lifetime
-      // expenses stay active through December of the death year.
+      // Death is Dec 31 of `birthYear + age`, so the exclusive end is Jan 1 of the next year whatever the birth month.
       const projectMember = (
         slot: 'primary' | 'secondary',
       ): { year: number; month0: number } | null => {
@@ -128,8 +102,7 @@ export function resolveEndMonth(
       };
       if (end.whose === 'primary') return projectMember('primary');
       if (end.whose === 'secondary') return projectMember('secondary');
-      // `whose: 'last'` — the later of the two members' exclusive end
-      // boundaries (i.e. the later death year + 1).
+      // `whose: 'last'`: the later end boundary.
       const p = projectMember('primary');
       const s = projectMember('secondary');
       if (!p && !s) return null;
@@ -147,24 +120,11 @@ export function resolveEndMonth(
 }
 
 /**
- * Resolve a discretionary-glide anchor to a calendar (year, month0).
- *
- * Not a call to `resolveStartMonth` — that handles only 3 kinds and has
- * no duration case. The three absolute kinds (`retirementStart` /
- * `year` / `age`) reuse the *exact same arithmetic* as
- * `resolveStartMonth`'s corresponding cases (so an absolute glide
- * anchor lands at the same calendar point for every expense — Decision
- * 20); `durationFromExpenseStart` is the genuinely per-expense kind and
- * mirrors `resolveEndMonth`'s `durationFromStart` case, offset from the
- * caller-supplied expense start month. `expenseEnd` (glide-end only)
- * resolves to the expense's own resolved `end` window via
- * `resolveEndMonth(expenseEnd, …)` — the caller threads the resolved
- * expense `end`; `undefined` (one-off / not supplied) ⇒ `null`.
- *
- * Returns `null` when unresolvable (e.g. an `age` anchor whose member
- * has no birthdate, or an `expenseEnd` whose `end` is absent /
- * unresolvable) — the engine treats that as glide-off for the affected
- * expense.
+ * Resolves a glide anchor to (year, month0). The absolute kinds reuse
+ * `resolveStartMonth`'s arithmetic, so they land on the same point for every
+ * expense; `durationFromExpenseStart` offsets from the caller's expense start;
+ * `expenseEnd` resolves to the expense's own `end` window. Null when
+ * unresolvable, which the engine treats as glide off for that expense.
  */
 export function resolveGlideAnchorMonth(
   anchor: GlideAnchor,
@@ -192,18 +152,14 @@ export function resolveGlideAnchorMonth(
       return { year: Math.floor(idx / 12), month0: idx % 12 };
     }
     case 'expenseEnd':
-      // Glide-end-only kind: the spending decline ends exactly when the
-      // expense's own resolved end window does. `undefined` end (one-off
-      // / not threaded by the caller) ⇒ unresolvable ⇒ null (engine
-      // fail-safe, glide off for this expense).
+      // Glide-end only: the glide ends when the expense's own `end` does; an absent `end` (a one-off) is unresolvable.
       return expenseEnd
         ? resolveEndMonth(expenseEnd, expenseStartMonth, ctx)
         : null;
   }
 }
 
-/** Count months in calendar year Y that satisfy the active rule:
- *  startAnniv ≤ end-of-M AND endAnniv > start-of-M. */
+/** Months of year `year` inside the active window. */
 export function monthsActiveInYear(
   startMonth: { year: number; month0: number },
   endMonthExclusive: { year: number; month0: number },
@@ -218,10 +174,7 @@ export function monthsActiveInYear(
   return Math.max(0, hiIdx - loIdx);
 }
 
-/** True when either anchor references a member with no resolvable
- *  birthdate (or a `whose` that points at a missing member). Callers
- *  surface broken-anchor expenses to the user rather than silently
- *  zeroing them. */
+/** True when an anchor references a member with no usable birthdate, so callers can surface the expense instead of zeroing it. */
 export function isScheduleAnchorBroken(
   start: ScheduleStart,
   end: ScheduleEnd | undefined,

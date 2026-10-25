@@ -1,27 +1,9 @@
-/**
- * Strict structural detector for an encrypted aggregate payload envelope.
- * Single source of truth for "is this an encrypted
- * envelope" on the server side, shared by the sync push guard (which rejects
- * plaintext for a keyed household) and the compactor (which
- * REPLACES — rather than spread-merges — an encrypted snapshot payload).
- *
- * The server stores payloads opaquely and never decrypts; this is a pure shape check. It mirrors
- * the web client's `isStrictEncryptedEnvelope` (apps/web/src/crypto/key-wrapping.ts) byte-for-byte
- * against the wire shape in apps/web/src/crypto/encryption-types.ts `EncryptedPayloadEnvelope`:
- * `encryptionVersion === 1`, `alg === 'AES-256-GCM'`, string `keyId` / `nonce` / `ciphertext`, an
- * OPTIONAL numeric `aadVersion` (absent or number — any other type fails), and NO OTHER KEYS — a
- * payload carrying any key outside this documented shape is rejected, closing the gap where a
- * plaintext field riding alongside real ciphertext would otherwise be stored and served back. A
- * plaintext domain payload that merely carries an `encryptionVersion` field is NOT mistaken for
- * ciphertext. This tightening cannot reject any envelope a real client has ever written: the only
- * producer, `encryptPayload` (apps/web/src/crypto/payload-crypto.ts), always returns exactly these
- * five keys and never sets `aadVersion`.
- */
+// Strict structural detector for an encrypted aggregate payload envelope, shared by the push guard and the compactor.
+// A pure shape check: the server never decrypts.
 
-/** The exact wire algorithm string for an encrypted aggregate payload. */
 const ENCRYPTED_ENVELOPE_ALG = 'AES-256-GCM';
 
-/** Every key the envelope shape may carry — anything else fails the guard. */
+// Every key the envelope may carry; anything else fails the guard.
 const ENVELOPE_KEYS = new Set([
   'encryptionVersion',
   'keyId',
@@ -41,8 +23,11 @@ export interface EncryptedPayloadEnvelope {
   aadVersion?: number;
 }
 
-/** Strict guard: true only for a well-formed encrypted aggregate payload
- *  carrying no key outside the documented shape. */
+/**
+ * True only for a well-formed encrypted aggregate payload with no key outside the documented five (plus an optional
+ * numeric `aadVersion`), so plaintext riding alongside ciphertext is rejected. Mirrors the web `isStrictEncryptedEnvelope`;
+ * no real client write is affected, since `encryptPayload` emits exactly those keys.
+ */
 export function isStrictEncryptedEnvelope(
   payload: unknown,
 ): payload is EncryptedPayloadEnvelope {

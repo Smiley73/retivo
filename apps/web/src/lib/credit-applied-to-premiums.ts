@@ -1,28 +1,16 @@
-/**
- * The part of the ACA premium tax credit that lowers a year's portfolio draw
- * because the premium is a Medical expense. Shared by both engines; explained in
- * docs/math-social-security-and-health.md, "How it reaches the numbers".
- */
+// The ACA premium tax credit that lowers a year's portfolio draw (the premium is a Medical expense), shared by both
+// engines; see docs/math-social-security-and-health.md, "How it reaches the numbers".
 
-/** Inputs to {@link creditAppliedToPremiumsCents}, all in integer cents. */
 interface CreditAppliedToPremiumsArgs {
-  /** The year's premium tax credit. */
   readonly creditCents: number;
-  /** The part of the credit already used against federal tax and IRMAA, as the
-   *  calling engine defines that offset. */
   readonly offsetCents: number;
-  /** Medical expenses modeled for the year (every `isMedical` row). */
   readonly medicalCents: number;
-  /** The draw the engine would otherwise commit this year. */
   readonly remainingNeedCents: number;
-  /** {@link povertyLineLimitCents}. Absent → no limit. */
+  /** Absent: no limit. */
   readonly povertyLineLimitCents?: number;
 }
 
-/**
- * `min(max(0, credit − offset), medical, remainingNeed, povertyLineLimit)`, floored
- * at zero. The model has no surplus deposit, so the rest of the credit is dropped.
- */
+/** `min(max(0, credit − offset), medical, remainingNeed, povertyLineLimit)`, floored at zero; the model has no surplus deposit, so the rest of the credit is dropped. */
 export function creditAppliedToPremiumsCents(args: CreditAppliedToPremiumsArgs): number {
   const excessCents = Math.max(0, args.creditCents - args.offsetCents);
   const limitCents = Math.min(
@@ -34,12 +22,8 @@ export function creditAppliedToPremiumsCents(args: CreditAppliedToPremiumsArgs):
   return Math.max(0, limitCents);
 }
 
-/** Inputs to {@link povertyLineLimitCents}, in integer cents. */
 interface PovertyLineLimitArgs {
-  /** `TaxYearResult.acaMagiAboveFplCents` at the draw the credit was priced on. */
   readonly headroomCents: number;
-  /** The part of that draw whose withdrawals are income, and the ACA MAGI it
-   *  carries ({@link drawIncomeCents}). */
   readonly incomeDrawCents: number;
   readonly magiOfDrawCents: number;
 }
@@ -56,18 +40,14 @@ export function povertyLineLimitCents(args: PovertyLineLimitArgs): number {
   return Math.floor((Math.max(0, args.headroomCents) * args.incomeDrawCents) / args.magiOfDrawCents);
 }
 
-/** Dollars of one year's draw, by what they do to ACA MAGI. */
 interface DrawIncomeArgs {
   readonly preTaxDollars: number;
   readonly taxableAccountDollars: number;
-  /** The taxable earnings of a nonqualified Roth draw. */
   readonly rothEarningsDollars: number;
-  /** The share of a taxable-account withdrawal that is basis, which is not income. */
   readonly costBasisFraction: number;
 }
 
-/** The income draw and the ACA MAGI it carries, in integer cents, for
- *  {@link povertyLineLimitCents}. */
+/** The income draw and the ACA MAGI it carries, for `povertyLineLimitCents`. */
 export function drawIncomeCents(
   args: DrawIncomeArgs,
 ): Pick<PovertyLineLimitArgs, 'incomeDrawCents' | 'magiOfDrawCents'> {
@@ -80,10 +60,7 @@ export function drawIncomeCents(
   };
 }
 
-/**
- * One retirement year's total of a monthly cents series anchored at
- * (retirementYear, January): the twelve months of year index `yearIndex`.
- */
+/** One retirement year's total (twelve months from `yearIndex`) of a monthly cents series anchored at (retirementYear, January). */
 export function sumYearCents(monthlyCents: ReadonlyArray<number>, yearIndex: number): number {
   let total = 0;
   for (let m = 0; m < 12; m += 1) total += monthlyCents[yearIndex * 12 + m] ?? 0;

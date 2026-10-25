@@ -1,10 +1,6 @@
 /**
- * Inner SVG-engine charts for the per-account history. Lazily imported
- * by AccountHistoryCharts.
- *
- * Two charts: ending balance by year (line), and return % by year (line
- * with a green→red vertical gradient split at y=0, per-point dots tinted
- * by sign, and a dashed zero reference line).
+ * Inner SVG-engine charts for per-account history: ending balance by year, and return % by year with a sign-split
+ * gradient, tinted dots and a zero line.
  */
 import React from 'react';
 import type { AccountHistoryRow } from './AccountHistoryCharts';
@@ -33,8 +29,7 @@ interface ReturnGradientBounds {
   zeroOffset: number;
 }
 
-// Exported for unit tests. See AccountHistoryChartsInner.test.ts.
-export function computeReturnBounds(values: number[]): ReturnGradientBounds {
+function computeReturnBounds(values: number[]): ReturnGradientBounds {
   const dataMin = values.length === 0 ? 0 : Math.min(...values);
   const dataMax = values.length === 0 ? 0 : Math.max(...values);
   const axisLow = Math.min(0, dataMin);
@@ -60,12 +55,6 @@ function buildXTicks(xMin: number, xMax: number): number[] {
   return ticks.length > 0 ? ticks : [xMin];
 }
 
-/**
- * Hover tooltip factory shared by both sub-charts. Shows the year plus
- * one formatted metric (currency ending balance / percent return). Drag
- * suppression is owned by ChartFrame, which only renders the
- * tooltip when `hoverX !== null && !isDragging`.
- */
 function makeMetricTooltip(
   chrome: ChartChrome,
   dataKey: string,
@@ -179,11 +168,8 @@ const InnerCharts: React.FC<InnerProps> = ({
           margin={{ top: 8, right: 16, bottom: 28, left: 64 }}
           ariaLabel="Return percent by year"
           xDomain={xDomain ?? null}
-          // The shared `yDomain` is the drag-zoom's BALANCE-dollar y-domain
-          // (computed from endingBalance in account-history-section.tsx). The
-          // return chart is on a percent scale, so it must ignore it and always
-          // use its own returnBounds — otherwise a zoom collapses the line and
-          // its zero baseline against a dollar-scale axis (port regression).
+          // The shared `yDomain` is the balance-dollar zoom domain; this percent-scale chart
+          // ignores it and uses its own `returnBounds`.
           yDomain={[returnBounds.yMin, returnBounds.yMax]}
           xTicks={ticks}
           yTickFormatter={formatPercent}

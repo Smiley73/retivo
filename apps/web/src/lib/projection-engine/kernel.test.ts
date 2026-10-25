@@ -50,7 +50,6 @@ describe('runStepKernel', () => {
   });
 
   it('contributions land before growth each step', () => {
-    // start 0, contribute 100 pre, 1% return → end = 100 * 1.01 = 101
     const inp = baseInputs(1, {
       contribPre: filled(1, 100),
       mainReturnPct: filled(1, 1),
@@ -74,9 +73,6 @@ describe('runStepKernel', () => {
   });
 
   it('mid-horizon retirement crossover uses default net-need strategy', () => {
-    // 12 accumulation months at 0% (no growth), then 12 drawdown months
-    // at 0% with expense 100/month, no income → 1200 balance starting,
-    // withdraws 100/month, ends at 0.
     const stepCount = 24;
     const expense = zeros(stepCount);
     for (let i = 12; i < stepCount; i += 1) expense[i] = 100;
@@ -94,7 +90,6 @@ describe('runStepKernel', () => {
   });
 
   it('depletion fires the first step the target exceeds the pool', () => {
-    // 1 unit balance, expense 10 → can take 1, target exceeded → depleted.
     const out = runStepKernel(
       baseInputs(1, {
         initialPre: 1,
@@ -117,8 +112,6 @@ describe('runStepKernel', () => {
         },
       }),
     );
-    // After 1 accumulation step, sub is 500; folds at step 1.
-    // Pool = 1000 + 500 = 1500, no withdrawal → end same.
     expect(out.preEnd[1] + out.postEnd[1]).toBeCloseTo(1500, 6);
   });
 
@@ -131,13 +124,11 @@ describe('runStepKernel', () => {
         income: filled(1, 30),
       }),
     );
-    // net need = 50 - 30 = 20, withdraw 20 → 80 left.
     expect(out.withdrawal[0]).toBe(20);
     expect(out.preEnd[0] + out.postEnd[0]).toBeCloseTo(80, 6);
   });
 
   it('pre/post ratio at retirement entry is preserved during drawdown', () => {
-    // 50/50 split entering retirement, withdraw 10% → end still 50/50.
     const out = runStepKernel(
       baseInputs(1, {
         initialPre: 50,

@@ -1,8 +1,4 @@
-/**
- * DashboardPlanBasicsCard render + a11y tests. The card takes no
- * view-model — only its three deterministic props — so tests exercise
- * blanking and the methodology trigger directly, no vm stub needed.
- */
+// DashboardPlanBasicsCard: blanking and the methodology trigger; the card takes no view-model.
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { DashboardPlanBasicsCard } from './DashboardPlanBasicsCard';
@@ -28,9 +24,7 @@ describe('DashboardPlanBasicsCard', () => {
     expect(screen.getByText('2050')).toBeInTheDocument();
   });
 
-  // The card takes no view-model at all: the dashboard renders it even
-  // when the plan-stress-test vm is `null` on a config error, so only net
-  // worth is guaranteed live.
+  // The dashboard renders the card even when the stress-test vm is `null` on a config error, so only net worth is guaranteed live.
   it('blanks projectedAtRetirement and retirementYear to "—" when null', () => {
     render(
       <DashboardPlanBasicsCard

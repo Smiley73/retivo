@@ -1,10 +1,5 @@
-/**
- * Controllable fake `SyncTransport` shared by the SyncContext test files.
- *
- * Kept free of any `SyncContext` import on purpose: each test file's
- * `vi.mock('./mock-sync', ...)` factory loads this module, and loading
- * `SyncContext` from inside that factory would deadlock on the mock itself.
- */
+// Controllable fake `SyncTransport` for the SyncContext tests.
+// Imports nothing from `SyncContext`: each test's `vi.mock('./mock-sync')` factory loads this, so that would deadlock.
 import type {
   BootstrapResponseBody,
   PullResponseBody,

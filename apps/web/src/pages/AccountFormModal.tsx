@@ -1,32 +1,4 @@
-/**
- * Account create/edit form, rendered as a modal.
- *
- * Reads household + (for edit mode) the account aggregate from
- * IndexedDB. Create submits via `queueLocalMutation`; an edit-mode save
- * submits via `queueGuardedAccountUpdate`, one
- * IndexedDB transaction that writes the account and queues its mutation
- * together and refuses the write outright when the submitted type differs
- * from the persisted one and the account has real balance history. The
- * "switching to/from MIXED clobbers the pre/post-tax split" warning
- * consults the local `accountBalance` store; client-side validation also
- * enforces the `ACCOUNT_NOT_ZEROED` rule (you can't inactivate while the
- * latest balance is non-zero).
- *
- * Field order: institution (required), name, type, tax treatment, owner.
- * Tax-treatment dropdown is filtered by account type and locks when only
- * one option is legal. The owner dropdown lists every household member
- * plus a "Joint Ownership" option (suppressed for individual-only types).
- * The type picker itself is edit-mode-only balance-history-gated
- * (see the handlers and
- * state below); an account with real history refuses every option but its
- * own persisted type, reachable and selectable by keyboard the whole time.
- *
- * Lives inside the shared `<Modal>` (React Aria — viewport-centered,
- * focus trap, Esc/scrim). The parent (AccountsPage) mounts this only
- * while open, so all the load effects + form state reset cleanly per
- * open. Unsaved edits are guarded via `useDirtyModalClose` (X / Esc /
- * scrim) and `useDirtyDiscardAction` (the error-recovery deep links).
- */
+/** Account create/edit modal; an edit-mode type change is refused when the account has balance history. */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useAuth } from '../auth/AuthContext';
@@ -98,13 +70,6 @@ interface HouseholdMemberView {
 
 const JOINT_VALUE = '__joint__';
 
-/**
- * Groups for the account-type picker. The
- * `{ value, label }` shape only — the per-option
- * `description`/`unavailable` additions are layered on per-render by the
- * `accountTypeGroups` memo below, keyed on the persisted type and the
- * retype-block verdict, neither of which this module-level list can see.
- */
 const ACCOUNT_TYPE_GROUP_DEFS: ReadonlyArray<{
   readonly label: string;
   readonly options: { value: AccountType; label: string }[];
@@ -142,16 +107,7 @@ const ACCOUNT_TYPE_GROUP_DEFS: ReadonlyArray<{
   },
 ];
 
-/**
- * Help text shown under the Tax treatment field when "Mixed" is selected.
- * Explains the post-tax sub-bucket distinction in plain English: in an
- * employer plan (401k/403b/457b/TSP) the post-tax money is a Roth-designated
- * slice that grows and comes out tax-free, whereas in a regular account the
- * post-tax money is plain after-tax savings whose growth is still taxed. It
- * deliberately does NOT promise the early-withdrawal contributions-first
- * ordering that applies to Roth IRAs only — designated-Roth employer-plan
- * money is taxed by a different (deferred / approximated) rule before 59½.
- */
+// Does not promise the Roth-IRA contributions-first ordering: designated-Roth employer-plan money is taxed by a different rule before 59½.
 const MIXED_TAX_TREATMENT_HINT =
   'Mixed means this account holds both pre-tax and post-tax money. In an ' +
   'employer plan (401(k)/403(b)/457(b)/TSP) the post-tax side is a ' +
@@ -159,35 +115,19 @@ const MIXED_TAX_TREATMENT_HINT =
   'account the post-tax side is plain after-tax savings, so only your original ' +
   'contributions are tax-free and the growth is still taxed.';
 
-/**
- * Copy for the account-type picker's retype blocking.
- */
-
-/** The `Select` option's own accessible description when its type is blocked
- *  by real balance history — never rendered on the persisted option. */
 const RETYPE_OPTION_BLOCKED_DESCRIPTION =
   'This account already has balance history — create a new account instead.';
 
-/** Live-region copy for a pick refused because the account has real
- *  history — whether the option already showed as blocked, or the pick's own
- *  read is what turned the history up. */
 const RETYPE_PICK_BLOCKED_MESSAGE =
   'This account already has balance history, so its type can’t be changed. ' +
   'Create a new account for the other type instead.';
 
-/** Live-region copy shared by an open-time and a pick-time read failure —
- *  one verdict, one copy. Claims nothing
- *  about whether the account has history; offers a retry. */
 const RETYPE_COULD_NOT_CHECK_MESSAGE =
   'Could not check this account’s balance history, so the type was not changed.';
 
-/** Live-region copy for a Try-again retry that comes back clear — replaces
- *  the could-not-check message rather than silently clearing the region, so
- *  the person who pressed Try again gets some confirmation the check ran. */
 const RETYPE_RETRY_CLEAR_MESSAGE =
   'Balance history check complete — no history found. You can choose a type again.';
 
-/** Save-time refusal, blocked — the editor's existing `error` Alert slot. */
 function retypeSaveBlockedMessage(persistedTypeLabel: string): string {
   return (
     'This account already has balance history, so its type can’t be changed. ' +
@@ -196,8 +136,6 @@ function retypeSaveBlockedMessage(persistedTypeLabel: string): string {
   );
 }
 
-/** Save-time refusal, could not check — distinct from the pick-time copy so
- *  pressing Update is never silently nothing. */
 const RETYPE_SAVE_COULD_NOT_CHECK_MESSAGE =
   'Could not check this account’s balance history, so nothing was saved. Please try again.';
 
@@ -239,8 +177,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
   const { confirm, dialog } = useConfirm();
 
   const [form, setForm] = useState(EMPTY_FORM);
-  // The account's Roth / required-withdrawal tax facts, held as a separate
-  // all-strings draft so a partially-typed value never becomes a stored number.
   const [taxProfile, setTaxProfile] = useState<TaxProfileDraft>(EMPTY_TAX_PROFILE_DRAFT);
   const taxProfileBaselineRef = useRef<TaxProfileDraft>(EMPTY_TAX_PROFILE_DRAFT);
   const [members, setMembers] = useState<HouseholdMemberView[]>([]);
@@ -249,61 +185,28 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
   const [error, setError] = useState<{ message: string; code?: string } | null>(null);
   const [originalTaxTreatment, setOriginalTaxTreatment] = useState<AccountTaxTreatment | ''>('');
   const [aggregateVersion, setAggregateVersion] = useState(0);
-  // Snapshot of the form taken once it's hydrated. See "Form controls"
-  // in docs/ui-conventions.md.
   const formBaselineRef = useRef<typeof EMPTY_FORM>(EMPTY_FORM);
   const [baselineReady, setBaselineReady] = useState(false);
-  // Bumped whenever a save refusal re-seeds `formBaselineRef.current.type`
-  // with the account's fresh persisted type (see the `AccountRetypeBlockedError`
-  // catch below). A ref mutation alone doesn't re-render, and even a render
-  // triggered by some OTHER state write doesn't re-run a `useMemo` whose own
-  // dependencies didn't change — `accountTypeGroups` needs its own signal that
-  // the value it reads out of the ref has moved, not just that the component
-  // rendered again.
+  // Bumped when a save refusal re-seeds the baseline type: a ref write alone does not re-run the accountTypeGroups memo.
   const [baselineTypeRevision, setBaselineTypeRevision] = useState(0);
-  // The editor's one latched verdict over
-  // this account's balance history: absent until the open-time read resolves
-  // (the loading gate covers that window), then replaced by any LATER read
-  // that finds a block the earlier one missed (pick-time or save-time). The
-  // latch is one-way toward 'blocked': a later clear/could-not-check read
-  // never erases a block already known. See `applyRetypeVerdict`.
+  // One-way latch: a later clear or could-not-check read never erases a known block (see applyRetypeVerdict).
   const [retypeVerdict, setRetypeVerdict] = useState<
     'clear' | 'blocked' | 'could-not-check' | null
   >(null);
-  // The type <Select>'s pick that a differing-type pick's balance read is
-  // still out for — `null` once nothing is in flight. Blocks Update
-  // (`saveDisabled`) and the Enter-in-a-text-field submit path: without
-  // it a person could pick, press Update before the read resolves, and have
-  // the OLD type written while the modal closes with no error at all.
+  // Blocks Update while a differing pick's balance read is out; otherwise the old type would be saved with no error.
   const [pendingPick, setPendingPick] = useState<AccountType | null>(null);
-  // The same value, readable synchronously inside an in-flight read's
-  // continuation. A pick is superseded the moment the user picks again, but
-  // the state write that says so only lands on the next render — this ref is
-  // what a resolving read compares itself to (the supersession check).
+  // Synchronous twin of pendingPick: a superseded read compares against the ref because the state write lands next render.
   const pendingPickRef = useRef<AccountType | null>(null);
-  // The polite live-region announcement beside
-  // the type field. A fresh object (not just new text) on every announcement,
-  // including a REPEAT of the same blocked option, because many screen
-  // readers do not re-announce identical text written into the same node;
-  // the render below keys the region's node on `nonce` so React remounts it.
+  // A fresh object per announcement so a repeated blocked pick re-announces; screen readers skip identical text in the same node.
   const [retypeAnnouncement, setRetypeAnnouncement] = useState<{
     nonce: number;
     message: string;
     retryable: boolean;
   } | null>(null);
-  // Wraps just the type `<Select>` (never the live region) so a retry's
-  // resolution can hand focus back to the trigger — the retry `<button>` it
-  // was pressed on is itself removed from the DOM on every outcome (a fresh
-  // `retypeAnnouncement` node), which would otherwise drop a keyboard/
-  // screen-reader user to `<body>` with no notice. `Select` forwards no
-  // ref of its own, so this queries
-  // the one `<button>` it renders — safe only because the query runs after
-  // the retry control (the region's OWN `<button>`, outside this wrapper)
-  // is already gone.
+  // Retry removes its own button on every outcome, which would drop keyboard focus to <body>; focus the trigger instead.
+  // Select forwards no ref, so this queries its button.
   const typeTriggerRef = useRef<HTMLDivElement>(null);
-  // Guards a stray setState after unmount from an in-flight retype read (an
-  // effect gets this from its cleanup's `active` flag; the
-  // pick-time read below is a plain async function, not an effect).
+  // Guards setState after unmount from the pick-time read (a plain async function, not an effect).
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -312,18 +215,10 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
     };
   }, []);
 
-  /**
-   * Move `retypeVerdict` toward `next`, never away from an established
-   * `'blocked'` (one-way latch — "a failed read must never erase a
-   * block already known", precedence blocked > could-not-check > clear).
-   * Every other transition fully replaces the verdict, including
-   * could-not-check → clear, which is what a successful retry relies on.
-   */
   const applyRetypeVerdict = (next: 'clear' | 'blocked' | 'could-not-check'): void => {
     setRetypeVerdict((prev) => (prev === 'blocked' ? prev : next));
   };
 
-  /** Replace the live-region announcement with a fresh node. */
   const announceRetype = (message: string, retryable: boolean): void => {
     setRetypeAnnouncement((prev) => ({ nonce: (prev?.nonce ?? 0) + 1, message, retryable }));
   };
@@ -392,9 +287,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
         };
         setForm(initial);
         formBaselineRef.current = initial;
-        // Every stored tax fact is re-validated on the way in, so a legacy or
-        // hand-imported payload with an out-of-shape value renders blank instead of
-        // crashing the editor or round-tripping the corrupt value back to storage.
+        // Re-validate stored tax facts so a corrupt legacy or imported value renders blank instead of crashing or round-tripping.
         const initialTaxProfile = readTaxProfileDraft(a.payload);
         setTaxProfile(initialTaxProfile);
         taxProfileBaselineRef.current = initialTaxProfile;
@@ -402,12 +295,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
         setOriginalTaxTreatment(a.payload.taxTreatment);
         setAggregateVersion(a.version);
 
-        // The open-time balance read, resolved
-        // BEFORE `setLoading(false)` lifts the gate that replaces the whole
-        // form with `LoadingState`: no option may render ahead of its
-        // verdict. Kept separate from the account read above — only
-        // THIS read's failure is could-not-check; a failed account read
-        // stays today's "Failed to load account".
+        // Read the balance history before setLoading(false) so no option renders ahead of its verdict.
         try {
           const historyRows = (await listAggregates(
             'accountBalance',
@@ -430,24 +318,9 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
     return () => {
       active = false;
     };
-    // `applyRetypeVerdict` / `announceRetype` are stable-enough setState
-    // wrappers (functional updaters only) — omitted, like every other such
-    // helper this component reads inside an effect without listing.
+    // applyRetypeVerdict and announceRetype only call functional setState updaters, so they are omitted from the deps.
   }, [accountId, isEdit]);
 
-  // Per-render (memoised) type-picker
-  // groups: each differing option carries `Select`'s unavailable treatment +
-  // its own accessible description ONLY while this account is known
-  // `'blocked'` (the three-verdict copy owns 'could-not-check' — the
-  // options themselves stay ordinary while it's merely unknown). The
-  // persisted option is marked on neither. Depends on `baselineReady` and
-  // `retypeVerdict`, never `formBaselineRef` alone — a ref does not
-  // re-render (see the field declarations above) — and also on
-  // `baselineTypeRevision`, so a save refusal that corrects the ref's `type`
-  // to the account's fresh persisted type (while `retypeVerdict` was already
-  // `'blocked'` and so wouldn't itself change) still forces this memo to
-  // re-read it, instead of continuing to mark options against the stale
-  // open-time type.
   const accountTypeGroups = useMemo(() => {
     const persistedType = baselineReady ? formBaselineRef.current.type : '';
     return ACCOUNT_TYPE_GROUP_DEFS.map((group) => ({
@@ -480,8 +353,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
       form.assetMixStocks !== b.assetMixStocks ||
       form.assetMixBonds !== b.assetMixBonds ||
       form.assetMixCash !== b.assetMixCash ||
-      // The tax-facts draft is part of the dirty state, so the unsaved-changes
-      // guard also protects a tax-detail edit from being discarded silently.
       JSON.stringify(taxProfile) !== JSON.stringify(taxProfileBaselineRef.current)
     );
   }, [baselineReady, form, taxProfile]);
@@ -513,13 +384,10 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
     form.taxTreatment,
   );
 
-  // X / Esc / scrim prompt when dirty; explicit Cancel uses immediateClose.
   const { guardedClose, immediateClose, confirmModal } = useDirtyModalClose(
     isFormDirty,
     () => onClose(false),
   );
-  // The error-recovery deep links navigate to another page, which would
-  // discard the draft — route them through the same Stay/Leave prompt.
   const { runGuarded, confirmModal: discardConfirmModal } =
     useDirtyDiscardAction(isFormDirty);
 
@@ -537,9 +405,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
             ? members.find((m) => m.isPrimary)?.id ?? ''
             : f.ownerValue,
       };
-      // For new accounts, re-suggest assetMix from the new type's
-      // default. For edit, leave the user's existing mix alone (a type
-      // change does not overwrite an already-set mix).
       if (!isEdit) {
         const def = defaultAssetMixForAccountType(newType);
         next.assetMixStocks = def.stocksPct.toFixed(1);
@@ -550,25 +415,8 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
     });
   };
 
-  /**
-   * The type `<Select>`'s onChange.
-   * `Select` forwards every selection unconditionally; this editor alone
-   * applies or refuses one.
-   *
-   * A pick equal to the PERSISTED type (never the live draft — flipping away
-   * and back grants nothing) applies immediately with no read: it is the one
-   * option never blocked, and re-picking it is the exit from a state where a
-   * sync pull landed history after the person had already picked another
-   * type. Create mode takes no read at all.
-   *
-   * A differing pick in edit mode runs a fresh balance read before anything
-   * reaches the draft — closing the same-device window the open-time read
-   * leaves open (another tab landing a qualifying row with no cross-tab
-   * signal). The read is superseded the moment the user picks again:
-   * `pendingPickRef` is the synchronous truth an in-flight run compares
-   * itself against, because the state write that supersedes it only lands on
-   * the next render.
-   */
+  // Equal-to-persisted picks apply without a read; a differing pick re-reads balances first (another tab may have landed history).
+  // pendingPickRef supersedes a stale read.
   const handleTypeChange = (newType: AccountType): void => {
     const persistedType = formBaselineRef.current.type;
     if (!isEdit || accountId === null || newType === persistedType) {
@@ -591,8 +439,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
       } catch {
         outcome = 'could-not-check';
       }
-      // Superseded: the user picked again while this read was out. Applies
-      // and refuses nothing — the later pick's own read is authoritative.
       if (!mountedRef.current || pendingPickRef.current !== newType) return;
       pendingPickRef.current = null;
       setPendingPick(null);
@@ -612,18 +458,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
     })();
   };
 
-  /**
-   * The retry — re-runs the pick-time-shaped read for whatever type the
-   * type `<Select>` is CURRENTLY on, and replaces the verdict with what it
-   * finds. Deliberately does NOT re-apply the abandoned pick: the person
-   * picks again once the account is known clear.
-   *
-   * Every outcome replaces the message rather than silently clearing it —
-   * pressing Try again and hearing nothing back is its own dead end — and
-   * every outcome also removes the retry `<button>` the person just
-   * activated (a fresh `retypeAnnouncement` node), so focus moves to the
-   * type trigger rather than falling to `<body>`.
-   */
+  // Retry does not re-apply the abandoned pick; every outcome replaces the message and moves focus to the type trigger.
   const retryRetypeCheck = (): void => {
     if (accountId === null) return;
     const runAccountId = accountId;
@@ -651,13 +486,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
   };
 
   const onSave = async (): Promise<void> => {
-    // A differing pick's balance read can
-    // still be out; until it settles, `form.type` still holds the value the
-    // editor is already accepting, so a submit slipping through here would
-    // queue the WRONG type and close the modal with no error at all. The
-    // disabled Update button covers the click path; this guard covers every
-    // other submit path (Enter in a text field). The ref, not the state, is
-    // the synchronous truth (see pendingPickRef).
     if (pendingPickRef.current !== null) return;
     if (
       !form.type ||
@@ -678,21 +506,10 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
       const balances = (await listAggregates('accountBalance')) as Aggregate<AccountBalancePayload>[];
       const forThis = balances.filter((b) => b.payload.accountId === accountId);
 
-      // The disable guards (ACCOUNT_INCOME_LINKED, ACCOUNT_NOT_ZEROED)
-      // gate the active true→false *transition* only — saving an account
-      // that was already inactive (e.g. editing its notes) must not be
-      // blocked. `formBaselineRef.current.active` is the hydrated
-      // baseline; `!form.active` alone over-blocks every save of an
-      // already-inactive account.
+      // The disable guards gate only the active true→false transition, so editing an already-inactive account is not blocked.
       const disabling = formBaselineRef.current.active === true && !form.active;
       if (disabling) {
-        // ACCOUNT_INCOME_LINKED — an account an income stream is paid
-        // from (linkedCbpAccountId) or deposits into (targetAccountId)
-        // cannot be disabled; it would orphan the stream. Structural
-        // scan over canonical + scenario-embedded income.
-        // Checked before ACCOUNT_NOT_ZEROED so the more
-        // feature-relevant /income remediation surfaces first when an
-        // account is both non-zero and income-linked.
+        // ACCOUNT_INCOME_LINKED: an account an income stream pays from or deposits into cannot be disabled; checked before ACCOUNT_NOT_ZEROED.
         const [income, scenarioRows] = await Promise.all([
           listAggregates('incomeStream') as Promise<Aggregate<IncomeStreamPayload>[]>,
           listAggregates('scenario') as Promise<Aggregate<ScenarioPayload>[]>,
@@ -706,7 +523,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
           return;
         }
 
-        // ACCOUNT_NOT_ZEROED — surface as a remediable error with a deep link.
         const latest = forThis.reduce<Aggregate<AccountBalancePayload> | null>((acc, b) => {
           if (!acc || b.payload.year > acc.payload.year) return b;
           return acc;
@@ -721,7 +537,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
         }
       }
 
-      // Tax-treatment switch confirm (only when balances exist + MIXED is involved).
       if (originalTaxTreatment && form.taxTreatment !== originalTaxTreatment) {
         const involvesMixed =
           originalTaxTreatment === 'MIXED' || form.taxTreatment === 'MIXED';
@@ -743,11 +558,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
       }
     }
 
-    // Refuse a save whose tax-detail amount / year cannot be read, BEFORE the
-    // serializer silently omits it. An omitted fact reads to the engines as
-    // "nothing recorded" and quietly earns a cautious default, so a user who typed
-    // `20,000` in a dollar field would otherwise be told nothing while the figure
-    // vanished (or, pre-fix, was stored as $20).
+    // Refuse unreadable tax-detail amounts: the serializer would omit them and the engines read an omission as a cautious default.
     const taxDetailError = currentTaxValidationError;
     if (taxDetailError !== null) {
       setError({ message: taxDetailError });
@@ -781,10 +592,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
                 bondsPct: parseFloat(form.assetMixBonds),
                 cashPct: parseFloat(form.assetMixCash),
               },
-        // Only facts the chosen account TYPE can carry are emitted, so
-        // changing an account's type never leaves orphan Roth or inherited-account
-        // facts behind, and a blank field is OMITTED (absent, not zero) so the
-        // engines apply their conservative default rather than a recorded $0.
+        // Blank facts are omitted (absent, not zero) so the engines apply their conservative default.
         ...taxProfileToPayloadFields(
           taxProfile,
           form.type,
@@ -792,11 +600,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
           soleSpouseEligible,
         ),
       };
-      // Refuse a save the sync push could never accept. The tax-details
-      // editor can hold up to 200 conversion lots + 200 rollover lots alongside a
-      // free-text notes field, which together can exceed the 64 KB per-payload sync
-      // cap — a locally-valid save that would then be permanently unsyncable with
-      // no explanation. Checked here, BEFORE any local write.
+      // Refuse a payload over the 64 KB sync cap; it would be permanently unsyncable with no explanation.
       const sizeError = accountPayloadSizeError(payload);
       if (sizeError !== null) {
         setError({ message: sizeError });
@@ -804,14 +608,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
         return;
       }
       if (isEdit && accountId) {
-        // One transactional write, opened
-        // AFTER the confirms above: the account row is read FRESH inside the
-        // transaction (never the snapshot captured at open) and compared
-        // against the submitted type; a differing type reads that account's
-        // balance rows in the same transaction and refuses the write outright
-        // when they qualify as history. An equal type
-        // takes no balance read at all — renaming an account with years of
-        // history is untouched.
+        // Read the account fresh inside the transaction; a differing type reads its balance rows and refuses the write on history.
         const targetAccountId = accountId;
         const submittedType = form.type;
         try {
@@ -819,11 +616,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
             householdId,
             aggregateId: targetAccountId,
             expectedVersion: aggregateVersion,
-            // Carry forward fields the edit-form doesn't surface (planned
-            // contributions) from the FRESH persisted row; `assetMix` IS in
-            // the form and the user-entered values must win — pre-fix this
-            // overwrote the form's edit with the existing value, silently
-            // dropping every asset-mix change.
+            // assetMix is in the form, so the form's value must win over the persisted one.
             buildPayload: (freshAccount) => ({
               ...payload,
               plannedContributionPreTax:
@@ -842,17 +635,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
         } catch (err) {
           if (err instanceof AccountRetypeBlockedError) {
             applyRetypeVerdict('blocked');
-            // The transaction refused against its FRESH persisted type, not
-            // `formBaselineRef`'s open-time snapshot — another device can
-            // retype this account out from under an open editor (the
-            // accepted cross-device window). Re-seed the baseline's type
-            // with it so the picker's own guard and option marking (both
-            // keyed on `formBaselineRef.current.type`) track what the
-            // transaction actually saw: the message below names it, the
-            // now-unavailable options re-mark around it, and re-picking it
-            // is the in-modal recovery — the exit `handleTypeChange`
-            // already grants a pick equal to the persisted type, now that
-            // the persisted type is current instead of stale.
+            // Re-seed the baseline type from the fresh persisted type: another device can retype the account under an open editor.
             formBaselineRef.current = {
               ...formBaselineRef.current,
               type: err.persistedType,
@@ -875,17 +658,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
           throw err;
         }
       } else {
-        // New account: auto-seed a current-year $0 balance so the account is
-        // "Shape 1" everywhere — it projects, renders, and is a valid
-        // Roth-conversion target with no hand-entered balance. The seed
-        // id is DETERMINISTIC (`bal-${accountId}-${year}`, the same id
-        // AccountBalancesPage derives), so a later real current-year balance
-        // save looks the seed up and UPDATES it (no duplicate). The seed
-        // payload mirrors the balances form's empty shape exactly: all numeric
-        // fields 0, splits `0` for MIXED / `null` otherwise. The $0 seed
-        // is excluded from time-weighted-return math on every surface
-        // (`isReturnBearingRow`, balance-calc.ts) so it never fabricates a
-        // return.
+        // The seed id is deterministic so a later real balance updates it; the $0 seed is excluded from return math (isReturnBearingRow).
         const newAccountId = cryptoUuid();
         const todayYear = new Date().getUTCFullYear();
         const isMixed = form.taxTreatment === 'MIXED';
@@ -910,27 +683,8 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
           comment: null,
         };
 
-        // Two distinct mechanisms, NOT conflated:
-        // (a) `withBatchedStoreSignals` coalesces the local reactive-read
-        //     signals only — it has NO push-ordering or transaction semantics,
-        //     and it only takes effect when `batch` is threaded into each
-        //     `queueLocalMutation` (forwarded to `putAggregate`). A bare wrap
-        //     that ignores `batch` would be inert.
-        // (b) The parent-before-dependent PUSH order comes from the sequential
-        //     queue → monotonic timestamp: the account is queued first ⟹ lower
-        //     timestamp ⟹ pushed first.
-        //
-        // Enumerate the failure points (no silent swallow):
-        //   - account-pair half-write (the account's own `putAggregate` then
-        //     `queueMutation`): nothing persisted ⟹ total failure.
-        //   - seed-pair half-write AFTER the account write succeeded: the
-        //     account exists, the seed does not. This is the only reachable
-        //     partial failure for a fresh-UUID create (the dangerous
-        //     balance-without-account is unreachable — the account create uses
-        //     a fresh id with `expectedVersion: 0`, so it cannot CONFLICT). It
-        //     is benign: it equals a new account with no balance yet (renders
-        //     on planned rate, unprojected) and the
-        //     deterministic seed id means a later real balance re-seeds cleanly.
+        // withBatchedStoreSignals only coalesces local reactive signals and takes effect only when `batch` is threaded into each queueLocalMutation.
+        // Push order comes from queueing the account first. A seed-pair failure after the account write leaves a benign account with no balance.
         let accountWritten = false;
         try {
           await withBatchedStoreSignals(async (batch) => {
@@ -960,10 +714,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
           });
         } catch (err) {
           if (accountWritten) {
-            // Partial success: the account is saved, the $0 seed is not. Do
-            // NOT show the generic total-failure message or close with a
-            // failure — the account was created and a later balance entry
-            // re-seeds it. Surface the benign partial-success guidance.
             notifyPending();
             setError({
               message:
@@ -1000,9 +750,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
 
   const saveDisabled =
     submitting ||
-    // A differing pick's balance read is still out — saving now would submit
-    // whatever value the editor is currently accepting, dropping the pick
-    // still in flight. See the guard at the top of onSave.
     pendingPick !== null ||
     !form.name ||
     !form.type ||
@@ -1072,8 +819,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
         }}
         noValidate
       >
-        {/* 2-col `form-grid`: Account name | Institution, Type | Owner,
-            Tax treatment | Planning Return %. */}
         <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
           <Field htmlFor="name" label="Account name">
             <TextInput
@@ -1120,19 +865,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
                 groups={accountTypeGroups}
               />
             </div>
-            {/* Polite live region beside the
-                field (never through the `hint` prop above, which nothing
-                associates with the control, and never in its place). The
-                `role="status"` element is mounted UNCONDITIONALLY, empty
-                when idle: inserting a live region and its text in the same
-                commit is the case screen readers handle least reliably — a
-                region that arrives already populated is commonly skipped
-                (NVDA/JAWS announce mutations inside a region that was
-                already present). Only the inner node is keyed on `nonce`,
-                so a screen reader that already registered the outer region
-                still hears every replacement, including a REPEAT of the
-                same blocked pick — many screen readers do not re-announce
-                identical text written into the same node. */}
+            {/* role="status" is mounted unconditionally and empty when idle (screen readers skip a region that arrives populated); only the inner node is keyed on nonce so repeats re-announce. */}
             <p role="status" className="mt-1 text-xs text-negative">
               {retypeAnnouncement && (
                 <span key={retypeAnnouncement.nonce}>
@@ -1222,9 +955,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
               onChange={(e) => setForm({ ...form, planningReturnPct: e.target.value })}
               className={inputNumericClass}
               onBlur={() => {
-                // Normalize to one decimal place so the field never shows
-                // "7" and "7.0" interchangeably across the app. Skip when
-                // empty so required-field validation can still fire.
+                // Skip empty so required-field validation can still fire.
                 const trimmed = form.planningReturnPct.trim();
                 if (trimmed === '') return;
                 const n = parseFloat(trimmed.replace(',', '.'));
@@ -1299,9 +1030,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
           </Muted>
         </div>
 
-        {/* Left-aligned, primary action first — AGENTS modal rule. The
-            primary is `type="submit"` so Enter inside a text field still
-            submits the form. */}
         <div className="mt-4 flex justify-start gap-2">
           <button
             type="submit"

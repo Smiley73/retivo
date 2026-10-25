@@ -1,24 +1,4 @@
-/**
- * Pinned defect: unit mix between balances and expenses.
- *
- * The "unit mix" bug: pre-fix the engine emitted real (today's-dollar)
- * balances while the expense projection compounded amounts from the
- * retirement-year anchor — these two units disagreed for any non-zero
- * inflation rate, producing balance projections that didn't line up
- * with the user's entered expense amounts.
- *
- * Post-fix:
- *   1. `project()` emits **nominal** balances.
- *   2. Expense amounts are interpreted as **today's dollars** and
- *      inflated forward from `asOfMonth`.
- *   3. Applying `realDeflatorAt(...)` to a nominal year-Y amount must
- *      return the today's-dollar amount the user originally entered.
- *
- * This file tests the round-trip identity end-to-end: take a flat
- * $100k/yr expense entered in today's dollars, project it forward at
- * 3 %/yr inflation, then deflate the nominal year-by-year totals back
- * to today's dollars. The result must match $100k/yr to FP precision.
- */
+// Pinned defect (unit mix): the engine once emitted real balances while the expense projection compounded from the retirement anchor, so for any non-zero inflation the two disagreed. Now `project()` is nominal, expenses are today's dollars inflated from `asOfMonth`, and `realDeflatorAt` round-trips a flat $100k/yr at 3% back to $100k/yr.
 import { describe, expect, it } from 'vitest';
 import {
   projectExpensesByYear,
@@ -75,10 +55,6 @@ describe('unit mix pin — today\'s-dollar expense round-trips through nominal p
       to: 2055,
     });
 
-    // Real-deflate each year's nominal back to today's dollars using
-    // the same year-mean factor the engine used to inflate. With
-    // matched factors the round-trip is exact (modulo the engine's
-    // round2 truncation).
     for (const row of nominal) {
       let yearMeanFactor = 0;
       for (let m = 0; m < 12; m += 1) {

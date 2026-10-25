@@ -1,12 +1,4 @@
-/**
- * Scenario detail page subsections introduced alongside the Expense
- * feature: Life Expectancy, Inflation, and Discretionary spending adjustment.
- *
- * Each card mirrors the existing Retirement Age / SS / Future
- * Contributions pattern: a summary card on the page with a Configure
- * button that opens a small modal owning its own draft state. Save in
- * the modal calls `saveScenario` directly and closes; Cancel discards.
- */
+/** Scenario detail subsection cards (Life expectancy, Inflation, Discretionary spending adjustment, Downturn guardrails): each a summary with a Configure button opening a modal that owns its draft and saves via saveScenario. */
 import React, { useMemo, useState } from 'react';
 import { Modal } from '../components/Modal';
 import { formatPercent } from '../components/PercentInput';
@@ -62,19 +54,11 @@ import {
 } from '../db/types';
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 
-/**
- * Capitalise the first character of a string. Used at leading-sentence
- * positions where `memberLabel` returned its lowercase fallback
- * (`primary`/`secondary`) — keeps the canonical helper's lowercase
- * signature intact while honouring the member-label rule
- * ("Form controls" in docs/ui-conventions.md) that the lowercase fallback is scoped to mid-sentence callers.
- */
+// Capitalises a leading-sentence fallback slot (primary/secondary); memberLabel keeps its lowercase fallback for mid-sentence callers ("Form controls" in docs/ui-conventions.md).
 function capitaliseFirst(s: string): string {
   if (s.length === 0) return s;
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
-
-// ---------- Life Expectancy ----------
 
 const LIFE_STEP = 5;
 
@@ -110,10 +94,6 @@ export const LifeExpectancyCard: React.FC<LifeExpectancyCardProps> = ({
 
   const primaryName = memberLabel(primaryMember ?? undefined, undefined, 'primary');
   const secondaryName = memberLabel(secondaryMember ?? undefined, undefined, 'secondary');
-  // Summary sentence starts with primaryName; capitalise the
-  // fallback slot (`primary`/`secondary`) at leading-sentence position.
-  // The canonical `memberLabel` keeps the lowercase fallback for the
-  // mid-sentence callsites elsewhere — see the member-label rule in docs/ui-conventions.md.
   const summary = secondaryMember
     ? `${capitaliseFirst(primaryName)} to ${primaryAge} years, ${secondaryName} to ${secondaryAge} years.`
     : `To ${primaryAge} years.`;
@@ -235,7 +215,6 @@ export const LifeExpectancyModal: React.FC<LifeExpectancyModalProps> = ({
           </div>
         )}
         {error && <Alert tone="error">{error}</Alert>}
-        {/* Left-aligned, primary action first — AGENTS modal rule. */}
         <div className="flex justify-start gap-2">
           <button type="button" className={btnPrimaryClass} onClick={onSave} disabled={submitting}>
             {submitting ? 'Saving…' : 'Save'}
@@ -249,13 +228,9 @@ export const LifeExpectancyModal: React.FC<LifeExpectancyModalProps> = ({
   );
 };
 
-// ---------- Inflation ----------
-
 interface InflationCardProps {
   scenario: ScenarioAggregate;
   scenarios: ScenarioAggregate[];
-  /** Flag-derived medical category ids. Omitted ⇒ the adapter falls
-   *  back to the seeded `cat-medical` id (legacy summary behaviour). */
   medicalCategoryIds?: ReadonlyArray<string>;
   onConfigure: () => void;
   onResetToInherited: () => void;
@@ -272,9 +247,6 @@ export const InflationCard: React.FC<InflationCardProps> = ({
   const isOverriddenLocally = ownOverride !== undefined;
   const canResetToInherited = isOverriddenLocally && !scenario.payload.isPrimary;
 
-  // Resolve per-key so the summary reflects the general rate, the resolved
-  // Medical rate (general + 2pp by default), and the count of categories
-  // carrying a non-default custom rate.
   const summaryText = useMemo(() => {
     const medicalIds = medicalCategoryIdSet(medicalCategoryIds);
     const resolved = resolveInflationForScenario(
@@ -283,17 +255,12 @@ export const InflationCard: React.FC<InflationCardProps> = ({
       medicalIds,
     );
     const generalPct = resolved.ratePct;
-    // Headline "Medical" number: the first flagged medical id's resolved rate
-    // (one representative figure for the summary; the per-category editor
-    // shows every row).
     const firstMedicalId = [...medicalIds][0];
     const medicalPct =
       firstMedicalId !== undefined
         ? resolved.categoryRates.get(firstMedicalId) ?? generalPct
         : generalPct;
-    // Custom = a resolved category rate that differs from its default
-    // (general, or general+2pp for a medical category). The materialised
-    // medical default is therefore not counted.
+    // Custom means a resolved rate differing from its default (general, or general + 2pp for medical); the materialised medical default is not counted.
     let customCount = 0;
     for (const [catId, rate] of resolved.categoryRates) {
       const def = medicalIds.has(catId)
@@ -331,8 +298,6 @@ export const InflationCard: React.FC<InflationCardProps> = ({
   );
 };
 
-// ---------- Discretionary spending adjustment ----------
-
 interface DiscretionaryCardProps {
   scenario: ScenarioAggregate;
   scenarios: ScenarioAggregate[];
@@ -360,7 +325,6 @@ export const DiscretionaryAdjustmentCard: React.FC<DiscretionaryCardProps> = ({
   const bumpPct = Math.max(-100, Math.min(100, resolved?.bumpPct ?? 0));
   const durationYears = resolved?.durationYears ?? null;
 
-  // U+2212 minus sign for negative display (no .0 decimal).
   const signed = (n: number): string =>
     n > 0 ? `+${n}%` : `−${Math.abs(n)}%`;
 
@@ -505,7 +469,6 @@ export const DiscretionaryAdjustmentModal: React.FC<DiscretionaryModalProps> = (
           )}
         </FieldGroup>
         {error && <Alert tone="error">{error}</Alert>}
-        {/* Left-aligned, primary action first — AGENTS modal rule. */}
         <div className="flex justify-start gap-2">
           <button type="button" className={btnPrimaryClass} onClick={onSave} disabled={submitting}>
             {submitting ? 'Saving…' : 'Save'}
@@ -519,8 +482,6 @@ export const DiscretionaryAdjustmentModal: React.FC<DiscretionaryModalProps> = (
   );
 };
 
-
-// ---------- Downturn spending guardrails ----------
 
 interface GuardrailsCardProps {
   scenario: ScenarioAggregate;
@@ -578,21 +539,13 @@ interface GuardrailsModalProps {
   onClose: (saved: boolean) => void;
 }
 
-// Slider bounds — a UX-sensible sub-range of what isGuardrailConfigValid
-// actually allows (0 ≤ lowerBandPct < upperBandPct, 0 < stepPct ≤ 100,
-// maxRaisePct ≥ 100); a wider raw text field is unnecessary since a band/step/
-// cap outside these ranges is not a realistic planning choice.
+// A UX-sensible sub-range of what isGuardrailConfigValid allows; a band, step or cap outside it is not a realistic planning choice.
 const GUARDRAIL_MAX_RAISE_STEP = 5;
-// Discretionary floor: 0 = trim all discretionary in a deep downturn (essentials
-// still never cut), 100 = protect discretionary entirely. Full [0, 100] range.
+// 0 trims all discretionary in a deep downturn (essentials are never cut); 100 protects discretionary entirely.
 const GUARDRAIL_DISCRETIONARY_FLOOR_STEP = 5;
 
 const formatGuardrailPct = (v: number): string => `${v}%`;
 
-// Label-left-of-slider layout — matches ScenarioAssetAllocationCard /
-// SocialSecurityModal's RangeSlider rows (flex row, fixed-width shrink-0
-// label, flex-1 slider). Wider label column than those (w-44/w-36) since
-// these labels run a full sentence rather than one or two words.
 const GUARDRAIL_SLIDER_ROW_CLASS = 'flex items-center gap-3';
 const GUARDRAIL_SLIDER_LABEL_CLASS = 'w-52 shrink-0 text-sm font-medium text-ink';
 const GUARDRAIL_SLIDER_WRAP_CLASS = 'min-w-0 flex-1';
@@ -614,9 +567,7 @@ export const DownturnGuardrailsModal: React.FC<GuardrailsModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Validation: only enforced when the guardrail is ON — a disabled config
-  // ships inert, so an out-of-range field on a disabled guardrail cannot break
-  // the projection. When ON, block Save on an inverted / out-of-range rule.
+  // Enforced only when the guardrail is ON: a disabled config ships inert, so an out-of-range field on it cannot break the projection.
   const configValid = isGuardrailConfigValid({
     lowerBandPct,
     upperBandPct,
@@ -782,7 +733,6 @@ export const DownturnGuardrailsModal: React.FC<GuardrailsModalProps> = ({
           </Alert>
         )}
         {error && <Alert tone="error">{error}</Alert>}
-        {/* Left-aligned, primary action first — AGENTS modal rule. */}
         <div className="flex justify-start gap-2">
           <button
             type="button"

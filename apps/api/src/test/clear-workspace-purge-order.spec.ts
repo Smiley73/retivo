@@ -1,17 +1,5 @@
-/**
- * Workspace-clear erase-history purge ordering + failure tests.
- *
- * Locks purge-LAST + purge-failure semantics: the S3 backup-history purge
- * runs AFTER the sweep + empty-snapshot mint + WorkspaceMeta repoint, so a
- * purge failure never strands the live pointer. The clear ALWAYS commits
- * (2xx `historyErased:false`); the prior snapshots linger (age out on the
- * janitor schedule, still restorable) and an audited workspace_clear_failed
- * flags the purge failure. The optional purgeHistoryOnly retry then succeeds
- * without re-sweeping.
- *
- * Builds its own Nest app so it can override AccountSnapshotPurgeService with
- * a spy / failure stub (mirrors account-deletion-purge-order.spec.ts).
- */
+// Workspace-clear purge ordering: the S3 history purge runs after the sweep, empty-snapshot mint and WorkspaceMeta repoint, so a purge failure never strands the live pointer. The clear still commits (historyErased:false),
+// prior snapshots stay restorable, workspace_clear_failed is audited, and the purgeHistoryOnly retry succeeds without re-sweeping. Builds its own Nest app to override AccountSnapshotPurgeService.
 import 'reflect-metadata';
 import request from 'supertest';
 import { Reflector } from '@nestjs/core';
@@ -34,7 +22,6 @@ import { validateEnv } from '../common/env.config.js';
 import { ensureLocalAwsResources } from '../aws/local-bootstrap.js';
 import {
   AccountSnapshotPurgeService,
-  SnapshotPurgeError,
 } from '../auth/account-snapshot-purge.service.js';
 import {
   scanAll,
@@ -73,7 +60,7 @@ describe('workspace clear — erase-history purge ordering + failure', () => {
         ): Promise<void> => {
           purgeCalls.push({ householdId, keepKeys: opts?.keepKeys });
           if (purgeShouldFail) {
-            throw new SnapshotPurgeError('forced purge failure (test)');
+            throw new Error('forced purge failure (test)');
           }
         },
       })
@@ -102,8 +89,7 @@ describe('workspace clear — erase-history purge ordering + failure', () => {
 
   afterAll(async () => {
     await app.close();
-    // This suite builds its own Nest app, so it is not covered by the
-    // `bootstrapTestApp` close-patch — destroy the resolved client pools.
+    // This suite builds its own app, so the bootstrapTestApp close-patch does not cover its clients; destroy the resolved pools.
     doc.destroy();
     s3.destroy();
   });
@@ -162,24 +148,20 @@ describe('workspace clear — erase-history purge ordering + failure', () => {
       currentPassword: STRONG_PASSWORD,
       eraseHistory: true,
     });
-    // The clear still committed (2xx) — purge-last never fails the clear.
     expect(res.status).toBe(201);
     expect(res.body.historyErased).toBe(false);
 
-    // WorkspaceMeta points at a fresh, resolvable empty snapshot (committed).
     const liveId = await liveSnapshotId(s.householdId);
     expect(liveId).toBeTruthy();
 
-    // The prior snapshot lingers (purge threw before deleting anything) — the
-    // clear stays undoable via Restore until the backups age out.
+    // The prior snapshot lingers (the purge threw before deleting anything), so the clear stays undoable via Restore until backups age out.
     const list = await s3.send(
       new ListObjectsV2Command({ Bucket: bucket, Prefix: `${s.householdId}/` }),
     );
     const keys = (list.Contents ?? []).map((o) => o.Key);
     expect(keys).toContain(`${s.householdId}/2026-01-01T00-00-00-000Z.json.gz`);
 
-    // Audited as a failure (the purge did not complete), reason-tagged so the
-    // audit trail distinguishes it from a rejected password.
+    // Audited as a failure, reason-tagged so the trail distinguishes it from a rejected password.
     const rows = (await scanAll<AuthEventRow>(doc, tableName('TABLE_AUTH_EVENT')))
       .filter((r) => r.userId === s.userId);
     const events = rows.map((r) => r.eventType);
@@ -187,8 +169,7 @@ describe('workspace clear — erase-history purge ordering + failure', () => {
     expect(events).toContain('workspace_clear_failed');
     const failed = rows.find((r) => r.eventType === 'workspace_clear_failed');
     expect(failed?.metadata).toMatchObject({ reason: 'history_purge_failed' });
-    // A purge failure emits _failed for the history sub-op — the clear itself
-    // committed but is NOT reported as _completed (guards the audit contract).
+    // A purge failure emits _failed for the history sub-op; the clear committed but is not reported as _completed.
     expect(events).not.toContain('workspace_clear_completed');
   });
 });

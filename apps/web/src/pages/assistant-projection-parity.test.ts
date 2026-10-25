@@ -1,9 +1,5 @@
-/**
- * The AI assistant's projection numbers are the Balance Projection page's: the same rows, field for field, and
- * the same headline the Scenarios cards derive, and its stress test reads the page's cache entry and draws the page's
- * seed. This file lives in `pages/` because the page glue it compares
- * against (`loadPageData`, `deriveScenarioDeterministicMetrics`) is not importable from `assistant/`.
- */
+// The assistant's projection numbers are the Balance Projection page's: the same rows field for field, the same headline the Scenarios cards derive, and a stress test that reads the page's cache entry and draws its seed.
+// This file lives in `pages/` because `loadPageData` and `deriveScenarioDeterministicMetrics` are not importable from `assistant/`.
 import 'fake-indexeddb/auto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ToolEnv } from '../assistant/tools/define';
@@ -99,7 +95,6 @@ describe('retivo_get_projection against the Balance Projection page', () => {
       const deflator = realDeflatorAt(ctx, year.year, 11);
       expect(row.year).toBe(year.year);
       expect(row.balanceNominal).toBe(year.balance);
-      // The deflator is applied once, to the nominal balance.
       expect(row.todayDollarsFactor).toBe(deflator);
       expect(row.balanceTodayDollars).toBe(year.balance * deflator);
       expect(row.withdrawn).toBe(year.withdrawn);
@@ -107,7 +102,6 @@ describe('retivo_get_projection against the Balance Projection page', () => {
       expect(row.deposit).toBe(year.deposit);
       expect(row.growth).toBe(year.growth);
       expect(row.depleted).toBe(year.depleted);
-      // The engine's cents leave as dollars.
       if (year.federalTaxCents !== undefined) expect(row.federalTax).toBe(year.federalTaxCents / 100);
       else expect(row.federalTax).toBeUndefined();
       if (year.taxableSsCents !== undefined) expect(row.taxableSocialSecurity).toBe(year.taxableSsCents / 100);
@@ -125,7 +119,6 @@ describe('retivo_get_projection against the Balance Projection page', () => {
     expect(data.headline.retirementYear).toBe(page.pageResult!.sharedCtx.retirementYear);
     expect(data.headline.runOutYear).toBe(page.pageResult!.planned!.depletionYear);
     expect(data.headline.portfolioAtRetirementNominal).toBe(page.pageResult!.planned!.netPortfolioAtRetirement);
-    // The last row's today's-dollar balance is the headline ending balance.
     expect(data.years.at(-1)!.balanceTodayDollars).toBeCloseTo(metrics.endingBalance!, 6);
   });
 
@@ -148,7 +141,6 @@ describe('retivo_get_projection against the Balance Projection page', () => {
 });
 
 describe('retivo_get_stress_test against the Balance Projection page', () => {
-  /** The input and cbpFailed flag `usePlanStressTestVm` works from, built the way the view model builds its `runArgs`. */
   async function pageStressInput(scenarioId: string) {
     const inputs = await loadProjectionInputs();
     const page = await pageDataFor(scenarioId);

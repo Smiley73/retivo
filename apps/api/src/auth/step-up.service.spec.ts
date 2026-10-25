@@ -1,13 +1,4 @@
-/**
- * Focused unit tests for StepUpService.computeFactors — the shared step-up
- * factor-eligibility computation. Directly asserts
- * the three enrollment states (previously only covered indirectly via the
- * change-email integration tests): no enrolled factor → Email-OTP floor;
- * TOTP-only → TOTP + Email-OTP recovery; passkey-enrolled → passkey first.
- *
- * Only `UserMfaRepository.get` + `PasskeysRepository.listForUser` are exercised,
- * so the remaining constructor deps are stubbed away.
- */
+// StepUpService.computeFactors: no enrolled factor gives the Email-OTP floor, TOTP-only gives TOTP plus Email-OTP recovery, and an enrolled passkey leads. Only UserMfaRepository.get and PasskeysRepository.listForUser are exercised.
 import 'reflect-metadata';
 import { StepUpService } from './step-up.service.js';
 import type { UserMfaRepository } from '../dynamo/user-mfa.repository.js';
@@ -16,7 +7,6 @@ import type { UserMfaRow, PasskeyRow } from '../dynamo/types.js';
 
 const USER_ID = 'user-123';
 
-/** A minimal enrolled passkey row for `USER_ID` (only presence matters here). */
 function passkeyRow(): PasskeyRow {
   return {
     userId: USER_ID,
@@ -31,7 +21,6 @@ function passkeyRow(): PasskeyRow {
   };
 }
 
-/** Build the service with stubbed factor repos; other deps are unused here. */
 function buildService(opts: {
   mfa: Partial<UserMfaRow> | null;
   passkeys: PasskeyRow[];

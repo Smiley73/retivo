@@ -1,16 +1,4 @@
-/**
- * Social Security monthly-benefit (PIA) capture modal — Add / Edit flow
- * for the per-member SSA benefit record on the Social Security page.
- *
- * Extracted from `SocialSecurityPage.tsx` to keep the page file within
- * the ≤ 400 ln shape limit. Mirrors the `AccountBalanceEntryModal.tsx` /
- * `RetirementAgeModal.tsx` extraction pattern.
- *
- * `<Modal size="lg">` (viewport-centered, focus trap, Esc/scrim); left-
- * aligned, primary-action-first button row; PIA money field
- * (`type="text" inputMode="decimal"`, `parseCurrencyInput`) with
- * dirty-guard close (`onClose` = guarded, `onCancel` = immediate).
- */
+/** Add / Edit modal for a member's Social Security monthly-benefit (PIA) record; the PIA field is type="text" inputMode="decimal", onClose is the dirty-guarded close and onCancel discards immediately. */
 import React, { useEffect, useState } from 'react';
 import { Modal } from '../components/Modal';
 import { TextInput } from '../components/TextInput';
@@ -80,17 +68,13 @@ export interface SocialSecurityEditState {
 
 interface SocialSecurityBenefitModalProps {
   open: boolean;
-  /** `true` when editing an existing record (drives the title verb). */
   isEdit: boolean;
-  /** Resolved member name for the title (already first-name-first). */
   memberName: string;
   editState: SocialSecurityEditState;
   setEditState: React.Dispatch<React.SetStateAction<SocialSecurityEditState>>;
   formError: string | null;
   saving: boolean;
-  /** Dirty-guarded close (scrim / Esc) — prompts while dirty. */
   onClose: () => void;
-  /** Unguarded close — explicit Cancel button (intentional discard). */
   onCancel: () => void;
   onSave: () => void;
 }
@@ -138,14 +122,10 @@ export const SocialSecurityBenefitModal: React.FC<
           onChange={(v) =>
             setEditState((s) => ({ ...s, piaAsOfDate: v }))
           }
-          // A statement can't be dated in the future — its year is the
-          // engine's COLA anchor, and a future anchor would deflate near-term
-          // benefits. Save also rejects a future date (no silent clamp).
+          // A statement can't be future-dated: its year is the engine's COLA anchor and a future anchor would deflate near-term benefits. Save rejects it too (no silent clamp).
           max={new Date().toISOString().slice(0, 10)}
         />
-        {/* The statement date is the projection's cost-of-living anchor —
-            the quoted amount already includes every increase through this
-            date, so projections add increases only for later years. */}
+        {/* The quoted amount already includes every increase through the statement date, so projections add increases only for later years. */}
         <Muted as="p" className="m-0 mt-1 text-xs">
           Projections use this date as the starting point for future
           cost-of-living increases — the statement amount already includes
@@ -163,7 +143,6 @@ export const SocialSecurityBenefitModal: React.FC<
       rows={3}
       maxLength={2000}
     />
-    {/* Left-aligned, primary (Save) first — AGENTS modal rule. */}
     <div className="mt-2 flex flex-wrap items-center gap-3">
       <button
         type="button"

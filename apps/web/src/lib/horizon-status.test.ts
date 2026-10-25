@@ -1,6 +1,3 @@
-/**
- * Tests for the shared horizon-status helper.
- */
 import { describe, expect, it } from 'vitest';
 import { horizonStatus } from './horizon-status';
 

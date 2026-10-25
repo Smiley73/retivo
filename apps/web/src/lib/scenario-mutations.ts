@@ -1,27 +1,6 @@
 /**
- * Scenario-aggregate mutation helpers + the promotion cascade.
- *
- * Every individual edit (rename, parent change, overrides edit, notes
- * edit, per-section reset, reset-all) is a single `update` mutation
- * via {@link saveScenario}. Two compound operations need multiple
- * mutations queued atomically locally:
- *
- * - {@link deleteScenarioCascade} recursively deletes the scenario
- *   and every transitive descendant. Children are deleted leaf-first
- *   so the parent-pointer chain stays valid throughout the cascade.
- *   The base scenario cannot be deleted.
- *
- * - {@link promoteScenario} flattens the resolved values of the
- *   promoted scenario into the new base, deletes the old base, and
- *   re-parents every surviving scenario as a direct child of the new
- *   base. A `promotionInProgress` marker (localStorage) is written
- *   before any mutations queue and cleared once the cascade queues
- *   successfully — bootstrap reads the marker and runs
- *   {@link reconcileScenarios} if the local state ends up
- *   inconsistent (dual base scenarios, dangling parents).
- *
- * Note: the storage flag stays `isPrimary: boolean` — only the
- * user-facing role term renames to "base."
+ * Scenario mutation helpers and the promotion cascade: every edit is a single `update` via `saveScenario`; `deleteScenarioCascade` and `promoteScenario` queue several mutations together.
+ * A `promotionInProgress` localStorage marker brackets the promotion so bootstrap can run `reconcileScenarios` if it was interrupted. The storage flag stays `isPrimary`; the user-facing term is "base".
  */
 import {
   listAggregates,
@@ -33,12 +12,7 @@ import { queueLocalMutation } from '../sync/mutation-queue';
 import { resolveScenario, type ScenarioAggregate } from './scenario-resolution';
 import type { Aggregate, ScenarioPayload } from '../db/types';
 
-/** Defense-in-depth duplicate-name check at the lib layer. UI paths
- *  (ScenariosPage create modal, ScenarioDetailPage edit) already block
- *  duplicates inline; this guard catches programmatic callers that
- *  forget. Throws DuplicateScenarioNameError on collision so the UI
- *  can render a clear inline message. Empty / whitespace-only names
- *  pass through (the page-level required-field check handles that). */
+// UI paths block duplicate names inline; this guard catches programmatic callers.
 class DuplicateScenarioNameError extends Error {
   readonly code = 'DUPLICATE_SCENARIO_NAME' as const;
   constructor(name: string) {
@@ -66,30 +40,32 @@ async function ensureNameUnique(
 
 const PROMOTION_MARKER_KEY = 'retivo.scenarios.promotionInProgress';
 
-/** Fired after any local scenario aggregate change so listeners (e.g. the
- *  sidebar picker) can refresh without polling. Caller is responsible
- *  for dispatching after `queueLocalMutation` resolves. */
-export const SCENARIOS_CHANGED_EVENT = 'retivo.scenarios.changed';
+/**
+ * Fired after any local scenario aggregate change so listeners can refresh without polling; the
+ * caller dispatches after `queueLocalMutation` resolves.
+ */
+const SCENARIOS_CHANGED_EVENT = 'retivo.scenarios.changed';
 
 export function notifyScenariosChanged(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(SCENARIOS_CHANGED_EVENT));
 }
 
-/** Fired by the sidebar picker when the user switches the active
- *  scenario. Distinct from `SCENARIOS_CHANGED_EVENT` (aggregate
- *  add/edit/delete) — selection changes don't touch any aggregate, so
- *  pages that re-derive from the active scenario need this hook. */
+/**
+ * Fired when the user switches the active scenario; selection changes touch no aggregate, so pages
+ * deriving from it need this separate hook.
+ */
 export const SELECTED_SCENARIO_CHANGED_EVENT = 'retivo.scenarios.selected-changed';
 
-export function notifySelectedScenarioChanged(): void {
+function notifySelectedScenarioChanged(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(SELECTED_SCENARIO_CHANGED_EVENT));
 }
 
-/** The one way to switch the active scenario: write the per-device pointer,
- *  then notify. Resolves only after the write has landed, so a caller that
- *  navigates next never mounts a page that reads the previous pointer. */
+/**
+ * Switch the active scenario: write the per-device pointer, then notify; resolves after the write
+ * lands so a following navigation reads the new pointer.
+ */
 export async function switchSelectedScenario(scenarioId: string): Promise<void> {
   await writeSelectedScenario({
     scenarioId,
@@ -104,7 +80,7 @@ interface PromotionMarker {
   expectedSurvivorIds: string[];
 }
 
-export function readPromotionMarker(): PromotionMarker | null {
+function readPromotionMarker(): PromotionMarker | null {
   try {
     const raw = localStorage.getItem(PROMOTION_MARKER_KEY);
     if (!raw) return null;
@@ -118,7 +94,7 @@ function writePromotionMarker(marker: PromotionMarker): void {
   localStorage.setItem(PROMOTION_MARKER_KEY, JSON.stringify(marker));
 }
 
-export function clearPromotionMarker(): void {
+function clearPromotionMarker(): void {
   localStorage.removeItem(PROMOTION_MARKER_KEY);
 }
 
@@ -126,18 +102,17 @@ export interface SaveScenarioInput {
   scenario: ScenarioAggregate;
   payload: ScenarioPayload;
   householdId: string;
-  /** When present, the fine `scenario`-store signal is recorded on this
-   *  batch instead of firing per call — the multi-row cascades thread it so
-   *  their many `saveScenario` writes collapse to one fine `scenario` flush
-   *  on the wrapping {@link withBatchedStoreSignals} scope's exit. A lone
-   *  page-form save passes none and emits immediately, as today. The
-   *  per-call coarse `notifyScenariosChanged()` is unchanged either way. */
+  /**
+   * When present, the fine `scenario` store signal is recorded on this batch, so cascades collapse
+   * many saves into one flush on the {@link withBatchedStoreSignals} scope's exit.
+   */
   batch?: Batch;
 }
 
-/** Queues a single `update` mutation for an existing scenario.
- *  Throws DuplicateScenarioNameError if the new name collides with
- *  another scenario in the household (case-folded, trimmed). */
+/**
+ * Queue an `update` for an existing scenario; throws DuplicateScenarioNameError on a case-folded,
+ * trimmed name collision.
+ */
 export async function saveScenario({
   scenario,
   payload,
@@ -167,9 +142,10 @@ export interface CreateScenarioInput {
   householdId: string;
 }
 
-/** Queues a `create` mutation for a non-primary scenario.
- *  Throws DuplicateScenarioNameError if the name collides with
- *  another scenario in the household (case-folded, trimmed). */
+/**
+ * Queue a `create` for a non-primary scenario; throws DuplicateScenarioNameError on a name
+ * collision.
+ */
 export async function createScenario({
   id,
   name,
@@ -199,12 +175,8 @@ export async function createScenario({
 }
 
 /**
- * Recursively delete `targetId` and every transitive descendant.
- * Mutations are queued leaf-first (deepest descendants first, target
- * last) so the parent pointer chain stays valid throughout the
- * cascade — at no point is a non-base scenario left pointing at a
- * deleted parent. Caller must have already verified
- * `target.isPrimary === false`.
+ * Delete `targetId` and every transitive descendant, queued leaf-first so no scenario ever points
+ * at a deleted parent. The caller verifies the target is not the base.
  */
 export async function deleteScenarioCascade(
   targetId: string,
@@ -226,7 +198,6 @@ export async function deleteScenarioCascade(
     childrenByParent.set(parent, list);
   }
 
-  // Post-order DFS: deepest descendants accumulate first, target last.
   const ordered: ScenarioAggregate[] = [];
   const walk = (node: ScenarioAggregate): void => {
     for (const child of childrenByParent.get(node.id) ?? []) {
@@ -236,8 +207,7 @@ export async function deleteScenarioCascade(
   };
   walk(target);
 
-  // Batch the cascade's per-row fine `scenario` signals into one flush on
-  // scope exit (the coarse `notifyScenariosChanged()` tail is unchanged).
+  // One flush for the cascade's fine `scenario` signals.
   await withBatchedStoreSignals(async (batch) => {
     for (const node of ordered) {
       await queueLocalMutation<ScenarioPayload>({
@@ -254,10 +224,8 @@ export async function deleteScenarioCascade(
 }
 
 /**
- * Multi-mutation promotion cascade. Caller is responsible for the
- * confirm dialog UX before calling. After this resolves, every
- * mutation is queued locally and IndexedDB reflects the post-promotion
- * state; the cloud converges as the queue drains.
+ * Promote a scenario to base: flatten its resolved values into it, delete the old base and
+ * re-parent the survivors. The caller owns the confirm dialog.
  */
 export async function promoteScenario(
   promotedId: string,
@@ -286,8 +254,6 @@ export async function promoteScenario(
   });
 
   try {
-    // Batch every step's fine `scenario` signal into one flush on scope exit
-    // (the coarse `notifyScenariosChanged()` in `finally` is unchanged).
     await withBatchedStoreSignals(async (batch) => {
       // Step 1: promote the chosen scenario into the new base.
       await saveScenario({
@@ -312,8 +278,7 @@ export async function promoteScenario(
         payload: oldBase.payload,
       }, batch);
 
-      // Step 3: re-parent every survivor as a direct child of the new
-      // base. Overrides + notes preserved verbatim.
+      // Step 3: re-parent every survivor under the new base.
       for (const survivor of survivors) {
         await saveScenario({
           scenario: survivor,
@@ -329,36 +294,16 @@ export async function promoteScenario(
   }
 }
 
-/**
- * Bootstrap-time reconciliation. Scans `allScenarios` for
- * inconsistencies introduced by an interrupted promotion or a
- * multi-device race, and queues local fixups to converge on the
- * invariant. Idempotent. Returns a summary suitable for `console.warn`
- * telemetry; the caller should NOT surface a toast in v1 (likelihood
- * of any user observing inconsistency is essentially zero).
- */
+/** Counts from one `reconcileScenarios` pass. */
 export interface ReconciliationSummary {
   ranBecauseOfMarker: boolean;
   duplicatePrimariesDemoted: number;
   danglingParentsRehomed: number;
 }
 
-/**
- * Cross-tab serialization for `reconcileScenarios`. Two tabs running
- * the bootstrap effect concurrently would both observe the same
- * dual-base state, both pick the same deterministic winner (good — see
- * `pickReconciliationWinner`), and both queue identical `update`
- * mutations on the loser. The server applies one, rejects the other
- * with a version conflict, and the user sees "Refresh needed" right
- * after a clean demo load.
- *
- * The lock is held in localStorage with a wall-clock timestamp value.
- * `LOCK_STALE_MS` bounds how long a tab can hold the lock before
- * another tab is allowed to steal it — a crashed tab won't strand
- * future reconciliations. The window is generous because the work is
- * mutation-queue I/O, not network: 5 s is comfortably longer than any
- * realistic reconciliation pass.
- */
+// Cross-tab lock: two tabs reconciling at once queue identical loser updates, one hits a version
+// conflict, and the user sees "Refresh needed". A tab holding the lock past 5 s is presumed crashed
+// and may be stolen.
 const RECONCILIATION_LOCK_KEY = 'retivo.scenarios.reconcileLock';
 const RECONCILIATION_LOCK_STALE_MS = 5_000;
 
@@ -380,6 +325,10 @@ function releaseReconciliationLock(): void {
   localStorage.removeItem(RECONCILIATION_LOCK_KEY);
 }
 
+/**
+ * Bootstrap-time sweep that demotes duplicate bases and re-homes dangling parents left by an
+ * interrupted promotion or a multi-device race; idempotent. Returns a summary for `console.warn`.
+ */
 export async function reconcileScenarios(
   allScenarios: ScenarioAggregate[],
   householdId: string,
@@ -391,22 +340,16 @@ export async function reconcileScenarios(
     danglingParentsRehomed: 0,
   };
 
-  // Skip the sweep entirely when another tab is already running it —
-  // the other tab's mutations will land, the eventual pull will bring
-  // this tab's local state into alignment, and on the next page
-  // navigation either tab's defensive picker-sweep covers what's left.
+  // Skip when another tab is already sweeping; the eventual pull aligns this tab.
   if (!acquireReconciliationLock()) {
     return summary;
   }
 
   try {
-    // No coarse tail here — `useAggregates('scenario')` readers are woken by
-    // the batched fine `scenario` flush on scope exit (load-bearing, as with
-    // `applyImport`). The per-call coarse `notifyScenariosChanged()` inside
-    // `saveScenario` still fires per fixup.
+    // No coarse tail: readers are woken by the batched fine `scenario` flush on scope exit
+    // (load-bearing, as with `applyImport`).
     await withBatchedStoreSignals(async (batch) => {
-      // Resolve dual base scenarios first so survivors re-parent to the
-      // *winning* base, not an arbitrary one.
+      // Resolve dual bases first so survivors re-parent to the winning base.
       const bases = allScenarios.filter((s) => s.payload.isPrimary);
       if (bases.length > 1) {
         const winner = pickReconciliationWinner(bases);
@@ -422,9 +365,8 @@ export async function reconcileScenarios(
         }
       }
 
-      // Re-resolve current base after potential demotions. `pickReconciliationWinner`
-      // is deterministic, so this picks the same row as the demotion loop above
-      // even though `bases` still holds the pre-demotion snapshot.
+      // pickReconciliationWinner is deterministic, so this matches the demotion loop although
+      // `bases` is a pre-demotion snapshot.
       const currentBase = bases.length > 1
         ? pickReconciliationWinner(bases)
         : (bases[0] ?? null);
@@ -464,14 +406,8 @@ export async function reconcileScenarios(
   }
 }
 
-/**
- * Pick the deterministic survivor among multiple `isPrimary` scenarios.
- * Most-recently-updated wins; ties break by ascending `id`. The id
- * tiebreaker matters when two tabs seeded a base simultaneously and
- * both rows carry the exact same `updatedAt` to the millisecond — then
- * a pure timestamp sort is unstable and different tabs could pick
- * different winners, leaving the loser undemoted on every device.
- */
+// Most-recently-updated wins, ties by ascending id: two tabs that seeded a base at the same
+// millisecond could otherwise pick different winners.
 function pickReconciliationWinner(bases: ScenarioAggregate[]): ScenarioAggregate {
   return [...bases].sort((a, b) => {
     const byUpdated = b.updatedAt.localeCompare(a.updatedAt);

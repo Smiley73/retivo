@@ -1,24 +1,9 @@
-/**
- * Environment validation. Fails fast at startup if required vars are
- * missing or invalid.
- *
- * AUTH_JWT_PRIVATE_KEYS is a JSON map `{ kid: pkcs8PrivateKeyPem }` and
- * AUTH_JWT_PUBLIC_KEYS its public-key counterpart `{ kid: spkiPublicKeyPem }`
- * (RS256 signing).
- * Both maps must carry the same set of `kid`s. In production these are
- * loaded from SSM Parameter Store at boot via the AWS module; the env vars
- * here are the local-dev fallback.
- */
+// Environment validation; fails fast at startup. The JWT key maps are `{ kid: pem }` and must share the same kids; deployed stacks
+// load them from SSM, and the env vars are the local-dev fallback.
 import { z } from 'zod';
 
-/**
- * Normalize one allowed-origin entry to its canonical origin
- * (`scheme://host[:port]`). Trims surrounding whitespace, strips a single
- * trailing slash, then requires a successful URL parse with no path, query,
- * or hash — anything carrying one is a malformed allowlist entry and fails
- * loud rather than silently mis-matching. Returns `null` on rejection so the
- * caller can attach a Zod issue.
- */
+// Normalizes one allowed-origin entry to `scheme://host[:port]`: trims, strips one trailing slash, and returns null
+// for anything with a path, query or hash, so a malformed entry fails loud instead of silently mis-matching.
 function normalizeAllowedOrigin(entry: string): string | null {
   const trimmed = entry.trim().replace(/\/$/, '');
   if (trimmed.length === 0) return null;
@@ -28,8 +13,7 @@ function normalizeAllowedOrigin(entry: string): string | null {
   } catch {
     return null;
   }
-  // Reject anything beyond `scheme://host[:port]` — a path/query/hash means
-  // the entry is not a bare origin and exact-match would never succeed.
+  // A path, query or hash means the entry is not a bare origin and exact-match would never succeed.
   if (url.pathname !== '/' || url.search !== '' || url.hash !== '') return null;
   return url.origin;
 }
@@ -81,16 +65,10 @@ const jwtPublicKeyMapSchema = pemKeyMapSchema({
   role: 'public',
 });
 
-/**
- * Pulumi's placeholder value for a not-yet-rotated `edge/shared-secret` SSM
- * parameter (infrastructure/src/ssm.ts's `PLACEHOLDER`). A present-but-
- * placeholder secret is a value published in this repository, so it is not
- * a secret at all — the deployed-stack guard below treats it as absent.
- * Kept as a literal copy rather than an import: the api bundle
- * cannot depend on `infrastructure/src` (a separate Pulumi-only package).
- * Guarded against drift by
- * `scripts/test/edge-secret-placeholder-contract.test.mjs`.
- */
+// Pulumi placeholder for a not-yet-rotated `edge/shared-secret` SSM parameter (infrastructure/src/ssm.ts). A
+// placeholder is published in this repository, so the deployed-stack guard treats it as absent. A literal copy, not
+// an import: the api bundle cannot depend on `infrastructure/src`;
+// `scripts/test/edge-secret-placeholder-contract.test.mjs` guards against drift.
 const EDGE_SHARED_SECRET_PLACEHOLDER =
   'phase-1-placeholder-replace-via-aws-ssm-put-parameter-overwrite';
 
@@ -99,33 +77,22 @@ const envSchema = z.object({
   AWS_REGION: z.string().default('us-east-1'),
 
   API_PORT: z.coerce.number().int().positive().default(3001),
-  // Local Nest bootstrap bind host (main.ts). Default `127.0.0.1` (loopback
-  // only) so a local dev API — which can expose seeded credentials / dev token
-  // shortcuts — is not reachable from the LAN by default;
-  // set `API_HOST=0.0.0.0` to opt IN to
-  // LAN exposure. No format regex — Node/Nest `listen()` owns real bind-host
-  // validation and accepts platform-specific forms (IPv4, IPv6 `::`,
-  // hostnames); a custom pattern risks rejecting valid binds.
+  // Default `127.0.0.1` so a local dev API (seeded credentials, dev token shortcuts) is not reachable from the LAN;
+  // `0.0.0.0` opts in. No format regex: Node `listen()` owns bind-host validation and a custom pattern could reject
+  // valid binds.
   API_HOST: z.string().trim().min(1).default('127.0.0.1'),
   WEB_ORIGIN: z.string().url().default('http://localhost:5173'),
-  // Comma-separated list of browser origins allowed to call state-changing
-  // endpoints. Single source for every browser-origin allow decision (Nest
-  // CORS + custom preflight + OriginCheckMiddleware) — replaces the removed
-  // API_CORS_ORIGIN. Unset ⇒ defaults to WEB_ORIGIN in the superRefine
-  // below (Zod `.default()` can't reference a sibling field). The parsed,
-  // normalized origin list is exposed as `WEB_ALLOWED_ORIGINS_PARSED` so
-  // consumers don't each re-split.
+  // Browser origins allowed to call state-changing endpoints: the single source for Nest CORS, the preflight handler
+  // and OriginCheckMiddleware. Unset defaults to WEB_ORIGIN in the superRefine below (a Zod default cannot reference
+  // a sibling); the normalized list is `WEB_ALLOWED_ORIGINS_PARSED`.
   WEB_ALLOWED_ORIGINS: z.string().optional(),
 
-  // AWS endpoints — only set in local Scenarios 2/3 to point at Docker
-  // emulators. Unset in real AWS so the SDK uses regional defaults.
+  // Set only for local emulators; unset in AWS so the SDK uses regional defaults.
   DYNAMODB_ENDPOINT: z.string().optional(),
   S3_ENDPOINT: z.string().optional(),
   SES_ENDPOINT: z.string().optional(),
 
-  // Resource names. In Lambda these come from env vars set by Pulumi
-  // (TABLE_*). For local dev we provide sensible defaults that match
-  // the namePrefix from infrastructure/src/config.ts when stack=local.
+  // In Lambda these come from Pulumi env vars; locally the defaults match the stack=local name prefix.
   TABLE_WORKSPACE_META: z.string().default('retirement-local-workspace-meta'),
   TABLE_MUTATION_LOG: z.string().default('retirement-local-mutation-log'),
   TABLE_AGGREGATE_VERSION: z.string().default('retirement-local-aggregate-version'),
@@ -137,9 +104,7 @@ const envSchema = z.object({
   TABLE_PASSWORD_RESET: z.string().default('retirement-local-password-reset'),
   TABLE_CREDENTIAL: z.string().default('retirement-local-credential'),
   TABLE_PASSKEY: z.string().default('retirement-local-passkey'),
-  // Shared, single-use WebAuthn challenge storage. PK `key` — the caller's own namespaced string
-  // (see PasskeyChallengeStore); ~5-min TTL on `expiresAt`, enforced by the
-  // reader, not this table's DynamoDB TTL.
+  // Single-use WebAuthn challenge storage; the ~5-minute window is enforced by the reader, not this table TTL.
   TABLE_PASSKEY_CHALLENGE: z
     .string()
     .default('retirement-local-passkey-challenge'),
@@ -153,85 +118,48 @@ const envSchema = z.object({
   TABLE_HOUSEHOLD_KEY_ENVELOPE: z
     .string()
     .default('retirement-local-household-key-envelope'),
-  // Enforced second-factor (MFA) tables. user-mfa: TOTP enrollment
-  // state (PK userId). mfa-email-otp: live Email-OTP code hash
-  // (PK userId, ~10-min TTL on expiresAt). trusted-device: per-device trust
-  // (PK userId, SK deviceId, ~30-day TTL on expiresAt).
+  // MFA tables: user-mfa (TOTP state), mfa-email-otp (live code hash, ~10-min TTL), trusted-device (~30-day TTL).
   TABLE_USER_MFA: z.string().default('retirement-local-user-mfa'),
   TABLE_MFA_EMAIL_OTP: z.string().default('retirement-local-mfa-email-otp'),
   TABLE_TRUSTED_DEVICE: z.string().default('retirement-local-trusted-device'),
   SNAPSHOTS_BUCKET: z.string().default('retirement-local-snapshots'),
 
-  // JWT signing keys (RS256). Two maps keyed by
-  // the same `kid` set: AUTH_JWT_PRIVATE_KEYS holds PKCS#8 PEMs the api
-  // uses to sign access tokens; AUTH_JWT_PUBLIC_KEYS holds the matching
-  // SPKI PEMs used to verify and to serve `GET /auth/.well-known/jwks.json`.
-  // The "current" key for new tokens is configured via AUTH_JWT_CURRENT_KID
-  // (or the first key in iteration order if unset). See cross-validation
-  // in `superRefine` below.
+  // Two maps keyed by the same `kid` set: PKCS#8 PEMs to sign, SPKI PEMs to verify and serve at
+  // `/auth/.well-known/jwks.json`. The current signing key is `AUTH_JWT_CURRENT_KID`, else the first key.
   AUTH_JWT_PRIVATE_KEYS: jwtPrivateKeyMapSchema,
   AUTH_JWT_PUBLIC_KEYS: jwtPublicKeyMapSchema,
   AUTH_JWT_CURRENT_KID: z.string().optional(),
-  // JWT token-domain claims. Every
-  // RS256 token this key store signs — access, MFA challenge, and data-export
-  // authorization — embeds these as the registered `iss`/`aud` claims and
-  // strictly verifies them, so key material shared across environments or future
-  // services cannot be replayed across a token-confusion boundary.
-  // `infrastructure/src/lambda.ts` sets `retivo-api/<stack>` /
-  // `retivo-web/<stack>` per deployed stack; the local-dev defaults below
-  // keep `pnpm dev` and the emulator suite working without extra config.
-  // Enforced with no transitional acceptance, so every access/MFA/export-authorization
-  // JWT issued before these claims existed (it carries neither) fails verification
-  // and its holder re-authenticates.
+  // Registered `iss` and `aud` claims for every RS256 token this key store signs (access, MFA challenge, export
+  // authorization), strictly verified so shared key material cannot be replayed across a token-confusion boundary.
+  // `infrastructure/src/lambda.ts` sets them per stack; the local defaults keep `pnpm dev` working.
   AUTH_JWT_ISSUER: z.string().trim().min(1).default('retivo-api/local'),
   AUTH_JWT_AUDIENCE: z.string().trim().min(1).default('retivo-web/local'),
-  // Access-token TTL in minutes. Intentionally short: it forces a
-  // /auth/refresh round-trip within this window of any authenticated
-  // activity, which is the only way the server slides the refresh-token
-  // (idle) window.
-  // Consumers multiply by 60
-  // for the seconds value JWT / cookies expect.
+  // Short on purpose: it forces a /auth/refresh round trip, the only way the server slides the refresh idle window.
+  // Consumers multiply by 60 for seconds.
   AUTH_ACCESS_TOKEN_TTL_MIN: z.coerce.number().int().positive().default(5),
-  // Refresh-token TTL in minutes. Doubles as the idle-timeout window:
-  // each successful rotate resets cookie maxAge + DB row expiresAt to
-  // now + this value; idle past the window → next rotate fails → user
-  // signed out.
+  // Doubles as the idle timeout: each rotate resets the cookie and row expiry to now + this; idle past it signs the
+  // user out.
   AUTH_REFRESH_TOKEN_TTL_MIN: z.coerce.number().int().positive().default(30),
 
-  // Enforced second-factor (MFA) master switch. When 'true', a
-  // successful password login on an untrusted device returns an MFA challenge
-  // instead of a session; the client completes POST /auth/mfa/verify. The code
-  // default stays 'false' so local `pnpm dev` without the var is password-only;
-  // the deployed dev + prod stacks set AUTH_MFA_ENFORCED via the
-  // `retivo:authMfaEnforced` stack config key (lambda.ts), default true.
-  // Setting 'false' is the permanent operational
-  // kill-switch (no code redeploy needed): login behaves exactly as before
-  // (issueSession directly).
+  // MFA master switch: when true, a password login on an untrusted device returns an MFA challenge. The code default
+  // is false so local `pnpm dev` is password-only; deployed stacks default true via `retivo:authMfaEnforced`. Setting
+  // false is the operational kill-switch.
   AUTH_MFA_ENFORCED: z.enum(['true', 'false']).default('false'),
 
-  // SES sender for signup verification mail. Required in production; for
-  // dev it can be a placeholder (the local SES endpoint accepts anything).
+  // Required in production; dev can use a placeholder, since the local SES endpoint accepts anything.
   SES_FROM_ADDRESS: z.string().email().default('no-reply@example.invalid'),
 
-  // Owner inbox that receives a signup-approval mail when somebody other
-  // than the owner signs up. Distinct concept from SES_FROM_ADDRESS (the
-  // SMTP "From" header — typically a no-reply@). Optional: when unset,
-  // the validator below copies SES_FROM_ADDRESS into it so a single-var
-  // config still works.
+  // Owner inbox for signup-approval mail when somebody else signs up; unset copies SES_FROM_ADDRESS in the validator
+  // below.
   APPROVER_EMAIL: z.string().email().optional(),
 
-  // Pulumi stack name (e.g. "dev" / "prod"). Set on every Lambda by
-  // infrastructure/src/lambda.ts; absent on local emulator runs.
-  // Used to gate dev-only conveniences like returning the
-  // verificationToken in the signup response (when SES sandbox can't
-  // actually deliver mail). The Lambda's NODE_ENV is "production" on
-  // every deployed stack, so it's the wrong knob for that decision.
+  // Pulumi stack name, set on every deployed Lambda and absent locally. Gates dev conveniences such as returning the
+  // verificationToken in the signup response; NODE_ENV is production on every deployed stack, so it is the wrong
+  // knob.
   STACK: z.string().optional(),
 
-  // Process-wide opt-out for integration tests that fire many requests
-  // in quick succession. Refused in production builds — a stray
-  // DISABLE_THROTTLE=true copied from a test .env into a Lambda env
-  // would silently disable every rate limit.
+  // Opt-out for integration tests firing many requests. Refused in production builds, since a stray
+  // DISABLE_THROTTLE=true in a Lambda env would disable every rate limit.
   DISABLE_THROTTLE: z
     .enum(['true', 'false'])
     .default('false')
@@ -240,51 +168,22 @@ const envSchema = z.object({
       { message: 'DISABLE_THROTTLE=true is not allowed when NODE_ENV=production' },
     ),
 
-  // Edge → origin shared secret. CloudFront attaches the primary value
-  // as `X-Origin-Verify` on every request it forwards to API Gateway.
-  // EdgeAuthMiddleware enforces it and rejects requests that don't
-  // present a matching value, locking direct APIGW access. The
-  // *_PREVIOUS slot accepts the prior secret during a rotation
-  // overlap so warm Lambdas don't reject in-flight CF traffic for the
-  // few minutes between SSM rotation and CloudFront origin update.
-  // Both unset means edge-auth is disabled — local dev / emulator, where
-  // STACK is also unset. On a deployed stack (STACK set) the base field
-  // stays optional here so the schema shape is uniform, but the refine
-  // below requires a real, non-placeholder EDGE_SHARED_SECRET —
-  // EDGE_SHARED_SECRET_PREVIOUS stays optional everywhere; it exists only
-  // for the rotation overlap window.
+  // Edge-to-origin shared secret: CloudFront sends it as `X-Origin-Verify` and EdgeAuthMiddleware rejects a mismatch,
+  // locking direct API Gateway access. `_PREVIOUS` accepts the prior secret during a rotation overlap. Both unset
+  // disables edge-auth for local dev; on a deployed stack (STACK set) the refine below requires a real,
+  // non-placeholder value.
   EDGE_SHARED_SECRET: z.string().optional(),
   EDGE_SHARED_SECRET_PREVIOUS: z.string().optional(),
 
-  // Name of the dedicated snapshot-purge Lambda the `DELETE /auth/account`
-  // cascade invokes synchronously to delete a household's S3 snapshots
-  // (removes bucket-wide s3:DeleteObject from the
-  // api role). Set on the api Lambda by infrastructure/src/lambda.ts.
-  // Unset in local/emulator runtime: AccountSnapshotPurgeService falls
-  // back to an in-process S3 purge so `pnpm dev` + the emulator test
-  // suite don't require a deployed Lambda. On a deployed stack the
-  // service requires it (fail-loud) — the refine below enforces that a
-  // production-like runtime cannot silently skip the purge.
+  // Name of the snapshot-purge Lambda that `DELETE /auth/account` invokes synchronously (the api role has no
+  // bucket-wide s3:DeleteObject). Unset locally, where AccountSnapshotPurgeService purges in process; the refine
+  // below makes it required on a deployed stack.
   SNAPSHOT_PURGE_FUNCTION_NAME: z.string().optional(),
 
-  // Operator-opt-in trapdoor for the dev
-  // shortcut: when 'true', /auth/signup and /auth/resend-verification
-  // include the raw `verificationToken` in the response so SignupPage
-  // can render a "Dev shortcut: verify now" link without waiting on
-  // SES delivery.
-  //
-  // The shortcut is LOCAL-DEVELOPMENT ONLY. Every deployed stack runs
-  // NODE_ENV=production (see STACK above), so that is the knob that
-  // decides it — dev and prod Lambdas alike boot with the shortcut off.
-  // Default is conditional:
-  //   NODE_ENV=production (any deployed stack) → 'false'.
-  //   local `pnpm dev` / tests                 → 'true'.
-  // The conditional default means an unset env on a deployed stack
-  // fails closed. Explicit 'true' on a deployed stack is hard-refused
-  // by the refine below as belt-and-suspenders (mirroring
-  // DISABLE_THROTTLE above). `infrastructure/src/lambda.ts` sets an
-  // explicit 'false' on every stack so the boundary is also visible in
-  // code review — the schema default fires only on misconfiguration.
+  // Dev shortcut: when true, /auth/signup and /auth/resend-verification return the raw `verificationToken` so
+  // SignupPage can offer a verify-now link. Local development only: the default is conditional (NODE_ENV=production
+  // gives false, local gives true), so an unset env on a deployed stack fails closed, and an explicit true there is
+  // refused by the refine below. `infrastructure/src/lambda.ts` sets false on every stack.
   EXPOSE_VERIFICATION_TOKEN: z
     .enum(['true', 'false'])
     .optional()
@@ -304,9 +203,8 @@ const envSchema = z.object({
       },
     ),
 }).superRefine((env, ctx) => {
-  // Cross-validate the JWT key maps so a misaligned rotation (private
-  // rotated, public not) fails boot rather than silently issuing tokens
-  // no one can verify.
+  // Cross-validate the JWT key maps so a misaligned rotation fails boot rather than issue tokens no one can
+  // verify.
   const privKids = Object.keys(env.AUTH_JWT_PRIVATE_KEYS);
   const pubKids = new Set(Object.keys(env.AUTH_JWT_PUBLIC_KEYS));
   const missingPub = privKids.filter((k) => !pubKids.has(k));
@@ -332,11 +230,8 @@ const envSchema = z.object({
       path: ['AUTH_JWT_CURRENT_KID'],
     });
   }
-  // On a deployed stack (STACK set), account deletion must purge
-  // snapshots via the dedicated Lambda — fail boot loud if the function
-  // name is missing rather than silently leaving orphaned snapshots.
-  // Local / emulator runs leave STACK unset and use the in-process
-  // fallback in AccountSnapshotPurgeService.
+  // A deployed stack must purge snapshots through the dedicated Lambda, so fail boot rather than leave orphaned
+  // snapshots.
   if (env.STACK !== undefined && (env.SNAPSHOT_PURGE_FUNCTION_NAME ?? '').length === 0) {
     ctx.addIssue({
       code: 'custom',
@@ -345,13 +240,9 @@ const envSchema = z.object({
       path: ['SNAPSHOT_PURGE_FUNCTION_NAME'],
     });
   }
-  // On a deployed stack (STACK set), CloudFront's shared secret must be a
-  // real, rotated value — the last line of defense against a raw API
-  // Gateway origin hit. Blank, whitespace-only, and the not-yet-
-  // rotated Pulumi placeholder all count as absent, so a brand-new or
-  // never-rotated stack fails boot loud instead of quietly leaving
-  // EdgeAuthMiddleware degraded to a pass-through. Local / emulator runs
-  // leave STACK unset and are unaffected.
+  // On a deployed stack the shared secret must be real and rotated: the last defense against a raw API Gateway
+  // hit. Blank, whitespace-only and the Pulumi placeholder count as absent, so a never-rotated stack fails boot
+  // instead of leaving EdgeAuthMiddleware a pass-through.
   const trimmedEdgeSecret = (env.EDGE_SHARED_SECRET ?? '').trim();
   if (
     env.STACK !== undefined &&
@@ -365,13 +256,9 @@ const envSchema = z.object({
       path: ['EDGE_SHARED_SECRET'],
     });
   }
-  // WEB_ORIGIN is the fallback source for the allowlist when
-  // WEB_ALLOWED_ORIGINS is unset/blank. `z.string().url()` accepts a URL with
-  // a path/query/hash (e.g. `http://localhost:5173/app`), but
-  // `normalizeAllowedOrigin` rejects those — left unvalidated it would yield an
-  // empty WEB_ALLOWED_ORIGINS_PARSED and reject every state-changing request.
-  // Validate it the same way the allowlist entries are validated so a
-  // path-carrying WEB_ORIGIN fails boot loud.
+  // WEB_ORIGIN seeds the allowlist when WEB_ALLOWED_ORIGINS is blank. `z.string().url()` accepts a path, which
+  // `normalizeAllowedOrigin` rejects, leaving an empty list that rejects every state-changing request; validate
+  // it the same way so it fails boot.
   if (normalizeAllowedOrigin(env.WEB_ORIGIN) === null) {
     ctx.addIssue({
       code: 'custom',
@@ -379,9 +266,8 @@ const envSchema = z.object({
       path: ['WEB_ORIGIN'],
     });
   }
-  // Validate WEB_ALLOWED_ORIGINS entries here so a malformed allowlist fails
-  // boot. When unset/blank the list defaults to WEB_ORIGIN, validated just
-  // above. The canonical parsed list is materialized in the `.transform` below.
+  // Validate allowlist entries here so a malformed one fails boot; blank defaults to the already-validated
+  // WEB_ORIGIN.
   const rawAllowed = (env.WEB_ALLOWED_ORIGINS ?? '').trim();
   if (rawAllowed.length > 0) {
     const entries = rawAllowed.split(',');
@@ -396,18 +282,14 @@ const envSchema = z.object({
     }
   }
 }).transform((env) => {
-  // Materialize the canonical, normalized allowed-origin list so every
-  // consumer (main.ts CORS, cors-preflight, OriginCheckMiddleware) reads one
-  // parsed source instead of re-splitting the raw string. Falls back to
-  // WEB_ORIGIN when WEB_ALLOWED_ORIGINS is unset/blank — Zod `.default()`
-  // can't reference WEB_ORIGIN, so the derivation lives here post-validation.
+  // Materialize the normalized list so consumers share one parsed source; the WEB_ORIGIN fallback lives here
+  // because a Zod default cannot reference it.
   const rawAllowed = (env.WEB_ALLOWED_ORIGINS ?? '').trim();
   const source =
     rawAllowed.length > 0 ? rawAllowed.split(',') : [env.WEB_ORIGIN];
   const parsed = source
     .map((entry) => normalizeAllowedOrigin(entry))
     .filter((origin): origin is string => origin !== null);
-  // De-duplicate while preserving first-seen order.
   const WEB_ALLOWED_ORIGINS_PARSED = [...new Set(parsed)];
   return { ...env, WEB_ALLOWED_ORIGINS_PARSED };
 });
@@ -428,9 +310,7 @@ export function validateEnv(): EnvConfig {
 }
 
 /**
- * Loaded into ConfigModule at the root (no `registerAs` namespace) so
- * `ConfigService<EnvConfig, true>.get('TABLE_USER', { infer: true })`
- * returns the zod-validated value with its schema default — the typing
- * already promised this; the loader now matches.
+ * Loaded into ConfigModule at the root so `ConfigService.get` returns the zod-validated value with its schema
+ * default.
  */
 export const envConfigProvider = (): EnvConfig => validateEnv();

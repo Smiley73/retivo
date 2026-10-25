@@ -1,18 +1,5 @@
-/**
- * Unit test for the refresh-token reuse incident log.
- *
- * The `RefreshTokenReuse` metric is now emitted as direct EMF from
- * AuthEventsRepository, so the reuse `logger.warn` is pure incident
- * context — not the old `refresh_token_reuse_detected` metric-filter marker.
- * This test pins that the incident warn is emitted on reuse (userId only) and
- * that the old marker string is gone — the integration suite (auth.spec.ts)
- * covers the wire behaviour; here we drive `rotate()` with a stubbed
- * repository returning an already-revoked row and assert the `logger.warn`
- * first arg.
- *
- * Pure unit test: every collaborator is a stub, so no DynamoDB Local /
- * Moto round trip is needed.
- */
+// The refresh-token reuse incident log: RefreshTokenReuse is emitted as direct EMF by AuthEventsRepository, so the reuse logger.warn is pure incident context (userId only)
+// and the old `refresh_token_reuse_detected` filter marker is gone. rotate() runs against a stubbed repository returning an already-revoked row.
 import 'reflect-metadata';
 import { Logger, UnauthorizedException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
@@ -63,9 +50,7 @@ function stubConfig(): TypedConfig {
   } as unknown as TypedConfig;
 }
 
-/** Mirrors `dynamo/transact-write.spec.ts`'s crafted-cancellation helper —
- *  the local DynamoDB emulator cannot deterministically produce a
- *  `TransactionConflict` cancellation. */
+// The emulator cannot deterministically produce a TransactionConflict cancellation.
 function transactCancel(codes: string[]): TransactionCanceledException {
   return new TransactionCanceledException({
     message: 'Transaction cancelled, please refer to CancellationReasons',
@@ -108,8 +93,6 @@ describe('RefreshTokenService — reuse detection log', () => {
       UnauthorizedException,
     );
 
-    // The RefreshTokenReuse metric is now direct EMF; the log is
-    // incident context, not the `refresh_token_reuse_detected` filter marker.
     expect(warnSpy).toHaveBeenCalledWith('Refresh token reuse detected', {
       userId: USER_ID,
     });
@@ -286,12 +269,7 @@ describe('RefreshTokenService — reuse detection log', () => {
     await expect(service.rotate(PRESENTED_TOKEN, NEW_ACCESS_JTI)).rejects.toMatchObject({
       response: { code: 'REFRESH_TOKEN_CONFLICT' },
     });
-    // The presented row's revoke is item 3 of the SAME transaction as the
-    // descendant's Put — a transient
-    // cancellation of that shared transaction must not leave it revoked with
-    // no successor, so `markRevoked`/`revokeTransactItem` is never committed
-    // standalone here; only `runTransactWrite`'s own bounded retry (3
-    // attempts) touches `doc.send`.
+    // The presented row's revoke is item 3 of the same transaction as the descendant's Put, so a transient cancellation must not leave it revoked with no successor: only runTransactWrite's bounded retry (3 attempts) touches doc.send.
     expect(doc.send).toHaveBeenCalledTimes(3);
   });
 });

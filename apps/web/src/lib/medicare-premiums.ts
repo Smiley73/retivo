@@ -1,22 +1,15 @@
 /**
- * CMS Medicare premiums by year: the Part B standard monthly premium (the
- * "Medicare Parts A & B Premiums and Deductibles" fact sheet, each autumn) and
- * the Part D national base beneficiary premium (the Part D bid announcement, each
- * July). Read only by the Expenses page helper; no engine imports this file.
+ * CMS Part B standard and Part D national base monthly premiums by year, from
+ * the autumn fact sheet and the July Part D bid announcement.
  */
 
 import type { CalibrationSnapshot } from './calibration';
 
-/** One year's Medicare premium amounts, in dollars per month. */
 interface MedicarePremiumYear {
-  /** CMS Part B standard monthly premium. */
   partBStandardMonthly: number;
-  /** CMS Part D national base beneficiary premium. */
   partDNationalBaseMonthly: number;
 }
 
-/** Add a new year when CMS publishes it, with its citations appended to
- *  `metadata.source` in publication order and `asOfDate` moved with them. */
 export const MEDICARE_PREMIUMS: CalibrationSnapshot<MedicarePremiumYear> = {
   values: {
     2024: { partBStandardMonthly: 174.7, partDNationalBaseMonthly: 34.7 },

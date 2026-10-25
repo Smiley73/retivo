@@ -1,13 +1,4 @@
-/**
- * StatGrid + Stat — summary tile render.
- *
- * Tailwind-defaults replacement for the legacy `.stat-grid` / `.stat`
- * pattern. Asserts label + value render, the value carries
- * the `tabular-nums` numeric-alignment class, the grid uses
- * responsive breakpoint columns. Purely presentational (no interactive
- * control / ARIA / focus / keyboard handler) → exempt from the a11y-smoke
- * mandate (AGENTS *Testing setup*).
- */
+/** StatGrid and Stat: label and value render, tabular-nums values and responsive columns; presentational, so no a11y scan. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -50,7 +41,6 @@ describe('StatGrid', () => {
     const cls = container.firstElementChild?.className ?? '';
     expect(cls).toContain('grid-cols-2');
     expect(cls).toContain('md:grid-cols-3');
-    // No empty fourth track on wide screens for an exactly-three-tile row.
     expect(cls).not.toContain('xl:grid-cols-4');
   });
 
@@ -64,7 +54,6 @@ describe('StatGrid', () => {
     expect(cls).toContain('grid-cols-2');
     expect(cls).toContain('md:grid-cols-3');
     expect(cls).toContain('lg:grid-cols-5');
-    // The default 4-up step must not leak into the five variant.
     expect(cls).not.toContain('xl:grid-cols-4');
   });
 

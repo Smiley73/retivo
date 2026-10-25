@@ -1,8 +1,4 @@
-/**
- * Optimizer page chrome — the small UI subcomponents the page renders
- * inside the React Aria `<Table>`. Extracted from `SsOptimizerPage.tsx`
- * to keep that file under the ≤400-line shape limit.
- */
+/** Optimizer page chrome: the small UI subcomponents rendered inside the React Aria Table. */
 import React from 'react';
 import { CheckIcon, PlayIcon } from '../components/icons';
 import { textLinkClass } from '../components/TextLink';
@@ -59,12 +55,7 @@ import { AgeTransition, MetricTransition } from './ss-optimizer-age-cell';
 
 export type Metric = 'balance' | 'mc';
 
-/** Tooltips on the Apply button while an optimizer run is in flight.
- *  Applying saves the scenario, which would otherwise abort the running
- *  sweep — so Apply is disabled until the run finishes or is cancelled.
- *  The copy is metric-specific: only the MC toolbar exposes a Cancel
- *  button, so the deterministic (balance) variant must not tell users to
- *  cancel a run they can't. */
+// Apply saves the scenario, which would abort a running sweep, so it is disabled mid-run; the balance variant must not tell users to cancel, since only the MC toolbar has Cancel.
 const APPLY_RUNNING_TIP_MC =
   'Calculations in progress — cancel or wait for them to finish';
 export const APPLY_RUNNING_TIP_DETERMINISTIC =
@@ -78,12 +69,9 @@ export interface OptimizerAggregates {
   readonly ssBenefits: Aggregate<SocialSecurityBenefitPayload>[];
   readonly expenses: Aggregate<ExpensePayload>[];
   readonly incomeStreams: Aggregate<IncomeStreamPayload>[];
-  /** Flag-derived medical category ids — drives the optimizer's +2pp
-   *  medical-inflation default off the `isMedical` flag (not the legacy id). */
   readonly medicalCategoryIds: ReadonlyArray<string>;
 }
 
-/** Per-method child-row payload on the deterministic tab. */
 export interface MethodChildResult {
   readonly loading: boolean;
   readonly result: OptimizerWorkerOutbound | null;
@@ -94,33 +82,19 @@ export interface ScenarioRow {
   readonly parentName: string | null;
   readonly result: OptimizerWorkerOutbound | null;
   readonly loading: boolean;
-  /** True for MC `kind: 'cancelled'` outcomes — surfaces a distinct
-   *  row variant so unprocessed scenarios don't render "Calculating…"
-   *  forever. */
   readonly cancelled?: boolean;
-  /** Present on the deterministic tab only — drives the per-method
-   *  parent + two-child layout (Planned / TWR). Absent on the MC tab
-   *  so the existing single-row rendering applies. */
   readonly methods?: {
     readonly planned: MethodChildResult;
     readonly twr: MethodChildResult;
   };
 }
 
-/** Formats an optimizer metric value: compact `$1.2M`/`$480k` for the
- *  ending balance, percent for MC plan success. */
 function metricFormatter(metric: Metric): (value: number) => string {
   return metric === 'balance'
     ? formatCurrencyShort
     : (value: number) => formatPercent(value * 100);
 }
 
-/**
- * Metric cell — renders the ending-balance / plan-success value as a
- * "current → recommended" transition (e.g. "$1.1M → $1.3M"), matching the
- * age cells. When the scenario is already at the optimum (or no baseline
- * exists), only the recommended value shows.
- */
 const MetricCell: React.FC<{ view: RowView; metric: Metric }> = ({ view, metric }) => {
   if (view.kind !== 'ready') return <>—</>;
   return (
@@ -138,10 +112,7 @@ interface OptimizerRowProps {
   metric: Metric;
   hasSecondary: boolean;
   onApply: (row: ScenarioRow, method?: ProjectionMethod) => void;
-  /** Smooth per-scenario path progress for this row while the MC sweep
-   *  is simulating it (MC tab only). */
   progress?: RowProgress;
-  /** True while an optimizer/MC run is in flight — disables Apply. */
   running: boolean;
 }
 
@@ -238,10 +209,7 @@ interface ApplyButtonProps {
   row: ScenarioRow;
   view: Extract<RowView, { kind: 'ready' }>;
   onApply: (row: ScenarioRow, method?: ProjectionMethod) => void;
-  /** True while an optimizer/MC run is in flight — Apply is disabled so
-   *  saving a scenario can't abort the sweep mid-run. */
   running: boolean;
-  /** Selects the run-in-flight tooltip copy — only the MC tab can cancel. */
   metric: Metric;
 }
 
@@ -292,18 +260,11 @@ interface OptimizerResultsTableProps {
   aggregates: OptimizerAggregates | null;
   metric: Metric;
   onApply: (row: ScenarioRow, method?: ProjectionMethod) => void;
-  /** Per-scenario path progress, keyed by scenario id — drives the
-   *  in-flight row's bar on the MC tab. Empty/absent on the
-   *  deterministic tab. */
   rowProgress?: ReadonlyMap<string, RowProgress>;
-  /** True while an optimizer/MC run is in flight (`mcRunning ||
-   *  detRunning`) — disables every row's Apply button so saving a
-   *  scenario can't abort the sweep mid-run. */
   running: boolean;
 }
 
-// Toolbars + disclaimer live in `./ss-optimizer-toolbars.tsx`; re-exported
-// here to keep the page's import surface intact (shape-cap split).
+// Re-exported from ss-optimizer-toolbars.tsx to keep the page's import surface intact.
 export {
   OptimizerDisclaimerCard,
   OptimizerMcToolbar,
@@ -340,9 +301,7 @@ export const OptimizerResultsTable: React.FC<OptimizerResultsTableProps> = ({
     );
   }
   const hasSecondary = aggregates.members.some((m) => !m.payload.isPrimary);
-  // Name the age columns after the household members rather than the clinical
-  // "Primary age" / "Secondary age"; fall back to the role label when a
-  // member has no first name on file.
+  // Name the age columns after members; fall back to the role label when a member has no first name.
   const firstNameOf = (isPrimary: boolean): string | undefined =>
     aggregates.members
       .find((m) => !!m.payload.isPrimary === isPrimary)

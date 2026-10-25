@@ -9,9 +9,7 @@
  *
  * Rows are built field by field from `classification.ts`. Aggregate ids pass as
  * opaque references; envelope metadata (`householdId`, `deviceId`, versions,
- * timestamps) is never read. Row 7 puts `withheld` and `rounding` into every
- * envelope, and rows 7, 8 and 10 apply the same rounding helper to what they
- * compute.
+ * timestamps) is never read.
  */
 import type { Aggregate } from '../../db/types';
 import {

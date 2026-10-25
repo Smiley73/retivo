@@ -1,8 +1,4 @@
-/**
- * Unit tests for the pure escalating-delay-from-a-running-count derivation
- * shared by the per-account TOTP lock (`MfaService`) and, in
- * shape, `FailedLoginService`'s password backoff.
- */
+// The pure escalating-delay derivation from a running count, shared by the per-account TOTP lock (MfaService) and, in shape, FailedLoginService's password backoff.
 import {
   escalatingBackoffDelaySec,
   escalatingBackoffState,

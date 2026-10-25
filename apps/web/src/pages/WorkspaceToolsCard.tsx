@@ -1,18 +1,4 @@
-/**
- * Workspace page: Workspace tools card.
- *
- * Owns the four `.kv` rows and their flows: Load demo data (two-stage
- * password → final-check), Reload from server (forceRefresh + reseed),
- * Clear data on this device (fail-closed sign-out → nuke → reload, ONLY once
- * the server session is provably gone; see
- * `AuthContext.signOutForDeviceClear`), and the always-available
- * Delete workspace data server-authoritative clear (password → counts confirm
- * with an optional "erase backup history" checkbox → `clearWorkspace` endpoint
- * → 2xx-gated local-residue wipe + reload). Also owns the workspace error, the
- * one-shot success notice, and the post-reload "couldn't erase backups / Try
- * again" banner — all stashed in sessionStorage to survive the hard reload
- * these flows trigger. Self-sources auth + sync from `useAuth` / `useSync`.
- */
+/** Workspace tools card: demo load, reload from server, clear this device, and server-authoritative workspace delete. */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Checkbox } from 'react-aria-components';
 import { useAuth, type DeviceClearAttempt } from '../auth/AuthContext';
@@ -54,14 +40,6 @@ import {
   TrashIcon,
 } from './profile-page-chrome';
 
-/**
- * Non-`household` aggregate types enumerated ONLY to show the human-readable
- * "delete N records" local count in the confirm dialog. The server clear
- * is type-agnostic — it sweeps every household sync row regardless of type — so
- * this list drives no deletion and needs no compile-time exhaustiveness guard
- * (unlike the retired client-tombstone parade): a new aggregate type can never
- * silently survive the server sweep.
- */
 const COUNTED_AGGREGATE_TYPES: readonly AggregateType[] = [
   'account',
   'accountBalance',
@@ -73,42 +51,14 @@ const COUNTED_AGGREGATE_TYPES: readonly AggregateType[] = [
   'incomeStream',
 ];
 
-/**
- * Bounded retry for the post-2xx local aggregate-store wipe. The server
- * clear has ALREADY committed and `SyncContext.clearWorkspace` reset the sync
- * cursor to `'0'` inside its fence — so the post-reload `initialSync` takes the
- * `applyBootstrap(false)` "fresh device" branch, which fetches the empty server
- * snapshot WITHOUT wiping local stores. A silent reload after a failed
- * `clearAllStores()` would therefore leave the just-deleted aggregates visible
- * on this device. We retry the wipe up to this many times and only reload once
- * it has actually succeeded; if every attempt fails we keep the user on the
- * page with an honest recovery message instead of a misleading reload.
- */
+// A reload after a failed clearAllStores() would show the deleted aggregates: the cursor is already '0', so bootstrap won't re-wipe.
 const LOCAL_WIPE_ATTEMPTS = 3;
 const LOCAL_WIPE_RETRY_MS = 60;
 
-/**
- * Shared honest-recovery copy for a Delete workspace data clear that COMMITTED
- * server-side but whose local cleanup couldn't finish on THIS device — either
- * the aggregate-store wipe or `SyncContext.clearWorkspace`'s own
- * sync-state cleanup (cursor / freshness pin / mutation queue). In both
- * cases the data WAS deleted server-side, so we must never show the pre-commit
- * "couldn't delete workspace data" copy, and the recovery is identical: use
- * Clear data on this device, or press Delete again (a retry finishes the
- * cleanup). We do NOT reload here — the post-reload bootstrap would not re-wipe
- * the stores, and the still-queued mutations must not reach a resumed
- * poll.
- */
+// Server clear committed but local cleanup could not finish: never show the pre-commit "couldn't delete" copy or reload; Delete again retries.
 const LOCAL_CLEANUP_INCOMPLETE_MESSAGE =
   "Your workspace data was deleted from our servers, but we couldn't finish clearing it from this device. To remove it here, use the Clear data on this device button, or try Delete again.";
 
-/**
- * Fixed backoff between local-wipe retries. A single fixed delay (no jitter) is
- * enough here: this is one client clearing its own IndexedDB, not a fleet
- * retrying a shared endpoint, so there is no thundering-herd to spread — the
- * pause just lets a transiently blocked/aborted IDB transaction settle before
- * the next attempt.
- */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -134,9 +84,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     conflictMutations,
     failedErrorMutations,
   } = useSync();
-  // Every un-synced edit a "Reload from server" would discard (conflicts first,
-  // then errors, then pending), named in the confirm dialog so nothing is lost
-  // silently (warn-before-discard). Empty → the dialog reads exactly as before.
   const unsyncedEdits = useMemo(
     () => [
       ...(conflictMutations ?? []),
@@ -150,35 +97,18 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     null | { willOverwrite: boolean; stage: 'first' | 'second' }
   >(null);
   const [loadingDemo, setLoadingDemo] = useState(false);
-  // Demo-overwrite re-auth gate. Mirrors the import password modal:
-  // we only require a password when there's existing data to wipe;
-  // an empty-workspace load skips this entirely.
   const [demoPasswordOpen, setDemoPasswordOpen] = useState(false);
   const [demoPasswordValue, setDemoPasswordValue] = useState('');
   const [demoPasswordError, setDemoPasswordError] = useState<string | null>(null);
   const [demoPasswordVerifying, setDemoPasswordVerifying] = useState(false);
-  // "Delete workspace data" flow. Always available under Workspace tools.
-  // Mirrors the demo-load two-stage password → confirm state machine: a
-  // password re-auth gate, then a confirmation modal listing the local count
-  // of what will be deleted plus the "erase backup history" opt-in. On confirm
-  // it calls the server-authoritative `clearWorkspace` endpoint.
   const [resetPasswordOpen, setResetPasswordOpen] = useState(false);
   const [resetPasswordValue, setResetPasswordValue] = useState('');
   const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
   const [resetPasswordVerifying, setResetPasswordVerifying] = useState(false);
-  // The confirmation modal's local record count (the server clear also
-  // removes anything this device hasn't synced yet, which the copy names but
-  // no exact server count is fetched). Non-null = confirm modal open.
   const [resetConfirm, setResetConfirm] = useState<{ total: number } | null>(null);
-  // "Also erase backup history" opt-in in the confirm dialog. Default OFF: the
-  // clear stays undoable via Restore previous version. ON: the S3 backups are
-  // purged too (irreversible).
+  // Default off: the clear stays undoable via Restore previous version; on, the S3 backups are purged irreversibly.
   const [resetEraseHistory, setResetEraseHistory] = useState(false);
   const [resetting, setResetting] = useState(false);
-  // Post-reload "we cleared your workspace but couldn't erase your backup
-  // history" state (a 2xx `historyErased:false` on a clear that DID request
-  // erase), latched across the reload. When visible the banner offers a
-  // purge-only "Try erasing backups again".
   const [historyRetryVisible, setHistoryRetryVisible] = useState(false);
   const [retryPasswordOpen, setRetryPasswordOpen] = useState(false);
   const [retryPasswordValue, setRetryPasswordValue] = useState('');
@@ -190,15 +120,9 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
   const [confirmFullSync, setConfirmFullSync] = useState(false);
   const [fullSyncing, setFullSyncing] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  // Workspace success notice that must survive the hard `window.location.reload()`
-  // these flows trigger. Set in sessionStorage before the reload, read back on
-  // the next mount (mirrors DELETED_NOTICE_KEY) — otherwise the notice mounts
-  // and is torn down by the reload before the user ever sees it.
+  // Stashed in sessionStorage because the hard reload would tear down the notice before it shows.
   const [workspaceNotice, setWorkspaceNotice] = useState<string | null>(null);
 
-  // Pick up a workspace success notice stashed before a hard reload (load demo
-  // / reload from server) and show it once, then auto-dismiss. Read-and-remove
-  // so it never re-appears on a later reload.
   useEffect(() => {
     const stashed = sessionStorage.getItem(WORKSPACE_NOTICE_KEY);
     if (!stashed) return;
@@ -208,10 +132,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     return () => clearTimeout(t);
   }, []);
 
-  // Pick up the "workspace cleared but backup history not erased" latch stashed
-  // before the delete flow's hard reload (a 2xx `historyErased:false`). Read
-  // and remove it so the "couldn't erase backups / Try again" banner shows once
-  // — its retry re-opens the password modal and runs a purge-only clear.
   useEffect(() => {
     if (sessionStorage.getItem(WORKSPACE_HISTORY_NOT_ERASED_KEY)) {
       sessionStorage.removeItem(WORKSPACE_HISTORY_NOT_ERASED_KEY);
@@ -235,9 +155,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
 
   const onLoadDemoConfirm = useCallback(async () => {
     if (!confirmLoadDemo) return;
-    // Three-gate flow when overwriting: (1) warning, (2) password re-auth
-    // (mirrors the import gate — destructive, so verify identity), (3) final
-    // check. The non-overwrite path (empty workspace) skips straight through.
     if (confirmLoadDemo.willOverwrite && confirmLoadDemo.stage === 'first') {
       setConfirmLoadDemo(null);
       setDemoPasswordValue(DEV_DEFAULT_PASSWORD);
@@ -250,16 +167,7 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     setWorkspaceError(null);
     try {
       if (confirmLoadDemo.willOverwrite) {
-        // Force a sync round-trip BEFORE the wipe so the local IDB
-        // reflects every server-side aggregate the demo load is about
-        // to overwrite. The wipe's enumeration is local-only — without
-        // this, rows that exist server-side but haven't been pulled
-        // yet (e.g. right after sign-in on a clean device) slip
-        // through and reappear on the next pull alongside the
-        // freshly-seeded demo set. Abort on failure so the destructive
-        // op never runs on stale state. A transient refresh blip here
-        // surfaces the retryable inline reason (never "Not signed in." —
-        // the session is preserved on a transient failure).
+        // Sync round-trip before the wipe: rows not yet pulled would otherwise reappear next to the demo set. Abort on failure.
         const sync = await syncRoundTrip();
         if (!sync.ok) {
           setWorkspaceError(`Could not load demo data: ${sync.reason}`);
@@ -267,20 +175,10 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
           return;
         }
       }
-      // Run the destructive wipe→load→reload inside the sync fence so a
-      // background poll tick can't flush half-queued wipe/load mutations
-      // mid-window. The fence is set before the mutex is acquired and the
-      // window runs inside the mutex, so `wipeWorkspaceForDemoReload`'s
-      // `clearMutationQueue()` never races a concurrent flush; `runDestructive`
-      // clears the fence in a `finally` (the reload below discards it on the
-      // success path, the `finally` re-enables the poll if anything throws).
+      // Run inside the sync fence so a poll tick cannot flush half-queued wipe/load mutations.
       await runDestructive(async () => {
         if (confirmLoadDemo.willOverwrite) {
-          // Queue `delete` mutations for the existing aggregates so the
-          // cloud copy is wiped alongside the local one. A naive
-          // `clearAllStores()` only touches IndexedDB, leaving orphan
-          // aggregates in DynamoDB that the next bootstrap pull would
-          // re-deliver next to the freshly-seeded demo set.
+          // Queue delete mutations so the cloud copy is wiped too; clearAllStores() only touches IndexedDB.
           await wipeWorkspaceForDemoReload(householdId);
         }
         await loadDemoData({
@@ -290,12 +188,8 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
         });
         setConfirmLoadDemo(null);
         notifyPending();
-        // Stash the success notice so it survives the reload (the prior inline
-        // setState + post-reload setTimeout never showed — the reload tore the
-        // component down first).
+        // Stash the notice in sessionStorage: the reload tears the component down first.
         sessionStorage.setItem(WORKSPACE_NOTICE_KEY, 'Demo data loaded.');
-        // Hard reload so every page re-reads aggregates the loader just
-        // queued. Same rationale as the FirstRunDemoModal path.
         window.location.reload();
       });
     } catch (err) {
@@ -325,8 +219,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     setDemoPasswordVerifying(true);
     try {
       await verifyPassword(demoPasswordValue);
-      // Tear down the password modal *before* opening the final-check
-      // dialog so they don't briefly stack.
       setDemoPasswordOpen(false);
       setDemoPasswordValue('');
       setConfirmLoadDemo({ willOverwrite: true, stage: 'second' });
@@ -343,11 +235,7 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
 
   const onResetWorkspaceClick = useCallback(() => {
     setWorkspaceError(null);
-    // Password re-verification is always required before the confirm step —
-    // this clears every account, scenario, and expense. The server clear
-    // re-verifies too (defense in depth); this client verify fails fast so a
-    // wrong password never reaches the scary confirm dialog. Mirror the
-    // import/demo local-dev prefill (blank on real deployments).
+    // The server clear re-verifies too; verifying here fails fast before the confirm dialog.
     setResetEraseHistory(false);
     setResetPasswordValue(DEV_DEFAULT_PASSWORD);
     setResetPasswordError(null);
@@ -369,20 +257,12 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     setResetPasswordVerifying(true);
     try {
       await verifyPassword(resetPasswordValue);
-      // Local count for the confirm copy. The server clear also removes
-      // anything this device hasn't synced yet — the copy names that; no exact
-      // server count is fetched (no pre-clear count endpoint, and it would add
-      // latency to a destructive action for marginal benefit). No sync
-      // round-trip precedes the clear anymore: the server sweep is
-      // authoritative and type-agnostic, so a stale local view can't leave
-      // anything behind.
+      // Local count only: the server clear also removes unsynced rows, and no pre-clear count endpoint exists.
       const counts = await Promise.all(
         COUNTED_AGGREGATE_TYPES.map((t) => listAggregates(t)),
       );
       const total = counts.reduce((sum, rows) => sum + rows.length, 0);
-      // Tear down the password modal *before* opening the confirm dialog so
-      // they don't briefly stack. Keep `resetPasswordValue` — the server clear
-      // re-verifies it on confirm.
+      // Keep resetPasswordValue: the server clear re-verifies it on confirm.
       setResetPasswordOpen(false);
       setResetConfirm({ total });
     } catch (err) {
@@ -401,41 +281,16 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     setResetting(true);
     setWorkspaceError(null);
     try {
-      // PRE-COMMIT step. `clearWorkspace` runs under the
-      // destructive-op fence + awaits any in-flight flush, then hits
-      // `POST /sync/workspace/clear`. It resolves ONLY on a 2xx — a non-2xx
-      // (wrong password / throttle / 5xx) throws, taking the PRE-COMMIT
-      // fail-safe catch below (queue preserved, NO wipe, NO reload, NO latch).
-      // On a 2xx it has ALREADY cleared the ZK freshness pin, reset the cursor,
-      // and dropped the mutation queue inside the fence.
+      // Pre-commit: clearWorkspace resolves only on a 2xx; a non-2xx throws into the fail-safe catch below with nothing wiped.
       const result = await clearWorkspace({
         currentPassword: resetPasswordValue,
         eraseHistory: resetEraseHistory,
       });
-      // 2xx: the sweep + empty snapshot + repoint committed server-side
-      // (purge-last), so it is safe to converge locally.
       setResetConfirm(null);
       setResetPasswordValue('');
-      // POST-COMMIT local-residue cleanup. The server clear has
-      // ALREADY committed, so a throw HERE is NOT a "delete failed" — surfacing
-      // that copy would be factually wrong (data WAS deleted server-side). But
-      // we also must NOT silently reload on a failed store wipe:
-      // `SyncContext.clearWorkspace` already reset the sync cursor to '0' inside
-      // its fence, so the post-reload `initialSync` takes the
-      // `applyBootstrap(false)` fresh-device branch — which fetches the empty
-      // server snapshot but does NOT wipe local stores. So if `clearAllStores()`
-      // never succeeds, a reload would leave the just-deleted aggregates visible
-      // on this device. Retry the wipe a bounded number of times; only reload
-      // once the stores are actually clear.
-      //
-      // `clearAllStores()` also drops the cached HDK (`keyCache`), but the
-      // household key is UNCHANGED by a clear (this is not the encrypted reset),
-      // so preserve it across the wipe exactly as the force-bootstrap
-      // auto-recovery does — otherwise the post-reload workspace would demand a
-      // re-unlock over a still-valid session and the encrypted household would
-      // not converge to "synced" without it. Re-read it inside the loop: a
-      // failed `clearAllStores()` is an all-or-nothing aborted transaction, so
-      // the row is still intact for the next attempt.
+      // Post-commit: the server already cleared, so a throw here is not "delete failed". Do not reload after a failed wipe,
+      // because the cursor is already '0' and bootstrap would not re-wipe the stores; retry a bounded number of times.
+      // Preserve the cached HDK across clearAllStores(): a clear leaves the household key unchanged and dropping it would force a re-unlock.
       let wiped = false;
       let preservedKeyCache: Awaited<ReturnType<typeof readKeyCacheEntry>> = null;
       for (let attempt = 0; attempt < LOCAL_WIPE_ATTEMPTS && !wiped; attempt += 1) {
@@ -452,43 +307,20 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
         }
       }
       if (!wiped) {
-        // Every wipe attempt failed. The server clear committed, so never show
-        // the pre-commit "couldn't delete workspace data" copy — but do NOT
-        // silently reload either (the post-reload bootstrap won't re-wipe; see
-        // above), or the deleted records would still be visible here. Keep the
-        // user on this page with an honest, actionable recovery path instead.
         setWorkspaceError(LOCAL_CLEANUP_INCOMPLETE_MESSAGE);
         setResetting(false);
         return;
       }
-      // Stores are clear. Finish the best-effort local-only bookkeeping (restore
-      // the preserved HDK, drop the caches the wipe leaves behind — Monte Carlo
-      // results + the selected-scenario pointer — and the per-household
-      // ready-banner keys, then set the suppress-demo flag + the post-reload
-      // notice/latch). The mutation queue was already dropped inside
-      // `clearWorkspace`'s fence. None of this is residue and all of it
-      // self-heals or is non-critical, so a throw here must NOT reach the
-      // pre-commit catch (a false "delete failed") — log and still reload to
-      // converge.
+      // Stores are clear: bookkeeping failures are non-critical and must not reach the pre-commit catch (a false "delete failed").
       try {
         if (preservedKeyCache) await writeKeyCacheEntry(preservedKeyCache);
         await clearReloadFromServerLocalCaches();
         localStorage.removeItem(bannerPendingKey(householdId));
         localStorage.removeItem(bannerDismissedKey(householdId));
-        // Suppress the first-run "Load demo data?" offer on the next mount: the
-        // clear leaves zero members (the offer's trigger) but the user
-        // deliberately chose an empty workspace. App.tsx consumes this flag.
+        // The clear leaves zero members (the demo offer's trigger) though the user chose an empty workspace; App.tsx consumes this flag.
         sessionStorage.setItem('suppressDemoModal', '1');
         if (resetEraseHistory && result.historyErased === false) {
-          // Erase-history WAS requested this clear but the S3 purge failed.
-          // Still converge (the clear happened) but latch the honest
-          // banner across the reload so the user can retry the purge — the copy
-          // is the banner, not a generic "deleted" toast. The `resetEraseHistory`
-          // guard is load-bearing: the server returns `historyErased:false` for
-          // EVERY clear where erase wasn't requested (it's saying "you didn't
-          // ask me to purge", NOT "the purge failed"), so on the default path
-          // (checkbox unticked) that value is the normal success case — never a
-          // failure banner.
+          // The resetEraseHistory guard is load-bearing: the server returns historyErased:false for every clear that did not request erase.
           sessionStorage.setItem(WORKSPACE_HISTORY_NOT_ERASED_KEY, '1');
         } else {
           sessionStorage.setItem(WORKSPACE_NOTICE_KEY, 'Workspace data deleted.');
@@ -499,36 +331,18 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
           cleanupErr,
         );
       }
-      // Hard reload so every page re-reads the now-empty workspace; the
-      // post-reload initialSync bootstraps the empty snapshot and
-      // ensureBaseScenario re-creates a fresh empty "Base" scenario. Reached
-      // only once the local stores are actually clear.
       setResetting(false);
       window.location.reload();
     } catch (err) {
       if (err instanceof WorkspaceClearCleanupError) {
-        // POST-COMMIT: the server clear COMMITTED (2xx) but
-        // `SyncContext.clearWorkspace` could not finish its local sync-state
-        // cleanup (cursor / freshness pin / mutation queue) even after its
-        // bounded retries, so it left the poll suspended. This is NOT a
-        // pre-commit failure — the data WAS deleted server-side — so never show
-        // the "couldn't delete workspace data" copy, and do NOT reload: the
-        // post-reload bootstrap would not re-wipe the stores, and a resumed poll
-        // could re-push the still-queued mutations onto the swept server. Keep
-        // the user here with the shared honest recovery path; pressing Delete
-        // again re-runs the clear, whose retry finishes the cleanup and lifts
-        // the suspension.
+        // Post-commit sync-state cleanup failed: same recovery, no reload (a resumed poll could re-push queued mutations onto the swept server).
         setWorkspaceError(LOCAL_CLEANUP_INCOMPLETE_MESSAGE);
         setResetConfirm(null);
         setResetPasswordValue('');
         setResetting(false);
         return;
       }
-      // PRE-COMMIT fail-safe: `clearWorkspace` itself rejected, so the
-      // server never swept — the mutation queue is untouched and nothing local
-      // was wiped. Surface the typed error and let the user retry (the next
-      // poll's CURSOR_EXPIRED still converges the device if the server actually
-      // completed after a client abort).
+      // Pre-commit fail-safe: clearWorkspace rejected, so nothing was swept or wiped; the next poll's CURSOR_EXPIRED converges if the server completed after a client abort.
       const message =
         err instanceof SyncApiError || err instanceof Error
           ? err.message
@@ -540,11 +354,7 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     }
   }, [householdId, resetting, resetPasswordValue, resetEraseHistory, clearWorkspace]);
 
-  // "Try erasing backups again" (post-reload, after a 2xx `historyErased:false`).
-  // Re-opens the password modal; on continue it runs a PURGE-ONLY clear
-  // (`purgeHistoryOnly: true`) — never a full clear, so resumed post-reload work
-  // is never swept. No reload: the workspace is already live + empty
-  // (or holding new edits); only the backup history is purged.
+  // Purge-only clear (purgeHistoryOnly): never a full clear, so resumed post-reload work is not swept.
   const onHistoryRetryClick = useCallback(() => {
     setWorkspaceError(null);
     setRetryPasswordValue(DEV_DEFAULT_PASSWORD);
@@ -565,9 +375,7 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     setRetryPasswordError(null);
     setRetryPasswordVerifying(true);
     try {
-      // Client verify fails fast on a wrong password (the server clear
-      // re-verifies too, but that avoids the sync 401→refresh→retry double
-      // hit on a deliberate password failure).
+      // Fail fast on a wrong password; avoids the sync 401→refresh→retry double hit.
       await verifyPassword(retryPasswordValue);
     } catch (err) {
       if (err instanceof ApiRequestError) {
@@ -592,7 +400,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
         setHistoryRetryVisible(false);
         setWorkspaceNotice('Your backup history was erased.');
       } else {
-        // Still couldn't purge — keep the banner so the user can try later.
         setWorkspaceError(
           "We still couldn't erase your backup history. It'll be removed automatically as it ages out; you can try again later.",
         );
@@ -612,12 +419,7 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     setWorkspaceError(null);
     setClearingLocal(true);
     setConfirmClearLocal(false);
-    // Sign out FIRST and fail closed:
-    // `signOutForDeviceClear` only reports `proven: true` when the server
-    // session is provably gone (a 2xx logout, or a definitively-rejected
-    // refresh cookie) — anything else (offline, a timeout, a 5xx, a
-    // throttle, or an ambiguous 401) stops here with nothing wiped and
-    // nothing reloaded, so the person stays on this page and can retry.
+    // Fail closed: signOutForDeviceClear reports proven only when the server session is gone; otherwise stop with nothing wiped or reloaded.
     let attempt: DeviceClearAttempt;
     try {
       attempt = await signOutForDeviceClear();
@@ -640,11 +442,7 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
       return;
     }
     try {
-      // The full nuke — every localStorage key (deviceId included),
-      // every sessionStorage key, the IndexedDB, and Cache Storage.
       await clearAllLocalData();
-      // Hard reload lands on /login via RequireAuth, dropping all
-      // in-memory/context residue and regenerating a fresh deviceId.
       window.location.reload();
     } catch (err) {
       setClearingLocal(false);
@@ -660,33 +458,22 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
     setConfirmFullSync(false);
     setWorkspaceError(null);
     setFullSyncing(true);
-    // `forceRefresh` wipes local IndexedDB + the mutation queue and
-    // reseeds from the server snapshot. The cursor-reset invariant
-    // guarantees a failed reseed left the cursor at '0', so a reload
-    // re-bootstraps rather than incremental-pulling into an empty store.
+    // A failed reseed leaves the cursor at '0', so a reload re-bootstraps instead of pulling incrementally into an empty store.
     const { ok, wiped } = await forceRefresh();
     if (ok) {
       await clearReloadFromServerLocalCaches();
       await recacheHdk();
-      // Stash the notice so it survives the hard reload (see WORKSPACE_NOTICE_KEY).
       sessionStorage.setItem(WORKSPACE_NOTICE_KEY, 'Reloaded a fresh copy from the server.');
-      // Hard reload so every mounted page re-reads the fresh IDB and
-      // the cleared selected-scenario pointer resets.
       window.location.reload();
       return;
     }
     if (wiped) {
-      // Reseed failed after the wipe — local data is gone. The reload's
-      // initialSync re-bootstraps from the server (cursor is '0').
       setWorkspaceError(
         "Reloading from the server didn't finish; trying again from the server.",
       );
       window.location.reload();
       return;
     }
-    // Pre-wipe failure (offline / transport / schema): nothing was
-    // touched. The badge + its Details popover carry the actionable
-    // envelope, so don't duplicate it here. Re-enable the button.
     setWorkspaceError(
       "Reloading from the server didn't complete, so your data was not changed. Check the sync status badge for details.",
     );
@@ -733,13 +520,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
             </div>
           </Alert>
         )}
-        {/* Mock `.kvs`/`.kv` key/value rows: label-left, action-right,
-            hairline divider between (13.5px). Replaces the prior
-            flex-row of three buttons. Each action's handler/guard is
-            unchanged — only the layout and the button captions moved
-            (the row label now carries the description; the button is
-            the short verb). The accessible name of each control is the
-            full row (label + button text) so existing intent is clear. */}
         <div className="flex flex-col">
           {/* eslint-disable-next-line no-restricted-syntax -- Graphite Spectrum mock .kv 13.5px */}
           <div className="flex items-center justify-between gap-3 border-b border-line py-2.5 text-[13.5px]">
@@ -755,12 +535,7 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
               {loadingDemo ? 'Loading…' : 'Load'}
             </button>
           </div>
-          {/* "Reload from server" replaces this device's data with the
-              server's copy. It discards unsynced local edits, so it keeps a
-              confirm gate, but it's a deliberate recovery action (not a
-              delete) — so the trigger is a neutral secondary button. Red is
-              reserved for the confirm step and the true device wipe below,
-              so the destructive action stays distinguishable at a glance. */}
+          {/* Neutral secondary trigger: red is reserved for the confirm step and the device wipe so destructive actions stay distinguishable. */}
           {/* eslint-disable-next-line no-restricted-syntax -- Graphite Spectrum mock .kv 13.5px */}
           <div className="flex items-center justify-between gap-3 border-b border-line py-2.5 text-[13.5px]">
             <span className="flex flex-col">
@@ -795,13 +570,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
               {clearingLocal ? 'Clearing…' : 'Clear'}
             </button>
           </div>
-          {/* "Delete workspace data" — always available. Wipes every
-              account, balance, scenario, expense, and member (demo data and
-              anything you've entered) and re-seeds an empty Base scenario +
-              default expense categories on reload, keeping the account +
-              sign-in intact. Password re-verification + a counts
-              confirmation gate the action. The most data-destructive tool
-              here, so it's the last row and carries a description. */}
           {/* eslint-disable-next-line no-restricted-syntax -- Graphite Spectrum mock .kv 13.5px */}
           <div className="flex items-center justify-between gap-3 py-2.5 text-[13.5px]">
             <span className="flex flex-col">
@@ -857,9 +625,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
               : 'Load demo data'
         }
         cancelLabel="Cancel"
-        // Loading demo into an EMPTY workspace adds data and is benign (lime
-        // confirm); overwriting an existing workspace, and the second-stage
-        // "really replace everything?" gate, are destructive (red).
         destructive={
           !!(confirmLoadDemo?.willOverwrite || confirmLoadDemo?.stage === 'second')
         }
@@ -902,10 +667,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
         onCancel={() => setConfirmClearLocal(false)}
       />
 
-      {/* "Delete workspace data" password re-auth. On a correct password the
-          confirmation dialog below opens (no pre-clear sync round-trip — the
-          server clear is authoritative). The typed password is retained and
-          re-verified server-side on confirm. */}
       <PasswordPromptModal
         open={resetPasswordOpen}
         onClose={closeResetPasswordModal}
@@ -982,8 +743,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
         }}
       />
 
-      {/* Demo-overwrite password re-auth. On a correct password, opens the
-          final-check confirm dialog above. */}
       <PasswordPromptModal
         open={demoPasswordOpen}
         onClose={closeDemoPasswordModal}
@@ -1000,9 +759,6 @@ export const WorkspaceToolsCard: React.FC<Props> = ({ householdId, email, me }) 
         cancelDisabled={demoPasswordVerifying}
       />
 
-      {/* "Try erasing backups again" password re-auth. On a correct password it
-          runs a PURGE-ONLY clear (`purgeHistoryOnly: true`) — no sweep, no
-          reload — so resumed post-reload work is never touched. */}
       <PasswordPromptModal
         open={retryPasswordOpen}
         onClose={closeRetryPasswordModal}

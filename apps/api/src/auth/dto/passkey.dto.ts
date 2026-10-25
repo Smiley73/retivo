@@ -1,14 +1,5 @@
-/**
- * Request DTOs for the two passkey-finish endpoints. The bodies arrive
- * shaped by `@simplewebauthn/browser`; we validate the outer envelope
- * here so the global `ValidationPipe` rejects malformed inputs as
- * `400 BAD_REQUEST` before controller logic runs. The opaque
- * authenticator response is parsed + verified by `@simplewebauthn/server`
- * inside the controller — we do not re-implement WebAuthn verification.
- *
- * Validating the envelope (not the cryptographic payload) eliminates
- * the avoidable-500 / noisy-log class of failures.
- */
+// Request DTOs for the passkey-finish endpoints. Only the outer envelope is validated, so malformed inputs are a 400 rather than a 500;
+// `@simplewebauthn/server` verifies the opaque authenticator response.
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -152,17 +143,10 @@ export class PasskeyAuthenticateFinishDto {
 }
 
 /**
- * The fresh-proof body carried by BOTH factor-enrollment writes — passkey
- * `register/finish` (below) and TOTP `enroll/confirm` (`mfa.dto.ts`). NESTED (not flattened onto the host DTO) so its
- * `method`/`code`/`response` never collide with a host field of the same
- * name: `PasskeyRegisterFinishDto.response` is the NEW credential being
- * registered, and `MfaEnrollConfirmDto.code` is the TOTP code being
- * confirmed — both distinct from this proof's own `response`/`code`.
- *
- * `currentPassword` is the UNCONDITIONAL floor (no `AUTH_MFA_ENFORCED`
- * early-out) — a hijacked session does not hold the
- * password. `method`/`code`/`response` are the OPTIONAL fresh second-factor,
- * required by the server only when `AUTH_MFA_ENFORCED` is on.
+ * The fresh-proof body for both factor-enrollment writes (passkey `register/finish`, TOTP `enroll/confirm`), nested
+ * so its `method`, `code` and `response` never collide with the host DTO fields of the same name. `currentPassword`
+ * is the unconditional floor (a hijacked session does not hold the password); the fresh factor is required only when
+ * `AUTH_MFA_ENFORCED` is on.
  */
 export class FactorEnrollmentStepUpProofDto {
   @IsString()
@@ -201,4 +185,3 @@ export class PasskeyRegisterFinishDto {
   @Type(() => FactorEnrollmentStepUpProofDto)
   stepUp!: FactorEnrollmentStepUpProofDto;
 }
-

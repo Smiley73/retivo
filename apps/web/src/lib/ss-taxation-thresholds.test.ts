@@ -1,7 +1,3 @@
-/**
- * Calibration seed config tests — schema validation.
- */
-
 import { describe, expect, it } from 'vitest';
 import { SS_TAX_THRESHOLDS } from './ss-taxation-thresholds';
 

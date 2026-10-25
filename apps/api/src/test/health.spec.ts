@@ -1,11 +1,4 @@
-/**
- * Health endpoint integration tests.
- *
- * Locks the split: public `/api/v1/health` is a
- * shallow secret-free liveness probe with no dependency fields; the
- * dependency probe moves behind authentication at
- * `/api/v1/health/dependencies` (the global JwtAuthGuard protects it).
- */
+// Public /api/v1/health is a shallow, secret-free liveness probe with no dependency fields; the dependency probe sits behind authentication at /api/v1/health/dependencies.
 import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
 import { ServiceUnavailableException } from '@nestjs/common';
@@ -33,8 +26,7 @@ async function loginAccessToken(t: TestApp): Promise<string> {
     .post('/api/v1/auth/verify-email')
     .set('Origin', process.env.WEB_ORIGIN!)
     .send({ token: signup.body.verificationToken });
-  // The approval token is stored hashed; capture the raw token from
-  // the verify-email dev trapdoor and approve with it.
+  // The approval token is stored hashed; the raw token comes from the verify-email dev trapdoor.
   await approvePendingSignup(t.app, verify.body.approvalToken);
   const login = await request(t.app.getHttpServer())
     .post('/api/v1/auth/login')
@@ -82,16 +74,8 @@ describe('health endpoints', () => {
   });
 });
 
-/**
- * Unit-level coverage of the S3 reachability probe path. Asserts the
- * probe uses GetBucketLocation (a bucket-level metadata read covered by
- * the api role's narrow `s3:GetBucketLocation` grant — no `s3:ListBucket`)
- * and maps a successful response to healthy while ANY thrown error
- * (AccessDenied / network / 5xx) maps to unhealthy. A HeadObject-on-a-
- * missing-key probe would wrongly return 403 here when ListBucket is
- * withheld; GetBucketLocation has no such ambiguity. The bug a
- * Moto-backed test hides because the emulator does not enforce IAM.
- */
+// The S3 reachability probe uses GetBucketLocation, covered by the api role's narrow grant without s3:ListBucket, and maps success to healthy and any thrown error to unhealthy.
+// A HeadObject-on-a-missing-key probe would wrongly 403 when ListBucket is withheld, which a Moto-backed test hides because the emulator does not enforce IAM.
 describe('HealthController — S3 dependency probe (GetBucketLocation-authorized)', () => {
   function makeController(s3Send: jest.Mock): HealthController {
     const doc = { send: jest.fn().mockResolvedValue({}) };
@@ -114,8 +98,6 @@ describe('HealthController — S3 dependency probe (GetBucketLocation-authorized
     const result = await controller.dependencies();
 
     expect(result.s3).toBe('ok');
-    // Probe used GetBucketLocation (s3:GetBucketLocation), never
-    // HeadBucket / ListBucket and never an object-level HeadObject.
     const sent = s3Send.mock.calls[0][0];
     expect(sent).toBeInstanceOf(GetBucketLocationCommand);
   });

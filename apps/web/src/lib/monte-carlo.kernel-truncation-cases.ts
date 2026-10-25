@@ -1,24 +1,5 @@
-/**
- * Shared input builders for the kernel-truncation byte-identity pins — the
- * four injected-return scenario shapes that exercise the kernel truncation +
- * skip:
- *   - `futureRetirement` (accumulation phase > 0 → kernel runs truncated),
- *   - `alreadyRetired` (`retStart === 0` → kernel skipped),
- *   - `guardrailsEnabled` (downturn guardrail reads cumCpi at year starts),
- *   - `qcdEnabled` (QCD reads year-END cumCpi to inflate the real gift).
- *
- * All four use INJECTED returns/CPI so every path is fully deterministic, and
- * the injected `cpiPct` series is NON-ZERO and month-to-month VARYING so the
- * cumCpi-source swap (kernel `StepOutcome.cumCpi` → `buildStepInputs`'s
- * `cumCpi`) is exercised somewhere an index/length mismatch would produce a
- * visible diff.
- *
- * This is a NON-test support module (mirroring `monte-carlo.test-helpers.ts`)
- * imported by BOTH the capture test (`capture-mc-perf-identity-fixture.test.ts`)
- * and the always-on assert (`monte-carlo.kernel-truncation.test.ts`), so the
- * captured fixture and the recomputed summary are built from byte-identical
- * inputs by construction (no hand-copied builder can drift between the two).
- */
+/** Input builders for the four kernel-truncation byte-identity scenarios, with injected returns/CPI.
+ * Shared by the capture test and the always-on assert so both build byte-identical inputs. */
 import { makeMonthlyExpenseBase } from './monte-carlo.test-helpers.js';
 import { DEFAULT_TAX_CALIBRATION_BUNDLE } from './tax-integration.js';
 import type {
@@ -33,24 +14,19 @@ const INJ_FIRST_YEAR = 2026;
 const INJ_HORIZON_YEAR = 2050;
 const INJ_STEP_COUNT = (INJ_HORIZON_YEAR - INJ_FIRST_YEAR + 1) * 12;
 
-/** Non-zero, month-to-month varying injected CPI (~0.10..0.34 %/mo), never
- *  flat/zero. Rational arithmetic only (no transcendentals) so it stays
- *  bit-identical across runs/platforms. */
+// Non-zero, month-to-month varying CPI; rational arithmetic only so it stays bit-identical across platforms.
 function injectedCpiSeries(): Float64Array {
   const c = new Float64Array(INJ_STEP_COUNT);
   for (let i = 0; i < INJ_STEP_COUNT; i += 1) c[i] = 0.1 + ((i * 7 + 3) % 25) / 100;
   return c;
 }
 
-/** Varying injected monthly returns (~-0.40..+0.70 %/mo, some negative). */
 function injectedReturnSeries(): Float64Array {
   const r = new Float64Array(INJ_STEP_COUNT);
   for (let i = 0; i < INJ_STEP_COUNT; i += 1) r[i] = -0.4 + ((i * 11 + 5) % 111) / 100;
   return r;
 }
 
-/** Two-account ledger (brokerage POST_TAX + IRA PRE_TAX), one owner, with
- *  accumulation-phase contributions through `retStep`. */
 function injLedger(retStep: number): MonteCarloAccountLedger[] {
   const contribPost = new Float64Array(INJ_STEP_COUNT);
   const contribPre = new Float64Array(INJ_STEP_COUNT);
@@ -90,8 +66,6 @@ function injLedger(retStep: number): MonteCarloAccountLedger[] {
   ];
 }
 
-/** Single RMD-eligible member (born 1955 → past 70½ before `firstYear`, so QCD
- *  is eligible from the first year and RMD engages within the horizon). */
 function injTaxContext(): McTaxContext {
   return {
     taxBundle: DEFAULT_TAX_CALIBRATION_BUNDLE,
@@ -131,18 +105,17 @@ function injBaseInput(retirementYear: number): MonteCarloInput {
   };
 }
 
-/** Edge: FUTURE retirement (10 accumulation years) — the kernel runs once,
- *  truncated to the accumulation-length step. */
+/** Future retirement: 10 accumulation years, kernel runs truncated. */
 export function buildFutureRetirementInput(): MonteCarloInput {
   return injBaseInput(INJ_FIRST_YEAR + 10);
 }
 
-/** Edge: ALREADY retired (`retStart === 0`) — the kernel is skipped. */
+/** Already retired (`retStart === 0`): kernel skipped. */
 export function buildAlreadyRetiredInput(): MonteCarloInput {
   return injBaseInput(INJ_FIRST_YEAR);
 }
 
-/** Edge: downturn GUARDRAIL enabled (reads cumCpi at year starts). */
+/** Downturn guardrail enabled; reads cumCpi at year starts. */
 export function buildGuardrailsEnabledInput(): MonteCarloInput {
   const retirementYear = INJ_FIRST_YEAR + 5;
   const drawdownYears = INJ_HORIZON_YEAR - retirementYear + 1;
@@ -163,7 +136,7 @@ export function buildGuardrailsEnabledInput(): MonteCarloInput {
   };
 }
 
-/** Edge: QCD enabled (reads year-END cumCpi to inflate the real gift). */
+/** QCD enabled; reads year-end cumCpi to inflate the real gift. */
 export function buildQcdEnabledInput(): MonteCarloInput {
   const retirementYear = INJ_FIRST_YEAR + 5;
   const qcdContext: McQcdContext = {

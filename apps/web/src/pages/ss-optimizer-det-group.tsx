@@ -1,12 +1,4 @@
-/**
- * Deterministic-tab rendering helpers — extracted from
- * `ss-optimizer-page-chrome.tsx` so that file stays under the ≤400-ln
- * shape limit. Owns the parent + Planned/TWR child layout plus the
- * "collapse to single status row when both methods agree" rule (a
- * non-result outcome that is scenario-wide, e.g. `cbp-unconfigured`,
- * `no-retirement-date`, both-past-window — emitting two duplicate rows
- * would be visual noise).
- */
+/** Deterministic-tab rendering helpers: the parent + Planned/TWR child layout, collapsing to one status row when both methods agree on a scenario-wide non-result outcome. */
 import React from 'react';
 import { MethodChildRow, ScenarioParentRow } from './ss-optimizer-row-variants';
 import type {
@@ -21,19 +13,11 @@ interface DetGroupArgs {
   readonly aggregates: OptimizerAggregates;
   readonly hasSecondary: boolean;
   readonly onApply: (row: ScenarioRow, method?: ProjectionMethod) => void;
-  /** True while an optimizer run is in flight — disables the child Apply
-   *  buttons so saving a scenario can't abort the sweep mid-run. */
   readonly running: boolean;
   readonly renderSingleRow: (row: ScenarioRow) => React.ReactElement;
 }
 
-/**
- * Returns the React rows for one deterministic-tab scenario. When both
- * methods produce the same scenario-wide non-result outcome the helper
- * synthesizes a single legacy single-row render via `renderSingleRow`
- * (the caller's `<OptimizerRow>` factory); otherwise it emits the
- * parent + two child rows.
- */
+/** Returns the rows for one scenario: a single row via renderSingleRow when both methods agree on a non-result outcome, else the parent plus two children. */
 export function renderDeterministicGroup(
   args: DetGroupArgs,
 ): React.ReactElement[] {
@@ -69,12 +53,7 @@ export function renderDeterministicGroup(
   ];
 }
 
-/**
- * Returns a synthetic outbound when both methods agree on a non-result
- * outcome (empty / unsupported / error / both-past-window). The
- * TWR-insufficient variant is NOT collapsed — only the TWR child
- * carries that copy; Planned still has a real winner.
- */
+// The collapsed outcome when both methods agree on a non-result; the TWR-insufficient variant is not collapsed, since Planned still has a real winner.
 function collapsedStatusFor(row: ScenarioRow): OptimizerWorkerOutbound | null {
   if (!row.methods) return null;
   const a = row.methods.planned.result;

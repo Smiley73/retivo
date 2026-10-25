@@ -1,30 +1,10 @@
-/**
- * `loadPageData` — runner-adapter data-flow tests.
- *
- * Post-migration `loadPageData` is a thin adapter over
- * `runBalanceProjectionForPage`: it runs the shared projection once, maps
- * the runner's `sharedCtx.accountProjections` into the page's
- * `BreakdownAccountRow` set, and surfaces the per-method drawdown slices on
- * `pageResult`. The old page-local re-projection + `buildDrawdownByMethod`
- * are gone — the deterministic-drawdown correctness (incl. the
- * post-primary CBP lump-sum transfer + RMD-context behavior) now lives in
- * the runner's own test suite (`balance-projection-runner*.test.ts`).
- *
- * These tests pin the page-adapter contract:
- *   (a) rows come from the runner's `accountProjections` (account set,
- *       owner display, insufficient-history flag);
- *   (b) `pageResult` carries the both-methods drawdown slices and
- *       `drawdownByMethodFromPageResult` projects them into the page shape;
- *   (c) hidden-account footer counts (inactive + zero-history) are
- *       computed page-side;
- *   (d) the page-side tax fields still flow through the runner for a
- *       named strategy (the tax post-pass populates them).
- */
+// `loadPageData`, a thin adapter over `runBalanceProjectionForPage`: it maps the runner's `sharedCtx.accountProjections` into `BreakdownAccountRow`s and surfaces the per-method drawdown slices on `pageResult`.
+// Pins rows from `accountProjections`, the both-methods `pageResult` slices, page-side hidden-account counts and tax fields flowing through; drawdown correctness lives in `balance-projection-runner*.test.ts`.
 import { describe, expect, it } from 'vitest';
 import {
   loadPageData,
   drawdownByMethodFromPageResult,
-} from './balance-projection-page-pipeline';
+} from './balance-projection-page-data';
 import {
   computeMethodTotal,
   type BreakdownAccountRow,
@@ -174,8 +154,7 @@ function balanceRow(
   };
 }
 
-/** The auto-$0 seed an account picks up at creation: all numeric fields 0,
- *  splits null for non-MIXED. Mirrors AccountFormModal's seed payload shape. */
+// The auto-$0 seed an account picks up at creation: numeric fields 0, splits null for non-MIXED (mirrors AccountFormModal's seed payload).
 function seedRow(
   accountId: string,
   year: number,
@@ -211,9 +190,7 @@ function seedRow(
   };
 }
 
-/** A MIXED-treatment account whose money lives ONLY in the split fields (the
- *  top-level startingBalance/endingBalance stay 0) — exercises the split
- *  source-of-truth for `hasAnyRealBalance`. */
+// A MIXED account whose money lives only in the split fields (top-level balances stay 0) exercises the split source of truth for `hasAnyRealBalance`.
 function mixedSplitOnlyRow(
   accountId: string,
   year: number,
@@ -319,10 +296,8 @@ describe('loadPageData — runner-adapter data flow', () => {
     expect(data.rows).toHaveLength(1);
     expect(data.rows[0].account.id).toBe('a1');
     expect(data.rows[0].ownerDisplay).toBe('Alex');
-    // Two years of history → TWR available → no insufficient-history flag.
     expect(data.rows[0].hasInsufficientHistory).toBe(false);
     expect(data.rows[0].outputs.planned).not.toBeNull();
-    // The page result carries the both-methods drawdown slices.
     expect(data.pageResult).not.toBeNull();
   });
 
@@ -340,13 +315,7 @@ describe('loadPageData — runner-adapter data flow', () => {
   });
 
   it('includes an insufficient-history non-CBP row at its planned rate under Historical', () => {
-    // A single year of balance history → no empirical TWR. The runner fills
-    // `outputs.twr` with the PLANNED projection; the page adapter now KEEPS
-    // that planned-rate fallback (no longer nulls it) so the account is
-    // INCLUDED across all Historical surfaces — reversing the prior
-    // exclusion that blanked the whole Historical view when even one account
-    // was empty / new. `hasInsufficientHistory` still flags it for
-    // disclosure (the ⚠ marker + the inline note + the footnote count).
+    // A single year of balance history gives no empirical TWR. The runner fills `outputs.twr` with the planned projection and the adapter keeps that fallback, so the account stays in all Historical surfaces (one empty or new account once blanked the whole Historical view); `hasInsufficientHistory` still flags it for disclosure.
     const birthYear = TODAY_YEAR - 60;
     const members = [member('m1', true, 'Alex', birthYear)];
     const acct = brokerage('a1', 'm1', 5);
@@ -357,15 +326,10 @@ describe('loadPageData — runner-adapter data flow', () => {
       balances: [balanceRow('a1', TODAY_YEAR - 1, 100_000)],
     });
     expect(data.rows[0].hasInsufficientHistory).toBe(true);
-    // `outputs.twr` is retained (the planned-rate fallback), NOT nulled.
     expect(data.rows[0].outputs.twr).not.toBeNull();
     expect(data.rows[0].outputs.planned).not.toBeNull();
-    // The Historical fallback equals the planned projection for this account
-    // (same rate — no empirical rate exists).
     expect(data.rows[0].outputs.twr!.total).toBe(data.rows[0].outputs.planned!.total);
 
-    // `computeMethodTotal(rows, 'twr')` INCLUDES the row at the planned rate
-    // and counts it as a planned-rate (mixed-basis) account for disclosure.
     const twrTotal = computeMethodTotal(
       data.rows as ReadonlyArray<BreakdownAccountRow>,
       'twr' as ProjectionMethod,
@@ -375,15 +339,7 @@ describe('loadPageData — runner-adapter data flow', () => {
   });
 
   it('keeps outputs.twr non-null for a single-year CBP row (TWR tab + totals include it)', () => {
-    // Complement to the non-CBP insufficient-history case above. A CBP
-    // (RETIREMENT_CASH_BALANCE) account accrues from the cash-balance
-    // formula, not market returns, so the runner deliberately reuses the
-    // PLANNED projection as the CBP TWR output and leaves
-    // `ratePctByMethod.twr` non-null. The page adapter's
-    // `hasInsufficientHistory = !isCbp && …` gate must therefore leave a
-    // CBP row's `outputs.twr` intact — the TWR tab/total legitimately
-    // reflects the planned projection. Removing the `!isCbp` half of the
-    // gate would wrongly null/exclude this valid CBP TWR row.
+    // A CBP (RETIREMENT_CASH_BALANCE) account accrues from the cash-balance formula, so the runner reuses the planned projection as its TWR output. The adapter's `hasInsufficientHistory = !isCbp && …` gate must leave that `outputs.twr` intact; dropping the `!isCbp` half would wrongly null or exclude a valid CBP TWR row.
     const birthYear = TODAY_YEAR - 60;
     const members = [member('m1', true, 'Alex', birthYear)];
     const acct = cbp('cbp1', 'm1', 5);
@@ -391,22 +347,16 @@ describe('loadPageData — runner-adapter data flow', () => {
       scenarios: [baseScenario('s', 'Base')],
       members,
       accounts: [acct],
-      // Single year of history — would flag insufficient history for a
-      // non-CBP account, but CBP rows accrue from a formula and are exempt.
+      // A single year of history would flag a non-CBP account, but CBP rows accrue from a formula and are exempt.
       balances: [balanceRow('cbp1', TODAY_YEAR - 1, 100_000)],
     });
     expect(data.rows).toHaveLength(1);
     expect(data.rows[0].account.id).toBe('cbp1');
 
-    // (a) CBP rows are never flagged insufficient-history.
     expect(data.rows[0].hasInsufficientHistory).toBe(false);
-    // (b) `outputs.twr` is retained (NOT nulled) — the CBP TWR surface
-    //     reflects the planned projection by design.
     expect(data.rows[0].outputs.twr).not.toBeNull();
     expect(data.rows[0].outputs.planned).not.toBeNull();
 
-    // (c) `computeMethodTotal(rows, 'twr')` INCLUDES the CBP row — it
-    //     contributes to the total and is not counted as excluded.
     const twrTotal = computeMethodTotal(
       data.rows as ReadonlyArray<BreakdownAccountRow>,
       'twr' as ProjectionMethod,
@@ -430,7 +380,6 @@ describe('loadPageData — runner-adapter data flow', () => {
     });
     expect(data.hiddenInactiveCount).toBe(1);
     expect(data.hiddenZeroHistoryCount).toBe(1);
-    // Only the active-with-history account makes it into rows.
     expect(data.rows.map((r) => r.account.id)).toEqual(['a1']);
   });
 
@@ -449,16 +398,13 @@ describe('loadPageData — runner-adapter data flow', () => {
     expect(dd).not.toBeNull();
     expect(dd!.planned).not.toBeNull();
     expect(dd!.planned!.years.length).toBeGreaterThan(0);
-    // The runner's net at-retirement figure
-    // carries through onto the page-level slice, additively.
     expect(dd!.planned!.netPortfolioAtRetirement).toBe(500_000);
   });
 
   it('returns null pageResult/empty rows when no primary retirement is resolvable', () => {
     const members = [member('m1', true, 'Alex', TODAY_YEAR - 60)];
     const acct = brokerage('a1', 'm1', 5);
-    // Scenario with no retirementAge override → page renders its own
-    // empty-state guard; the adapter never reaches the runner.
+    // With no retirementAge override the page renders its own empty-state guard; the adapter never reaches the runner.
     const scenario = baseScenario('s', 'NoRetAge');
     const stripped: ScenarioAggregate = {
       ...scenario,
@@ -474,13 +420,7 @@ describe('loadPageData — runner-adapter data flow', () => {
     expect(data.rows).toHaveLength(0);
   });
 
-  // ---------------------------------------------------------------------
-  // Deterministic-side migration parity. The page now sources its
-  // drawdown from `runBalanceProjectionForPage`; these prove the page
-  // surface is value-identical to the canonical single-method runner
-  // (`runBalanceProjection`) that the Plan Stress Test card + optimizer
-  // use — closing the prior page-vs-runner RMD divergence.
-  // ---------------------------------------------------------------------
+  // Deterministic-side parity: the page surface must be value-identical to the canonical single-method runner (`runBalanceProjection`) that the Plan Stress Test card and optimizer use.
 
   function runArgsFor(opts: {
     scenarios: ScenarioAggregate[];
@@ -518,7 +458,6 @@ describe('loadPageData — runner-adapter data flow', () => {
     const canonical = runBalanceProjection(
       runArgsFor({ scenarios, members, accounts: [acct], balances, ssBenefits: ss }),
     );
-    // Value-identical: same year set + same end-of-year balances + withdrawals.
     expect(pageYears.map((y) => y.year)).toEqual(
       canonical.drawdownYears.map((y) => y.year),
     );
@@ -529,10 +468,7 @@ describe('loadPageData — runner-adapter data flow', () => {
   });
 
   it('page TWR drawdown years equal the canonical TWR runner (two-year history)', () => {
-    // Two balance-history years → empirical TWR is available, so the page's
-    // TWR slice is populated and must be value-identical to the canonical
-    // single-method `runBalanceProjection({ method: 'twr' })`. The runner migration reroutes
-    // BOTH methods, so the TWR surface needs a parity guard equal to Planned.
+    // Two balance-history years give an empirical TWR, so the page's TWR slice must be value-identical to the canonical `runBalanceProjection({ method: 'twr' })`.
     const birthYear = TODAY_YEAR - 67; // retires this year → drawdown runs
     const members = [member('m1', true, 'Alex', birthYear)];
     const acct = brokerage('a1', 'm1', 5);
@@ -552,7 +488,6 @@ describe('loadPageData — runner-adapter data flow', () => {
       method: 'twr',
     });
     expect(canonical.methodAvailable).toBe(true);
-    // Value-identical: same year set + same end-of-year balances + withdrawals.
     expect(pageTwrYears.map((y) => y.year)).toEqual(
       canonical.drawdownYears.map((y) => y.year),
     );
@@ -563,12 +498,7 @@ describe('loadPageData — runner-adapter data flow', () => {
   });
 
   it('page per-account drawdown matches the runner + enforces RMD context (divergence closed)', () => {
-    // Per-account (taxEfficient) scenario, age 67 retiree → reaches RMD
-    // age (73) mid-horizon, so the RMD floor engages on later years.
-    // Pre-migration the page's own `simulateDrawdown` call site ignored
-    // RMD context, diverging from the runner; the migration routes both through the
-    // same engine. The page surface must now be value-identical to the
-    // canonical runner the stress-test card uses.
+    // A per-account (taxEfficient) 67-year-old reaches RMD age (73) mid-horizon, so the RMD floor engages on later years; the page's old `simulateDrawdown` call ignored RMD context and diverged from the runner.
     const birthYear = TODAY_YEAR - 67;
     const members = [member('m1', true, 'Alex', birthYear)];
     const iraAcct = ira('ira1', 'm1', 5);
@@ -590,8 +520,6 @@ describe('loadPageData — runner-adapter data flow', () => {
       expect(y.balance).toBeCloseTo(canonical.drawdownYears[i].nominalBalance, 2);
       expect(y.withdrawn).toBeCloseTo(canonical.drawdownYears[i].withdrawal, 2);
     });
-    // RMD floor is populated on the per-account ledger years (RMD context
-    // threaded through the shared runner — the divergence the migration closes).
     expect(pageYears.some((y) => (y.rmdFloorCents ?? 0) > 0)).toBe(true);
   });
 
@@ -610,19 +538,13 @@ describe('loadPageData — runner-adapter data flow', () => {
     expect(dd).not.toBeNull();
     const years = dd!.planned?.years ?? [];
     expect(years.length).toBeGreaterThan(0);
-    // The runner's tax post-pass runs for every named strategy, so the tax
-    // fields are defined on the year rows the page renders.
     expect(years[0].federalTaxCents).toBeDefined();
     expect(years[0].magiCents).toBeDefined();
   });
 });
 
 describe('Historical (TWR) no longer vetoed by an empty / short-history account', () => {
-  // One funded, historied account (≥2 yr) + one zero-balance no-history
-  // account → Historical stays available, renders drawdown years, and the
-  // empty account does NOT blank the whole projection (the exact reported
-  // bug). The empty (no-rows) account is unprojected + absent from the
-  // fallback list.
+  // One funded, historied account plus one zero-balance no-history account: Historical stays available and the empty account must not blank the whole projection (the reported bug). The empty account is unprojected and absent from the fallback list.
   it('does not blank Historical when a zero-balance no-history account is present', () => {
     const birthYear = TODAY_YEAR - 60;
     const members = [member('m1', true, 'Alex', birthYear)];
@@ -632,27 +554,20 @@ describe('Historical (TWR) no longer vetoed by an empty / short-history account'
       scenarios: [baseScenario('s', 'Base')],
       members,
       accounts: [funded, emptyRoth],
-      // funded has 2 yr history; emptyRoth has NO balance rows.
       balances: [
         balanceRow('funded', TODAY_YEAR - 2, 100_000),
         balanceRow('funded', TODAY_YEAR - 1, 110_000),
       ],
     });
     const sharedCtx = data.pageResult!.sharedCtx;
-    // Historical is available (≥1 account has empirical history).
     expect(sharedCtx.methodAvailable).toBe(true);
-    // The TWR drawdown slice exists and renders drawdown years.
     expect(data.pageResult!.twr).not.toBeNull();
     expect((data.pageResult!.twr?.years.length ?? 0)).toBeGreaterThan(0);
-    // The no-rows account is unprojected (absent from rows) and not in the
-    // fallback list (nothing renders for it until it has a balance row).
     expect(data.rows.map((r) => r.account.id)).toEqual(['funded']);
     expect(sharedCtx.fallbackAccounts).toEqual([]);
   });
 
-  // A funded but short-history (<2 yr) account → Historical available (not
-  // vetoed), the account falls back to its planned rate, and it appears in
-  // `sharedCtx.fallbackAccounts`.
+  // A funded short-history (<2 yr) account does not veto Historical: it falls back to its planned rate and appears in `sharedCtx.fallbackAccounts`.
   it('falls a funded short-history account back to planned and lists it', () => {
     const birthYear = TODAY_YEAR - 60;
     const members = [member('m1', true, 'Alex', birthYear)];
@@ -665,20 +580,17 @@ describe('Historical (TWR) no longer vetoed by an empty / short-history account'
       balances: [
         balanceRow('funded', TODAY_YEAR - 2, 100_000),
         balanceRow('funded', TODAY_YEAR - 1, 110_000),
-        // shortHistory: a single funded year → no empirical rate.
         balanceRow('short', TODAY_YEAR - 1, 50_000),
       ],
     });
     const sharedCtx = data.pageResult!.sharedCtx;
     expect(sharedCtx.methodAvailable).toBe(true);
     expect(sharedCtx.fallbackAccounts).toEqual([{ id: 'short', name: 'short' }]);
-    // The short-history row is INCLUDED at its planned rate.
     const shortRow = data.rows.find((r) => r.account.id === 'short')!;
     expect(shortRow.hasInsufficientHistory).toBe(true);
     expect(shortRow.outputs.twr).not.toBeNull();
   });
 
-  // Fallback-list correctness for a mixed portfolio + the `[]` empty case.
   it('surfaces an empty fallback list when every account has empirical history', () => {
     const birthYear = TODAY_YEAR - 60;
     const members = [member('m1', true, 'Alex', birthYear)];
@@ -699,9 +611,7 @@ describe('Historical (TWR) no longer vetoed by an empty / short-history account'
     expect(data.pageResult!.sharedCtx.methodAvailable).toBe(true);
   });
 
-  // Degenerate case: NO non-CBP account has ≥2 yr history → Historical
-  // hidden (methodAvailable false, twr slice null); giving one account a
-  // second year makes it available.
+  // Degenerate case: no non-CBP account has ≥2 years of history, so Historical is hidden (methodAvailable false, twr slice null); a second year makes it available.
   it('hides Historical only in the all-fallback degenerate case', () => {
     const birthYear = TODAY_YEAR - 60;
     const members = [member('m1', true, 'Alex', birthYear)];
@@ -710,17 +620,14 @@ describe('Historical (TWR) no longer vetoed by an empty / short-history account'
       scenarios: [baseScenario('s', 'Base')],
       members,
       accounts: [acct],
-      // Single funded year → no empirical rate anywhere.
       balances: [balanceRow('a1', TODAY_YEAR - 1, 100_000)],
     });
     expect(degenerate.pageResult!.sharedCtx.methodAvailable).toBe(false);
     expect(degenerate.pageResult!.twr).toBeNull();
-    // The single account still falls back + is disclosed.
     expect(degenerate.pageResult!.sharedCtx.fallbackAccounts).toEqual([
       { id: 'a1', name: 'a1' },
     ]);
 
-    // Gaining a second year flips availability on.
     const withHistory = callLoad({
       scenarios: [baseScenario('s', 'Base')],
       members,
@@ -740,8 +647,7 @@ describe('hasAnyRealBalance empty-state gate', () => {
   const members = [member('m1', true, 'Alex', birthYear)];
 
   it('a seed-$0-only portfolio has no real balance even though rows project', () => {
-    // The $0 seed projects, so the account lands in rows — but
-    // hasAnyRealBalance is false, so the page renders the onboarding prompt.
+    // The $0 seed projects, so the account lands in rows, but hasAnyRealBalance is false and the page renders the onboarding prompt.
     const acct = brokerage('a1', 'm1', 5);
     const data = callLoad({
       scenarios: [baseScenario('s', 'Base')],
@@ -750,7 +656,6 @@ describe('hasAnyRealBalance empty-state gate', () => {
       balances: [seedRow('a1', TODAY_YEAR)],
     });
     expect(data.hasAnyRealBalance).toBe(false);
-    // The seed row is NOT counted as history (re-keyed hiddenZeroHistoryCount).
     expect(data.hiddenZeroHistoryCount).toBe(1);
     expect(data.rows.length).toBeGreaterThan(0);
   });
@@ -777,7 +682,6 @@ describe('hasAnyRealBalance empty-state gate', () => {
       balances: [balanceRow('a1', TODAY_YEAR - 1, 100_000), seedRow('a2', TODAY_YEAR)],
     });
     expect(data.hasAnyRealBalance).toBe(true);
-    // Only the fresh seed-only account is counted as zero-history.
     expect(data.hiddenZeroHistoryCount).toBe(1);
   });
 
@@ -794,9 +698,7 @@ describe('hasAnyRealBalance empty-state gate', () => {
   });
 
   it('a CBP account auto-seeded with a $0 row projects without breaking', () => {
-    // The auto-$0 seed applies to all account types incl CBP. A CBP with
-    // only the seed row still loads (preProjectCbpAccounts projects from the
-    // cash-balance formula) and is treated as having no real balance yet.
+    // The auto-$0 seed applies to all account types including CBP: a CBP with only the seed row still loads (preProjectCbpAccounts projects from the cash-balance formula) and counts as having no real balance yet.
     const acct = cbp('cbp1', 'm1', 5);
     const data = callLoad({
       scenarios: [baseScenario('s', 'Base')],

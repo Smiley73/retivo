@@ -1,9 +1,6 @@
 /**
- * X/Y axes, gridlines and tick labels for the SVG chart engine. Reads
- * the theme-reactive `CHART_CHROME` neutrals via `useChartChrome()`
- * (grid / axis stroke / tick text) so chrome re-flips on a `.dark`
- * toggle exactly like the series palette. SVG presentation attributes
- * only — no inline `style`.
+ * X/Y axes, gridlines and tick labels for the chart engine, using `useChartChrome()` neutrals so chrome re-flips on a
+ * `.dark` toggle. SVG presentation attributes only.
  */
 import React from 'react';
 import { useChartChrome } from '../../../lib/use-chart-tokens';
@@ -22,19 +19,10 @@ interface AxesProps {
 
 const AXIS_FONT = 12;
 
-/** Above this count, a per-tick label set is too dense for the axis width
- *  and the labels overwrite each other — trigger calendar-year thinning. */
 const DENSE_X_TICK_THRESHOLD = 12;
 
-/**
- * Adaptive x-tick thinning. The time-series charts emit one tick per
- * integer calendar year; on narrow hosts (the Dashboard mini-chart) and
- * even on long projection horizons the year labels collide. When the tick
- * set is dense (> ~12 ticks) AND every tick looks like a calendar year
- * (an integer), keep only multiples of 5 plus the first + last tick;
- * otherwise render every tick unchanged. Non-integer / sparse axes (e.g.
- * the few y-derived or fractional sets) are never thinned.
- */
+// Thins dense year axes (more than ~12 integer ticks) to multiples of 5 plus the endpoints; sparse
+// or non-integer axes are untouched.
 function thinXTicks(xTicks: number[]): number[] {
   if (xTicks.length <= DENSE_X_TICK_THRESHOLD) return xTicks;
   const allYears = xTicks.every((t) => Number.isInteger(t));
@@ -45,7 +33,6 @@ function thinXTicks(xTicks: number[]): number[] {
   );
 }
 
-/** Build ~5 evenly spaced y ticks across the domain. */
 function buildYTicks(
   yDomain: [number, number],
   scale: 'linear' | 'log',

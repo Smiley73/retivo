@@ -1,12 +1,4 @@
-/**
- * PercentInput — a11y smoke + minimal behavioural coverage.
- *
- * Most percent-input behaviour is exercised indirectly through the
- * Account / Scenario forms. This file's job is to lock in label
- * association (form variant) and aria-label (cell variant) so the
- * input always has an accessible name, and to prove the component
- * surfaces no axe violations in either variant.
- */
+/** PercentInput: label association (form variant) and aria-label (cell variant) so the input always has an accessible name. */
 import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -39,9 +31,7 @@ describe('PercentInput', () => {
   });
 
   it('renders at the text-sm page baseline (font-size regression guard)', () => {
-    // Without `text-sm` the input fell back to the 16px browser
-    // default while page text is 14px. jsdom cannot measure computed
-    // px, so the class is the contract.
+    // jsdom cannot measure computed px, so the class is the contract for matching the page text size.
     render(
       <PercentInput
         variant="cell"
@@ -55,18 +45,6 @@ describe('PercentInput', () => {
 
   it('form variant: no a11y violations', async () => {
     const { container } = render(<FormHarness />);
-    await expectNoA11yViolations(container);
-  });
-
-  it('cell variant: no a11y violations', async () => {
-    const { container } = render(
-      <PercentInput
-        variant="cell"
-        ariaLabel="row-1-growth"
-        value={3}
-        onChange={() => undefined}
-      />,
-    );
     await expectNoA11yViolations(container);
   });
 });

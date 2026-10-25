@@ -1,12 +1,4 @@
-/**
- * Unit tests for `buildStrategyTiers` tier layout in
- * drawdown-engine-per-account-strategy-helpers.ts.
- *
- * Focus: HSA is HELD OUT of every ordinary tier — it is never drained
- * as ordinary funds; the year loop runs the medical + emergency two-pass for
- * it. Regression: HSA-only, Roth-only, and `proportional` layouts (HSA excluded
- * from the proportional pool too).
- */
+/** Unit tests for `buildStrategyTiers` and `selectActiveMagiCapWindow`: HSA is held out of every ordinary tier. */
 import { describe, it, expect } from 'vitest';
 import {
   buildStrategyTiers,
@@ -17,10 +9,6 @@ import {
   type MagiCapWindowRuntime,
   type StrategyAwareKind,
 } from './drawdown-engine-per-account-strategy-helpers';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function makeState(
   overrides: Partial<AccountRunState> & {
@@ -40,17 +28,12 @@ function makeState(
   };
 }
 
-/** Index of the tier (0-based) that contains account index `a`, or -1. */
 function tierOf(tiers: number[][], a: number): number {
   return tiers.findIndex((tier) => tier.includes(a));
 }
 
-// ---------------------------------------------------------------------------
-// taxEfficient — HSA held out of the ordinary tiers
-// ---------------------------------------------------------------------------
-
 describe('buildStrategyTiers — taxEfficient with Roth + HSA mix', () => {
-  // taxable(0) → tax-deferred(1) → Roth(2); HSA(3) held out (medical reserve)
+  // taxable(0) → tax-deferred(1) → Roth(2); HSA(3) held out (medical reserve).
   const state: AccountRunState[] = [
     makeState({ id: 'brok', taxTreatment: 'POST_TAX', accountType: 'BROKERAGE' }),
     makeState({ id: 'ira', taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
@@ -69,12 +52,8 @@ describe('buildStrategyTiers — taxEfficient with Roth + HSA mix', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// rothFirst — HSA held out of the ordinary tiers
-// ---------------------------------------------------------------------------
-
 describe('buildStrategyTiers — rothFirst with Roth + HSA mix', () => {
-  // Roth(0) → tax-deferred(1) → taxable(2); HSA(3) held out (medical reserve)
+  // Roth(0) → tax-deferred(1) → taxable(2); HSA(3) held out (medical reserve).
   const state: AccountRunState[] = [
     makeState({ id: 'roth', taxTreatment: 'ROTH', accountType: 'RETIREMENT_ROTH_IRA' }),
     makeState({ id: 'ira', taxTreatment: 'PRE_TAX', accountType: 'RETIREMENT_IRA' }),
@@ -92,10 +71,6 @@ describe('buildStrategyTiers — rothFirst with Roth + HSA mix', () => {
     expect(tiers).toEqual([[0], [1], [2]]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Regression — HSA-only / Roth-only layouts
-// ---------------------------------------------------------------------------
 
 describe('buildStrategyTiers — regression layouts', () => {
   it('HSA-only: every ordinary tier is empty, both strategies (HSA held out)', () => {
@@ -133,12 +108,6 @@ describe('buildStrategyTiers — regression layouts', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// selectActiveMagiCapWindow — half-open `[startYear, endYear)` selection
-// from a PRE-SORTED window list; earliest-start wins on residual overlap.
-// ---------------------------------------------------------------------------
-
-/** Stub runtime config — `selectActiveMagiCapWindow` never reads it. */
 const stubCapConfig: MagiCapRuntimeConfig = {
   capDollars: 0,
   capOffYear: 0,
@@ -157,8 +126,6 @@ function makeWindow(
   return { startYear, endYear, originalIndex, brokenAnchor, config: stubCapConfig };
 }
 
-/** Sort a window list by the engine's total order before selecting, matching
- *  how the engine hands a PRE-SORTED list to `selectActiveMagiCapWindow`. */
 function sorted(windows: MagiCapWindowRuntime[]): MagiCapWindowRuntime[] {
   return [...windows].sort(
     (a, b) =>
@@ -194,7 +161,7 @@ describe('selectActiveMagiCapWindow', () => {
       makeWindow(2030, 2035, 0),
     ]);
     expect(selectActiveMagiCapWindow(withBroken, 2032)?.originalIndex).toBe(0);
-    // A "year 0" probe must NOT select the broken [0,0) window.
+    // A year-0 probe must not select the broken [0,0) window.
     expect(selectActiveMagiCapWindow(withBroken, 0)).toBeUndefined();
   });
 

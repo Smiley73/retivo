@@ -1,36 +1,16 @@
-// Source generators for the CloudFront Functions cloudfront.ts publishes:
-// the SPA-route rewrite, the dev-only viewer IP gate, the combination
-// of the two, and the viewer-response security headers (with the CSP). Kept as a dependency-free ESM module (like config-helpers.mjs)
-// so `node --test` can execute the GENERATED handler code against fake
-// viewer events (scripts/test/edge-functions.test.mjs) without a Pulumi
-// runtime or AWS credentials. cloudfront.ts imports the generators and
-// hands their output to `aws.cloudfront.Function`.
-//
-// Constraints on the emitted code (CloudFront Functions, cloudfront-js-2.0):
-//   - ES5-subset JavaScript, no imports, no network/DNS access;
-//   - the published function must stay under 10 KB — the allowlist is
-//     unbounded config, so `assertFunctionSize` makes the limit an
-//     invariant checked BEFORE any resource is registered;
-//   - one function per event type per behavior, so the gate is folded into
-//     the SPA router for the default behavior and published separately
-//     (`gateOnlyCode`) for `/api/*`;
-//   - `event.viewer.ip` is the connecting viewer/proxy address (a VPN or
-//     privacy relay changes it); X-Forwarded-For is never consulted.
+// Source generators for the CloudFront Functions cloudfront.ts publishes, kept dependency-free so `node --test` can run the output.
+// CloudFront Functions run an ES5-subset runtime (cloudfront-js-2.0) with no imports; `assertFunctionSize` enforces the size limit.
 
 import { ASSISTANT_BRIDGE_PORT_RANGE } from "./config-helpers.mjs";
 
 /**
- * Local ceiling on published function size. AWS documents the CloudFront
- * Functions limit as "10 KB" without saying whether that is 10,000 or
- * 10,240 bytes, so this invariant uses the conservative reading.
+ * Local ceiling on published function size; AWS documents "10 KB" without saying 10,000 or 10,240 bytes, so this uses the lower.
  * @type {number}
  */
 export const CLOUDFRONT_FUNCTION_MAX_BYTES = 10_000;
 
 /**
- * Throw when generated function code would exceed CloudFront's size limit.
- * Called by every generator so an oversized allowlist fails `pulumi preview`
- * instead of an opaque CreateFunction error mid-deploy.
+ * Throws when generated code exceeds the size limit, so an oversized allowlist fails `pulumi preview`.
  * @param {string} code generated handler source
  * @param {string} label which function, for the error message
  * @returns {string} the same code, for chaining
@@ -46,11 +26,7 @@ export function assertFunctionSize(code, label) {
 }
 
 /**
- * The viewer-IP allowlist check, emitted as top-level helpers the handler
- * calls. `rules` are `{ base, mask }` pairs from ipv4CidrToRule; a request
- * is allowed when `((ip & mask) >>> 0) === base` for any rule. Anything that
- * is not exactly four numeric octets in 0–255 (a missing ip, an IPv6
- * literal, a partial address) is treated as NOT allowed.
+ * The viewer-IP allowlist check, as top-level helpers; anything but four numeric octets in 0-255 is not allowed.
  * @param {ReadonlyArray<{ base: number, mask: number }>} rules
  * @returns {string}
  */
@@ -96,10 +72,7 @@ function allowed(ip) {
 }
 
 /**
- * Body of the SPA-route rewrite: anything whose last path segment has no
- * `.` is rewritten to /index.html so React Router resolves it client-side;
- * static assets keep their URI (S3 returns the file, or a real 404).
- * Shared verbatim by the gated and ungated router variants.
+ * The SPA-route rewrite shared by both router variants: a last path segment without `.` becomes /index.html.
  * @returns {string}
  */
 function spaRouterBody() {
@@ -115,9 +88,7 @@ function spaRouterBody() {
 }
 
 /**
- * Ungated viewer-request handler for the SPA (default) cache behavior —
- * the behaviour every stack has shipped since the customErrorResponses
- * rewrite was retired. /api/* is a separate behavior and never reaches it.
+ * Ungated viewer-request handler for the SPA (default) cache behavior.
  * @returns {string}
  */
 export function spaRouterCode() {
@@ -133,9 +104,7 @@ ${spaRouterBody()}
 }
 
 /**
- * Gated viewer-request handler for the SPA behavior: the allowlist check
- * runs first and answers 403 from the edge (no origin request), then the
- * unchanged SPA rewrite.
+ * Gated viewer-request handler for the SPA behavior: 403 from the edge for a viewer outside the allowlist, then the rewrite.
  * @param {ReadonlyArray<{ base: number, mask: number }>} rules
  * @returns {string}
  */
@@ -154,9 +123,7 @@ ${spaRouterBody()}
 }
 
 /**
- * Gate-only viewer-request handler for the `/api/*` behavior: 403 for a
- * viewer outside the allowlist, otherwise the request passes through
- * untouched (the API origin sees exactly what it sees today).
+ * Gate-only viewer-request handler for `/api/*`: 403 outside the allowlist, otherwise the request passes through.
  * @param {ReadonlyArray<{ base: number, mask: number }>} rules
  * @returns {string}
  */
@@ -174,19 +141,9 @@ function handler(event) {
 }
 
 /**
- * Viewer-response handler for every behavior: HSTS and friends on all
- * responses, plus a SPA-friendly CSP on responses that do not already carry
- * one. API responses carry a tight CSP from helmet, so those are left alone;
- * SPA static responses from S3 carry none, so this attaches one.
- *
- * With no `assistantBridgePort` the code is byte-identical to what
- * cloudfront.ts inlined before this generator existed, so a stack that does
- * not set `retivo:assistantBridgePort` sees no function update. With a port
- * the ONLY difference is `connect-src 'self' ws://127.0.0.1:<port>` — the
- * exact string `loopbackWsUrl(port)` in packages/assistant-protocol returns
- * (scripts/test/csp-contract.test.mjs pins the two together). The package is
- * ESM-only and infrastructure is CommonJS, so the entry is formatted here
- * rather than imported. Never `ws:` or a wildcard.
+ * Viewer-response handler: security headers on every response, plus a SPA CSP when the response carries none
+ * (the API's helmet CSP is left alone). With a port, the one added entry is `connect-src 'self' ws://127.0.0.1:<port>`,
+ * the string `loopbackWsUrl(port)` returns; it is formatted here because that package is ESM-only. Never `ws:` or a wildcard.
  * @param {number | undefined} [assistantBridgePort] loopback port to allow;
  *   undefined = no WebSocket entry
  * @returns {string}
@@ -207,17 +164,7 @@ export function securityHeadersCode(assistantBridgePort) {
     }
     connectSrc = `connect-src 'self' ws://127.0.0.1:${assistantBridgePort}`;
   }
-  // Keep this short — CloudFront Functions have a 10 KB compiled limit
-  // and ~1 ms execution budget per request.
-  //
-  // We set HSTS / X-Content-Type-Options / Referrer-Policy /
-  // Permissions-Policy on every response. CSP is more nuanced: API
-  // responses already carry a tight CSP from helmet (defaultSrc 'self',
-  // no inline anything), so we leave those alone. SPA static responses
-  // from S3 carry no CSP, so we attach a SPA-friendly default that
-  // allows same-origin assets + connect (for /api/* fetch) and inline
-  // styles (Vite's CSS hashes are inlined into <style> by some plugins
-  // — staying safe with 'unsafe-inline' on style-src only).
+  // 'unsafe-inline' on style-src only, for styles inlined by build plugins.
   return assertFunctionSize(
     `
 function handler(event) {

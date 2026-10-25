@@ -1,30 +1,10 @@
-/**
- * Monte Carlo path-range sharding primitives.
- *
- * A single `runMonteCarlo` run is split into contiguous path ranges. Each
- * range is simulated by `runPathRange` (the extracted per-path loop, calling
- * the single-path primitive `runOnePath`), producing a transferable
- * typed-array `PathRangeResult`. The main-thread coordinator merges the
- * ranges by ABSOLUTE path index into a full-size `MergedAccumulationTransfer`
- * (`mergePathRanges`, Stage 1 — cheap `TypedArray.set` copies, transferable),
- * then `assembleAccumulationFromTyped` (Stage 2) reconstructs the plain-array
- * `PathLoopAccumulation` that `assembleMonteCarloSummary` consumes. Serial and
- * sharded runs drive the SAME two-stage pipeline, so a sharded run is
- * bit-for-bit identical to a serial one (per-path seeds are index-derived).
- *
- * Runtime dependency direction: this module depends on `monte-carlo.ts`
- * (`runOnePath`, `buildRunContext` are not re-implemented here) and
- * `monte-carlo-tax.ts` (`createTaxAccumulators` for the reconstructed
- * tax-matrix shape). `PathLoopAccumulation` is imported TYPE-ONLY (erased at
- * compile time).
- */
+/** Monte Carlo path-range sharding: `runPathRange`, the two-stage merge and `shardBounds`.
+ * Per-path seeds are index-derived and both serial and sharded runs use this pipeline, so results match bit for bit. */
 import { runOnePath, seedForPathIndex } from './monte-carlo.js';
 import type { PathLoopAccumulation, RunContext } from './monte-carlo.js';
 import type { MonteCarloInput } from './monte-carlo-types.js';
 import { createTaxAccumulators, type McTaxAccumulators } from './monte-carlo-tax.js';
 
-/** The six per-year tax matrices carried through a shard / merge, matching
- *  `McTaxAccumulators`' field set. `null` when the run has no `taxContext`. */
 interface TaxMatrices {
   fedTaxByYear: Float64Array[];
   irmaaSurchargeByYear: Float64Array[];
@@ -34,11 +14,7 @@ interface TaxMatrices {
   netAfterTaxByYear: Float64Array[];
 }
 
-/** One shard's accumulated path results, sized `pathEnd − pathStart`. Every
- *  field is a `Float64Array` / `Int32Array` so its `.buffer` can populate a
- *  `postMessage` transfer list. `depletionYearByPath` uses −1 as the
- *  "never depleted" sentinel (the plain-array reconstruction maps it back to
- *  `null`). */
+/** One shard's results sized `pathEnd - pathStart`; typed arrays so `.buffer` can go in a `postMessage` transfer list. `depletionYearByPath` uses -1 for never depleted. */
 export interface PathRangeResult {
   readonly pathStart: number;
   readonly pathEnd: number;
@@ -52,9 +28,6 @@ export interface PathRangeResult {
   readonly successes: number;
 }
 
-/** The full-run typed merge produced by `mergePathRanges` (Stage 1). Same
- *  field shapes as `PathRangeResult` but sized `pathCount`; carries no
- *  `pathStart`/`pathEnd`. Transferable — see `collectAccumulationTransferables`. */
 export interface MergedAccumulationTransfer {
   readonly balancesByYearNominal: Float64Array[];
   readonly balancesByYearReal: Float64Array[];
@@ -84,16 +57,9 @@ function makeTaxMatrices(horizon: number, cols: number): TaxMatrices {
 }
 
 /**
- * Simulate the paths `[pathStart, pathEnd)` and accumulate them into a
- * transferable `PathRangeResult`. Per-path seeds use the ABSOLUTE path index
- * `p` (`(input.seed + p * 0x9e3779b1) >>> 0`), identical to the serial loop,
- * so range boundaries never shift a path's sample.
- *
- * `onProgress` (when supplied) is called range-relative: `(doneInRange,
- * rangeLen)`, on the same cadence the serial loop used (`progressEvery =
- * max(25, floor(rangeLen / 40))`, plus the final path). For a single
- * `[0, pathCount)` range this is byte-identical to the old
- * `input.onProgress?.(p + 1, pathCount)` — same call count, same arguments.
+ * Simulates paths `[pathStart, pathEnd)`. Per-path seeds use the absolute index `p`
+ * (`(input.seed + p * 0x9e3779b1) >>> 0`), so range boundaries never shift a sample.
+ * `onProgress` is range-relative: `(doneInRange, rangeLen)`.
  */
 export function runPathRange(
   input: MonteCarloInput,
@@ -164,13 +130,7 @@ export function runPathRange(
   };
 }
 
-/**
- * Stage 1 — merge the shard ranges into full-size (`pathCount`) typed
- * arrays by ABSOLUTE path index (`TypedArray.set` at each range's `pathStart`).
- * Integer histograms and `successes` are summed. Output stays TYPED and
- * transferable; the plain-array reconstruction is Stage 2
- * (`assembleAccumulationFromTyped`).
- */
+/** Stage 1: merges shard ranges into full-size typed arrays by absolute path index; histograms and `successes` are summed. */
 export function mergePathRanges(
   ranges: readonly PathRangeResult[],
   input: MonteCarloInput,
@@ -224,13 +184,8 @@ export function mergePathRanges(
 }
 
 /**
- * Stage 2 — reconstruct the plain-array `PathLoopAccumulation` that
- * `assembleMonteCarloSummary` consumes from the merged typed payload. Runs
- * ONCE per run (not per path). `depletionYears` is rebuilt by iterating
- * `depletionYearByPath` in ASCENDING path index and pushing non-sentinel
- * values, reproducing the serial loop's push order exactly; the −1 sentinel
- * maps back to `null` in `depletionYearByPath`. The five tax matrices are
- * rebuilt into `McTaxAccumulators`' shape via `createTaxAccumulators`.
+ * Stage 2: rebuilds the plain-array `PathLoopAccumulation`. `depletionYears` is pushed in ascending path index to
+ * reproduce the serial push order; the -1 sentinel maps back to `null`.
  */
 export function assembleAccumulationFromTyped(
   merged: MergedAccumulationTransfer,
@@ -294,9 +249,7 @@ export function assembleAccumulationFromTyped(
   };
 }
 
-/** Split `pathCount` into `shardCount` equal contiguous chunks, remainder to
- *  the LAST chunk. `shardCount` is clamped to `[1, pathCount]`, so a request
- *  for more shards than paths yields `pathCount` chunks of 1. */
+/** Splits `pathCount` into `shardCount` contiguous chunks, remainder to the last; `shardCount` is clamped to `[1, pathCount]`. */
 export function shardBounds(
   pathCount: number,
   shardCount: number,
@@ -317,11 +270,7 @@ function pushMatrixBuffers(out: Transferable[], rows: Float64Array[]): void {
   for (const row of rows) out.push(row.buffer);
 }
 
-/** Every underlying `ArrayBuffer` of a merged/shard accumulation, for the
- *  `postMessage` transfer list (zero-copy, single recipient). A
- *  `PathRangeResult` is structurally assignable to the parameter (its extra
- *  `pathStart`/`pathEnd` are ignored), so both the `shardResult` reply and the
- *  `assemble` dispatch share this collector. */
+/** Every underlying `ArrayBuffer` for a `postMessage` transfer list; a `PathRangeResult` is accepted too (extra fields ignored). */
 export function collectAccumulationTransferables(x: MergedAccumulationTransfer): Transferable[] {
   const out: Transferable[] = [];
   pushMatrixBuffers(out, x.balancesByYearNominal);

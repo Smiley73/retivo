@@ -1,9 +1,5 @@
-/**
- * Shared types for `optimizer-mc-runner.ts` + its helper sibling.
- * Lives in a tiny sibling file so the helper module can import the
- * `OptimizerMcOutcome` / `OptimizerMcWinner` shapes without a circular
- * import on the main orchestrator.
- */
+// Shared types for `optimizer-mc-runner.ts` and its helpers, in a sibling file to avoid a circular import.
+
 export interface OptimizerMcWinner {
   readonly primaryAgeYears: number;
   /** Absent or 0 is a whole year; see `Winner` in `pick-winner.ts`. */
@@ -14,20 +10,8 @@ export interface OptimizerMcWinner {
 }
 
 /**
- * Per-scenario outcome. Mirrors
- * the deterministic worker's `OptimizerWorkerOutbound` variants so the
- * page consumes one row shape across both metrics:
- *  - `result` — full row contract (winner + partial + missing PIA +
- *    alreadyAtOptimum); `winner: null` is past-window.
- *  - `empty` — `no-primary-member` / `no-retirement-date`.
- *    Surface the same EmptyReasonRow copy the deterministic path
- *    renders instead of wrapping the raw error message.
- *  - `unsupported` — only `cbp-unconfigured` reason.
- *  - `error` — per-scenario surface; other scenarios continue running.
- *  - `cancelled` — distinguishes "not computed due to abort"
- *    from `winner: null` (past-window). The page omits cancelled
- *    scenarios from the populated row map rather than rendering them
- *    with the past-window copy.
+ * Per-scenario outcome, mirroring the deterministic worker's variants so the page consumes one row shape. `result` with `winner: null` is past-window;
+ * `empty` surfaces the same EmptyReasonRow copy as the deterministic path; `cancelled` (aborted, not computed) is omitted from the page's row map.
  */
 export type OptimizerMcOutcome =
   | {
@@ -36,12 +20,9 @@ export type OptimizerMcOutcome =
       readonly partial: boolean;
       readonly missingPiaMembers: ReadonlyArray<string>;
       readonly alreadyAtOptimum: boolean;
-      /** MC success probability at the scenario's current claim ages —
-       *  drives the "current → recommended" metric cell. `undefined` when
-       *  the current pair isn't a candidate (the 1-D primary-only fallback). */
+      /** MC success probability at the current claim ages; undefined when the current pair is not a candidate (the 1-D fallback). */
       readonly baselineMetricValue?: number;
-      /** Disclosure only: the fixed primary death age the optimizer
-       *  assumed for this scenario. */
+      /** The fixed primary death age assumed, for disclosure only. */
       readonly assumedDeathAge?: number;
     }
   | {
@@ -54,14 +35,7 @@ export type OptimizerMcOutcome =
 
 export type OptimizerMcResult = ReadonlyMap<string, OptimizerMcOutcome>;
 
-/**
- * Smooth per-scenario progress (path units). Emitted as the in-flight
- * scenario's candidate grid simulates, so the page can drive a
- * per-row progress bar that climbs to 100 % before the row resolves.
- * `done`/`total` span the scenario's *entire* triple grid:
- * `total = triples × pathCount`, `done = completedTriples × pathCount +
- * currentTripleDonePaths`.
- */
+/** Per-scenario progress in path units: `total = triples × pathCount`, `done` counts completed triples plus in-flight paths. */
 export interface OptimizerMcScenarioProgress {
   readonly done: number;
   readonly total: number;

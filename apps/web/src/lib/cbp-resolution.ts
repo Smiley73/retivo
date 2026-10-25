@@ -1,16 +1,6 @@
-/**
- * Shared Cash Balance Pension resolver + validator.
- *
- * Every engine that touches CBP payouts — the deterministic balance
- * projection, the Monte Carlo input builder, and the stress-test
- * card — reads the same resolved election + validation result so
- * remediation banners stay in sync. CBP elections
- * live on the linked IncomeStream via `linkedCbpAccountId`;
- * this module does the per-CBP-account walk and applies the
- * annuity-match predicate.
- *
- * Pure module — no IndexedDB, no React, no Date.now().
- */
+// Shared Cash Balance Pension resolver and validator, so every engine and the remediation banners read one election.
+// Elections live on the linked IncomeStream via `linkedCbpAccountId`.
+
 import { resolveIncomeForScenarioSparse } from './income-override-resolution';
 import type { ScenarioAggregate } from './scenario-resolution';
 import type {
@@ -19,12 +9,7 @@ import type {
   IncomeStreamPayload,
 } from '../db/types';
 
-/**
- * The elected CBP payout for a given CBP account in the active
- * scenario. `lumpSum` carries the target account the balance rolls
- * into at retirement; `annuity` references the linked income stream
- * that carries the monthly benefit forward.
- */
+/** `lumpSum` rolls the balance into `targetAccountId` at retirement; `annuity` references the income stream carrying the monthly benefit. */
 export type ResolvedCbpElection =
   | {
       readonly kind: 'lumpSum';
@@ -44,22 +29,11 @@ export interface ResolveLinkedCbpInput {
 }
 
 /**
- * For every Cash Balance Pension account in the household, returns
- * the resolved payout election that the active scenario produces.
- *
- * The walk:
- * 1. Resolve the scenario's full income list via the per-id sparse
- *    resolver — this folds parent / child overrides, disables, and
- *    re-enables into a single flat list.
- * 2. Index resolved streams by `linkedCbpAccountId`.
- * 3. For each CBP account, apply the annuity-match rule: exactly one matching
- *    pension stream wins. Zero matches or multiple matches surface
- *    via `validateCbpResolution` instead of returning an entry.
- *    When the matching stream's owner differs from the CBP account
- *    owner on an `INDIVIDUAL` account, the match is rejected
- *    (treated as zero matches).
- *
- * Accounts that aren't CBP type are absent from the returned map.
+ * The payout election per Cash Balance Pension account for the active scenario,
+ * from the sparse-resolved income list indexed by `linkedCbpAccountId`. Exactly
+ * one matching pension stream wins; zero or several surface via
+ * `validateCbpResolution` instead. On an `INDIVIDUAL` account a stream owned by
+ * someone else does not match. Non-CBP accounts are absent.
  */
 export function resolveLinkedCbpIncomeStreams(
   input: ResolveLinkedCbpInput,
@@ -104,23 +78,10 @@ export function resolveLinkedCbpIncomeStreams(
 }
 
 /**
- * CBP validation result: surfaces every account in the household
- * that needs remediation before any engine should run.
- *
- * - `unconfigured` — CBP account with **no** linked income stream of
- *   any payout type. The user hasn't elected a payout — engines hard-
- *   block.
- * - `annuityMissingStream` — currently identical to `unconfigured`
- *   for v1; reserved for future "user picked annuity but the linked
- *   stream is missing" semantics if a separate election surface ever
- *   reappears. Today it is always empty (the form-level path is
- *   covered by `unconfigured`).
- * - `annuityDuplicateStream` — CBP account with two or more matching
- *   linked streams. Engines hard-block; remediation UI
- *   surfaces the conflict.
- *
- * `ok` is true iff every CBP account resolved to exactly one valid
- * election.
+ * Accounts needing remediation before any engine runs. `unconfigured`: no linked
+ * stream, so engines hard-block. `annuityDuplicateStream`: two or more matching
+ * streams. `annuityMissingStream` is reserved and always empty. `ok` means every
+ * CBP account resolved to exactly one election.
  */
 export interface CbpValidationResult {
   readonly ok: boolean;
@@ -167,7 +128,6 @@ export function validateCbpResolution(
       annuityDuplicateStream.push(acct.id);
       continue;
     }
-    // Exactly one match — valid.
   }
 
   return {
@@ -188,16 +148,7 @@ function ownerMatchesAccount(
   return stream.memberId === account.ownerId;
 }
 
-/**
- * Deep-link path to the Income form, pre-filled to elect a payout for a
- * Cash Balance Pension account. The form understands the query params
- * (`kind=pension`, `payoutType`, `linkedCbpAccountId`, `memberId`).
- *
- * Account-only: `memberId` derives from the account owner, so the link
- * needs no member/scenario context. Shared by `CbpRemediationBanner`
- * and the custom-drawdown-order info section (an in-app relative path,
- * not a user-controlled redirect).
- */
+/** Deep link to the Income form pre-filled to elect a payout for a Cash Balance Pension account; `memberId` comes from the account owner. */
 export function incomeAddPath(account: Aggregate<AccountPayload>): string {
   const params = new URLSearchParams({
     kind: 'pension',

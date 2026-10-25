@@ -1,21 +1,4 @@
-/**
- * PasswordManagerModal — the containment-free re-auth overlay.
- *
- * The whole point of this component is the *absence* of React Aria's modal
- * containment: DOM injected outside the panel (a password manager's autofill
- * popup) must stay interactive — not `inert`, not `aria-hidden`. These tests
- * assert that property and its falsifiable negative control (the general
- * `Modal` DOES inert injected outside DOM), plus the hand-rolled shell the
- * component owns now that React Aria no longer manages it: scrim outside-click
- * gating (pointerdown + click), document-level Esc gating (including a dynamic
- * transition), autofocus + focus-restore (with a detached-trigger fallback),
- * ref-counted body scroll-lock across stacked instances and unmount-while-open,
- * dialog semantics (role + accessible name, no aria-modal), and an axe smoke.
- *
- * Keyboard/pointer interaction goes through `@testing-library/user-event`.
- * jsdom can only observe the scroll-lock via the body `style.overflow`
- * attribute, and `inert` as a boolean attribute (`hasAttribute('inert')`).
- */
+/** PasswordManagerModal: the containment-free re-auth overlay; DOM injected outside the panel must stay interactive. */
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -24,12 +7,10 @@ import { Modal } from './Modal';
 import { expectNoA11yViolations } from '../test/a11y';
 
 afterEach(() => {
-  // Defensive: a leaked scroll-lock would bleed into the next test's body
-  // style. Every test that opens also closes/unmounts, but reset for safety.
+  // jsdom observes the scroll lock only via body `style.overflow`; reset it so a leaked lock cannot bleed into the next test.
   document.body.style.overflow = '';
 });
 
-/** A node appended outside the React tree, mimicking a password-manager popup. */
 function injectOutsideNode(): HTMLElement {
   const el = document.createElement('div');
   el.setAttribute('data-testid', 'pm-popup');
@@ -49,7 +30,7 @@ describe('PasswordManagerModal', () => {
     expect(screen.queryByText('Body')).not.toBeInTheDocument();
   });
 
-  it('exposes role=dialog + accessible name from the title and NO aria-modal', () => {
+  it('exposes role=dialog + accessible name from the title and no aria-modal', () => {
     render(
       <PasswordManagerModal open onClose={() => {}} title="Confirm with your password">
         <p>Body content</p>
@@ -58,20 +39,17 @@ describe('PasswordManagerModal', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveAttribute('role', 'dialog');
     expect(dialog).toHaveAccessibleName('Confirm with your password');
-    // The deliberate trade-off: no aria-modal, so the honest
-    // semantics match a non-suppressed background.
     expect(dialog).not.toHaveAttribute('aria-modal');
   });
 
-  it('does NOT mark DOM injected outside the panel as inert or aria-hidden', async () => {
+  it('does not mark DOM injected outside the panel as inert or aria-hidden', async () => {
     const outside = injectOutsideNode();
     render(
       <PasswordManagerModal open onClose={() => {}} title="Open">
         <p>Body</p>
       </PasswordManagerModal>,
     );
-    // Wait for any MutationObserver tick that a containment overlay would use
-    // to auto-inert the injected node — the guard must survive it.
+    // Wait out the MutationObserver tick a containment overlay would use to inert the injected node.
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
     expect(outside.hasAttribute('inert')).toBe(false);
     expect(outside.getAttribute('aria-hidden')).toBeNull();
@@ -86,7 +64,6 @@ describe('PasswordManagerModal', () => {
       </Modal>,
     );
     await screen.findByRole('dialog');
-    // React Aria's ariaHideOutside marks siblings inert and/or aria-hidden.
     await waitFor(() =>
       expect(
         outside.hasAttribute('inert') || outside.getAttribute('aria-hidden') === 'true',
@@ -133,7 +110,7 @@ describe('PasswordManagerModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT close on Esc when keyboardDismissDisabled is set', async () => {
+  it('does not close on Esc when keyboardDismissDisabled is set', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(
@@ -156,7 +133,6 @@ describe('PasswordManagerModal', () => {
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    // Verifying starts → Esc suppressed.
     rerender(
       <PasswordManagerModal open onClose={onClose} title="Esc dynamic" keyboardDismissDisabled>
         <input aria-label="pw" />
@@ -165,7 +141,6 @@ describe('PasswordManagerModal', () => {
     await user.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
 
-    // Verify finished → Esc closes again.
     rerender(
       <PasswordManagerModal open onClose={onClose} title="Esc dynamic" keyboardDismissDisabled={false}>
         <input aria-label="pw" />
@@ -188,7 +163,6 @@ describe('PasswordManagerModal', () => {
         <input aria-label="pw" />
       </PasswordManagerModal>,
     );
-    // Autofocus lands on the first focusable in the panel.
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('pw')));
 
     rerender(
@@ -196,7 +170,6 @@ describe('PasswordManagerModal', () => {
         <input aria-label="pw" />
       </PasswordManagerModal>,
     );
-    // Focus restored to the still-attached trigger.
     await waitFor(() => expect(document.activeElement).toBe(trigger));
     trigger.remove();
   });
@@ -214,7 +187,6 @@ describe('PasswordManagerModal', () => {
     );
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('pw')));
 
-    // Trigger leaves the DOM before close (the surface that opened it unmounted).
     trigger.remove();
     rerender(
       <PasswordManagerModal open={false} onClose={onClose} title="Detached">
@@ -259,7 +231,6 @@ describe('PasswordManagerModal', () => {
     );
     expect(document.body.style.overflow).toBe('hidden');
 
-    // A second instance stacks (the dirty-guard confirm over Change-password).
     const second = render(
       <PasswordManagerModal open onClose={() => {}} title="Second">
         <p>Two</p>
@@ -267,7 +238,6 @@ describe('PasswordManagerModal', () => {
     );
     expect(document.body.style.overflow).toBe('hidden');
 
-    // Closing the inner instance must NOT unlock — the outer one still holds it.
     second.unmount();
     expect(document.body.style.overflow).toBe('hidden');
 

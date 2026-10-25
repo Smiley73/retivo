@@ -1,15 +1,7 @@
-/**
- * Unit tests for the shared contribution-growth-factor helper.
- *
- * Pins the load-bearing properties both engines rely on: the percent unit
- * `(1 + pct/100)`, the month-precise today anchor (factor = 1 at
- * `asOfMonth`), and the finite/range guard.
- */
 import {
   contributionGrowthFactor,
   isValidContributionGrowthPct,
   MAX_CONTRIBUTION_GROWTH_PCT,
-  MIN_CONTRIBUTION_GROWTH_PCT,
 } from './contribution-growth';
 
 const asOfMonth = 2026 * 12 + 0; // Jan 2026
@@ -20,7 +12,6 @@ describe('contributionGrowthFactor', () => {
   });
 
   it('should_use_percent_unit_one_year_forward', () => {
-    // 3 %/yr, exactly one year after the anchor → (1 + 3/100)^1.
     const oneYearLater = asOfMonth + 12;
     expect(contributionGrowthFactor(3, oneYearLater, asOfMonth)).toBeCloseTo(
       1.03,
@@ -38,7 +29,6 @@ describe('contributionGrowthFactor', () => {
   });
 
   it('should_be_month_precise_not_whole_year_stepped', () => {
-    // Six months forward → fractional exponent 0.5.
     const sixMonths = asOfMonth + 6;
     expect(contributionGrowthFactor(10, sixMonths, asOfMonth)).toBeCloseTo(
       Math.pow(1.1, 0.5),
@@ -113,7 +103,7 @@ describe('isValidContributionGrowthPct', () => {
   it.each([
     ['NaN', NaN],
     ['Infinity', Infinity],
-    ['-100 boundary', MIN_CONTRIBUTION_GROWTH_PCT],
+    ['-100 boundary', -100],
     ['below -100', -101],
     ['above 25', 25.01],
     ['string', '3'],

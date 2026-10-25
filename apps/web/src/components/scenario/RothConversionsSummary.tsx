@@ -16,15 +16,11 @@ import {
   ConfigureResetActions,
 } from '../../pages/scenarios-page-chrome';
 
-/** The two override keys the working-years Roth-conversions section owns.
- *  A reset clears both in one mutation (one feature, two sparse keys). */
 export const ROTH_CONVERSION_OVERRIDE_KEYS = [
   'preRetirementRothConversions',
   'preRetirementRothConversionTaxRatePct',
 ] as const;
 
-/** True when this scenario carries any LOCAL Roth-conversion override (drives
- *  the card tint + Reset gating + the group customized count). */
 export function hasRothConversionOverride(ov: ScenarioOverrides): boolean {
   return ROTH_CONVERSION_OVERRIDE_KEYS.some((k) => ov[k] !== undefined);
 }
@@ -37,19 +33,11 @@ export interface RothConversionsSummaryProps {
   onResetToInherited: () => void;
 }
 
-/** Working-years Roth conversions summary. Shows how many conversions
- *  are set plus the PEAK single-year tax burden so the transfer never reads as
- *  cost-free. Burden uses the shared `resolveConversionLeg` cents helper (the
- *  single math home — never re-derived).
- *
- *  Total burden over all conversion years: each conversion contributes its
- *  per-year burden times the number of years in its window (`endYear −
- *  startYear + 1`), summed across conversions. The headline is the lifetime
- *  extra income tax the conversions would create, not an annual figure.
- *
- *  The displayed list + rate reflect the EFFECTIVE parent-chain value (like
- *  InflationCard / LifeExpectancyCard) so an inheriting child matches its
- *  editor + the engine; the tint + Reset stay keyed on a LOCAL override only. */
+/**
+ * Working-years Roth conversions summary: the count and the lifetime extra income tax (per-year
+ * burden times each window's years, summed). The list reflects the effective parent-chain value;
+ * tint and Reset key on a local override only.
+ */
 export const RothConversionsSummaryCard: React.FC<RothConversionsSummaryProps> = ({
   scenarioId,
   scenario,
@@ -62,8 +50,6 @@ export const RothConversionsSummaryCard: React.FC<RothConversionsSummaryProps> =
   const hasLocalOverride = hasRothConversionOverride(ov);
   const canResetToInherited = hasLocalOverride && !scenario.payload.isPrimary;
 
-  // Effective (parent-chain) overrides drive the displayed list/rate; the base
-  // scenario or a resolution failure falls back to local.
   const effective = useMemo<ScenarioOverrides>(() => {
     if (!scenario.payload.parentScenarioId) return ov;
     try {
@@ -73,9 +59,6 @@ export const RothConversionsSummaryCard: React.FC<RothConversionsSummaryProps> =
     }
   }, [scenario, scenarios, ov]);
 
-  // Nearest ancestor that actually sets the conversions key — shown only when
-  // the child inherits the list (no local override), mirroring the editor's
-  // inherited banner (first-ancestor-wins).
   const inheritedFromName = useMemo<string | null>(() => {
     if (ov.preRetirementRothConversions !== undefined) return null;
     if ((effective.preRetirementRothConversions ?? []).length === 0) return null;
@@ -98,11 +81,8 @@ export const RothConversionsSummaryCard: React.FC<RothConversionsSummaryProps> =
   const conversions = effective.preRetirementRothConversions ?? [];
   const ratePct = effective.preRetirementRothConversionTaxRatePct ?? 0;
 
-  // Total burden over all conversion years: each conversion's per-year burden
-  // times its window length (`endYear − startYear + 1`), summed across
-  // conversions. A conversion whose `age` anchor can't resolve (missing
-  // birthdate) or whose window is backwards counts as a single year so it is
-  // never dropped from the headline.
+  // A conversion whose `age` anchor cannot resolve or whose window is backwards counts as one year,
+  // so it is never dropped from the headline.
   const totalBurdenCents = useMemo<number>(() => {
     const ctx = buildRothConversionResolveCtx(members);
     let total = 0;

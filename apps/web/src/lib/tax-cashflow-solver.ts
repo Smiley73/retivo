@@ -1,53 +1,6 @@
 /**
- * Annual tax-cashflow solver. Closes the withdrawal/tax feedback
- * loop: federal income tax, the IRMAA cash portion, and the ACA
- * premium-tax-credit offset become a same-year cash need that the drawdown
- * engine funds by raising the year's withdrawal target.
- *
- * Within-year fixpoint: a household that owes more tax must withdraw
- * more, which raises MAGI, which can raise the current-year-MAGI-dependent
- * costs (federal tax, SS §86 taxation, ACA PTC). The solver iterates the
- * trial withdrawal → tax → new trial withdrawal cycle until the net tax
- * cost moves by less than `$1`, hard-stopping at `8` passes. IRMAA is a
- * CONSTANT input for the year (2-year MAGI look-back from `magiBuffer[i-2]`,
- * resolved by the caller); it only feeds the cash/SS-withholding need, it
- * is NOT re-solved inside the loop — keeping the iteration a contraction
- * and matching the existing look-back mechanic.
- *
- * Graceful degradation: when the loop does not
- * converge inside the pass cap, or when the funding callback reports the
- * portfolio cannot supply the grossed-up withdrawal, the solver returns
- * the last computed values plus a diagnostic — it NEVER throws.
- *
- * IRMAA payment handling is hybrid: the caller splits the year's
- * IRMAA surcharge into a portion withheld from a member's Social Security
- * (when that member is receiving benefits) and a portion paid as same-year
- * cash (when the member is on Medicare but not yet claiming SS). Only the
- * cash portion lands in `totalTaxCashflowNeedCents` (a direct tax payment
- * from the portfolio). The withheld portion is reported separately as
- * `irmaaWithheldFromSsCents`; it is NOT folded into the cash field. The
- * runner adds the withheld amount to the engine draw add-on separately
- * because the spendable income series spends GROSS SS — the withheld
- * surcharge shrinks the member's SS check, so the portfolio must fund the
- * difference. See `toTaxCashflowOutcome` in
- * `balance-projection-runner-tax.ts`.
- *
- * Withheld IRMAA → MAGI feedback: the extra draw the runner makes to
- * cover the SS-withheld surcharge is itself taxable pre-tax income, so the
- * solver's per-pass trial target adds the withheld cents on top of the
- * ordinary need + cash tax need. This taxes the withheld-funded draw (so it is
- * not under-counted) while keeping the convergence guard — which keys on
- * the withheld-FREE `needCents` — a contraction, because the withheld
- * surcharge is a CONSTANT within-year input (2-year MAGI look-back). The
- * withheld principal is still counted exactly once on the committing draw
- * (in the runner's `addedNeedDollars`); only the federal tax on it rises.
- *
- * Credit applied to premiums: with the year's Medical expenses supplied, the
- * credit left after federal tax and IRMAA cash lowers the draw. Each pass computes
- * it from its own credit; it enters the next trial target and the convergence
- * test. The poverty-line limit (`povertyLineLimitCents`) is set on pass 1, the
- * draw before any line, and held, so no trial draw falls below the line and the
- * loop cannot cycle between earning the credit and losing it.
+ * Annual tax-cashflow solver: federal tax, the IRMAA cash portion and the ACA credit offset become a same-year cash need the drawdown engine funds by raising the withdrawal target; it never throws.
+ * `solveFillConversion` sizes Fill-mode Roth conversions against the same tax surface.
  */
 import { applyTaxYearForFilingPlan } from './tax-integration';
 import type {
@@ -63,10 +16,8 @@ import {
   povertyLineLimitCents,
 } from './credit-applied-to-premiums';
 
-/** Shared error `code` thrown by every engine's `UnsupportedTaxYearError`
- *  (federal-tax / ss-taxation / irmaa / aca-ptc / rmd). A projection year
- *  below the calibration floor has no modelable tax — the solver degrades
- *  gracefully (zero need) rather than throwing. */
+// Shared `code` of every engine's `UnsupportedTaxYearError`: a year below the calibration floor has
+// no modelable tax, so the solver degrades to zero need instead of throwing.
 const UNSUPPORTED_TAX_YEAR_CODE = 'UNSUPPORTED_TAX_YEAR';
 
 function isUnsupportedTaxYear(err: unknown): boolean {
@@ -78,9 +29,6 @@ function isUnsupportedTaxYear(err: unknown): boolean {
   );
 }
 
-/** A zero tax cashflow result — returned when the year is below the
- *  calibration floor (graceful degradation). `taxYearResult` is left
- *  undefined-safe by the caller's null guard. */
 function zeroTaxCashflowResult(): TaxCashflowResult {
   return {
     federalTaxCashNeedCents: 0,
@@ -96,7 +44,6 @@ function zeroTaxCashflowResult(): TaxCashflowResult {
   };
 }
 
-/** Neutral `TaxYearResult` used when no tax can be modeled for the year. */
 const ZERO_TAX_YEAR_RESULT: TaxYearResult = {
   federalTaxCents: 0,
   taxableSsCents: 0,
@@ -118,81 +65,61 @@ const ZERO_TAX_YEAR_RESULT: TaxYearResult = {
   penaltySkippedForMissingBirthdate: false,
 };
 
-/** Convergence threshold: stop once the net tax cost moves < `$1`. */
 const CONVERGENCE_DOLLARS = 1;
-/** Hard cap on solver passes. */
 const MAX_PASSES = 8;
 
-/**
- * Per-member IRMAA payment availability for the year. The caller
- * resolves each member's OWN annual Social Security benefit. CMS collects
- * the Part B/D surcharge per beneficiary out of that beneficiary's own
- * Social Security — so the split is per-member, not from a household pool:
- * a Medicare member's surcharge is withheld only from THAT member's own SS
- * (capped at it); any uncovered remainder — and the entire surcharge of a
- * Medicare member who is not yet claiming their own SS — becomes a same-year
- * cash need funded from the portfolio. Withholding NEVER reaches across to a
- * spouse's SS.
- */
+// CMS collects the Part B/D surcharge from each beneficiary's own Social Security, so a member's
+// surcharge is withheld only from that member's own SS (capped at it); the remainder, and the whole
+// surcharge of a Medicare member not yet claiming SS, is a same-year cash need. Withholding never
+// reaches a spouse's SS.
 interface IrmaaPaymentAvailability {
-  /** Each member's OWN annual Social Security dollars, keyed by `memberId`.
-   *  A Medicare member absent from the map (or mapped to 0) has no own SS to
-   *  absorb withholding → their whole surcharge falls to the cash need. */
+  // A Medicare member absent from the map (or mapped to 0) has no own SS to absorb withholding.
   readonly ownSsDollarsByMemberId: Readonly<Record<string, number>>;
 }
 
 /**
- * Inputs to one annual solve. `taxInput` is the assembled per-year tax
- * input EXCEPT for the withdrawal-classification fields, which the solver
- * recomputes each pass from the funding callback. The solver overwrites
- * `preTaxWithdrawalDollars` / `postTaxNonRothWithdrawalDollars` /
- * `postTaxCashLikeWithdrawalDollars` / `rothWithdrawalDollars` on each pass
- * from the classification the callback returns for the trial target.
+ * Inputs to one annual solve. `taxInputBase` is the per-year tax input except for the
+ * withdrawal-classification fields, which the solver overwrites each pass from the callback's
+ * classification.
  */
 export interface TaxCashflowSolveArgs {
   /** The ordinary (non-tax) net spending need for the year, in dollars. */
   readonly ordinaryNetNeedDollars: number;
-  /** Assembled per-year tax input. Withdrawal-classification fields are
-   *  replaced each pass by the callback's classification. */
   readonly taxInputBase: ApplyFilingPlanYearInput;
-  /** Calibration bundle for the five tax engines. */
   readonly bundle: TaxCalibrationBundle;
-  /** Per-member IRMAA payment availability (hybrid handling). */
   readonly irmaaPayment: IrmaaPaymentAvailability;
   /**
-   * Funding callback: given a TOTAL year withdrawal target (ordinary +
-   * tax), classify the resulting withdrawals by tax bucket. Returns the
-   * per-bucket classification AND the actual dollars the portfolio could
-   * supply (`fundedDollars`) — when `fundedDollars < target` the portfolio
-   * is depleted and the tax cashflow cannot be fully funded.
-   *
-   * Pure with respect to the solver: the engine implementation runs a
-   * trial (non-committing) year simulation; the real committing draw runs
-   * once after convergence using the solver's final target.
+   * Classifies the withdrawals by tax bucket for a total year withdrawal target (ordinary + tax)
+   * and reports the dollars the portfolio could supply (`fundedDollars < target` means depleted).
+   * Runs a non-committing trial; the real draw runs once after convergence.
    */
   readonly classifyForTarget: (totalTargetDollars: number) => WithdrawalClassification;
-  /** The year's modeled Medical expenses (every `isMedical` row), integer cents.
-   *  Absent → no credit applied: the Roth-conversion funding solves difference two
-   *  zero-need solves and must not see the line. */
+  /**
+   * The year's modeled Medical expenses (every `isMedical` row), integer cents; absent applies no
+   * credit (the Roth-conversion funding solves difference two zero-need solves and must not see the
+   * line).
+   */
   readonly medicalExpenseCents?: number;
-  /** Taxable Roth earnings already in `taxInputBase`'s ordinary income, dollars:
-   *  ACA MAGI a lower draw sheds. Absent → 0. */
+  /**
+   * Taxable Roth earnings already in `taxInputBase`'s ordinary income, dollars (ACA MAGI a lower
+   * draw sheds); default 0.
+   */
   readonly rothEarningsIncomeDollars?: number;
 }
 
 /** Per-bucket withdrawal classification returned by the funding callback. */
-export interface WithdrawalClassification {
+interface WithdrawalClassification {
   readonly preTaxDollars: number;
   readonly postTaxNonRothDollars: number;
   readonly postTaxCashLikeDollars: number;
   readonly rothDollars: number;
-  /** The INHERITED Roth IRA portion of `rothDollars` (a SUBSET of it, not a
-   *  separate bucket). Passed through untouched by the solver: it changes only how
-   *  much of the Roth tranche `buildSolverPenaltyAccountsForYear` charges against
-   *  the §408A basis carrier, never any funded or taxable total. Absent → none. */
+  /**
+   * The inherited Roth IRA portion of `rothDollars` (a subset, not a separate bucket); passed
+   * through untouched, it only changes how much of the Roth tranche is charged against the §408A
+   * basis carrier.
+   */
   readonly rothInheritedTaxFreeDollars?: number;
-  /** Dollars the portfolio could actually supply for the requested target.
-   *  Less than the target → depletion / unfundable. */
+  /** Dollars the portfolio could supply for the target; less than the target means depletion. */
   readonly fundedDollars: number;
 }
 
@@ -200,7 +127,12 @@ export interface WithdrawalClassification {
 export interface TaxCashflowResult {
   /** Federal income tax owed for the year, in integer cents. */
   readonly federalTaxCashNeedCents: number;
-  /** IRMAA surcharge withheld from Social Security (no cash draw), cents. */
+  /**
+   * IRMAA surcharge withheld from Social Security, cents. Kept out of `totalTaxCashflowNeedCents`
+   * because the runner adds it to the draw separately: spendable income uses gross SS, so the
+   * portfolio must fund the shrunken check (see `toTaxCashflowOutcome` in
+   * `balance-projection-runner-tax.ts`).
+   */
   readonly irmaaWithheldFromSsCents: number;
   /** IRMAA surcharge paid as same-year cash need, cents. */
   readonly irmaaCashNeedCents: number;
@@ -215,29 +147,24 @@ export interface TaxCashflowResult {
   readonly taxCashflowIterations: number;
   /** True when the net tax cost converged (< `$1`) before the pass cap. */
   readonly taxCashflowConverged: boolean;
-  /** Dollars of the grossed-up withdrawal the portfolio could NOT supply,
+  /** Dollars of the grossed-up withdrawal the portfolio could not supply,
    *  cents. Zero when fully fundable. */
   readonly taxCashflowShortfallCents: number;
   /** The full `TaxYearResult` from the final pass (display annotation). */
   readonly taxYearResult: TaxYearResult;
 }
 
-/** Withheld-vs-cash split for one group of Medicare beneficiaries sharing one
- *  return's surcharge. Each member's share is withheld only from THAT member's
- *  own SS (capped at it); the uncovered remainder falls to the cash need. */
 function splitGroupIrmaaPayment(
   surchargeCents: number,
   medicareMembers: readonly TaxMemberInput[],
   availability: IrmaaPaymentAvailability,
 ): { withheldCents: number; cashCents: number } {
   if (surchargeCents <= 0) return { withheldCents: 0, cashCents: 0 };
-  // Defensive: a positive surcharge with no Medicare member should not occur
-  // (the engine only assesses IRMAA when a member is on Medicare). Treat the
-  // whole surcharge as cash rather than divide by zero.
+  // A positive surcharge with no Medicare member should not occur; treat it as cash rather than
+  // divide by zero.
   if (medicareMembers.length === 0) return { withheldCents: 0, cashCents: surchargeCents };
-  // Within ONE return the per-beneficiary surcharge is uniform (CMS publishes one
-  // surcharge schedule per tier); distribute any rounding cent to the first
-  // member so the per-member parts sum back to the group total.
+  // Within one return the per-beneficiary surcharge is uniform; the rounding cent goes to the first
+  // member so the parts sum to the total.
   const perMemberBase = Math.floor(surchargeCents / medicareMembers.length);
   let remainderCents = surchargeCents - perMemberBase * medicareMembers.length;
   let withheldCents = 0;
@@ -259,27 +186,13 @@ function splitGroupIrmaaPayment(
   return { withheldCents, cashCents };
 }
 
-/**
- * Split the year's IRMAA surcharge into a withheld-from-SS portion and a
- * same-year cash portion PER MEMBER (mirrors how CMS collects Part B/D per
- * beneficiary). Each Medicare member's surcharge is withheld only from THAT
- * member's own SS; withholding never reaches across to a spouse's SS.
- *
- * Month-aware IRMAA prorates Part B and Part D by each
- * beneficiary's OWN enrolment months, so two beneficiaries no longer owe equal
- * amounts and the legacy whole-year `onMedicare` boolean no longer identifies
- * who owes anything (a member with stated Medicare months but a false
- * age-derived flag was silently omitted). When the engine reports the
- * per-beneficiary breakdown (`irmaaSurchargeCentsByMember`) it is authoritative:
- * each member's own charge is withheld from that member's own Social Security.
- *
- * When the year filed TWO returns they can land on DIFFERENT IRMAA
- * tiers, so the merged household surcharge must NOT be re-divided equally: the
- * engine hands back each return's own surcharge (`irmaaSurchargeCentsByUnit`)
- * and each return's beneficiaries are charged their own return's amount. That
- * per-unit path remains the fallback for a result carrying no per-beneficiary
- * breakdown (a hand-built `TaxYearResult` in a focused test).
- */
+// Split the year's IRMAA surcharge into withheld-from-SS and same-year cash, per member (CMS
+// collects Part B/D per beneficiary). The engine's per-beneficiary breakdown
+// (`irmaaSurchargeCentsByMember`) is authoritative: month-aware IRMAA prorates by each
+// beneficiary's own enrolment months, so the whole-year `onMedicare` flag does not identify who owes.
+// Two returns can land on different IRMAA tiers, so the merged surcharge must not be re-divided
+// equally; the per-unit amounts (`irmaaSurchargeCentsByUnit`) are the fallback for a result without
+// the per-beneficiary breakdown.
 function splitIrmaaPayment(
   result: TaxYearResult,
   members: readonly TaxMemberInput[],
@@ -319,11 +232,7 @@ function splitIrmaaPayment(
   return { withheldCents, cashCents };
 }
 
-/**
- * Compute the total same-year tax cashflow need from the engine results:
- * federal tax + IRMAA cash portion − ACA PTC offset, floored at zero
- * (D-plan: ACA PTC never creates a negative tax cashflow need).
- */
+// Floored at zero: the ACA PTC never creates a negative tax cashflow need.
 function totalCashflowNeedCents(
   federalTaxCents: number,
   irmaaCashCents: number,
@@ -332,7 +241,6 @@ function totalCashflowNeedCents(
   return Math.max(0, federalTaxCents + irmaaCashCents - acaPtcOffsetCents);
 }
 
-/** Build the per-pass tax input by overlaying the trial classification. */
 function taxInputForClassification(
   base: ApplyFilingPlanYearInput,
   cls: WithdrawalClassification,
@@ -346,12 +254,10 @@ function taxInputForClassification(
   };
 }
 
-/** Marker thrown internally when a pass hits a year below the calibration
- *  floor — caught by `solveTaxCashflow` to return the zero result. */
+// Thrown internally for a year below the calibration floor; caught by `solveTaxCashflow` to return
+// the zero result.
 const UNSUPPORTED_YEAR_SENTINEL = Symbol('unsupportedTaxYear');
 
-/** Accumulated state across solver passes — the last-pass figures plus the
- *  loop's convergence diagnostics. All monetary fields in integer cents. */
 interface SolverPassState {
   pass: number;
   converged: boolean;
@@ -361,16 +267,12 @@ interface SolverPassState {
   irmaaCashCents: number;
   acaOffsetCents: number;
   creditAppliedCents: number;
-  /** Set by pass 1 (the draw before any line) and held. */
   povertyLineLimitCents: number;
-  /** The target the last classification was run against (shortfall basis). */
   requestedTargetDollars: number;
   classification: WithdrawalClassification | undefined;
   result: TaxYearResult | undefined;
 }
 
-/** Run one solver pass for `totalTargetDollars`: classify, apply the tax
- *  engines, split IRMAA, and record the net cashflow need into `state`. */
 function runOnePass(
   args: TaxCashflowSolveArgs,
   totalTargetDollars: number,
@@ -384,8 +286,6 @@ function runOnePass(
   try {
     result = applyTaxYearForFilingPlan(taxInputForClassification(taxInputBase, cls), bundle);
   } catch (err) {
-    // Year below the calibration floor → no modelable tax (graceful
-    // degradation). Signalled up to `solveTaxCashflow` via the sentinel.
     if (isUnsupportedTaxYear(err)) throw UNSUPPORTED_YEAR_SENTINEL;
     throw err;
   }
@@ -398,15 +298,19 @@ function runOnePass(
   state.federalCents = result.federalTaxCents;
   state.irmaaWithheldCents = withheldCents;
   state.irmaaCashCents = cashCents;
-  // ACA offset reported is the portion actually applied against the need
-  // (floored — never more than federal + IRMAA cash so the need stays ≥ 0).
+  // The ACA offset is the portion applied against the need (never more than federal + IRMAA cash,
+  // so the need stays ≥ 0).
   state.acaOffsetCents = Math.min(result.acaPtcSubsidyCents, result.federalTaxCents + cashCents);
   state.needCents = totalCashflowNeedCents(result.federalTaxCents, cashCents, result.acaPtcSubsidyCents);
+  // With Medical expenses supplied, the credit left after federal tax and IRMAA cash lowers the
+  // draw; each pass recomputes it, and it enters the next trial target and the convergence test.
   if (args.medicalExpenseCents === undefined) {
     state.creditAppliedCents = 0;
     return;
   }
   if (state.pass === 1) {
+      // Set on pass 1 (the draw before any line) and held, so no trial draw falls below the line
+      // and the loop cannot cycle between earning the credit and losing it.
     state.povertyLineLimitCents = povertyLineLimitCents({
       headroomCents: result.acaMagiAboveFplCents,
       ...drawIncomeCents({
@@ -427,11 +331,7 @@ function runOnePass(
   });
 }
 
-/** Assemble the public result from the final pass state. */
 function buildResult(state: SolverPassState): TaxCashflowResult {
-  // Shortfall: the dollars the portfolio could not supply for the last
-  // grossed-up target it was asked to fund (funded vs requested). Sub-cent
-  // fp residue is floored away by the whole-cent rounding.
   const fundedDollars = state.classification?.fundedDollars ?? 0;
   const shortfallCents = Math.max(0, dollarsToCents(state.requestedTargetDollars - fundedDollars));
   return {
@@ -450,17 +350,14 @@ function buildResult(state: SolverPassState): TaxCashflowResult {
 }
 
 /**
- * Solve the annual tax/withdrawal feedback loop. Returns the tax cashflow
- * need + diagnostics; never throws (graceful degradation).
- *
- * The per-pass trial target =
- * `ordinaryNetNeed + (needCents + withheldCents − creditAppliedCents)`:
- * the ordinary need, the cash tax need, AND the SS-withheld IRMAA portion,
- * less the credit applied to premiums, so the federal tax on the
- * withheld-funded draw is included. The
- * initial seed is ordinary-need only (zero tax assumed on pass 1). The
- * withheld addend is a constant within-year offset, so the loop remains a
- * contraction and the `needCents`-keyed convergence test still settles.
+ * Solve the annual tax/withdrawal feedback loop; a non-converged loop or an unfundable draw returns
+ * the last values with a diagnostic.
+ * Within-year fixpoint: a household owing more tax must withdraw more, which raises MAGI and the
+ * MAGI-dependent costs (federal tax, SS §86 taxation, ACA PTC), so the trial target iterates until
+ * the net tax cost moves by less than $1, hard-stopping at 8 passes. IRMAA is a constant input for
+ * the year (2-year MAGI look-back), keeping the iteration a contraction.
+ * Per-pass trial target = `ordinaryNetNeed + (needCents + withheldCents − creditAppliedCents)`,
+ * seeded with the ordinary need only.
  */
 export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult {
   const { ordinaryNetNeedDollars } = args;
@@ -479,7 +376,6 @@ export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult 
     result: undefined,
   };
   let prevNetCostCents = Number.NaN;
-  // Trial target starts at the ordinary need only (zero tax assumed).
   let totalTargetDollars = ordinaryNetNeedDollars;
 
   try {
@@ -493,18 +389,11 @@ export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult 
         break;
       }
       prevNetCostCents = netCostCents;
-      // Next trial: fund the ordinary need plus the latest tax cashflow need
-      // AND the IRMAA portion withheld from Social Security.
-      // The runner spends GROSS SS but the withheld surcharge shrinks the
-      // member's SS check, so the portfolio funds that shortfall via an extra
-      // draw — which is itself taxable pre-tax income. Folding the withheld
-      // cents into the trial target taxes that withheld-funded draw, so it is
-      // not under-counted. The convergence guard keys on `state.needCents`
-      // (withheld-free) and this stays a contraction because the withheld
-      // surcharge is a CONSTANT within-year input (2-year MAGI look-back) — a
-      // fixed offset, not an iterated quantity. The withheld principal is still
-      // added to the committing draw exactly once in the runner
-      // (`addedNeedDollars`); only the federal tax on it rises here.
+      // Next trial: the withheld IRMAA is funded by an extra draw (the runner spends gross SS) that
+      // is itself taxable pre-tax income, so it is folded into the target to avoid under-counting
+      // its tax. It is a constant within-year offset, so the `needCents`-keyed convergence test
+      // still contracts, and the principal is added once to the committing draw
+      // (`addedNeedDollars`).
       totalTargetDollars =
         ordinaryNetNeedDollars +
         (state.needCents + state.irmaaWithheldCents - state.creditAppliedCents) / 100;
@@ -517,53 +406,47 @@ export function solveTaxCashflow(args: TaxCashflowSolveArgs): TaxCashflowResult 
   return buildResult(state);
 }
 
-// ---------------------------------------------------------------------------
-// Fill-mode Roth-conversion solve — the OUTER monotone bisection
-// that wraps the inner tax surface. Sizes the year's auto-conversion so the
-// realized MAGI on the user-selected line lands AT the ceiling, never above.
-// ---------------------------------------------------------------------------
+// Fill-mode Roth-conversion solve: an outer monotone bisection sizing the year's auto-conversion so
+// realized MAGI on the selected line lands at the ceiling, never above.
 
-/** Bisection iteration cap — ~24-32 steps reach cent resolution on a
- *  bracket up to ~$16M (2^28 > 1.6e8 cents); 40 is a safe ceiling that always
- *  terminates well before exhausting the bracket. */
 const FILL_CONVERSION_MAX_ITERS = 40;
-/** Bisection tolerance: stop once the bracket narrows below `$1` real. */
 const FILL_CONVERSION_TOLERANCE_DOLLARS = 1;
 
-/** Inputs to one Fill-mode conversion solve. `taxInputBase` already carries the
- *  year's COMMITTED withdrawal classification (pre/post/cash-like/Roth); the
- *  probe adds the trial conversion as ADDITIONAL ordinary income on top — never
- *  folded into `preTaxWithdrawalDollars` (which would wrongly feed the §72(t)
- *  penalty basis). */
+/**
+ * Inputs to one Fill-mode conversion solve. `taxInputBase` carries the year's committed
+ * withdrawals; each probe adds the trial conversion as additional ordinary income, never in
+ * `preTaxWithdrawalDollars` (which would wrongly feed the §72(t) penalty basis).
+ */
 export interface FillConversionSolveArgs {
-  /** The year's tax input with committed withdrawals baked in; the conversion
-   *  is layered on via `otherOrdinaryIncomeDollars` in each probe. */
   readonly taxInputBase: ApplyFilingPlanYearInput;
   readonly bundle: TaxCalibrationBundle;
-  /** MAGI line the ceiling targets: `'irmaa'` uses the federal/IRMAA MAGI
-   *  (taxable-SS only); `'aca'` uses the ACA MAGI (full-SS add-back). */
+  /**
+   * MAGI line the ceiling targets: `'irmaa'` is the federal/IRMAA MAGI (taxable SS only), `'aca'`
+   * the ACA MAGI (full-SS add-back).
+   */
   readonly capMagiLine: 'irmaa' | 'aca';
-  /** The user's MAGI ceiling for the year, in whole dollars (the target line). */
   readonly magiCeilingDollars: number;
-  /** Gross-dollar residual cap room — the bisection's UPPER BRACKET only.
-   *  The realized conversion is ≤ this and further shrunk so MAGI ≤ ceiling. */
+  /**
+   * Gross-dollar residual cap room, the bisection's upper bracket; the realized conversion is
+   * further shrunk so MAGI ≤ ceiling.
+   */
   readonly convertibleRoomDollars: number;
 }
 
 /** Result of one Fill conversion solve. */
 export interface FillConversionSolveResult {
-  /** Converted dollars, rounded DOWN to whole cents so realized MAGI never
-   *  exceeds the ceiling. Zero when no headroom exists. */
+  /**
+   * Converted dollars, rounded down to whole cents so realized MAGI never exceeds the ceiling; zero
+   * with no headroom.
+   */
   readonly convertedDollars: number;
   /** Bisection iterations executed (diagnostic). */
   readonly iterations: number;
 }
 
-/** Realized MAGI (dollars) on the selected line for a probe conversion. The
- *  probe is side-effect-free — it builds a throwaway per-year input and reads
- *  the resulting MAGI; `applyTaxYearForFilingPlan` mutates nothing. Returns `+Infinity` for
- *  a year below the calibration floor (no modelable tax → treat as "over the
- *  ceiling" so the solve converges to $0 rather than converting blindly). */
+// Realized MAGI (dollars) on the selected line for a probe conversion, side-effect-free;
+// `+Infinity` for a year below the calibration floor so the solve converges to $0 rather than
+// converting blindly.
 function magiOnLineForConversion(
   args: FillConversionSolveArgs,
   convDollars: number,
@@ -571,7 +454,6 @@ function magiOnLineForConversion(
   const { taxInputBase, bundle, capMagiLine } = args;
   const probeInput: ApplyFilingPlanYearInput = {
     ...taxInputBase,
-    // Callers only ever probe conv ∈ [0, room], so no clamp is needed here.
     otherOrdinaryIncomeDollars: taxInputBase.otherOrdinaryIncomeDollars + convDollars,
   };
   let result: TaxYearResult;
@@ -582,40 +464,30 @@ function magiOnLineForConversion(
     throw err;
   }
   if (capMagiLine === 'aca') {
-    // ACA MAGI adds back the NONTAXABLE SS portion (full-SS add-back); the
-    // conversion→ACA-MAGI slope is a flat 1.0. `magiCents` is the
-    // federal/IRMAA MAGI (taxable-SS only); reconstruct the ACA figure.
+    // ACA MAGI adds back the nontaxable SS portion (slope 1.0); `magiCents` is the federal/IRMAA
+    // MAGI, so reconstruct the ACA figure.
     const taxableSsDollars = result.taxableSsCents / 100;
     const nontaxableSsDollars = Math.max(0, taxInputBase.grossSsDollars - taxableSsDollars);
     return result.magiCents / 100 + nontaxableSsDollars;
   }
-  // IRMAA / federal line: the §86-tier-dependent slope (1.0/1.5/1.85) is
-  // already baked into `magiCents` (the SS spillover ran inside the per-year engine).
+  // The §86-tier slope (1.0/1.5/1.85) is already in `magiCents`.
   return result.magiCents / 100;
 }
 
 /**
- * Size the Fill-mode auto-conversion by an OUTER monotone bisection against the
- * engine's actual computed MAGI. `MAGI(conv)` is non-decreasing in `conv`
- * (each converted dollar is ordinary income), so the bisection is
- * unconditionally convergent and deterministic — robust to the §86 spillover
- * kinks where `dMAGI/dconv` jumps to 1.5/1.85.
- *
- * Finds the largest `conv ∈ [0, convertibleRoom]` with `MAGI_line(conv) ≤
- * ceiling`, rounded DOWN to whole cents so realized MAGI never exceeds the
- * ceiling ("not above it"). When even `conv = 0` already exceeds the
- * ceiling (withdrawals alone overshoot), returns $0. When the full room stays
- * under the ceiling, returns the full room. Side-effect-free; consumes no RNG.
+ * Size the Fill-mode conversion by an outer monotone bisection on the engine's computed MAGI: the
+ * largest `conv ∈ [0, convertibleRoom]` with `MAGI_line(conv) ≤ ceiling`, rounded down to whole
+ * cents. MAGI is non-decreasing in `conv`, so the bisection converges even across the §86 spillover
+ * kinks. Returns $0 when `conv = 0` already exceeds the ceiling and the full room when it stays
+ * under.
  */
 export function solveFillConversion(args: FillConversionSolveArgs): FillConversionSolveResult {
   const room = Math.max(0, args.convertibleRoomDollars);
   if (room <= 0) return { convertedDollars: 0, iterations: 0 };
 
-  // Withdrawals-only MAGI already at/over the ceiling → no headroom to fill.
   const magiAtZero = magiOnLineForConversion(args, 0);
   if (magiAtZero >= args.magiCeilingDollars) return { convertedDollars: 0, iterations: 0 };
 
-  // Full room still under the ceiling → convert all of it (no MAGI overshoot).
   const magiAtRoom = magiOnLineForConversion(args, room);
   if (magiAtRoom <= args.magiCeilingDollars) {
     return { convertedDollars: Math.floor(room * 100) / 100, iterations: 0 };
@@ -634,7 +506,7 @@ export function solveFillConversion(args: FillConversionSolveArgs): FillConversi
     }
     iterations += 1;
   }
-  // `lo` is the largest probed conversion that stayed at/under the ceiling.
-  // Round DOWN to whole cents so the committed conversion never tips MAGI over.
+  // `lo` is the largest probed conversion at/under the ceiling; rounding down keeps the committed
+  // conversion from tipping MAGI over.
   return { convertedDollars: Math.floor(lo * 100) / 100, iterations };
 }

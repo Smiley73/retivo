@@ -1,26 +1,5 @@
-/**
- * Off-screen PDF render host for the unified Export PDF page.
- *
- * The Export page mounts THIS host only while an export is in flight. It
- * renders the Balance Projection chart surfaces from the ALREADY-COMPUTED
- * display data the page derived (no new Monte Carlo run, no new projection —
- * the host consumes `mcSummary` + `pathIndex` indirectly
- * via the pre-derived `displayRows` / `accountStackTimeline` props the page
- * passes in). Each chart's live `<svg>` node is captured and handed back to the
- * page via `onReady`, keyed by the `section-manifest.ts` section id, so the
- * build pipeline can embed each as a vector (svg2pdf).
- *
- * Rendered OFF-SCREEN (`left:-99999px`, non-zero width — never `display:none`,
- * which would collapse layout so the SVG engine measures width 0 and the
- * vectors capture empty). The non-zero fixed width is the one approved inline
- * style override (runtime-computed geometry the token system
- * can't express); every other style stays on semantic tokens.
- *
- * Wrapped in a FORCED-LIGHT `ThemeProvider` so the in-house chart engine's
- * `useChartColors()` emits the `CHART_COLORS.light` palette regardless of the
- * app's active theme — the PDF is always a white-page, light-palette surface
- * (see "Chart colours" in docs/ui-conventions.md).
- */
+/** Off-screen host that renders the Balance Projection charts from the page's already-computed data and hands each `<svg>` back via onReady, keyed by section-manifest id, for svg2pdf.
+* Rendered off-canvas with a fixed non-zero width (never display:none, which makes the SVG engine measure 0) inside a forced-light ThemeProvider, since the PDF is always light-palette (see "Chart colours" in docs/ui-conventions.md). */
 import React, { useEffect, useRef } from 'react';
 import { ForcedThemeProvider } from '../contexts/ThemeContext';
 import { PdfCaptureContext } from '../components/charts/engine/pdf-capture-context';
@@ -65,7 +44,7 @@ import type { ExpenseCategoryMonthlyPoint } from '../lib/expense-projection';
 
 /** Account metadata the account-balance bands group by (mirrors
  *  `AccountBalanceStackBandProps.accounts`). */
-export interface RenderHostAccount {
+interface RenderHostAccount {
   readonly id: string;
   readonly name: string;
   readonly ownerDisplayName: string;
@@ -144,11 +123,8 @@ export interface ReportPagePdfRenderHostProps {
   readonly onError: (err: Error) => void;
 }
 
-/** Fixed off-screen capture width (PDF points-ish): wide enough that the SVG
- *  chart engine measures a real, non-zero plot width (never `display:none`). */
 const CAPTURE_WIDTH_PX = 800;
 
-/** Manifest section ids the host renders an `<svg>` for. */
 const SECTION_BALANCE = 'chart-balance';
 const SECTION_STRESS_TEST = 'chart-stress-test';
 const SECTION_CASHFLOW = 'chart-cashflow';
@@ -163,22 +139,19 @@ const SECTION_ACCT_ACCOUNT = 'chart-account-balances-account';
 const SECTION_EXPENSE_TOTAL = 'chart-expenses-total';
 const SECTION_EXPENSE_CATEGORY = 'chart-expenses-category';
 
-/** True when the stress-test VM has a renderable Monte Carlo result. Mirrors
- *  `PlanStressTestChart`'s own render gates: no accounts → null; a failed CBP
- *  validation → a remediation banner (no fan svg); otherwise a fan renders only
- *  when `result` is non-null. Only then is a stress page captured/emitted. */
+// True when the stress-test VM has a renderable Monte Carlo result. Mirrors
+// `PlanStressTestChart`'s own render gates: no accounts → null; a failed CBP
+// validation → a remediation banner (no fan svg); otherwise a fan renders only
+// when `result` is non-null. Only then is a stress page captured/emitted.
 function stressHasResult(vm: PlanStressTestVm): boolean {
   if (vm.hasNoAccounts) return false;
   if (vm.cbpValidation && !vm.cbpValidation.ok) return false;
   return vm.result !== null;
 }
 
-/** Max time to wait for chart geometry to commit before reporting failure. */
 const GEOMETRY_TIMEOUT_MS = 10_000;
 
-/** Return the first SVG in `container` that is NOT inside a `<button>` —
- *  skips decorative icon SVGs (e.g. ChartInfoPopover's InfoCircleIcon which
- *  lives inside a React Aria Button) and lands on the chart SVG proper. */
+// Skips decorative icon SVGs inside a Button (e.g. ChartInfoPopover) to land on the chart SVG.
 function findChartSvg(container: Element | null): SVGElement | null {
   if (!container) return null;
   const found = Array.from(container.querySelectorAll('svg')).find(
@@ -240,11 +213,7 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
     let cancelled = false;
     const start = Date.now();
 
-    // Poll for committed geometry: each grouping's container must hold an
-    // `<svg>` whose viewBox has a non-zero width (the chart engine sets the
-    // viewBox from the measured container width via useChartGeometry). The
-    // lazy chart impls also need a microtask or two to resolve their dynamic
-    // import, so we poll on rAF rather than read once.
+    // Poll on rAF: each container needs an <svg> with a non-zero viewBox width (set from the measured width), and lazy chart impls need ticks to resolve their dynamic import.
     const collectSvgs = (): Record<string, SVGElement> | null => {
       const balanceSvg = findChartSvg(balanceRef.current);
       const tierSvg = findChartSvg(tierRef.current);
@@ -255,10 +224,7 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
         [SECTION_ACCT_TIER]: tierSvg,
         [SECTION_ACCT_ACCOUNT]: accountSvg,
       };
-      // Each optional chart blocks readiness only while it is supposed to
-      // render (it has data): if it should render but its svg hasn't committed
-      // yet, return null to keep polling; if it has no data, it is never mounted
-      // and is skipped entirely (no page emitted by build-pdf).
+      // An optional chart blocks readiness only while it has data to render; with no data it is never mounted.
       const optional: Array<{
         render: boolean;
         ref: React.RefObject<HTMLDivElement | null>;
@@ -305,9 +271,7 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
         onError(new Error('PDF chart geometry did not commit in time.'));
         return;
       }
-      // rAF in a real browser; jsdom shims rAF to a macrotask, so the lazy
-      // chart import resolves between ticks and the svgs appear within a few
-      // iterations.
+      // jsdom shims rAF to a macrotask so the lazy chart import resolves between ticks.
       if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(tick);
       } else {
@@ -319,7 +283,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
     return () => {
       cancelled = true;
     };
-    // Re-probe whenever the rendered inputs change (a fresh export run).
   }, [
     onReady,
     onError,
@@ -341,9 +304,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
   ]);
 
   return (
-    // The off-screen container: pushed far off-canvas (NOT display:none — that
-    // collapses layout so the SVG engine measures width 0). The fixed non-zero
-    // width is the one approved inline geometry override.
     <div
       data-testid="pdf-render-host"
       aria-hidden="true"
@@ -365,7 +325,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               mcLine={mcLine ?? null}
             />
           </div>
-          {/* Stress-test fan — only when the MC run has a result. */}
           {showStress && (
             <div ref={stressRef} data-section={SECTION_STRESS_TEST}>
               <PlanStressTestChart
@@ -375,7 +334,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               />
             </div>
           )}
-          {/* Expected cashflow band — only when there are cashflow rows. */}
           {cashflowRows.length > 0 && (
             <div ref={cashflowRef} data-section={SECTION_CASHFLOW}>
               <CashflowProjectionChart
@@ -388,7 +346,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               />
             </div>
           )}
-          {/* Income breakdown — only when there are breakdown rows. */}
           {breakdownRows.length > 0 && (
             <div ref={breakdownRef} data-section={SECTION_INCOME_BREAKDOWN}>
               <IncomeBreakdownChart
@@ -400,7 +357,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               />
             </div>
           )}
-          {/* Annual portfolio flows — only when there are flow rows. */}
           {portfolioRows.length > 0 && (
             <div ref={portfolioRef} data-section={SECTION_PORTFOLIO_FLOWS}>
               <PortfolioFlowsChart
@@ -411,7 +367,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               />
             </div>
           )}
-          {/* Tax & health-cost burden — only when there are burden rows. */}
           {taxBurdenRows.length > 0 && (
             <div ref={taxRef} data-section={SECTION_TAX_HEALTH_COST}>
               <TaxBurdenChart
@@ -421,7 +376,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               />
             </div>
           )}
-          {/* Required minimum distributions — only when there are RMD rows. */}
           {rmdRows.length > 0 && (
             <div ref={rmdRef} data-section={SECTION_RMD}>
               <RmdChart
@@ -431,7 +385,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               />
             </div>
           )}
-          {/* Charitable distributions (QCD) — only when QCDs occurred. */}
           {qcdRows.length > 0 && (
             <div ref={qcdRef} data-section={SECTION_QCD}>
               <QcdChart
@@ -440,7 +393,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               />
             </div>
           )}
-          {/* Roth conversions — only when conversions occurred. */}
           {rothRows.length > 0 && (
             <div ref={rothRef} data-section={SECTION_ROTH_CONVERSIONS}>
               <RothConversionsChart
@@ -449,7 +401,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               />
             </div>
           )}
-          {/* Tier/Type grouping — the band defaults to the tier/type view. */}
           <div ref={tierRef} data-section={SECTION_ACCT_TIER}>
             <AccountBalanceStackBand
               accounts={accounts}
@@ -463,7 +414,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               showExcludedToggle={false}
             />
           </div>
-          {/* Account grouping — same band, defaulted to the per-account view. */}
           <div ref={accountRef} data-section={SECTION_ACCT_ACCOUNT}>
             <AccountBalanceStackBand
               accounts={byAccountAccounts}
@@ -478,7 +428,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               initialGroupBy="account"
             />
           </div>
-          {/* Expense overview — Essential vs Discretionary stacked area. */}
           <div ref={expenseTotalRef} data-section={SECTION_EXPENSE_TOTAL}>
             <ExpensesProjectionChart
               rows={[...expenseRows]}
@@ -487,7 +436,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               enableZoom={false}
             />
           </div>
-          {/* Expenses by category — per-category stacked area. */}
           <div ref={expenseCategoryRef} data-section={SECTION_EXPENSE_CATEGORY}>
             <ExpensesCategoryChart
               rows={[...expenseCategoryRows]}
@@ -496,9 +444,6 @@ export const ReportPagePdfRenderHost: React.FC<ReportPagePdfRenderHostProps> = (
               members={[...tooltipMembers]}
             />
           </div>
-          {/* `activeMethod` is forwarded for symmetry with the page's basis
-              wiring; the deterministic series the bands render is already
-              baked into `accountStackTimeline`. */}
           <span hidden>{activeMethod}</span>
         </PdfCaptureContext.Provider>
       </ForcedThemeProvider>

@@ -1,8 +1,4 @@
-/**
- * Optimizer table row variants for non-`ready` states. Extracted from
- * `ss-optimizer-page-chrome.tsx` to keep that file under the ≤400-ln
- * shape limit.
- */
+/** Optimizer table row variants for non-ready states. */
 import React from 'react';
 import { Link } from 'react-router';
 import { Cell, Row } from 'react-aria-components';
@@ -21,11 +17,9 @@ import { textLinkClass } from '../components/TextLink';
 import { McProgressBar } from '../components/McProgressBar';
 
 const LINK_CLASS = textLinkClass;
-// Re-export the dual-method child-row component from the sibling file
-// so consumers (the chrome group renderer) keep their import surface.
+// Re-exported so consumers keep their import surface.
 export { MethodChildRow } from './ss-optimizer-method-child-row';
 
-/** Smooth per-scenario path progress for the in-flight MC row. */
 export interface RowProgress {
   readonly done: number;
   readonly total: number;
@@ -33,8 +27,6 @@ export interface RowProgress {
 
 export const LoadingRow: React.FC<{
   row: ScenarioRow;
-  /** Present while the MC sweep is simulating this scenario — renders a
-   *  determinate per-row bar in the metric cell instead of plain text. */
   progress?: RowProgress;
 }> = ({ row, progress }) => (
   <Row id={row.scenario.id}>
@@ -58,9 +50,7 @@ export const LoadingRow: React.FC<{
   </Row>
 );
 
-/** Renders for scenarios the MC sweep did not finish before the user
- *  clicked Cancel. Distinct from LoadingRow so unprocessed scenarios
- *  don't keep showing "Calculating…" forever. */
+/** For scenarios the MC sweep did not finish before Cancel; distinct from LoadingRow so they don't show "Calculating…" forever. */
 export const CancelledRow: React.FC<{ row: ScenarioRow }> = ({ row }) => (
   <Row id={row.scenario.id}>
     <Cell className={tdClass}>{row.scenario.payload.name}</Cell>
@@ -191,9 +181,7 @@ export const EmptyReasonRow: React.FC<{ row: ScenarioRow; reason: EmptyReason }>
   </Row>
 );
 
-/** Parent row on the deterministic tab — carries the scenario name and
- *  spans the metric cells; the two `MethodChildRow` siblings render
- *  Planned / TWR underneath. */
+/** Deterministic-tab parent row: the scenario name spanning the metric cells, with the two MethodChildRow siblings (Planned / TWR) beneath. */
 export const ScenarioParentRow: React.FC<{ row: ScenarioRow }> = ({ row }) => (
   <Row id={`${row.scenario.id}-parent`}>
     <Cell className={`${tdClass} font-semibold`}>{row.scenario.payload.name}</Cell>
@@ -201,10 +189,7 @@ export const ScenarioParentRow: React.FC<{ row: ScenarioRow }> = ({ row }) => (
   </Row>
 );
 
-/** TWR-insufficient row variant — surfaces when an active non-CBP
- *  account has under two years of balance history; the empirical TWR
- *  rate is undefined so the metric is unranked. The Planned child row
- *  is unaffected. */
+/** Surfaces when an active non-CBP account has under two years of balance history, leaving the empirical TWR rate undefined; the Planned child row is unaffected. */
 export const TwrInsufficientRow: React.FC<{ id: string; label: string }> = ({
   id,
   label,

@@ -1,17 +1,8 @@
-/**
- * Calibration snapshot integrity tests for ACA_PTC_PARAMETERS.
- *
- * Structural checks only; the table constants are not retyped here.
- */
-
 import { describe, it, expect } from 'vitest';
 import { ACA_PTC_PARAMETERS } from './aca-ptc-parameters';
 
 const snap = ACA_PTC_PARAMETERS;
 
-// ---------------------------------------------------------------------------
-// Snapshot shape
-// ---------------------------------------------------------------------------
 describe('ACA_PTC_PARAMETERS — snapshot structure', () => {
   it('has values for 2024, 2025, 2026', () => {
     expect(snap.values[2024]).toBeDefined();
@@ -33,10 +24,7 @@ describe('ACA_PTC_PARAMETERS — snapshot structure', () => {
   });
 
   it('source URLs are in strict chronological order (HHS/IRS interleaved by publish date)', () => {
-    // Required order: composite snapshots list sources
-    // chronologically — HHS 2023 (Jan 2023) → IRS rp-23-29 (Aug 2023) →
-    // HHS 2024 (Jan 2024) → IRS rp-24-35 (Aug 2024) →
-    // HHS 2025 (Jan 2025) → IRS rp-25-25 (Aug 2025)
+    // Sources run chronologically: HHS 2023, rp-23-29, HHS 2024, rp-24-35, HHS 2025, rp-25-25.
     const src = snap.metadata.source;
     const hhs2023 = src.indexOf('2023-hhs-poverty-guidelines');
     const rp2329  = src.indexOf('rp-23-29.pdf');
@@ -52,9 +40,6 @@ describe('ACA_PTC_PARAMETERS — snapshot structure', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2024 — regime + FPL
-// ---------------------------------------------------------------------------
 describe('ACA_PTC_PARAMETERS — 2024 regime + FPL', () => {
   const t = snap.values[2024];
 
@@ -67,9 +52,6 @@ describe('ACA_PTC_PARAMETERS — 2024 regime + FPL', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2025 — regime + FPL
-// ---------------------------------------------------------------------------
 describe('ACA_PTC_PARAMETERS — 2025 regime + FPL', () => {
   const t = snap.values[2025];
 
@@ -82,9 +64,6 @@ describe('ACA_PTC_PARAMETERS — 2025 regime + FPL', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2026 — regime + FPL
-// ---------------------------------------------------------------------------
 describe('ACA_PTC_PARAMETERS — 2026 regime + FPL', () => {
   const t = snap.values[2026];
 
@@ -101,9 +80,6 @@ describe('ACA_PTC_PARAMETERS — 2026 regime + FPL', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Band ordering invariant
-// ---------------------------------------------------------------------------
 describe('ACA_PTC_PARAMETERS — band ordering', () => {
   for (const year of [2024, 2025, 2026] as const) {
     it(`${year}: bands ordered by ascending fplFloorPct`, () => {

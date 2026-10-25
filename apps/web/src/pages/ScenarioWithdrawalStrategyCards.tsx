@@ -1,45 +1,4 @@
-/**
- * Scenario detail page subsection: two sibling summary cards. The withdrawal-
- * strategy card's Configure navigates to a dedicated page
- * (/scenarios/:id/withdrawal-strategy); the tax-assumptions card's Configure
- * opens its own modal.
- *
- * Withdrawal strategy editor — drawdown *mechanics* (five override fields):
- *   - `overrides.withdrawalStrategy` — four-option picker (taxEfficient /
- *     proportional / rothFirst / customOrder).
- *   - `overrides.customDrawdownOrder` — tier editor; active only
- *     when `withdrawalStrategy.kind === 'customOrder'`.
- *   - `overrides.magiCap` — MAGI-cap overlay.
- *   - `overrides.assumedCostBasisFractionOfTaxableWithdrawal` — percent.
- *   - `overrides.magiBootstrapLookbackMinus2` / `magiBootstrapLookbackMinus1`
- *     — pre-retirement income (whole dollars) gated by a "Use engine
- *     default" ToggleSwitch (ON = omit both keys). The single UI input writes
- *     both lookback fields to the same value (year 0 = MAGI(ret−2), year 1 =
- *     MAGI(ret−1)).
- *
- * Tax assumptions modal — user-asserted tax treatment (two override fields):
- *   - `overrides.hsaQualifiedMedicalExpensePct` — percentage of EMERGENCY HSA
- *     withdrawals still assumed backed by qualified medical receipts (0–100,
- *     default 100); modeled medical-qualified draws are always 100% qualified.
- *   - `overrides.earlyWithdrawalPenaltyExemptAccountIds` — account IDs the
- *     user has marked as penalty-exempt.
- *
- * Each surface's Save calls `saveScenario` directly (one queued mutation,
- * touching only its own keys). The tax-assumptions modal reloads its parent on
- * `onClose(true)` with a `useDirtyModalClose` guard; the withdrawal-strategy
- * editor lives on its own page with a `useUnsavedChangesGuard` + post-save
- * in-place reload.
- *
- * Extraction map:
- *   - scenario-withdrawal-strategy-shared.ts       — constants + helpers
- *   - scenario-withdrawal-strategy-tier-editor.tsx — TierList + TierEditor
- *   - scenario-withdrawal-strategy-magi-cap.tsx    — MagiCapSection
- *   - scenario-withdrawal-strategy-draft-hook.ts   — both draft hooks
- *   - scenario-withdrawal-strategy-editor.tsx      — withdrawal-strategy editor
- *   - ScenarioWithdrawalStrategyPage.tsx           — withdrawal-strategy page chrome
- *   - scenario-tax-assumptions-sections.tsx        — tax-assumptions tab sections
- *   - scenario-tax-assumptions-modal.tsx           — tax-assumptions modal (tabs)
- */
+/** Scenario detail page summary cards for the withdrawal strategy (Configure opens its page), the tax assumptions and the health coverage; each Save touches only its own override keys. */
 import React, { useMemo } from 'react';
 import { formatPercent } from '../components/PercentInput';
 import { resolveScenario } from '../lib/scenario-resolution';
@@ -61,8 +20,6 @@ import {
 } from './scenario-withdrawal-strategy-shared';
 
 export { TaxAssumptionsModal, AcaCoverageModal } from './scenario-tax-assumptions-modal';
-
-// ——— card ————————————————————————————————————————————————
 
 interface CardProps {
   scenario: ScenarioAggregate;
@@ -107,8 +64,6 @@ export const WithdrawalStrategyCard: React.FC<CardProps> = ({
     const costBasisFraction =
       overrides.assumedCostBasisFractionOfTaxableWithdrawal ??
       inherited?.assumedCostBasisFractionOfTaxableWithdrawal;
-    // Read the year-0 (minus2) lookback, falling back to year-1 (minus1);
-    // the two fields are written together, so they normally agree.
     const magi =
       overrides.magiBootstrapLookbackMinus2 ??
       overrides.magiBootstrapLookbackMinus1 ??
@@ -147,8 +102,6 @@ export const WithdrawalStrategyCard: React.FC<CardProps> = ({
   );
 };
 
-// ——— Tax assumptions card —————————————————————————————————
-
 interface TaxAssumptionsCardProps {
   scenario: ScenarioAggregate;
   scenarios: ScenarioAggregate[];
@@ -158,18 +111,7 @@ interface TaxAssumptionsCardProps {
   onResetToInherited?: () => void;
 }
 
-/**
- * Compact summary of the scenario's tax assumptions (resolved through the
- * parent chain, same as the engine reads them): the share of emergency-reserve
- * HSA withdrawals treated as qualified (modeled medical-qualified HSA spending
- * is always 100% qualified — this percentage governs only the emergency-reserve
- * draws taken after every non-HSA account is exhausted) and the count of
- * accounts marked exempt from the early-withdrawal penalty. Configure opens the
- * standalone Tax assumptions modal where these
- * are edited; Reset (non-base scenarios with a local override) clears both
- * tax-assumption keys back to inherited — symmetric with the Withdrawal
- * strategy card.
- */
+/** Summary of the resolved HSA qualified % (emergency-reserve draws only; modeled medical-qualified spending is always 100%) and the count of penalty-exempt accounts. */
 export const TaxAssumptionsCard: React.FC<TaxAssumptionsCardProps> = ({
   scenario,
   scenarios,
@@ -231,8 +173,6 @@ export const TaxAssumptionsCard: React.FC<TaxAssumptionsCardProps> = ({
   );
 };
 
-// ——— ACA Marketplace coverage card —————————————————————————
-
 interface AcaCoverageCardProps {
   scenario: ScenarioAggregate;
   scenarios: ScenarioAggregate[];
@@ -244,35 +184,19 @@ interface AcaCoverageCardProps {
   onResetToInherited?: () => void;
 }
 
-/** The plain-English region labels the card echoes. `contiguous` is the
- *  default and is left unsaid so the summary stays short. */
 const FPL_REGION_SUMMARY: Readonly<Record<Exclude<AcaFplRegion, 'contiguous'>, string>> = {
   alaska: 'Alaska poverty guidelines',
   hawaii: 'Hawaii poverty guidelines',
 };
 
-/** Own-property lookup (CWE-1321) for a STORED region value. The plain
- *  object literal inherits `constructor` / `toString` from `Object.prototype`,
- *  and import hardening rejects those names only in KEY position, so a stored
- *  `acaFplRegion: "constructor"` would otherwise return an inherited FUNCTION
- *  and get stringified into the card summary. */
+// Own-property lookup (CWE-1321): a stored acaFplRegion of "constructor" would otherwise return an inherited function from Object.prototype and be stringified into the summary.
 function fplRegionSummaryLabel(region: string | undefined): string | undefined {
   return region !== undefined && Object.hasOwn(FPL_REGION_SUMMARY, region)
     ? FPL_REGION_SUMMARY[region as Exclude<AcaFplRegion, 'contiguous'>]
     : undefined;
 }
 
-/**
- * Compact summary of the household's modeled health coverage (resolved through
- * the parent chain, same as the engine reads it): who buys ACA Marketplace
- * coverage in early retirement vs has "other coverage", how many years carry
- * stated Medicare/Marketplace months, whether a non-default poverty-guideline
- * region applies, and how many years carry a benchmark-price override. Defaults
- * = everyone on the Marketplace, automatic coverage timing, mainland guidelines,
- * and the rough estimated benchmark. Configure opens the standalone modal; Reset
- * (non-base scenarios with a local override) clears the health keys back to
- * inherited.
- */
+/** Summary of the modeled health coverage resolved through the parent chain: Marketplace vs other coverage, years with stated months, a non-default FPL region and benchmark overrides. */
 export const AcaCoverageCard: React.FC<AcaCoverageCardProps> = ({
   scenario,
   scenarios,
@@ -318,9 +242,7 @@ export const AcaCoverageCard: React.FC<AcaCoverageCardProps> = ({
     const regionLabel = fplRegionSummaryLabel(region);
     if (regionLabel) parts.push(regionLabel);
 
-    // Counted through the ONE shape-checking reader (each row is one
-    // stated member/year), so an imported `{ perMember: { id: null } }` renders
-    // as "nothing stated" instead of throwing out of this card.
+    // Counted through the shape-checking reader, so an imported { perMember: { id: null } } reads as "nothing stated" instead of throwing.
     const monthYears = toDraftHealthRows(
       overrides.healthCoverageMonths ?? inherited?.healthCoverageMonths,
     ).length;
@@ -328,9 +250,7 @@ export const AcaCoverageCard: React.FC<AcaCoverageCardProps> = ({
       parts.push(`${monthYears} coverage year${monthYears === 1 ? '' : 's'} set`);
     }
 
-    // Counted through the ONE shape-checking benchmark enumerator, so an
-    // imported non-array (or a malformed row) reads as "none entered" instead of
-    // throwing out of this card.
+    // Counted through the shape-checking enumerator, so an imported non-array or malformed row reads as "none entered".
     const benchmarkCount = toDraftBenchmarkRows(
       overrides.acaPtcBenchmark ?? inherited?.acaPtcBenchmark,
     ).length;

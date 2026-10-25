@@ -1,21 +1,7 @@
 /**
- * Shared pure split site for a linked Cash Balance Pension (CBP) lump-sum
- * rollover that lands in or after the source-account owner's RMD trigger year.
- *
- * IRS rule: a Required Minimum Distribution for a distribution year is NOT
- * rollover-eligible. So when a linked-CBP lump-sum is rolled in/after the
- * owner's RMD trigger-age year, that year's RMD must come out first (taxable
- * ordinary income) and only the excess rolls into the target's pre-tax bucket.
- *
- * This is the SINGLE split site: the deterministic seam
- * (`collectPostRetirementCbpLumpSumDeposits`) and the Monte Carlo event builder
- * both call it so cross-engine parity is structural, not test-only. All
- * arithmetic is in integer cents (`computeRmd` returns cents) so the two engines
- * agree to the cent.
- *
- * Plain (non-linked-CBP) pension lump-sums are NOT split here — the user-typed
- * `lumpSumAmount` has undefined gross/net/post-RMD semantics, so an RMD on it
- * could invent or double-count tax (a known limitation).
+ * Splits a linked Cash Balance Pension lump-sum rollover in or after the owner's RMD trigger year: that
+ * year's RMD is not rollover-eligible, so it comes out first. Plain pension lump-sums are not split
+ * (their gross/net semantics are undefined).
  */
 import type { CalibrationSnapshot } from './calibration';
 import {
@@ -25,57 +11,31 @@ import {
   type RmdTable,
 } from './rmd';
 
-/** Arguments to {@link splitRolloverByRmd}. All dollar amounts in integer cents. */
+/** Arguments to {@link splitRolloverByRmd}; dollar amounts are integer cents. */
 export interface SplitRolloverByRmdArgs {
-  /** The rolled lump-sum basis in integer cents. For a linked-CBP rollover this
-   *  IS the rolled amount (= the source CBP projected balance in cents), so the
-   *  split is self-consistent. */
   readonly basisCents: number;
-  /** Source-account owner's ISO `YYYY-MM-DD` birthdate, or `null`/`undefined`
-   *  on an owner-meta / birthdate miss (→ `rmdPortionCents = 0`). */
+  /** Source-account owner's ISO `YYYY-MM-DD` birthdate; `null`/`undefined` gives `rmdPortionCents = 0`. */
   readonly ownerBirthdate: string | null | undefined;
-  /** Calendar year the rollover event occurs. */
   readonly eventYear: number;
-  /** Tax treatment of the real source CBP account (PRE_TAX or MIXED). */
   readonly sourceTaxTreatment: AccountTaxTreatment;
-  /** For a MIXED source CBP, the Roth-designated portion in integer cents so
-   *  the engine does not over-distribute (SECURE 2.0 §325). Ignored on a
-   *  PRE_TAX source. */
+  /** Roth-designated portion of a MIXED source, so the engine does not over-distribute (SECURE 2.0 §325). */
   readonly rothPortionCents?: number;
-  /** The run's RMD calibration snapshot (no hard-coded trigger ages / divisors). */
   readonly rmdSnapshot: CalibrationSnapshot<RmdTable>;
 }
 
-/** Result of {@link splitRolloverByRmd}. Both fields in integer cents;
- *  `rmdPortionCents + rolloverExcessCents === basisCents`. */
+/** `rmdPortionCents + rolloverExcessCents === basisCents`, in integer cents. */
 export interface SplitRolloverByRmdResult {
-  /** RMD carved out of the rollover (taxable ordinary income, distributed). */
   readonly rmdPortionCents: number;
-  /** Remainder that rolls into the target's pre-tax bucket (not a taxable event). */
   readonly rolloverExcessCents: number;
 }
 
 /**
- * Carve the rollover-year RMD out of a linked-CBP lump-sum.
+ * `rmdPortionCents` is 0 (the whole amount rolls) on a missing or unparseable birthdate (never throws),
+ * an event year before the trigger year, or a source with no RMD; otherwise `min(ownerRmdCents, basisCents)`.
  *
- * Returns `rmdPortionCents = 0` (whole amount rolls) when:
- *  - the owner birthdate is missing/unparseable (never throws),
- *  - the event year is before the owner's RMD trigger-age year (no RMD),
- *  - the source account is not RMD-qualifying / has no pre-tax balance.
- *
- * Otherwise `rmdPortionCents = min(ownerRmdCents, basisCents)` (clamped to the
- * basis so the excess is never negative) and
- * `rolloverExcessCents = basisCents − rmdPortionCents`.
- *
- * Approximation: the Cash Balance Pension (CBP) is modeled as a
- * defined-contribution-EQUIVALENT account, so the carved RMD uses the Uniform
- * Lifetime Method (IRS Pub. 590-B Appendix B Table III) via `computeRmd` — the
- * same account-balance-÷-divisor math the rest of the engine uses. IRS FAQ Q15
- * and Pub. 590-B note that a true DEFINED-BENEFIT plan's RMD is ordinarily
- * determined by the plan's annuity-payment rules, NOT an account-balance
- * divisor. This approximation is accepted for plans structured as
- * defined-contribution-equivalent (the only CBP shape this app models); a plan
- * following true DB-plan annuity rules would require plan-provided RMD amounts.
+ * Approximation: the CBP is modeled as a defined-contribution-equivalent account, so the RMD uses the
+ * Uniform Lifetime Method (IRS Pub. 590-B Appendix B Table III); a true defined-benefit plan follows
+ * annuity rules (IRS FAQ Q15, Pub. 590-B) and would need plan-provided RMD amounts.
  */
 export function splitRolloverByRmd(
   args: SplitRolloverByRmdArgs,
@@ -87,14 +47,11 @@ export function splitRolloverByRmd(
   };
   if (basisCents <= 0) return noSplit;
   if (typeof ownerBirthdate !== 'string' || ownerBirthdate.length === 0) {
-    // Owner-meta / birthdate miss → whole amount rolls, never throw.
     return noSplit;
   }
   const birthYear = Number(ownerBirthdate.slice(0, 4));
   if (!Number.isFinite(birthYear) || birthYear <= 0) return noSplit;
-  // Pre-trigger-age fast path: the rollover year is before the owner's RMD
-  // trigger year, so there is no RMD to carve (avoids computeRmd on an
-  // unparseable-but-not-empty birthdate too, since the YYYY prefix is valid).
+  // Before the trigger-age year there is no RMD to carve.
   if (eventYear < birthYear + rmdTriggerAge(birthYear)) return noSplit;
 
   let rmdResult;
@@ -109,9 +66,7 @@ export function splitRolloverByRmd(
             balanceDec31PriorYearCents: basisCents,
             accountType: 'RETIREMENT_CASH_BALANCE',
             taxTreatment: sourceTaxTreatment,
-            // A CBP source is PRE_TAX or MIXED, and `rothPortionCents` is
-            // meaningful only where a Roth-designated pocket exists (computeRmd
-            // throws on PRE_TAX / HSA); only pass it through on a MIXED source.
+            // rothPortionCents is valid only with a Roth pocket (computeRmd throws on PRE_TAX / HSA).
             ...(sourceTaxTreatment === 'MIXED' && args.rothPortionCents !== undefined
               ? { rothPortionCents: args.rothPortionCents }
               : {}),
@@ -121,8 +76,7 @@ export function splitRolloverByRmd(
       args.rmdSnapshot,
     );
   } catch {
-    // Any malformed-input throw (e.g. an out-of-range calendar birthdate that
-    // slipped the prefix check) falls back to the no-split, never-throw contract.
+    // A malformed birthdate that passed the prefix check falls back to no split.
     return noSplit;
   }
 

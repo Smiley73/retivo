@@ -1,13 +1,6 @@
-/**
- * Tests for the two-phase (enforced MFA) login flow in AuthContext.
- * A password login that returns `mfaRequired: true` sets `mfaChallenge` and
- * adopts no session; `verifyMfa` POSTs the chosen factor, adopts the returned
- * session through the shared cross-user-reset + ZK-unlock path, and clears the
- * challenge. The API + crypto layers are mocked at the module boundary so the
- * test exercises only the context's orchestration.
- */
-import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+// Two-phase (enforced MFA) login: a password login returning `mfaRequired` sets `mfaChallenge` and adopts no session;
+// `verifyMfa` POSTs the chosen factor, adopts the session through the shared cross-user-reset and unlock path, and clears the challenge.
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,48 +12,10 @@ vi.mock('./user-transition', async () => (await import('./auth-context.test-harn
 vi.mock('@simplewebauthn/browser', async () => (await import('./auth-context.test-harness')).webauthnBrowserMock());
 vi.mock('../crypto/passkey-prf', async () => (await import('./auth-context.test-harness')).passkeyPrfMock());
 
-import { AuthProvider, useAuth } from './AuthContext';
-import { authMocks, jwt } from './auth-context.test-harness';
-import type { MfaChallengeState, VerifyMfaResult } from './AuthContext';
+import { authMocks, captured, jwt, renderAuth } from './auth-context.test-harness';
+import type { VerifyMfaResult } from './types';
 
 const { apiRequest, getKeyEnvelopes, loadCachedHdk, maybeResetForNewUser, startAuthentication } = authMocks;
-
-let captured: {
-  login: (e: string, p: string) => Promise<void>;
-  verifyMfa: (m: string, c: string, r: boolean) => Promise<VerifyMfaResult>;
-  verifyMfaWithPasskey: (r: boolean) => Promise<VerifyMfaResult>;
-  sendEmailOtp: () => Promise<void>;
-  clearMfaChallenge: () => void;
-  mfaChallenge: MfaChallengeState | null;
-  isAuthenticated: boolean;
-};
-
-function Probe(): React.ReactElement {
-  const auth = useAuth();
-  captured = {
-    login: auth.login,
-    verifyMfa: auth.verifyMfa,
-    verifyMfaWithPasskey: auth.verifyMfaWithPasskey,
-    sendEmailOtp: auth.sendEmailOtp,
-    clearMfaChallenge: auth.clearMfaChallenge,
-    mfaChallenge: auth.mfaChallenge,
-    isAuthenticated: auth.isAuthenticated,
-  };
-  return <div data-testid="auth">{String(auth.isAuthenticated)}</div>;
-}
-
-async function renderAuth(): Promise<void> {
-  apiRequest.mockImplementation(async (path: string) => {
-    if (path === '/api/v1/auth/refresh') throw new Error('no session');
-    throw new Error(`unexpected api call ${path}`);
-  });
-  render(
-    <AuthProvider>
-      <Probe />
-    </AuthProvider>,
-  );
-  await waitFor(() => expect(captured.isAuthenticated).toBe(false));
-}
 
 describe('AuthContext — two-phase MFA login', () => {
   beforeEach(() => {
@@ -102,7 +57,6 @@ describe('AuthContext — two-phase MFA login', () => {
       methods: ['totp'],
       recoveryMethods: ['email_otp'],
     });
-    // No session adopted while challenged.
     expect(captured.isAuthenticated).toBe(false);
   });
 
@@ -122,7 +76,6 @@ describe('AuthContext — two-phase MFA login', () => {
         };
       }
       if (path === '/api/v1/auth/mfa/verify') {
-        // Assert the wire contract: challengeToken + method + code + deviceId.
         expect(opts.body).toMatchObject({
           challengeToken: 'chal-tok',
           method: 'totp',
@@ -156,11 +109,7 @@ describe('AuthContext — two-phase MFA login', () => {
 
   it('clears blockedReset and mfaChallenge when cross-user reset is blocked during verifyMfa', async () => {
     await renderAuth();
-    // The cross-user IDB drop fails closed during the MFA session adoption:
-    // resetThenCompleteLogin returns false, surfaces the blocking modal, and
-    // never adopts the new claims. Its Retry runs the verifyMfa `reauth`
-    // callback, which must clear both the blockedReset overlay AND the
-    // challenge so the user lands back on the sign-in form.
+    // A blocked cross-user IDB drop fails closed with the blocking modal; its Retry runs the `reauth` callback, which must clear both the overlay and the challenge.
     maybeResetForNewUser.mockRejectedValue(new Error('DatabaseDropBlockedError'));
 
     apiRequest.mockImplementation(async (path: string) => {
@@ -195,22 +144,17 @@ describe('AuthContext — two-phase MFA login', () => {
       result = await captured.verifyMfa('totp', '123456', false);
     });
 
-    // Fail closed: no session adopted, the blocking modal is shown.
     expect(result).toEqual({ deviceRemembered: false });
     expect(captured.isAuthenticated).toBe(false);
     await waitFor(() =>
       expect(screen.getByText('Close all other tabs to continue')).toBeInTheDocument(),
     );
 
-    // The user clicks Retry → the reauth callback fires.
     const user = userEvent.setup();
     await act(async () => {
       await user.click(screen.getByRole('button', { name: 'Retry' }));
     });
 
-    // The blockedReset overlay closes (modal gone) and the challenge is cleared,
-    // so the user is back on the sign-in form rather than stuck behind a
-    // non-dismissible modal.
     await waitFor(() =>
       expect(screen.queryByText('Close all other tabs to continue')).not.toBeInTheDocument(),
     );
@@ -244,7 +188,6 @@ describe('AuthContext — two-phase MFA login', () => {
           method: 'passkey',
           rememberDevice: true,
         });
-        // The assertion (not a code) carries the proof.
         expect(opts.body.response).toEqual({ id: 'cred-1', response: {}, type: 'public-key' });
         expect(opts.body.code).toBeUndefined();
         return {
@@ -267,8 +210,7 @@ describe('AuthContext — two-phase MFA login', () => {
     });
 
     expect(result).toEqual({ deviceRemembered: true });
-    // No second password prompt — the retained challenge password drove the
-    // unlock; the verify path never called unlockWithPassword.
+    // The retained challenge password drove the unlock, so there is no second password prompt.
     expect(startAuthentication).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(captured.isAuthenticated).toBe(true));
     expect(captured.mfaChallenge).toBeNull();

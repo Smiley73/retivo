@@ -1,38 +1,5 @@
-// Bridge artifact contract.
-//
-// The bridge is shipped as ONE file, `retivo-mcp-bridge.mjs`, built by
-// `pnpm --filter @retirement/mcp-bridge build` (apps/mcp-bridge/scripts/build-bundle.mjs)
-// and served from the app's own origin (build_spa, see stage-bridge-bundle.mjs).
-// A person saves it and runs `node <file> --origin ...`, so everything it needs
-// must be inside it. This test builds the bundle into a throwaway directory and
-// asserts what that promise rests on:
-//
-//   - the output directory holds exactly the bundle and the generated notices;
-//   - the bundle starts with a Node shebang, is executable and carries no
-//     source map reference;
-//   - it stays under a size ceiling (twice the first measured size), so silent
-//     growth, say a dependency that pulls in an HTTP server, is noticed;
-//   - copied alone into an empty directory (no node_modules anywhere near it) it
-//     answers an MCP `initialize` and `tools/list` over stdio with the manifest's
-//     version and exactly the protocol registry's tools, and exits 0 when stdin
-//     closes. That run is the only proof the embedding is complete;
-//   - every package esbuild bundled is the version the workspace resolved and the
-//     lockfile pins, and the two optional `ws` natives are not embedded;
-//   - the bundle file itself ends in the notices, so the copy a person keeps carries
-//     every embedded package's license and copyright text (the notices file served
-//     beside it never reaches their disk);
-//   - the notices name every embedded package with its license and copyright,
-//     and the set equals the bundler's own package set. The SDK's dist ships
-//     ajv, fast-uri and others already bundled, invisible to esbuild's metafile,
-//     so the set is also checked against the SDK chunks' own source maps, an
-//     inventory the bundler's code did not produce;
-//   - `npm pack --dry-run` of the artifact lists exactly the allowlisted files
-//     and a manifest with no dependencies and no install scripts.
-//
-// A passing run does not prove the file runs on a different Node 24 minor or on
-// Windows. Heavier than the other scripts/test/ checks (a real build), so it is
-// a plain node:test run by `pnpm test:contracts` (RUN_CONTRACT_TESTS=1) and
-// skipped under `pnpm test:scripts`. Pattern: lambda-artifact-contract.test.mjs.
+// Builds the single-file bridge bundle and asserts it is self-contained, size-bounded, notice-complete and what `npm pack` lists. The SDK's dist pre-bundles ajv and fast-uri, invisible to esbuild's metafile.
+// Gated: skipped under `pnpm test:scripts`, run by `pnpm test:contracts` (RUN_CONTRACT_TESTS=1).
 
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -70,10 +37,7 @@ function freePort() {
   });
 }
 
-/**
- * Every `name@version` the bundled files' own source maps say they were built from, for the inputs that
- * reach the output. Independent of the bundler's code: it reads what the dependencies recorded.
- */
+/** Every `name@version` the bundled files' own source maps say they were built from: an inventory the bundler did not produce. */
 function packagesFromSourceMaps(metafile) {
   const found = new Set();
   const inputs = new Set(
@@ -94,10 +58,7 @@ function packagesFromSourceMaps(metafile) {
   return found;
 }
 
-/**
- * Runs the bundle at `file` from `cwd`, sends the MCP handshake and a tool listing, closes stdin and
- * resolves with the two answers, the exit code and what it wrote to stderr.
- */
+/** Run the bundle from `cwd`, send the MCP handshake and a tool listing, close stdin; resolves with both answers, the exit code and stderr. */
 function driveBundle(file, cwd, args) {
   return new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, [file, ...args], { cwd, env: { PATH: process.env.PATH }, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -110,7 +71,6 @@ function driveBundle(file, cwd, args) {
     child.stdout.on('data', (chunk) => {
       stdout += chunk;
       const answers = stdout.split('\n').filter(Boolean);
-      // Both answers are in: the agent is gone, so close stdin.
       if (answers.length >= 2 && child.stdin.writable) child.stdin.end();
     });
     child.stderr.on('data', (chunk) => {
@@ -138,7 +98,7 @@ describe(
     let embedded;
     const manifest = JSON.parse(readFileSync(join(BRIDGE_ROOT, 'package.json'), 'utf8'));
 
-    // Build the artifact ONCE into a temp dir, shared by every assertion below.
+    // One build, shared by every assertion below.
     before(
       async () => {
         workDir = mkdtempSync(join(tmpdir(), 'bridge-artifact-contract-'));

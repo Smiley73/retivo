@@ -1,13 +1,5 @@
-/**
- * Persistent header badge surfacing the cloud-sync state.
- *
- * Tailwind-defaults styled. Per-state color is an AA-safe
- * Tailwind-default pair (contrast.ts); the spin on the in-flight
- * states uses Tailwind `animate-spin` and respects
- * `prefers-reduced-motion` via `motion-reduce:animate-none`. The badge pill is a React Aria `DialogTrigger` that opens
- * the unified details popover in every state (`SyncDetailsPopover.tsx`,
- * React Aria `Popover`).
- */
+// Header badge for the cloud-sync state: a React Aria `DialogTrigger` pill that opens SyncDetailsPopover in every state.
+// Tones are AA-safe pairs (contrast.ts); the spin on in-flight states respects `prefers-reduced-motion`.
 import React, { useEffect, useState } from 'react';
 import { Button, DialogTrigger } from 'react-aria-components';
 import { useSync } from './SyncContext.js';
@@ -20,9 +12,6 @@ const BADGE_BASE =
   'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 ' +
   'text-xs font-medium transition-colors';
 
-// Per-state tone (legacy `.sync-badge--*`). Every state is now an
-// interactive trigger that opens the details popover, so all get the
-// `cursor-pointer` affordance.
 const BADGE_TONE: Record<SyncKind, string> = {
   synced: 'cursor-pointer border-positive/40 bg-surface-sunken text-positive',
   'syncing-push': 'cursor-pointer border-info/40 bg-surface-sunken text-info',
@@ -33,16 +22,11 @@ const BADGE_TONE: Record<SyncKind, string> = {
   stale:
     'cursor-pointer border-warning/40 bg-surface-sunken text-warning hover:border-warning',
   pending: 'cursor-pointer border-info/40 bg-surface-sunken text-info',
-  // Rollback detected: a security-relevant rejection of a
-  // stale/tampered server view. Reuses the negative palette (already
-  // AA-registered in contrast.ts). The badge still opens the details
-  // popover (showing the security explanation), but there is no
-  // client-side action that fixes a rollback.
+  // A security-relevant rejection of a stale or tampered server view: the popover explains it, but no client-side
+  // action fixes a rollback.
   'rollback-detected':
     'cursor-pointer border-negative/40 bg-surface-sunken text-negative',
-  // Deploy-time schema-ahead: a calm "update
-  // needed" state, not a sync error — reuses the same `info` tone as
-  // the in-flight states (already AA-registered in contrast.ts).
+  // A calm "update needed" state, not a sync error.
   'update-available': 'cursor-pointer border-info/40 bg-surface-sunken text-info',
 };
 
@@ -50,10 +34,7 @@ export function SyncBadge() {
   const { state, nextRetryAt } = useSync();
   const spinning =
     state.kind === 'syncing-push' || state.kind === 'syncing-pull';
-  // Live countdown while waiting out an error-state backoff.
-  // `now` only ticks while there is a
-  // deadline to count down to, and the interval is torn down on leaving the
-  // error state and on unmount — it does not exist at all otherwise.
+  // Live countdown during an error-state backoff; the interval exists only while there is a deadline.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (state.kind !== 'error' || nextRetryAt === null) return;
@@ -64,18 +45,10 @@ export function SyncBadge() {
   const secondsLeft =
     state.kind === 'error' && nextRetryAt !== null ? secondsUntil(nextRetryAt, now) : null;
   return (
-    // `aria-live` rides the inert wrapper, not the focusable button: a
-    // live region on the interactive element itself is announced
-    // unreliably (some AT suppress it while the control has focus). The
-    // `title` hover tooltip also rides this wrapper: `DialogTrigger`
-    // renders no DOM of its own, so the wrapper covers exactly the pill,
-    // and React Aria's `Button` prop type omits the global `title` attr.
-    // Both `title` and this wrapper's announced text are derived from
-    // `state` alone (never `secondsLeft`), so they change on state
-    // transitions only — the per-second countdown below is visible
-    // decoration, excluded from announced content via `aria-hidden` on the
-    // digits, so a screen reader is never re-announced once a second for
-    // the length of the wait.
+    // `aria-live` rides the inert wrapper: a live region on the focusable button is announced unreliably (some AT
+    // suppress it while the control has focus). `title` rides it too: DialogTrigger renders no DOM and React Aria's
+    // `Button` omits the global `title`. Both derive from `state` alone and the per-second countdown is `aria-hidden`,
+    // so a screen reader is not re-announced every second.
     <span
       className="relative inline-flex items-center gap-1.5"
       aria-live="polite"
@@ -85,9 +58,6 @@ export function SyncBadge() {
         <Button
           type="button"
           className={`${BADGE_BASE} ${BADGE_TONE[state.kind]}`}
-          // Stable state hook (visual tone is now utility classes; the
-          // semantic state is exposed here so consumers/tests observe it
-          // without coupling to styling).
           data-sync-state={state.kind}
         >
           <span
@@ -99,13 +69,8 @@ export function SyncBadge() {
             {iconFor(state.kind)}
           </span>
           {secondsLeft !== null ? (
-            // The visible countdown is entirely
-            // decorative (outer `aria-hidden`) — a screen reader must never
-            // hear the ungrammatical "Retrying in s" left behind once only
-            // the digits were hidden. The accessible name instead comes from
-            // an `sr-only` sibling carrying `textFor(state)` ("Sync failed"),
-            // so it still only changes on state transitions, never once a
-            // second.
+            // The visible countdown is decorative and fully `aria-hidden`, so a screen reader never hears a dangling
+            // "Retrying in s"; the `sr-only` sibling carries `textFor(state)`, which changes only on state transitions.
             <span>
               <span aria-hidden="true">
                 Retrying in <span aria-hidden="true">{secondsLeft}</span>s
@@ -122,9 +87,6 @@ export function SyncBadge() {
   );
 }
 
-// All status icons share dimensions + stroke conventions so the badge
-// looks consistent across states. The wrapper sets size + stroke once
-// and each per-state component supplies its own paths.
 function StatusSvg({ children }: { children: React.ReactNode }) {
   return (
     <svg
@@ -145,7 +107,6 @@ function StatusSvg({ children }: { children: React.ReactNode }) {
 
 function iconFor(kind: ReturnType<typeof useSync>['state']['kind']): React.ReactNode {
   switch (kind) {
-    // Cloud + check: synced.
     case 'synced':
       return (
         <StatusSvg>
@@ -153,8 +114,6 @@ function iconFor(kind: ReturnType<typeof useSync>['state']['kind']): React.React
           <polyline points="9.5 13.5 11 15 14.5 11.5" />
         </StatusSvg>
       );
-    // Circular arrow: in-flight sync (the existing CSS spin animation
-    // rotates the icon span, so the SVG inherits the rotation).
     case 'syncing-push':
     case 'syncing-pull':
       return (
@@ -163,7 +122,6 @@ function iconFor(kind: ReturnType<typeof useSync>['state']['kind']): React.React
           <polyline points="21 3 21 8 16 8" />
         </StatusSvg>
       );
-    // Cloud crossed out: offline.
     case 'offline':
       return (
         <StatusSvg>
@@ -172,7 +130,6 @@ function iconFor(kind: ReturnType<typeof useSync>['state']['kind']): React.React
           <line x1="3" y1="3" x2="21" y2="21" />
         </StatusSvg>
       );
-    // Alert triangle: sync failed (clickable to retry).
     case 'error':
       return (
         <StatusSvg>
@@ -181,7 +138,6 @@ function iconFor(kind: ReturnType<typeof useSync>['state']['kind']): React.React
           <line x1="12" y1="17" x2="12" y2="17" />
         </StatusSvg>
       );
-    // Cloud-with-down-arrow: server has changes, click to refresh.
     case 'stale':
       return (
         <StatusSvg>
@@ -190,7 +146,6 @@ function iconFor(kind: ReturnType<typeof useSync>['state']['kind']): React.React
           <polyline points="9.5 14.5 12 17 14.5 14.5" />
         </StatusSvg>
       );
-    // Cloud-with-up-arrow: local edits queued, awaiting push.
     case 'pending':
       return (
         <StatusSvg>
@@ -199,7 +154,6 @@ function iconFor(kind: ReturnType<typeof useSync>['state']['kind']): React.React
           <polyline points="9.5 12.5 12 10 14.5 12.5" />
         </StatusSvg>
       );
-    // Shield-with-alert: freshness rollback / tampered server view.
     case 'rollback-detected':
       return (
         <StatusSvg>
@@ -208,9 +162,7 @@ function iconFor(kind: ReturnType<typeof useSync>['state']['kind']): React.React
           <line x1="12" y1="16" x2="12" y2="16" />
         </StatusSvg>
       );
-    // Circular arrow (same glyph as syncing-push/-pull, rendered static —
-    // `spinning` below deliberately excludes this kind): a newer app
-    // version is available, reload to update.
+    // Same glyph as syncing-push/-pull but static: `spinning` excludes this kind.
     case 'update-available':
       return (
         <StatusSvg>

@@ -1,13 +1,5 @@
-/**
- * SignupApprovalService.requestApproval unit tests — the approval-mail
- * content contract.
- *
- * Locks that the owner approval email names the applicant (first + last +
- * email) in both the subject and the body, and that the applicant's
- * birthdate is NEVER included (PII). SES is forced "enabled" via
- * a SES_ENDPOINT config value so the SendEmailCommand is captured rather
- * than logged.
- */
+// SignupApprovalService.requestApproval mail contract: the owner approval email names the applicant (first, last, email) in subject and body and never includes
+// the birthdate (PII). SES is forced on through a SES_ENDPOINT config value so the SendEmailCommand is captured.
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { SESClient } from '@aws-sdk/client-ses';
@@ -32,8 +24,6 @@ function buildConfig(
     SES_FROM_ADDRESS: 'owner@example.com',
     APPROVER_EMAIL: 'owner@example.com',
     WEB_ORIGIN: 'http://localhost:5173',
-    // Force SES on so sendApprovalMail issues a SendEmailCommand we can
-    // capture (otherwise it only logs the link in non-prod).
     SES_ENDPOINT: 'http://localhost:4566',
     NODE_ENV: 'test',
     TABLE_USER: 'User',
@@ -108,9 +98,7 @@ describe('SignupApprovalService.requestApproval — approval-mail content', () =
     const sent: SendEmailCommand[] = [];
     const svc = buildService(sent);
 
-    // requestApproval never receives birthdate; assert defence-in-depth
-    // that the rendered mail carries no date-like PII even if a value
-    // leaked into scope.
+    // requestApproval never receives birthdate; this asserts defence in depth that the mail carries no date-like PII even if a value leaked into scope.
     await svc.requestApproval({
       userId: 'u-2',
       email: 'jane@example.com',
@@ -159,29 +147,19 @@ describe('SignupApprovalService.requestApproval — approval-mail content', () =
       email: 'h@example.com',
     });
 
-    // Raw token issued to the caller / mail link: 43-char base64url (32 bytes).
     expect(approvalToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    // Row stored under the DIGEST, never the raw token.
     expect(insert).toHaveBeenCalledTimes(1);
     const storedRow = insert.mock.calls[0][0] as SignupApprovalRow;
     expect(storedRow.approvalToken).toBe(sha256(approvalToken));
     expect(storedRow.approvalToken).not.toBe(approvalToken);
-    // The raw token rides the mail link; the digest never appears in it.
     const { text } = dataOf(sent[0]);
     expect(text).toContain(encodeURIComponent(approvalToken));
     expect(text).not.toContain(sha256(approvalToken));
   });
 });
 
-/**
- * SignupApprovalService.approve → sendApprovedNotificationMail unit tests.
- *
- * Locks the best-effort "you're approved" user notice: it goes to the
- * approved user (not the owner), links to `/login`, personalises with the
- * escaped first name, and never lets a SES outage or
- * a user-row read failure break the approval. Dev-mode logs with
- * emailFingerprint instead of sending.
- */
+// The best-effort "you're approved" notice goes to the approved user (not the owner), links to /login, escapes the first name, and never lets a SES outage
+// or user-row read failure break the approval; dev mode logs emailFingerprint instead of sending.
 describe('SignupApprovalService.approve — approved-user notification', () => {
   const APPROVAL_TOKEN = 'approval-token-1';
   const USER_ID = 'u-approved';
@@ -208,8 +186,6 @@ describe('SignupApprovalService.approve — approved-user notification', () => {
     findByIdImpl?: () => Promise<UserRow | null>;
     sesThrows?: boolean;
     sesEnabled?: boolean;
-    /** Override the atomic approve transaction's `doc.send` (defaults to a
-     *  resolve). Used to drive the ConditionalCheckFailed / transient branches. */
     docSendImpl?: () => Promise<unknown>;
   }): Harness {
     const sesSends: SendEmailCommand[] = [];
@@ -234,8 +210,6 @@ describe('SignupApprovalService.approve — approved-user notification', () => {
     const users = {
       findById: findByIdMock,
       setApprovalStatus,
-      // approve() folds a conditional User update into an atomic
-      // TransactWrite via this builder (returns the update parts).
       approveSignupUpdate: jest.fn((userId: string) => ({
         tableName: 'User',
         key: { userId },
@@ -253,8 +227,7 @@ describe('SignupApprovalService.approve — approved-user notification', () => {
     const auth = {
       record: jest.fn().mockResolvedValue(undefined),
     } as unknown as AuthEventsRepository;
-    // approve()'s atomic delete-token + user-update transaction. Defaults
-    // to a clean commit; `docSendImpl` drives the cancellation branches.
+    // approve()'s atomic delete-token plus user-update transaction commits by default; `docSendImpl` drives the cancellation branches.
     const doc = {
       send: jest.fn(opts.docSendImpl ?? (() => Promise.resolve({}))),
     } as unknown as DynamoDBDocumentClient;
@@ -294,12 +267,10 @@ describe('SignupApprovalService.approve — approved-user notification', () => {
 
     expect(sesSends).toHaveLength(1);
     const cmd = sesSends[0];
-    // Recipient is the approved user, NOT the owner.
     expect(cmd.input.Destination!.ToAddresses).toEqual([USER_EMAIL]);
     const { text, html } = bodyOf(cmd);
     expect(text).toContain('http://localhost:5173/login');
     expect(html).toContain('http://localhost:5173/login');
-    // First name is escaped in the HTML body and never appears raw.
     expect(html).toContain('Hi A&lt;b&gt;&amp;,');
     expect(html).not.toContain('A<b>&,');
   });
@@ -319,7 +290,6 @@ describe('SignupApprovalService.approve — approved-user notification', () => {
       userId: USER_ID,
       email: USER_EMAIL,
     });
-    // A send was attempted (and threw); the approval still succeeded.
     expect(sesSends).toHaveLength(1);
   });
 
@@ -333,7 +303,6 @@ describe('SignupApprovalService.approve — approved-user notification', () => {
       email: USER_EMAIL,
     });
     expect(findByIdMock).toHaveBeenCalledWith(USER_ID);
-    // findById threw before the send — no SES call.
     expect(sesSends).toHaveLength(0);
   });
 
@@ -376,8 +345,7 @@ describe('SignupApprovalService.approve — approved-user notification', () => {
           new TransactionCanceledException({
             message: 'Transaction cancelled, please refer to CancellationReasons',
             $metadata: {},
-            // Item 1 (the conditional User flip) failed — token consumed / user
-            // no longer pending (raced with a decline or already approved).
+            // The conditional User flip failed: the token was consumed or the user is no longer pending (raced with a decline or already approved).
             CancellationReasons: [{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }],
           }),
         ),
@@ -396,8 +364,7 @@ describe('SignupApprovalService.approve — approved-user notification', () => {
 
   it('maps a surviving transient transaction conflict to 503 APPROVAL_WRITE_CONFLICT', async () => {
     const { svc } = buildApproveHarness({
-      // Every attempt cancels for a purely transient reason → runTransactWrite
-      // exhausts its bounded retry and throws TransientTransactionError.
+      // Every attempt cancels transiently, so runTransactWrite exhausts its bounded retry and throws TransientTransactionError.
       docSendImpl: () =>
         Promise.reject(
           new TransactionCanceledException({
@@ -441,9 +408,8 @@ describe('SignupApprovalService.approve — approved-user notification', () => {
 
     expect(sesSends).toHaveLength(0);
     expect(logSpy).toHaveBeenCalledTimes(1);
-    // The dev-mode log now uses structured-object form ({ emailFingerprint, loginLink }).
     const logArg = logSpy.mock.calls[0][0] as { emailFingerprint: string; loginLink: string };
-    // Fingerprint, not the raw recipient address (no PII in logs).
+    // A fingerprint, not the raw recipient address (no PII in logs).
     expect(logArg.emailFingerprint).toBe(emailFingerprint(USER_EMAIL));
     expect(logArg.emailFingerprint).not.toContain(USER_EMAIL);
     expect(logArg.loginLink).toContain('http://localhost:5173/login');

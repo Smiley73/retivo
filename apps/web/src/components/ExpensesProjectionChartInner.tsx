@@ -1,14 +1,6 @@
 /**
- * Inner SVG-engine implementation for the Expenses-page projection chart.
- * Lazy-imported by `ExpensesProjectionChart`.
- *
- * Two stacked area bands: Essential (baseline) + Discretionary (above),
- * with Total implied by the combined stack height — over per-month rows.
- * Y is annualized run-rate ($/yr); X is `fractionalYear` so transitions
- * land on the actual start/end month. When `singleSeriesLabel` is set,
- * only the `total` line renders.
- *
- * Marker labels float in the top margin, slot-staggered.
+ * Inner SVG-engine chart for the Expenses-page projection: Essential and Discretionary bands over per-month rows, or
+ * only the `total` line when `singleSeriesLabel` is set.
  */
 import React from 'react';
 import type { ExpenseProjectionMonthlyPoint } from '../lib/expense-projection';
@@ -125,12 +117,8 @@ const InnerChart: React.FC<InnerProps> = ({
   );
   const xs = rows.map((r) => r.fractionalYear);
   const xMin = Math.floor(xs[0]);
-  // Always-monthly chart. Death markers (`kind: 'death'`) arrive as the
-  // integer `deathYear`; map each to the December sample
-  // (`deathYear + 11/12`) — the last monthly data point — so the marker
-  // hugs the data. Retirement markers (a true fractional date) are
-  // rendered as-is. Applied to BOTH the reference line AND the `xMax`
-  // derivation so December data isn't clipped by a raw integer x.
+  // Death markers arrive as the integer `deathYear` and map to the December sample so they hug the
+  // last monthly point; applied to the reference line and `xMax`.
   const mappedMarkers = markers.map((m) =>
     m.kind === 'death'
       ? { ...m, fractionalYear: Math.floor(m.fractionalYear) + 11 / 12 }

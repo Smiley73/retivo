@@ -1,10 +1,5 @@
-/**
- * Request DTOs for the enforced second-factor (MFA) endpoints.
- * All are validated by the global ValidationPipe with whitelist +
- * forbidNonWhitelisted. Codes / challenge tokens are never logged.
- *
- * See docs/security.md, "The second factor".
- */
+// Request DTOs for the MFA endpoints, validated by the global ValidationPipe; codes and challenge tokens are never logged. See
+// docs/security.md, "The second factor".
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -36,30 +31,17 @@ import {
   type StepUpFactorMethod,
 } from './auth.dto.js';
 
-/**
- * The MFA methods the verify endpoint dispatches on. `passkey` carries a WebAuthn assertion instead
- * of a `code`; the two other factors carry a `code`.
- */
+// Methods the verify endpoint dispatches on; `passkey` carries a WebAuthn assertion instead of a `code`.
 const MFA_VERIFY_METHODS = ['totp', 'email_otp', 'passkey'] as const;
 
-/**
- * Code-bearing factors (everything except the WebAuthn `passkey` assertion).
- * Derived from {@link MFA_VERIFY_METHODS} so the two lists never drift; the
- * resulting tuple keeps the readonly typing the `@IsIn`/`@ValidateIf` usages
- * need.
- */
+// Code-bearing factors, derived from MFA_VERIFY_METHODS so the lists cannot drift.
 const MFA_CODE_METHODS = MFA_VERIFY_METHODS.filter(
   (m): m is Exclude<(typeof MFA_VERIFY_METHODS)[number], 'passkey'> => m !== 'passkey',
 );
 
-/**
- * Class-level XOR enforcement for the verify body's factor proof: a
- * code factor MUST carry a `code` and MUST NOT carry a `response`; `method:
- * 'passkey'` MUST carry a `response` and MUST NOT carry a `code`. `@ValidateIf`
- * alone only *skips* the unused field's validation, leaving a whitelisted-but-
- * unused proof field on the body; a class-level constraint actively REJECTS the
- * wrong-shaped pair so the mismatch surfaces as a 400.
- */
+// Class-level XOR for the verify proof: a code factor carries a `code` and no `response`; `passkey` a `response` and
+// no `code`. `@ValidateIf` alone only skips the unused field, so this actively rejects the wrong-shaped pair as a
+// 400.
 @ValidatorConstraint({ name: 'mfaProofMatchesMethod', async: false })
 class MfaProofMatchesMethodConstraint implements ValidatorConstraintInterface {
   validate(_value: unknown, args: ValidationArguments): boolean {
@@ -73,7 +55,7 @@ class MfaProofMatchesMethodConstraint implements ValidatorConstraintInterface {
       // A passkey assertion must not carry an unused code.
       return dto.code === undefined;
     }
-    // An unknown method is rejected by `@IsIn` on `method`; don't double-fail.
+    // An unknown method is rejected by `@IsIn` on `method`; do not double-fail.
     return true;
   }
 
@@ -83,12 +65,8 @@ class MfaProofMatchesMethodConstraint implements ValidatorConstraintInterface {
 }
 
 /**
- * Body for `POST /auth/mfa/verify`. Carries the 5-min challenge token minted by
- * login, the chosen `method`, and the factor proof: the user-entered `code` for
- * the two code factors, or a WebAuthn `response` for `method: 'passkey'`.
- * Plus an optional remember-this-device flag. The challenge token is an RS256
- * JWT (bounded generously, not the 6-digit code). The existing code bound is
- * retained for TOTP / Email-OTP compatibility.
+ * Body for `POST /auth/mfa/verify`: the challenge token, the `method`, the factor proof and an optional
+ * remember-this-device flag.
  */
 export class MfaVerifyDto {
   @IsString()
@@ -97,18 +75,11 @@ export class MfaVerifyDto {
   challengeToken!: string;
 
   @IsIn(MFA_VERIFY_METHODS as readonly string[])
-  // Class-level XOR: the chosen method's factor proof must be present and the
-  // OTHER proof field absent — a code factor a `code` with no `response`, a
-  // passkey a `response` with no `code`. Anchored on `method` so it
-  // runs once per body.
+  // Anchored on `method` so the XOR runs once per body.
   @Validate(MfaProofMatchesMethodConstraint)
   method!: (typeof MFA_VERIFY_METHODS)[number];
 
-  // Required for the two code factors; rejected (must be absent) for passkey,
-  // whose proof rides in `response`. `ValidateIf` switches the required-when
-  // validation on the chosen method; the class-level
-  // MfaProofMatchesMethodConstraint additionally REJECTS a `code` sent with
-  // `method: 'passkey'` so the unused field can't ride along.
+  // Required for the code factors and rejected for passkey, whose proof rides in `response`.
   @ValidateIf(
     (o: MfaVerifyDto) => (MFA_CODE_METHODS as readonly string[]).includes(o.method),
   )
@@ -117,26 +88,16 @@ export class MfaVerifyDto {
   @MaxLength(64)
   code?: string;
 
-  // Required only for `method: 'passkey'` (the WebAuthn assertion belonging to
-  // the challenge user). Validated as the same envelope shape as the
-  // passkey-login finish body; the cryptographic verification happens in
-  // PasskeyAssertionService, not here. The class-level
-  // MfaProofMatchesMethodConstraint additionally REJECTS a `response` sent with
-  // a code factor so the unused field can't ride along.
+  // Required only for passkey; validated as the passkey-login finish envelope, with verification in
+  // PasskeyAssertionService.
   @ValidateIf((o: MfaVerifyDto) => o.method === 'passkey')
   @IsObject()
   @ValidateNested()
   @Type(() => WebAuthnAuthenticationResponseDto)
   response?: WebAuthnAuthenticationResponseDto;
 
-  // Client-generated UUID, the same value the login body carried. Needed to
-  // mint the (userId, deviceId)-keyed device-trust row on remember-device, and
-  // to carry the `deviceId` claim into the issued session so the sync
-  // controller's `dto.deviceId === me.deviceId` check holds. Device binding:
-  // `mfa/verify` requires this to equal
-  // the `deviceId` claim signed into the challenge token at login — a mismatch
-  // is rejected as `MFA_CHALLENGE_INVALID` before any factor/session/trust work,
-  // so a captured challenge cannot complete for a substituted device.
+  // Client-generated UUID, the login body value. `mfa/verify` requires it to equal the `deviceId` signed into the
+  // challenge, so a captured challenge cannot complete for a substituted device.
   @IsUUID()
   deviceId!: string;
 
@@ -145,11 +106,7 @@ export class MfaVerifyDto {
   rememberDevice?: boolean;
 }
 
-/**
- * Body for `POST /auth/mfa/passkey/start`. Pre-session: the only proof of
- * identity is the 5-min challenge token; the returned `allowCredentials` are
- * scoped to the user it names.
- */
+/** Body for `POST /auth/mfa/passkey/start`: pre-session, identified only by the challenge token. */
 export class MfaPasskeyStartDto {
   @IsString()
   @IsNotEmpty()
@@ -158,8 +115,8 @@ export class MfaPasskeyStartDto {
 }
 
 /**
- * Body for `POST /auth/mfa/email/send`. Pre-session: the only proof of identity
- * is the challenge token, so a send is only honoured for the user it names.
+ * Body for `POST /auth/mfa/email/send`: pre-session, so a send is only honoured for the user the challenge token
+ * names.
  */
 export class MfaEmailSendDto {
   @IsString()
@@ -169,11 +126,8 @@ export class MfaEmailSendDto {
 }
 
 /**
- * Body for `POST /auth/mfa/totp/enroll/confirm`.
- * `code` is the 6-digit TOTP code from the authenticator app, verified against
- * the pending secret before promotion; `stepUp` is the fresh-proof gate this
- * write (the one that actually persists the factor) now requires — see
- * `FactorEnrollmentStepUpProofDto`.
+ * Body for `POST /auth/mfa/totp/enroll/confirm`: the TOTP `code` plus `stepUp`, the fresh-proof gate on the write
+ * that persists the factor.
  */
 export class MfaEnrollConfirmDto {
   @IsString()
@@ -190,12 +144,8 @@ export class MfaEnrollConfirmDto {
 }
 
 /**
- * Body for `POST /auth/mfa/totp/disable`.
- * The caller's current password is verified server-side, so disabling the
- * authenticator requires explicit knowledge-factor proof. No live TOTP code is collected. When
- * `AUTH_MFA_ENFORCED` is on the caller ALSO carries a fresh step-up factor proof
- * (`method` + `code`|`response`); the proof fields are OPTIONAL at the DTO level
- * (the flag-off floor is password-only).
+ * Body for `POST /auth/mfa/totp/disable`: the current password, verified server-side, and no live TOTP code. With
+ * `AUTH_MFA_ENFORCED` on, a fresh step-up proof too (optional at the DTO level).
  */
 export class MfaDisableDto {
   @IsString()
@@ -221,10 +171,7 @@ export class MfaDisableDto {
   response?: WebAuthnAuthenticationResponseDto;
 }
 
-/**
- * Body for `POST /auth/mfa/trusted-devices/forget`. An explicit id list forgets
- * those devices; an omitted list forgets every trusted device for the user.
- */
+/** Body for `POST /auth/mfa/trusted-devices/forget`: an id list, or every device when omitted. */
 export class TrustedDeviceForgetDto {
   @IsOptional()
   @IsArray()

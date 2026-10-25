@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aggregateByYear,
   buildAccountBalancesByAccountTableSpec,
   buildAccountBalancesByTypeTableSpec,
   buildBalanceTableSpec,
@@ -18,13 +17,8 @@ import {
   buildStressTestTableSpec,
   buildTaxBurdenTableSpec,
   buildYearByYearTableSpec,
-  buildWithdrawalGuidanceTableSpec,
   buildWithdrawalGuidanceSectionSpec,
-  buildGuidanceNoteSpec,
-  WITHDRAWAL_GUIDANCE_MC_NOTE,
-  WITHDRAWAL_GUIDANCE_EMPTY_NOTE,
   formatDollars,
-  formatPercent,
   type StackTableAccount,
 } from './pdf-tables';
 import {
@@ -67,16 +61,6 @@ function yearRow(over: Partial<YearlyTableRow> = {}): YearlyTableRow {
   };
 }
 
-describe('formatPercent', () => {
-  it('formats a percent value to one decimal with a % suffix', () => {
-    expect(formatPercent(6.5)).toBe('6.5%');
-  });
-
-  it('renders null as an em dash', () => {
-    expect(formatPercent(null)).toBe('—');
-  });
-});
-
 describe('buildYearByYearTableSpec', () => {
   it('returns a { head, body } shape with one body row per input row', () => {
     const spec = buildYearByYearTableSpec([yearRow(), yearRow({ year: 2041 })], 'planned');
@@ -87,9 +71,7 @@ describe('buildYearByYearTableSpec', () => {
   });
 
   it('reads the ALREADY-deflated balance for the active method — no re-deflation', () => {
-    // The balance cells must be the VM's stored values verbatim. A high-CPI MC
-    // path stores its own path-CPI-deflated balance upstream; the adapter must
-    // emit exactly that, never re-scale it.
+    // The balance cells must be the view-model's stored values verbatim; the adapter must not re-deflate a path-CPI-deflated MC balance.
     const planned = buildYearByYearTableSpec(
       [yearRow({ balanceByMethod: { planned: 777, twr: 999 } })],
       'planned',
@@ -104,8 +86,6 @@ describe('buildYearByYearTableSpec', () => {
   });
 
   it('emits today’s-dollar Gains from the VM verbatim', () => {
-    // Two rows with the SAME nominal source would diverge if the adapter
-    // re-deflated; here we assert it passes the already-display value through.
     const spec = buildYearByYearTableSpec(
       [yearRow({ gains: 12345 })],
       'planned',
@@ -163,8 +143,6 @@ describe('buildPortfolioFlowsTableSpec', () => {
   });
 
   it('includes the QCD outflow column, reconciling into net change', () => {
-    // QCD year: the gift left the portfolio, so it is its own below-zero
-    // column and is already subtracted from `netChange` upstream.
     const qcdFlow: PortfolioFlowYear = {
       year: 2050,
       contributions: 0,
@@ -184,7 +162,6 @@ describe('buildPortfolioFlowsTableSpec', () => {
       formatDollars(-1000),
       formatDollars(-3000),
     ]);
-    // The charted columns reconcile to the net-change column.
     expect(
       qcdFlow.contributions +
         qcdFlow.gains +
@@ -244,30 +221,6 @@ describe('report inventory adapters', () => {
   it('all inventory adapters handle empty input', () => {
     expect(buildReportExpensesTableSpec([]).body).toEqual([]);
     expect(buildReportIncomeTableSpec([]).body).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Per-chart data tables
-// ---------------------------------------------------------------------------
-
-describe('aggregateByYear', () => {
-  it('sums the selected fields per calendar year, preserving first-seen order', () => {
-    const rows = [
-      { year: 2041, a: 10, b: 1 },
-      { year: 2040, a: 100, b: 2 },
-      { year: 2040, a: 50, b: 3 },
-      { year: 2041, a: 20, b: 4 },
-    ];
-    const out = aggregateByYear(rows, ['a', 'b']);
-    expect(out.map((r) => r.year)).toEqual([2041, 2040]);
-    expect(out[0]).toEqual({ year: 2041, a: 30, b: 5 });
-    expect(out[1]).toEqual({ year: 2040, a: 150, b: 5 });
-  });
-
-  it('passes one-per-year rows through with their lone value', () => {
-    const out = aggregateByYear([{ year: 2040, v: 7 }], ['v']);
-    expect(out).toEqual([{ year: 2040, v: 7 }]);
   });
 });
 
@@ -340,21 +293,22 @@ describe('buildStressTestTableSpec', () => {
 });
 
 describe('buildCashflowTableSpec', () => {
+  const point = (year: number, essential: number) => ({
+    fractionalYear: year,
+    year,
+    month0: 0,
+    essential,
+    discretionary: 5,
+    taxes: 1,
+    total: essential + 6,
+    earned: 0,
+    withdrawal: 0,
+    totalIncome: 50,
+    shortfallBase: 0,
+    shortfallHeight: 2,
+  });
+
   it('aggregates monthly samples to annual essential/discretionary/taxes/income/shortfall', () => {
-    const point = (year: number, essential: number) => ({
-      fractionalYear: year,
-      year,
-      month0: 0,
-      essential,
-      discretionary: 5,
-      taxes: 1,
-      total: essential + 6,
-      earned: 0,
-      withdrawal: 0,
-      totalIncome: 50,
-      shortfallBase: 0,
-      shortfallHeight: 2,
-    });
     const spec = buildCashflowTableSpec([point(2040, 10), point(2040, 20)]);
     expect(spec.head[0]).toEqual([
       'Year',
@@ -368,6 +322,18 @@ describe('buildCashflowTableSpec', () => {
     expect(spec.body[0][1]).toBe(formatDollars(30));
     expect(spec.body[0][2]).toBe(formatDollars(10));
     expect(spec.body[0][5]).toBe(formatDollars(4));
+  });
+
+  it('keeps first-seen year order and sums each year separately', () => {
+    const spec = buildCashflowTableSpec([
+      point(2041, 7),
+      point(2040, 10),
+      point(2040, 20),
+      point(2041, 1),
+    ]);
+    expect(spec.body.map((r) => r[0])).toEqual(['2041', '2040']);
+    expect(spec.body[0][1]).toBe(formatDollars(8));
+    expect(spec.body[1][1]).toBe(formatDollars(30));
   });
 });
 
@@ -392,7 +358,6 @@ describe('buildIncomeBreakdownTableSpec', () => {
       point({ ss: 100, withdrawal: 50 }),
       point({ ss: 100, withdrawal: 50 }),
     ]);
-    // ss + withdrawal are non-zero; the other four stripes are dropped.
     expect(spec.head[0]).toEqual(['Year', 'Social Security', 'Withdrawal']);
     expect(spec.body[0]).toEqual([
       '2040',
@@ -442,7 +407,6 @@ describe('buildRmdTableSpec', () => {
       'of which surplus',
       'Shortfall',
     ]);
-    // The surplus cell sits BETWEEN RMD met and Shortfall.
     expect(spec.body[0]).toEqual([
       '2040',
       formatDollars(5000),
@@ -488,15 +452,9 @@ describe('buildRothTaxFreeTableSpec', () => {
       ['Alex', expect.any(String), formatDollars(45_000)],
       ['401k', expect.any(String), formatDollars(12_000)],
     ]);
-    // The employer description must state the OPPOSITE of withdrawable
-    // tax-free (positive form, not just the absence of one literal phrase)...
     expect(spec.body[0][1]).not.toBe(spec.body[1][1]);
     expect(spec.body[1][1]).toMatch(/\bnot tax-free\b/i);
-    // ...and no header cell or the employer body cell may pair "withdraw" with
-    // an UNNEGATED "tax-free" within ~20 characters, in either order — that
-    // pairing is exactly what the binding constraint forbids. A "not tax-free"
-    // occurrence is excluded so the legitimate disclaimer above doesn't
-    // self-trip the guard it exists to satisfy.
+    // No header or employer cell may pair "withdraw" with an unnegated "tax-free" within ~20 characters, in either order; "not tax-free" is excluded so the legitimate disclaimer does not trip the guard.
     const withdrawTaxFreeProximity =
       /(withdraw\w*[^.]{0,20}(?<!not )tax-free|(?<!not )tax-free[^.]{0,20}withdraw\w*)/i;
     for (const cell of [...spec.head[0], spec.body[1][1]]) {
@@ -510,8 +468,6 @@ describe('buildRothTaxFreeTableSpec', () => {
       { id: 'e', kind: 'employer', label: '401k', amount: 12_000 },
     ]);
     const nonAscii = /[^\x00-\x7F—]/;
-    // The generated description + amount cells stay ASCII (em dash only); the
-    // user-supplied label passes through verbatim (checked separately below).
     for (const row of [...spec.head, ...spec.body]) {
       for (const cell of row.slice(1)) expect(cell).not.toMatch(nonAscii);
     }
@@ -587,7 +543,6 @@ describe('buildAccountBalancesByTypeTableSpec', () => {
       accounts,
       stackTypeBucketsForYear,
     );
-    // Only Tax-deferred (401k) + Taxable (brokerage) are non-zero.
     expect(spec.head[0]).toEqual(['Year', 'Tax-deferred', 'Taxable']);
     expect(spec.body[0]).toEqual([
       '2040',
@@ -611,14 +566,7 @@ describe('buildAccountBalancesByAccountTableSpec', () => {
   });
 });
 
-// The expense PDF tables source their annual figures straight from the
-// headline annual engine (`projectExpensesByYear` /
-// `projectExpensesByCategoryYear`) for the SAME resolved expenses / context /
-// display basis the monthly chart rows are built from. These tests lock that
-// contract: the builder formats the annual rows it is handed verbatim, and a
-// future-dollars PARTIAL (mid-year-start) year ties out to the engine exactly —
-// a monthly run-rate rollup would diverge there (mean-of-active-months ≠
-// mean-of-all-12 when inflation ≠ 0).
+// Expense tables format the annual rows from projectExpensesByYear/ByCategoryYear verbatim; a monthly run-rate rollup would diverge on a partial year with inflation (mean of active months ≠ mean of 12).
 const expenseCtx = (
   overrides: Partial<ProjectionContext> = {},
 ): ProjectionContext => ({
@@ -676,10 +624,6 @@ describe('buildExpensesTotalTableSpec', () => {
   });
 
   it('ties out to projectExpensesByYear for a future-dollars mid-year-start partial year', () => {
-    // Mid-year (March) age-65 start in 2030 → a PARTIAL year, with 3% future
-    // inflation on. A monthly mean-of-active-months rollup would diverge from
-    // the engine's active-months × year-mean-factor here; sourcing the table
-    // from the engine ties it out exactly.
     const exp = resolvedExpense('e', {
       amount: 1000,
       frequency: 'monthly',
@@ -690,7 +634,6 @@ describe('buildExpensesTotalTableSpec', () => {
     const ctx = expenseCtx({ inflation: { ratePct: 3 } });
     const annual = projectExpensesByYear([exp], ctx, { from: 2030, to: 2031 });
     const partial = annual.find((r) => r.year === 2030)!;
-    // Sanity: the start month really makes 2030 a partial year (< full year).
     const full = annual.find((r) => r.year === 2031)!;
     expect(partial.essential).toBeGreaterThan(0);
     expect(partial.essential).toBeLessThan(full.essential);
@@ -724,7 +667,6 @@ describe('buildExpensesByCategoryTableSpec', () => {
       [annualCat(2040, { h: 30_000, m: 0 })],
       meta,
     );
-    // Medical is all-zero → dropped.
     expect(spec.head[0]).toEqual(['Year', 'Housing']);
     expect(spec.body[0]).toEqual(['2040', formatDollars(30_000)]);
   });
@@ -756,11 +698,6 @@ describe('buildExpensesByCategoryTableSpec', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Projected withdrawals (the PDF's final section).
-// ---------------------------------------------------------------------------
-
-/** Build a minimal `GuidanceYearRow` for the withdrawal-guidance tests. */
 function guidanceYear(
   partial: Partial<GuidanceYearRow> & { year: number },
 ): GuidanceYearRow {
@@ -788,14 +725,21 @@ const EXPECTED_GUIDANCE_HEAD = [
 
 const NO_OWNERS: ReadonlyMap<string, string> = new Map();
 
-describe('buildWithdrawalGuidanceTableSpec', () => {
-  it('emits the six-column header', () => {
-    const spec = buildWithdrawalGuidanceTableSpec([], NO_OWNERS);
-    expect(spec.head).toEqual([EXPECTED_GUIDANCE_HEAD]);
-  });
+const MC_NOTE =
+  'Projected withdrawals reflect the deterministic projection; not available for Monte Carlo bases.';
+const EMPTY_NOTE = 'No portfolio withdrawals are projected for this scenario.';
+const NOTE_HEAD = [['Projected withdrawals']];
 
+// Every case here passes a year with a withdrawal, so the section spec returns the full table.
+const guidanceTable = (
+  displayRows: GuidanceYearRow[],
+  ownerNameById: ReadonlyMap<string, string>,
+) =>
+  buildWithdrawalGuidanceSectionSpec({ isMcBasisActive: false, displayRows, ownerNameById });
+
+describe('withdrawal guidance table', () => {
   it('one year + one plain account → summary row then one indented sub-row', () => {
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [
         guidanceYear({
           year: 2040,
@@ -816,10 +760,8 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       ],
       NO_OWNERS,
     );
-    // Two body rows precede the two trailing notes.
     const content = spec.body.slice(0, -2);
     expect(content).toHaveLength(2);
-    // Summary row: cross-level cells are em dashes.
     expect(content[0]).toEqual([
       '2040',
       formatDollars(40000),
@@ -828,7 +770,6 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       formatDollars(5000),
       formatDollars(34000),
     ]);
-    // Account sub-row: indented; RMD 0 → em dash; tax/spendable columns dashed.
     expect(content[1]).toEqual([
       '    Brokerage',
       formatDollars(40000),
@@ -837,7 +778,6 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       '—',
       '—',
     ]);
-    // Every body row has the six-column width.
     for (const row of spec.body) expect(row).toHaveLength(6);
   });
 
@@ -850,7 +790,7 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       requiredCents: 100000,
       accounts: [{ id: 'ira1', name: 'IRA One', requiredCents: 100000 }],
     };
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [
         guidanceYear({
           year: 2040,
@@ -875,18 +815,17 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
     expect(firstCells[1]).toContain('Required minimum: projected from any of');
     expect(firstCells[2]).toBe('    IRA One');
     expect(firstCells[3]).toBe('2041');
-    // Trailing notes are the final two rows.
     expect(firstCells[firstCells.length - 2]).toContain('Required min. shown per account');
     expect(firstCells[firstCells.length - 1]).toContain('After-tax spendable already nets');
   });
 
   it('marks the RMD-shortfall suffix on the year cell only when flagged', () => {
-    const shortfall = buildWithdrawalGuidanceTableSpec(
+    const shortfall = guidanceTable(
       [guidanceYear({ year: 2040, hasWithdrawal: true, hasRmdShortfall: true })],
       NO_OWNERS,
     );
     expect(shortfall.body[0][0]).toBe('2040 — RMD shortfall');
-    const ok = buildWithdrawalGuidanceTableSpec(
+    const ok = guidanceTable(
       [guidanceYear({ year: 2040, hasWithdrawal: true, hasRmdShortfall: false })],
       NO_OWNERS,
     );
@@ -894,7 +833,7 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
   });
 
   it('renders HSA medical/reserve, MIXED split, and MIXED unavailable parentheticals', () => {
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [
         guidanceYear({
           year: 2040,
@@ -944,7 +883,7 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
   });
 
   it('per-account Required min. renders 0 → em dash, > 0 → formatted', () => {
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [
         guidanceYear({
           year: 2040,
@@ -999,7 +938,7 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       requiredCents: 90000,
       accounts: [{ id: 'k1', name: 'Bo 401k', requiredCents: 90000 }],
     };
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [guidanceYear({ year: 2040, hasWithdrawal: true, rmdGroups: [aggGroup, perPlanGroup] })],
       owners,
     );
@@ -1013,7 +952,6 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       "  Required minimum: projected from Bo's Bo 401k (401(k) — required minimum must come from this account)",
     );
     expect(planRow[3]).toBe(formatDollars(900));
-    // Two distinct owners → two distinct group rows.
     const groupRows = spec.body.filter((r) => r[0].includes('Required minimum:'));
     expect(groupRows).toHaveLength(2);
   });
@@ -1027,7 +965,7 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       requiredCents: 10000,
       accounts: [],
     };
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [guidanceYear({ year: 2030, hasWithdrawal: true, rmdGroups: [group] })],
       new Map([['m1', 'Alice']]),
     );
@@ -1046,7 +984,7 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       requiredCents: 5000,
       accounts: [],
     };
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [guidanceYear({ year: 2030, hasWithdrawal: true, rmdGroups: [group] })],
       new Map([['m1', 'Bob']]),
     );
@@ -1057,7 +995,7 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
   });
 
   it('emits no group rows when a year has no rmdGroups', () => {
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [guidanceYear({ year: 2040, hasWithdrawal: true })],
       NO_OWNERS,
     );
@@ -1065,14 +1003,13 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
   });
 
   it('always appends the two trailing clarifying note rows', () => {
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [guidanceYear({ year: 2040, hasWithdrawal: true })],
       NO_OWNERS,
     );
     const notes = spec.body.slice(-2);
     expect(notes[0][0]).toContain('the binding amount is the "Required minimum" instruction row');
     expect(notes[1][0]).toContain('it is not Withdrawn minus Tax & Medicare');
-    // The note rows pad the remaining cells with empty strings.
     expect(notes[0].slice(1)).toEqual(['', '', '', '', '']);
   });
 
@@ -1085,7 +1022,7 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       requiredCents: 12345,
       accounts: [{ id: 'k1', name: 'Plan', requiredCents: 12345 }],
     };
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [
         guidanceYear({
           year: 2040,
@@ -1121,7 +1058,6 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
       ],
       new Map([['m1', 'Owner']]),
     );
-    // Only the em dash is allowed outside the ASCII range in generated text.
     const nonAscii = /[^\x00-\x7F—]/;
     for (const row of [...spec.head, ...spec.body]) {
       for (const cell of row) expect(cell).not.toMatch(nonAscii);
@@ -1129,7 +1065,7 @@ describe('buildWithdrawalGuidanceTableSpec', () => {
   });
 
   it('passes a non-ASCII account name through verbatim (generated scaffolding stays ASCII)', () => {
-    const spec = buildWithdrawalGuidanceTableSpec(
+    const spec = guidanceTable(
       [
         guidanceYear({
           year: 2040,
@@ -1203,11 +1139,9 @@ describe('deflateGuidanceRows', () => {
     expect(acc.hsaEmergencyReserveDollars).toBe(25);
     expect(acc.preTaxWithdrawnDollars).toBe(300);
     expect(acc.postWithdrawnDollars).toBe(200);
-    // Residual structure preserved: labels/ids/booleans untouched.
     expect(acc.accountName).toBe('IRA');
     expect(acc.isMixed).toBe(true);
     expect(acc.postLabel).toBe('Roth');
-    // The 2041 row keeps its (×1) value.
     expect(deflated[1].totalWithdrawnDollars).toBe(1000);
   });
 
@@ -1250,23 +1184,13 @@ describe('buildWithdrawalGuidanceSectionSpec', () => {
     ],
   });
 
-  // Pin the note spec's head to the literal section name independently of the
-  // function's own output, so a future accidental divergence between the note
-  // header and the manifest's `table-withdrawal-guidance` title is caught (the
-  // header now derives from the manifest, but this locks the displayed string).
-  it('note spec head is the literal "Projected withdrawals" section title', () => {
-    expect(buildGuidanceNoteSpec(WITHDRAWAL_GUIDANCE_MC_NOTE).head).toEqual([
-      ['Projected withdrawals'],
-    ]);
-  });
-
   it('MC basis active → the MC note spec', () => {
     const spec = buildWithdrawalGuidanceSectionSpec({
       isMcBasisActive: true,
       displayRows: [withdrawalRow],
       ownerNameById: NO_OWNERS,
     });
-    expect(spec).toEqual(buildGuidanceNoteSpec(WITHDRAWAL_GUIDANCE_MC_NOTE));
+    expect(spec).toEqual({ head: NOTE_HEAD, body: [[MC_NOTE]] });
   });
 
   it('no-withdrawal predicate true → the empty note spec', () => {
@@ -1275,7 +1199,7 @@ describe('buildWithdrawalGuidanceSectionSpec', () => {
       displayRows: [guidanceYear({ year: 2040 })],
       ownerNameById: NO_OWNERS,
     });
-    expect(spec).toEqual(buildGuidanceNoteSpec(WITHDRAWAL_GUIDANCE_EMPTY_NOTE));
+    expect(spec).toEqual({ head: NOTE_HEAD, body: [[EMPTY_NOTE]] });
   });
 
   it('empty rows → the empty note spec', () => {
@@ -1284,7 +1208,7 @@ describe('buildWithdrawalGuidanceSectionSpec', () => {
       displayRows: [],
       ownerNameById: NO_OWNERS,
     });
-    expect(spec).toEqual(buildGuidanceNoteSpec(WITHDRAWAL_GUIDANCE_EMPTY_NOTE));
+    expect(spec).toEqual({ head: NOTE_HEAD, body: [[EMPTY_NOTE]] });
   });
 
   it('deterministic basis with withdrawals → the full table', () => {
@@ -1303,6 +1227,6 @@ describe('buildWithdrawalGuidanceSectionSpec', () => {
       displayRows: [],
       ownerNameById: NO_OWNERS,
     });
-    expect(spec).toEqual(buildGuidanceNoteSpec(WITHDRAWAL_GUIDANCE_MC_NOTE));
+    expect(spec).toEqual({ head: NOTE_HEAD, body: [[MC_NOTE]] });
   });
 });

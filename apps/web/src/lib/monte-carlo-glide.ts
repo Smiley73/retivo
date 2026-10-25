@@ -1,19 +1,8 @@
-/**
- * Per-step per-account asset mix derived from a `RetirementAllocationOverride`
- * glide trajectory. Extracted as a sibling to `monte-carlo-per-account.ts` so
- * the large parent files do not grow further. The glide itself is explained in
- * docs/math-income-expenses-and-returns.md ("The Asset allocation glide").
- */
+/** Per-step per-account asset mix along a `RetirementAllocationOverride` glide.
+ * See docs/math-income-expenses-and-returns.md ("The Asset allocation glide"). */
 import type { AssetMix, RetirementAllocationOverride } from '../db/types.js';
-// The pure glide-share helper is shared with the deterministic per-account
-// drawdown path; MC's mix×sampled return and the deterministic
-// scalar-blend differ by construction but consume the SAME growth share.
 import { targetGrowthShareForStep } from './allocation-glide.js';
 
-/**
- * Split `incomePct` into bonds/cash weighted by the base mix ratio.
- * All flows to cash when base has no income bucket.
- */
 function splitNonGrowth(
   incomePct: number,
   baseBondsPct: number,
@@ -30,26 +19,11 @@ function splitNonGrowth(
 }
 
 /**
- * Build a per-step asset-mix series for a single account.
- *
- * Returns a `ReadonlyArray<AssetMix>` of length `stepCount`.
- * Accumulation steps (`i < retirementStepIdx`) return `baseAssetMix`
- * unchanged. Drawdown steps apply the glide branch table via
- * `targetGrowthShareForStep` + `splitNonGrowth`.
- *
- * @param baseAssetMix      Account's effective asset mix (after per-account
- *                          override resolution, before glide).
- * @param allocation        The `retirementAllocation` override.
- * @param retirementStepIdx Step index of the first post-retirement month.
- * @param stepCount         Total number of simulation steps.
- * @param firstYear         Calendar year of step 0 (used to map step → year).
- * @param retirementYear    Actual calendar retirement year of the primary
- *                          member. Required explicitly — for already-retired
- *                          households `retirementStepIdx` is clamped to 0,
- *                          so deriving `retirementYear` from
- *                          `firstYear + floor(retirementStepIdx/12)` would
- *                          collapse to `firstYear` and restart the glide from
- *                          the wrong baseline.
+ * Per-step asset-mix series for one account: `baseAssetMix` before
+ * `retirementStepIdx`, the glide branch table after.
+ * @param retirementYear Calendar retirement year of the primary member. Not
+ *   derivable from `retirementStepIdx`, which is clamped to 0 for
+ *   already-retired households.
  */
 export function buildGlideAssetMixSeries(args: {
   readonly baseAssetMix: AssetMix;

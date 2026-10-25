@@ -1,18 +1,4 @@
-/**
- * Account-*category* classifier — the dashboard "By account type" card.
- *
- * Maps the domain `AccountType` enum to one of six whole-account categories
- * the dashboard's by-account-type card groups balances into. This is a
- * separate, finer-grained classification than `accountBucket` (the locked
- * four-way visual bucket the account tables tint by): `accountCategory`
- * splits HSA out as its own category and keeps Retirement / Roth / Brokerage
- * / Cash / Other apart, mirroring the groups the Balance-Projection
- * account-balance stack chart already uses.
- *
- * Pure function; no behavioural contract. The category drives only which
- * `bg-*` swatch + label the by-account-type card paints — it is NOT the
- * account's `taxTreatment`.
- */
+// Maps `AccountType` to the six whole-account categories of the dashboard's by-account-type card; finer than `accountBucket` (HSA is its own category) and not `taxTreatment`.
 import type { AccountType } from '../db/types';
 
 export type AccountCategory =

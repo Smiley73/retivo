@@ -1,12 +1,4 @@
-/**
- * TotpEnrollment tests. Covers the start→scan
- * state machine: the QR renders (client-side, via the mocked qrcode lib) after
- * enrollStart resolves, the manual seed is shown, and Continue hands off to
- * `onContinue` — this screen collects no code and performs no write (the
- * parent's last gate modal does both, so the live
- * code is seconds old when spent). `qrcode` is mocked so no real image is
- * drawn.
- */
+/** TotpEnrollment: QR render after enrollStart (qrcode mocked), the manual seed, and Continue handing off to onContinue. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TotpEnrollment } from './TotpEnrollment';
@@ -46,13 +38,11 @@ describe('TotpEnrollment', () => {
       name: /qr code for setting up your authenticator app/i,
     });
     expect(img).toHaveAttribute('src', 'data:image/png;base64,MOCK');
-    // The raw base32 seed is shown for manual entry.
     expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument();
   });
 
   it('passes axe accessibility checks after enrollStart resolves', async () => {
     const { container } = renderEnrollment();
-    // Wait for the async enrollStart to resolve and the scan screen to appear.
     await screen.findByRole('button', { name: 'Continue' });
     await expectNoA11yViolations(container);
   });
@@ -74,7 +64,6 @@ describe('TotpEnrollment', () => {
     const qrcode = await import('qrcode');
     (qrcode.default.toDataURL as any).mockRejectedValueOnce(new Error('no canvas'));
     renderEnrollment();
-    // Seed still shown; the QR img is absent.
     expect(await screen.findByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument();
     expect(
       screen.queryByRole('img', { name: /qr code/i }),

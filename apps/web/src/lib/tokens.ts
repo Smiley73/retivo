@@ -1,41 +1,9 @@
-/**
- * Chart color map — the SOLE source of chart series / marker colors.
- *
- * This map is the JS mirror of the Graphite Spectrum OKLCH palette: the
- * ported SVG chart engine (components/charts/) resolves chart colors from
- * it (NOT from runtime `getComputedStyle` reads of the CSS vars) so pure
- * marker builders (which run outside React render and cannot read the DOM
- * cheaply per-frame) and the AA gate (`contrast.ts`) share one source of
- * truth. Chart components read the active theme via `useChartColors()` /
- * `useChartChrome()` (in `./use-chart-tokens` — split out so this file
- * stays free of any `.tsx` import; otherwise the `ThemeContext` `.tsx`
- * drags Vite's React Refresh runtime into the optimiser worker bundle
- * and throws `ReferenceError: Can't find variable: window`).
- *
- * Palette is the Graphite Spectrum system: five type-coded account-bucket
- * hues (iris = pre-tax, violet = Roth, cyan = taxable, amber = cash,
- * teal = tax_free) plus
- * the lime accent (gated at the darker ring-lime so it clears the
- * non-text 3.0 threshold), green/red semantic states, and life/retire
- * markers. Every value is the sRGB hex of the matching OKLCH token in
- * styles.css. Every chart-series-vs-surface pair is registered in
- * `contrast.ts` and gated AA in both themes.
- *
- * Drift guard (`tokens.test.ts`): every key present in BOTH `light`
- * and `dark`, `light !== dark` per key, shape/type stable.
- */
+// Chart color map: the sole source of chart series and marker colors, mirroring styles.css and gated AA in `contrast.ts`.
+// It must not import a `.tsx` module, or the optimizer worker bundle pulls in React Refresh.
 
-/**
- * Theme-keyed chart palette. Each `light` key has a matching `dark` key
- * with the same hue lifted for legibility on dark surfaces (light uses
- * the ~0.50 lightness band, dark the ~0.74 band).
- *
- * Band fills (Monte Carlo) carry their own alpha — they paint over the
- * plot area, not text, so they are translucent by design.
- */
+/** Theme-keyed chart palette; `dark` lifts each hue for legibility on dark surfaces. */
 export const CHART_COLORS = {
   light: {
-    // Primary series lead with the bucket hues (iris / violet).
     essential: '#195cc7', // iris (pre-tax bucket hue) — primary series
     discretionary: '#7c298e', // violet (Roth-adjacent) — secondary series
     income: '#097f23', // positive green
@@ -138,17 +106,9 @@ export const CHART_COLORS = {
 } as const;
 
 /**
- * Chart chrome — the decorative, non-series neutrals every chart paints
- * around its data (grid lines, axis strokes/ticks, the hover-tooltip
- * surface + its border + text). Graphite Spectrum neutral tokens
- * (sRGB hex mirrors of the styles.css OKLCH neutrals), lifted for dark
- * surfaces.
- *
- * Deliberately SEPARATE from `CHART_COLORS`: chrome is decoration, not a
- * series line/bar/area/marker that conveys required information, so it is
- * out of scope for the WCAG-1.4.11 non-text-UI gate that `contrast.ts`
- * applies to every `CHART_COLORS` hex (grid lines are intentionally
- * low-contrast and would — correctly — fail a ≥ 3.0 series threshold).
+ * Decorative neutrals (grid, axis, tooltip), kept out of `CHART_COLORS` because
+ * the non-text 3.0 gate in `contrast.ts` would rightly fail intentionally
+ * low-contrast grid lines.
  */
 export const CHART_CHROME = {
   light: {
@@ -168,23 +128,13 @@ export const CHART_CHROME = {
 } as const;
 
 type ChartChromeKey = keyof (typeof CHART_CHROME)['light'];
-/** Resolved chrome for one theme. The `light`/`dark` literal types
- *  differ per key, so widen to `string` for the shared shape. */
 export type ChartChrome = Record<ChartChromeKey, string>;
 
 export type ChartTheme = keyof typeof CHART_COLORS;
 type ChartColorKey = keyof (typeof CHART_COLORS)['light'];
-/** Resolved palette for one theme: every key → a color string. The
- *  `light`/`dark` literal types differ per key, so widen to `string`
- *  for the shared consumer-facing shape. */
 export type ChartColors = Record<ChartColorKey, string>;
 
-/**
- * Life-event marker colors keyed by household member slot, for a given
- * resolved theme. Both pages that draw life-marker lines (Balance
- * Projection, Expenses) and the expense-preview builder share this so a
- * palette change ripples in one place.
- */
+/** Life-event marker colors by household member slot for a resolved theme. */
 export function lifeMarkerColors(
   theme: ChartTheme,
 ): Record<'primary' | 'secondary', string> {

@@ -1,20 +1,6 @@
 /**
- * Inline alert — the typed message block for the Graphite Spectrum
- * semantic-token system.
- *
- * A bordered, soft-tinted message block. `tone="error"` (default) is the
- * negative (red) state; the other tones map to the `warning` / `info` /
- * `positive` state tokens. Each renders its state-token text on the
- * sunken surface with a state-tinted hairline — every painted text pair
- * is registered WCAG-AA-safe in contrast.ts. Dark mode is the `.dark`
- * variable swap (no `dark:` colour twins).
- *
- * PRESERVED BEHAVIORAL RULE — error/warning alerts announce via
- * `role="alert"` (live region), the framework-independent a11y rule
- * the app already relies on (see "Accessibility" in
- * docs/ui-conventions.md). Informational/success tones use
- * `role="status"` (polite). Override
- * with an explicit `role` only with a stated reason.
+ * Bordered, tinted inline message. Error and warning tones announce via `role="alert"`, the others via
+ * `role="status"` ("Accessibility" in docs/ui-conventions.md); override `role` only with a stated reason.
  */
 import React from 'react';
 
@@ -23,14 +9,11 @@ type AlertTone = 'error' | 'warning' | 'info' | 'success';
 interface AlertProps {
   children: React.ReactNode;
   tone?: AlertTone;
-  /** Override the default live-region role (error/warning → assertive). */
   role?: 'alert' | 'status';
   className?: string;
   /**
-   * Optional test hook. Two alerts of the same tone on one page render
-   * identically (same role, same classes), so a test cannot otherwise tell
-   * which surface a message arrived on — see `SignupPage`'s page-level vs
-   * clickwrap/field alerts.
+   * Test hook: two alerts of the same tone render identically, so a test cannot otherwise tell
+   * which surface a message came from.
    */
   'data-testid'?: string;
 }

@@ -7,20 +7,8 @@ import {
 } from 'class-validator';
 
 /**
- * Body for `POST /api/v1/sync/workspace/clear`.
- *
- * NO `householdId`: the clear is scoped to the JWT `householdId` claim,
- * so a body-supplied id can never widen it into a cross-household
- * clear — and the global `forbidNonWhitelisted` ValidationPipe rejects the
- * extra field at the boundary.
- *
- * `currentPassword` is re-verified server-side (VerifyPasswordService +
- * FailedLoginService per-account backoff); it is NEVER logged.
- * `eraseHistory` opts into purging the S3 backup history after the clear.
- * `purgeHistoryOnly` is the erase-history RETRY: purge-only,
- * NO sweep — the client's "Try erasing backups again" affordance after a
- * `historyErased:false` clear, run against the current live snapshot so
- * resumed post-reload work is never swept.
+ * Body for `POST /api/v1/sync/workspace/clear`. No `householdId`: the clear is scoped to the JWT claim, so a body field
+ * can never widen it. `purgeHistoryOnly` is the erase-history retry and skips the sweep, so resumed work is not swept.
  */
 export class ClearWorkspaceDto {
   @IsString()

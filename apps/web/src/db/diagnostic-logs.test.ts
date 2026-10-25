@@ -1,8 +1,4 @@
-/**
- * `diagnosticLogs` store-helper tests (v9). Atomic append+prune in one
- * transaction, monotonic seq, list ordering, prune backstop, clear, and
- * preservation across `clearAllStores()`. Uses `fake-indexeddb/auto`.
- */
+// `diagnosticLogs` store helpers: atomic append and prune in one transaction, monotonic seq, list ordering, prune backstop, clear, and survival across `clearAllStores()`.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -42,7 +38,6 @@ describe('diagnosticLogs store helpers', () => {
 
   it('should_prune_oldest_to_the_cap_in_the_same_transaction', async () => {
     await appendDiagnosticLogs([entry('a'), entry('b'), entry('c')], 100);
-    // Append two more with a cap of 3 → oldest (a, b) evicted.
     await appendDiagnosticLogs([entry('d'), entry('e')], 3);
     const rows = await listDiagnosticLogs();
     expect(rows.map((r) => r.id)).toEqual(['c', 'd', 'e']);

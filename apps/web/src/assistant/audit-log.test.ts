@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import {
-  AUDIT_MAX_ARGS_CHARS,
-  AUDIT_MAX_ENTRIES,
-  AUDIT_MAX_PAYLOAD_BYTES,
-  AUDIT_MAX_TOTAL_BYTES,
-  AuditLog, summarizeArgs,
-  type AuditInput,
-} from './audit-log';
+import { MAX_TOOL_RESULT_BYTES } from '@retirement/assistant-protocol';
+import { AuditLog, summarizeArgs, type AuditInput } from './audit-log';
+
+const AUDIT_MAX_ENTRIES = 200;
+const AUDIT_MAX_PAYLOAD_BYTES = MAX_TOOL_RESULT_BYTES;
+const AUDIT_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+const AUDIT_MAX_ARGS_CHARS = 2_000;
 
 function input(overrides: Partial<AuditInput> = {}): AuditInput {
   return {

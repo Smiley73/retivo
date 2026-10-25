@@ -1,9 +1,4 @@
-/**
- * Tests for ChartZoomReset.
- *
- * 4 cases: null_when_not_zoomed, renders_when_zoomed, click_calls_reset,
- * a11y_smoke.
- */
+/** ChartZoomReset: hidden when not zoomed, shown when zoomed, and click calls reset. */
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';

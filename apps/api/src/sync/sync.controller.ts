@@ -1,15 +1,4 @@
-/**
- * Sync HTTP layer (docs/architecture.md, "Sync"). Endpoints:
- *   POST /api/v1/sync/push
- *   GET  /api/v1/sync/pull?since=<cursor>
- *   GET  /api/v1/sync/bootstrap?force=true|false
- *   GET  /api/v1/sync/snapshots
- *   POST /api/v1/sync/restore
- *   POST /api/v1/sync/workspace/clear
- *
- * All require: JwtAuthGuard, household-claim equality, CSRF + Origin
- * (the latter two are enforced by the global middlewares).
- */
+// Sync HTTP layer: push, pull, bootstrap, snapshots, restore and workspace clear (docs/architecture.md, "Sync").
 import {
   BadRequestException,
   Body,
@@ -66,26 +55,13 @@ export class SyncController {
   ) {
     assertHousehold(me, dto.householdId);
     if (dto.deviceId !== me.deviceId) {
-      // Not strictly required, but enforces the deviceId
-      // claim's intent — a JWT issued for device A cannot be paired
-      // with mutations claiming device B.
       throw new ForbiddenException({
         code: 'DEVICE_MISMATCH',
         message: 'Body deviceId does not match the JWT claim.',
       });
     }
-    // Inner-mutation deviceId provenance: each mutation must self-tag
-    // with the same device the JWT was issued for. A mixed-device batch
-    // is a client bug, not a recoverable per-mutation conflict — fail
-    // the whole batch before any DB work runs.
-    //
-    // The `timestamp` / `schemaVersion` ingress bounds are checked here too, manually, rather than
-    // as `PushMutationDto` class-validator decorators (mirrors the freshnessHead pattern below):
-    // each needs its OWN wire code, not the generic `ValidationPipe` `BAD_REQUEST`, so the client
-    // (`SyncContext.tsx`, `PERMANENT_PUSH_REJECTION_CODES`) can park the batch instead of retrying
-    // it forever. Neither can clear by retry: `SCHEMA_VERSION_TOO_NEW` needs a newer app build, and
-    // `TIMESTAMP_OUT_OF_SERVER_WINDOW` is stamped on a value the client froze at enqueue time and
-    // never re-stamps (a past-window stamp only drifts further out).
+    // Manual rather than PushMutationDto decorators: timestamp and schemaVersion violations need their own wire codes so the client
+    // parks the batch; neither clears by retry. A mixed-device batch is a client bug and fails whole before any DB work.
     for (const m of dto.mutations) {
       if (m.deviceId !== me.deviceId) {
         throw new ForbiddenException({
@@ -116,14 +92,7 @@ export class SyncController {
       }
     }
     enforceTotalSize(req);
-    // Optional zero-knowledge freshness head. When present (any
-    // non-undefined value), validate it here — NOT via the DTO's class-validator
-    // decorators, which are deliberately absent so the global
-    // ValidationPipe can never pre-empt the `FRESHNESS_HEAD_INVALID`
-    // discriminator. A malformed/oversized head fails the whole push (400, zero
-    // mutations committed); only a buggy or untrusted client ever sends one. The
-    // service then persists the validated head opaquely + echoes the stored
-    // head. Undefined on the plaintext path.
+    // Validated manually: FreshnessHeadDto has no decorators, so the global ValidationPipe cannot pre-empt FRESHNESS_HEAD_INVALID.
     const freshnessHead =
       dto.freshnessHead === undefined
         ? undefined
@@ -157,21 +126,13 @@ export class SyncController {
     @CurrentUser() me: AccessTokenClaims,
     @Query('force') force: string,
   ) {
-    // `force=true` is a client-initiated full re-bootstrap (the SPA's
-    // "reset local cache" recovery path). The flag does not change the
-    // response shape; it is forwarded so BootstrapService can emit the
-    // structured log line the forced-bootstrap CloudWatch metric filter
-    // matches on.
     return this.bootstrap.bootstrap(me.householdId, force === 'true');
   }
 
   @Get('snapshots')
   @Throttle({ default: { ttl: 3_600_000, limit: 30 } })
   async listSnapshots(@CurrentUser() me: AccessTokenClaims) {
-    // Household-isolated by the JWT claim: SnapshotsService keys S3 by
-    // the `${householdId}/` prefix, so a caller only ever sees their own
-    // snapshots. Throttled like bootstrap (30/hr) — snapshot metadata
-    // reveals activity cadence, so cheap enumeration must be blocked.
+    // Throttled like bootstrap: snapshot metadata reveals activity cadence, so cheap enumeration must be blocked.
     return this.snapshots.list(me.householdId);
   }
 
@@ -181,11 +142,8 @@ export class SyncController {
     @CurrentUser() me: AccessTokenClaims,
     @Body() dto: RestoreDto,
   ) {
-    // Destructive sync-state reset → tighter throttle (5/hr) than
-    // bootstrap. CSRF + Origin enforced by the global middlewares.
-    // Household authority is the JWT claim; the snapshot key is built
-    // from it, so a foreign snapshotId 404s rather than crossing
-    // households.
+    // Destructive, so a tighter throttle than bootstrap. The household comes from the JWT claim and the snapshot key is built from it,
+    // so a foreign snapshotId 404s.
     return this.restore.restore(me.householdId, dto.snapshotId);
   }
 
@@ -196,18 +154,10 @@ export class SyncController {
     @Body() dto: ClearWorkspaceDto,
     @Req() req: Request,
   ): Promise<{ ok: true; historyErased: boolean }> {
-    // Server-authoritative "Delete workspace data". CSRF + Origin
-    // enforced by the global middlewares; destructive → tight 5/hr throttle
-    // like restore. Household authority is the JWT claim — the DTO
-    // carries no householdId, so a body field can never widen the clear. The
-    // whole use case (password re-verify + backoff + audit sequencing +
-    // sweep/mint/repoint/purge dispatch) lives in ClearWorkspaceService so the
-    // auth-service coupling stays out of the delivery layer.
+    // The DTO carries no householdId, so a body field can never widen the clear to another household.
     const ip = req.ip ?? null;
     const userAgent =
       (req.headers['user-agent'] as string | undefined) ?? null;
-    // Device identity: a trusted device's cookie
-    // bypasses the backoff here too, inherited from the shared primitive.
     const cookies = parseCookies(req.headers.cookie ?? '');
     return this.clearWorkspaceService.clearWorkspace(
       me,
@@ -229,23 +179,11 @@ function assertHousehold(me: AccessTokenClaims, bodyHouseholdId: string): void {
   }
 }
 
-/**
- * Exactly 43 base64url characters (no padding) — the wire form of a 32-byte
- * HMAC. Anchored so a 42/44-char, padded (`=`), or non-base64url value is
- * rejected.
- */
+// Exactly 43 base64url characters without padding: the wire form of a 32-byte HMAC.
 const CURSOR_TAG_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
-/**
- * Manual, exhaustive freshness-head validation. Runs entirely here rather than on
- * `FreshnessHeadDto`'s decorators so the global `ValidationPipe` never pre-empts the
- * `FRESHNESS_HEAD_INVALID` discriminator — the client's push-catch branch keys on that exact code
- * to park the batch `failed-error` instead of retrying it forever. Throws a `400 {code:
- * 'FRESHNESS_HEAD_INVALID', message}` on ANY violation, including a non-object primitive (`value`
- * is typed `unknown` precisely so a bare string / number reaches this check untouched by the pipe).
- * Deliberately overrides the general "freshness head never blocks a push" invariant for this one
- * field.
- */
+// Manual so the global ValidationPipe never pre-empts FRESHNESS_HEAD_INVALID, the code the client keys on to park the batch.
+// `value` is unknown so a bare primitive reaches this check untouched by the pipe.
 function validateFreshnessHead(value: unknown): FreshnessHeadDto {
   const reject = (message: string): never => {
     throw new BadRequestException({ code: 'FRESHNESS_HEAD_INVALID', message });
@@ -273,8 +211,7 @@ function validateFreshnessHead(value: unknown): FreshnessHeadDto {
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024;
 function enforceTotalSize(req: Request): void {
-  // express.json already enforces the global 5 MB cap, so this is just
-  // a belt-and-braces check in case the limit is lifted upstream.
+  // express.json already caps the body at 5 MB; this is a second check in case that limit is lifted.
   const contentLength = Number(req.headers['content-length'] ?? 0);
   if (contentLength > MAX_REQUEST_BYTES) {
     throw new BadRequestException({

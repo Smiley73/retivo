@@ -1,13 +1,5 @@
-/**
- * Freshness head MAC + monotonic-counter helpers for rollback detection
- * (see "Unlocking" in docs/security.md).
- *
- * The client owns a monotonic `freshnessCounter` and MACs only the counter
- * (the server-assigned `syncCursor` is deliberately not bound — the client
- * signs before the cursor exists; content binding would be a future hash-chain).
- * The MAC key is HDK-derived so any unlock method can verify it; the server
- * stores both fields opaquely and never recomputes the MAC.
- */
+// Freshness head MAC and monotonic-counter helpers for rollback detection; see docs/security.md "Unlocking".
+// The MAC covers only the counter (the client signs before the server's `syncCursor` exists) under an HDK-derived key.
 import {
   base64UrlToBytes,
   bytesToBase64Url,
@@ -16,11 +8,8 @@ import {
 } from './payload-crypto';
 import type { FreshnessHead } from './encryption-types';
 
-/** HKDF info label for the freshness MAC key (distinct from payload/envelope). */
+// HKDF info label for the freshness MAC key; distinct from the payload and envelope labels.
 const CURSOR_AUTH_LABEL = 'cursor-auth';
-
-// Re-export the shared canonical-serialization primitive so freshness consumers
-// import it from one place; the implementation lives in payload-crypto.ts.
 
 /** Error thrown on freshness-verification failure; lets callers fail closed. */
 export class FreshnessError extends Error {
@@ -30,12 +19,10 @@ export class FreshnessError extends Error {
   }
 }
 
-/** Canonical bytes over the freshness counter (counter only). */
 function canonicalFreshnessCounter(freshnessCounter: number): Uint8Array<ArrayBuffer> {
   return canonicalJsonBytes({ freshnessCounter });
 }
 
-/** Derive the freshness MAC key from the HDK via HKDF-SHA-256. */
 async function deriveCursorMacKey(hdk: CryptoKey): Promise<CryptoKey> {
   const hdkBytes = await crypto.subtle.exportKey('raw', hdk);
   const baseKey = await crypto.subtle.importKey('raw', hdkBytes, 'HKDF', false, ['deriveKey']);
@@ -53,10 +40,7 @@ async function deriveCursorMacKey(hdk: CryptoKey): Promise<CryptoKey> {
   );
 }
 
-/**
- * Compute the freshness `cursorTag`: HMAC-SHA-256 under the HDK-derived
- * MAC key over the canonical counter. base64url.
- */
+/** `cursorTag`: base64url HMAC-SHA-256 over the canonical counter under the HDK-derived MAC key. */
 export async function computeCursorTag(freshnessCounter: number, hdk: CryptoKey): Promise<string> {
   const macKey = await deriveCursorMacKey(hdk);
   const signature = await crypto.subtle.sign(
@@ -67,16 +51,11 @@ export async function computeCursorTag(freshnessCounter: number, hdk: CryptoKey)
   return bytesToBase64Url(new Uint8Array(signature));
 }
 
-/**
- * Verify a freshness head's `cursorTag`. Throws {@link FreshnessError} on
- * mismatch (tampered tag or counter).
- */
+/** Throws {@link FreshnessError} on a tampered or malformed tag or counter. */
 export async function verifyCursorTag(head: FreshnessHead, hdk: CryptoKey): Promise<void> {
   let ok: boolean;
   try {
-    // Decode the server-stored base64url tag + derive/verify inside the catch so
-    // a malformed cursorTag fails closed as FreshnessError, not a raw DOMException
-    // from atob.
+    // Inside the try so a malformed server-stored tag fails closed as FreshnessError, not a raw DOMException from atob.
     const macKey = await deriveCursorMacKey(hdk);
     ok = await crypto.subtle.verify(
       'HMAC',
@@ -96,9 +75,8 @@ export function bumpCounter(current: number): number {
 }
 
 /**
- * A served counter strictly below the locally pinned value is a genuine
- * rollback. Equal or higher is accepted; first-contact (pinned 0) accepts
- * any non-negative served counter as the TOFU pin (a known limit).
+ * A served counter below the pinned value is a rollback; first contact (pinned 0) accepts any non-negative counter
+ * (TOFU, a known limit).
  */
 export function isRollback(served: number, pinned: number): boolean {
   return served < pinned;

@@ -1,11 +1,4 @@
-// Guard: apps/api/src/sync/dto/push.dto.ts's `SCHEMA_VERSION_CEILING` must
-// always equal apps/web/src/db/migrations.ts's REGISTRY maximum + 1. This is
-// the test that survives the next schema bump — a REGISTRY bump that lands
-// without a matching push.dto.ts edit fails here.
-//
-// Pure-helper fixtures first (so a mismatch is caught without touching real
-// files), then a real-file check against the actual working tree. Runs under
-// `pnpm test:scripts`.
+// `SCHEMA_VERSION_CEILING` in apps/api/src/sync/dto/push.dto.ts must equal the REGISTRY maximum + 1 in apps/web/src/db/migrations.ts.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

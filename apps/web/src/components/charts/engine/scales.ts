@@ -1,15 +1,12 @@
 /**
- * Pure scale + domain helpers for the SVG chart engine. No JSX, no DOM —
- * fully unit-testable. Maps data-space values to pixel-space positions
- * inside a plot rectangle.
+ * Pure scale and domain helpers for the SVG chart engine, mapping data space to pixel space inside a plot rectangle.
  */
 import type { ChartDatum, SeriesSpec } from './types';
 
-/** Floor for log-scale Y domains; mirrors `chart-markers.ts` LOG_SCALE_FLOOR. */
-export const LOG_FLOOR = 10000;
+// Floor ($) for log-scale Y domains: starting at 1 wastes the height on the empty $1-$10k band.
+const LOG_FLOOR = 10000;
 
-/** Linear map: value in [d0,d1] → pixel in [r0,r1]. */
-export function linearScale(
+function linearScale(
   value: number,
   d0: number,
   d1: number,
@@ -20,8 +17,7 @@ export function linearScale(
   return r0 + ((value - d0) / (d1 - d0)) * (r1 - r0);
 }
 
-/** Log map (base 10), clamping values below `floor` to `floor`. */
-export function logScale(
+function logScale(
   value: number,
   d0: number,
   d1: number,
@@ -38,7 +34,6 @@ export function logScale(
   return r0 + ((lv - ld0) / (ld1 - ld0)) * (r1 - r0);
 }
 
-/** Map a data x to a pixel inside the plot's horizontal span. */
 export function xToPx(
   x: number,
   domain: [number, number],
@@ -47,8 +42,6 @@ export function xToPx(
   return linearScale(x, domain[0], domain[1], plot.x, plot.x + plot.width);
 }
 
-/** Map a data y to a pixel inside the plot's vertical span (inverted:
- *  larger y is higher on screen → smaller pixel). */
 export function yToPx(
   y: number,
   domain: [number, number],
@@ -62,7 +55,6 @@ export function yToPx(
     : linearScale(y, domain[0], domain[1], bottom, top);
 }
 
-/** Signed pos/neg sums of a series group at a datum (missing → 0). */
 function signedStack(d: ChartDatum, group: SeriesSpec[]): { pos: number; neg: number } {
   let pos = 0;
   let neg = 0;
@@ -74,24 +66,10 @@ function signedStack(d: ChartDatum, group: SeriesSpec[]): { pos: number; neg: nu
   return { pos, neg };
 }
 
-/**
- * Compute the data-space y extent across all series + rows. Grouping
- * mirrors the renderer (`Series.tsx`):
- *
- * - All `kind:'bar'` series form ONE signed stack group (stackId is
- *   ignored, exactly like `BarStack`), tracking the highest positive sum
- *   and lowest negative sum across rows.
- * - `kind:'area'` series WITH a `stackId` are grouped by that id and
- *   signed-stacked per group; loose areas (no `stackId`) each contribute
- *   independently against zero.
- * - `kind:'line'` series each contribute independently (non-finite values
- *   skipped).
- *
- * Bars + areas read `d[dataKey] ?? 0` (renderer parity — no finite guard);
- * lines + `extraValues` keep their `Number.isFinite` guards. Lines + the
- * `extraMin`/`extraMax` (e.g. retirement markers) widen the extent.
- */
-export function computeYExtent(
+// Data-space y extent across all series and rows, grouped as the renderer (`Series.tsx`) does: all
+// bars form one signed stack, areas stack per `stackId` (loose areas against zero), and lines
+// contribute independently.
+function computeYExtent(
   rows: ChartDatum[],
   series: SeriesSpec[],
   extraValues: number[] = [],
@@ -141,8 +119,7 @@ export function computeYExtent(
   return [min, max];
 }
 
-/** Pad a [min,max] extent by `frac` on each non-zero side. */
-export function padExtent(
+function padExtent(
   extent: [number, number],
   frac = 0.05,
 ): [number, number] {
@@ -152,21 +129,12 @@ export function padExtent(
   return [min === 0 ? 0 : min - pad, max === 0 ? 0 : max + pad];
 }
 
-/** Build the stacked baseline + top for one series at a datum, given
- *  the signed running offsets. Returns [base, top] in data space. */
 export interface StackBands {
-  /** base value (lower edge) per row index. */
   base: number[];
-  /** top value (upper edge) per row index. */
   top: number[];
 }
 
-/**
- * For a stack group, compute each series' [base, top] bands across all
- * rows using signed stacking (positive values stack up from the running
- * positive offset, negative values stack down). Returns a map keyed by
- * `dataKey`.
- */
+/** Per-series [base, top] bands for a stack group using signed stacking, keyed by `dataKey`. */
 export function computeStackBands(
   rows: ChartDatum[],
   group: SeriesSpec[],
@@ -194,14 +162,12 @@ export function computeStackBands(
   return out;
 }
 
-/** Default x-domain from rows when none is supplied. */
 export function defaultXDomain(rows: ChartDatum[]): [number, number] {
   if (rows.length === 0) return [0, 1];
   const xs = rows.map((r) => r.x);
   return [Math.min(...xs), Math.max(...xs)];
 }
 
-/** Filter rows to those whose x falls inside [lo,hi] (inclusive). */
 export function rowsInDomain(
   rows: ChartDatum[],
   domain: [number, number],
@@ -209,7 +175,6 @@ export function rowsInDomain(
   return rows.filter((r) => r.x >= domain[0] && r.x <= domain[1]);
 }
 
-/** Nearest row (by x) to a data-space x value; null when no rows. */
 export function nearestRow(
   rows: ChartDatum[],
   x: number,
@@ -228,9 +193,8 @@ export function nearestRow(
 }
 
 /**
- * Resolve the effective y-domain. When `explicit` is provided it wins
- * (zoom-fitted), clamped for log scale to keep the floor positive and
- * guard inversion. Otherwise derive from the data extent + padding.
+ * Effective y-domain: an `explicit` (zoom-fitted) domain wins, clamped for log scale; otherwise the
+ * data extent plus padding.
  */
 export function resolveYDomain(
   rows: ChartDatum[],
@@ -254,7 +218,6 @@ export function resolveYDomain(
   return padExtent(computeYExtent(rows, series, extraValues));
 }
 
-/** Build the SVG `d` for a polyline through (x,y) data points. */
 export function linePath(points: Array<{ px: number; py: number }>): string {
   if (points.length === 0) return '';
   return points
@@ -262,8 +225,6 @@ export function linePath(points: Array<{ px: number; py: number }>): string {
     .join(' ');
 }
 
-/** Build the SVG `d` for a filled area between a top line and a base
- *  line (base reversed). */
 export function areaPath(
   top: Array<{ px: number; py: number }>,
   base: Array<{ px: number; py: number }>,

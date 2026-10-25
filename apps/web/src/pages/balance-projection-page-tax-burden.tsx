@@ -1,9 +1,4 @@
-/**
- * Balance Projection page — "Tax & Health-Cost Burden" band.
- * Shows per-year federal income tax + IRMAA surcharge above zero and
- * ACA-PTC subsidy below zero. Rendered for EVERY named withdrawal strategy
- * (tax cashflow funds all strategies).
- */
+/** "Tax & Health-Cost Burden" band: per-year federal tax and IRMAA above zero and the ACA-PTC subsidy below, for every named withdrawal strategy. */
 import React, { useCallback, useMemo } from 'react';
 import { TaxBurdenChart, type TaxBurdenChartRow } from '../components/TaxBurdenChart';
 import type { TooltipMember } from '../components/tooltip-member';
@@ -17,12 +12,7 @@ import { formatCurrencyShort } from '../lib/format-currency';
 import type { DisplayMode } from '../lib/view-deflator';
 import { bandSectionH2Class } from './accounts-page-chrome';
 
-/**
- * Lifetime totals for the tax-burden summary tiles — sums the already-deflated
- * chart rows so the figures match the chart column-sums and honor the
- * Display-unit toggle by construction. The ACA-PTC series is stored negative
- * (renders below zero); this flips it to a positive credit-received figure.
- */
+/** Lifetime totals summed from the already-deflated rows; the ACA-PTC series is stored negative, so it is flipped to a positive credit. */
 export function sumTaxBurden(rows: ReadonlyArray<TaxBurdenChartRow>): {
   federalTax: number;
   irmaaSurcharge: number;
@@ -39,20 +29,10 @@ export function sumTaxBurden(rows: ReadonlyArray<TaxBurdenChartRow>): {
     acaPtcSubsidy += r.acaPtcSubsidy;
     acaCreditApplied += r.acaCreditApplied;
   }
-  // `+ 0` normalizes a sign-flipped `-0` back to `0` (so an all-zero credit
-  // never formats as "-$0").
+  // + 0 normalizes a sign-flipped -0 so an all-zero credit never formats as "-$0".
   return { federalTax, irmaaSurcharge, acaPtcCredit: -acaPtcSubsidy + 0, acaCreditApplied };
 }
 
-/**
- * Summary-tile row for the tax-burden band — the four deflated lifetime totals
- * (federal tax, IRMAA, ACA-PTC credit, and the part of that credit that lowered
- * the withdrawals). Extracted from `TaxBurdenBand` to keep
- * that component within the 60-line shape limit; rendered only inside its
- * hasSignal branch so the gate-by-placement is preserved. The lifetime-basis
- * caption that used to sit below the grid now lives in the section's `(i)` info
- * popover (`TaxBurdenMethodologyContent`).
- */
 const TaxBurdenSummaryTiles: React.FC<{
   readonly totals: ReturnType<typeof sumTaxBurden>;
 }> = ({ totals }) => (
@@ -76,16 +56,6 @@ const TaxBurdenSummaryTiles: React.FC<{
   </StatGrid>
 );
 
-/**
- * Methodology prose for the tax-burden band's `(i)` info popover — folds BOTH
- * the lifetime-tiles caption (dollar-mode basis) and the standing chart caption
- * (above/below-zero stacking + the IRS §86 SS-tax treatment, with its MC vs
- * deterministic funded-base sentence variant) into one disclosure, closed by
- * the shared display-only qualification: the yield / interest /
- * cost-basis tax refinements are shown but not yet funded from the portfolio
- * in either engine. The numeric tiles + chart stay inline; only this prose
- * moved behind the `(i)`.
- */
 const TaxBurdenMethodologyContent: React.FC<{
   readonly displayMode: DisplayMode;
   readonly isMcBasisActive: boolean;
@@ -107,14 +77,9 @@ const TaxBurdenMethodologyContent: React.FC<{
       separate SS-tax segment is shown.{' '}
       {isMcBasisActive
         ? // The MC drawdown funds the core tax bill from the portfolio each
-          // year (every strategy), so that portion IS reflected in the
-          // simulated balances.
           'These are estimated taxes for this example path; they are funded from the portfolio each year, so they affect the projected balances.'
         : 'These costs are funded from the portfolio each year, so they affect your projected balances, shown for every withdrawal strategy.'}{' '}
-      {/* The yield / interest / cost-basis refinements are
-          display-exact in BOTH engines but deliberately NOT funded into either
-          engine's balance progression — mirror the BalanceProjectionEstimateNote
-          disclosure so this popover never overstates what the balances absorb. */}
+      {/* Display-exact in both engines but not funded into either engine's balances, mirroring BalanceProjectionEstimateNote so the popover never overstates what the balances absorb. */}
       One exception: the displayed figures also include the yearly tax on
       estimated investment yield inside taxable brokerage accounts and on
       savings, money-market, and CD interest, using an estimated year-by-year
@@ -126,21 +91,11 @@ const TaxBurdenMethodologyContent: React.FC<{
 
 export interface TaxBurdenBandProps {
   readonly rows: ReadonlyArray<TaxBurdenChartRow>;
-  /** Retirement + death markers rendered as dashed reference lines. */
   readonly markers?: ReadonlyArray<CashflowChartMarker>;
-  /** Household members shown in tooltip header — "<First> (age N)". */
   readonly members?: ReadonlyArray<TooltipMember>;
-  /** Drives the summary-tile caption's dollar-mode wording. */
   readonly displayMode: DisplayMode;
-  /** Active deterministic method label (Planned / TWR) suffixed onto the
-   *  band title so the user can tell which basis this chart reflects. */
   readonly methodLabel: string;
-  /** Optional small note rendered below the band title (shown only under an MC
-   *  basis: the display-only tax disclosure). Absent under a deterministic
-   *  method. */
   readonly subLabel?: string;
-  /** True when an MC basis is active — swaps the caption's final sentence to the
-   *  display-only wording. Defaults to false (deterministic verbatim). */
   readonly isMcBasisActive?: boolean;
 }
 
@@ -169,9 +124,7 @@ export const TaxBurdenBand: React.FC<TaxBurdenBandProps> = ({
       const xs = new Set(visibleRows.map((r) => r.x));
       const visible = rows.filter((r) => xs.has(r.year));
       if (visible.length < 2) return null;
-      // Use per-row stacked sums so the y-domain matches the tallest and
-      // deepest stacked bars. Positive stack = federalTax + irmaaSurcharge;
-      // negative stack = acaPtcSubsidy (stored negative by convention).
+      // Per-row stacked sums so the y-domain fits the tallest and deepest bars.
       const yMax = Math.max(0, ...visible.map((r) => r.federalTax + r.irmaaSurcharge));
       const yMin = Math.min(0, ...visible.map((r) => r.acaPtcSubsidy));
       if (yMin === 0 && yMax === 0) return null;

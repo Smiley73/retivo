@@ -1,20 +1,5 @@
-/**
- * Integration tests for `ThrottleCounterRepository` against DynamoDB Local.
- * Covers the increment contract at the
- * repository layer:
- *  - a fresh key starts a one-hit window;
- *  - hits accumulate within a still-open window;
- *  - a window whose stored expiry has already passed resets to one hit
- *    rather than continuing the stale count, even though the emulator never
- *    TTL-sweeps the row away;
- *  - concurrent increments on one key total exactly the number issued (no
- *    lost updates).
- *
- * The cross-instance guarantee (two independently constructed repository
- * objects sharing one table) lives in
- * `../test/shared-throttle-counters.spec.ts` — this file covers one
- * repository object's own contract in isolation.
- */
+// ThrottleCounterRepository's increment contract on DynamoDB Local: a fresh key starts a one-hit window, hits accumulate in an open window, an expired window resets to one hit though the emulator never TTL-sweeps the row,
+// and concurrent increments lose no updates. The cross-instance guarantee lives in shared-throttle-counters.spec.ts.
 import { randomUUID } from 'node:crypto';
 import { bootstrapTestApp, type TestApp } from '../test/test-helpers.js';
 import { ThrottleCounterRepository } from './throttle-counter.repository.js';
@@ -57,9 +42,7 @@ describe('ThrottleCounterRepository', () => {
     const first = await repo.increment(key, 50, new AbortController().signal);
     expect(first.hits).toBe(1);
 
-    // The emulator never TTL-sweeps — the row is still there. Waiting past
-    // the tiny window proves the reset is read from `windowEnd`, not from
-    // the row's absence.
+    // The emulator never TTL-sweeps, so the row is still there: waiting past the window proves the reset is read from `windowEnd`, not the row's absence.
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     const second = await repo.increment(key, 60_000, new AbortController().signal);

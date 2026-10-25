@@ -1,9 +1,4 @@
-/**
- * Internal helpers shared between the annual (`projectSsByYear`) and
- * monthly (`projectSsByMonth`) SS projection engines. Not part of the
- * public module API — import from `ss-projection.ts` for all external
- * consumers.
- */
+/** Internal helpers shared by the annual (`projectSsByYear`) and monthly (`projectSsByMonth`) SS projection engines; external consumers import from `ss-projection.ts`. */
 import {
   adjustmentFactor,
   birthMonthForBenefitPurposes,
@@ -34,18 +29,14 @@ export const fraMonthsFor = (member: SsContextMember): number => {
   const bd = member.payload.birthdate;
   if (!bd) return 67 * 12;
   try {
-    // Route through fraMonthsForBirthdate so the SSA day-1 rule
-    // (POMS GN 00302.400) is applied: Jan 1 1960 → 1959 cohort.
+    // Routing through fraMonthsForBirthdate applies the SSA day-1 rule (POMS GN 00302.400): Jan 1 1960 is the 1959 cohort.
     return fraMonthsForBirthdate(bd);
   } catch {
     return 67 * 12;
   }
 };
 
-/** Widow(er) (survivor) FRA in total months — the SURVIVOR cohort table
- *  (POMS RS 00615.003), distinct from the retirement FRA for 1943–1961
- *  births. Same 67×12 fallback shape as `fraMonthsFor`.
- *  Module-private: consumed via `buildSurvivorStructs`. */
+// Widow(er) FRA from the survivor cohort table (POMS RS 00615.003); same 67×12 fallback as `fraMonthsFor`.
 const survivorFraMonthsFor = (member: SsContextMember): number => {
   const bd = member.payload.birthdate;
   if (!bd) return 67 * 12;
@@ -60,8 +51,6 @@ export const claimYearFor = (member: SsContextMember): number | null => {
   const bd = member.payload.birthdate;
   if (!bd) return null;
   try {
-    // Use benefit-year birth year (SSA day-1 rule) for consistent
-    // cohort derivation across all SS calculations.
     const birthYear = birthYearForBenefitPurposes(bd);
     return birthYear + member.claimAge.ageYears;
   } catch {
@@ -69,12 +58,6 @@ export const claimYearFor = (member: SsContextMember): number | null => {
   }
 };
 
-/**
- * Age-62 eligibility year (`birthYear + 62`, SSA day-1 birth year) — the
- * FALLBACK COLA anchor for a benefit with no statement date on file.
- * Returns `null` when the birthdate is absent/invalid. Module-private:
- * external consumers read the anchor via `colaAnchorYearFor`.
- */
 const age62YearFor = (member: SsContextMember): number | null => {
   const bd = member.payload.birthdate;
   if (!bd) return null;
@@ -86,37 +69,28 @@ const age62YearFor = (member: SsContextMember): number | null => {
 };
 
 /**
- * Statement-anchored COLA anchor year: the SSA statement's as-of year
- * when `piaAsOfDate` exists — the quoted FRA benefit already includes every
- * COLA through that date, so nominal COLAs are layered only for years AFTER
- * it (applying earlier COLAs would double-count the statement's own). Falls
- * back to the age-62 eligibility year when no
- * statement date is on file. `null` when neither is derivable.
+ * Statement-anchored COLA anchor year: the statement's as-of year when `piaAsOfDate` exists (its quoted FRA benefit
+ * already includes COLAs through that date, so earlier COLAs would double-count), else the age-62 eligibility year;
+ * `null` when neither is derivable.
  */
 export const colaAnchorYearFor = (member: SsContextMember): number | null =>
   member.statementAnchorYear ?? age62YearFor(member);
 
-/** Calendar year the member attains FRA (benefit-purpose birth year/month +
- *  FRA months). `null` when the birthdate is absent/invalid. */
+/** Calendar year the member attains FRA; `null` when the birthdate is absent or invalid. */
 export const fraYearFor = (member: SsContextMember): number | null => {
   const b = birthYearMonth(member);
   if (!b) return null;
   return Math.floor((b.year * 12 + b.month0 + fraMonthsFor(member)) / 12);
 };
 
-/** 0-indexed calendar month the member attains FRA within `fraYearFor`'s
- *  year (the ARF restoration is effective only with the FRA month,
- *  20 CFR 404.412(b), so the FRA year mixes pre-/post-restoration rates at
- *  this boundary). `null` when the birthdate is absent/invalid. */
+/** 0-indexed month the member attains FRA within `fraYearFor`'s year; ARF restoration takes effect with the FRA month (20 CFR 404.412(b)), so the FRA year mixes rates at this boundary. */
 export const fraMonth0For = (member: SsContextMember): number | null => {
   const b = birthYearMonth(member);
   if (!b) return null;
   return (b.month0 + fraMonthsFor(member)) % 12;
 };
 
-/** Birth (year, month0) for benefit purposes, applying the SSA day-1 rule
- *  (POMS GN 00302.400) via `birthYearForBenefitPurposes` and
- *  `birthMonthForBenefitPurposes` — consistent with the annual engine. */
+// Benefit-purpose birth (year, month0) under the SSA day-1 rule (POMS GN 00302.400).
 const birthYearMonth = (
   member: SsContextMember,
 ): { year: number; month0: number } | null => {
@@ -144,9 +118,7 @@ export const claimMonthFor = (
   };
 };
 
-/** Absolute month index the member reaches their SURVIVOR claim age
- *  (independent of the own claim age). `null` when no survivor claim age is
- *  on file (withheld) or the birthdate is missing/invalid. */
+/** Absolute month index the member reaches their survivor claim age (independent of the own claim age); `null` when withheld or the birthdate is missing. */
 export const survivorClaimMonthIdxFor = (member: SsContextMember): number | null => {
   if (!member.survivorClaimAge) return null;
   const b = birthYearMonth(member);
@@ -158,13 +130,7 @@ export const survivorClaimMonthIdxFor = (member: SsContextMember): number | null
   );
 };
 
-/** Resolved (year, month0) of the member's projected death — exclusive
- *  boundary (alive up to but not including this month).
- *
- *  Death is modelled as Dec 31 of `deathYear`
- *  (`deathYear = birthYear + lifeExpectancyAge`); the member is alive
- *  through all of `deathYear`, so the exclusive boundary is Jan 1 of
- *  `deathYear + 1`. Survivor benefits begin from this month. */
+/** Projected death as an exclusive boundary: death is Dec 31 of `birthYear + lifeExpectancyAge`, so the boundary is Jan 1 of the next year, when survivor benefits begin. */
 export const deathMonthFor = (
   member: SsContextMember,
 ): { year: number; month0: number } | null => {
@@ -187,10 +153,7 @@ export const deathYearFor = (member: SsContextMember): number | null => {
   }
 };
 
-/**
- * Annual SS benefit a member receives at their claim year (in nominal
- * dollars at the COLA-anchor level). Returns 0 when pia is null.
- */
+/** Annual benefit at the claim year in nominal dollars at the COLA-anchor level; 0 when pia is null. */
 export function ownClaimBenefitAnnual(member: SsContextMember, reductionFactor: number): number {
   if (member.pia === null || member.pia <= 0) return 0;
   const monthly = monthlyBenefitAtAge(
@@ -202,11 +165,8 @@ export function ownClaimBenefitAnnual(member: SsContextMember, reductionFactor: 
 }
 
 /**
- * ARF-adjusted own-benefit annual base (POMS RS 00615.482): at FRA the SSA
- * recomputes a reduced benefit, removing every pre-FRA month whose check was
- * withheld under the earnings test from the early-claim reduction — as if
- * the member had claimed `withheldMonths` later. Only reduced (pre-FRA)
- * claims are adjusted; the recomputed claim age caps at FRA.
+ * ARF-adjusted own-benefit annual base (POMS RS 00615.482): months withheld under the earnings test come out of the
+ * early-claim reduction at FRA, as if the claim were that many months later (capped at FRA); only reduced claims are adjusted.
  */
 export function arfAdjustedOwnBaseAnnual(
   member: SsContextMember,
@@ -224,20 +184,10 @@ export function arfAdjustedOwnBaseAnnual(
 }
 
 /**
- * Dual-entitlement spousal EXCESS base (annual, POMS RS 00615.020): the
- * dually entitled recipient receives their OWN benefit (reduced by their own
- * claim-age factor) PLUS the spousal excess — `max(0, 50% × worker PIA −
- * recipient PIA)` — where the excess is reduced SEPARATELY by the
- * recipient's spousal reduction factor (POMS RS 00615.201). The worker
- * benefit and the spouse excess are never combined before reduction: each
- * carries its own factor. DRCs do not transfer — the spousal factor caps at
- * 1.0. Returns 0 when there is no spouse / spouse PIA, or when the
- * recipient's own PIA already meets or exceeds half the worker's.
- *
- * Per POMS RS 00615.301, spousal entitlement — and therefore the reduction
- * clock — begins no earlier than the date the WORKER claims; the caller
- * supplies the effective entitlement age via `effectiveRecipientAgeMonths`
- * (see `effectiveSpousalAgeMonths`).
+ * Dual-entitlement spousal excess base, annual (POMS RS 00615.020): `max(0, 50% × worker PIA − recipient PIA)`, reduced by
+ * the recipient's spousal factor (POMS RS 00615.201) separately from their own benefit and capped at 1.0 (DRCs do not
+ * transfer). 0 with no spouse PIA or when the recipient's PIA already covers half. Spousal entitlement begins no earlier
+ * than the worker's claim (POMS RS 00615.301); the caller passes the effective age via `effectiveRecipientAgeMonths`.
  */
 export function spousalExcessAnnual(
   self: SsContextMember,
@@ -245,26 +195,15 @@ export function spousalExcessAnnual(
   reductionFactor: number,
   effectiveRecipientAgeMonths?: number,
   opts?: {
-    /** Scenario COLA percent — used to bring the recipient's PIA onto the
-     *  WORKER's statement-anchor basis before subtracting. The two
-     *  statements may carry different as-of years; subtracting mixed-basis
-     *  PIAs and then growing the whole excess from the worker's anchor
-     *  mis-scales the recipient component. 0/absent → no normalization. */
+    /** Scenario COLA percent, bringing the recipient's PIA onto the worker's statement-anchor basis before subtracting (the statements may carry different as-of years); 0 or absent skips it. */
     colaPct?: number;
-    /** ARF credit months for the SPOUSAL reduction factor (POMS
-     *  RS 00615.482): months the excess was withheld under the earnings
-     *  test before the recipient's FRA are removed from the spousal
-     *  reduction at FRA — as if the spousal entitlement began that many
-     *  months later (the factor caps itself at 1.0 at/after FRA). */
+    /** ARF credit months for the spousal reduction factor (POMS RS 00615.482): excess months withheld under the earnings test come out of the reduction, as if entitlement began that many months later. */
     arfCreditMonths?: number;
   },
 ): number {
   if (!spouse || spouse.pia === null || spouse.pia <= 0) return 0;
   const ownPiaRaw = self.pia !== null && self.pia > 0 ? self.pia : 0;
-  // Normalize the recipient's PIA to the worker's COLA-anchor year so
-  // the subtraction happens on ONE basis; downstream growth then compounds
-  // from the worker's anchor for the whole excess, keeping each component
-  // effectively growing from its own statement date.
+  // Normalize the recipient's PIA to the worker's COLA-anchor year so the subtraction is on one basis; growth then compounds from the worker's anchor.
   const selfAnchor = colaAnchorYearFor(self);
   const workerAnchor = colaAnchorYearFor(spouse);
   const colaPct = opts?.colaPct ?? 0;
@@ -281,16 +220,7 @@ export function spousalExcessAnnual(
   return excessMonthly * 12 * factor * reductionFactor;
 }
 
-/**
- * The recipient's effective spousal-entitlement age in months,
- * which is the later of their own claim age and their age when the worker
- * first claims. Both members' birthdays are derived for benefit purposes
- * (SSA day-1 rule). Returns the recipient's own claim age when either
- * birthdate is missing or the worker does not claim later.
- *
- * @param recipient - the spousal-excess recipient
- * @param worker - the higher earner whose PIA the excess draws on
- */
+/** The recipient's effective spousal-entitlement age in months: the later of their own claim age and their age when the worker first claims (benefit-purpose birthdays). Returns the own claim age when a birthdate is missing. */
 export function effectiveSpousalAgeMonths(
   recipient: SsContextMember,
   worker: SsContextMember | undefined,
@@ -307,18 +237,8 @@ export function effectiveSpousalAgeMonths(
 }
 
 /**
- * Pre-builds the four survivor structs consumed by both projection engines.
- *
- * The survivor side carries the member's SEPARATE survivor claim age
- * (`survivorClaimAge` — `null` when absent → withheld); the deceased
- * side carries the pre-reduced PIA, the death cap, and the statement-anchored
- * COLA anchor.
- *
- * @param primary - primary context member
- * @param secondary - secondary context member, or undefined
- * @param primaryDeathYear - calendar year primary dies (or null)
- * @param secondaryDeathYear - calendar year secondary dies (or null)
- * @param reductionFactor - `1 - benefitReductionPct / 100`
+ * Builds the four survivor structs both engines consume. The survivor side carries the separate survivor claim age
+ * (`null` withholds); the deceased side the pre-reduced PIA, the death cap and the statement-anchored COLA anchor.
  */
 export function buildSurvivorStructs(
   primary: SsContextMember,
@@ -330,33 +250,24 @@ export function buildSurvivorStructs(
   const survivorFor = (member: SsContextMember): SurvivorMember => {
     const svAge = member.survivorClaimAge ?? null;
     return {
-      // The WIDOW(ER) FRA cohort table, not the retirement FRA.
       survivorFraMonths: survivorFraMonthsFor(member),
       survivorClaimAgeMonths: svAge ? svAge.ageYears * 12 + svAge.ageMonths : null,
-      // Month-precise absolute claim index (benefit-purpose birth
-      // month + survivor claim age) — the annual engine derives the start
-      // year AND the midyear-entitlement proration from it.
       survivorClaimMonthIdx: survivorClaimMonthIdxFor(member),
     };
   };
   const deceasedFor = (member: SsContextMember, deathYear: number | null): DeceasedMember => {
     const b = birthYearMonth(member);
     return {
-      // Pre-reduce pia so survivorBenefitAnnual does not double-reduce.
+      // Pre-reduced so survivorBenefitAnnual does not double-reduce.
       pia: (member.pia ?? 0) * reductionFactor,
       fraMonths: fraMonthsFor(member),
       scenarioClaimAgeMonths: claimAgeMonths(member.claimAge),
-      // Death is Dec 31 of `deathYear` (the engine-wide convention —
-      // `deathMonthFor`'s exclusive Jan boundary), so the death age is the
-      // age at Jan 1 of `deathYear + 1`, NOT the birthday of the
-      // life-expectancy year — a claim (or DRC month) between the birthday
-      // and Dec 31 of the death year is not posthumous.
+      // Death is Dec 31 of `deathYear`, so the age is taken at Jan 1 of `deathYear + 1`: a claim between the birthday and Dec 31 of that year is not posthumous.
       deathAgeMonths:
         b && deathYear !== null
           ? (deathYear + 1 - b.year) * 12 - b.month0
           : member.lifeExpectancyAge * 12,
       deathYear: deathYear ?? 0,
-      // Deceased-component COLA anchor — statement anchor, age-62 fallback.
       colaAnchorYear: colaAnchorYearFor(member) ?? (deathYear ?? 0),
     };
   };
@@ -368,37 +279,26 @@ export function buildSurvivorStructs(
   };
 }
 
-/** One entitlement start: the year+month a benefit first became payable to
- *  the member. Another grace year requires the prior entitlement to
- *  end plus a ≥1-month break before the next benefit — the model never
- *  breaks an entitlement, so callers supply only the member's FIRST-ever
- *  start (own retirement claim or an earlier survivor start). */
+/** A benefit's first entitlement start. Callers supply only the member's first-ever start (own claim or an earlier survivor start), since a further grace year needs a break in entitlement the model never has. */
 export interface EntitlementStart {
   year: number;
   month0: number;
 }
 
-/** Per-member earnings-test timing state: the first-ever entitlement
- *  start plus the resolved SSA grace year — the FIRST entitled taxable year
- *  that contains an entitled, pre-FRA, NON-SERVICE month (20 CFR 404.435 /
- *  POMS RS 02501.030), which is NOT necessarily the entitlement year (an
- *  entitlement year made up entirely of service months defers the grace
- *  year, and its monthly test, to the first later non-service-month year).
- *  `graceYear === null` = no qualifying year through the FRA year. */
+/**
+ * Per-member earnings-test timing: the first-ever entitlement start plus the SSA grace year (20 CFR 404.435 / POMS RS
+ * 02501.030), the first entitled taxable year with an entitled pre-FRA non-service month, which may be later than the
+ * entitlement year. `graceYear === null` means none through the FRA year.
+ */
 export interface MemberEtTiming {
   start: EntitlementStart;
   graceYear: number | null;
 }
 
 /**
- * Resolve the member's SSA grace year (POMS RS 02501.030): scan from
- * the first entitlement year through the FRA year for the first year with
- * an entitled, pre-FRA, non-service month (monthly earnings at/below 1/12
- * of that year's applicable exempt amount). A year with NO monthly-earnings
- * series consumes the grace year (a zero-earnings year genuinely contains
- * non-service months; with annual-only data the engine cannot prove every
- * month was a service month, and the monthly test cannot run without the
- * series anyway).
+ * Resolves the member's SSA grace year (POMS RS 02501.030): scans from the first entitlement year to the FRA year for
+ * the first with an entitled pre-FRA month at or below 1/12 of that year's exempt amount. A year with no monthly-earnings
+ * series consumes it, since annual-only data cannot prove every month was a service month.
  */
 export function resolveGraceYear(
   member: SsContextMember,
@@ -407,8 +307,7 @@ export function resolveGraceYear(
 ): number | null {
   const fraYear = fraYearFor(member);
   const fraMonth0 = fraMonth0For(member);
-  // No FRA frame (missing/invalid birthdate) → the earnings test never runs
-  // for this member; keep the entitlement year as the nominal grace year.
+  // No FRA frame (missing birthdate) means the test never runs; keep the entitlement year as the nominal grace year.
   if (fraYear === null || fraMonth0 === null) return start.year;
   for (let y = start.year; y <= fraYear; y += 1) {
     const from = y === start.year ? start.month0 : 0;
@@ -425,21 +324,12 @@ export function resolveGraceYear(
   return null;
 }
 
-/** Outcome of `applyEarningsTestToMember` for one member-year. The engine
- *  consumes only the per-month charge schedule, the withheld-check count,
- *  and the estimate flag (there is no single annual factor; the month
- *  schedules carry the charge). */
+/** Outcome for one member-year: the per-month charge schedule, withheld-check count and estimate flag (no single annual factor). */
 export interface MemberEarningsTestOutcome {
   estimated: boolean;
-  /** Whole RECORD-level checks charged. The engine derives the
-   *  per-component ARF credits (own-RIB vs spousal-excess vs discarded
-   *  survivor-only months) from the schedule + each component's
-   *  entitled months, not from this raw count. */
+  /** Whole record-level checks charged; the engine derives per-component ARF credits from the schedule and each component's entitled months, not from this count. */
   withheldMonths: number;
-  /** Per-calendar-month pay-factor schedule (12 entries) — the fraction of
-   *  the RECORD-level pool paid each month (§404.439 apportions a partial
-   *  month proportionally, so the same factor applies to every component
-   *  on the record); `null` when no test ran (untested → full pay). */
+  /** Per-month pay factor (12 entries): the fraction of the record-level pool paid, the same for every component on the record (§404.439 apportions a partial month proportionally); `null` when no test ran. */
   payFactorByMonth: readonly number[] | null;
 }
 
@@ -450,40 +340,14 @@ const UNTESTED = (): MemberEarningsTestOutcome => ({
 });
 
 /**
- * Apply the SSA earnings-test reduction to a member's chargeable benefit
- * pool for one year.
+ * Applies the SSA earnings test to a member's chargeable pool for one year. Per 20 CFR 404.415/404.434 the pool is
+ * record-level: their own (+survivor) checks, spousal excess payable on their record, and their own spousal excess. A
+ * monthly earnings series makes the FRA-year sum month-precise and, in the grace year on `timing`, runs the monthly
+ * non-service test too (20 CFR 404.430 / 404.435); a later benefit start with unbroken entitlement adds no grace year
+ * (20 CFR 404.435(b)(2)).
  *
- * The earnings test reduces benefits when the earner has part-time earned
- * income above the annual exempt amount before FRA. Per 20 CFR
- * 404.415/404.434, `benefitAnnual` / `monthlyBenefitDollars` carry the
- * RECORD-level combined pool chargeable by THIS member's excess earnings —
- * their own (+survivor) checks, any spousal excess payable on their record,
- * and their own spousal excess (dual entitlement) — so the deduction amount
- * and the per-month charge schedule are computed against the correct
- * family total, never a personal-benefit ratio reapplied elsewhere.
- *
- * Month-precise inputs: when the member carries an actual monthly-earnings
- * series for the year it drives the FRA-year pre-FRA-month sum, and in the
- * member's GRACE YEAR the monthly non-service test runs too (20 CFR
- * 404.430 / 404.435). The grace year is carried on
- * `timing` — the FIRST entitled taxable year containing a non-service
- * month (POMS RS 02501.030), resolved from the member's first-ever
- * entitlement start (own retirement claim or an earlier survivor start); a
- * later benefit start with entitlement continuing unbroken into it
- * establishes no additional grace year (20 CFR 404.435(b)(2)).
- *
- * Returns the whole-check `withheldMonths` count (record-level charged
- * months), the month-indexed charge schedule the engines consume,
- * and the estimated-thresholds flag.
- *
- * @param timing - the member's entitlement start + resolved grace year).
- *   Absent → derived from the own retirement claim via
- *   `claimMonthFor` + `resolveGraceYear` (direct-caller fallback).
- * @param monthlyBenefitDollars - the ACTUAL chargeable pool per calendar
- *   month (12 entries). When the checks vary within the year
- *   (midyear spousal-excess/survivor activation, FRA-year mixed rates) the
- *   deductions charge each specific month's real total instead of a
- *   uniform annual÷12 scalar.
+ * @param timing - entitlement start and grace year; absent derives them from the own retirement claim.
+ * @param monthlyBenefitDollars - the actual chargeable pool per calendar month (12 entries) when checks vary within the year, else annual ÷ 12.
  */
 export function applyEarningsTestToMember(
   member: SsContextMember,
@@ -501,8 +365,7 @@ export function applyEarningsTestToMember(
   if (earnedTotal <= 0) return UNTESTED();
   const bd = member.payload.birthdate;
   if (!bd) return UNTESTED();
-  // Timing fallback for direct callers: the own retirement claim is the
-  // entitlement start; the grace year resolves from there.
+  // Direct callers: the own retirement claim is the entitlement start.
   const resolvedTiming =
     timing ??
     ((): MemberEtTiming | null => {
@@ -543,63 +406,42 @@ export interface AnnualIterationInputs {
   secondaryAlive: boolean;
   primaryClaiming: boolean;
   secondaryClaiming: boolean;
-  /** Year being evaluated. */
   year: number;
   primaryClaim: number | null;
   secondaryClaim: number | null;
-  /** Absolute claim-month indices (`year × 12 + month0`) — drive the
-   *  spousal-excess activation month (`max(recipient, worker)` claim month)
-   *  so a midyear worker claim prorates the excess in the annual table.
-   *  `null` when the birthdate is missing. */
+  /** Absolute claim-month indices (`year × 12 + month0`) driving the spousal-excess activation month, so a midyear worker claim prorates the excess; `null` when the birthdate is missing. */
   primaryClaimMonthIdx: number | null;
   secondaryClaimMonthIdx: number | null;
-  /** COLA anchor year (statement anchor when present, else the age-62
-   *  eligibility year). COLAs compound only for years after it. */
+  /** COLA anchor year (statement anchor, else age-62 eligibility year); COLAs compound only after it. */
   primaryColaAnchorYear: number | null;
   secondaryColaAnchorYear: number | null;
-  /** Own-benefit annual bases — ARF-adjusted per year by the caller from the
-   *  member's FRA year onward (restored earnings-test months). */
+  /** Own-benefit annual bases, ARF-adjusted per year by the caller from the FRA year on. */
   primaryOwnBase: number;
   secondaryOwnBase: number;
-  /** Dual-entitlement spousal EXCESS bases (see `spousalExcessAnnual`) —
-   *  independently reduced; added on top of the own benefit, never composed
-   *  via `max`. */
+  /** Spousal-excess bases (see `spousalExcessAnnual`), reduced independently and added to the own benefit, never composed via `max`. */
   primarySpousalExcessBase: number;
   secondarySpousalExcessBase: number;
   colaFactor: number;
-  /** When true, prorate the claim-year benefit by the share of the
-   *  year on/after the claim month. Annual-table mode only. */
+  /** Prorates the claim-year benefit by the share of the year from the claim month; annual-table mode only. */
   prorateClaimYear?: boolean;
-  /** Fraction of the claim year on/after the claim month, `(12 −
-   *  claimMonth0) / 12`. Applied only in the claim year when
-   *  `prorateClaimYear` is set. One per member. */
+  /** `(12 − claimMonth0) / 12`, applied only in the claim year when `prorateClaimYear` is set. */
   primaryClaimYearFraction?: number;
   secondaryClaimYearFraction?: number;
 }
 
-/** One member's annual benefit split into its components — the earnings-test
- *  application needs the spousal EXCESS separately (a worker's excess
- *  earnings also charge the spousal excess payable on their record). */
+/** One member's annual benefit split into components, since a worker's excess earnings also charge the spousal excess payable on their record. */
 export interface AnnualMemberComponents {
-  /** own + spousal excess (post-proration), nominal $/yr. */
   total: number;
-  /** The spousal-excess portion of `total` (post-proration). */
   excess: number;
 }
 
-/** Annual components plus the ACTUAL per-calendar-month dollars: the
- *  annual engine composes the year from these 12 checks — the survivor fold,
- *  the earnings-test charging, and the FRA-year mixed-rate
- *  splice all operate month-wise. `total === Σ totalByMonth`. */
+/** Annual components plus the actual per-month dollars; the year is composed from these 12 checks (`total === Σ totalByMonth`). */
 export interface AnnualMemberMonthlyComponents extends AnnualMemberComponents {
   totalByMonth: number[];
   excessByMonth: number[];
 }
 
-/** First month0 of `year` the spousal excess is payable — activation
- *  is the LATER of the two claim months (`max(recipient, worker)`), so the
- *  worker's midyear claim starts the excess mid-year in its activation
- *  year. `12` = no payable month this year. */
+// First month0 of `year` the spousal excess is payable: the later of the two claim months, so a midyear worker claim starts it midyear; 12 means no payable month this year.
 function excessStartMonth0(
   year: number,
   recipientClaimIdx: number | null,
@@ -609,8 +451,6 @@ function excessStartMonth0(
 ): number {
   if (!prorate) return 0;
   if (recipientClaimIdx === null || workerClaimIdx === null) {
-    // Missing birthdate → no month info; fall back to the recipient's own
-    // claim-year start month.
     return fallbackStartMonth0;
   }
   const startIdx = Math.max(recipientClaimIdx, workerClaimIdx);
@@ -620,9 +460,6 @@ function excessStartMonth0(
   return startIdx % 12;
 }
 
-/** One recipient's annual components (own + excess) as actual per-month
- *  checks — the shared body both member directions of
- *  `computeAnnualMemberBenefits` call. */
 function annualComponentsFor(args: {
   year: number;
   colaFactor: number;
@@ -639,24 +476,19 @@ function annualComponentsFor(args: {
   prorate: boolean;
   claimYearFraction: number;
 }): AnnualMemberMonthlyComponents {
-  // COLA exponent measured from the anchor year (statement anchor / age-62
-  // fallback), not the claim year. The claim-age adjustment is already
-  // baked into `ownBase`.
+  // COLA compounds from the anchor year (statement or age-62 fallback), not the claim year; the claim-age adjustment is already in `ownBase`.
   const cola = Math.pow(args.colaFactor, args.year - (args.anchor ?? args.claim));
-  // The claim-year fraction is `(12 − claimMonth0)/12` by construction,
-  // so the payable-month start recovers exactly as `12 − fraction × 12`.
+  // The claim-year fraction is (12 − claimMonth0)/12, so the payable-month start is 12 − fraction × 12.
   const ownStartMonth0 =
     args.prorate && args.year === args.claim
       ? Math.min(12, Math.max(0, Math.round(12 - args.claimYearFraction * 12)))
       : 0;
   const ownMonthly = (args.ownBase * cola) / 12;
-  // The spousal excess derives from the WORKER's PIA, so its COLA
-  // compounds from the WORKER's anchor.
+  // The excess derives from the worker's PIA, so its COLA compounds from the worker's anchor.
   const spousalCola = Math.pow(
     args.colaFactor,
     args.year - (args.workerAnchor ?? args.workerClaim ?? args.claim),
   );
-  // Deemed-filing gate: worker claimed AND recipient at/past own claim.
   const spousalEligible = deemedFilingEligible(args.workerClaiming, args.year, args.claim);
   const excessMonthly =
     args.workerAlive && spousalEligible ? (args.excessBase * spousalCola) / 12 : 0;
@@ -670,8 +502,7 @@ function annualComponentsFor(args: {
           ownStartMonth0,
         )
       : 12;
-  // Dual entitlement: own + independently reduced excess (POMS
-  // RS 00615.020), each carrying its own reduction factor, month by month.
+  // Dual entitlement (POMS RS 00615.020): own plus independently reduced excess, month by month.
   const totalByMonth = new Array<number>(12).fill(0);
   const excessByMonth = new Array<number>(12).fill(0);
   let total = 0;
@@ -687,23 +518,6 @@ function annualComponentsFor(args: {
   return { total, excess, totalByMonth, excessByMonth };
 }
 
-/**
- * Computes per-member annual benefit amounts for `projectSsByYear` for
- * one calendar year, applying own-benefit COLA and the deemed-filing
- * dual-entitlement spousal excess. Does NOT apply survivor overrides
- * (see `applyAnnualSurvivorBranches`).
- *
- * Dual entitlement (POMS RS 00615.020): `own (own reduction) + excess
- * (spousal reduction)` — the two components are reduced separately and
- * ADDED (not the larger of the two). The excess COLAs
- * from the WORKER's anchor and activates at the worker's actual claim
- * month (prorated in the activation year).
- *
- * Returns `{ primary, secondary }` component pairs (nominal $/yr);
- * `secondary` is `undefined` when there is no secondary member.
- *
- * @param inp - per-year loop state
- */
 const emptyMonthlyComponents = (): AnnualMemberMonthlyComponents => ({
   total: 0,
   excess: 0,
@@ -711,6 +525,12 @@ const emptyMonthlyComponents = (): AnnualMemberMonthlyComponents => ({
   excessByMonth: new Array<number>(12).fill(0),
 });
 
+/**
+ * Per-member annual benefits for `projectSsByYear` in one calendar year: own-benefit COLA plus the deemed-filing
+ * dual-entitlement excess (POMS RS 00615.020), reduced separately and added (not the larger of the two). The excess COLAs
+ * from the worker's anchor and activates at the worker's claim month, prorated in that year. Survivor overrides are
+ * applied elsewhere (`applyAnnualSurvivorBranches`); `secondary` is `undefined` with no secondary member.
+ */
 export function computeAnnualMemberBenefits(inp: AnnualIterationInputs): {
   primary: AnnualMemberMonthlyComponents;
   secondary: AnnualMemberMonthlyComponents | undefined;
@@ -762,23 +582,10 @@ export function computeAnnualMemberBenefits(inp: AnnualIterationInputs): {
 }
 
 /**
- * DRC portion of the adjustment factor that is actually PAYABLE in
- * the month at `idx`. Delayed-retirement credits earned during calendar
- * year N are first payable in January of N+1 (SSA POMS RS 00615.690),
- * except credits earned in the year the beneficiary turns 70 (and any
- * months at/after age 70), which are payable immediately.
- *
- * Returns the full static `adjustmentFactor` for claims at or below FRA
- * (reductions and the 1.0 factor have no deferral) and for months at or
- * after age 70. For a delayed claim before age 70, the payable factor
- * ramps up only at each January boundary: it pays for the credits earned
- * through the END of the prior calendar year.
- *
- * @param idx - absolute month index `year × 12 + month0` being evaluated
- * @param claimIdx - absolute month index the member claims
- * @param fraMonths - member's FRA in total months
- * @param claimAgeMonths - member's claim age in total months
- * @param age70Idx - absolute month index the member reaches age 70
+ * DRC portion of the adjustment factor payable in month `idx`. Delayed-retirement credits earned in calendar year N are
+ * first payable in January N+1 (POMS RS 00615.690), except those earned in the year the beneficiary turns 70 and later
+ * months, which are payable immediately. Claims at or below FRA return the static `adjustmentFactor`; for a delayed
+ * claim before 70 the factor ramps only at each January, paying credits earned through the end of the prior year.
  */
 export function payableDrcFactorForMonth(
   idx: number,
@@ -787,19 +594,11 @@ export function payableDrcFactorForMonth(
   claimAgeMonths: number,
   age70Idx: number,
 ): number {
-  // No DRCs below/at FRA — early-claim reduction already in base; payable factor = 1.0.
   if (claimAgeMonths <= fraMonths) {
-    // Pre-FRA/at-FRA: no DRCs. The early-claim reduction is already baked
-    // into `ownBaseNoDrcAnnual` (via min(claim, fra)). Payable factor = 1.0.
     return 1.0;
   }
-  // At/after age 70 all earned credits are payable immediately.
   if (idx >= age70Idx) return adjustmentFactor(fraMonths, claimAgeMonths);
-  // The delay spans calendar-month indices [fraIdx, claimIdx − 1]. A
-  // delay-month in calendar year Y is first payable in January Y+1, i.e.
-  // payable once `idx ≥ (Y+1)×12`. At the evaluation month `idx`
-  // (calendar year `currentYear`), the payable delay-months are those
-  // whose calendar year < currentYear, i.e. month index < currentYear×12.
+  // The delay spans month indices [fraIdx, claimIdx − 1]; a delay month in year Y is payable once `idx ≥ (Y+1) × 12`.
   const currentYear = Math.floor(idx / 12);
   const totalDrcMonths = claimAgeMonths - fraMonths;
   const fraIdx = claimIdx - totalDrcMonths;
@@ -812,47 +611,31 @@ export function payableDrcFactorForMonth(
   return adjustmentFactor(fraMonths, fraMonths + cappedPayable);
 }
 
-/** Inputs shared by `computeMonthlyMemberBenefits` for a single month. */
 export interface MonthlyIterationInputs {
   hasSecondary: boolean;
   primaryAlive: boolean;
   secondaryAlive: boolean;
   primaryClaiming: boolean;
   secondaryClaiming: boolean;
-  /** Absolute month index `year * 12 + month0`. */
   idx: number;
   primaryClaimIdx: number | null;
   secondaryClaimIdx: number | null;
-  /** COLA exponent for primary — `year − primaryColaAnchorYear`. */
   primaryColaPow: number;
-  /** COLA exponent for secondary — same formula. */
   secondaryColaPow: number;
-  /** Own annual base WITHOUT the DRC portion of the adjustment factor
-   *  baked in (reductions/at-FRA factor still applied) — the payable
-   *  DRC factor is applied per-month on top. ARF-adjusted per year by the
-   *  caller from the member's FRA year onward. */
+  /** Own annual base without the DRC portion (reductions and the at-FRA factor still applied); the payable DRC factor is layered per month. ARF-adjusted per year from the FRA year on. */
   primaryOwnBaseNoDrc: number;
   secondaryOwnBaseNoDrc: number;
-  /** Payable-DRC factor for this month (1.0 when no DRCs apply). */
   primaryPayableDrc: number;
   secondaryPayableDrc: number;
-  /** Dual-entitlement spousal EXCESS bases — independently reduced. */
   primarySpousalExcessBase: number;
   secondarySpousalExcessBase: number;
   colaFactor: number;
 }
 
 /**
- * Computes per-member annualized benefit amounts for `projectSsByMonth`
- * for one calendar month. Applies own-benefit COLA and the deemed-filing
- * dual-entitlement spousal excess at month-index precision.
- *
- * Returns `{ primary, secondary }` component pairs in nominal $/yr —
- * `total` (own + excess) plus the `excess` portion, so the caller can
- * apply the per-record earnings-test schedules component-wise.
- * `secondary` is `undefined` when there is no secondary member.
- *
- * @param inp - per-month loop state
+ * Per-member annualized benefits for `projectSsByMonth` in one calendar month: own-benefit COLA plus the deemed-filing
+ * dual-entitlement excess at month-index precision. `total` (own + excess) comes with the `excess` portion so the
+ * caller can apply the earnings-test schedules component-wise; `secondary` is `undefined` with no secondary member.
  */
 export function computeMonthlyMemberBenefits(inp: MonthlyIterationInputs): {
   primary: AnnualMemberComponents;
@@ -865,10 +648,8 @@ export function computeMonthlyMemberBenefits(inp: MonthlyIterationInputs): {
 
   if (inp.primaryAlive && inp.primaryClaiming) {
     const cola = Math.pow(inp.colaFactor, inp.primaryColaPow);
-    // Own benefit = (PIA × non-DRC factor) × payable-DRC factor × COLA.
     const ownNow = inp.primaryOwnBaseNoDrc * inp.primaryPayableDrc * cola;
-    // Spousal excess: worker=secondary claimed, recipient=primary. Worker's
-    // COLA anchor.
+    // Worker = secondary, recipient = primary; COLA from the worker's anchor.
     const spousalCola = Math.pow(inp.colaFactor, inp.secondaryColaPow);
     const spousalEligible = deemedFilingEligible(
       inp.secondaryClaiming,
@@ -879,7 +660,6 @@ export function computeMonthlyMemberBenefits(inp: MonthlyIterationInputs): {
       inp.secondaryAlive && spousalEligible
         ? inp.primarySpousalExcessBase * spousalCola
         : 0;
-    // Dual entitlement: own + independently reduced excess, not max.
     primary = { total: ownNow + excessNow, excess: excessNow };
   }
 
@@ -902,15 +682,7 @@ export function computeMonthlyMemberBenefits(inp: MonthlyIterationInputs): {
   return { primary, secondary };
 }
 
-/**
- * Own annual benefit base WITHOUT the DRC portion of the adjustment
- * factor. For claims at or below FRA this equals
- * `ownClaimBenefitAnnual` (the adjustment factor is the reduction/1.0,
- * which is not deferred). For delayed claims it strips the DRC multiplier
- * so the monthly engine can layer `payableDrcFactorForMonth` on top.
- *
- * Returns `pia × (claim ≤ FRA ? adjustmentFactor : 1.0) × 12 × reductionFactor`.
- */
+/** Own annual base without the DRC portion: equals `ownClaimBenefitAnnual` at or below FRA, and for delayed claims strips the DRC multiplier so the monthly engine can layer `payableDrcFactorForMonth` on top. */
 export function ownBaseNoDrcAnnual(
   member: SsContextMember,
   reductionFactor: number,
@@ -918,8 +690,6 @@ export function ownBaseNoDrcAnnual(
   if (member.pia === null || member.pia <= 0) return 0;
   const fra = fraMonthsFor(member);
   const claim = claimAgeMonths(member.claimAge);
-  // Below/at FRA: keep the (reduction) factor. Above FRA: strip DRCs
-  // (base at FRA = 1.0 factor) — the payable DRC factor is layered later.
   const ageForBase = Math.min(claim, fra);
   const monthly = monthlyBenefitAtAge(member.pia, fra, ageForBase);
   return monthly * 12 * reductionFactor;

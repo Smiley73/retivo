@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   BRIDGE_FILE,
-  BRIDGE_LAUNCHER,
   BRIDGE_MANIFEST_FILE,
   BRIDGE_NOTICES_FILE,
   assertSafeOrigin,
@@ -18,12 +17,11 @@ const sha256 = 'a'.repeat(64);
 describe('bridgeCommandFor', () => {
   it.each<AgentName>(['claude', 'codex'])('builds a one-line %s command', (agent) => {
     const line = bridgeCommandFor(agent, { origin });
-    expect(line).toBe(`${agent} mcp add retivo -- ${BRIDGE_LAUNCHER} --origin ${origin}`);
+    expect(line).toBe(`${agent} mcp add retivo -- node "$HOME/.retivo/${BRIDGE_FILE}" --origin ${origin}`);
     expect(line).not.toContain('\n');
   });
 
   it('launches the saved bridge file with node, not a package fetched on every start', () => {
-    expect(BRIDGE_LAUNCHER).toBe(`node "$HOME/.retivo/${BRIDGE_FILE}"`);
     expect(bridgeCommandFor('claude', { origin })).not.toMatch(/npx|placeholder/);
   });
 
@@ -91,7 +89,7 @@ describe('bridgeInstallCommand', () => {
 
   it('saves the file exactly where the launcher runs it from', () => {
     expect(bridgeInstallCommand({ origin, sha256 })).toContain(` "$HOME/.retivo/${BRIDGE_FILE}"`);
-    expect(BRIDGE_LAUNCHER).toContain(`"$HOME/.retivo/${BRIDGE_FILE}"`);
+    expect(bridgeCommandFor('claude', { origin })).toContain(` node "$HOME/.retivo/${BRIDGE_FILE}" `);
   });
 
   it('accepts a loopback http origin', () => {

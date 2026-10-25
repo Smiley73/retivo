@@ -2,7 +2,7 @@
 import { z } from 'zod';
 
 /** Codes a tool result can carry. */
-export const TOOL_ERROR_CODES = [
+const TOOL_ERROR_CODES = [
   'NOT_PAIRED',
   'TOOL_NOT_SUPPORTED',
   'WORKSPACE_LOCKED',
@@ -18,7 +18,7 @@ export const TOOL_ERROR_CODES = [
 ] as const;
 
 /** Codes that end the socket; each has a close code in `CLOSE_CODES`. */
-export const HANDSHAKE_ERROR_CODES = [
+const HANDSHAKE_ERROR_CODES = [
   'PROTOCOL_VERSION_MISMATCH',
   'PAIRING_FAILED',
   'PAIRING_ATTEMPTS_EXCEEDED',
@@ -53,13 +53,4 @@ export function handshakeErrorForCloseCode(closeCode: number): HandshakeErrorCod
 }
 
 /** Reason strings for the tab's normal close (limited to 123 bytes by the WebSocket spec). */
-export const TAB_CLOSE_REASONS = [
-  'disconnect',
-  'sign-out',
-  'idle',
-  'lock',
-  'user-switch',
-  'pagehide',
-  'consent-declined',
-] as const;
-export type TabCloseReason = (typeof TAB_CLOSE_REASONS)[number];
+export type TabCloseReason = 'disconnect' | 'sign-out' | 'idle' | 'lock' | 'user-switch' | 'pagehide' | 'consent-declined';
