@@ -1,16 +1,6 @@
 /**
- * Reusable step-up re-auth modal.
- *
- * Presentational shell for "prove it's really you with a fresh second factor"
- * before a sensitive operation. State + API orchestration live in `useStepUp`
- * (kept out of `AuthContext`); this renders the factor picker, the code
- * field, and the passkey button from a `UseStepUpResult`.
- *
- * Password-manager interop (see "Password managers" in docs/ui-conventions.md): the
- * OTP / code fields carry `autocomplete="one-time-code"`; the modal renders
- * through `<PasswordManagerModal>` (its scrim swallows outside clicks so a
- * password-manager popup cannot dismiss it; the background is never inert).
- * React Aria primitives only.
+ * Presentational step-up modal over `useStepUp`, rendered through `PasswordManagerModal` so a password-manager popup
+ * cannot dismiss it. See "Password managers" in docs/ui-conventions.md.
  */
 import React from 'react';
 import { RadioGroup } from 'react-aria-components';
@@ -33,22 +23,15 @@ interface StepUpModalProps {
   open: boolean;
   onClose: () => void;
   title: string;
-  /** The orchestration state + actions from {@link useStepUp}. */
   stepUp: UseStepUpResult;
-  /** Optional intro copy above the factor picker. */
   children?: React.ReactNode;
-  /** Label for the confirm button (defaults to "Confirm"). */
   confirmLabel?: string;
   /**
-   * Field(s) the operation needs in the SAME submit as the factor proof,
-   * rendered after the factor field so they are the last thing typed before
-   * Confirm — e.g. the live authenticator code during TOTP enrollment,
-   * valid for only ~a minute and so collected
-   * right before it is spent rather than frozen earlier in the flow.
+   * Fields the operation needs in the same submit as the proof, rendered last so a ~one-minute
+   * authenticator code is collected right before it is spent.
    */
   extraFields?: React.ReactNode;
-  /** Owner-side confirm gate (e.g. an empty `extraFields` value), OR'd with
-   * the modal's own code/passkey readiness. */
+  /** Owner-side confirm gate, OR'd with the modal's own readiness. */
   confirmDisabled?: boolean;
 }
 

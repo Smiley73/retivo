@@ -1,14 +1,6 @@
 /**
- * Shared inline text link — the app's single source for link styling.
- *
- * Renders a React Router <Link> in the brand `accent-link` green with a
- * persistent underline (a link never relies on colour alone — WCAG 1.4.1)
- * and a focus-visible ring (keyboard discoverable — WCAG 2.4.7). Extra
- * `className` is appended, so callers can add weight/size (e.g. `text-sm`,
- * `font-semibold`) without losing the link treatment.
- *
- * For a non-navigation trigger (a <button> styled as a link, or an external
- * <a>), import `textLinkClass` and apply it directly — same single source.
+ * Shared inline link styling on a router `<Link>`: persistent underline (WCAG 1.4.1) and a focus ring (2.4.7). For a
+ * button or external `<a>`, apply `textLinkClass` directly.
  */
 import React from 'react';
 import { Link, type LinkProps } from 'react-router';

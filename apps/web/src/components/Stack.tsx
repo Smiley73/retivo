@@ -1,17 +1,9 @@
-/**
- * Vertical flex stack — the typed Tailwind-defaults replacement for the
- * legacy `.stack` utility class.
- *
- * Lays children out vertically with a consistent gap (the legacy
- * `.stack`: `display:flex; flex-direction:column; gap:0.5rem`).
- * Layout-only — gap / alignment overrides go through `className`.
- */
+/** Vertical flex stack with a consistent gap; layout-only, overrides go through `className`. */
 import React from 'react';
 
 interface StackProps {
   children: React.ReactNode;
   className?: string;
-  /** Runtime-dynamic values only (static styling belongs in classes). */
   style?: React.CSSProperties;
 }
 

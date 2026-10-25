@@ -1,17 +1,6 @@
 /**
- * ChartFrame — the SVG container + interaction surface for the bespoke
- * chart engine. Replaces the Recharts `<ResponsiveContainer><…Chart>`
- * shell. Owns:
- *   - responsive width (via `useChartGeometry`) + caller-fixed height
- *   - the inner plot rect (after margins)
- *   - pointer-move hover state (→ crosshair + HTML tooltip)
- *   - pointer down/move/up wiring to an engine-agnostic
- *     `PointerHandlers` (the reworked `useChartZoom`)
- *   - composition of Axes / Series / Markers / Crosshair / Tooltip
- *
- * Colors arrive pre-resolved on each `SeriesSpec`/`MarkerSpec`; chrome
- * (grid/axis/tooltip) is read inside the child components via
- * `useChartChrome()` so it re-flips on a `.dark` toggle.
+ * SVG container and interaction surface of the chart engine: geometry, hover state, pointer wiring, and composition
+ * of Axes, Series, Markers, Crosshair and Tooltip.
  */
 import React from 'react';
 import { useChartChrome, useChartColors } from '../../../lib/use-chart-tokens';
@@ -40,8 +29,6 @@ import {
 
 const DEFAULT_MARGIN: ChartMargin = { top: 56, right: 16, bottom: 28, left: 72 };
 
-/** Engine-agnostic pointer handlers (supplied by `useChartZoom`). The
- *  data-space x of the pointer is passed so the hook does the snap. */
 interface PointerHandlers {
   onPointerDown: (dataX: number) => void;
   onPointerMove: (dataX: number) => void;
@@ -59,9 +46,10 @@ export interface ChartFrameProps {
   xDomain: [number, number] | null;
   yDomain?: [number, number] | null;
   yScale?: 'linear' | 'log';
-  /** Series names to hide (interactive legend filter). Hidden series are
-   *  dropped before the stack/domain are computed, so the remaining
-   *  series restack and the Y axis auto-fits to the visible data. */
+  /**
+   * Series names to hide; hidden series are dropped before the stack and domain are computed, so
+   * the rest restack and Y re-fits.
+   */
   hiddenSeries?: ReadonlySet<string>;
   xTicks: number[];
   xTickFormatter?: (v: number) => string;
@@ -70,12 +58,10 @@ export interface ChartFrameProps {
   dragSelection?: [number, number] | null;
   isDragging?: boolean;
   pointerHandlers?: PointerHandlers;
-  /** SVG `<defs>` (gradients) injected before the series. */
+  /** SVG `<defs>` injected before the series. */
   defs?: React.ReactNode;
-  /** Optional dashed horizontal reference line at this data-space y
-   *  (e.g. the zero baseline on the return-% chart). */
+  /** Dashed horizontal reference line at this data-space y. */
   hLineY?: number;
-  /** Render the HTML tooltip body for the hovered datum. */
   renderTooltip?: (datum: ChartDatum) => React.ReactNode;
 }
 
@@ -97,7 +83,6 @@ function buildGeometry(
   };
 }
 
-/** Translate a DOM pointer event to a data-space x within the plot. */
 function eventToDataX(
   evt: React.PointerEvent<SVGSVGElement>,
   geometry: ChartGeometry,
@@ -110,7 +95,6 @@ function eventToDataX(
   return xDomain[0] + t * (xDomain[1] - xDomain[0]);
 }
 
-/** Resolved domains + geometry + visible rows for the current render. */
 interface ResolvedFrame {
   margin: ChartMargin;
   geometry: ChartGeometry;
@@ -119,7 +103,6 @@ interface ResolvedFrame {
   visibleRows: ChartDatum[];
 }
 
-/** Pure resolution of margins, geometry, and active x/y domains. */
 function resolveFrame(props: ChartFrameProps, width: number): ResolvedFrame {
   const margin: ChartMargin = { ...DEFAULT_MARGIN, ...props.margin };
   const geometry = buildGeometry(width, props.height, margin);
@@ -136,16 +119,9 @@ function resolveFrame(props: ChartFrameProps, width: number): ResolvedFrame {
   return { margin, geometry, activeX, activeY, visibleRows };
 }
 
-/** SVG pointer handler set, wired to the engine-agnostic hook.
- *
- *  Touch is deliberately ignored (the zoom gesture is mouse + pen only —
- *  see use-chart-zoom.ts): a `pointerType: 'touch'` down/move never
- *  starts or continues a drag, so a finger swiping to scroll the page over
- *  the chart keeps panning instead of arming a zoom selection (the `<svg>`
- *  also carries `touch-pan-y` so vertical scroll is preserved). The
- *  recharts port wired raw pointer events with no such guard. `onPointer
- *  Cancel` shares the leave/up cleanup path so a browser-cancelled pointer
- *  can't strand `isDragging`/the selection. */
+// Touch is ignored so a finger swiping to scroll over the chart keeps panning instead of arming a
+// zoom (the `<svg>` also carries `touch-pan-y`). `onPointerCancel` shares the leave/up cleanup so a
+// cancelled pointer cannot strand `isDragging` or the selection.
 function buildPointerHandlers(
   geometry: ChartGeometry,
   activeX: [number, number],
@@ -180,9 +156,6 @@ function buildPointerHandlers(
   };
 }
 
-/** The composed SVG markup tree (axes, optional ref line, series, markers,
- *  crosshair). Chrome/colors are read here so they re-flip on a dark
- *  toggle without re-resolving the parent frame. */
 function ChartCanvas(props: {
   frame: ResolvedFrame;
   series: SeriesSpec[];
@@ -242,12 +215,8 @@ function ChartCanvas(props: {
   );
 }
 
-/** Vertical pitch (px) between wrapped legend rows in the PDF-capture band.
- *  Holds the 10px swatch + the 11px label with a little breathing room. */
 const LEGEND_ROW_H = 18;
 
-/** One laid-out legend entry: its swatch color + name, positioned at `x`
- *  within the row at index `row`. */
 interface LegendEntryLayout {
   name: string;
   color: string;
@@ -255,16 +224,11 @@ interface LegendEntryLayout {
   row: number;
 }
 
-/** Approximate the rendered width of one legend entry (swatch + gap + label
- *  + trailing item gap), used to wrap entries into centered rows. */
 function legendEntryWidth(name: string): number {
   return 10 + 4 + name.length * 6.2 + 14;
 }
 
-/** Lay legend entries out as centered horizontal rows that wrap within
- *  `width`. Pure (no DOM measure) — the per-entry width is an approximation,
- *  good enough for the off-screen PDF capture. Returns the positioned entries
- *  plus the row count so the caller can size the legend band. */
+// Pure layout (no DOM measure); widths are approximate, good enough for the off-screen PDF capture.
 function layoutLegend(
   series: SeriesSpec[],
   width: number,
@@ -272,7 +236,6 @@ function layoutLegend(
   const visible = series.filter((s) => !s.hideFromLegend);
   if (visible.length === 0) return { entries: [], rows: 0 };
   const maxRowWidth = width - 8;
-  // First pass: assign each entry to a row + its running x within that row.
   const rowOf: number[] = [];
   const rawX: number[] = [];
   const rowWidths: number[] = [];
@@ -290,7 +253,6 @@ function layoutLegend(
     runningX += w;
   }
   rowWidths[row] = runningX;
-  // Second pass: center each row by offsetting its entries by the row's slack.
   const entries: LegendEntryLayout[] = visible.map((s, i) => {
     const r = rowOf[i];
     const offset = Math.max(0, (width - rowWidths[r]) / 2);
@@ -299,11 +261,9 @@ function layoutLegend(
   return { entries, rows: row + 1 };
 }
 
-/** In-SVG legend band rendered ONLY during PDF capture (svg2pdf captures just
- *  the `<svg>`, so the on-screen HTML `ChartLegend` sibling never reaches the
- *  PDF). Reads the active chrome for a theme-correct (forced-light under the
- *  PDF host) text color. Kept to `<rect fill>` + `<text>` — the only primitives
- *  svg2pdf renders. */
+// In-SVG legend for PDF capture only: svg2pdf captures just the `<svg>`, so the HTML `ChartLegend`
+// never reaches the PDF. Limited to `<rect fill>` and `<text>`, the only primitives svg2pdf
+// renders.
 function SvgLegend(props: {
   entries: LegendEntryLayout[];
   top: number;
@@ -315,11 +275,8 @@ function SvgLegend(props: {
         const rowTop = e.row * LEGEND_ROW_H;
         return (
           <g key={`${e.name}-${i}`}>
-            {/* Swatch + label share a vertical center: the swatch spans
-                rowTop..rowTop+10 (center rowTop+5); the text baseline sits at
-                rowTop+9 so its visual middle lands on the same center. The
-                default (alphabetic) baseline is used — `dominantBaseline` is
-                not reliably honored through svg2pdf. */}
+            {/* Default alphabetic baseline: `dominantBaseline` is not reliably honored through
+                svg2pdf. */}
             <rect x={e.x} y={rowTop} width={10} height={10} rx={2} fill={e.color} />
             <text x={e.x + 14} y={rowTop + 9} fontSize={11} fill={chrome.axis}>
               {e.name}
@@ -335,12 +292,8 @@ export const ChartFrame: React.FC<ChartFrameProps> = (props) => {
   const pdfCapture = React.useContext(PdfCaptureContext);
   const { ref, width } = useChartGeometry();
   const [hoverX, setHoverX] = React.useState<number | null>(null);
-  // Drop hidden series up front: both the Y-domain (`resolveYDomain`) and
-  // the renderer (`<Series>`) read only this array, so filtering here
-  // restacks + rescales the chart with no further wiring. `null` markers/
-  // x-domain/ticks are series-independent and untouched. Series toggle by
-  // `legendId` (defaults to `name`) so an invisible stack helper can follow
-  // its visible partner and duplicate names can still toggle independently.
+  // Hidden series are dropped up front, so both the Y domain and `<Series>` restack and rescale;
+  // they toggle by `legendId` (default `name`).
   const hiddenSeries = props.hiddenSeries;
   const isFiltering = (hiddenSeries?.size ?? 0) > 0;
   const visibleSeries = React.useMemo(
@@ -350,10 +303,8 @@ export const ChartFrame: React.FC<ChartFrameProps> = (props) => {
         : props.series,
     [props.series, hiddenSeries, isFiltering],
   );
-  // While filtering, ignore an explicit (zoom-fitted) yDomain — it was
-  // computed from the UNFILTERED series, so honoring it would leave the Y
-  // axis scaled to now-hidden data. Passing `null` re-fits Y to the visible
-  // series within the current x-window (the zoom's x stays intact).
+  // An explicit zoom-fitted `yDomain` was computed from the unfiltered series; ignoring it re-fits
+  // Y to the visible ones.
   const yDomainForFrame = isFiltering ? null : props.yDomain;
   const frame = resolveFrame(
     { ...props, series: visibleSeries, yDomain: yDomainForFrame },
@@ -372,11 +323,8 @@ export const ChartFrame: React.FC<ChartFrameProps> = (props) => {
       : null;
   const tooltipPx = hovered ? xToPx(hovered.x, activeX, geometry.plot) : 0;
 
-  // PDF capture only: lay the (full, unfiltered) series legend out as wrapped
-  // centered rows and extend the svg by a legend band so svg2pdf captures it.
-  // On screen `pdfCapture` is false → `legendBandH` is 0 and the svg is
-  // byte-identical to before (the on-screen HTML `ChartLegend` sibling stays
-  // the only legend).
+  // PDF capture only: extend the svg by a legend band so svg2pdf captures the full, unfiltered
+  // legend.
   const legend = pdfCapture
     ? layoutLegend(props.series, width)
     : { entries: [], rows: 0 };

@@ -1,14 +1,5 @@
 /**
- * Shared glyphs — the single source for the small icons across the app:
- * leading icons on action buttons (add, save, delete, reload, duplicate, plus
- * the Profile-specific data/credential icons) and a handful of decorative
- * section-header glyphs (the scenario override-group headers). Heroicons-outline
- * style, 14px, `currentColor` so each inherits its container's ink.
- *
- * Decorative by contract: the surrounding button text / heading is the
- * accessible name, so every glyph rides `aria-hidden="true"`. On a button, pair
- * with `gap-1.5` (the shared `inline-flex items-center` button classes already
- * centre the row).
+ * Shared 14px `currentColor` outline glyphs; decorative (`aria-hidden`), the surrounding text is the accessible name.
  */
 import React from 'react';
 
@@ -45,11 +36,8 @@ export const PencilIcon = (): React.ReactElement =>
   svg(<><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3z" /><path d="M13.5 6.5l3 3" /></>);
 export const XIcon = (): React.ReactElement =>
   svg(<><path d="M6 6l12 12M18 6L6 18" /></>);
-// Linked chain — a live connection (the shell's "Assistant connected" pill).
 export const LinkIcon = (): React.ReactElement =>
   svg(<><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1" /></>);
-// "Configure" affordance — horizontal sliders (adjustments). Reads as
-// "adjust these settings" on every override card's Configure button.
 export const SlidersIcon = (): React.ReactElement =>
   svg(<><circle cx="9" cy="7" r="2.2" /><path d="M3 7h4M11 7h10" /><circle cx="15" cy="17" r="2.2" /><path d="M3 17h10M17 17h4" /></>);
 
@@ -69,12 +57,9 @@ export const FingerprintIcon = (): React.ReactElement =>
 export const LockOpenIcon = (): React.ReactElement =>
   svg(<><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.7-1.5" /></>);
 
-// Status glyph — warning triangle (replaces the ⚠ emoji as a status marker;
-// the call site provides the accessible name + colour).
 export const WarningIcon = (): React.ReactElement =>
   svg(<><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4" /><path d="M12 17h.01" /></>);
 
-// Status glyph — info circle (replaces the ℹ emoji as a status marker).
 export const InfoIcon = (): React.ReactElement =>
   svg(<><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8h.01" /></>);
 

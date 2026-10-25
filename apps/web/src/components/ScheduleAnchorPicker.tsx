@@ -1,44 +1,6 @@
 /**
- * Shared schedule-anchor picker. Radio + conditional
- * input for the schedule-anchor vocabulary, modelled on the Expense
- * form's Start picker so the two stay visually consistent.
- *
- * Kinds: `retirementStart` · `age {memberId?,years,months}` ·
- * `year {year}`, plus an optional 4th `durationFromExpenseStart
- * {months}` kind gated by the `relativeKind` prop (off ⇒ behaves like
- * the expense Start picker; on ⇒ adds the per-expense relative option
- * the discretionary glide needs), plus an optional 5th `expenseEnd`
- * kind gated by the `expenseEndKind` prop — offered **only** on the
- * glide-end picker ("ends when the expense ends" is only meaningful
- * there). No sub-input: it resolves to the expense's own resolved end.
- *
- * Glide-anchor UX:
- * - `age` is configured **years-only** (no months sub-input); the
- *   stored anchor always carries `months: 0`. A member `<select>`
- *   renders only when a secondary member exists (mirrors the expense
- *   form's whose/member gating); otherwise the role defaults to primary.
- * - `durationFromExpenseStart` is configured as **years + months**
- *   "after this expense begins" (singular — this expense, not "each");
- *   the two inputs combine into the stored total `months`
- *   (`years*12 + months`).
- *
- * Rendered inside a collapsible `<AnchorCard>` by default (collapsed
- * shows a plain-language summary of the current selection; expanded
- * reveals the radio picker with room to lay out), or — when
- * `collapsible={false}` — inside the always-expanded shared
- * `<LabelledGroup>` (the income form has no collapsible sections). The
- * radio cluster is a React Aria `RadioGroup`
- * self-labelled by `label`: React Aria owns the keyboard pattern
- * (arrow / Home / End / Space / click, roving tabIndex,
- * selection-follows-focus). Pure controlled component — no draft state
- * of its own.
- *
- * Both forms' **Start** pickers now render through this component: the
- * Expense form's `StartSection` and the income form's `ScheduleStartPicker`
- * delegate to it via the `GlideAnchor ↔ ScheduleStart` bridge
- * (`lib/schedule-anchor-bridge.ts`). The Expense/income **End** pickers
- * still keep their own (richer) radio bodies — their 5-kind vocabulary is
- * a superset of this component and is not migrated.
+ * Controlled radio-plus-input picker for the schedule-anchor vocabulary, collapsible by default; the Start pickers
+ * delegate to it via `lib/schedule-anchor-bridge.ts`.
  */
 import React from 'react';
 import { RadioGroup } from 'react-aria-components';
@@ -69,68 +31,48 @@ interface Props {
   value: GlideAnchor;
   onChange: (next: GlideAnchor) => void;
   members?: ReadonlyArray<Aggregate<HouseholdMemberPayload>>;
-  /** Enable the 4th `durationFromExpenseStart` kind (glide only). */
+  /** Enables the `durationFromExpenseStart` kind (glide only). */
   relativeKind?: boolean;
-  /** Enable the 5th `expenseEnd` kind — glide-end picker only. The
-   *  glide ends exactly when the expense's own resolved `end` does. */
+  /** Enables the `expenseEnd` kind, offered on the glide-end picker only. */
   expenseEndKind?: boolean;
-  /** END-anchor mode. Hides the `retirementStart`
-   *  radio so only `age | year` are offered (a cap window's END can't be the
-   *  start of retirement). The age / year sliders still reuse
-   *  `ageSliderBounds()` / `yearSliderBounds()` so the END age anchor reaches
-   *  `MAX_AGE` (the old age-85 ceiling is gone). Defaults to `false`. */
+  /** END-anchor mode: hides `retirementStart` so only `age | year` are offered. */
   hideRetirementStart?: boolean;
   /** Group header text, e.g. "Glide starts". */
   label: string;
-  /** Disables the whole picker: the anchor card can't expand and dims.
-   *  Defaults to `false` so callers outside the glide stay unaffected. */
+  /** Disables the whole picker; the anchor card cannot expand. */
   disabled?: boolean;
-  /** Gates ONLY the `age` member `<select>` visibility (AND-ed with
-   *  `hasSecondary`). The component still emits `memberId ?? 'primary'`;
-   *  the `memberId` keep/omit policy lives in the bridge. Defaults
-   *  to `true` so the glide / Expense callers are unaffected. */
+  /**
+   * Gates only the `age` member `<select>`; the `memberId` keep/omit policy lives in the bridge.
+   */
   memberSelectable?: boolean;
-  /** When `false`, render the body in the shared always-expanded
-   *  `<LabelledGroup>` instead of the collapsible `<AnchorCard>` (the
-   *  income form has no collapsible sections). Defaults to `true`. */
+  /**
+   * `false` renders the body in the always-expanded `<LabelledGroup>` instead of the collapsible
+   * `<AnchorCard>`.
+   */
   collapsible?: boolean;
-  /** Overrides the `age` radio's text (Expense passes a personalized
-   *  "At {primary}'s age"). Defaults to `'At age'`. */
+  /**
+   * Overrides the `age` radio text, e.g. a personalized "At {primary}'s age". Defaults to
+   * `'At age'`.
+   */
   ageLabel?: React.ReactNode;
-  /** The `memberId` a freshly-switched `age` kind defaults to (income
-   *  passes the stream owner's role so switching to `age` on a
-   *  secondary-owned stream anchors to that owner, not a hardcoded
-   *  primary — the bridge's omit rule keeps a primary default on a
-   *  secondary stream, silently mis-anchoring). Defaults to `'primary'`
-   *  so the glide / Expense callers are unaffected. */
+  /**
+   * The `memberId` a freshly-switched `age` kind defaults to, so a secondary-owned stream anchors
+   * to its owner.
+   */
   defaultMemberId?: HouseholdRole;
-  /** The `year` a freshly-switched `year` kind defaults to (income's
-   *  Start picker uses the current year + 5). Defaults to the current
-   *  year so the glide / Expense callers are unaffected. */
+  /** The `year` a freshly-switched `year` kind defaults to. Defaults to the current year. */
   defaultYear?: number;
-  /** Optional upper bound for the age / year sliders. `age` caps the
-   *  age-slider max; `year` caps the year-slider max (e.g. the Roth-conversion
-   *  editor caps both at the source-owner's last working age / year — the
-   *  engine converts only strictly before retirement). The never-clamp guard in
-   *  `ageSliderBounds` / `yearSliderBounds` still wins, so an existing stored
-   *  anchor above the cap keeps showing its real value. Omitted (or each field
-   *  omitted) ⇒ no cap, so every existing caller is unaffected. */
+  /**
+   * Upper bound for the age / year sliders; an existing stored anchor above it still shows its real
+   * value.
+   */
   cap?: { age?: number; year?: number };
-  /** Optional lower bound for the age / year sliders — the mirror of `cap`.
-   *  `age` raises the age-slider min; `year` raises the year-slider min (e.g.
-   *  the QCD editor floors both at the giver's 70½ first-eligible age / year, so
-   *  a pre-70½ window can't be selected — complementing the resolver's
-   *  start-up-clamp). The never-clamp guard in `ageSliderBounds` /
-   *  `yearSliderBounds` still wins, so an existing stored anchor below the floor
-   *  keeps showing its real value. Omitted (or each field omitted) ⇒ no floor,
-   *  so every existing caller is unaffected. */
+  /** Lower bound for the age / year sliders, the mirror of `cap`. */
   floor?: { age?: number; year?: number };
 }
 
-// Shared schedule number-input vocabulary (from MemberAgeInput) — the
-// SAME class + width the expense Start/End "At age" inputs use, so every
-// anchor input (age yrs · year · duration yrs/mo) lines up identically.
-// Crucially has no `block w-full`, which would override the fixed width.
+// Same class and width as the expense "At age" inputs; no `block w-full`, which would override the
+// fixed width.
 const CONTROL_CLASS = NUMBER_INPUT_CLASS;
 const NUM_WIDTH = NUMBER_INPUT_WIDTH;
 
@@ -152,11 +94,8 @@ function defaultForKind(
       return {
         kind: 'age',
         memberId: defaults.memberId,
-        // A finite floor raises the seed above the bare default so a
-        // freshly-switched `age` anchor can't start below the picker's
-        // own lower bound (e.g. the QCD editor's 70½ floor). Absent /
-        // non-finite floor ⇒ the bare default, so every existing caller
-        // (which passes no `floor`) is unchanged.
+        // A finite floor raises the seed so a freshly-switched anchor cannot start below the
+        // picker's lower bound.
         years: Number.isFinite(floor?.age)
           ? Math.max(DEFAULT_AGE_YEARS, floor?.age as number)
           : DEFAULT_AGE_YEARS,
@@ -196,10 +135,7 @@ export const ScheduleAnchorPicker: React.FC<Props> = ({
   cap,
   floor,
 }) => {
-  // Mirror the expense form's whose/member gating: the role select
-  // only renders when a secondary member exists AND the caller allows it
-  // (income hides it for non-partTime kinds via `memberSelectable`);
-  // otherwise the anchor defaults to primary implicitly.
+  // The member select renders only when a secondary member exists and the caller allows it.
   const hasSecondary = !!members && members.some((m) => !m.payload.isPrimary);
   const showMemberSelect = memberSelectable && hasSecondary;
   const select = (kind: GlideAnchor['kind']) => {
@@ -209,10 +145,8 @@ export const ScheduleAnchorPicker: React.FC<Props> = ({
     );
   };
 
-  // Mockup: every radio's input stays visible at all times — the inputs
-  // whose radio isn't the active kind are simply *disabled*, not hidden.
-  // Each row shows the live value when its kind is selected, otherwise a
-  // sensible default placeholder while disabled.
+  // Every radio's input stays visible; inputs of inactive kinds are disabled, showing a default
+  // placeholder.
   const ageActive = value.kind === 'age';
   const yearActive = value.kind === 'year';
   const durationActive = value.kind === 'durationFromExpenseStart';
@@ -237,15 +171,11 @@ export const ScheduleAnchorPicker: React.FC<Props> = ({
     floor?.year,
   );
 
-  // Stable id for the non-collapsible `<LabelledGroup>` heading the
-  // RadioGroup is `aria-labelledby`-wired to. In the collapsible
-  // `<AnchorCard>` path the RadioGroup self-labels via `aria-label`.
+  // Heading id for the non-collapsible `<LabelledGroup>`; the collapsible path labels the
+  // RadioGroup with `aria-label`.
   const groupHeadingId = React.useId();
 
   const body = (
-    // Two-column alignment grid: every radio sits in column 1 and its
-    // input(s) in column 2, so the age/year sliders and duration inputs
-    // line up vertically. Radios with no input span both columns.
     <RadioGroup
       aria-label={collapsible ? label : undefined}
       aria-labelledby={collapsible ? undefined : groupHeadingId}
@@ -260,8 +190,8 @@ export const ScheduleAnchorPicker: React.FC<Props> = ({
           </RadioOption>
         )}
 
-        {/* The editable controls sit in column 2 beside the RadioOption
-            (not inside the <Radio> label, which would toggle on click). */}
+        {/* Controls sit beside the RadioOption, not inside its label, which would toggle on
+            click. */}
         <RadioOption value="age">{ageLabel}</RadioOption>
         <div className="flex min-w-0 items-center gap-2">
           {showMemberSelect && (
@@ -360,8 +290,6 @@ export const ScheduleAnchorPicker: React.FC<Props> = ({
         )}
 
         {expenseEndKind && (
-          // No sub-input — `expenseEnd` resolves to the expense's own
-          // resolved end window (offered only on the glide-end picker).
           <RadioOption value="expenseEnd" className="col-span-2">
             When this expense ends
           </RadioOption>
@@ -369,12 +297,6 @@ export const ScheduleAnchorPicker: React.FC<Props> = ({
     </RadioGroup>
   );
 
-  // Default: collapsible anchor card — the label + a plain-language
-  // summary of the current selection when collapsed; the radio picker
-  // when open. The card owns the bordered chrome (the parent no longer
-  // wraps each picker in its own box). When `collapsible === false`
-  // (income), render the body in the shared always-expanded
-  // `<LabelledGroup>` instead.
   if (!collapsible) {
     return (
       <LabelledGroup id={groupHeadingId} heading={label}>

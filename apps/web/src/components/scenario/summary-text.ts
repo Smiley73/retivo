@@ -53,8 +53,10 @@ export interface SsSummaryTextInput {
   effective: SocialSecurityClaimAgeOverride;
   primaryMember: Aggregate<HouseholdMemberPayload> | null;
   secondaryMember: Aggregate<HouseholdMemberPayload> | null;
-  /** Resolved scenario inflation rate — shown as the effective COLA when
-   *  `colaTracksInflation` is on (absent/true), matching `resolveSsColaPct`. */
+  /**
+   * Resolved scenario inflation, shown as the effective COLA when `colaTracksInflation` is on
+   * (absent or true).
+   */
   scenarioInflationPct: number;
 }
 
@@ -73,8 +75,6 @@ export function ssSummaryText(input: SsSummaryTextInput): string {
   const reduction = effective.benefitReductionPct ?? DEFAULT_BENEFIT_REDUCTION_PCT;
   const reductionLabel =
     reduction === 0 ? 'full benefit' : `${formatPercent(reduction)} reduction`;
-  // Mirror resolveSsColaPct: absent/true → COLA tracks scenario inflation;
-  // only an explicit false uses the fixed colaPct.
   const colaLabel =
     effective.colaTracksInflation === false
       ? `${formatPercent(effective.colaPct ?? DEFAULT_COLA_PCT)} COLA`

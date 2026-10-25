@@ -1,39 +1,15 @@
 /**
- * Per-year stacked-area income breakdown rendered beneath the cashflow
- * band on the Balance Projection page. Splits the household's gross
- * income into five sources so the user can see the shape of each:
- *
- *   - **Social Security** — combined primary + secondary household
- *     SS benefit per year (already incorporates spousal / survivor
- *     floors).
- *   - **Pension annuity** — every IncomeStream of kind=pension,
- *     payoutType=annuity, including J&S survivor reductions.
- *   - **Part-time / earned** — every kind=partTime stream.
- *   - **One-off / spendable** — sparse spikes from untargeted oneOff
- *     windfalls that fund spending directly (no `targetAccountId`).
- *   - **Portfolio additions** — sparse spikes from targeted oneOff
- *     windfalls + pension lump-sum payouts. These flow into the
- *     portfolio rather than offsetting net-need, so they sit on their
- *     own stripe.
- *   - **Portfolio withdrawal** — drawdown engine's per-year `withdrawn`
- *     under the user-selected Income method, stacked on top in a neutral
- *     slate fill so it reads as "the leftover, sourced from savings."
- *
- * A dashed expense overlay line plots `essential + discretionary` total
- * for the year, so the eye can confirm at a glance whether the stack
- * reaches the household's spend.
- *
- * Same X axis as the cashflow band above (5-year ticks, retirement →
- * `lastDeathYear`) and the same colour-coded death markers, so the two
- * charts read as a vertical stack.
+ * Per-year stacked-area breakdown of household income by source, with the portfolio withdrawal on top and a dashed
+ * expense overlay. Shares the cashflow band's X axis and death markers.
  */
 import React, { Suspense, lazy } from 'react';
 import type { TooltipMember } from './tooltip-member';
 import type { ChartMouseHandlers } from '../lib/use-chart-zoom';
 
-/** Per-month income breakdown sample. Amounts are annualized run-rates
- *  ($/yr at that month), so the stack steps up/down at the actual SS
- *  claim month, pension start month, etc. */
+/**
+ * Per-month income sample; amounts are annualized run-rates, so the stack steps at the actual claim
+ * and start months.
+ */
 export interface IncomeBreakdownPoint {
   fractionalYear: number;
   year: number;
@@ -41,29 +17,24 @@ export interface IncomeBreakdownPoint {
   ss: number;
   pensionAnnuity: number;
   partTime: number;
-  /** Untargeted oneOff windfalls — spendable income that funds
-   *  net-need directly. */
+  /** Untargeted one-off windfalls, spendable directly. */
   oneOff: number;
-  /** **Portfolio additions** — targeted oneOff windfalls + pension
-   *  lump-sum payouts. Rendered as its own stripe.
-   *  Sparse spikes only — most months are 0. */
+  /**
+   * Targeted one-off windfalls and pension lump sums, which flow into the portfolio; sparse spikes.
+   */
   portfolioAdd: number;
-  /** Drawdown engine's per-year `withdrawn` under the selected method,
-   *  broadcast as a flat run-rate across all 12 months of each year. */
+  /** Drawdown engine's per-year `withdrawn`, broadcast flat across the year's 12 months. */
   withdrawal: number;
-  /** Total flow at this month (spendable income + portfolio additions
-   *  + withdrawal). The chart stacks the six sources. */
+  /** Total flow at this month (spendable income, portfolio additions and withdrawal). */
   total: number;
-  /** Annualized expense run-rate at this month — drives the expense
-   *  overlay line. */
+  /** Annualized expense run-rate; drives the overlay line. */
   expenses: number;
 }
 
-/** Vertical reference line at a household member's projected
- *  end-of-life. Same shape as the cashflow chart's death marker so the
- *  same array can feed both. `kind: 'death'` markers are the integer
- *  death year (death = Dec 31 of `deathYear`) and the inner chart
- *  remaps them to the terminal data point per granularity. */
+/**
+ * Vertical line at a member's projected end of life; `death` markers carry the integer death year
+ * and the inner chart remaps them.
+ */
 export interface IncomeBreakdownMarker {
   fractionalYear: number;
   label: string;
@@ -74,18 +45,12 @@ export interface IncomeBreakdownMarker {
 interface Props {
   rows: IncomeBreakdownPoint[];
   markers?: IncomeBreakdownMarker[];
-  /** First year withdrawal < net need under the selected method (null
-   *  when the portfolio survives). Renders as a dashed vertical
-   *  reference line on the chart. */
+  /** First year withdrawal falls below net need; `null` when the portfolio survives. */
   depletionYear?: number | null;
-  /** Household members for the hover tooltip's "<First> (age N)" line. */
   members?: TooltipMember[];
-  /** Chart granularity. `'yearly'` (one Dec-anchored point/year) drops
-   *  the month from the tooltip date; `'monthly'` keeps `MMM YYYY`.
-   *  Defaults to `'monthly'` to preserve the prior behaviour for any
-   *  caller that doesn't pass it. */
+  /** `'yearly'` drops the month from the tooltip date. Defaults to `'monthly'`. */
   granularity?: 'monthly' | 'yearly';
-  /** Zoom-state props injected by useChartZoom in the host section. */
+  /** Zoom state injected by `useChartZoom`. */
   xDomain?: [number, number] | null;
   yDomain?: [number, number] | null;
   dragSelection?: [number, number] | null;

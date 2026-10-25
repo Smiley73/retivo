@@ -1,18 +1,12 @@
 /**
- * Horizontal flex row — the typed Tailwind-defaults replacement for the
- * legacy `.row` utility class.
- *
- * Lays children out in a wrapping, vertically-centered flex row with a
- * consistent gap (the legacy `.row`: `display:flex; gap:0.75rem;
- * align-items:center; flex-wrap:wrap`). Layout-only — extra spacing /
- * alignment overrides go through `className`.
+ * Wrapping, vertically-centred horizontal flex row with a consistent gap; layout-only, overrides go through
+ * `className`.
  */
 import React from 'react';
 
 interface RowProps {
   children: React.ReactNode;
   className?: string;
-  /** Runtime-dynamic values only (static styling belongs in classes). */
   style?: React.CSSProperties;
 }
 

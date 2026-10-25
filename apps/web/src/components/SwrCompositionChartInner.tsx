@@ -1,35 +1,6 @@
 /**
- * Inner SVG-engine impl for the Balance Projection page's spending
- * composition chart, lazy-imported by `SwrCompositionChart`.
- *
- * Up to four `kind:'area'` series sharing one `stackId`, bottom to top:
- * guaranteed income, other income (conditional), the after-tax portfolio
- * draw, and the tax that draw funds (conditional) — plus two `kind:'line'`
- * rule series (never `ChartFrameProps.hLineY`, which cannot express two
- * lines, is excluded from the legend/tooltip, and would let a rule line
- * outside the plotted domain render invisibly). Legend toggling is load-
- * bearing, not decorative: `ChartFrame` drops hidden series before the
- * stack and Y domain are computed, so hiding both income layers restacks
- * the after-tax draw onto the baseline and makes the rule-vs-draw
- * comparison directly geometric. Because the conditional layers make the
- * legend-key universe change under a mounted chart, the hidden set is
- * reconciled against the emitted series every render (`reconcileHidden`)
- * — see its docblock for the blank-chart case that guards.
- *
- * Each rule series plots the value its OWN row carries, measured from the
- * axis; this module enforces no flatness. The row builder holds the rule
- * flat in REAL terms and re-expresses it into each row's active dollar mode, so the
- * line is level under Today's-dollars and rises with inflation under
- * Future-dollars — where the draw, the income layers and the portfolio
- * figure beside the chart are all nominal too. Clamping it level there
- * would read a later year's nominal draw against a retirement-year rule
- * figure, the "flat NOMINAL" error `pages/balance-projection-swr-derivation.ts`
- * records as already rejected.
- *
- * Every row already carries its layer dollars, already resolved to the
- * active basis and dollar mode (`SwrComparisonYearRow`) — this module
- * does no arithmetic of its own beyond flattening the row for the chart
- * engine's flat `ChartDatum` shape.
+ * Inner SVG-engine chart for `SwrCompositionChart`: stacked income, draw and tax areas plus two dashed rule lines,
+ * over rows already resolved to the active basis and dollar mode.
  */
 import React from 'react';
 import type { SwrComparisonYearRow } from '../lib/safe-withdrawal-rate-chart-types';
@@ -47,9 +18,6 @@ interface InnerProps {
   members: ReadonlyArray<TooltipMember>;
 }
 
-/** Reference lines are dashed in this codebase (reused from
- *  `SafeWithdrawalRateChartInner`) so both rule lines read as a published
- *  heuristic, not a forecast of this household. */
 const RULE_DASH_PATTERN = '5 4';
 
 const GUARANTEED_NAME = 'Guaranteed income';
@@ -62,35 +30,20 @@ const FOUR_HALF_PCT_NAME = '4.5% rule';
 const DEPLETION_LABEL = 'Portfolio depleted';
 const COMPARISON_START_LABEL = 'Comparison starts';
 
-/** Stable identity for "nothing hidden", so reconciling a set that needs no
- *  pruning doesn't hand the memoized tooltip a fresh `Set` every render. */
+// Stable identity for "nothing hidden", so reconciling does not hand the memoized tooltip a fresh
+// `Set` every render.
 const NOTHING_HIDDEN: ReadonlySet<string> = new Set<string>();
 
-/**
- * Reconcile the legend's hidden set against the series actually emitted
- * this render.
- *
- * The legend-key universe here is not fixed for the component's lifetime:
- * the two conditional layers drop out whenever no row carries a non-zero
- * value, which a still-mounted chart can hit when the parent swaps in rows
- * for another basis. `useSeriesVisibility` prunes orphan keys only when the
- * next legend click arrives, so a hidden set captured while an isolated
- * conditional series was still emitted can, once that series disappears,
- * cover every key that remains — and `ChartFrame` drops hidden series
- * before it draws, which would leave a blank frame under a legend with
- * every entry struck through.
- *
- * So each render: drop keys no longer emitted, and fall back to all-visible
- * when what is left would hide everything. Returning `hidden` unchanged
- * where nothing needed pruning keeps the common case identity-stable.
- */
+// The legend-key universe changes under a mounted chart (conditional layers drop out), while
+// `useSeriesVisibility` prunes orphan keys only on the next click. A stale hidden set could then
+// cover every remaining key and leave a blank `ChartFrame` under a fully struck-through legend, so
+// drop dead keys and fall back to all-visible.
 function reconcileHidden(
   hidden: ReadonlySet<string>,
   legendKeys: readonly string[],
 ): ReadonlySet<string> {
   if (hidden.size === 0) return hidden;
   const live = new Set([...hidden].filter((n) => legendKeys.includes(n)));
-  // Nothing left to hide, or nothing left visible — all-visible either way.
   if (live.size === 0 || live.size >= legendKeys.length) return NOTHING_HIDDEN;
   return live.size === hidden.size ? hidden : live;
 }
@@ -111,8 +64,7 @@ interface FlatRow extends ChartDatum {
   guaranteedIncomeSurplus: number;
   fourPercentRuleValue: number | null;
   fourPointFivePercentRuleValue: number | null;
-  /** Booleans aren't valid `ChartDatum` values — encoded as 0/1 so the
-   *  tooltip can still read it off the flattened datum. */
+  // Booleans are not valid `ChartDatum` values, so this is encoded 0/1.
   isPartialYear: 0 | 1;
 }
 
@@ -133,11 +85,10 @@ function flattenRows(rows: ReadonlyArray<SwrComparisonYearRow>): FlatRow[] {
   }));
 }
 
-/** Exported (mirrors `SafeWithdrawalRateChartInner.makeTooltip`) so a
- *  component test can render the tooltip body directly off a `ChartDatum`
- *  without simulating a pointer hover. Does no arithmetic — every dollar is
- *  read straight off the datum — and omits any layer the legend has
- *  hidden, so the tooltip can never contradict the legend's own feedback. */
+/**
+ * Exported so a component test can render the tooltip body off a `ChartDatum`; omits any layer the
+ * legend has hidden.
+ */
 export function makeTooltip(
   colors: ChartColors,
   chrome: ChartChrome,
@@ -246,24 +197,18 @@ const InnerChart: React.FC<InnerProps> = ({ rows, depletionYear, members }) => {
   const { hidden, toggle } = useSeriesVisibility();
   const data = React.useMemo(() => flattenRows(rows), [rows]);
   const years = rows.map((r) => r.year);
-  // Empty rows: the caller gates the chart out before mounting it (< 2
-  // plotted years, mirroring the current SWR chart's own gate), but guard a
-  // bare empty series so the domain math never produces a NaN bound.
+  // The caller gates the chart out below two plotted years; guard a bare empty series so the domain
+  // stays finite.
   const xMin = years.length > 0 ? years[0] : 0;
   const xMax = years.length > 0 ? years[years.length - 1] : 0;
   const activeDomain: [number, number] = [xMin, xMax];
   const ticks = fiveYearTicks(activeDomain[0], activeDomain[1]);
 
-  // The two thin layers are conditional: when no row carries a non-zero
-  // value, the series isn't emitted at all — no area, no legend entry, no
-  // tooltip line (the tooltip's own zero-value guard handles the tooltip
-  // side; this guards the stack + legend).
+  // The thin layers are emitted only when some row has a non-zero value.
   const hasOtherIncome = rows.some((r) => r.otherIncome !== 0);
   const hasTax = rows.some((r) => r.tax !== 0);
 
-  // The settled order, bottom to top — array order IS stack order
-  // (`computeStackBands` accumulates the group as given), so the two
-  // conditional layers are spliced in rather than reordered afterward.
+  // Array order is stack order (`computeStackBands`), so the conditional layers are spliced in.
   const stackSeries: SeriesSpec[] = [
     {
       kind: 'area',
@@ -322,17 +267,13 @@ const InnerChart: React.FC<InnerProps> = ({ rows, depletionYear, members }) => {
     },
   ];
 
-  // The legend keys exactly as `ChartLegend` derives them, so the
-  // reconciliation below can never disagree with what the legend renders.
   const legendKeys = seriesSpecs
     .filter((s) => !s.hideFromLegend)
     .map((s) => s.legendId ?? s.name);
   const visibleHidden = reconcileHidden(hidden, legendKeys);
 
-  // Markers: a dashed vertical at depletion (when supplied), and one at the
-  // first compared year when the leading row is partial — both derived
-  // from `rows`/`depletionYear`, never passed in separately, so they can
-  // never disagree with the rule lines' own null-at-the-partial-year gap.
+  // Markers derive from `rows` / `depletionYear` so they cannot disagree with the rule lines' null
+  // at a partial year.
   const firstRow = rows[0];
   const firstComparedRow = firstRow?.isPartialYear
     ? rows.find((r) => !r.isPartialYear)

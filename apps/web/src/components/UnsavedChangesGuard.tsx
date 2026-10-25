@@ -1,35 +1,6 @@
 /**
- * Reusable hooks that implement the "Guard unsaved edits against accidental
- * loss" rule from CODING_STANDARDS.md ("UI guards") and the project-specific
- * implementation pattern in docs/ui-conventions.md ("Modals" and "Form controls").
- *
- * Two related but distinct concerns:
- *
- * - `useUnsavedChangesGuard(isDirty)` — page-level navigation guard. Listens
- *   for `beforeunload` and patches `window.history.pushState` /
- *   `replaceState` so sidebar `<Link>` clicks and programmatic
- *   `navigate(...)` calls get intercepted before the URL changes. Renders a
- *   styled Stay / Leave modal that the caller drops into its tree.
- *
- * - `useDirtyModalClose(isDirty, realClose)` — modal-level close-path
- *   guard. Wraps the Modal's `onClose` so the X button, Esc key, and scrim
- *   click prompt before discarding edits. **Explicit Cancel buttons inside
- *   the modal call `realClose` directly** — those are intentional discards
- *   per CODING_STANDARDS.md. Returns the wrapped close, the unguarded close,
- *   and the confirm modal for the caller to render alongside.
- *
- * - `useDirtyDiscardAction(isDirty)` — guards an arbitrary in-app action that
- *   would discard the draft (e.g. an in-modal `<Link>`/`navigate(...)` that
- *   unmounts a dirty explicit-Save surface). Runs the action immediately when
- *   clean; when dirty it shows the SAME Stay/Leave prompt as
- *   `useDirtyModalClose` and runs the action only after the user picks Leave.
- *   `useDirtyModalClose` covers only X / Esc / scrim — not in-app navigation.
- *
- * Why a `pushState` patch instead of react-router's `useBlocker`: the app
- * runs on `BrowserRouter`, not a data router (`createBrowserRouter`), and
- * `useBlocker` only works under the latter. `<Link>` clicks and
- * `useNavigate()` both ultimately call `window.history.pushState`, so
- * patching it covers every same-app navigation path.
+ * Dirty-state guards: `useUnsavedChangesGuard` (navigation), `useDirtyModalClose` (X / Esc / scrim) and
+ * `useDirtyDiscardAction` (any discarding action). See "Modals" and "Form controls" in docs/ui-conventions.md.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -47,9 +18,6 @@ const StayLeaveModal: React.FC<StayLeaveModalProps> = ({ open, onStay, onLeave }
     <p className="mt-0 text-ink">
       You have unsaved changes. Leave without saving?
     </p>
-    {/* Left-aligned, primary (Leave — the affirmative for this prompt)
-        first ("Modals" in docs/ui-conventions.md). Styled with Tailwind
-        defaults. */}
     <div className="mt-3 flex flex-wrap items-center gap-3">
       <button type="button" className={btnDangerClass} onClick={onLeave}>
         Leave
@@ -64,33 +32,21 @@ const StayLeaveModal: React.FC<StayLeaveModalProps> = ({ open, onStay, onLeave }
 export interface UnsavedChangesGuardResult {
   /** Render this somewhere in the page tree (typically alongside the page's other modals). */
   pendingNavModal: React.ReactNode;
-  /**
-   * Navigate to `to` without prompting, even when dirty. Wire this to explicit
-   * Cancel / Discard buttons on full-page forms so an intentional user action
-   * doesn't double-confirm. Mirrors `immediateClose` from useDirtyModalClose
-   * for the page case.
-   */
+  /** Navigates without prompting, for explicit Cancel / Discard buttons. */
   navigateUnguarded: (to: string) => void;
 }
 
 /**
- * Page-level guard. Activates only while `isDirty === true`.
- *
- * - Tab close / reload: triggers the browser's native `beforeunload` confirm.
- * - In-app navigation: blocks pathname changes via `pushState` / `replaceState`,
- *   stashes the target in state, and surfaces a Stay / Leave modal. Stay
- *   leaves the URL untouched; Leave re-issues `navigate(target)` with an
- *   internal "allow next" ref so the patched `pushState` lets that one
- *   call through. Query / hash changes pass through untouched.
+ * Page-level guard, active only while `isDirty`: `beforeunload` for tab close, and a Stay / Leave
+ * modal for in-app navigation that changes the pathname. Leave re-issues `navigate(target)` through
+ * an "allow next" ref.
  */
 export function useUnsavedChangesGuard(isDirty: boolean): UnsavedChangesGuardResult {
   const navigate = useNavigate();
   const [pendingNav, setPendingNav] = useState<string | null>(null);
-  // Set to true just before we re-issue the navigation we previously blocked,
-  // so the patched pushState lets that one through without re-prompting.
+  // Set just before re-issuing a blocked navigation so the patched `pushState` lets it through.
   const allowNextNavRef = useRef(false);
 
-  // beforeunload — handles tab close / reload while dirty.
   useEffect(() => {
     if (!isDirty) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -101,7 +57,8 @@ export function useUnsavedChangesGuard(isDirty: boolean): UnsavedChangesGuardRes
     return () => window.removeEventListener('beforeunload', handler);
   }, [isDirty]);
 
-  // pushState / replaceState patch — intercepts in-app navigation.
+  // Patches `pushState` / `replaceState` because the app runs on `BrowserRouter`, where
+  // `useBlocker` is unavailable.
   useEffect(() => {
     if (!isDirty) return;
     const originalPush = window.history.pushState.bind(window.history);
@@ -173,15 +130,8 @@ export interface DirtyModalCloseResult {
 }
 
 /**
- * Modal-level close-path guard. Activates only while `isDirty === true`.
- *
- * Wire `guardedClose` to the Modal's `onClose` prop (which the Modal calls
- * for X button, Esc key, and scrim click). Wire `immediateClose` to any
- * explicit Cancel button inside the modal — those are intentional discards
- * and bypass the prompt per CODING_STANDARDS.md.
- *
- * Save paths should also call `immediateClose` (or however the modal closes
- * after a successful save) — there's nothing to lose post-save.
+ * Modal-level close-path guard, active only while `isDirty`. Wire `guardedClose` to the Modal's
+ * `onClose` and `immediateClose` to explicit Cancel and save paths.
  */
 export function useDirtyModalClose(isDirty: boolean, realClose: () => void): DirtyModalCloseResult {
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -211,22 +161,15 @@ export function useDirtyModalClose(isDirty: boolean, realClose: () => void): Dir
 }
 
 export interface DirtyDiscardActionResult {
-  /**
-   * Run `action` guarded by the dirty check: immediately when clean, after a
-   * Stay/Leave confirm when dirty. Wire this to in-app navigations (e.g. a
-   * `<Link>`/`navigate(...)` that unmounts the dirty modal) so they prompt
-   * before discarding the draft.
-   */
+  /** Runs `action` immediately when clean, after a Stay / Leave confirm when dirty. */
   runGuarded: (action: () => void) => void;
   /** Render this alongside the modal it guards. */
   confirmModal: React.ReactNode;
 }
 
 /**
- * Guards an arbitrary in-app action that would discard a dirty draft.
- * Activates only while `isDirty === true`; when clean the action runs straight
- * through. Reuses the same `StayLeaveModal` as `useDirtyModalClose` so the copy
- * and behavior match the X / Esc / scrim close paths.
+ * Guards an in-app action that would discard a dirty draft, reusing the Stay / Leave prompt of
+ * `useDirtyModalClose`.
  */
 export function useDirtyDiscardAction(isDirty: boolean): DirtyDiscardActionResult {
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
@@ -237,8 +180,7 @@ export function useDirtyDiscardAction(isDirty: boolean): DirtyDiscardActionResul
         action();
         return;
       }
-      // Store the action behind the prompt. Wrap in an arrow so React's state
-      // setter treats it as a value, not an updater function.
+      // Arrow wrapper so React stores the action as a value, not an updater.
       setPendingAction(() => action);
     },
     [isDirty],

@@ -1,12 +1,6 @@
 /**
- * Vertical dashed reference markers (retirement / life-expectancy /
- * depletion) with labels floating in the chart's top margin. Mirrors the
- * old Recharts `<ReferenceLine>` + slot-staggered label treatment.
- *
- * Each marker line carries `data-marker-label` so tests can address a
- * specific marker (the Recharts `.recharts-reference-line` selector is
- * gone). Color comes from the caller (already theme-resolved, e.g.
- * `lifeMarkerColors()` / `retirementMarker`).
+ * Vertical dashed reference markers with slot-staggered labels in the top margin; each line carries
+ * `data-marker-label` for tests, and the colour comes from the caller already theme-resolved.
  */
 import React from 'react';
 import { labelAnchorForX, markerSlotDy } from '../../../lib/chart-markers';

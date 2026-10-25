@@ -1,13 +1,4 @@
-/**
- * Keyboard hint — the typed Tailwind-defaults replacement for the
- * legacy `.kbd-hint` class.
- *
- * Small muted helper line shown under dialog button rows (e.g.
- * "Press Enter to save · Esc to cancel"). Matches the legacy
- * `.kbd-hint` contract: extra-small, muted, a small top margin.
- *
- * Visual style only — no behavioral contract.
- */
+/** Small muted helper line under dialog button rows, e.g. "Press Enter to save · Esc to cancel". */
 import React from 'react';
 
 interface KbdHintProps {

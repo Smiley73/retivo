@@ -1,11 +1,6 @@
 /**
- * Inner SVG-engine chart for the Expenses-by-Category stacked chart.
- * Lazy-imported by `ExpensesCategoryChart`.
- *
- * One stacked-area layer per category at monthly resolution. Same
- * fractionalYear x-axis + integer-year ticks + MMM YYYY tooltip + top-
- * margin marker labels (3-slot stagger) as the total-view chart so the
- * two read as siblings.
+ * Inner SVG-engine chart for Expenses-by-Category: one stacked-area layer per category at monthly resolution, sharing
+ * the total-view chart's axis and tooltip.
  */
 import React from 'react';
 import type { ExpenseCategoryMonthlyPoint } from '../lib/expense-projection';
@@ -25,9 +20,6 @@ const SHORT_MONTHS = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-// `CategoryMeta` is the shared named contract (relocated to
-// ../lib/category-palette); re-exported here so existing importers (incl.
-// the component test) keep their import path.
 export type { CategoryMeta };
 
 interface InnerProps {
@@ -147,11 +139,8 @@ const InnerChart: React.FC<InnerProps> = ({
   const data = React.useMemo(() => flattenRows(rows, categories), [rows, categories]);
   const xs = data.map((r) => r.fractionalYear);
   const xMin = Math.floor(xs[0]);
-  // Always-monthly chart. Death markers (`kind: 'death'`) arrive as the
-  // integer `deathYear`; map each to the December sample
-  // (`deathYear + 11/12`) so the marker hugs the last monthly data point.
-  // Retirement markers (a true fractional date) are rendered as-is.
-  // Applied to BOTH the reference line AND the `xMax` derivation.
+  // Death markers arrive as the integer `deathYear` and map to the December sample; applied to the
+  // reference line and `xMax`.
   const mappedMarkers = markers.map((m) =>
     m.kind === 'death'
       ? { ...m, fractionalYear: Math.floor(m.fractionalYear) + 11 / 12 }

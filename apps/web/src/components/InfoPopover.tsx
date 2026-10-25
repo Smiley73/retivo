@@ -1,26 +1,13 @@
 /**
- * Generic info-icon popover (i) affordance.
- *
- * A small `(i)` trigger button; pressing it (mouse or keyboard) opens a React
- * Aria Popover/Dialog holding arbitrary content, dismissed by Esc or an
- * outside press. Use anywhere a plain-language explainer or supplemental info
- * is needed inline (e.g. the HSA-qualified flag on the expense form).
- *
- * Intentionally NOT chart/print-scoped — see `ChartInfoPopover` for the
- * chart-titled variant that carries `report-print-hide` semantics.
- *
- * Built on the same React Aria `DialogTrigger`+`Button`+`Popover`+`Dialog`
- * shell as `ChartInfoPopover`. Self-contained: owns its
- * own `DialogTrigger`.
+ * Generic `(i)` trigger opening a React Aria Popover/Dialog with arbitrary content; self-contained. Not print-scoped,
+ * unlike `ChartInfoPopover`.
  */
 import React from 'react';
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components';
 import { InfoCircleIcon } from './InfoCircleIcon';
 
 export interface InfoPopoverProps {
-  /** Accessible name for the trigger Button and the Dialog. */
   readonly label: string;
-  /** Content rendered inside the popover. */
   readonly children: React.ReactNode;
 }
 

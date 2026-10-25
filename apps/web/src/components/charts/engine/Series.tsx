@@ -1,13 +1,6 @@
 /**
- * Series renderer for the SVG chart engine. Turns a `SeriesSpec[]` +
- * data rows into stacked-area `<path>`s, line `<path>`s, and stacked
- * signed `<rect>` bars. Each rendered series node carries a `name`
- * attribute (the series' accessible name) so the shared `seriesColor()`
- * test helper and the tooltip can address it — preserving the Recharts
- * `path[name="…"]` contract the tests assert.
- *
- * SVG presentation attributes only (`d`, `fill`, `stroke`, `x`, `y`,
- * `width`, `height`) — no inline `style`.
+ * Series renderer for the chart engine: stacked-area and line `<path>`s and stacked signed `<rect>` bars, each
+ * carrying a `name` attribute. SVG presentation attributes only.
  */
 import React from 'react';
 import type { ChartDatum, ChartGeometry, SeriesSpec, SeriesZone } from './types';
@@ -28,7 +21,6 @@ interface SeriesLayerProps {
   yScale: 'linear' | 'log';
 }
 
-/** Group series by stackId (lines have no stack → one-each groups). */
 function groupByStack(series: SeriesSpec[]): SeriesSpec[][] {
   const byId = new Map<string, SeriesSpec[]>();
   const loose: SeriesSpec[][] = [];
@@ -69,10 +61,6 @@ function AreaGroup({
           py: yToPx(b.base[i], yDomain, geometry.plot, yScale),
         }));
         const baseStroke = s.stroke ?? (s.color === 'none' ? 'none' : s.color);
-        // Zone-split rendering: one `<path>` per zone (each carrying
-        // `data-zone`) so the projected region + carried-forward spans read
-        // distinct. A single zone (the common case) renders exactly one path
-        // as before — no behavior change for existing charts.
         if (s.zones && s.zones.length > 0) {
           return (
             <React.Fragment key={s.dataKey}>
@@ -106,10 +94,8 @@ function AreaGroup({
   );
 }
 
-/** Render one zone span of a stacked-area series as its own `<path>`,
- *  carrying the series `name` plus a `data-zone` attribute. The span covers
- *  every row whose x falls inside `[fromX, toX]` (inclusive); adjacent zones
- *  share their boundary row so the areas stay visually connected. */
+// One zone span as its own `<path>` with `data-zone`; adjacent zones share a boundary row so areas
+// stay connected.
 function renderZonePath({
   s,
   zone,
@@ -149,9 +135,8 @@ function renderZonePath({
   );
 }
 
-/** Split a line's points into runs of consecutive same-sign values, inserting
- *  an interpolated vertex at `zeroPy` wherever the value crosses zero, so each
- *  run can stroke a solid sign colour. Zero counts as positive. */
+// Splits a line into same-sign runs with an interpolated vertex at the zero crossing; zero counts
+// as positive.
 function signSplitRuns(
   points: Array<{ px: number; py: number; v: number }>,
   zeroPy: number,
@@ -167,8 +152,6 @@ function signSplitRuns(
       cur.pts.push({ px: p.px, py: p.py });
       continue;
     }
-    // Sign change: interpolate the x where the value hits zero (the y there is
-    // the plot's zero line) and split the run at that crossing vertex.
     const t = prev.v / (prev.v - p.v);
     const crossing = { px: prev.px + (p.px - prev.px) * t, py: zeroPy };
     cur.pts.push(crossing);
@@ -196,8 +179,7 @@ function LineSeries({
       v,
       datum: d,
     }));
-  // Sign-split lines stroke solid green/red runs (PDF-safe); the gradient
-  // `strokeUrl` form is invisible in the PDF (svg2pdf can't stroke a gradient).
+  // Sign-split lines stroke solid runs because svg2pdf cannot stroke a `strokeUrl` gradient.
   const lineNodes = s.signSplit
     ? signSplitRuns(points, yToPx(0, yDomain, geometry.plot, yScale)).map((run, i) => (
         <path
@@ -235,14 +217,9 @@ function LineSeries({
   );
 }
 
-/** Widest a single bar may render, in px. Without a cap, zooming in
- *  stretches the per-year pixel `step` so far that bars balloon to fill
- *  the plot (and visually collide); the cap keeps them reading as bars at
- *  any zoom level while leaving the un-zoomed view (small step) untouched. */
+// Caps bar width so zooming in does not balloon bars into each other.
 const MAX_BAR_PX = 48;
 
-/** Bar width in px, derived from row spacing and capped so deep zoom
- *  doesn't balloon the bars. */
 function barWidth(rows: ChartDatum[], geometry: ChartGeometry, xDomain: [number, number]): number {
   if (rows.length < 2) return 12;
   const step =

@@ -1,19 +1,12 @@
 /**
- * Tax & Health-Cost Burden chart on the Balance Projection page.
- * Plots per-year federal income tax and IRMAA surcharge above zero, and
- * ACA-PTC subsidy below zero (a benefit reducing net cost).
- *
- * Rendered for every named withdrawal strategy — the tax engines run on all of
- * them.
- *
- * Lazy-imported SVG-engine impl. See `TaxBurdenChartInner.tsx`.
+ * Per-year federal income tax and IRMAA surcharge above zero and the ACA-PTC subsidy below it, for every withdrawal
+ * strategy. Lazy-loads `TaxBurdenChartInner.tsx`.
  */
 import React, { Suspense, lazy } from 'react';
 import type { ChartMouseHandlers } from '../lib/use-chart-zoom';
 import type { CashflowChartMarker } from './CashflowProjectionChart';
 import type { TooltipMember } from './tooltip-member';
 
-/** Per-year data row consumed by the Tax Burden chart. */
 export interface TaxBurdenChartRow {
   readonly year: number;
   /** Federal income tax owed (dollars, ≥ 0). */
@@ -21,29 +14,24 @@ export interface TaxBurdenChartRow {
   /** IRMAA Medicare surcharge (dollars, ≥ 0). */
   readonly irmaaSurcharge: number;
   /**
-   * ACA-PTC subsidy received (dollars, stored as a NEGATIVE value so
-   * the chart engine renders the bar below zero — benefit convention
-   * mirrors the Portfolio Flows "withdrawals" bar).
+   * ACA-PTC subsidy received (dollars), stored negative so the engine renders it below zero, like
+   * the Portfolio Flows withdrawals bar.
    */
   readonly acaPtcSubsidy: number;
-  /** The ACA credit applied to premiums (dollars, ≥ 0). Already inside the
-   *  `acaPtcSubsidy` bar, so never drawn as a second bar. */
+  /** The ACA credit applied to premiums (dollars, ≥ 0); already inside the `acaPtcSubsidy` bar. */
   readonly acaCreditApplied: number;
-  /** Fractional X position. Always omitted now — death = Dec 31 of
-   *  `deathYear` (the terminal year), so every bar (including the
-   *  death-year bar) is a full year at its integer `year`; the chart
-   *  falls back to `year`. The integer-`deathYear` death marker lands on
-   *  the last bar. */
+  /**
+   * Fractional X position; always omitted now, since death is Dec 31 of the terminal year and every
+   * bar sits at its integer `year`.
+   */
   readonly fractionalYear?: number;
 }
 
 interface Props {
   rows: TaxBurdenChartRow[];
-  /** Household members shown in tooltip header — "<First> (age N)". */
   members?: ReadonlyArray<TooltipMember>;
-  /** Retirement + death markers rendered as dashed reference lines. */
   markers?: ReadonlyArray<CashflowChartMarker>;
-  /** Zoom-state props injected by useChartZoom in the host section. */
+  /** Zoom state injected by `useChartZoom`. */
   xDomain?: [number, number] | null;
   yDomain?: [number, number] | null;
   dragSelection?: [number, number] | null;

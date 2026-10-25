@@ -1,12 +1,6 @@
 /**
- * Account Balance Stack chart on the Balance Projection page.
- * Stacked-area chart visualizing projected account balances over time.
- *
- * The section wrapper (`balance-projection-page-account-balance-stack`)
- * owns grouping logic (per-tier / per-AccountType / per-account) and
- * passes a flat `series` + `rows` pair. This component is the lazy shell.
- *
- * Lazy-imported SVG-engine impl. See `AccountBalanceStackChartInner.tsx`.
+ * Stacked-area chart of projected account balances; the section wrapper owns grouping and passes flat `series` and
+ * `rows`. Lazy-loads the inner chart.
  */
 import React, { Suspense, lazy } from 'react';
 import type { ChartMouseHandlers } from '../lib/use-chart-zoom';
@@ -26,13 +20,10 @@ export type {
 interface Props {
   rows: AccountBalanceStackRow[];
   series: AccountBalanceStackSeries[];
-  /** Household members shown in tooltip header — "<First> (age N)". */
   members?: ReadonlyArray<TooltipMember>;
-  /** Retirement + death markers rendered as dashed reference lines. */
   markers?: ReadonlyArray<CashflowChartMarker>;
-  /** Dashed actual→projected boundary marker (last actual year). */
   boundary?: AccountBalanceStackBoundary | null;
-  /** Zoom-state props injected by useChartZoom in the host section. */
+  /** Zoom state injected by `useChartZoom`. */
   xDomain?: [number, number] | null;
   yDomain?: [number, number] | null;
   dragSelection?: [number, number] | null;

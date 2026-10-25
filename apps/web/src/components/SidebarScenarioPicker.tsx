@@ -1,16 +1,6 @@
 /**
- * Per-device "Viewing" picker for the scenario currently driving any
- * consuming page. The scenario list re-reads reactively via
- * `useAggregates('scenario')` (any scenario add/edit/delete, the initial sync
- * bootstrap, demo bulk fill); the active-scenario *pointer* is read from the
- * local-only `selectedScenario` IDB store on mount and whenever the sidebar
- * selection changes (`useSelectedScenarioRevision()`), defaulting to the base
- * when no selection exists.
- *
- * A dedicated effect retains the guarded `reconcileScenarios()` sweep:
- * a check-and-mutate write cannot live in a pure derivation, so the
- * dual-base demotion stays in its own effect with the per-mount-per-household
- * `sweepAttemptedRef` guard.
+ * Per-device "Viewing" picker for the scenario driving consuming pages; the pointer lives in the local-only
+ * `selectedScenario` store.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Select } from './Select';
@@ -28,25 +18,17 @@ import type { ScenarioAggregate } from '../lib/scenario-resolution';
 
 export const SidebarScenarioPicker: React.FC = () => {
   const { householdId } = useAuth();
-  // Reactive scenario list: re-reads on any `scenario`-store write (add/edit/
-  // delete, the reconcile sweep's demotions, sync bootstrap, demo bulk fill).
   const scenarioQuery = useAggregates('scenario');
-  // Selected-scenario pointer channel: re-read the local pointer when the user
-  // switches the active scenario from this (or another mounted) picker.
   const selectedScenarioRevision = useSelectedScenarioRevision();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Guards the defensive dual-base sweep so it only fires once per mount
-  // per household — the sweep itself queues an update mutation which
-  // re-fires SCENARIOS_CHANGED_EVENT and would otherwise loop.
+  // Guards the dual-base sweep to once per mount per household: its update mutation re-fires
+  // SCENARIOS_CHANGED_EVENT and would loop.
   const sweepAttemptedRef = useRef<string | null>(null);
 
   const scenarios = scenarioQuery.aggregates as ReadonlyArray<
     Aggregate<ScenarioPayload>
   > as ScenarioAggregate[];
 
-  // Resolve the active selection: the stored pointer if it still names a live
-  // scenario, else the base. Re-runs on a scenario-list change and on a
-  // selected-scenario pointer switch.
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -64,15 +46,8 @@ export const SidebarScenarioPicker: React.FC = () => {
     };
   }, [scenarios, selectedScenarioRevision]);
 
-  // Defensive sweep (a check-and-mutate write can't live in a
-  // pure derivation). If more than one `isPrimary` scenario sneaks through
-  // (cross-tab first-run race, an imported bundle that already carried dupes),
-  // kick `reconcileScenarios` once per mount per household to demote losers.
-  // The App-shell bootstrap pass already does this, but only on first mount
-  // after sync settles — that gate has been observed to miss races that
-  // introduce the dupe after bootstrap has already run. The reconcile's
-  // batched fine `scenario` flush wakes the reactive query, so the picker
-  // reflects the demoted state without a manual re-read here.
+  // Defensive sweep for more than one `isPrimary` scenario (cross-tab first-run race, imported
+  // bundle); the App-shell pass can miss a dupe introduced after bootstrap.
   useEffect(() => {
     if (!householdId) return;
     if (!scenarioQuery.ready) return;
@@ -97,8 +72,6 @@ export const SidebarScenarioPicker: React.FC = () => {
 
   if (scenarios.length === 0 || selectedId === null) return null;
 
-  // Indented-tree order via the two-phase algorithm; isPrimary roots
-  // first (carry "(Base)" suffix), depth wired to <Select> option rows.
   const treeOptions = buildScenarioTreeOptions(scenarios).map(
     ({ scenario: s, depth }) => ({
       value: s.id,

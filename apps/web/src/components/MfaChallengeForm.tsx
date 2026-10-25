@@ -1,27 +1,6 @@
 /**
- * Two-step login MFA challenge (enforced MFA). Shown by the
- * LoginPage in place of the sign-in form once a password login on an untrusted
- * device returns a challenge (no session yet). The user picks an offered
- * second factor, enters the code, and may remember the device for ~30 days.
- *
- * Factor model:
- *  - `methods` are the ROUTINE factors (passkey first when enrolled, then
- *    `totp`, else `email_otp` as the standing universal factor).
- *  - `recoveryMethods` contains `email_otp` as the "can't use my
- *    authenticator?" path once a stronger factor is enrolled.
- *  - "Trust this device" is offered only for a routine factor — never for an
- *    Email-OTP recovery pass (the server declines the remember
- *    request and returns `deviceRemembered: false`; the UI hides the checkbox
- *    so we don't promise trust we won't get).
- *
- * Password-manager interop (see "Password managers" in docs/ui-conventions.md): a real
- * `<form>` with `autocomplete="one-time-code"` + `inputMode="numeric"` on the
- * code field, plus `PM_IGNORE_ATTRS` so manager overlays don't fight the OTP
- * field. The login form upstream already carries the `HiddenUsernameField`, so
- * none is needed here.
- *
- * Built on the shared auth-page chrome + React Aria primitives (the method tabs
- * are a `SegmentedRadioGroup`; the trust toggle is a React Aria `Checkbox`).
+ * Two-step login MFA challenge shown in place of the sign-in form on an untrusted device; password-manager interop
+ * per "Password managers" in docs/ui-conventions.md.
  */
 import React, { useMemo, useState } from 'react';
 import { Checkbox } from 'react-aria-components';
@@ -43,26 +22,23 @@ import {
 import { SegmentedRadioGroup } from './SegmentedRadioGroup';
 
 export interface MfaChallengeFormProps {
-  /** Routine factors offered (e.g. `['passkey']`, `['totp']`, `['email_otp']`). */
+  /** Routine factors offered, e.g. `['passkey']`. */
   methods: string[];
-  /** Recovery/fallback factors (currently `['email_otp']`). */
+  /** Fallback factors (currently `['email_otp']`). */
   recoveryMethods: string[];
-  /** Verify a code factor (totp/email_otp); rejects on a wrong/expired code. */
+  /** Verifies a code factor; rejects on a wrong or expired code. */
   onVerify: (method: string, code: string, rememberDevice: boolean) => Promise<void>;
   /**
-   * Complete the challenge with a passkey (passkey as second factor):
-   * runs the WebAuthn assertion + verify. Rejects on a server error OR a
-   * cancelled/failed WebAuthn prompt (the form shows non-alarming retry copy).
-   * Only wired when the form renders the passkey factor.
+   * Completes the challenge with a passkey; rejects on a server error or a cancelled WebAuthn
+   * prompt. Wired only when the passkey factor renders.
    */
   onVerifyPasskey?: (rememberDevice: boolean) => Promise<void>;
-  /** Send a fresh Email-OTP for the pending challenge. */
+  /** Sends a fresh Email-OTP. */
   onSendEmail: () => Promise<void>;
   /** Back out to the sign-in form. */
   onCancel: () => void;
 }
 
-/** Plain-language label for each factor (layman default). */
 type MfaChallengeMethod = 'passkey' | 'totp' | 'email_otp';
 
 const METHOD_LABEL: Record<MfaChallengeMethod, string> = {
@@ -71,16 +47,12 @@ const METHOD_LABEL: Record<MfaChallengeMethod, string> = {
   email_otp: 'Email code',
 };
 
-/**
- * Keep the browser compatible with an older server response without exposing
- * retired or unknown factors in the UI.
- */
 function isSupportedMethod(method: string): method is MfaChallengeMethod {
   return method === 'passkey' || method === 'totp' || method === 'email_otp';
 }
 
-/** Routine factors may mint device trust: passkey, TOTP, or Email-OTP
- *  only when it is offered as a routine method (not merely as recovery). */
+// Trust is minted only for routine factors; an Email-OTP recovery pass is declined by the server,
+// so the checkbox is hidden.
 function canTrustDevice(method: MfaChallengeMethod, routineMethods: string[]): boolean {
   return routineMethods.includes(method);
 }
@@ -93,19 +65,15 @@ export const MfaChallengeForm: React.FC<MfaChallengeFormProps> = ({
   onSendEmail,
   onCancel,
 }) => {
-  // The passkey factor is offered only when the browser supports WebAuthn AND
-  // the caller wired a passkey handler. On an unsupported browser the
-  // factor is hidden and selection falls through to the next factor, so a
-  // passkey-only user is never stranded — they land on a usable recovery factor.
+  // Hidden when WebAuthn is unsupported, so a passkey-only user falls through to a usable recovery
+  // factor.
   const passkeySupported = useMemo(
     () => browserSupportsWebAuthn() && typeof onVerifyPasskey === 'function',
     [onVerifyPasskey],
   );
 
-  // Tab order: routine factors first (the steered-toward options), then any
-  // recovery factors not already listed. De-dupe so a method that is both
-  // routine and recovery shows once, and drop `passkey` on an unsupported
-  // browser so it is never selectable.
+  // Routine factors first, then recovery ones, de-duplicated; `passkey` is dropped on an
+  // unsupported browser.
   const allMethods = useMemo(() => {
     const seen = new Set<MfaChallengeMethod>();
     return [...methods, ...recoveryMethods].filter((m): m is MfaChallengeMethod => {
@@ -117,8 +85,6 @@ export const MfaChallengeForm: React.FC<MfaChallengeFormProps> = ({
     });
   }, [methods, recoveryMethods, passkeySupported]);
 
-  // Auto-select the strongest routine factor: passkey leads whenever
-  // offered + supported, then TOTP, else the first remaining offered method.
   const [active, setActive] = useState<MfaChallengeMethod>(() => {
     if (passkeySupported && methods.includes('passkey')) return 'passkey';
     if (methods.includes('totp')) return 'totp';
@@ -135,8 +101,7 @@ export const MfaChallengeForm: React.FC<MfaChallengeFormProps> = ({
   const showTrust = canTrustDevice(active, methods);
   const showSendEmail = active === 'email_otp' && allMethods.includes('email_otp');
 
-  // Switching factors clears the entered code + any error so a code typed for
-  // one method never carries into another.
+  // Clears the code and error so a code typed for one method never carries into another.
   const onMethodChange = (next: string): void => {
     if (!isSupportedMethod(next)) return;
     setActive(next);
@@ -148,7 +113,6 @@ export const MfaChallengeForm: React.FC<MfaChallengeFormProps> = ({
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     if (submitting) return;
-    // The passkey factor has no code field — it runs a WebAuthn assertion.
     if (isPasskey) {
       await runPasskey();
       return;
@@ -157,29 +121,23 @@ export const MfaChallengeForm: React.FC<MfaChallengeFormProps> = ({
     setError(null);
     setSubmitting(true);
     try {
-      // Only a routine pass can carry the remember-device request; a
-      // recovery factor always sends false so the server's decline is moot.
+      // A recovery factor always sends false, so the server's decline is moot.
       await onVerify(active, code.trim(), showTrust && rememberDevice);
     } catch (err) {
       if (err instanceof ApiRequestError) {
-        // A gateway-level throttle/timeout with no error envelope reads
-        // the shared busy copy instead of the raw upstream status text.
+        // A gateway-level throttle or timeout has no error envelope; show the shared busy copy.
         setError(isBusyResponse(err) ? BUSY_MESSAGE : err.error.message);
       } else {
         setError('That code did not work. Please try again.');
       }
       setSubmitting(false);
     }
-    // On success the form unmounts (the session is adopted), so there is no
-    // need to clear `submitting` — leaving it true keeps the button disabled
-    // during the brief teardown.
+    // On success the form unmounts, so `submitting` stays true to keep the button disabled during
+    // teardown.
   };
 
-  // Run the passkey assertion (passkey as second factor). A
-  // cancelled/failed WebAuthn prompt or a server rejection surfaces
-  // non-alarming retry copy — NOT the "that code did not work" message,
-  // which is wrong for a passkey — and keeps the form mounted so the recovery
-  // tabs stay selectable. On success the form unmounts (session adopted).
+  // A cancelled or failed WebAuthn prompt shows retry copy, not "that code did not work", and keeps
+  // the recovery tabs selectable.
   const runPasskey = async (): Promise<void> => {
     if (!onVerifyPasskey) return;
     setError(null);
@@ -188,14 +146,9 @@ export const MfaChallengeForm: React.FC<MfaChallengeFormProps> = ({
       await onVerifyPasskey(showTrust && rememberDevice);
     } catch (err) {
       if (err instanceof ApiRequestError) {
-        // A server rejection (expired challenge, UV/counter anomaly) — show its
-        // human message, unless the response carries no error envelope at all
-        // (a gateway-level throttle/timeout), which reads the shared
-        // busy copy instead.
+        // A gateway-level throttle or timeout has no error envelope; show the shared busy copy.
         setError(isBusyResponse(err) ? BUSY_MESSAGE : err.error.message);
       } else {
-        // A WebAuthn cancel/timeout/NotAllowedError/SecurityError, or a network
-        // hiccup — non-alarming, actionable copy.
         setError("We couldn't verify your passkey. Try again, or use another option.");
       }
       setSubmitting(false);
@@ -243,8 +196,8 @@ export const MfaChallengeForm: React.FC<MfaChallengeFormProps> = ({
         </div>
       )}
 
-      {/* Error region: announced politely so a wrong-code message reaches
-          assistive tech without stealing focus mid-correction. */}
+      {/* Polite live region so a wrong-code message reaches assistive tech without stealing
+          focus. */}
       <div aria-live="polite">
         {error && <Alert tone="error">{error}</Alert>}
         {emailSent && !error && (
@@ -255,8 +208,6 @@ export const MfaChallengeForm: React.FC<MfaChallengeFormProps> = ({
       </div>
 
       <form onSubmit={onSubmit} noValidate>
-        {/* The passkey factor has no code field — the WebAuthn assertion is the
-            proof. The other factors render the code input. */}
         {!isPasskey && (
           <div className={authFieldClass()}>
             <label htmlFor="mfa-code" className={authLabelClass}>

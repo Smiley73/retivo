@@ -1,9 +1,6 @@
 /**
- * Route gate for a beta feature's page. Renders the page only while the
- * feature is visible (offered by this build AND switched on by the user —
- * see `lib/feature-flags.ts`); otherwise a short notice explains why the page
- * is not showing and where to turn it on. The sidebar already hides the entry,
- * so this is the deep-link / bookmark path.
+ * Route gate rendering a beta feature's page only while it is offered by this build and switched on; otherwise a
+ * notice says where to turn it on (the deep-link path, since the sidebar hides the entry).
  */
 import React from 'react';
 import { useBetaFeatures } from '../contexts/BetaFeaturesContext';
@@ -22,8 +19,6 @@ export const BetaFeatureGate: React.FC<BetaFeatureGateProps> = ({ feature, child
   if (isBetaFeatureVisible(feature)) return <>{children}</>;
 
   const offered = isBetaFeatureOffered(feature);
-  // The registry label is the page title above the notice, so the gated URL
-  // still says where you are (and a rename can't drift between the two).
   const title = betaFeature(feature).label;
   return (
     <section aria-labelledby="beta-gate-heading">

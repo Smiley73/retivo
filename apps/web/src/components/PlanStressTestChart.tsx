@@ -1,20 +1,6 @@
 /**
- * Plan stress-test fan chart + percentile data table, extracted from
- * `PlanStressTestSection.tsx` to keep that file under the shape limit.
- *
- * Pure presentation over the shared `PlanStressTestVm`: renders the
- * Monte Carlo fan section, a toggleable yearly-percentile data table,
- * and the CBP remediation banner when the active scenario fails CBP
- * validation. No engine access — reads only off the
- * resolved `vm`.
- *
- * Also hosts the market-stress comparison fan
- * (`PlanStressTestStressFanChart`): the same fan component over a STRESSED
- * run's summary, so a stressed outcome band is read on the same terms as the
- * base band above it.
- *
- * Re-exported from `PlanStressTestSection.tsx` so existing importers and
- * the section's test suite keep their import paths unchanged.
+ * Plan stress-test fan chart, percentile data table and CBP remediation banner, plus the market-stress comparison
+ * fan. Re-exported from `PlanStressTestSection.tsx`.
  */
 import {
   Cell,
@@ -44,8 +30,7 @@ export interface PlanStressTestChartProps {
   onToggleDataTable: () => void;
 }
 
-/** Fan chart + toggleable percentile data table. Empty when there are
- *  no accounts or no result yet. */
+/** Fan chart with a toggleable percentile data table; empty without accounts or a result. */
 export function PlanStressTestChart({
   vm,
   yScale = 'linear',
@@ -91,10 +76,8 @@ export function PlanStressTestChart({
           >
             {dataTableOpen ? 'Hide stress-test data table' : 'Show stress-test data table'}
           </button>
-          {/* Always mounted (inside the `result &&` guard so the table never
-              mounts without a result) but `display:none`/out of the a11y tree
-              when collapsed: print reveals only
-              `.bp-print-expand[hidden]`. */}
+          {/* Always mounted so print can reveal `.bp-print-expand[hidden]`, but out of the a11y
+              tree when collapsed. */}
           <div hidden={!dataTableOpen} className="bp-print-expand">
             <TableScroll label="Plan stress-test yearly outcomes">
               <Table
@@ -136,31 +119,22 @@ export function PlanStressTestChart({
 }
 
 export interface PlanStressTestStressFanChartProps {
-  /** Plain-English name of the stress being plotted (e.g. "Higher fees"). */
   readonly caseName: string;
-  /** The stressed run's summary. Same seed and path count as the base run, so
-   *  the two fans are drawn from the SAME simulated market histories. */
+  /** The stressed run's summary, drawn from the same simulated histories as the base run. */
   readonly stressResult: MonteCarloSummary;
   readonly vm: PlanStressTestVm;
-  /** True for the longevity-bearing cases, whose extra years draw FRESH months
-   *  — the same-paths claim then holds only through the original end of the
-   *  plan and the note has to say so. */
+  /**
+   * True for longevity cases whose extra years draw fresh months, so the same-paths note holds only
+   * through the original plan end.
+   */
   readonly extendsHorizon?: boolean;
-  /** Y-axis scale, threaded from the page so the stressed fan is drawn on the
-   *  same axis as the base fan above it. */
+  /** Y-axis scale, so the stressed fan shares the base fan's axis. */
   readonly yScale?: 'linear' | 'log';
 }
 
 /**
- * Percentile fan for ONE stressed run, drawn with the same chart
- * component, display mode, and y-axis scale as the base fan above it, so the
- * two are read on like-for-like terms. The stress reuses the base run's seed
- * and path count, so any difference between the two fans is the changed
- * assumption, not a different draw.
- *
- * Markers carry over too, with ONE exception: a horizon-EXTENDING case plots no
- * life-expectancy markers, because they mark the BASE run's death years and the
- * fan deliberately runs past them (`extendsHorizon` below).
+ * Percentile fan for one stressed run, on the same chart, display mode and y-axis scale as the base
+ * fan.
  */
 export function PlanStressTestStressFanChart({
   caseName,
@@ -180,11 +154,8 @@ export function PlanStressTestStressFanChart({
         real={vm.displayMode === 'today'}
         retirementYear={vm.retirementFractionalYear}
         retirementLabel={vm.retirementLabel}
-        // `vm.lifeMarkers` are the BASE run's projected death years. On a
-        // horizon-EXTENDING case the fan deliberately runs past them, so
-        // plotting them would draw a member's death marker with years of
-        // portfolio band beyond it — the chart contradicting the very stress it
-        // illustrates. The note below says the markers are left off.
+        // A horizon-extending case runs past the base run's death years, so those markers are left
+        // off.
         lifeMarkers={extendsHorizon ? [] : vm.lifeMarkers}
         yScale={yScale}
       />

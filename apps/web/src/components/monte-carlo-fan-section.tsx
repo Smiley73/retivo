@@ -1,12 +1,6 @@
 /**
- * Monte Carlo fan chart section — thin wrapper that hosts the
- * `useChartZoom` call and `<ChartZoomReset>` button for the fan chart.
- * Extracted from `PlanStressTestSection.tsx` to keep that file
- * under the shape limit.
- *
- * The Reset button renders here (section level) so it stays visible
- * during the chart's lazy-Suspense fallback. Zoom props are
- * threaded down to `<MonteCarloFanChart>`.
+ * Fan chart section hosting the `useChartZoom` call and `<ChartZoomReset>`; the Reset button renders at section level
+ * so it stays visible during the lazy-Suspense fallback.
  */
 import React, { useCallback, useMemo } from 'react';
 import { MonteCarloFanChart } from './MonteCarloFanChart';
@@ -38,9 +32,7 @@ export const MonteCarloFanSection: React.FC<MonteCarloFanSectionProps> = ({
   lifeMarkers,
   yScale = 'linear',
 }) => {
-  // The hook lives here (section), not in the chart component itself.
-  // xDomainFull mirrors MonteCarloFanChart's internal row construction:
-  // x = year + 1, rows span firstYear+1 … firstYear+N.
+  // `xDomainFull` mirrors MonteCarloFanChart's row construction: x = year + 1.
   const xDomainFull = useMemo((): [number, number] => {
     const n = result.percentilesReal.p50.length;
     if (n === 0) return [0, 0];
@@ -52,8 +44,7 @@ export const MonteCarloFanSection: React.FC<MonteCarloFanSectionProps> = ({
     return Array.from({ length: n }, (_, i) => ({ x: result.firstYear + 1 + i }));
   }, [result.firstYear, result.percentilesReal.p50.length]);
 
-  // The y-range for visible MC percentile values so the y-axis auto-fits on zoom.
-  // x = firstYear + 1 + i → i = x - (firstYear + 1).
+  // Visible MC percentile range so the y-axis auto-fits on zoom; i = x - (firstYear + 1).
   const computeY = useCallback(
     (visibleRows: readonly { x: number }[]): [number, number] | null => {
       const percentiles = real ? result.percentilesReal : result.percentilesNominal;

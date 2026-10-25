@@ -1,17 +1,12 @@
 /**
- * Sizing hook for the SVG chart engine. Measures the container width
- * via ResizeObserver (height is caller-fixed, matching the old Recharts
- * `<ResponsiveContainer height={...}>`), falling back to a default when
- * no measurement is available yet (jsdom's ResizeObserver stub never
- * fires, so tests render against the fallback width — the same role the
- * old `ResponsiveContainer` test stub played by injecting width=800).
+ * Sizing hook for the chart engine: measures container width via ResizeObserver (height is caller-fixed) and falls
+ * back to a default width, which is what tests render against, since jsdom's ResizeObserver stub never fires.
  */
 import { useCallback, useEffect, useRef as useReactRef, useState } from 'react';
 
 const DEFAULT_WIDTH = 800;
 
 export interface ChartSizing {
-  /** Attach to the outer measuring element. */
   ref: (node: HTMLDivElement | null) => void;
   width: number;
 }

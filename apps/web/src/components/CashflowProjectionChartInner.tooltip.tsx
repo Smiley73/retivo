@@ -1,11 +1,6 @@
 /**
- * Tooltip + currency-format helpers for the cashflow band chart.
- * Split out of CashflowProjectionChartInner.tsx so that file stays
- * within the file-length limit. The inner chart re-exports
- * `makeCashflowTooltip` for its test's import path.
- *
- * The factory takes a `ChartDatum` (the hovered row) from the SVG chart
- * engine.
+ * Tooltip and currency-format helpers for the cashflow band chart, split out of `CashflowProjectionChartInner.tsx`,
+ * which re-exports `makeCashflowTooltip`.
  */
 import React from 'react';
 import type { CashflowMonthlyPoint } from '../lib/cashflow-chart-types';
@@ -97,11 +92,8 @@ export function makeCashflowTooltip(
         {categoryActive
           ? category.categoryMeta.map((c) => {
               if (hidden.has(c.name)) return null;
-              // The chart engine hands the tooltip the flattened datum
-              // (CashflowProjectionChartInner projects `byCategory` onto
-              // top-level `cat-${id}` keys), so read that flat key here —
-              // not `point.byCategory`, which is stripped before the engine
-              // sees the row. Mirrors ExpensesCategoryChartInner's tooltip.
+              // The engine hands over the flattened datum, so read the flat `cat-${id}` key, not
+              // `point.byCategory`.
               const v = (datum[`cat-${c.id}`] as number | null) ?? 0;
               if (v === 0) return null;
               return (

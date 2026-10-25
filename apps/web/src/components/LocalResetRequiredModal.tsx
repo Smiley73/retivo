@@ -1,15 +1,6 @@
 /**
- * Blocking modal shown when a cross-user login cannot clear the previous
- * account's local data because another browser tab still holds the IndexedDB
- * open (the cross-user IndexedDB-leak guard fails closed).
- *
- * The login has failed closed: the new account's claims/household are NOT
- * exposed, so there is no safe way to dismiss this — the user must close the
- * other tabs (which releases their IDB handle; the dropping tab nudges them via
- * BroadcastChannel) and then Retry. Built on React Aria's `ModalOverlay` /
- * `Modal` / `Dialog` with dismissal disabled
- * (`isDismissable={false}` + `isKeyboardDismissDisabled`) so neither the scrim,
- * Esc, nor an X can bypass the guard.
+ * Blocking modal when a cross-user login cannot clear the previous account's local data because another tab holds the
+ * IndexedDB open. The login has failed closed, so nothing dismisses it: the user closes the other tabs and retries.
  */
 import React, { useId, useState } from 'react';
 import {
@@ -24,9 +15,7 @@ import { btnPrimaryClass } from './dialog-chrome';
 interface LocalResetRequiredModalProps {
   open: boolean;
   /**
-   * Re-attempt the cross-user IDB drop + login continuation. May reject /
-   * re-block; the component shows a spinner while it runs and surfaces nothing
-   * itself — a still-blocked retry simply keeps this modal open.
+   * Re-attempts the IDB drop and login continuation; a still-blocked retry keeps the modal open.
    */
   onRetry: () => Promise<void>;
 }
@@ -36,10 +25,8 @@ export const LocalResetRequiredModal: React.FC<LocalResetRequiredModalProps> = (
   onRetry,
 }) => {
   const [retrying, setRetrying] = useState(false);
-  // RAC's `Dialog` auto-wires `aria-labelledby` from the `slot="title"`
-  // heading but does NOT auto-wire `aria-describedby` from a description
-  // slot (matches ConfirmDialog.tsx). Wire it explicitly so the alertdialog
-  // has a programmatic accessible description, not just a title.
+  // RAC does not auto-wire `aria-describedby` from a description slot (as in ConfirmDialog); wire
+  // it so the alertdialog has an accessible description.
   const descId = useId();
 
   const handleRetry = async (): Promise<void> => {
@@ -48,8 +35,7 @@ export const LocalResetRequiredModal: React.FC<LocalResetRequiredModalProps> = (
     try {
       await onRetry();
     } finally {
-      // If the retry succeeded the parent unmounts this modal; if it stayed
-      // blocked the modal remains open and the button re-enables for another go.
+      // On success the parent unmounts this modal; if still blocked the button re-enables.
       setRetrying(false);
     }
   };
@@ -57,8 +43,7 @@ export const LocalResetRequiredModal: React.FC<LocalResetRequiredModalProps> = (
   return (
     <ModalOverlay
       isOpen={open}
-      // Blocking: no scrim-close, no Esc-close. The login is in a fail-closed
-      // state until the previous account's IDB is actually dropped.
+      // Blocking: no scrim-close and no Esc-close while the guard is failing closed.
       isDismissable={false}
       isKeyboardDismissDisabled
       className="fixed inset-0 z-50 flex min-h-full items-center justify-center overflow-y-auto bg-overlay p-4"

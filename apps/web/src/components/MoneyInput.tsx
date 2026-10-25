@@ -1,20 +1,6 @@
 /**
- * Shared currency input — single source of truth for money entry.
- *
- * Two variants share parsing/format/focus behavior:
- *  - `form` (default): wraps in a labelled field. Used in edit dialogs
- *    and full-page forms.
- *  - `cell`: bare input, right-aligned, `aria-label` only. Used inside
- *    `<td>` cells in editable tables.
- *
- * Built on React Aria's `TextField` / `Input`. RA
- * `TextField` is spinner-less by construction (a text field, no
- * stepper buttons — the input keeps the same height every paint, per
- * "Form controls" in docs/ui-conventions.md) and keeps `inputMode="decimal"`. The public API
- * and the BEHAVIORAL CONTRACT are FROZEN byte-for-byte (consumers
- * untouched): positive-only / negative-opt-in `pattern`, strip
- * `$`/`,`, parse via `parseCurrencyInput`, raw value on focus,
- * `toFixed(2)` on blur, right-aligned, `min-w-0` flex-shrink guard.
+ * Shared currency input on React Aria `TextField` with `form` and `cell` variants: focus shows the raw value, blur
+ * re-formats to `decimals`. Spinner-less ("Form controls" in docs/ui-conventions.md).
  */
 import React, { useEffect, useState } from 'react';
 import { Input, Label, Text, TextField } from 'react-aria-components';
@@ -25,15 +11,10 @@ export function parseCurrencyInput(raw: string): number | null {
   return isNaN(parsed) ? null : parsed;
 }
 
-// Control boundary uses the dedicated `input-line` token — a load-bearing
-// boundary, AA-safe non-text (WCAG 1.4.11 ≥ 3.0), registered in
-// contrast.ts. Dark mode is the `.dark` variable swap.
 const INPUT_CLASS =
   'block w-full min-w-0 rounded-md border border-input-line bg-surface px-3 py-2 ' +
-  // `text-sm` matches the 14px page baseline (Field labels / tables).
-  // `font-mono`: the Tabular-Money Rule — the entered amount sits in editable
-  // table columns beside read-only mono cells, so it renders in JetBrains Mono
-  // too (see "Typography" in docs/ui-conventions.md).
+  // `font-mono` so the amount matches read-only mono cells beside it ("Typography" in
+  // docs/ui-conventions.md).
   'text-right text-sm font-mono tabular-nums text-ink placeholder:text-muted ' +
   'focus:border-accent focus:outline-none focus:ring-2 focus:ring-ring ' +
   'disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-muted';
@@ -43,8 +24,7 @@ const LABEL_CLASS = 'mb-1 block text-sm font-medium text-ink';
 interface BaseProps {
   value: number;
   onChange: (next: number) => void;
-  /** Fired on blur after the display re-formats — lets callers commit a draft
-   *  edit once per edit (blur-commit) rather than on every keystroke. */
+  /** Fired on blur after the display re-formats, so callers can commit a draft once per edit. */
   onBlur?: () => void;
   disabled?: boolean;
   /** Allow negative values. Defaults to `true` for `form`, `false` for `cell`. */
@@ -57,9 +37,10 @@ interface FormVariantProps extends BaseProps {
   variant?: 'form';
   id: string;
   label: string;
-  /** Optional help text rendered under the control. React Aria wires it as the
-   *  field's `aria-describedby`, so a screen reader announces it with the label
-   *  — a bare sibling paragraph would not be announced at all. */
+  /**
+   * Help text wired as the field's `aria-describedby`; a bare sibling paragraph would not be
+   * announced.
+   */
   description?: React.ReactNode;
 }
 
@@ -100,11 +81,7 @@ export const MoneyInput: React.FC<MoneyInputProps> = (props) => {
     onChange(dp === 0 ? Math.round(parsed) : parsed);
   };
 
-  // React Aria's <TextField> owns the labelled-input wiring (the bare
-  // `cell` form uses aria-label). `inputMode="decimal"` + `pattern`
-  // ride on the RA <Input> exactly as on the prior native input; the
-  // value is fully controlled by `display`, so parse/format/blur is
-  // byte-identical to the prior build.
+  // RA `<TextField>` owns the labelled-input wiring; the value is fully controlled by `display`.
   const field = (
     <TextField
       value={display}

@@ -1,12 +1,6 @@
 /**
- * What the connected assistant asked for and what Retivo sent back, newest call first. Each call is
- * a collapsed disclosure (time, tool, outcome, duration, bytes); expanded, it shows the arguments
- * received and the exact text sent to the bridge in a `<pre>`, byte for byte as the session encoded
- * it for the socket, never a re-serialization. An error result has no body to show.
- *
- * The viewer reads the session through `useAssistant()` and updates live while open. Closing it
- * leaves the session alone; Disconnect here is the caller's `onDisconnect`, which closes the modal
- * and ends the session.
+ * Newest-first log of what the assistant asked for and what Retivo sent back; expanded, a call shows the exact text
+ * sent to the bridge, byte for byte. `onDisconnect` closes the modal and ends the session.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Disclosure, DisclosurePanel, Heading } from 'react-aria-components';
@@ -31,9 +25,7 @@ function plural(count: number, one: string, many: string): string {
 
 interface AssistantActivityViewerProps {
   open: boolean;
-  /** Closes the viewer and nothing else. */
   onClose: () => void;
-  /** Closes the viewer and ends the session. */
   onDisconnect: () => void;
 }
 
@@ -113,7 +105,7 @@ const ActivityEntry: React.FC<{ entry: AuditEntry }> = ({ entry }) => {
 
 const SentText: React.FC<{ entry: AuditEntry; startedAt: string }> = ({ entry, startedAt }) => {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  // Auto-reset handle for the "Copied" / "Copy failed" label; cleared on unmount and on each new copy.
+  // Auto-reset handle for the copy label; cleared on unmount and on each new copy.
   const resetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {

@@ -1,34 +1,18 @@
 /**
- * Form field wrapper — the typed Tailwind-defaults replacement for the
- * legacy `.field` class.
- *
- * Wraps a labelled control: a `<label>` (associated to the control via
- * `htmlFor`/`id`) above the field children, with a consistent bottom
- * margin. Optional helper / error text renders below.
- *
- * BEHAVIORAL RULE — the wrapper carries `min-width: 0`
- * (Tailwind `min-w-0`). A `.field` used as a flex item must be able to
- * shrink below its content's intrinsic width; the default
- * `min-width: auto` resolves to `min-content` and blows constrained
- * parents (e.g. modals) out on first paint. This is the same
- * framework-independent flex-shrink guard the legacy `.field` baked in,
- * re-expressed in Tailwind.
+ * Form field wrapper: a `<label>` associated by `htmlFor` / `id` above the control, with optional hint and error
+ * text. `min-w-0` keeps a flex-item field from blowing out constrained parents such as modals.
  */
 import React from 'react';
 
 interface FieldProps {
-  /** Associates the `<label>` to the control (`htmlFor` ↔ control `id`). */
   htmlFor: string;
   label: React.ReactNode;
   children: React.ReactNode;
-  /** Muted helper text below the control. */
   hint?: React.ReactNode;
-  /** Error message below the control (announced via `role="alert"`). */
   error?: React.ReactNode;
   className?: string;
 }
 
-// `min-w-0` is the flex-shrink guard.
 const FIELD_CLASS = 'mb-3 min-w-0';
 
 const LABEL_CLASS = 'mb-1 block text-sm font-medium text-ink';
@@ -54,11 +38,7 @@ export const Field: React.FC<FieldProps> = ({
       {children}
       {hint && <p id={`${htmlFor}-hint`} className={HINT_CLASS}>{hint}</p>}
       {error && (
-        // Stable id (`${htmlFor}-error`) so a caller whose control needs
-        // more than the automatic label association — e.g. an
-        // `aria-describedby` pointer, when the AT contract calls for the
-        // error to be explicitly tied to the field that caused it — can
-        // reference this element without re-deriving its id.
+        // Stable id so a caller can point `aria-describedby` at the error without re-deriving it.
         <p id={`${htmlFor}-error`} role="alert" className={ERROR_CLASS}>
           {error}
         </p>

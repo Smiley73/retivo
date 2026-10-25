@@ -1,12 +1,5 @@
 /**
- * Shared React Aria Tabs class-token vocabulary (`TAB_CLASS` /
- * `TAB_PANEL_CLASS`), used by every scenario tab surface so they look and
- * behave identically (React Aria `Tab` / `TabPanel`). Originally lived in
- * `scenario-withdrawal-strategy-shared.ts` as `MODAL_TAB_CLASS` /
- * `MODAL_TAB_PANEL_CLASS`; hoisted here (01) because the strategy modal's
- * page module was never the right layering home for a token a *page*
- * (not just a modal) also needs, and the names stop saying "modal" now
- * that a page tab strip carries them too.
+ * Shared React Aria Tabs class tokens (`TAB_CLASS` / `TAB_PANEL_CLASS`) for every scenario tab surface.
  */
 
 export const TAB_CLASS =

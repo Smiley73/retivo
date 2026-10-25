@@ -1,15 +1,6 @@
 /**
- * Cash Balance Pension remediation banner. Surfaces every CBP account
- * that needs the user's attention before any engine should run —
- * unconfigured (no linked income stream) or duplicate (multiple linked
- * streams). Shared across the Balance Projection, Monte Carlo, and
- * stress-test surfaces so the remediation prompt looks identical
- * everywhere.
- *
- * Each row carries a direct link to the Income form so the user can
- * configure / disambiguate the linked stream in one click. The form
- * understands the deep-link query parameters
- * (`linkedCbpAccountId`, `memberId`, `kind=pension`, `payoutType`).
+ * Banner listing every Cash Balance Pension account that is unconfigured or duplicated, shared across the projection
+ * surfaces; each row deep-links to the Income form.
  */
 import React from 'react';
 import { textLinkClass } from './TextLink';
@@ -45,9 +36,7 @@ export const CbpRemediationBanner: React.FC<Props> = ({
     .filter((a): a is Aggregate<AccountPayload> => Boolean(a));
 
   return (
-    // Danger-toned card (legacy `.card .card--danger`) re-expressed in
-    // Tailwind defaults; kept a <section role="alert"> so the
-    // remediation prompt is announced as a live region (preserved a11y).
+    // A `<section role="alert">` so the remediation prompt is announced as a live region.
     <section
       className="mb-4 flex flex-col gap-3 rounded-lg border border-negative/40 bg-negative/5 p-5 shadow-sm"
       role="alert"
