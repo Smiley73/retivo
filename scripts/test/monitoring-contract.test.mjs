@@ -1,15 +1,5 @@
-// CloudWatch monitoring contract guard. Reads infrastructure/src/monitoring.ts
-// and infrastructure/src/lambda.ts as TEXT and asserts the evidence-tuned
-// dev/prod monitoring configuration — alarm identities +
-// thresholds/statistics/periods, per-stack metric namespaces, and the absence
-// of the removed dashboard and log metric filters. Pulumi resources can't be
-// unit-tested directly (no live AWS runtime), so this static IaC contract is
-// what actually pins the configuration values.
-//
-// Creds-free, no Pulumi runtime, no new dependency — mirrors
-// scripts/test/csp-contract.test.mjs (reads an infra source file as text) and
-// scripts/test/config-coverage.test.mjs. Runs under `pnpm test:scripts`. Lives
-// in scripts/test/ so node's `test-*.mjs` discovery glob does not match it.
+// Reads infrastructure/src/monitoring.ts and lambda.ts as text and pins the alarm identities, thresholds, periods and metric
+// namespaces, and the absence of the removed dashboard and log metric filters.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,11 +14,7 @@ const LAMBDA = readFileSync(resolve(INFRA, 'lambda.ts'), 'utf8');
 const BACKUP = readFileSync(resolve(INFRA, 'backup.ts'), 'utf8');
 const INDEX = readFileSync(resolve(INFRA, '../index.ts'), 'utf8');
 
-/**
- * The source substring of a single `new aws.cloudwatch.MetricAlarm(...)` block,
- * located by its `name: `${namePrefix}-<suffix>`` line and sliced to the next
- * `});`. Lets each assertion scope threshold/statistic/period to one alarm.
- */
+/** One `new aws.cloudwatch.MetricAlarm(...)` block, found by its `name:` line and sliced to the next `});`. */
 function alarmBlock(suffix) {
   const marker = '`${namePrefix}-' + suffix + '`';
   const at = MONITORING.indexOf(`name: ${marker}`);
@@ -39,12 +25,7 @@ function alarmBlock(suffix) {
 
 // --- 1. alarm groups: each switch gates exactly its own alarms --------------
 
-/**
- * The source of the brace-delimited block whose opening `{` is the first `{`
- * at or after `from` in `src`. Returns the offsets too, so callers can ask
- * whether an alarm falls inside it. Braces are matched by depth, not by a
- * character window, so an alarm just past a closing brace is NOT inside.
- */
+/** The brace-delimited block opening at the first `{` at or after `from`, with its offsets. Matched by depth, so an alarm just past the closing brace is outside. */
 function braceBlock(src, from) {
   const open = src.indexOf('{', from);
   assert.notEqual(open, -1, 'a block must open after the guard');
@@ -79,10 +60,7 @@ function groupBlock(switchName) {
   return braceBlock(MONITORING, at);
 }
 
-/**
- * Split a group block into its always-on alarms and the alarms that sit in a
- * nested `if (isProd) {` block (prod-only).
- */
+/** Split a group block into its always-on alarms and those in a nested `if (isProd) {` block. */
 function splitMembership(block) {
   const prodOnly = [];
   let rest = block.text;
@@ -161,10 +139,7 @@ test('every MetricAlarm sits inside exactly one group block, and no group block 
 });
 
 test('the SNS topic + subscription follow the shared anythingSendsAlerts predicate over all five switches', () => {
-  // A guard that named only some switches would pass "conditional" but
-  // silently drop a group's (or backup.ts's) alerting path — assert every
-  // switch is handed to the shared predicate, by name, and that the topic is
-  // built from that predicate rather than an inline union.
+  // A guard naming only some switches would silently drop a group's (or backup.ts's) alerting path.
   assert.match(MONITORING, /import \{ anythingSendsAlerts \} from "\.\/config-helpers\.mjs";/);
   const call = MONITORING.match(/const alarmsEnabled = anythingSendsAlerts\(\{([^}]*)\}\);/);
   assert.ok(call, 'alarmsEnabled must come from anythingSendsAlerts({...})');
@@ -205,9 +180,7 @@ test('backup.ts refers to none of the four alarm switches', () => {
 });
 
 test('the backups branch in index.ts depends on enableBackups alone, not on any alarm switch', () => {
-  // The four switches may appear in index.ts only inside the monitoringOpts
-  // object that is handed to createMonitoring. Anywhere else — notably the
-  // condition guarding createBackup — would couple backup alerting to a group.
+  // Elsewhere in index.ts, notably the condition guarding createBackup, a switch would couple backup alerting to a group.
   const optsAt = INDEX.indexOf('const monitoringOpts = {');
   assert.notEqual(optsAt, -1, 'monitoringOpts must exist');
   const opts = braceBlock(INDEX, optsAt);
@@ -296,13 +269,7 @@ test('compactor budget-limited alarm: compactorNs / Sum > 0 / 5min / 1 period / 
   assert.match(b, /treatMissingData: "notBreaching"/);
 });
 
-/**
- * Assert the named alarm is declared inside the `enableBackgroundJobAlarms`
- * block and outside every nested `if (isProd) {` block. Keyed on the guard
- * and the alarm's `name:` line, so comments between them play no part. Wrapping
- * the alarm in `if (isProd)` would drop its signal on a dev stack that turns
- * the group on; the group's own switch is a different, deliberate guard.
- */
+/** The alarm sits inside the `enableBackgroundJobAlarms` block and outside every nested `if (isProd) {`, which would drop it on a dev stack with the group on. */
 function assertAlwaysOnInBackgroundGroup(suffix) {
   const block = groupBlock('enableBackgroundJobAlarms');
   assert.ok(
@@ -395,8 +362,7 @@ test('lambda-concurrency-headroom alarm: account-wide AWS/Lambda ConcurrentExecu
 });
 
 test('both account-wide alarms sit inside the isProd gate within the capacity group', () => {
-  // Structural proof via brace matching: the capacity group block holds no
-  // always-on alarm, and both alarms live in its nested isProd block.
+  // Brace matching: no always-on alarm in the capacity group; both live in its isProd block.
   const { alwaysOn, prodOnly } = splitMembership(groupBlock('enableCapacityAlarms'));
   assert.deepEqual(alwaysOn, []);
   assert.deepEqual(

@@ -1,23 +1,5 @@
-// Deploy preflight guard: aggregate schema versions must not be ahead of
-// `origin/main` (scripts/check-schema-not-ahead.mjs).
-//
-// The guard's whole value is that it FAILS when it cannot answer — a silent
-// pass would let the 2026-08-04 dev incident happen again (a branch build with
-// a higher `account.current` wrote rows the shipped bundle can never read,
-// permanently halting sync for that workspace). So the negative branches below
-// carry as much weight as the positive one.
-//
-// Coverage is layered on purpose, because the first version of this file tested
-// only the pure helpers and stayed green against a guard that never executed:
-// pure helpers, then the composition root through its `git` seam (so an
-// inverted comparison or an unconditional override fails), then `runCli`, then
-// the entry gate, then REAL subprocess runs — including through a SYMLINKED
-// path, the exact shape that silently disarmed the CLI entry condition — then
-// the deploy-script wiring.
-//
-// The subprocess runs are skipped under `pnpm test:scripts` and run by
-// `pnpm test:contracts` (RUN_CONTRACT_TESTS=1). Pattern: lambda-artifact-contract.test.mjs
-// (script-as-text contract + subprocess execution).
+// scripts/check-schema-not-ahead.mjs must fail when it cannot answer: a silent pass lets a branch build write rows the shipped bundle cannot read.
+// The subprocess runs, including through a symlinked path, are gated: skipped under `pnpm test:scripts`, run by `pnpm test:contracts`.
 
 import { describe, test, after, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -58,9 +40,7 @@ const REPO_ROOT = resolve(__dirname, '../..');
 const SCRIPT_PATH = resolve(REPO_ROOT, 'scripts/check-schema-not-ahead.mjs');
 const DEPLOY_SCRIPT = resolve(REPO_ROOT, 'infrastructure/scripts/deploy-stack.sh');
 
-// A miniature registry with the same shape as the real one: prose comments that
-// mention version numbers, inline entries, and a multi-line entry with a nested
-// `migrations` object (which also pins that a depth-1 key is not an aggregate).
+// A miniature registry: comments that mention versions, an inline entry, and a multi-line entry whose nested `migrations` keys are not aggregates.
 const HOUSEHOLD_ENTRY = 'household: { current: 1, migrations: {} },';
 const FIXTURE = `
 const REGISTRY: Record<AggregateType, Registry> = {
@@ -92,8 +72,7 @@ const TREE_VERSIONS = parseRegistryVersions(
   readFileSync(resolve(REPO_ROOT, MIGRATIONS_PATH), 'utf8'),
 );
 
-/** The active inventory read WITHOUT the guard's own parser, so a bug shared by
- *  both parsers cannot hide behind itself. */
+/** The active inventory read without the guard's own parser, so a shared bug cannot hide. */
 function activeTypesByHand() {
   const listSource = readFileSync(resolve(REPO_ROOT, ACTIVE_TYPES_PATH), 'utf8');
   const listBlock = listSource.match(/ACTIVE_AGGREGATE_TYPES_LIST = \[([^\]]+)\]/);
@@ -104,8 +83,6 @@ function activeTypesByHand() {
 }
 
 test('parses a current version for every active aggregate type', () => {
-  // Deriving the expectation from the shared inventory (rather than a
-  // hand-copied list) means a parser that silently drops an aggregate fails.
   const expected = activeTypesByHand();
   assert.deepEqual(Object.keys(TREE_VERSIONS).sort(), [...expected].sort());
   for (const [name, version] of Object.entries(TREE_VERSIONS)) {
@@ -166,8 +143,7 @@ test('identical versions pass with an explicit all-clear', () => {
   assert.deepEqual(ahead, []);
   const result = report(ahead, false);
   assert.equal(result.exitCode, 0);
-  // Never silent: a run that prints nothing cannot be told apart from a run
-  // that never happened.
+  // A run that prints nothing cannot be told apart from one that never happened.
   assert.match(result.lines.join('\n'), /OK: no aggregate schema version is ahead of origin\/main/);
 });
 
@@ -188,7 +164,6 @@ test('ALLOW_SCHEMA_AHEAD=1 warns loudly and passes', () => {
   assert.equal(result.exitCode, 0);
   assert.match(result.lines.join('\n'), /^WARNING: ALLOW_SCHEMA_AHEAD=1/);
   assert.match(result.lines.join('\n'), /account 7 \(origin\/main has 6\)/);
-  // Same input without the override is a refusal — the flag is what changed.
   assert.equal(report(ahead, false).exitCode, 1);
 });
 
@@ -207,11 +182,7 @@ test('the override is only enabled by an explicit ALLOW_SCHEMA_AHEAD=1', () => {
   assert.equal(isOverrideEnabled({ ALLOW_SCHEMA_AHEAD: '' }), false);
 });
 
-// --- Fail-loud parsing -----------------------------------------------------
-//
-// Every row below is a registry shape the parser must REFUSE. A partial answer
-// is exactly the failure the guard exists to prevent, so none of these may come
-// back with a version map.
+// --- Fail-loud parsing: each row is a registry shape the parser must refuse, never answer partially ---
 
 for (const [name, source, expected] of [
   ['a missing REGISTRY declaration raises instead of passing',
@@ -226,27 +197,17 @@ for (const [name, source, expected] of [
     FIXTURE.replace('household: { current: 1,', 'household: { current: ACCOUNT_V1,'), /has 0 `current: <number>` entries/],
   ['a stray extra current inside an aggregate raises',
     reshapedHousehold('household: { current: 1, migrations: {}, legacy: { current: 4 } },'), /has 2 `current: <number>` entries/],
-  // Only ONE numeric `current:` per entry, so the per-entry check passes and the
-  // top-level key count still matches — the block-wide `current:` tally is the
-  // only thing standing between this reshaped block and a wrong answer.
+  // One numeric `current:` per entry passes the per-entry check; only the block-wide tally catches it.
   ['a non-numeric extra current trips the block-wide count backstop',
     reshapedHousehold('household: { current: 1, migrations: {}, legacy: { current: LEGACY_VERSION } },'), /`current:` key\(s\) for 2 aggregate\(s\)/],
-  // A spread carries no `name:` key, so none of the count-based shape checks
-  // sees it: without an explicit rejection the aggregates it contributes vanish,
-  // and a real schema bump hiding among them would sail through.
+  // A spread carries no `name:` key, so no count-based check sees the aggregates it hides.
   ['a top-level spread in the registry raises instead of dropping aggregates',
     reshapedHousehold(`...BASE_REGISTRY,\n  ${HOUSEHOLD_ENTRY}`), /spreads another object at top level/],
 ]) {
   test(name, () => assert.throws(() => parseRegistryVersions(source), expected));
 }
 
-// --- Fail-loud inventory parsing -------------------------------------------
-//
-// The inventory is the guard's only independent opinion on which aggregates
-// exist, so it carries the same contract: any shape it cannot fully read has to
-// raise, never come back short. A short inventory that returned quietly would
-// disagree with a correct registry and be blamed on the registry — or, worse,
-// agree with an equally short registry.
+// --- Fail-loud inventory parsing: the inventory is the independent opinion on which aggregates exist, so it must raise rather than come back short ---
 
 const INVENTORY_FIXTURE = `
 // The list below is \`as const\` so the union derives from it.
@@ -268,8 +229,7 @@ for (const [name, source, expected] of [
     'export const ACTIVE_AGGREGATE_TYPES_LIST = [] as const;\n', /parsed zero aggregate names/],
   ['an unterminated inventory array raises',
     "export const ACTIVE_AGGREGATE_TYPES_LIST = [\n  'account',\n", /unbalanced brackets/],
-  // A spread contributes names this parser cannot see, so the list would come
-  // back short and the registry would be blamed for it.
+  // A spread contributes names the parser cannot see.
   ['anything in the inventory that is not a quoted name raises',
     INVENTORY_FIXTURE.replace("'household',", '...LEGACY_TYPES,'), /contains something other than quoted aggregate names/],
   ['a repeated inventory name raises instead of being counted twice',
@@ -292,13 +252,12 @@ test('an unresolvable base ref raises instead of passing', () => {
   const run = () => readBaseSource(gitFailingAt('rev-parse', "fatal: not a git repository: '/nowhere'\n"));
   assert.throws(run, /cannot resolve origin\/main/);
   assert.throws(run, /git fetch origin main/);
-  // git's own words survive, so a corrupt object / permissions / wrong-cwd
-  // failure is not silently reported as "the ref was never fetched".
+  // git's own words survive, so another failure is not reported as "the ref was never fetched".
   assert.throws(run, /not a git repository/);
 });
 
 test('an unreadable migrations file on the base ref raises instead of passing', () => {
-  // A Buffer stderr, which is what execFileSync really hands back.
+  // execFileSync hands back a Buffer.
   const stderr = Buffer.from('fatal: path does not exist in origin/main\n');
   const run = () => readBaseSource(gitFailingAt('show', stderr));
   assert.throws(run, /cannot read apps\/web\/src\/db\/migrations\.ts/);
@@ -306,11 +265,7 @@ test('an unreadable migrations file on the base ref raises instead of passing', 
   assert.throws(run, /path does not exist in origin\/main/);
 });
 
-// --- The composition root --------------------------------------------------
-//
-// `checkSchemaNotAhead` reads the REAL working tree and takes the base ref
-// through its `git` seam, so these exercise the actual wiring: which side of
-// the comparison is which, and whether the override is consulted at all.
+// --- The composition root: reads the real working tree and takes the base ref through its `git` seam ---
 
 const AHEAD_AGGREGATE = 'account';
 
@@ -331,13 +286,7 @@ const registrySourceWith = (versions) =>
 const inventorySourceWith = (names) =>
   `export const ACTIVE_AGGREGATE_TYPES_LIST = [\n${names.map((n) => `  '${n}',`).join('\n')}\n] as const;\n`;
 
-/**
- * A `git` double that resolves the ref and serves the right file per `git show`
- * path. `inventory` defaults to one that AGREES with `migrations`, so the
- * per-ref consistency check is satisfied and each test only has to state the
- * thing it is actually about. Pass it explicitly to model one ref's two files
- * disagreeing.
- */
+/** A `git` double serving the right file per `git show` path; `inventory` defaults to one agreeing with `migrations`. */
 function gitServing(migrations, inventory) {
   return (args) => {
     if (args[0] === 'rev-parse') return '';
@@ -361,22 +310,20 @@ function treeServing(migrations, inventory) {
   };
 }
 
-/** A base ref identical to the tree except one aggregate left a version behind —
- *  i.e. the working tree is ahead by exactly one bump. */
+/** A base ref identical to the tree except one aggregate a version behind. */
 const baseOneBehind = () =>
   gitServing(
     registrySourceWith({ ...TREE_VERSIONS, [AHEAD_AGGREGATE]: TREE_VERSIONS[AHEAD_AGGREGATE] - 1 }),
   );
 
-/** A base ref serving both files from the same version map, so the per-ref
- *  consistency check passes and only the comparison is under test. */
+/** A base ref serving both files from one version map, so only the comparison is under test. */
 const baseServing = (versions) =>
   gitServing(registrySourceWith(versions), inventorySourceWith(Object.keys(versions)));
 
 test('checkSchemaNotAhead refuses when the working tree is ahead of the base ref', () => {
   const result = checkSchemaNotAhead({}, baseOneBehind());
   assert.equal(result.exitCode, 1);
-  // Swapping the two arguments at the call site inverts this into a pass.
+  // Swapped arguments would invert this into a pass.
   assert.match(
     result.lines.join('\n'),
     new RegExp(
@@ -396,17 +343,12 @@ test('checkSchemaNotAhead honours ALLOW_SCHEMA_AHEAD from the env it is given', 
   const result = checkSchemaNotAhead({ [OVERRIDE_ENV]: '1' }, baseOneBehind());
   assert.equal(result.exitCode, 0);
   assert.match(result.lines.join('\n'), /^WARNING: ALLOW_SCHEMA_AHEAD=1/);
-  // An unconditional override would make the refusal case above pass too.
+  // An unconditional override would pass this too.
   assert.equal(checkSchemaNotAhead({}, baseOneBehind()).exitCode, 1);
 });
 
 test('a spread in the base ref registry fails the whole check loudly', () => {
-  // The dangerous shape: the base ref hides aggregates behind a spread while
-  // the working tree bumps one of them. Dropping those entries would compare an
-  // ahead aggregate against nothing and report all clear. The refusal must also
-  // carry the PARSER's own reason — swallowing it and letting the downstream
-  // inventory check complain instead names the wrong file. The inventory is
-  // passed explicitly so the test double never parses the spread itself.
+  // The refusal must carry the parser's own reason; the downstream inventory check would name the wrong file.
   const spreadBase =
     'const REGISTRY: Record<AggregateType, Registry> = {\n  ...BASE_REGISTRY,\n' +
     `  ${AHEAD_AGGREGATE}: { current: ${TREE_VERSIONS[AHEAD_AGGREGATE] - 1}, migrations: {} },\n};\n`;
@@ -427,19 +369,9 @@ test('both base-ref files are read from the base ref, not the working tree', () 
   assert.deepEqual(targets, [`${BASE_REF}:${MIGRATIONS_PATH}`, `${BASE_REF}:${ACTIVE_TYPES_PATH}`]);
 });
 
-// --- Short parses, in BOTH directions --------------------------------------
-//
-// Every shape check inside `parseRegistryVersions` compares the block against
-// itself, so a source that hides whole entries from the scanner satisfies all
-// of them and comes back silently short. The independent second opinion is the
-// per-ref inventory, and it has to be applied to BOTH refs: the two directions
-// fail differently, and an earlier one-way version of this cross-check left the
-// worse direction open.
+// --- Short parses, in both directions: the parser's checks compare the block to itself, so only each ref's own inventory catches a short parse ---
 
-/** The shape that evades every count check in the parser. `stripComments`
- *  removes block comments BEFORE line comments, so the unpaired `/*` inside the
- *  `//` line swallows everything up to the next real close-comment, taking whole
- *  entries with it. The survivors stay self-consistent, so nothing raises. */
+/** Evades every count check: `stripComments` removes block comments before line comments, so the unpaired `/*` in the `//` line swallows entries up to the next close-comment. */
 const SWALLOWED_HOUSEHOLD = `
 const REGISTRY: Record<AggregateType, Registry> = {
   // note: the /* old registry shape is gone
@@ -462,29 +394,23 @@ test("a short parse is caught in BOTH directions, against that ref's own invento
   const short = { account: 6 };
   const names = Object.keys(full);
 
-  // Registry short of its inventory — the shape SWALLOWED_HOUSEHOLD produces.
+  // Registry short of its inventory: what SWALLOWED_HOUSEHOLD produces.
   assert.throws(
     () => assertRegistryMatchesInventory(short, names, 'some ref'),
     /missing from the registry parse: household/,
   );
-  // Inventory short of its registry — the mirror image, e.g. a comment that
-  // swallows names out of ACTIVE_AGGREGATE_TYPES_LIST instead.
+  // Inventory short of its registry: the mirror image.
   assert.throws(
     () => assertRegistryMatchesInventory(full, ['account'], 'some ref'),
     /missing from the inventory parse: household/,
   );
-  // An agreeing pair passes, so the throws above are the mismatch firing.
   assert.doesNotThrow(() => assertRegistryMatchesInventory(full, names, 'some ref'));
   assert.doesNotThrow(() => assertRegistryMatchesInventory(short, ['account'], 'some ref'));
 });
 
 test('a BASE ref whose registry parse comes back short is refused, not read as all clear', () => {
-  // The reproduced hole: the tree is at `account: 6`, the base ref really is at
-  // `account: 5`, but a swallowing comment hides `account` from the BASE parse.
-  // `findAheadAggregates` skips aggregates the base does not declare (a genuine
-  // new type is safe), so the bump was never compared and the run reported all
-  // clear — the exact silent pass this guard exists to prevent. The base ref's
-  // OWN inventory still lists it, which is what contradicts the short parse.
+  // A comment hides `account` from the base parse, and `findAheadAggregates` skips aggregates the base does not declare,
+  // so the bump would read as all clear. The base ref's own inventory still lists it.
   const survivors = Object.fromEntries(
     Object.entries(TREE_VERSIONS).filter(([name]) => name !== AHEAD_AGGREGATE),
   );
@@ -507,15 +433,12 @@ ${registryEntries(survivors)}
       gitServing(hiddenAccountBase, inventorySourceWith(Object.keys(TREE_VERSIONS))),
     );
   assert.throws(run, /origin\/main: the REGISTRY block and ACTIVE_AGGREGATE_TYPES_LIST disagree/);
-  // …and it names the aggregate that went missing, so the operator can find it.
   assert.throws(run, new RegExp(`missing from the registry parse: ${AHEAD_AGGREGATE}`));
 });
 
 test('a TREE whose registry parse comes back short is refused, not read as all clear', () => {
-  // The other direction, and the more dangerous one: `findAheadAggregates`
-  // iterates the TREE's keys, so an aggregate the tree parse never produced is
-  // not compared at all — a real bump on it reads as all clear no matter what
-  // the base ref says. The working tree's own inventory is what contradicts it.
+  // `findAheadAggregates` iterates the tree's keys, so an aggregate the tree parse never produced is not compared.
+  // The working tree's own inventory contradicts it.
   const base = baseServing({ household: 1, account: 5 });
   assert.throws(
     () =>
@@ -526,23 +449,16 @@ test('a TREE whose registry parse comes back short is refused, not read as all c
       ),
     /this working tree: the REGISTRY block and ACTIVE_AGGREGATE_TYPES_LIST disagree/,
   );
-  // The same base ref against a tree whose two files agree is a clean refusal
-  // on the merits (account 6 > 5), so the throw above is the consistency check
-  // firing rather than some other rejection.
+  // With the tree's two files agreeing, the refusal is on the merits (account 6 > 5).
   const honest = treeServing(SWALLOWED_HOUSEHOLD.replace('// note: the /*', '//'));
   assert.equal(checkSchemaNotAhead({}, base, honest).exitCode, 1);
-  // …and the real working tree satisfies it, so the guard is not permanently
-  // throwing.
   assert.doesNotThrow(() =>
     assertRegistryMatchesInventory(TREE_VERSIONS, activeTypesByHand(), 'this working tree'),
   );
 });
 
 test('a genuinely RETIRED aggregate type is not refused', () => {
-  // The reason the fix is a per-ref consistency check rather than a
-  // base-vs-tree key comparison: a type the base ref declares in BOTH its
-  // registry and its inventory, and the tree declares in neither, has simply
-  // been removed. There is no tree-side version to be ahead of anything.
+  // Declared in both of the base ref's files and neither of the tree's, so there is no tree-side version to be ahead.
   const RETIRED = 'legacyProfile';
   assert.equal(TREE_VERSIONS[RETIRED], undefined, `precondition: ${RETIRED} is not a real aggregate`);
   const withRetired = { ...TREE_VERSIONS, [RETIRED]: 3 };
@@ -550,17 +466,13 @@ test('a genuinely RETIRED aggregate type is not refused', () => {
   assert.equal(result.exitCode, 0);
   assert.match(result.lines.join('\n'), /OK: no aggregate schema version is ahead/);
 
-  // Retiring a type must not blind the guard to a real bump on the types that
-  // remain: same base, but one shared aggregate left a version behind.
+  // Retiring a type must not blind the guard to a real bump on the others.
   const alsoBehind = { ...withRetired, [AHEAD_AGGREGATE]: TREE_VERSIONS[AHEAD_AGGREGATE] - 1 };
   assert.equal(checkSchemaNotAhead({}, baseServing(alsoBehind)).exitCode, 1);
 });
 
 test('a genuinely NEW aggregate type is not refused', () => {
-  // The tree declares an aggregate the base ref does not (both files agree on
-  // each side). An older bundle skips rows of a type it does not know at all,
-  // so this cannot cause the permanent sync halt — modelled by serving a base
-  // ref that is missing one of the tree's types entirely.
+  // An older bundle skips rows of a type it does not know, so a new type cannot halt sync.
   const baseMissingOne = Object.fromEntries(
     Object.entries(TREE_VERSIONS).filter(([name]) => name !== AHEAD_AGGREGATE),
   );
@@ -604,28 +516,17 @@ test('runCli turns a thrown failure into exit 1, never a silent pass', () => {
 test('the entry gate refuses to run on a runtime without `import.meta.main`', () => {
   assert.doesNotThrow(() => assertEntryGateSupported({ main: true }));
   assert.doesNotThrow(() => assertEntryGateSupported({ main: false }));
-  // Node < 24.2 has no `import.meta.main` at all: the gate would be falsy, the
-  // guard would skip itself with no output and exit 0, and the deploy would
-  // still print the preflight banner — the same silent no-op the symlinked
-  // `process.argv[1]` comparison produced.
+  // Node < 24.2 has no `import.meta.main`: the gate would be falsy and the guard would skip itself silently.
   assert.throws(() => assertEntryGateSupported({}), /does not support `import\.meta\.main`/);
   assert.throws(() => assertEntryGateSupported({}), /Node >= 24\.2 is required/);
 });
 
-/** Where the stop markers come from — named in the failure messages below so a
- *  red run points at the constant to fix, not at a copy of the text. */
+/** Named in the failure messages so a red run points at the constant to fix. */
 const MARKER_SOURCE = 'PRE_PULUMI_STOP_MARKERS (scripts/check-schema-not-ahead.mjs)';
 
 test('exactly the outcomes that stop the deploy announce a stop marker', () => {
-  // These markers are what a deploy log is read for to tell "the preflight
-  // stopped this, nothing reached AWS" from "the deploy itself failed, the
-  // stack may be half-changed".
-  //
-  // Every terminal form is PRODUCED here by the code path that emits it, rather
-  // than copied as text, so a reworded one cannot drift out of this check. The
-  // pairing is the point: a stop that announces no marker gets read as a failed
-  // deploy with a partial stack that does not exist, and an outcome that lets
-  // the deploy run must never be read as a refusal.
+  // The markers tell a deploy log "the preflight stopped this" from "the deploy failed, the stack may be half-changed".
+  // Each terminal form is produced by the code path that emits it, so a reworded one cannot drift out of this check.
   const markers = PRE_PULUMI_STOP_MARKERS;
   assert.ok(markers.length > 0, `${MARKER_SOURCE} must name at least one log marker`);
   const ahead = [{ aggregate: AHEAD_AGGREGATE, tree: 7, base: 6 }];
@@ -665,8 +566,7 @@ test('package.json pins Node to 24.x, at 24.2 or later', () => {
   const floor = declared.match(/^>=\s*(\d+)\.(\d+)\./);
   assert.ok(floor, `engines.node must state a \`>=\` floor, got "${declared}"`);
   const [, major, minor] = floor.map(Number);
-  // Major 24 exactly: this repo runs the current Lambda LTS and does not accept
-  // a newer Node major. A `>=` with no ceiling would silently permit 25+.
+  // Major 24 exactly: the repo runs the current Lambda LTS, and a `>=` with no ceiling would permit 25+.
   assert.equal(major, 24, `engines.node is "${declared}", but this repo is pinned to Node 24.x`);
   assert.ok(
     minor >= 2,
@@ -679,8 +579,7 @@ test('package.json pins Node to 24.x, at 24.2 or later', () => {
 });
 
 test('the CLI sets an exit code instead of exiting mid-write', () => {
-  // Executable lines only: the script's own comments discuss `process.exit()`
-  // to explain why it is not used, which must not read as a call.
+  // Executable lines only: the script's comments name `process.exit()` to explain why it is not used.
   const source = readFileSync(SCRIPT_PATH, 'utf8')
     .split('\n')
     .filter((line) => !/^\s*(\/\/|\/\*|\*)/.test(line))
@@ -693,9 +592,7 @@ test('the CLI sets an exit code instead of exiting mid-write', () => {
       'subprocess runs below invoke this — so exiting before the writes drain can truncate the ' +
       'refusal text that names the offending aggregate',
   );
-  // The assertion's CALL SITE is one executable line no in-process test reaches,
-  // and it must run BEFORE the entry gate — after it, an unsupported runtime
-  // skips both and the guard silently no-ops again.
+  // No in-process test reaches this call site, and after the entry gate an unsupported runtime would skip both.
   const callIndex = source.search(/^assertEntryGateSupported\(import\.meta\);$/m);
   const gateIndex = source.search(/^if \(import\.meta\.main\) \{$/m);
   assert.ok(callIndex >= 0, 'the module must call `assertEntryGateSupported(import.meta)` at top level');
@@ -703,13 +600,7 @@ test('the CLI sets an exit code instead of exiting mid-write', () => {
   assert.ok(callIndex < gateIndex, 'the entry-gate assertion must run before the `import.meta.main` gate');
 });
 
-// --- Real subprocess runs, canonical AND symlinked -------------------------
-//
-// The CLI entry condition is the one part no in-process test can reach. It
-// shipped comparing a non-canonical `process.argv[1]` against a realpathed
-// `import.meta.url`, so invoking the script through ANY symlinked checkout path
-// skipped the whole guard and exited 0 with no output while the deploy log
-// still showed the preflight banner. These runs are the regression.
+// --- Real subprocess runs, canonical and symlinked: no in-process test reaches the CLI entry condition, which a symlinked checkout path would disarm ---
 
 const RUN = process.env.RUN_CONTRACT_TESTS === '1';
 
@@ -745,13 +636,7 @@ describe(
     return { status: result.status, output: `${result.stdout}${result.stderr}` };
   }
 
-  // Every completed run ends in exactly one of these, and each one pins its own
-  // exit code. Asserting the PAIR — which outcome was announced, and whether the
-  // status agrees — is what makes these runs state-independent: they hold on a
-  // clean branch, on a branch that legitimately bumps a schema version, and in a
-  // checkout where `origin/main` was never fetched. What they still reject is the
-  // failure they exist for: a skipped entry block prints nothing and exits 0, so
-  // it matches no outcome at all.
+  // Asserting the outcome and its exit code together holds on any branch state; a skipped entry block prints nothing and matches none.
   const OUTCOMES = [
     { name: 'clean', pattern: /^OK: no aggregate schema version is ahead of origin\/main\.$/m, status: 0 },
     { name: 'override-warning', pattern: /^WARNING: ALLOW_SCHEMA_AHEAD=1 —/m, status: 0 },
@@ -759,8 +644,7 @@ describe(
     { name: 'preflight-failed', pattern: /^Schema-ahead preflight failed: /m, status: 1 },
   ];
 
-  /** Assert the run announced exactly one outcome and exited the way that
-   *  outcome requires; returns the outcome's name so callers can compare runs. */
+  /** Assert the run announced exactly one outcome with its exit code; returns the outcome's name. */
   function assertAnnouncedOutcome({ status, output }, context) {
     const matched = OUTCOMES.filter((outcome) => outcome.pattern.test(output));
     assert.equal(
@@ -809,8 +693,7 @@ describe(
 
 // --- The deploy-script wiring ----------------------------------------------
 
-/** deploy-stack.sh with its comment lines removed: the file header describes
- *  the preflight in prose, which must not be mistaken for the invocation. */
+/** deploy-stack.sh without comment lines, whose prose describes the preflight. */
 const DEPLOY_CODE = readFileSync(DEPLOY_SCRIPT, 'utf8')
   .split('\n')
   .filter((line) => !/^\s*#/.test(line))

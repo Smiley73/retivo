@@ -1,18 +1,4 @@
-/**
- * Cross-page user journeys, layered on top of the smoke suite.
- *
- * Scope:
- *   1. Scenario change propagates: editing the active scenario's planned
- *      returns changes the Balance Projection headline stat.
- *   2. Data persistence round-trip: a created expense survives a hard
- *      reload (IndexedDB persistence + boot path).
- *
- * Both journeys are fully local (demo data, no API) — the Profile
- * export/import flows are password-gated against the API and live in
- * the API-coupled manual suite, not here.
- *
- * Each test runs against a freshly-cleared IndexedDB (see fixtures.ts).
- */
+/** Cross-page journeys: a scenario edit moves the projection headline, and a created expense survives a hard reload. */
 import { test, expect, loadDemo } from './fixtures';
 
 test.describe('journeys', () => {
@@ -21,8 +7,7 @@ test.describe('journeys', () => {
   }) => {
     await loadDemo(page);
 
-    // Capture the "Planned · at horizon" stat (label div + value div are
-    // siblings inside the Stat card).
+    // xpath: the stat's label and value are sibling divs.
     await page.goto('/balance-projection');
     await expect(
       page.getByRole('heading', { name: /balance projection/i }),
@@ -34,7 +19,7 @@ test.describe('journeys', () => {
     await expect(horizonValue).not.toHaveText('—', { timeout: 15_000 });
     const before = (await horizonValue.textContent())?.trim() ?? '';
 
-    // Open the active scenario (the row carrying the "Active" badge).
+    // The row carrying the "Active" badge.
     await page.goto('/scenarios');
     const activeRow = page
       .locator('.scenario-tree > *')
@@ -43,10 +28,7 @@ test.describe('journeys', () => {
     await expect(activeRow).toBeVisible({ timeout: 10_000 });
     await activeRow.getByRole('button', { name: /^edit /i }).click();
 
-    // Scenario detail → Planned returns → override EVERY account with an
-    // aggressively different return. One small account at -15% can move
-    // the $M-rounded headline by less than the rounding step; all of
-    // them cannot.
+    // Override every account: one small account can move the $M-rounded headline by less than the rounding step.
     await page
       .getByRole('button', { name: 'Configure planned-return overrides' })
       .click();
@@ -58,19 +40,14 @@ test.describe('journeys', () => {
     const count = await returns.count();
     for (let i = 0; i < count; i += 1) {
       const input = returns.nth(i);
-      // Click before filling: the React Aria Table grid manages focus,
-      // and fill()'s programmatic focus can be redirected to the row,
-      // sending the inserted text nowhere. A click enters the cell the
-      // way a user does and pins focus on the input.
+      // Click before fill: a React Aria Table can redirect fill()'s focus to the row.
       await input.click();
       await input.fill('-15');
       await input.blur();
       await expect(input).toHaveValue('-15.0');
     }
-    // Save renders only while the grid is dirty.
     await page.getByRole('button', { name: /^save$/i }).click();
 
-    // Back on Balance Projection the planned-at-horizon stat must move.
     await page.goto('/balance-projection');
     await expect(horizonValue).toBeVisible({ timeout: 15_000 });
     await expect
@@ -94,12 +71,7 @@ test.describe('journeys', () => {
       timeout: 10_000,
     });
 
-    // Hard reload: the fixture only wipes IDB at test start, so the row
-    // must come back from IndexedDB through the normal boot path. One
-    // navigation only — reload() immediately followed by a goto() aborts
-    // the boot-time session refresh mid-flight, which intermittently
-    // bounces the app to /login (the page is already on /expenses, so
-    // reload() alone exercises the same round-trip).
+    // Reload only: a reload followed by a goto aborts the boot-time session refresh and bounces to /login.
     await page.reload();
     await expect(page.getByText('E2E Persistence Check')).toBeVisible({
       timeout: 15_000,

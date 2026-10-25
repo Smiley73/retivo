@@ -1,21 +1,5 @@
-// Edge-secret placeholder contract guard.
-//
-// infrastructure/src/ssm.ts's `PLACEHOLDER` literal and
-// apps/api/src/common/env.config.ts's `EDGE_SHARED_SECRET_PLACEHOLDER` copy
-// must agree byte-for-byte: env.config.ts's deployed-stack superRefine
-// treats that exact string as "no secret" for EDGE_SHARED_SECRET, and the
-// api bundle cannot import infrastructure/src/ssm.ts (a separate
-// Pulumi-only package) to share the constant directly. A drifted copy would
-// either fail closed on a properly rotated secret that happens to collide
-// with the stale api-side string (spurious boot failure) or, worse, fail
-// open by no longer recognizing the actual placeholder Pulumi ships on a
-// brand-new, not-yet-bootstrapped stack.
-//
-// Reads both files as text — no infra runtime, no api runtime, no new
-// dependency. Runs under `pnpm test:scripts`. Lives in scripts/test/ (not
-// flat scripts/) so Node's test runner does not match the built-in
-// `test-*.mjs` discovery glob. Pattern: scripts/test/csp-contract.test.mjs,
-// scripts/test/monitoring-contract.test.mjs.
+// `PLACEHOLDER` in infrastructure/src/ssm.ts and `EDGE_SHARED_SECRET_PLACEHOLDER` in apps/api/src/common/env.config.ts must match byte-for-byte.
+// The api bundle cannot import the Pulumi-only package, and drift would fail open or closed on a real deploy.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,10 +17,7 @@ const ENV_CONFIG_SRC = readFileSync(
   'utf8',
 );
 
-/**
- * Extract the string literal assigned to `const <varName> = "...";` (single
- * or double quotes, value may wrap onto the next line) from source text.
- */
+/** The string literal assigned to `const <varName> = "...";` in source text; the value may wrap onto the next line. */
 function extractLiteral(source, varName, label) {
   const match = source.match(new RegExp(`${varName}\\s*=\\s*(["'])([^"']+)\\1`));
   assert.notEqual(match, null, `${label} must declare ${varName} = "..."`);

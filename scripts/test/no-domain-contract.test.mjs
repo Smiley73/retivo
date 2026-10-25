@@ -1,19 +1,5 @@
-// No-domain deploy contract. Deploying with no custom domain is the shipped
-// default: both examples leave `retivo:domainName` and `retivo:apiDomainName`
-// empty, and three pieces of existing code make that path work:
-//
-//   - index.ts hands `disableExecuteApiEndpoint` to the API Gateway only when
-//     an API domain is set, and forces `false` otherwise;
-//   - bootstrap-stack.sh's `maybe_lock_execute_api_endpoint` returns before it
-//     ever sets `retivo:disableExecuteApiEndpoint true` when there is no API
-//     domain;
-//   - bootstrap-stack.sh points `retivo:webOrigin` at the CloudFront address
-//     when there is no custom web domain.
-//
-// Text contract, like csp-contract.test.mjs: files are read as text and each
-// assertion anchors on the condition and on what sits inside its branch, never
-// on whitespace or line numbers. A live no-domain deploy is out of reach here;
-// this only keeps the three guards from being edited away unnoticed.
+// With no custom domain (the shipped default), index.ts, `maybe_lock_execute_api_endpoint` and the `retivo:webOrigin` handling must each take the no-domain branch.
+// Text contract: assertions anchor on the condition and its branch, not on whitespace or line numbers.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -168,10 +154,8 @@ test('bootstrap sets retivo:webOrigin to https:// + the cloudfrontDomain output 
     /^\s*if \[\[ -n "\$CUSTOM_DOMAIN" \]\]; then\s*$/,
   );
 
-  // The custom-domain branch keeps deriving the origin from the web domain.
   assert.match(thenBranch, /NEW_ORIGIN="https:\/\/\$\{?CUSTOM_DOMAIN\}?"/);
 
-  // The no-custom-domain branch uses the CloudFront address and writes it.
   const originMatch = elseBranch.match(/NEW_ORIGIN="https:\/\/\$\{?CF_DOMAIN\}?"/);
   assert.ok(originMatch, 'the no-domain branch must set NEW_ORIGIN="https://$CF_DOMAIN"');
   const setMatch = elseBranch.match(/pulumi config set retivo:webOrigin "\$NEW_ORIGIN"/);

@@ -1,26 +1,5 @@
-// Package contract for apps/mcp-bridge, the stdio MCP relay agents run on the
-// person's machine (`npx`-style, from a command the app shows). A dependency
-// added to it lands on every person's machine with their agent's privileges, so
-// the manifest is held to rules a reviewer should not have to re-check by eye:
-//
-//   - every non-workspace dependency is an exact version (no ^, ~, ranges, tags),
-//     so an install can never pick up a version nobody reviewed;
-//   - no preinstall / install / postinstall script, so installing it runs no
-//     code beyond its dependencies' own (and `ws`'s optional natives are not
-//     declared);
-//   - there are no runtime `dependencies`: everything the bridge needs is
-//     embedded in the single-file bundle (scripts/build-bundle.mjs), so what it
-//     embeds sits in `devDependencies` where `audit:ci` still audits it;
-//   - the `files` allowlist is exactly the bundle, its notices, the README and
-//     the license, the bin is the bundle, the package stays `private`, and it is
-//     ESM on the same Node range as the repo;
-//   - the dependency names equal a frozen allowlist: a new dependency fails here
-//     until the list below is edited WITH a reason, which makes adding one a
-//     visible, reviewed decision.
-//
-// Each rule also runs against a small inline manifest that breaks it, so the
-// rules themselves are shown to fail. Runs under `pnpm test:scripts`. Pattern:
-// scripts/test/pnpm-config-contract.test.mjs.
+// Manifest rules for apps/mcp-bridge, which runs on people's machines: exact versions, no install scripts, no runtime `dependencies`,
+// a frozen dependency allowlist and a `files` allowlist. Each rule also runs against an inline manifest that breaks it.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
