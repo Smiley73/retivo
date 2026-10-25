@@ -1,6 +1,3 @@
-/**
- * Display and methodology-button tests for the headline success-probability card.
- */
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -34,9 +31,6 @@ describe('PlanStressTestSuccessCard — methodology (i) button', () => {
 
 describe('PlanStressTestSuccessCard — headline', () => {
   it('renders the headline as a whole-number percent (matches the colour band)', () => {
-    // The card renders the integer `successPct` it is given (87%),
-    // never a one-decimal form — the 87.3 → 87 rounding is the vm
-    // builder's concern, not the card's.
     render(
       <PlanStressTestSuccessCard
         vm={vm({

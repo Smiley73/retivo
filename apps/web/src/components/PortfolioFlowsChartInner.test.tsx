@@ -1,11 +1,4 @@
-/**
- * Render-level test for PortfolioFlowsChartInner on the SVG engine —
- * asserts that the positive flow bars (contributions + gains) and the
- * negative withdrawal bar share the same X column at each data year
- * (single signed stack: positives above 0, negatives below 0), plus
- * theme-reactivity (the Contributions bar fill is map-sourced and flips
- * light↔dark) and drag-zoom + marker rendering.
- */
+/** PortfolioFlowsChartInner: signed stacking of flow bars, theme-reactive fills, drag-zoom and markers. */
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 
@@ -21,10 +14,7 @@ import { CHART_COLORS } from '../lib/tokens';
 const rows: PortfolioFlowsChartRow[] = [
   { year: 2026, contributions: 10000, gains: 5000, deposits: 0, withdrawals: 0, qcd: 0, netChange: 15000 },
   { year: 2027, contributions: 10000, gains: 6000, deposits: 0, withdrawals: 0, qcd: 0, netChange: 16000 },
-  // 2028-29: drawdown years — `withdrawals` is the net spend (gross draw less
-  // any forced-RMD surplus that round-trips back into the portfolio); 2029
-  // also directs a Qualified Charitable Distribution (its own below-zero
-  // stripe, distinct from the spending withdrawal).
+  // 2028-29 are drawdown years: withdrawals are net of forced-RMD surplus, and 2029 also carries a QCD stripe.
   { year: 2028, contributions: 0, gains: 4000, deposits: 0, withdrawals: -10000, qcd: 0, netChange: -6000 },
   { year: 2029, contributions: 0, gains: 3000, deposits: 0, withdrawals: -15000, qcd: -5000, netChange: -17000 },
 ];
@@ -82,19 +72,14 @@ describe('PortfolioFlowsChartInner', () => {
     expect(withdrawals[0].x).toBe(gains[2].x);
     expect(withdrawals[1].x).toBe(gains[3].x);
 
-    // Positive bars render above the zero line (their visual bottom is
-    // at or above zero).
     for (const c of contrib) {
       expect(c.y + c.height).toBeLessThanOrEqual(zeroY + 1);
     }
-    // Withdrawal bars render below zero: top at the zero line, bottom
-    // strictly below.
     for (const w of withdrawals) {
       expect(w.y).toBeCloseTo(zeroY, 0);
       expect(w.y + w.height).toBeGreaterThan(zeroY);
     }
 
-    // Drag selection renders the zoom marquee.
     expect(
       container.querySelector('[data-testid="chart-drag-marquee"]'),
     ).not.toBeNull();
@@ -108,16 +93,10 @@ describe('PortfolioFlowsChartInner', () => {
     const qcd = getBars(container, 'Charitable (QCD)');
     const withdrawals = getBars(container, 'Withdrawals');
     const zeroY = findZeroLineY(container);
-    // Only the 2029 row carries a non-zero `qcd`, so exactly one stripe renders
-    // (the zero-magnitude bars are skipped by the engine).
     expect(qcd).toHaveLength(1);
-    // It sits below zero (its own outflow stripe), stacked under the spending
-    // withdrawal of the same year — top below the withdrawal's bottom edge.
     const w2029 = withdrawals.find((b) => b.x === qcd[0].x)!;
     expect(qcd[0].y).toBeGreaterThan(zeroY);
     expect(qcd[0].y).toBeGreaterThanOrEqual(w2029.y + w2029.height - 1);
-    // The stripe fill is map-sourced (theme-reactive qcd token), distinct from
-    // the spending-withdrawal hue.
     expect(seriesColor(container, 'Charitable (QCD)')).toBe(CHART_COLORS.light.qcd);
     expect(CHART_COLORS.light.qcd).not.toBe(CHART_COLORS.light.incomeWithdrawal);
   });
@@ -161,10 +140,6 @@ describe('PortfolioFlowsChartInner', () => {
 });
 
 describe('PortfolioFlowsChartInner — integer death-year terminal bar', () => {
-  // Death = Dec 31 of `deathYear` (the terminal year), so the death-year
-  // bar is a FULL bar at its integer year and the death marker is the
-  // integer `deathYear` — landing on the last bar, with no fractional
-  // terminal bar.
   it('places the integer death-year marker on the last (full) bar, with no fractional terminal bar', () => {
     const deathMarker: CashflowChartMarker = {
       fractionalYear: 2029, // integer deathYear == the last data year
@@ -176,8 +151,6 @@ describe('PortfolioFlowsChartInner — integer death-year terminal bar', () => {
       'light',
       <InnerChart rows={rows} markers={[deathMarker]} depletionYear={null} members={[]} />,
     );
-    // The terminal bar stays on its integer year — no fractional row was
-    // injected, so the last gains bar's X equals the no-marker layout.
     const noMarker = renderWithTheme(
       'light',
       <InnerChart rows={rows} markers={[]} depletionYear={null} members={[]} />,
@@ -185,7 +158,6 @@ describe('PortfolioFlowsChartInner — integer death-year terminal bar', () => {
     const withMarkerX = getBars(container, 'Investment gains').at(-1)!.x;
     const noMarkerX = getBars(noMarker, 'Investment gains').at(-1)!.x;
     expect(withMarkerX).toBeCloseTo(noMarkerX, 5);
-    // The death marker renders (on the last bar).
     expect(
       container.querySelector('[data-marker-label="Pat life expectancy 90"]'),
     ).not.toBeNull();
@@ -246,15 +218,12 @@ describe('PortfolioFlowsChartInner — markers', () => {
       'light',
       <InnerChart rows={rows} markers={[]} depletionYear={null} members={[]} />,
     );
-    // `rows` crosses zero (positive 2026-27, negative 2028-29), so the line
-    // splits into at least one green run and one red run.
     const strokes = Array.from(
       container.querySelectorAll<SVGPathElement>('path[name="Net change"]'),
     ).map((p) => p.getAttribute('stroke'));
     expect(strokes).toContain(CHART_COLORS.light.netChangePositive);
     expect(strokes).toContain(CHART_COLORS.light.netChangeNegative);
-    // No gradient fallback — svg2pdf can't stroke a gradient, so the PDF would
-    // drop the line. Every segment must carry a solid colour.
+    // svg2pdf cannot stroke a gradient, so every segment must carry a solid colour.
     expect(strokes.some((s) => s?.startsWith('url('))).toBe(false);
   });
 });

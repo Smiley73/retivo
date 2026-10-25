@@ -1,17 +1,10 @@
-/**
- * Wrapper test for `SwrCompositionChart` — the `lazy()` + `Suspense` shell
- * around `SwrCompositionChartInner`. `SwrCompositionChartInner.test.tsx`
- * covers everything the chart itself renders; this file only proves the
- * lazy chunk resolves and mounts it — `knip`'s vitest plugin only credits
- * a test file as a real importer of the chunk when it renders the runtime
- * export, not just the row type (`ExpensesCategoryChart.test.tsx` precedent).
- */
+/** SwrCompositionChart wrapper: the lazy chunk resolves and mounts SwrCompositionChartInner. */
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { screen } from '@testing-library/react';
 
 import { SwrCompositionChart } from './SwrCompositionChart';
-import type { SwrComparisonYearRow } from './SwrCompositionChart';
+import type { SwrComparisonYearRow } from '../lib/safe-withdrawal-rate-chart-types';
 import { renderWithTheme } from '../test/theme-render';
 
 const ROWS: SwrComparisonYearRow[] = [

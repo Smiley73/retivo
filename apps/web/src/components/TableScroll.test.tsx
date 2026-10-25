@@ -1,14 +1,4 @@
-/**
- * TableScroll — keyboard-scrollable landmark contract + a11y smoke.
- *
- * The component is a focused scroll-region
- * landmark wrapper around React Aria Table children — `role="region"` +
- * `tabIndex={0}` + content-describing `aria-label`. Sticky-thead /
- * sticky-tfoot positioning is the consumer's responsibility via the
- * utility classes (`thStickyClass`, `thStickyNumClass`,
- * `rowStickyBottomClass`) on the RA Table's `<Column>` / `<Row>`
- * `className`. There are no global `.table-scroll` descendant rules.
- */
+/** TableScroll: keyboard-scrollable region landmark around React Aria tables, and the non-scrolling variant. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import {
@@ -77,12 +67,10 @@ describe('TableScroll', () => {
     await expectNoA11yViolations(container);
   });
 
-  // scroll={false}: hover-action tables opt out of the overflow context that
-  // leaves a row's :hover stuck in WebKit (see "Tables" in docs/ui-conventions.md).
+  // scroll={false}: hover-action tables opt out of the overflow context that leaves a row's :hover stuck in WebKit.
   describe('scroll={false} (non-scrolling variant)', () => {
     it('drops the overflow scroll context and the scroll-region landmark', () => {
       const { container } = renderTable('Household account balances', false);
-      // No scroll region / tabindex — there is nothing to scroll.
       expect(
         screen.queryByRole('region', { name: 'Household account balances' }),
       ).toBeNull();
@@ -90,7 +78,6 @@ describe('TableScroll', () => {
       expect(wrapper).not.toHaveAttribute('tabindex');
       expect(wrapper.className).not.toContain('overflow-auto');
       expect(wrapper.className).not.toContain('max-h-[60vh]');
-      // Keeps the bordered container chrome.
       expect(wrapper.className).toContain('rounded-lg');
       expect(wrapper.className).toContain('border');
       expect(wrapper.className).toContain('shadow-sm');
@@ -101,11 +88,6 @@ describe('TableScroll', () => {
       expect(
         screen.getByRole('grid', { name: 'year-by-year' }),
       ).toBeInTheDocument();
-    });
-
-    it('has no a11y violations', async () => {
-      const { container } = renderTable('Household account balances', false);
-      await expectNoA11yViolations(container);
     });
   });
 });

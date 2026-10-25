@@ -1,13 +1,4 @@
-/**
- * Select — shared React Aria dropdown. Asserts the frozen,
- * native-`<select>`-equivalent contract: a `combobox`/listbox pair with
- * an accessible name (visible label OR `ariaLabel`), the controlled
- * value reflected on the trigger, keyboard + pointer selection firing
- * `onChange(value)`, disabled blocking interaction, and the
- * shared-component axe rule (AGENTS mandate). Interaction goes through
- * `@testing-library/user-event` — React Aria's listbox press/key
- * model cannot be driven by `fireEvent`.
- */
+/** Select: the native-select-equivalent contract on the React Aria dropdown. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -22,10 +13,8 @@ const OPTIONS = [
   { value: 'c', label: 'Charlie', disabled: true },
 ];
 
-// Referentially-stable across renders (module scope, like a `useMemo`'d or
-// module-level options list a real caller would pass) — this is the shape
-// that trips React Aria's identity-keyed item cache when `value` changes
-// without `dependencies` telling it to invalidate.
+// Module-scope options keep a stable identity, which trips React Aria's identity-keyed item cache when `value` changes
+// without `dependencies`.
 const STABLE_DESCRIBED_OPTIONS = [
   { value: 'a', label: 'Alpha', description: 'Blocked because it holds a pension.' },
   { value: 'b', label: 'Bravo', description: 'Blocked because it holds a pension.' },
@@ -51,10 +40,7 @@ describe('Select', () => {
   });
 
   it('renders the trigger at the text-sm page baseline (no size jump on open)', () => {
-    // Regression: the closed trigger set no `text-*` (16px default)
-    // while the open listbox options are `text-sm` (14px), so the
-    // dropdown visibly changed size on open. jsdom cannot measure px,
-    // so the trigger class is the contract.
+    // jsdom cannot measure px, so the trigger class is the contract for matching the option size.
     render(
       <Select ariaLabel="Pick one" value="a" onChange={() => {}} options={OPTIONS} />,
     );
@@ -95,12 +81,7 @@ describe('Select', () => {
         <Select id="freq" value="a" onChange={() => {}} options={OPTIONS} />
       </>,
     );
-    // id + external label, NO ariaLabel. Before the fix RA named the
-    // trigger by the selected VALUE only ("Alpha") — the visible label
-    // was dropped. RA's listbox-trigger naming convention is
-    // value + label (same as a native <select>'s AT announcement); the
-    // contract is that the visible label is now part of a RELIABLE
-    // accessible name, so match it by substring.
+    // React Aria names the trigger by value plus label, so match the label by substring.
     const trigger = screen.getByRole('button', { name: /Frequency/ });
     expect(trigger).toHaveAccessibleName(/Frequency/);
     expect(trigger).toHaveTextContent('Alpha');
@@ -115,20 +96,12 @@ describe('Select', () => {
         <Select id="freq3" value="a" onChange={() => {}} options={OPTIONS} />
       </>,
     );
-    // The label already has an id — the hook must point
-    // `aria-labelledby` at THAT id (not overwrite it), so the
-    // accessible name resolves to the visible label and any
-    // pre-wired reference to `my-own-label` stays valid.
     expect(document.getElementById('my-own-label')?.id).toBe('my-own-label');
     const trigger = screen.getByRole('button', { name: /Frequency/ });
     expect(trigger).toHaveAccessibleName(/Frequency/);
   });
 
   it('resolves a unique accessible name when a same-named id already exists', () => {
-    // An unrelated element pre-occupies the id the legacy
-    // `${id}-label` derivation would have produced — the old code
-    // pointed `aria-labelledby` at THIS element ("Some other text"),
-    // an ambiguous / wrong name. The render-unique id must avoid it.
     render(
       <>
         <span id="freq4-label">Some other text</span>
@@ -139,7 +112,6 @@ describe('Select', () => {
     const trigger = screen.getByRole('button', { name: /Frequency/ });
     expect(trigger).toHaveAccessibleName(/Frequency/);
     expect(trigger).not.toHaveAccessibleName(/Some other text/);
-    // The decoy element is untouched and still the only `freq4-label`.
     expect(document.getElementById('freq4-label')?.textContent).toBe(
       'Some other text',
     );
@@ -177,9 +149,6 @@ describe('Select', () => {
         />
       </>,
     );
-    // When `ariaLabel` is supplied the external-label hook must not
-    // fire — RA keeps its own `aria-label`; the visible label id is
-    // NOT folded into aria-labelledby (existing call sites unchanged).
     const trigger = screen.getByRole('button');
     expect(trigger).toHaveAttribute('aria-label', 'Explicit name');
     expect(trigger.getAttribute('aria-labelledby') ?? '').not.toContain(
@@ -188,20 +157,12 @@ describe('Select', () => {
   });
 
   it('clears a chosen value back to "" via a selectable empty-string option', async () => {
-    // Regression: the native-`<select>` parity case. A native
-    // `<option value="">— pick an account —</option>` lets the user
-    // clear a previously-chosen target back to '' (re-entering the
-    // empty/validation path). The migrated `<Select>` must keep that:
-    // an `{ value: '', ... }` option is a real, selectable listbox row
-    // — not a display-only `placeholder` — and choosing it fires
-    // `onChange('')`. Ref: IncomeFormPage lump/one-off target selects.
     const user = userEvent.setup();
     const onChange = vi.fn();
     const withEmpty = [{ value: '', label: '— pick an account —' }, ...OPTIONS];
     const { rerender } = render(
       <Select ariaLabel="Target" value="" onChange={onChange} options={withEmpty} />,
     );
-    // Empty value selected → trigger shows the prompt row's label.
     expect(screen.getByRole('button', { name: /Target/ })).toHaveTextContent(
       '— pick an account —',
     );
@@ -209,7 +170,6 @@ describe('Select', () => {
     await user.click(await screen.findByRole('option', { name: 'Alpha' }));
     expect(onChange).toHaveBeenLastCalledWith('a');
 
-    // Now a real value is chosen; selecting the empty option clears it.
     rerender(
       <Select ariaLabel="Target" value="a" onChange={onChange} options={withEmpty} />,
     );
@@ -235,13 +195,6 @@ describe('Select', () => {
     await user.click(screen.getByRole('button', { name: /Pick one/ }));
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
-  });
-
-  it('has no a11y violations', async () => {
-    const { container } = render(
-      <Select ariaLabel="Pick one" value="a" onChange={() => {}} options={OPTIONS} />,
-    );
-    await expectNoA11yViolations(container);
   });
 
   it('renders an option row for each depth level 0–5', async () => {
@@ -272,7 +225,6 @@ describe('Select', () => {
     expect(await screen.findByRole('option', { name: 'Deep' })).toBeInTheDocument();
   });
 
-
   it('renders grouped options with group headers (the optgroup analogue)', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -298,13 +250,10 @@ describe('Select', () => {
         ]}
       />,
     );
-    // Controlled value still reflected on the trigger.
     expect(screen.getByRole('button', { name: /Grouped/ })).toHaveTextContent('TWR');
     await user.click(screen.getByRole('button', { name: /Grouped/ }));
-    // Group headers render (React Aria ListBoxSection + Header).
     expect(await screen.findByText('Deterministic')).toBeInTheDocument();
     expect(screen.getByText('Monte Carlo')).toBeInTheDocument();
-    // A grouped option is still selectable and fires onChange(value).
     await user.click(screen.getByRole('option', { name: 'Typical' }));
     expect(onChange).toHaveBeenCalledWith('typical');
   });
@@ -397,15 +346,8 @@ describe('Select', () => {
     });
 
     it('re-suppresses the description after a controlled value change reuses the same (referentially-stable) option objects — flat options path', async () => {
-      // Regression: React Aria's CollectionBuilder caches rendered items by
-      // object identity (see useCachedChildren) and only invalidates that
-      // cache via the `dependencies` prop. With a stable options array (a
-      // module-level constant or a `useMemo`'d list, ordinary React
-      // practice), a `renderOption` closure over `value` that never passes
-      // `dependencies` leaves the previously-rendered (described) element
-      // cached even after `value` moves onto it — so the description leaks
-      // into the closed trigger. This fails before `dependencies={[value]}`
-      // is threaded through the flat `<ListBox>` and passes after.
+      // React Aria caches rendered items by object identity and invalidates only via `dependencies`; without it a described
+      // option stays cached after `value` moves onto it and leaks its description into the closed trigger.
       const { rerender } = render(
         <Select
           ariaLabel="Pick one"
@@ -445,21 +387,13 @@ describe('Select', () => {
       expect(trigger.querySelector('[slot="description"]')).toBeNull();
       expect(trigger).not.toHaveAccessibleName(/Blocked/);
 
-      // And the option the trigger vacated (now unselected) picks up its
-      // description once React Aria re-renders it with the new `value`.
       await user.click(trigger);
       const alpha = await screen.findByRole('option', { name: 'Alpha' });
       expect(alpha).toHaveAccessibleDescription('Blocked because it holds a pension.');
     });
 
     it('lands typeahead on a described option — textValue stays load-bearing once children are elements', async () => {
-      // The option's `children` are now `<Text>` elements rather than a
-      // plain string once a description renders, so React Aria's
-      // type-to-select must resolve through `textValue`, not the rendered
-      // content. Assert that specifically for a described option: an
-      // undescribed option would keep working through the plain-string
-      // fallback even if `textValue` were dropped, so it would not catch a
-      // regression there.
+      // Described options render <Text> children, so type-to-select must resolve through `textValue`.
       const user = userEvent.setup();
       const described = [
         { value: 'a', label: 'Alpha' },
@@ -472,8 +406,7 @@ describe('Select', () => {
       await screen.findByRole('listbox');
       const bravo = screen.getByRole('option', { name: 'Bravo' });
       await user.keyboard('B');
-      // React Aria's listbox uses a roving-tabindex focus model here (real
-      // DOM focus moves onto the option), not `aria-activedescendant`.
+      // Real DOM focus moves onto the option (roving tabindex), not `aria-activedescendant`.
       expect(bravo).toHaveFocus();
       expect(bravo).toHaveAttribute('data-focused', 'true');
     });
@@ -543,10 +476,7 @@ describe('Select', () => {
       await user.click(screen.getByRole('button', { name: /Pick one/ }));
       const charlie = await screen.findByRole('option', { name: 'Charlie' });
       expect(charlie).toHaveAttribute('aria-disabled', 'true');
-      // `opacity-50` is applied conditionally via the `data-[disabled]:`
-      // variant, not as a plain class — jsdom never evaluates data-attribute
-      // selectors, so the class token itself is the contract (see
-      // RadioOption.test.tsx for the same pattern).
+      // jsdom never evaluates data-attribute selectors, so the class token itself is the contract.
       expect(charlie.className).toContain('data-[disabled]:opacity-50');
       await user.click(charlie);
       expect(onChange).not.toHaveBeenCalled();

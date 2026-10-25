@@ -1,6 +1,3 @@
-/**
- * Tests for the ErrorBoundary component.
- */
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { ISSUES_URL } from '../lib/brand';
@@ -17,11 +14,9 @@ const Thrower = () => {
 };
 
 describe('ErrorBoundary', () => {
-  // Save original descriptors so each test that overrides them can restore.
   let origClipboardDescriptor: PropertyDescriptor | undefined;
   let origLocationDescriptor: PropertyDescriptor | undefined;
 
-  // Suppress console.error during tests
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     origClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
@@ -30,15 +25,12 @@ describe('ErrorBoundary', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    // Restore navigator.clipboard to pre-test state.
     if (origClipboardDescriptor !== undefined) {
       Object.defineProperty(navigator, 'clipboard', origClipboardDescriptor);
     } else {
-      // Property didn't exist on navigator before — delete the override.
       // cast: restoring a non-enumerable browser property not in the Navigator type
       delete (navigator as any).clipboard;
     }
-    // Restore window.location to pre-test state.
     if (origLocationDescriptor !== undefined) {
       Object.defineProperty(window, 'location', origLocationDescriptor);
     }
@@ -143,7 +135,6 @@ describe('ErrorBoundary', () => {
         <Thrower />
       </ErrorBoundary>,
     );
-    // The dd sibling of the "Message" dt label must carry break-words.
     const messageDt = screen.getByText('Message');
     const messageDd = messageDt.nextElementSibling;
     expect(messageDd).not.toBeNull();
@@ -161,7 +152,6 @@ describe('ErrorBoundary', () => {
       .closest('p');
     expect(intro).toHaveClass('text-sm');
 
-    // At least one dt row is text-sm.
     const typeDt = screen.getByText('Type');
     expect(typeDt).toHaveClass('text-sm');
   });
@@ -178,7 +168,6 @@ describe('ErrorBoundary', () => {
     expect(pathDd).not.toBeNull();
     expect(pathDd?.textContent).toBe('/x');
     expect(pathDd?.textContent).not.toContain('token');
-    // Reset URL after test.
     window.history.pushState({}, '', '/');
   });
 
@@ -205,7 +194,6 @@ describe('ErrorBoundary', () => {
     expect(payload).toMatch(/^Message:/m);
     expect(payload).toMatch(/^Build ID:/m);
     expect(payload).toMatch(/^Path: \/test-path$/m);
-    // query string must not appear in the bundle
     expect(payload).not.toContain('token');
 
     window.history.pushState({}, '', '/');
@@ -226,7 +214,6 @@ describe('ErrorBoundary', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /copy details/i }));
-    // Flush the async clipboard promise.
     await act(async () => {
       await Promise.resolve();
     });
@@ -270,11 +257,9 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>,
     );
 
-    // Wait for componentDidCatch to setState({ capturedAt }) — one extra render.
     await act(async () => {});
     const timeDt = screen.getByText('Time');
     const timeDd = timeDt.nextElementSibling;
-    // After componentDidCatch runs, Time should not be em-dash.
     expect(timeDd?.textContent).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
     fireEvent.click(screen.getByRole('button', { name: /copy details/i }));
@@ -304,10 +289,6 @@ describe('ErrorBoundary', () => {
 
   it('records exactly one boundary entry and re-emits to devtools', async () => {
     clear();
-    // The suite's beforeEach already spies on console.error; recordCaught
-    // re-emits through the saved-original (defaulting to the live binding,
-    // i.e. the spy) so devtools output is preserved without the shim
-    // re-capturing it.
     render(
       <ErrorBoundary>
         <Thrower />
@@ -316,7 +297,6 @@ describe('ErrorBoundary', () => {
     await act(async () => {});
     const boundary = getEntries().filter((e) => e.source === 'boundary');
     expect(boundary).toHaveLength(1);
-    // Saved-original console.error fired for devtools.
     expect(console.error).toHaveBeenCalled();
     clear();
   });

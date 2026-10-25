@@ -1,6 +1,5 @@
 /**
- * Tooltip and currency-format helpers for the cashflow band chart, split out of `CashflowProjectionChartInner.tsx`,
- * which re-exports `makeCashflowTooltip`.
+ * Tooltip and currency-format helpers for the cashflow band chart, split out of `CashflowProjectionChartInner.tsx`.
  */
 import React from 'react';
 import type { CashflowMonthlyPoint } from '../lib/cashflow-chart-types';

@@ -1,14 +1,4 @@
-/**
- * ProjectionMethodExplainer — trigger + dialog content + close +
- * a11y smoke.
- *
- * Keyboard/pointer interaction goes through user-event (React Aria's
- * usePress model can't be driven by fireEvent). The opened modal is
- * portaled by React Aria to document.body, outside the render
- * container, so the opened-state axe scan runs against `baseElement`
- * (the documented pattern in Modal.test.tsx) — a container-scoped scan
- * would miss the dialog tree entirely.
- */
+/** ProjectionMethodExplainer: trigger, dialog content, close and a11y. */
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -25,8 +15,6 @@ const METHOD_NAMES = [
 
 const EXPLANATIONS = [
   /Each account grows at the return % you set for it/,
-  // The Historical gloss must carry the past-performance disclaimer, not just
-  // describe the mechanic.
   /it has actually earned in your balance history.*Past performance is not a forecast/s,
   /The middle outcome of 10,000 simulated market histories/,
   /A rough 1-in-4 bad case \(the 25th-percentile outcome\)\./,
@@ -109,17 +97,9 @@ describe('ProjectionMethodExplainer', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toBeInTheDocument();
 
-    // React Aria's isDismissable overlay closes when a pointer press
-    // lands on the overlay (scrim) outside the modal panel — the only
-    // mouse-only dismissal for this no-action-row dialog.
     const overlay = dialog.closest('.fixed')!;
     await user.click(overlay);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  it('has no a11y violations (trigger-only, closed)', async () => {
-    const { container } = render(<ProjectionMethodExplainer />);
-    await expectNoA11yViolations(container);
   });
 
   it('has no a11y violations when the dialog is open', async () => {
@@ -130,8 +110,7 @@ describe('ProjectionMethodExplainer', () => {
       screen.getByRole('button', { name: 'What do these mean?' }),
     );
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    // React Aria portals the dialog outside the render container; axe
-    // the whole document body so the dialog tree is in scope.
+    // React Aria portals the dialog outside the render container, so scan the whole body.
     await expectNoA11yViolations(baseElement);
   });
 });

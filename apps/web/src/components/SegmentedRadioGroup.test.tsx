@@ -1,20 +1,4 @@
-/**
- * SegmentedRadioGroup — WAI-ARIA radiogroup behaviour + a11y smoke.
- *
- * Built on React Aria's `RadioGroup`/`Radio`. React Aria owns the
- * keyboard pattern internally, so
- * these tests assert the *contract* (radiogroup + radio roles,
- * accessible group name, the value option checked + sole tab stop,
- * click-selects, arrow-selects with wrap) the same way the deleted
- * `SegmentedControl.test.tsx` did — plus the shared-component axe rule
- * (AGENTS mandate). React Aria renders each option as a native
- * `<input role="radio">` whose selected state is the native `checked`
- * (not an `aria-checked` attribute); the public API is frozen.
- *
- * Interaction is driven via `@testing-library/user-event`:
- * React Aria's keyboard/press model cannot be replicated by `fireEvent`
- * (Space/Arrow + `disabled` semantics).
- */
+/** SegmentedRadioGroup: radiogroup roles, the checked option as the sole tab stop, click and arrow selection. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -50,9 +34,7 @@ describe('SegmentedRadioGroup', () => {
     const group = screen.getByRole('radiogroup', { name: 'Test group' });
     expect(group).toBeInTheDocument();
     const bravo = screen.getByRole('radio', { name: 'Bravo' });
-    // React Aria radio = native <input role="radio">; selected state is
-    // the native `checked`. The framework-independent contract (the
-    // value option is checked) is unchanged.
+    // React Aria renders a native <input role="radio">, so selected state is `checked`, not `aria-checked`.
     expect(bravo).toBeChecked();
     expect(bravo).toHaveAttribute('tabindex', '0');
     expect(screen.getByRole('radio', { name: 'Alpha' })).toHaveAttribute(
@@ -105,8 +87,6 @@ describe('SegmentedRadioGroup', () => {
         size="sm"
       />,
     );
-    // `sm` matches the compact `btnSecondarySmClass` tokens so the group
-    // sits flush beside small row-action buttons (Expenses chart tabs).
     const alpha = screen.getByRole('radio', { name: 'Alpha' });
     const option = alpha.closest('label');
     expect(option).not.toBeNull();
@@ -122,10 +102,7 @@ describe('SegmentedRadioGroup', () => {
     expect(option).toHaveClass('px-[15px]', 'py-2', 'text-[13.5px]');
   });
 
-  // Regression — disabling by wrapping the group does not work; React Aria
-  // needs `isDisabled` on the radiogroup itself. Without this prop the radios stayed interactive while the
-  // visually-disabled wrapper suggested otherwise (Discretionary "Duration"
-  // segmented control in ScenarioExpenseSubsectionCards).
+  // Disabling by wrapping the group does not work: React Aria needs `isDisabled` on the radiogroup itself.
   it('does not fire onChange while disabled', async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();

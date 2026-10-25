@@ -1,10 +1,4 @@
-/**
- * Password-manager interop helpers — asserts the HiddenUsernameField
- * contract (sr-only, readOnly, untabbable, AT-hidden, correct
- * `name`/`autocomplete` tokens, renders nothing without an email), the
- * PM_IGNORE_ATTRS token set, and the shared-component axe rule (AGENTS
- * mandate).
- */
+/** Password-manager interop helpers: the HiddenUsernameField contract and the PM_IGNORE_ATTRS token set. */
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import { expectNoA11yViolations } from '../test/a11y';
@@ -22,8 +16,7 @@ describe('HiddenUsernameField', () => {
     expect(input).toHaveAttribute('autocomplete', 'username');
     expect(input).toHaveValue('ada@example.com');
     expect(input).toHaveAttribute('readonly');
-    // Out of the tab order + AT-hidden, but NOT display:none — managers
-    // skip display-hidden fields.
+    // Out of the tab order and AT-hidden but not display:none, because managers skip display-hidden fields.
     expect(input).toHaveAttribute('tabindex', '-1');
     expect(input).toHaveAttribute('aria-hidden', 'true');
     expect(input).toHaveClass('sr-only');

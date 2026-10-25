@@ -1,13 +1,11 @@
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
-import {
-  SmallScreenNotice,
-  PHONE_VIEWPORT_QUERY,
-  SMALL_SCREEN_NOTICE_DISMISSED_KEY,
-} from './SmallScreenNotice';
+import { SmallScreenNotice } from './SmallScreenNotice';
+
+const PHONE_VIEWPORT_QUERY = '(max-width: 639px)';
+const SMALL_SCREEN_NOTICE_DISMISSED_KEY = 'retivo:small-screen-notice-dismissed';
 
 type ChangeHandler = (e: MediaQueryListEvent) => void;
 
-/** Installs a controllable matchMedia; returns a setter that fires `change`. */
 function installMatchMedia(initialMatches: boolean) {
   const handlers = new Set<ChangeHandler>();
   let matches = initialMatches;

@@ -1,8 +1,4 @@
-/**
- * TrustedDevicesList tests. Covers the empty state,
- * device rows, the per-row forget action, the confirm-gated forget-all, and the
- * mandatory shared-component a11y smoke (AGENTS.md → Testing setup).
- */
+/** TrustedDevicesList: empty state, device rows, per-row forget and the confirm-gated forget-all. */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TrustedDevicesList } from './TrustedDevicesList';
@@ -56,7 +52,6 @@ describe('TrustedDevicesList', () => {
     const onForgetAll = vi.fn().mockResolvedValue(undefined);
     renderList({ onForgetAll });
     fireEvent.click(screen.getByRole('button', { name: 'Forget all devices' }));
-    // The confirm dialog appears; confirm it.
     const confirm = await screen.findByRole('alertdialog');
     expect(confirm).toHaveTextContent(/forget all devices/i);
     fireEvent.click(screen.getByRole('button', { name: 'Forget all' }));

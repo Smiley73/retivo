@@ -1,6 +1,3 @@
-/**
- * Tests for the running / error status row and its progress bar.
- */
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -10,20 +7,19 @@ import { expectNoA11yViolations } from '../test/a11y';
 
 
 describe('PlanStressTestStatusRow — running renders the MC progress bar', () => {
-  it('renders the determinate McProgressBar (not the old "Crunching…" text) with Cancel', async () => {
+  it('renders the determinate progress bar with Cancel in a polite status region', async () => {
     const { container } = render(
       <PlanStressTestStatusRow
         vm={vm({ isRunning: true, progressDone: 6200, progressTotal: 10000, result: null })}
       />,
     );
-    // The old badge text is gone; a progressbar now reports path progress.
-    expect(screen.queryByText(/Crunching stress-test numbers/i)).not.toBeInTheDocument();
     expect(
       screen.getByRole('progressbar', {
         name: /Simulating market histories: 6,200 of 10,000 paths/i,
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(container.querySelector('[role="status"]')).toHaveAttribute('aria-live', 'polite');
     await expectNoA11yViolations(container);
   });
 
@@ -48,17 +44,6 @@ describe('PlanStressTestStatusRow — running renders the MC progress bar', () =
     );
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(cancel).toHaveBeenCalledTimes(1);
-  });
-
-  it('renders the running region with status/aria-live semantics', () => {
-    const { container } = render(
-      <PlanStressTestStatusRow
-        vm={vm({ isRunning: true, progressDone: 1, progressTotal: 10000, result: null })}
-      />,
-    );
-    const status = container.querySelector('[role="status"]');
-    expect(status).not.toBeNull();
-    expect(status?.getAttribute('aria-live')).toBe('polite');
   });
 
   it('returns null when neither running nor errored', () => {

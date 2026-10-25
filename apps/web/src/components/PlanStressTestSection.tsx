@@ -181,12 +181,10 @@ function buildMcInputFromArgs(
   return runBalanceProjectionMc(runArgs);
 }
 
-/**
- * Latest birth year among the members, the anchor for the market-stress longevity cap. Birthdates
- * come from imported payloads, so only a complete, real ISO date counts; `null` when none is usable
- * withholds the comparison.
- */
-export function longestLivedBirthYearOf(
+// Latest birth year among the members, the anchor for the market-stress longevity cap. Birthdates
+// come from imported payloads, so only a complete, real ISO date counts; `null` when none is usable
+// withholds the comparison.
+function longestLivedBirthYearOf(
   members: ReadonlyArray<Aggregate<HouseholdMemberPayload>>,
 ): number | null {
   const years = members
@@ -674,8 +672,7 @@ export function PlanStressTestRecalcButton({
   );
 }
 
-// The stat-card slot renderers (`PlanStressTestSuccessCard`,
-// `PlanStressTestRetirementCards`, `PlanStressTestHorizonCards`) and the
+// The stat-card slot renderers (`PlanStressTestSuccessCard`) and the
 // fan-chart + data-table renderer (`PlanStressTestChart`) were extracted
 // to sibling modules to keep this file under the shape limit.
 // They are pure presentation over the `PlanStressTestVm` built
@@ -683,8 +680,6 @@ export function PlanStressTestRecalcButton({
 // suite keep their `./PlanStressTestSection` import paths unchanged.
 export {
   PlanStressTestSuccessCard,
-  PlanStressTestRetirementCards,
-  PlanStressTestHorizonCards,
 } from './PlanStressTestCards';
 export {
   PlanStressTestChart,

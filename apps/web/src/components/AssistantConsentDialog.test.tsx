@@ -1,8 +1,4 @@
-/**
- * The consent dialog: every registry switch with its default and linked
- * description, the Session group, both statements and the never-shared list,
- * Allow with the toggled choices, and the three ways to decline.
- */
+/** The consent dialog: every registry switch with its default and description, the statements, Allow with toggled choices, and the three ways to decline. */
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';

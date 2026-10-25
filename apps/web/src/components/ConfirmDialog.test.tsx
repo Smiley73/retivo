@@ -1,15 +1,4 @@
-/**
- * Tests for the ConfirmDialog component.
- *
- * Internals are React Aria's `ModalOverlay`/`Modal`/`Dialog`. These cover the
- * behavioral contract: render-when-open / hidden-when-closed,
- * the Confirm/Cancel callbacks, rich message content, Esc + scrim
- * resolve cancel, Enter resolves confirm, the LEFT-aligned primary-first
- * action order ("Modals" in docs/ui-conventions.md), and the shared-component axe
- * assertion. Keyboard/pointer interaction goes through
- * `@testing-library/user-event` because React Aria's `usePress`
- * model cannot be driven by `fireEvent`.
- */
+/** ConfirmDialog: open and closed rendering, confirm and cancel resolution, and left-aligned primary-first actions. */
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Checkbox } from 'react-aria-components';
@@ -44,7 +33,6 @@ describe('ConfirmDialog', () => {
         onCancel={() => {}}
       />,
     );
-    // Default = destructive: the red danger fill (`bg-negative`).
     expect(screen.getByRole('button', { name: 'Delete' })).toHaveClass('bg-negative');
   });
 
@@ -60,8 +48,6 @@ describe('ConfirmDialog', () => {
         onCancel={() => {}}
       />,
     );
-    // Benign confirms use the lime primary fill (`bg-accent`) so a screen full
-    // of red buttons doesn't dilute what "danger" means.
     const confirm = screen.getByRole('button', { name: 'Use it' });
     expect(confirm).toHaveClass('bg-accent');
     expect(confirm).not.toHaveClass('bg-negative');
@@ -140,8 +126,6 @@ describe('ConfirmDialog', () => {
         onCancel={onCancel}
       />,
     );
-    // React Aria's isDismissable overlay closes (→ onCancel) when a
-    // pointer press lands on the scrim outside the dialog panel.
     const dialog = screen.getByRole('alertdialog');
     const overlay = dialog.closest('.fixed')!;
     await user.click(overlay);
@@ -160,10 +144,6 @@ describe('ConfirmDialog', () => {
         onCancel={() => {}}
       />,
     );
-    // The Confirm button is autofocused on open. With the button guard,
-    // Enter on the autofocused button activates via native button click
-    // rather than the wrapper handler — onConfirm is still called exactly
-    // once; the observable result is unchanged.
     await user.keyboard('{Enter}');
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
@@ -181,11 +161,8 @@ describe('ConfirmDialog', () => {
         onCancel={onCancel}
       />,
     );
-    // Focus the Cancel button directly (no click, no side-effect on mocks).
     screen.getByRole('button', { name: 'Cancel' }).focus();
     await user.keyboard('{Enter}');
-    // The button guard early-returns; the browser fires the button's native
-    // click — onCancel is called once, onConfirm not at all.
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onConfirm).not.toHaveBeenCalled();
   });
@@ -208,15 +185,9 @@ describe('ConfirmDialog', () => {
         }
       />,
     );
-    // Move focus off the autofocused Confirm button onto the opt-in checkbox
-    // (the "Delete workspace data" flow's "Also erase backup history" toggle lives here).
     const checkbox = screen.getByRole('checkbox');
     checkbox.focus();
     await user.keyboard('{Enter}');
-    // Enter must stay scoped to the checkbox — it does NOT trigger the
-    // destructive confirm (the broadened guard excludes interactive
-    // input/role=checkbox targets), so the irreversible action never fires by
-    // accident while the checkbox is focused.
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
@@ -232,12 +203,7 @@ describe('ConfirmDialog', () => {
         onCancel={() => {}}
       />,
     );
-    // React Aria's isDismissable overlay injects a visually-hidden
-    // "Dismiss" button as the first DOM button (its AT escape hatch);
-    // it is not part of the visible action row. Assert ordering on the
-    // two real action buttons: primary (confirm) must precede the
-    // dismissive (cancel) action in DOM order — the left-aligned,
-    // primary-first modal rule.
+    // React Aria's dismissable overlay injects a visually-hidden "Dismiss" button first; assert order on the two real action buttons.
     const actions = screen
       .getAllByRole('button')
       .filter((b) => b.getAttribute('aria-label') !== 'Dismiss');
@@ -255,9 +221,6 @@ describe('ConfirmDialog', () => {
         onCancel={() => {}}
       />,
     );
-    // React Aria wires the alertdialog's aria-describedby from the
-    // `slot="description"` message (regression guard — a bare <p>
-    // would leave the dialog with no programmatic description).
     expect(screen.getByRole('alertdialog')).toHaveAccessibleDescription(
       'This permanently erases all data.',
     );
@@ -293,10 +256,7 @@ describe('ConfirmDialog', () => {
   });
 
   it('gives the message a block box with a bottom gap above the buttons', () => {
-    // RAC's <Text> renders an inline <span>; margin-bottom is a no-op on
-    // inline boxes, so the message must be `block` for the gap to the
-    // action row to exist at all. Regression guard for the
-    // "no padding between text and buttons" report.
+    // RAC's <Text> renders an inline span, so the message must be `block` for the gap to the action row to exist.
     render(
       <ConfirmDialog
         open
@@ -322,8 +282,6 @@ describe('ConfirmDialog', () => {
         onCancel={() => {}}
       />,
     );
-    // The panel is the alertdialog's RAC Modal ancestor; `size` maps to a
-    // max-w-* token (lg → max-w-lg). Default (omitted) stays max-w-sm.
     const panel = screen.getByRole('alertdialog').closest('.rounded-lg');
     expect(panel).toHaveClass('max-w-lg');
   });

@@ -1,18 +1,4 @@
-/**
- * InfoPopover tests.
- *
- * The component is a self-contained `(i)` disclosure: a decorative-icon
- * trigger that opens a Popover/Dialog holding arbitrary content, dismissed by
- * Esc or an outside press. Covers the accessible trigger name + decorative
- * icon, open-on-press, open-on-keyboard (Enter/Space), Esc-to-close,
- * content-absent-until-opened, an a11y smoke on the opened dialog, and an
- * unmount-while-open lifecycle case (no act/state warning).
- *
- * Outside-press close is React Aria's own pointer `interactOutside`, which is
- * unreliable under jsdom (the SyncDetailsPopover unit suite covers only Esc),
- * so it is exercised here via `userEvent.click(document.body)` and left to the
- * manual checklist if it proves flaky.
- */
+/** InfoPopover: accessible trigger and decorative icon, open on press and keys, Esc and outside-press close, unmount while open. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -35,7 +21,6 @@ describe('InfoPopover', () => {
     renderPopover();
     const trigger = screen.getByRole('button', { name: LABEL });
     expect(trigger).toBeInTheDocument();
-    // The icon SVG is decorative (button carries the name).
     const icon = trigger.querySelector('svg');
     expect(icon).not.toBeNull();
     expect(icon).toHaveAttribute('aria-hidden', 'true');
@@ -82,6 +67,7 @@ describe('InfoPopover', () => {
     renderPopover();
     await user.click(screen.getByRole('button', { name: LABEL }));
     expect(screen.getByRole('dialog', { name: LABEL })).toBeInTheDocument();
+    // React Aria's outside-press close is unreliable under jsdom, so drive it with a click on document.body.
     await user.click(document.body);
     expect(screen.queryByRole('dialog')).toBeNull();
   });

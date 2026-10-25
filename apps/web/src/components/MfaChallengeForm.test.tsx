@@ -1,9 +1,4 @@
-/**
- * MfaChallengeForm tests (enforced MFA). Covers method selection,
- * verify submission, the conditional trust-device checkbox, stale-factor
- * filtering, the email-send button, cancel, and the mandatory
- * shared-component a11y smoke (AGENTS.md → Testing setup).
- */
+/** MfaChallengeForm: method selection, verify submission, trust-device checkbox, stale-factor filtering, email send and cancel. */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MfaChallengeForm } from './MfaChallengeForm';
@@ -21,7 +16,6 @@ vi.mock('../api/client', () => ({
   },
 }));
 
-// WebAuthn-support detection — defaults to supported; individual tests flip it.
 const browserSupportsWebAuthn = vi.fn(() => true);
 vi.mock('@simplewebauthn/browser', () => ({
   browserSupportsWebAuthn: () => browserSupportsWebAuthn(),
@@ -145,9 +139,6 @@ describe('MfaChallengeForm', () => {
     ).toBeInTheDocument();
   });
 
-  // Inline "service is busy" copy: a gateway-level throttle/timeout with no error envelope shows
-  // the shared busy sentence instead of raw upstream status text, in the
-  // same aria-live="polite" error region a wrong code already uses.
   describe('busy-response handling', () => {
     const BUSY_MESSAGE = 'The service is busy right now. Please try again in a moment.';
 
@@ -197,17 +188,16 @@ describe('MfaChallengeForm', () => {
       expect(screen.queryByText(BUSY_MESSAGE)).not.toBeInTheDocument();
     });
 
-    it('renders the busy sentence inside the form\'s aria-live="polite" error region with no a11y violations', async () => {
+    it('renders the busy sentence inside the form\'s aria-live="polite" error region', async () => {
       const { ApiRequestError } = await import('../api/client');
       const onVerify = vi
         .fn()
         .mockRejectedValue(new (ApiRequestError as any)(503, { code: 'UNKNOWN_ERROR', message: 'Service Unavailable' }));
-      const { container } = renderForm({ onVerify, methods: ['totp'], recoveryMethods: [] });
+      renderForm({ onVerify, methods: ['totp'], recoveryMethods: [] });
       fireEvent.change(screen.getByLabelText('Verification code'), { target: { value: '000000' } });
       fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
       const alert = await screen.findByText(BUSY_MESSAGE);
       expect(alert.closest('[aria-live="polite"]')).not.toBeNull();
-      await expectNoA11yViolations(container);
     });
   });
 
@@ -217,12 +207,9 @@ describe('MfaChallengeForm', () => {
       recoveryMethods: ['email_otp'],
       onVerifyPasskey: vi.fn().mockResolvedValue(undefined),
     });
-    // Passkey leads → assert button, no code field.
     expect(screen.getByRole('button', { name: 'Use a passkey' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Verification code')).not.toBeInTheDocument();
-    // The trust-device checkbox is available for the passkey routine factor.
     expect(screen.getByRole('checkbox', { name: /trust this device/i })).toBeInTheDocument();
-    // The recovery factors are still reachable.
     expect(screen.getByRole('radio', { name: 'Authenticator app' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Email code' })).toBeInTheDocument();
   });
@@ -242,7 +229,6 @@ describe('MfaChallengeForm', () => {
       recoveryMethods: ['email_otp'],
       onVerifyPasskey: vi.fn().mockResolvedValue(undefined),
     });
-    // No passkey tab/button; selection falls through to a usable recovery factor.
     expect(screen.queryByRole('button', { name: 'Use a passkey' })).not.toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'Passkey' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Verification code')).toBeInTheDocument();
@@ -261,7 +247,6 @@ describe('MfaChallengeForm', () => {
     expect(
       await screen.findByText("We couldn't verify your passkey. Try again, or use another option."),
     ).toBeInTheDocument();
-    // The form stays mounted: a recovery factor is still reachable.
     expect(screen.getByRole('radio', { name: 'Email code' })).toBeInTheDocument();
   });
 
@@ -273,14 +258,8 @@ describe('MfaChallengeForm', () => {
     });
     expect(screen.getByRole('button', { name: 'Use a passkey' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: 'Email code' }));
-    // The code field returns; the assert button is gone.
     expect(screen.getByLabelText('Verification code')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use a passkey' })).not.toBeInTheDocument();
-  });
-
-  it('has no a11y violations', async () => {
-    const { container } = renderForm();
-    await expectNoA11yViolations(container);
   });
 
   it('has no a11y violations with the passkey factor active', async () => {

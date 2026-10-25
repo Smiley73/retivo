@@ -1,11 +1,4 @@
-/**
- * BalanceProjectionMcSampleNote — copy + polite-live-region + a11y.
- *
- * The banner explains the Monte Carlo per-year line is one example, not
- * an average. It must announce POLITELY (`role="status"`) — never
- * assertively (`role="alert"`), which would re-read the paragraph on
- * every basis change.
- */
+/** BalanceProjectionMcSampleNote: copy that the Monte Carlo line is one example, announced politely (role="status", never role="alert"). */
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { BalanceProjectionMcSampleNote } from './BalanceProjectionMcSampleNote';

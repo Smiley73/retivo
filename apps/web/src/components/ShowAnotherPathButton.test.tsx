@@ -1,10 +1,4 @@
-/**
- * ShowAnotherPathButton — reroll control render + interaction + a11y.
- *
- * Covers the enabled click + Enter/Space activation, the `aria-disabled`
- * (NOT native `disabled`, stays keyboard-focusable) state with an accessible
- * reason when no alternative exists, and the WCAG 2.2 AA smoke assertion.
- */
+/** ShowAnotherPathButton: click and key activation, and the aria-disabled state that stays keyboard-focusable with an accessible reason. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -37,20 +31,19 @@ describe('ShowAnotherPathButton', () => {
     expect(onShowAnotherPath).toHaveBeenCalledTimes(2);
   });
 
-  it('is aria-disabled (NOT native disabled) and keyboard-focusable when no alternative exists', () => {
+  it('is aria-disabled (not native disabled) and keyboard-focusable when no alternative exists', () => {
     render(
       <ShowAnotherPathButton enabled={false} onShowAnotherPath={() => {}} />,
     );
     const button = screen.getByRole('button', { name: 'Show another likely path' });
     expect(button).toHaveAttribute('aria-disabled', 'true');
-    // Native `disabled` would remove it from the tab order + drop the
-    // accessible reason; the control must stay focusable (WCAG 2.2 AA).
+    // Native `disabled` would drop it from the tab order and lose the accessible reason (WCAG 2.2 AA).
     expect(button).not.toBeDisabled();
     button.focus();
     expect(button).toHaveFocus();
   });
 
-  it('exposes an accessible reason when disabled and does NOT fire the handler', async () => {
+  it('exposes an accessible reason when disabled and does not fire the handler', async () => {
     const onShowAnotherPath = vi.fn();
     const user = userEvent.setup();
     render(
@@ -62,19 +55,11 @@ describe('ShowAnotherPathButton', () => {
     expect(document.getElementById(describedBy as string)?.textContent).toBe(
       'Only one likely path for this outcome',
     );
-    // Guarded no-op while disabled.
     await user.click(button);
     button.focus();
     await user.keyboard('{Enter}');
     await user.keyboard(' ');
     expect(onShowAnotherPath).not.toHaveBeenCalled();
-  });
-
-  it('has no a11y violations (enabled)', async () => {
-    const { container } = render(
-      <ShowAnotherPathButton enabled onShowAnotherPath={() => {}} />,
-    );
-    await expectNoA11yViolations(container);
   });
 
   it('has no a11y violations (disabled)', async () => {

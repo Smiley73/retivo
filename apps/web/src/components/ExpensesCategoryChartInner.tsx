@@ -20,8 +20,6 @@ const SHORT_MONTHS = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-export type { CategoryMeta };
-
 interface InnerProps {
   rows: ExpenseCategoryMonthlyPoint[];
   categories: ReadonlyArray<CategoryMeta>;
@@ -67,7 +65,7 @@ function flattenRows(
   });
 }
 
-export function makeTooltip(
+function makeTooltip(
   categories: ReadonlyArray<CategoryMeta>,
   members: TooltipMember[],
   chrome: ChartChrome,

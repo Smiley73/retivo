@@ -51,7 +51,7 @@ const MC_PESSIMISTIC_LABEL = 'Pessimistic';
 
 const DASH_PATTERN = '5 4';
 
-export interface McCell {
+interface McCell {
   typicalSolid: number | null;
   typicalDashed: number | null;
   pessimisticSolid: number | null;
@@ -81,12 +81,10 @@ function applyMcCell(row: ProjectionChartRow, mc: McCell): ChartDatum {
   };
 }
 
-/**
- * Merges the per-year MC overlay onto the deterministic rows. The drawdown engine stops emitting
- * rows once Planned and TWR both deplete, so MC-only years up to `domainMax` get a null carrier row
- * to keep the MC lines full length.
- */
-export function buildProjectionData(
+// Merges the per-year MC overlay onto the deterministic rows. The drawdown engine stops emitting
+// rows once Planned and TWR both deplete, so MC-only years up to `domainMax` get a null carrier row
+// to keep the MC lines full length.
+function buildProjectionData(
   visibleRows: ProjectionChartRow[],
   mcByX: Map<number, McCell>,
   domainMax: number,

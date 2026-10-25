@@ -71,11 +71,9 @@ export interface MarketStressComparisonArgs {
   readonly baseRunInFlight: boolean;
 }
 
-/**
- * Bounded wait for one stress case: the surface has no Cancel, so a hung worker would leave it
- * "Comparing…" forever.
- */
-export const STRESS_CASE_TIMEOUT_MS = 300_000;
+// Bounded wait for one stress case: the surface has no Cancel, so a hung worker would leave it
+// "Comparing…" forever.
+const STRESS_CASE_TIMEOUT_MS = 300_000;
 
 function reasonText(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason);

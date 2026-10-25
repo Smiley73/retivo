@@ -1,13 +1,4 @@
-/**
- * Muted — de-emphasized text render.
- *
- * Tailwind-defaults replacement for the legacy `.muted` class.
- * Asserts default inline render, the `as` element override, the
- * muted color classes. Purely presentational (no interactive control /
- * ARIA / focus / keyboard handler; the optional `role` live-region prop
- * is unset in these renders) → exempt from the a11y-smoke mandate (AGENTS
- * *Testing setup*).
- */
+/** Muted: default inline render, the `as` element override and the muted colour classes; presentational, so no a11y scan. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';

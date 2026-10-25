@@ -1,8 +1,4 @@
-/**
- * The shell's connected indicator: nothing without a session, a named pill and a one-activation
- * Disconnect with a place for focus to land, and the axe smoke. jsdom applies no Tailwind, so the
- * width behaviour (one banner row at 320 px) is the manual check recorded in the PR.
- */
+/** The shell's connected indicator: hidden without a session, a named pill, and one-activation Disconnect with a place for focus to land. */
 import React from 'react';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -133,7 +129,6 @@ describe('AssistantSessionBadge', () => {
     const { assistants } = setup('banner');
     await user.click(screen.getByRole('button', { name: /^Assistant connected/ }));
     await screen.findByRole('dialog', { name: 'Assistant activity' });
-    // The session ends from outside the viewer (the bridge went away).
     act(() => assistants.set(assistantValue({ phase: 'idle', client: null, pairedAt: null })));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     act(() => assistants.set(assistantValue()));

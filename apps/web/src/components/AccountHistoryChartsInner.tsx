@@ -29,7 +29,7 @@ interface ReturnGradientBounds {
   zeroOffset: number;
 }
 
-export function computeReturnBounds(values: number[]): ReturnGradientBounds {
+function computeReturnBounds(values: number[]): ReturnGradientBounds {
   const dataMin = values.length === 0 ? 0 : Math.min(...values);
   const dataMax = values.length === 0 ? 0 : Math.max(...values);
   const axisLow = Math.min(0, dataMin);

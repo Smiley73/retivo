@@ -85,11 +85,8 @@ function flattenRows(rows: ReadonlyArray<SwrComparisonYearRow>): FlatRow[] {
   }));
 }
 
-/**
- * Exported so a component test can render the tooltip body off a `ChartDatum`; omits any layer the
- * legend has hidden.
- */
-export function makeTooltip(
+// Omits any layer the legend has hidden.
+function makeTooltip(
   colors: ChartColors,
   chrome: ChartChrome,
   depletionYear: number | null,

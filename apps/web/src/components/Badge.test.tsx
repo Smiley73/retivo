@@ -1,12 +1,4 @@
-/**
- * Badge — tone variant render.
- *
- * Graphite Spectrum semantic-token pill. Asserts content
- * renders, the default + a tone variant apply their semantic-token
- * classes. Purely presentational (a static `<span>` pill — no interactive
- * control / ARIA / focus / keyboard handler) → exempt from the a11y-smoke
- * mandate (AGENTS *Testing setup*).
- */
+/** Badge: content, default and tone variants apply their semantic-token classes; presentational, so no a11y scan. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';

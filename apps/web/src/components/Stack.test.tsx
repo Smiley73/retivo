@@ -1,11 +1,4 @@
-/**
- * Stack — vertical flex utility render.
- *
- * Tailwind-defaults replacement for the legacy `.stack` class.
- * Asserts children render in a column flex. Purely presentational (no interactive control / ARIA / focus /
- * keyboard handler) → exempt from the a11y-smoke mandate (AGENTS *Testing
- * setup*).
- */
+/** Stack: children render in a column flex; presentational, so no a11y scan. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';

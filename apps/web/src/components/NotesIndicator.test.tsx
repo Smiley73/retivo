@@ -1,8 +1,4 @@
-/**
- * NotesIndicator — render gate (present / null / undefined / whitespace),
- * tooltip-on-focus behavior, and the a11y smoke required of every shared
- * component (AGENTS rule).
- */
+/** NotesIndicator: render gate (present, null, undefined, whitespace) and tooltip on focus. */
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';

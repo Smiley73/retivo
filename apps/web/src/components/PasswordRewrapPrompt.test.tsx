@@ -1,11 +1,4 @@
-/**
- * PasswordRewrapPrompt — regression coverage: the terminal `locked` outcome's copy must never instruct an
- * action the dialog's own Continue button cannot perform. `attemptsRemaining
- * <= 0 && error !== null` (the exact shape both `useDerivedRewrap.ts`
- * "locked" branches set) always makes `terminal` true, which always disables
- * Continue — so the copy must describe dismiss-and-sign-in-again, not an
- * in-dialog retry.
- */
+/** PasswordRewrapPrompt: the terminal locked outcome's copy must not instruct an action the disabled Continue button cannot perform. */
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -37,13 +30,9 @@ describe('PasswordRewrapPrompt', () => {
       />,
     );
     const continueButton = screen.getByRole('button', { name: 'Continue' });
-    // This exact state (attemptsRemaining <= 0 && error !== null) is always
-    // terminal, so Continue is always disabled — the copy must match that,
-    // not promise an action the button cannot carry out.
     expect(continueButton).toBeDisabled();
     expect(screen.getByText(LOCKED_ERROR)).toBeInTheDocument();
     expect(screen.queryByText(/enter your password to unlock it/i)).not.toBeInTheDocument();
-    // "Not now" (dismiss) stays the one working action for this state.
     expect(screen.getByRole('button', { name: 'Not now' })).toBeEnabled();
   });
 
@@ -58,7 +47,6 @@ describe('PasswordRewrapPrompt', () => {
       />,
     );
     const continueButton = screen.getByRole('button', { name: 'Continue' });
-    // Empty input still disables Continue regardless of terminality.
     expect(continueButton).toBeDisabled();
     await user.type(screen.getByLabelText('Current password'), 'S0mePassw0rd!');
     expect(continueButton).toBeEnabled();

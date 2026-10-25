@@ -6,8 +6,6 @@ import React, { Suspense, lazy } from 'react';
 import type { SwrComparisonYearRow } from '../lib/safe-withdrawal-rate-chart-types';
 import type { TooltipMember } from './tooltip-member';
 
-export type { SwrComparisonYearRow };
-
 interface Props {
   readonly rows: ReadonlyArray<SwrComparisonYearRow>;
   /**
