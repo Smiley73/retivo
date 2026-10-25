@@ -32,7 +32,7 @@ interface LabelMode {
   statement: string;
 }
 
-export interface ToolEnvelope {
+interface ToolEnvelope {
   /** What the tool found, after the sanitizer walk. */
   data: Record<string, unknown>;
   /** Each assumption or default the answer relied on, with its basis. */

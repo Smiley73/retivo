@@ -5,7 +5,7 @@
  */
 import type { ToolResult } from '@retirement/assistant-protocol';
 import type { ToolCallContext, ToolHandler } from '../assistant/dispatcher';
-import { loadWorkspace } from '../assistant/tools/workspace';
+import { loadWorkspace, type DataFreshness } from '../assistant/tools/workspace';
 import { monteCarloInputFor } from '../assistant/tools/stress-cache';
 import { mcCacheKey, putCached } from '../db/monte-carlo-cache';
 import { savedSummary } from './assistant-analysis-inputs';
@@ -14,7 +14,9 @@ import { defaultSharingChoices, type SharingChoices } from '../assistant/sharing
 import { buildShareView } from '../assistant/sharing/view';
 import { registerPlanTools } from '../assistant/tools';
 import { toHandler, type ToolDefinition } from '../assistant/tools/define';
-import type { ToolEnvelope } from '../assistant/tools/envelope';
+import type { TaxTableFacts } from '../assistant/tools/facts';
+import type { RoundingDescriptor } from '../assistant/sharing/rounding';
+import type { SharingSwitchId } from '../assistant/sharing/switches';
 
 /** Mid-June 2026 in the local zone: the tab's "today" for these tests. */
 export const TEST_NOW = new Date(2026, 5, 15, 12, 0, 0);
@@ -64,6 +66,19 @@ export async function callDefinition(
   context: ToolCallContext = toolContext(),
 ): Promise<ToolResult> {
   return toHandler(definition)(args, context);
+}
+
+interface ToolEnvelope {
+  data: Record<string, unknown>;
+  assumptions: string[];
+  rounding: RoundingDescriptor;
+  labels: { mode: string; statement: string };
+  withheld: SharingSwitchId[];
+  neverShared: { statement: string; items: readonly string[] };
+  disclosure: Record<'notFinancialAdvice' | 'professionalReview' | 'taxSnapshot' | 'dataNotInstructions', string>;
+  engineVersion: number;
+  taxTables: TaxTableFacts;
+  dataAsOf: DataFreshness;
 }
 
 export function envelopeOf(result: ToolResult): ToolEnvelope {
