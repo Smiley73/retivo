@@ -13,14 +13,9 @@ export type OutputSizeCheck =
 
 const utf8 = new TextEncoder();
 
-/** Checks an already-serialized result. */
-export function checkSerializedSize(serialized: string): OutputSizeCheck {
-  const bytes = utf8.encode(serialized).length;
-  if (bytes > MAX_TOOL_RESULT_BYTES) return { ok: false, code: 'OUTPUT_TOO_LARGE', bytes, maxBytes: MAX_TOOL_RESULT_BYTES };
-  return { ok: true, bytes };
-}
-
 /** Serializes `result` and checks it; never throws on size. */
 export function checkOutputSize(result: unknown): OutputSizeCheck {
-  return checkSerializedSize(JSON.stringify(result));
+  const bytes = utf8.encode(JSON.stringify(result)).length;
+  if (bytes > MAX_TOOL_RESULT_BYTES) return { ok: false, code: 'OUTPUT_TOO_LARGE', bytes, maxBytes: MAX_TOOL_RESULT_BYTES };
+  return { ok: true, bytes };
 }

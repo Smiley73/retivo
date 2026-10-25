@@ -4,17 +4,19 @@
  * the narrowing of a result to its envelope.
  */
 import type { ToolResult } from '@retirement/assistant-protocol';
-import type { ToolCallContext } from '../assistant/dispatcher';
-import { loadWorkspace } from '../assistant/tools/workspace';
+import type { ToolCallContext, ToolHandler } from '../assistant/dispatcher';
+import { loadWorkspace, type DataFreshness } from '../assistant/tools/workspace';
 import { monteCarloInputFor } from '../assistant/tools/stress-cache';
 import { mcCacheKey, putCached } from '../db/monte-carlo-cache';
 import { savedSummary } from './assistant-analysis-inputs';
 import { createConsentRecord } from '../assistant/sharing/consent';
 import { defaultSharingChoices, type SharingChoices } from '../assistant/sharing/switches';
 import { buildShareView } from '../assistant/sharing/view';
-import { planToolHandlers } from '../assistant/tools';
+import { registerPlanTools } from '../assistant/tools';
 import { toHandler, type ToolDefinition } from '../assistant/tools/define';
-import type { ToolEnvelope } from '../assistant/tools/envelope';
+import type { TaxTableFacts } from '../assistant/tools/facts';
+import type { RoundingDescriptor } from '../assistant/sharing/rounding';
+import type { SharingSwitchId } from '../assistant/sharing/switches';
 
 /** Mid-June 2026 in the local zone: the tab's "today" for these tests. */
 export const TEST_NOW = new Date(2026, 5, 15, 12, 0, 0);
@@ -34,6 +36,19 @@ export function toolContext(choices: SharingChoices = defaultSharingChoices(), n
   };
 }
 
+const HANDLERS = new Map<string, ToolHandler>();
+registerPlanTools((name, handler) => {
+  HANDLERS.set(name, handler);
+  return () => undefined;
+});
+
+/** The shipped handler for a registry tool. */
+export function planToolHandler(name: string): ToolHandler {
+  const handler = HANDLERS.get(name);
+  if (handler === undefined) throw new Error(`no handler for ${name}`);
+  return handler;
+}
+
 /** Runs a plan tool's handler directly, the way the dispatcher does once its own gates pass. */
 export async function callPlanTool(
   name: string,
@@ -41,9 +56,7 @@ export async function callPlanTool(
   choices: SharingChoices = defaultSharingChoices(),
   now: Date = TEST_NOW,
 ): Promise<ToolResult> {
-  const handler = planToolHandlers().get(name);
-  if (handler === undefined) throw new Error(`no handler for ${name}`);
-  return handler(args, toolContext(choices, now));
+  return planToolHandler(name)(args, toolContext(choices, now));
 }
 
 /** Runs a tool built outside the shipped list (one with injected workers, say) through the same `toHandler` wrapper. */
@@ -53,6 +66,19 @@ export async function callDefinition(
   context: ToolCallContext = toolContext(),
 ): Promise<ToolResult> {
   return toHandler(definition)(args, context);
+}
+
+interface ToolEnvelope {
+  data: Record<string, unknown>;
+  assumptions: string[];
+  rounding: RoundingDescriptor;
+  labels: { mode: string; statement: string };
+  withheld: SharingSwitchId[];
+  neverShared: { statement: string; items: readonly string[] };
+  disclosure: Record<'notFinancialAdvice' | 'professionalReview' | 'taxSnapshot' | 'dataNotInstructions', string>;
+  engineVersion: number;
+  taxTables: TaxTableFacts;
+  dataAsOf: DataFreshness;
 }
 
 export function envelopeOf(result: ToolResult): ToolEnvelope {

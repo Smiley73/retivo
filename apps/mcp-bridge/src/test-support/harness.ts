@@ -1,10 +1,12 @@
 /** An in-process bridge on an ephemeral port with a capturing logger, an injectable clock and an in-memory MCP client. */
 import { InMemoryTransport, type McpServer } from '@modelcontextprotocol/server';
 import { startBridge, type Bridge, type BridgeOptions } from '../bridge.js';
-import type { LogEvent, Logger } from '../logger.js';
+import type { Logger } from '../logger.js';
 import { Clock } from './clock.js';
 import { FakeTab, TEST_ORIGIN, type TabOptions } from './fake-tab.js';
 import { McpTestClient, type RpcMessage } from './mcp-test-client.js';
+
+type LogEvent = Parameters<Logger['log']>[0];
 
 export interface Harness {
   bridge: Bridge;

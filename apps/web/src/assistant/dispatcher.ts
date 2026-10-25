@@ -23,7 +23,6 @@ import {
   type ToolEntry,
   type ToolResult,
 } from '@retirement/assistant-protocol';
-import { dangerousKeyMessage, invalidArgsMessage } from './args-issue';
 import { summarizeArgs, type AuditOutcome } from './audit-log';
 import type { ConsentRecord } from './sharing/consent';
 import { buildShareView, type ShareSource, type ShareView } from './sharing/view';
@@ -55,7 +54,7 @@ export interface ToolCallContext {
   connection: ConnectionInfo;
 }
 
-/** `args` has already been validated against the registry entry's input schema. */
+/** `args` is the frame's, unchecked: the handler validates it against the registry entry's input schema. */
 export type ToolHandler = (args: Record<string, unknown>, context: ToolCallContext) => Promise<ToolResult> | ToolResult;
 
 export interface Timers {
@@ -152,16 +151,6 @@ export class CallDispatcher {
       immediate(toolNotSupported(frame.tool, this.options.appBuildId));
       return true;
     }
-    const dangerous = dangerousKeyMessage(frame.tool, frame.args);
-    if (dangerous !== null) {
-      immediate(failureResult('INVALID_ARGS', dangerous));
-      return true;
-    }
-    const parsed = entry.inputSchema.safeParse(frame.args);
-    if (!parsed.success) {
-      immediate(failureResult('INVALID_ARGS', invalidArgsMessage(frame.tool, parsed.error)));
-      return true;
-    }
 
     const controller = new AbortController();
     const call: InFlightCall = {
@@ -190,7 +179,7 @@ export class CallDispatcher {
       now,
       connection: this.options.getConnection?.() ?? { assistantName: null, pairedAt: null },
     };
-    void (async () => handler(parsed.data as Record<string, unknown>, context))().then(
+    void (async () => handler(frame.args, context))().then(
       (result) => this.finish(call, result, result.ok),
       () => this.finish(call, failureResult('INTERNAL', `${frame.tool} failed unexpectedly.`), false),
     );

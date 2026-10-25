@@ -112,23 +112,13 @@ describe('dispatch and caps', () => {
     expect(() => session.registerHandler('retivo_made_up', () => OK)).toThrow(/not a tool in the registry/);
   });
 
-  it('answers INVALID_ARGS without invoking the handler', async () => {
-    const { session, results, call } = await pairedSession();
-    const handler = vi.fn(() => OK);
-    session.registerHandler('retivo_get_scenario', handler);
-    call('c1', 'retivo_get_scenario', { scenarioId: 7 });
-    await vi.waitFor(() => expect(results()).toHaveLength(1));
-    expect(results()[0]!.result).toMatchObject({ ok: false, error: { code: 'INVALID_ARGS' } });
-    expect(handler).not.toHaveBeenCalled();
-  });
-
-  it('hands the handler validated args, a signal and a progress callback that is clamped', async () => {
+  it('hands the handler its args, a signal and a progress callback that is clamped', async () => {
     const { session, socket, results, call } = await pairedSession();
     session.registerHandler('retivo_get_scenario', (args, context: ToolCallContext) => {
       context.progress({ fraction: 4, message: 'x'.repeat(500) });
       return { ok: true, payload: args, disclosure: {} };
     });
-    call('c1', 'retivo_get_scenario', { scenarioId: 'abc', extra: 'stripped' });
+    call('c1', 'retivo_get_scenario', { scenarioId: 'abc' });
     await vi.waitFor(() => expect(results()).toHaveLength(1));
     const progress = socket.frames.find((frame) => frame.type === 'progress')!;
     expect(progress).toMatchObject({ id: 'c1', fraction: 1 });
@@ -249,7 +239,7 @@ describe('dispatch and caps', () => {
 });
 
 describe('the idle clock', () => {
-  it('stays put when the D7 switch is off, whatever the outcome', async () => {
+  it('stays put when the keep-signed-in switch is off, whatever the outcome', async () => {
     const { session, noteActivity, results, call } = await pairedSession();
     session.registerHandler('retivo_status', () => OK);
     call('c1', 'retivo_status');

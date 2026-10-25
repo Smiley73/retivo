@@ -14,7 +14,7 @@ import { seedSentinelWorkspace } from '../../test/assistant-sentinels';
 import { TEST_NOW, callPlanTool, choicesWith, envelopeOf } from '../../test/assistant-tools';
 import { buildMasker } from '../sharing/sanitize';
 import { NEVER_SHARED_ITEMS } from '../sharing/sentences';
-import { buildEnvelope, sanitizeLeaves } from './envelope';
+import { buildEnvelope } from './envelope';
 
 const FRESHNESS = { lastSyncedAt: '2026-06-14T08:30:00.000Z', pendingLocalChanges: 2 };
 const TOOLS: ReadonlyArray<[string, Record<string, unknown>]> = [
@@ -83,7 +83,8 @@ describe('the sanitizer walk', () => {
       token: 'Zzlastname',
       list: ['demo-account-1', 'Zzlastname'],
     };
-    const walked = sanitizeLeaves(planted, masker) as typeof planted;
+    const result = buildEnvelope('retivo_made_up', { data: planted, assumptions: [], choices: choicesWith(), masker, freshness: FRESHNESS, now: TEST_NOW });
+    const walked = (result as { payload: { data: typeof planted } }).payload.data;
     const deep = walked.a.b.c[0]!.label;
     expect(deep).not.toMatch(/[\u0000​‮\n\t]/);
     expect(Array.from(deep).length).toBeLessThanOrEqual(500);

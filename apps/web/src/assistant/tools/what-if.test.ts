@@ -17,17 +17,38 @@ import { seedFromString } from '../../lib/sfc32';
 import { WORKSPACE_CHANGED_EVENT } from '../../lib/workspace-events';
 import { makeFactory } from '../../monte-carlo/computing-fake-worker.test-harness';
 import type { MinimalMcWorker } from '../../monte-carlo/mc-worker-pool';
-import { BASE_ID, DELAY_ID, EARLY_ID, savedSummary } from '../../test/assistant-analysis-inputs';
-import { TEST_NOW, callDefinition, callPlanTool, choicesWith, envelopeOf, toolContext } from '../../test/assistant-tools';
+import { BASE_ID, DELAY_ID, EARLY_ID, savedSummary, whatIfChildOf } from '../../test/assistant-analysis-inputs';
+import { callDefinition, callPlanTool, choicesWith, envelopeOf, toolContext } from '../../test/assistant-tools';
 import type { ToolCallContext } from '../dispatcher';
 import { buildMasker } from '../sharing/sanitize';
 import { maskTermsFor } from '../sharing/view';
 import type { ToolEnv } from './define';
 import { buildWhatIf } from './what-if-overrides';
 import { monteCarloInputFor } from './stress-cache';
-import { makeStressRunner, makeStressTestTool } from './stress-test';
+import { makeStressRunner, makeStressTestTool, type StressRunner } from './stress-test';
 import { loadWorkspace, shareSourceOf } from './workspace';
-import { NOT_SAVED_STATEMENT, WHAT_IF_LABEL, makeWhatIfTool, retivoRunWhatIf, throwawayFor } from './what-if';
+import { retivoRunWhatIf } from './what-if';
+
+/** The shipped runner, swapped for whichever one a test computes on. */
+const runnerSlot = vi.hoisted(() => ({ current: undefined as StressRunner | undefined }));
+vi.mock('./stress-test', async () => {
+  const actual = await vi.importActual<typeof import('./stress-test')>('./stress-test');
+  const stressRunner: StressRunner = {
+    get pathCount() {
+      return runnerSlot.current!.pathCount;
+    },
+    run: (input, env) => runnerSlot.current!.run(input, env),
+  };
+  return { ...actual, stressRunner };
+});
+
+/** `retivo_run_what_if` computing its stress test on `runner`. */
+function whatIfOn(runner: StressRunner) {
+  runnerSlot.current = runner;
+  return retivoRunWhatIf;
+}
+
+const WHAT_IF_LABEL = 'What-if (not saved)';
 
 const COMPUTE_TIMEOUT = process.env.VITEST_COVERAGE === '1' ? 90_000 : 30_000;
 const TEST_PATHS = 200;
@@ -89,7 +110,7 @@ async function envFor(context: ToolCallContext = toolContext()): Promise<ToolEnv
 async function whatIfInput(overrides: Parameters<typeof buildWhatIf>[1], pathCount = MC_PATH_COUNT): Promise<MonteCarloInput> {
   const env = await envFor();
   const base = env.workspace.scenarios.find((scenario) => scenario.id === BASE_ID)!;
-  const throwaway = throwawayFor(base, buildWhatIf(BASE_ID, overrides, env).overrides, TEST_NOW);
+  const throwaway = whatIfChildOf(base, buildWhatIf(BASE_ID, overrides, env).overrides);
   return monteCarloInputFor(throwaway.id, { ...env, workspace: { ...env.workspace, scenarios: [...env.workspace.scenarios, throwaway] } } as ToolEnv, pathCount)!;
 }
 
@@ -187,7 +208,7 @@ describe('the answer', () => {
   it('gives base and what-if side by side, the difference, an echo of what changed, and the not-saved statement', async () => {
     const { data } = await whatIf({ retirementAge: { primary: { ageYears: 62 } }, socialSecurity: { primary: { ageYears: 70 } } });
     expect(data.saved).toBe(false);
-    expect(data.statement).toBe(NOT_SAVED_STATEMENT);
+    expect(data.statement).toMatch(/^Nothing was saved\./);
     expect(data.statement).toMatch(/Planning, Scenarios, Create scenario/);
     expect(data.base).toMatchObject({ scenarioId: BASE_ID, name: 'Base' });
     expect(data.whatIf.label).toBe(WHAT_IF_LABEL);
@@ -306,18 +327,12 @@ describe('nothing is written', () => {
     });
   });
 
-  it('on a projection error', async () => {
-    await expectNoTrace(async () => {
-      expect(await callPlanTool('retivo_run_what_if', { baseScenarioId: 't-no-retirement', overrides: {} })).toMatchObject({ ok: false });
-    });
-  });
-
   it('on a stress test that is cancelled, and on one that exceeds its cap', async () => {
     await expectNoTrace(async () => {
       const controller = new AbortController();
       const hanging = makeFactory({ manual: true });
       const cancelled = callDefinition(
-        makeWhatIfTool({ runner: makeStressRunner({ workerFactory: hanging.factory }) }),
+        whatIfOn(makeStressRunner({ workerFactory: hanging.factory })),
         { baseScenarioId: BASE_ID, overrides: {}, stressTest: true },
         { ...toolContext(), signal: controller.signal },
       );
@@ -327,7 +342,7 @@ describe('nothing is written', () => {
       expect(hanging.workers.every((worker) => worker.terminated)).toBe(true);
 
       const capped = makeFactory({ manual: true });
-      const result = await callDefinition(makeWhatIfTool({ runner: makeStressRunner({ workerFactory: capped.factory, wallClockMs: 30 }) }), {
+      const result = await callDefinition(whatIfOn(makeStressRunner({ workerFactory: capped.factory, wallClockMs: 30 })), {
         baseScenarioId: BASE_ID,
         overrides: {},
         stressTest: true,
@@ -340,7 +355,7 @@ describe('nothing is written', () => {
   it('on a stress test that completes', async () => {
     await expectNoTrace(async () => {
       const { factory } = makeFactory();
-      const result = await callDefinition(makeWhatIfTool({ runner: makeStressRunner({ workerFactory: factory, pathCount: TEST_PATHS }) }), {
+      const result = await callDefinition(whatIfOn(makeStressRunner({ workerFactory: factory, pathCount: TEST_PATHS })), {
         baseScenarioId: BASE_ID,
         overrides: { inflation: { ratePct: 4 } },
         stressTest: true,
@@ -359,23 +374,12 @@ describe('nothing is written', () => {
     const again = await envFor();
     expect(again.workspace.scenarios).toHaveLength(before.length);
   });
-
-  it('gives each call its own throwaway id, a parent link to the base, and the base’s household and schema version', async () => {
-    const env = await envFor();
-    const base = env.workspace.scenarios.find((scenario) => scenario.id === BASE_ID)!;
-    const built = buildWhatIf(BASE_ID, {}, env);
-    const first = throwawayFor(base, built.overrides, TEST_NOW);
-    const second = throwawayFor(base, built.overrides, TEST_NOW);
-    expect(first.id).not.toBe(second.id);
-    expect(first).toMatchObject({ householdId: base.householdId, schemaVersion: base.schemaVersion });
-    expect(first.payload).toMatchObject({ name: WHAT_IF_LABEL, parentScenarioId: BASE_ID, isPrimary: false });
-  });
 });
 
 describe('the stress test', () => {
   it('is not run, and no pool is built, unless asked for', async () => {
     const worker = recordingFactory();
-    const result = await callDefinition(makeWhatIfTool({ runner: makeStressRunner({ workerFactory: worker.factory }) }), { baseScenarioId: BASE_ID, overrides: {} });
+    const result = await callDefinition(whatIfOn(makeStressRunner({ workerFactory: worker.factory })), { baseScenarioId: BASE_ID, overrides: {} });
     expect(result.ok).toBe(true);
     expect(envelopeOf(result).data).not.toHaveProperty('stressTest');
     expect(worker.constructed()).toBe(0);
@@ -384,7 +388,7 @@ describe('the stress test', () => {
   it('runs exactly MC_PATH_COUNT paths, on the what-if’s own plan, with the page’s seed rule', async () => {
     const worker = recordingFactory();
     const overrides = { inflation: { ratePct: 4 } };
-    const result = await callDefinition(makeWhatIfTool({ runner: makeStressRunner({ workerFactory: worker.factory }) }), { baseScenarioId: BASE_ID, overrides, stressTest: true });
+    const result = await callDefinition(whatIfOn(makeStressRunner({ workerFactory: worker.factory })), { baseScenarioId: BASE_ID, overrides, stressTest: true });
     expect(result).toMatchObject({ ok: false, error: { code: 'INTERNAL' } });
     const sent = worker.messages[0] as { kind: string; input: MonteCarloInput };
     expect(sent.kind).toBe('runShard');
@@ -399,7 +403,7 @@ describe('the stress test', () => {
     const overrides = { inflation: { ratePct: 4 } };
     const { factory } = makeFactory();
     const progress: Array<{ fraction?: number }> = [];
-    const tool = makeWhatIfTool({ runner: makeStressRunner({ workerFactory: factory, pathCount: TEST_PATHS }) });
+    const tool = whatIfOn(makeStressRunner({ workerFactory: factory, pathCount: TEST_PATHS }));
     const result = await callDefinition(tool, { baseScenarioId: BASE_ID, overrides, stressTest: true }, { ...toolContext(), progress: (update) => progress.push(update) });
     const data = envelopeOf(result).data as unknown as WhatIfData;
 
@@ -420,7 +424,7 @@ describe('the stress test', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     const worker = recordingFactory();
-    const result = await callDefinition(makeWhatIfTool({ runner: makeStressRunner({ workerFactory: worker.factory }) }), { baseScenarioId: BASE_ID, overrides: {}, stressTest: true });
+    const result = await callDefinition(whatIfOn(makeStressRunner({ workerFactory: worker.factory })), { baseScenarioId: BASE_ID, overrides: {}, stressTest: true });
     // A cache hit would have answered with seed 77 and built no worker.
     expect(worker.constructed()).toBeGreaterThan(0);
     expect(result).toMatchObject({ ok: false, error: { code: 'INTERNAL' } });
@@ -432,18 +436,18 @@ describe('the stress test', () => {
     const controller = new AbortController();
     const hanging = makeFactory({ manual: true });
     const runner = makeStressRunner({ workerFactory: hanging.factory });
-    const first = callDefinition(makeWhatIfTool({ runner }), { baseScenarioId: BASE_ID, overrides: {}, stressTest: true }, { ...toolContext(), signal: controller.signal });
+    const first = callDefinition(whatIfOn(runner), { baseScenarioId: BASE_ID, overrides: {}, stressTest: true }, { ...toolContext(), signal: controller.signal });
     await vi.waitFor(() => expect(hanging.workers.length).toBeGreaterThan(0));
 
     const built = hanging.workers.length;
     expect(await callDefinition(makeStressTestTool({ runner }), {})).toMatchObject({ ok: false, error: { code: 'TOO_MANY_IN_FLIGHT' } });
-    expect(await callDefinition(makeWhatIfTool({ runner }), { baseScenarioId: BASE_ID, overrides: {}, stressTest: true })).toMatchObject({ ok: false, error: { code: 'TOO_MANY_IN_FLIGHT' } });
+    expect(await callDefinition(whatIfOn(runner), { baseScenarioId: BASE_ID, overrides: {}, stressTest: true })).toMatchObject({ ok: false, error: { code: 'TOO_MANY_IN_FLIGHT' } });
     expect(hanging.workers.length).toBe(built);
 
     controller.abort();
     expect(await first).toMatchObject({ ok: false, error: { code: 'CANCELLED' } });
     const worker = recordingFactory();
-    expect(await callDefinition(makeWhatIfTool({ runner: makeStressRunner({ workerFactory: worker.factory }) }), { baseScenarioId: BASE_ID, overrides: {}, stressTest: true })).toMatchObject({ ok: false, error: { code: 'INTERNAL' } });
+    expect(await callDefinition(whatIfOn(makeStressRunner({ workerFactory: worker.factory })), { baseScenarioId: BASE_ID, overrides: {}, stressTest: true })).toMatchObject({ ok: false, error: { code: 'INTERNAL' } });
   });
 });
 

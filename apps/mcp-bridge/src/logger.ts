@@ -6,7 +6,7 @@
  */
 import type { ErrorCode } from '@retirement/assistant-protocol';
 
-export type LogEvent =
+type LogEvent =
   | { event: 'listening'; port: number; origin: string }
   | { event: 'upgrade_rejected'; reason: 'origin' | 'host' | 'duplicate_header' | 'method'; origin?: string }
   | { event: 'session_started' }

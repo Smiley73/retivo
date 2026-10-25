@@ -13,7 +13,7 @@
  *
  * A session ends, socket closed and every in-memory secret dropped, on any
  * `end(reason)` call or when the socket closes under it. A new session needs a
- * new code. Logging is state names only.
+ * new code.
  */
 import {
   CLOSE_CODES,
@@ -40,11 +40,11 @@ import type { ClientInfo, ConsentStep, SessionEnd, SessionPhase, SocketFactory, 
  * How long a socket may stay un-opened before the tab gives up. Long, because a browser keeps a loopback
  * connection pending while its local-network permission prompt is on screen, and a person answers slowly.
  */
-export const CONNECT_TIMEOUT_MS = 120_000;
+const CONNECT_TIMEOUT_MS = 120_000;
 /** How long a bridge has to send a valid `hello` once the socket is open. */
-export const HELLO_TIMEOUT_MS = 5_000;
+const HELLO_TIMEOUT_MS = 5_000;
 /** How long a bridge has to answer `pair` with `paired`. */
-export const PAIRED_TIMEOUT_MS = 10_000;
+const PAIRED_TIMEOUT_MS = 10_000;
 
 /** Close reasons that mean the sign-in itself is over, so what the assistant did is no longer the new person's to read. */
 const AUTH_ENDING_REASONS: ReadonlySet<TabCloseReason> = new Set(['sign-out', 'user-switch']);
@@ -64,7 +64,7 @@ export interface SessionOptions {
   /** `unlockResolved`, `isUnlocked` and a household, read at call time. */
   isWorkspaceReady: () => boolean;
   appBuildId: string;
-  /** Moves the tab's idle clock; called once per completed call, and only while the consent record has the D7 switch on. */
+  /** Moves the tab's idle clock; called once per completed call, and only while the consent record has `keepSignedInWhileActive` on. */
   noteActivity: () => void;
   /** The consent step, normally the dialog. Required: a session never agrees on the person's behalf. */
   requestConsent: ConsentStep;
@@ -148,7 +148,7 @@ export class AssistantSession {
     };
   };
 
-  /** Registers the handler for a registry tool; the tool rows call this. */
+  /** Registers the handler for a registry tool. */
   registerHandler(name: string, handler: ToolHandler): () => void {
     return this.dispatcher.register(name, handler);
   }
