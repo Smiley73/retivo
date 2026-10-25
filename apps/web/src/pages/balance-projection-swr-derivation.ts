@@ -15,11 +15,8 @@ import type {
   SwrComparisonState,
   SwrComparisonYearRow,
 } from '../lib/safe-withdrawal-rate-chart-types';
-import type {
-  DrawdownByMethodResult,
-  McBasis,
-  RepresentativeRun,
-} from './balance-projection-page-data';
+import type { McBasis, RepresentativeRun } from '../lib/monte-carlo';
+import type { DrawdownByMethodResult } from './balance-projection-page-data';
 
 export interface BuildSwrComparisonDataParams {
   readonly displayMode: DisplayMode;

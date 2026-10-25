@@ -1,6 +1,7 @@
 /** Shared class strings and small components for the accounts, balances and contributions pages. */
 import React from 'react';
 import { Column, TableHeader } from 'react-aria-components';
+import { inputClass } from '../components/dialog-chrome';
 import { Field } from '../components/Field';
 import { CheckIcon } from '../components/icons';
 import { Muted } from '../components/Muted';
@@ -8,27 +9,18 @@ import { formatPercent } from '../components/PercentInput';
 import { TextInput } from '../components/TextInput';
 import type { AccountBucket } from '../lib/account-bucket';
 
-/** Dark `accent-ink` label on the lime fill: the bright lime is too light for white text. */
-export const btnPrimaryClass =
-  'inline-flex items-center justify-center rounded-md ' +
-  'bg-accent px-4 py-2 text-sm font-medium text-accent-ink shadow-sm ' +
-  'transition-colors hover:bg-accent/90 focus:outline-none ' +
-  'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
-  'disabled:cursor-not-allowed disabled:opacity-50';
-
-export const btnSecondaryClass =
-  'inline-flex items-center justify-center rounded-md ' +
-  'border border-line-strong bg-surface-raised px-4 py-2 text-sm font-medium text-accent-link ' +
-  'transition-colors hover:bg-surface-sunken focus:outline-none ' +
-  'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
-  'disabled:cursor-not-allowed disabled:opacity-50';
-
-export const btnDangerClass =
-  'inline-flex items-center justify-center rounded-md ' +
-  'bg-negative px-4 py-2 text-sm font-medium text-surface shadow-sm ' +
-  'transition-colors hover:bg-negative/90 focus:outline-none ' +
-  'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
-  'disabled:cursor-not-allowed disabled:opacity-50';
+export {
+  btnPrimaryClass,
+  btnSecondaryClass,
+  btnDangerClass,
+  btnSecondarySmClass,
+  inputClass,
+} from '../components/dialog-chrome';
+export {
+  SolidPencilIcon as PencilIcon,
+  SolidTrashIcon as TrashIcon,
+  SolidEyeIcon as EyeIcon,
+} from '../components/icons';
 
 /**
  * Standalone class string (not concatenated with a size class) so a toolbar button matches the 34px height of an adjacent
@@ -56,26 +48,12 @@ export const btnPrimarySmClass =
   'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
   'disabled:cursor-not-allowed disabled:opacity-50';
 
-export const btnSecondarySmClass =
-  'inline-flex items-center justify-center rounded-md ' +
-  'border border-line-strong bg-surface-raised px-2.5 py-1 text-xs text-accent-link ' +
-  'transition-colors hover:bg-surface-sunken focus:outline-none ' +
-  'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
-  'disabled:cursor-not-allowed disabled:opacity-50';
-
 export const btnDangerSmClass =
   'inline-flex items-center justify-center rounded-md ' +
   'bg-negative px-2.5 py-1 text-xs text-surface shadow-sm ' +
   'transition-colors hover:bg-negative/90 focus:outline-none ' +
   'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
   'disabled:cursor-not-allowed disabled:opacity-50';
-
-/** Uses the darker `input-line` border token so the control boundary clears the WCAG 1.4.11 non-text contrast gate. */
-export const inputClass =
-  'block w-full min-w-0 rounded-md border border-input-line bg-surface px-3 py-2 ' +
-  'text-ink placeholder:text-muted ' +
-  'focus:border-accent focus:outline-none focus:ring-2 focus:ring-ring ' +
-  'disabled:cursor-not-allowed disabled:bg-surface-sunken disabled:text-muted';
 
 export const inputNumericClass = `${inputClass} font-mono tabular-nums`;
 
@@ -146,49 +124,6 @@ export const iactViewClass = `${iactClass} text-muted hover:border-line-strong h
 export const iactEditClass = `${iactClass} text-positive hover:border-positive/40 hover:bg-positive/10`;
 
 export const iactDeleteClass = `${iactClass} text-negative hover:border-negative/40 hover:bg-negative/10`;
-
-export const PencilIcon: React.FC = () => (
-  <svg
-    aria-hidden="true"
-    focusable="false"
-    viewBox="0 0 20 20"
-    fill="currentColor"
-    width={15}
-    height={15}
-  >
-    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793 3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-  </svg>
-);
-
-export const TrashIcon: React.FC = () => (
-  <svg
-    aria-hidden="true"
-    focusable="false"
-    viewBox="0 0 20 20"
-    fill="currentColor"
-    width={15}
-    height={15}
-  >
-    <path
-      fillRule="evenodd"
-      d="M8.75 1a1 1 0 00-.95.69L7.56 2.5H4a1 1 0 000 2h.12l.78 11.07A2 2 0 006.9 17.5h6.2a2 2 0 002-1.93L15.88 4.5H16a1 1 0 100-2h-3.56l-.24-.81A1 1 0 0011.25 1h-2.5zM7.92 6.5a.75.75 0 011.5 0v6a.75.75 0 01-1.5 0v-6zm3.16 0a.75.75 0 00-1.5 0v6a.75.75 0 001.5 0v-6z"
-      clipRule="evenodd"
-    />
-  </svg>
-);
-
-export const EyeIcon: React.FC = () => (
-  <svg
-    aria-hidden="true"
-    focusable="false"
-    viewBox="0 0 20 20"
-    fill="currentColor"
-    width={15}
-    height={15}
-  >
-    <path d="M10 4c-3.86 0-7.16 2.4-8.5 5.78a.8.8 0 000 .44C2.84 13.6 6.14 16 10 16s7.16-2.4 8.5-5.78a.8.8 0 000-.44C17.16 6.4 13.86 4 10 4zm0 9.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7zm0-1.75a1.75 1.75 0 100-3.5 1.75 1.75 0 000 3.5z" />
-  </svg>
-);
 
 /** Relabels a negative remaining to "… Overpaid" with its absolute amount. */
 export const remainingLabel = (prefix: string, v: number): string =>

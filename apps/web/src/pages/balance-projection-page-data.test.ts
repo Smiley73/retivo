@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   loadPageData,
   drawdownByMethodFromPageResult,
-} from './balance-projection-page-pipeline';
+} from './balance-projection-page-data';
 import {
   computeMethodTotal,
   type BreakdownAccountRow,

@@ -3,10 +3,8 @@ import type {
   ProjectionChartRow,
   ProjectionMethod,
 } from '../components/ProjectionChart';
-import type {
-  DrawdownByMethodResult,
-  RepresentativeRun,
-} from './balance-projection-page-data';
+import type { RepresentativeRun } from '../lib/monte-carlo';
+import type { DrawdownByMethodResult } from './balance-projection-page-data';
 import type { DisplayMode } from '../lib/view-deflator';
 
 const PROJECTION_CHART_TAIL_YEARS = 0;

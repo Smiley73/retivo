@@ -18,7 +18,7 @@ import { useBalanceProjectionData } from './use-balance-projection-data';
 import {
   loadPageData,
   type PipelineData,
-} from './balance-projection-page-pipeline';
+} from './balance-projection-page-data';
 import {
   useBalanceProjectionViewModel,
   type BalanceProjectionViewModel,

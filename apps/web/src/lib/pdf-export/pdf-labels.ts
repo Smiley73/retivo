@@ -3,7 +3,7 @@
  * Basis wording reuses `resolvedBasisLabel` so the PDF names a basis as the page does.
  */
 import type { DisplayMode } from '../view-deflator';
-import type { McBasis } from '../../pages/balance-projection-page-pipeline';
+import type { McBasis } from '../monte-carlo';
 import type { ProjectionMethod } from '../../components/ProjectionChart';
 import { resolvedBasisLabel } from '../../pages/balance-projection-page-constants';
 import { pad2 } from './format';

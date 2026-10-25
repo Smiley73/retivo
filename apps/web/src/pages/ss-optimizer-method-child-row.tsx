@@ -25,7 +25,7 @@ import {
 } from './ss-optimizer-row-variants';
 import { AgeTransition, MetricTransition } from './ss-optimizer-age-cell';
 import {
-  claimAgeMatches,
+  isAlreadyAtOptimum,
   resolveCurrentClaimAges,
   type CurrentClaimAges,
 } from './ss-optimizer-row-view';
@@ -167,17 +167,7 @@ const ChildResultRow: React.FC<ChildResultRowProps> = ({
   const resolvedFromAncestor =
     row.scenario.payload.overrides.socialSecurity === undefined &&
     row.scenario.payload.parentScenarioId !== null;
-  // Derived from aggregates so applying a recommendation flips the row to "Applied" immediately, without trusting the engine's baked flag.
   const current = resolveCurrentClaimAges(row.scenario.id, aggregates.scenarios);
-  const alreadyAtOptimum =
-    claimAgeMatches(current.primary, winner.primaryAgeYears, winner.primaryAgeMonths) &&
-    (!hasSecondary ||
-      winner.secondaryAgeYears === null ||
-      claimAgeMatches(
-        current.secondary,
-        winner.secondaryAgeYears,
-        winner.secondaryAgeMonths,
-      ));
   return (
     <Row id={id}>
       <Cell className={`${tdClass} pl-8`}>{label}</Cell>
@@ -209,7 +199,7 @@ const ChildResultRow: React.FC<ChildResultRowProps> = ({
         <MethodApplyButton
           row={row}
           method={method}
-          alreadyAtOptimum={alreadyAtOptimum}
+          alreadyAtOptimum={isAlreadyAtOptimum(current, winner, hasSecondary)}
           parentName={row.parentName}
           resolvedFromAncestor={resolvedFromAncestor}
           onApply={onApply}

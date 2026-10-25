@@ -5,8 +5,8 @@ import { Button, Tab, TabList, TabPanel, Tabs, type Key } from 'react-aria-compo
 import {
   PlanStressTestStatusRow,
   PlanStressTestRecalcButton,
-  PlanStressTestSuccessCard,
 } from '../components/PlanStressTestSection';
+import { PlanStressTestSuccessCard } from '../components/PlanStressTestCards';
 import { TAB_CLASS } from '../components/tab-chrome';
 import {
   CASHFLOW_GRANULARITY_STORAGE_KEY,
@@ -45,11 +45,8 @@ import {
   resolvedBasisLabel,
   type BalanceProjectionViewId,
 } from './balance-projection-page-constants';
-import {
-  loadPageData,
-  type PipelineData,
-  type McBasis,
-} from './balance-projection-page-pipeline';
+import { loadPageData, type PipelineData } from './balance-projection-page-data';
+import type { McBasis } from '../lib/monte-carlo';
 import { TaxIntegrationInvalidInputError } from '../lib/balance-projection-runner-tax';
 import { friendlyProjectionErrorMessage } from '../lib/tax-integration';
 import { buildReportTimestamp } from '../lib/report-format';

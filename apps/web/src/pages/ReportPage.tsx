@@ -21,7 +21,8 @@ import {
   parseDisplayMode,
   type DisplayMode,
 } from '../lib/view-deflator';
-import { loadPageData, type PipelineData, type McBasis } from './balance-projection-page-pipeline';
+import type { McBasis } from '../lib/monte-carlo';
+import { loadPageData, type PipelineData } from './balance-projection-page-data';
 import { TaxIntegrationInvalidInputError } from '../lib/balance-projection-runner-tax';
 import { friendlyProjectionErrorMessage } from '../lib/tax-integration';
 import { useBalanceProjectionViewModel } from './use-balance-projection-view-model';

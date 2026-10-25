@@ -39,6 +39,27 @@ export function claimAgeMatches(
   return true;
 }
 
+type OptimizerWinner = NonNullable<
+  Extract<OptimizerWorkerOutbound, { kind: 'result' }>['winner']
+>;
+
+/**
+ * Whether the current claim ages equal the recommendation, derived live rather than from the engine's baked flag: the MC
+ * tab doesn't re-run after Apply, so the baked flag goes stale.
+ */
+export function isAlreadyAtOptimum(
+  current: CurrentClaimAges,
+  winner: OptimizerWinner,
+  hasSecondary: boolean,
+): boolean {
+  return (
+    claimAgeMatches(current.primary, winner.primaryAgeYears, winner.primaryAgeMonths) &&
+    (!hasSecondary ||
+      winner.secondaryAgeYears === null ||
+      claimAgeMatches(current.secondary, winner.secondaryAgeYears, winner.secondaryAgeMonths))
+  );
+}
+
 export type RowView =
   | { kind: 'loading' }
   | { kind: 'cancelled' }
@@ -49,9 +70,7 @@ export type RowView =
   | { kind: 'unsupported'; reason: UnsupportedReason }
   | {
       kind: 'ready';
-      winner: NonNullable<
-        Extract<OptimizerWorkerOutbound, { kind: 'result' }>['winner']
-      >;
+      winner: OptimizerWinner;
       primaryHasPia: boolean;
       secondaryHasPia: boolean;
       secondaryPastWindow: boolean;
@@ -111,16 +130,6 @@ function deriveRowView(
     row.scenario.payload.overrides.socialSecurity === undefined &&
     row.scenario.payload.parentScenarioId !== null;
   const current = resolveCurrentClaimAges(row.scenario.id, aggregates.scenarios);
-  // Derived live from current vs recommended, not the engine's baked flag: the MC tab doesn't re-run after Apply, so the baked flag goes stale.
-  const alreadyAtOptimum =
-    claimAgeMatches(current.primary, winner.primaryAgeYears, winner.primaryAgeMonths) &&
-    (secondary === undefined ||
-      winner.secondaryAgeYears === null ||
-      claimAgeMatches(
-        current.secondary,
-        winner.secondaryAgeYears,
-        winner.secondaryAgeMonths,
-      ));
   // Prefer the runner-forwarded value; else resolve from the scenario chain.
   const assumedDeathAge =
     row.result.assumedDeathAge ??
@@ -134,7 +143,7 @@ function deriveRowView(
     hasSecondary: secondary !== undefined,
     missingPiaMembers,
     current,
-    alreadyAtOptimum,
+    alreadyAtOptimum: isAlreadyAtOptimum(current, winner, secondary !== undefined),
     baselineMetricValue: row.result.baselineMetricValue,
     parentName: row.parentName,
     resolvedFromAncestor,

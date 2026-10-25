@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PlanStressTestSuccessCard } from './PlanStressTestSection';
+import { PlanStressTestSuccessCard } from './PlanStressTestCards';
 import { vm } from './__fixtures__/plan-stress-test-vm';
 import { expectNoA11yViolations } from '../test/a11y';
 

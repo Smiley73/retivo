@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { PlanStressTestSuccessCard, type PlanStressTestVm } from './PlanStressTestSection';
+import { PlanStressTestSuccessCard } from './PlanStressTestCards';
+import type { PlanStressTestVm } from './PlanStressTestSection';
 import { vm } from './__fixtures__/plan-stress-test-vm';
 
 function renderCard(guardrailComparison: PlanStressTestVm['guardrailComparison']): void {
@@ -18,7 +19,7 @@ describe('guardrail delta pill on the success card', () => {
   });
 
   it('renders nothing while the sibling run is pending', () => {
-    renderCard({ state: 'pending', withPct: null, withoutPct: null, deltaPct: null, se: null });
+    renderCard({ state: 'pending' });
     expect(screen.queryByText(/guardrails/)).not.toBeInTheDocument();
   });
 

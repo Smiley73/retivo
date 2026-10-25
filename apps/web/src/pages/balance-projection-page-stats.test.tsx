@@ -53,12 +53,12 @@ describe('GuardrailsComparisonCallout', () => {
   });
 
   it('renders the pending copy while the sibling run is in flight', () => {
-    renderStats({ state: 'pending', withPct: 0.9, withoutPct: null, deltaPct: null, se: null });
+    renderStats({ state: 'pending' });
     expect(screen.getByRole('status')).toHaveTextContent(/comparing your plan/i);
   });
 
   it('renders the fallback copy on a sibling-run error', () => {
-    renderStats({ state: 'error', withPct: 0.9, withoutPct: null, deltaPct: null, se: null });
+    renderStats({ state: 'error' });
     expect(screen.getByText(/couldn't compare your plan/i)).toBeInTheDocument();
   });
 
@@ -79,10 +79,5 @@ describe('GuardrailsComparisonCallout', () => {
     expect(screen.getByText(/your plan's success is/i)).toBeInTheDocument();
     expect(screen.getByText('70%')).toBeInTheDocument();
     expect(screen.getByText('82%')).toBeInTheDocument();
-  });
-
-  it('renders nothing when a ready comparison is missing a numeric field', () => {
-    renderStats({ state: 'ready', withPct: 0.9, withoutPct: null, deltaPct: null, se: null });
-    expect(screen.queryByText(/guardrails/i)).not.toBeInTheDocument();
   });
 });

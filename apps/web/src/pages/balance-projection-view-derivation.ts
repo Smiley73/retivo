@@ -16,13 +16,9 @@ import type {
   ProjectionMethod,
   ProjectionChartRow,
 } from '../components/ProjectionChart';
-import { deflateChartRows } from './balance-projection-page-pipeline';
-import type {
-  PipelineData,
-  DrawdownByMethodResult,
-  McBasis,
-  RepresentativeRun,
-} from './balance-projection-page-pipeline';
+import type { McBasis, RepresentativeRun } from '../lib/monte-carlo';
+import { deflateChartRows } from './balance-projection-page-drawdown';
+import type { PipelineData, DrawdownByMethodResult } from './balance-projection-page-data';
 import type { StackBandYear } from './balance-projection-page-account-balance-stack';
 
 /** The flat view deflator: identity in Future dollars or at zero inflation, else the month-precise 1 / (1+i)^t reciprocal. */

@@ -1,5 +1,6 @@
 /**
- * Shared 14px `currentColor` outline glyphs; decorative (`aria-hidden`), the surrounding text is the accessible name.
+ * Shared 14px `currentColor` outline glyphs, plus the 15px solid row-action family at the end; decorative (`aria-hidden`),
+ * the surrounding text is the accessible name.
  */
 import React from 'react';
 
@@ -76,3 +77,47 @@ export const TrendingUpIcon = (): React.ReactElement =>
 // Withdrawals & taxes — balance scale.
 export const ScaleIcon = (): React.ReactElement =>
   svg(<><path d="M12 3v18" /><path d="M7 21h10" /><path d="M3 8h18" /><path d="M3 8l-2 5a3 3 0 0 0 6 0z" /><path d="M21 8l2 5a3 3 0 0 1 -6 0z" /></>);
+
+// ── 15px solid row-action glyphs (20×20 filled), re-exported as PencilIcon/TrashIcon/EyeIcon by accounts-page-chrome ──
+export const SolidPencilIcon: React.FC = () => (
+  <svg
+    aria-hidden="true"
+    focusable="false"
+    viewBox="0 0 20 20"
+    fill="currentColor"
+    width={15}
+    height={15}
+  >
+    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793 3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+  </svg>
+);
+
+export const SolidTrashIcon: React.FC = () => (
+  <svg
+    aria-hidden="true"
+    focusable="false"
+    viewBox="0 0 20 20"
+    fill="currentColor"
+    width={15}
+    height={15}
+  >
+    <path
+      fillRule="evenodd"
+      d="M8.75 1a1 1 0 00-.95.69L7.56 2.5H4a1 1 0 000 2h.12l.78 11.07A2 2 0 006.9 17.5h6.2a2 2 0 002-1.93L15.88 4.5H16a1 1 0 100-2h-3.56l-.24-.81A1 1 0 0011.25 1h-2.5zM7.92 6.5a.75.75 0 011.5 0v6a.75.75 0 01-1.5 0v-6zm3.16 0a.75.75 0 00-1.5 0v6a.75.75 0 001.5 0v-6z"
+      clipRule="evenodd"
+    />
+  </svg>
+);
+
+export const SolidEyeIcon: React.FC = () => (
+  <svg
+    aria-hidden="true"
+    focusable="false"
+    viewBox="0 0 20 20"
+    fill="currentColor"
+    width={15}
+    height={15}
+  >
+    <path d="M10 4c-3.86 0-7.16 2.4-8.5 5.78a.8.8 0 000 .44C2.84 13.6 6.14 16 10 16s7.16-2.4 8.5-5.78a.8.8 0 000-.44C17.16 6.4 13.86 4 10 4zm0 9.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7zm0-1.75a1.75 1.75 0 100-3.5 1.75 1.75 0 000 3.5z" />
+  </svg>
+);
