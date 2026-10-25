@@ -1,9 +1,4 @@
-/**
- * Integration tests for `POST /auth/verify-password`.
- *
- * Covers the side-effect-free re-auth primitive.
- * Currently consumed by the Profile-page data import and data-export flows.
- */
+// POST /auth/verify-password, the side-effect-free re-auth primitive used by the Profile-page data import and export flows.
 import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -19,7 +14,6 @@ import { EXPORT_AUTHORIZATION_COOKIE_NAME } from '../auth/cookie-config.js';
 
 const WRONG_PASSWORD = 'WrongPassw0rd!Wrong';
 
-/** The raw `Set-Cookie` line for the export-authorization cookie, if present. */
 function exportCookieLine(res: request.Response): string | undefined {
   const raw = res.headers['set-cookie'] as unknown as string[] | string | undefined;
   if (!raw) return undefined;
@@ -74,7 +68,6 @@ describe('verify-password', () => {
     )).filter((r) => r.userId === s.userId && r.eventType === 'password_verify');
     expect(eventsAfter.length).toBe(eventsBefore.length + 1);
 
-    // Session is unchanged: same access token still authenticates.
     const probe = await request(t.app.getHttpServer())
       .post('/api/v1/auth/verify-password')
       .set('Origin', process.env.WEB_ORIGIN!)
@@ -107,18 +100,14 @@ describe('verify-password', () => {
         (r) => r.emailLowercase === emailLowercase,
       );
 
-    // Backoff is now centralized inside VerifyPasswordService.verify(),
-    // so this side-effect-free re-auth endpoint shares the login path's counter.
+    // Backoff lives in VerifyPasswordService.verify(), so this endpoint shares the login path's counter.
     expect(await rowFor()).toBeUndefined();
 
     const wrong = await verifyPassword(t, s, WRONG_PASSWORD);
     expect(wrong.status).toBe(401);
-    // Exactly 1 — a single wrong attempt is counted
-    // ONCE (not double-incremented by both the shared login path and this
-    // endpoint). `>= 1` would silently pass a double-count regression.
+    // Exactly 1: a wrong attempt is counted once, not double-incremented by the shared login path and this endpoint; `>= 1` would pass a double count.
     expect((await rowFor())?.consecutiveFailures).toBe(1);
 
-    // A correct password clears the shared counter.
     const ok = await verifyPassword(t, s, STRONG_PASSWORD);
     expect(ok.status).toBe(204);
     expect(await rowFor()).toBeUndefined();
@@ -135,7 +124,6 @@ describe('verify-password', () => {
       (r) => r.userId === s.userId && r.eventType === 'data_export',
     );
     expect(exportEvents.length).toBe(1);
-    // The generic password_verify event must NOT be recorded for an export.
     const generic = events.filter(
       (r) => r.userId === s.userId && r.eventType === 'password_verify',
     );
@@ -176,8 +164,7 @@ describe('verify-password', () => {
       .send({ currentPassword: STRONG_PASSWORD, purpose: 'not_allowed' });
     expect(res.status).toBe(400);
 
-    // Validation rejects the request before the service runs, so neither the
-    // data_export/_failed nor the generic password_verify/_failed events fire.
+    // Validation rejects the request before the service runs, so no data_export/_failed or generic password_verify/_failed event fires.
     const eventsAfter = (await scanAll<AuthEventRow>(
       t.doc,
       tableName(t, 'TABLE_AUTH_EVENT'),
@@ -210,8 +197,7 @@ describe('verify-password', () => {
 
     const cookie = exportCookieLine(res);
     expect(cookie).toBeDefined();
-    // Session-bound, short-lived, HttpOnly, SameSite=Strict, scoped to /api/v1 so
-    // it also arrives at GET /sync/pull + /sync/bootstrap where the guard reads it.
+    // Session-bound, short-lived, HttpOnly, SameSite=Strict and scoped to /api/v1 so it also reaches GET /sync/pull and /sync/bootstrap where the guard reads it.
     expect(cookie).toMatch(/HttpOnly/i);
     expect(cookie).toMatch(/SameSite=Strict/i);
     expect(cookie).toMatch(/Path=\/api\/v1(?:;|$)/i);
@@ -244,8 +230,7 @@ describe('verify-password', () => {
       .set('X-CSRF-Token', s.csrfValue)
       .set('Cookie', [s.refreshCookie, s.csrfCookie].join('; '))
       .send({ currentPassword: STRONG_PASSWORD, purpose: 'not_allowed' });
-    // The DTO allows only `data_export`; any other purpose is rejected at
-    // validation (400) and never reaches the mint path.
+    // The DTO allows only `data_export`; any other purpose is a 400 before the mint path.
     expect(res.status).toBe(400);
     expect(exportCookieLine(res)).toBeUndefined();
   });
@@ -258,9 +243,7 @@ describe('verify-password', () => {
     expect(exportCookieLine(res)).toBeUndefined();
 
     const events = await scanAll<AuthEventRow>(t.doc, tableName(t, 'TABLE_AUTH_EVENT'));
-    // The purpose is an exemption entry only — it must not change what
-    // the audit records, so this is the SAME generic pair every bare
-    // verification writes, never a bespoke `password_slot_rewrap` event type.
+    // The purpose is an exemption entry only: it writes the same generic audit pair as any bare verification, never a bespoke `password_slot_rewrap` event type.
     const generic = events.filter(
       (r) => r.userId === s.userId && r.eventType === 'password_verify',
     );
@@ -280,5 +263,4 @@ describe('verify-password', () => {
     );
     expect(failed.length).toBe(1);
   });
-
 });

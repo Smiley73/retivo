@@ -1,14 +1,5 @@
-/**
- * Unit tests for MfaEmailOtpService:
- *   - cooldown: a recent send is a silent no-op (no User update, no code Put),
- *   - daily cap: 5 sends/day max — the 6th is a silent no-op,
- *   - hash round-trip: only sha256(code) is stored; a matching raw code verifies,
- *   - response floor: send always takes ≥ 200 ms,
- *   - per-code attempt cap: the 5th wrong guess invalidates the code (delete +
- *     MFA_CODE_INVALID).
- *
- * Pure unit test: the doc client, SES client, repos, and config are stubbed.
- */
+// MfaEmailOtpService: a recent send is a silent no-op (cooldown), 5 sends/day max, only sha256(code) is stored, send always takes >= 200 ms, and the 5th wrong guess
+// invalidates the code. The doc client, SES client, repos and config are stubbed.
 import 'reflect-metadata';
 import { GoneException, Logger, UnauthorizedException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
@@ -16,12 +7,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import type { SESClient } from '@aws-sdk/client-ses';
 import type { EnvConfig } from '../common/env.config.js';
-import {
-  MfaEmailOtpService,
-  MFA_EMAIL_OTP_DAILY_LIMIT,
-  MFA_EMAIL_OTP_MAX_ATTEMPTS,
-  MFA_EMAIL_OTP_RESPONSE_FLOOR_MS,
-} from './mfa-email-otp.service.js';
+import { MfaEmailOtpService } from './mfa-email-otp.service.js';
 import type { MfaEmailOtpRepository } from '../dynamo/mfa-email-otp.repository.js';
 import type { UsersRepository } from '../dynamo/users.repository.js';
 import type { AuthEventsRepository } from '../dynamo/auth-events.repository.js';
@@ -69,7 +55,6 @@ function deps(user: UserRow | null) {
   } as unknown as MfaEmailOtpRepository;
   const realUsers = {
     findById: jest.fn().mockResolvedValue(user),
-    // Use the real builder so the conditional UpdateExpression is exercised.
     mfaEmailOtpSendUpdate: jest.fn((args) => ({
       TableName: 't-user',
       Key: { userId: args.userId },
@@ -100,7 +85,7 @@ describe('MfaEmailOtpService — send rate limits', () => {
     const todayKey = Math.floor(Date.now() / 1000 / 86400);
     const user = baseUser({
       mfaEmailOtpSentDayKey: todayKey,
-      mfaEmailOtpSentToday: MFA_EMAIL_OTP_DAILY_LIMIT,
+      mfaEmailOtpSentToday: 5,
     });
     const { doc, docSend, ses, otps, otpPut, users, auth } = deps(user);
     const svc = new MfaEmailOtpService(doc, ses, otps, users, auth, buildConfig());
@@ -123,7 +108,6 @@ describe('MfaEmailOtpService — send rate limits', () => {
     const putRow = (otpPut as jest.Mock).mock.calls[0][0] as MfaEmailOtpRow;
     expect(putRow.attempts).toBe(0);
     expect(putRow.codeHash).toMatch(/^[0-9a-f]{64}$/);
-    // The stored TTL is a future epoch-SECOND Number, not an ISO string.
     expect(typeof putRow.expiresAt).toBe('number');
     expect(putRow.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
     expect(auth.record).toHaveBeenCalledWith(
@@ -139,7 +123,7 @@ describe('MfaEmailOtpService — send rate limits', () => {
 
     const start = Date.now();
     await svc.send({ userId: 'u1', email: 'a@b.test' });
-    expect(Date.now() - start).toBeGreaterThanOrEqual(MFA_EMAIL_OTP_RESPONSE_FLOOR_MS - 25);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(175);
   });
 });
 
@@ -148,7 +132,6 @@ describe('MfaEmailOtpService — verify', () => {
     return {
       userId: 'u1',
       codeHash: sha256(code),
-      // Numeric epoch-second TTL.
       expiresAt: Math.floor(Date.now() / 1000) + 600,
       sentAt: new Date().toISOString(),
       attempts,
@@ -185,8 +168,7 @@ describe('MfaEmailOtpService — verify', () => {
     const r = await svc.verify({ userId: 'u1', code: '999999' });
     expect(r.ok).toBe(false);
     expect(otps.incrementAttempts).toHaveBeenCalled();
-    // Incident-context warn only — the MfaVerifyFailed metric is now direct
-    // EMF from AuthEventsRepository, not sourced from this log line.
+    // Incident-context warn only; MfaVerifyFailed is direct EMF from AuthEventsRepository.
     expect(warnSpy).toHaveBeenCalledWith('MFA verification failed', {
       userId: 'u1',
       factor: 'email_otp',
@@ -198,10 +180,9 @@ describe('MfaEmailOtpService — verify', () => {
     const { doc, ses, users, auth } = deps(baseUser());
     const del = jest.fn().mockResolvedValue(undefined);
     const otps = {
-      get: jest.fn().mockResolvedValue(liveRow('123456', MFA_EMAIL_OTP_MAX_ATTEMPTS - 1)),
+      get: jest.fn().mockResolvedValue(liveRow('123456', 4)),
       delete: del,
-      // The 5th wrong guess pushes attempts to the cap.
-      incrementAttempts: jest.fn().mockResolvedValue(MFA_EMAIL_OTP_MAX_ATTEMPTS),
+      incrementAttempts: jest.fn().mockResolvedValue(5),
     } as unknown as MfaEmailOtpRepository;
     const svc = new MfaEmailOtpService(doc, ses, otps, users, auth, buildConfig());
 
@@ -235,8 +216,7 @@ describe('MfaEmailOtpService — verify', () => {
   });
 
   it('still throws MFA_CODE_EXPIRED when the best-effort delete of the stale row throws', async () => {
-    // A transient DynamoDB fault on the hygiene delete must not turn the
-    // expired-code fallback into a 500 — the typed GoneException still throws.
+    // A transient fault on the hygiene delete must not turn the expired-code fallback into a 500: the typed GoneException still throws.
     const warnSpy = jest
       .spyOn(Logger.prototype, 'warn')
       .mockImplementation(() => undefined);
@@ -267,8 +247,7 @@ describe('MfaEmailOtpService — verify', () => {
   it('rejects a legacy ISO-string `expiresAt` code as expired (clean cutover)', async () => {
     const { doc, ses, users, auth } = deps(baseUser());
     const del = jest.fn().mockResolvedValue(undefined);
-    // A pre-cutover row whose TTL is still an ISO string (nonnumeric) must fail
-    // the numeric guard and be invalidated — even with a matching code.
+    // A pre-cutover row whose TTL is still an ISO string must fail the numeric guard and be invalidated, even with a matching code.
     const legacy: MfaEmailOtpRow = {
       userId: 'u1',
       codeHash: sha256('123456'),
@@ -306,8 +285,6 @@ describe('MfaEmailOtpService — verify', () => {
 
 describe('MfaEmailOtpService — verifyStepUp', () => {
   it('still throws MFA_CODE_EXPIRED when the best-effort step-up delete throws', async () => {
-    // The step-up expired-code fallback must survive a transient DynamoDB fault
-    // on the hygiene delete — the typed GoneException still throws, not a 500.
     const warnSpy = jest
       .spyOn(Logger.prototype, 'warn')
       .mockImplementation(() => undefined);

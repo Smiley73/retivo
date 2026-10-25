@@ -7,9 +7,9 @@ import type { UserRow } from '../dynamo/types.js';
  * Post-completion restriction window, 24 hours: long enough for the owner to notice a reset they did not request,
  * tied to the actual reset event.
  */
-export const FACTOR_RESTRICTION_WINDOW_SEC = 24 * 60 * 60;
+const FACTOR_RESTRICTION_WINDOW_SEC = 24 * 60 * 60;
 
-export type ResetWindowUser = Pick<
+type ResetWindowUser = Pick<
   UserRow,
   | 'currentResetToken'
   | 'passwordResetRequestOpenedAt'

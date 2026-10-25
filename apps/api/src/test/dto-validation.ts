@@ -12,12 +12,7 @@ function flatten(errors: ValidationError[], prefix = ''): string[] {
   });
 }
 
-/**
- * Runs a request body through the same validation the app's global
- * `ValidationPipe` applies (`transform`, `whitelist`, `forbidNonWhitelisted`)
- * and returns every violation as `<property path>:<constraint>`; an empty
- * list means the body is accepted.
- */
+/** Validates a body as the global ValidationPipe does (transform, whitelist, forbidNonWhitelisted) and returns each violation as `<property path>:<constraint>`; empty means accepted. */
 export function dtoViolations<T extends object>(dto: DtoClass<T>, body: unknown): string[] {
   const instance = plainToInstance(dto, body) as object;
   return flatten(validateSync(instance, { whitelist: true, forbidNonWhitelisted: true }));

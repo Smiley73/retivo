@@ -6,9 +6,7 @@ describe('escapeHtml', () => {
   });
 
   it('does not double-escape an ampersand that precedes another special character', () => {
-    // A naive chained `.replace()` implementation that runs `<` before `&`
-    // would turn `<` into `&lt;` and then re-escape that `&` into `&amp;lt;`.
-    // The single-pass regex must not do that.
+    // A chained .replace() running `<` before `&` would turn `<` into `&lt;` and re-escape that `&` into `&amp;lt;`; the single-pass regex must not.
     expect(escapeHtml('<')).toBe('&lt;');
     expect(escapeHtml('&<')).toBe('&amp;&lt;');
     expect(escapeHtml('A&B<C')).toBe('A&amp;B&lt;C');

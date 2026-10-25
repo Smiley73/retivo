@@ -1,13 +1,4 @@
-/**
- * Integration tests for the ingress bounds: the daily push-quota (mutation
- * count + payload bytes), the `timestamp` / `schemaVersion` DTO bounds, the stored-relative
- * freshness-counter step bound, and the strict-envelope unknown-key guard as exercised at the push
- * boundary.
- *
- * Follows the shape of `sync-validation.spec.ts` / `sync.spec.ts`: each case
- * asserts the observable contract (HTTP status + error code) AND that a
- * pre-write rejection leaves zero DynamoDB rows behind.
- */
+// Ingress bounds on push: the daily quota (mutation count and bytes), the timestamp and schemaVersion DTO bounds, the freshness-counter step bound and the strict-envelope unknown-key guard.
 import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
 import { ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -27,17 +18,9 @@ import {
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
 } from '../auth/cookie-config.js';
-import {
-  utcDayStamp,
-  WorkspaceMetaRepository,
-} from '../dynamo/workspace-meta.repository.js';
+import { WorkspaceMetaRepository } from '../dynamo/workspace-meta.repository.js';
 import { DeviceRegistryRepository } from '../dynamo/device-registry.repository.js';
 import { MutationLogRepository } from '../dynamo/mutation-log.repository.js';
-import {
-  FRESHNESS_COUNTER_MAX_STEP,
-  MAX_DAILY_BYTES,
-  MAX_DAILY_MUTATIONS,
-} from '../sync/push.service.js';
 import {
   SCHEMA_VERSION_CEILING,
   TIMESTAMP_MAX_FUTURE_SKEW_MS,
@@ -45,7 +28,6 @@ import {
 } from '../sync/dto/push.dto.js';
 import { SnapshotsService } from '../sync/snapshots.service.js';
 
-/** A strict encrypted-envelope payload. Mirrors sync.spec.ts. */
 function encryptedPayload(): Record<string, unknown> {
   return {
     encryptionVersion: 1,
@@ -57,6 +39,10 @@ function encryptedPayload(): Record<string, unknown> {
 }
 
 const VALID_CURSOR_TAG = 'a'.repeat(43);
+const MAX_DAILY_MUTATIONS = 10_000;
+const MAX_DAILY_BYTES = 50 * 1024 * 1024;
+const FRESHNESS_COUNTER_MAX_STEP = 1000;
+const utcDayStamp = (): string => new Date().toISOString().slice(0, 10);
 
 async function push(
   t: TestApp,
@@ -95,7 +81,6 @@ async function countMutationLogRows(t: TestApp, householdId: string): Promise<nu
   return r.Count ?? 0;
 }
 
-/** Seed the household's stored daily-quota state directly (bypasses push). */
 async function seedQuota(
   t: TestApp,
   householdId: string,
@@ -195,11 +180,7 @@ describe('sync push bounds', () => {
       const res = await push(t, s, [mutation]);
       expect(res.status).toBe(201);
 
-      // Pins `chargeDailyQuota`'s `ADD dailyByteCount :addB` — a test that
-      // only asserts the accept/reject outcome above would still pass if
-      // `:addB` were wired to 0 or a constant, or if `bytes` were dropped
-      // from the preflight entirely, and the byte budget would then never
-      // accumulate at all.
+      // Pins `chargeDailyQuota`'s `ADD dailyByteCount :addB`: accept/reject alone would pass if `:addB` were wired to 0 or bytes dropped from the preflight, and the budget would never accumulate.
       const repo = t.module.get(WorkspaceMetaRepository);
       const row = await repo.find(s.householdId);
       expect(row?.dailyByteCount).toBe(seededBase + bytes);
@@ -240,7 +221,6 @@ describe('sync push bounds', () => {
       const repo = t.module.get(WorkspaceMetaRepository);
       const row = await repo.find(s.householdId);
       expect(row?.quotaDay).toBe(utcDayStamp());
-      // Only THIS push's charge — the stale day's count was not carried over.
       expect(row?.dailyMutationCount).toBe(1);
     });
   });
@@ -268,8 +248,6 @@ describe('sync push bounds', () => {
       expect(res.body.error.code).toBe('PUSH_QUOTA_EXCEEDED');
     });
 
-    /** The reset revokes the session (all devices re-bootstrap clean) —
-     *  mint a fresh one for the same user to push again. */
     async function reLoginAfterReset(s: Session): Promise<Session> {
       const reLogin = await request(t.app.getHttpServer())
         .post('/api/v1/auth/login')
@@ -290,17 +268,9 @@ describe('sync push bounds', () => {
       };
     }
 
-    // In-flight-push shapes. A push that is already past its
-    // `createIfMissing` when a household-triggerable sweep starts charges the
-    // quota (`chargeDailyQuota`) at some point during the sweep — on either
-    // side of the sweep's WorkspaceMeta delete — and whichever side it lands
-    // on, that charge must survive the carry-forward. Each case seeds the
-    // budget at MAX-1, injects that one charge from inside the sweep via a
-    // one-shot spy on a neighbouring sweep step, and asserts the very next
-    // push sees a SPENT budget (429). With the charge lost — a stale
-    // pre-sweep read, a second delete, or a conditional create / full-row Put
-    // that keeps one side and discards the other — the same push is accepted
-    // against MAX-1.
+    // A push already past its `createIfMissing` when a household-triggerable sweep starts charges the quota on either side of the sweep's WorkspaceMeta delete,
+    // and that charge must survive the carry-forward. Each case seeds MAX-1, injects one charge from inside the sweep, and asserts the next push sees a spent
+    // budget (429): with the charge lost the same push is accepted against MAX-1.
     async function seedOneBelowBudget(s: Session): Promise<void> {
       await seedQuota(t, s.householdId, {
         quotaDay: utcDayStamp(),
@@ -309,7 +279,6 @@ describe('sync push bounds', () => {
       });
     }
 
-    /** Exactly what `PushService.push` does for a one-mutation batch. */
     async function inFlightCharge(householdId: string): Promise<void> {
       const repo = t.module.get(WorkspaceMetaRepository);
       const charge = await repo.chargeDailyQuota(
@@ -322,7 +291,6 @@ describe('sync push bounds', () => {
       expect(charge).toEqual({ ok: true });
     }
 
-    /** One-shot: land `inFlightCharge` just before the given sweep step runs. */
     function chargeBeforeFirstCallOf(repo: {
       deleteAllForHousehold: (householdId: string) => Promise<unknown>;
     }): jest.SpyInstance {
@@ -341,9 +309,7 @@ describe('sync push bounds', () => {
       const snapshotId = await snapshots.write(s.householdId, { aggregates: [], cutoff: '0' });
       await seedOneBelowBudget(s);
 
-      // MutationLog is the sweep's FIRST step: a charge here has committed
-      // after everything the service could have read before the sweep, and
-      // before the WorkspaceMeta delete.
+      // MutationLog is the sweep's first step: a charge here commits after everything the service read and before the WorkspaceMeta delete.
       const spy = chargeBeforeFirstCallOf(t.module.get(MutationLogRepository));
       try {
         const restoreRes = await request(t.app.getHttpServer())
@@ -390,10 +356,7 @@ describe('sync push bounds', () => {
       const s = await loginAsFreshUser(t);
       await seedOneBelowBudget(s);
 
-      // DeviceRegistry is the sweep's LAST step — after the WorkspaceMeta
-      // delete, before the service recreates the row. The charge recreates
-      // the row itself with a fresh count of 1; the captured MAX-1 must be
-      // ADDed on top of it, not discarded in favour of it.
+      // DeviceRegistry is the sweep's last step, after the WorkspaceMeta delete: the charge recreates the row with a count of 1, and the captured MAX-1 must be added on top of it, not discarded.
       const spy = chargeBeforeFirstCallOf(t.module.get(DeviceRegistryRepository));
       try {
         const resetRes = await request(t.app.getHttpServer())
@@ -427,7 +390,6 @@ describe('sync push bounds', () => {
       const afterFirst = await repo.find(s.householdId);
       expect(afterFirst?.dailyMutationCount).toBe(1);
 
-      // Identical mutation id + version — a trustworthy applied replay.
       const replay = await push(t, s, [mutation]);
       expect(replay.status).toBe(201);
 
@@ -447,16 +409,11 @@ describe('sync push bounds', () => {
         }),
       ]);
       expect(res.status).toBe(400);
-      // A distinct code from the generic DTO-violation BAD_REQUEST (not
-      // ValidationPipe's default): a clock-skewed device is a recoverable
-      // environmental condition, and the client (SyncContext.tsx) relies on
-      // this code to NOT park the batch as permanently unsendable.
+      // A distinct code from the generic BAD_REQUEST: a clock-skewed device is recoverable, and the client (SyncContext.tsx) relies on this code not to park the batch as permanently unsendable.
       expect(res.body.error.code).toBe('TIMESTAMP_OUT_OF_SERVER_WINDOW');
       expect(await countMutationLogRows(t, s.householdId)).toBe(before);
 
-      // The crash vector this bound closes: no absurd-timestamp row ever
-      // reached MutationLog, so pull/bootstrap for this household stay
-      // healthy (never a 500 from `new Date(...).toISOString()`).
+      // No absurd-timestamp row ever reached MutationLog, so pull and bootstrap stay healthy (never a 500 from `new Date(...).toISOString()`).
       const pullRes = await request(t.app.getHttpServer())
         .get('/api/v1/sync/pull?since=0')
         .set('Authorization', `Bearer ${s.accessToken}`);
@@ -512,10 +469,7 @@ describe('sync push bounds', () => {
         }),
       ]);
       expect(res.status).toBe(400);
-      // A distinct code from the generic DTO-violation BAD_REQUEST (not
-      // ValidationPipe's default): unlike the timestamp bound, this one
-      // genuinely cannot clear without a newer app build, so the client
-      // (SyncContext.tsx) parks it as permanently unsendable.
+      // A distinct code from the generic BAD_REQUEST: this one cannot clear without a newer app build, so the client (SyncContext.tsx) parks it as permanently unsendable.
       expect(res.body.error.code).toBe('SCHEMA_VERSION_TOO_NEW');
       expect(await countMutationLogRows(t, s.householdId)).toBe(before);
     });

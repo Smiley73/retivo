@@ -1,18 +1,11 @@
-/**
- * Unit tests for the post-reset factor-restriction window resolution —
- * the pure function that decides whether a
- * factor enrolled "now" falls inside an open password-reset window. The
- * integration tests in `test/enrollment-gate.spec.ts` cover the end-to-end
- * marking/enforcing/lifting behavior against the real endpoints; these cover
- * the window-boundary arithmetic in isolation.
- */
-import {
-  FACTOR_RESTRICTION_WINDOW_SEC,
-  resolveOpenResetWindow,
-  type ResetWindowUser,
-} from './factor-restriction.js';
+// resolveOpenResetWindow, the pure decision whether a factor enrolled now falls inside an open password-reset window: the window-boundary arithmetic in isolation
+// (enrollment-gate.spec.ts covers marking, enforcing and lifting end to end).
+import { resolveOpenResetWindow } from './factor-restriction.js';
 import { RESET_TTL_SEC } from './password-reset.service.js';
 
+type ResetWindowUser = Parameters<typeof resolveOpenResetWindow>[0];
+
+const FACTOR_RESTRICTION_WINDOW_SEC = 24 * 60 * 60;
 const REQUESTED_AT = '2026-01-01T00:00:00.000Z';
 const REQUESTED_MS = Date.parse(REQUESTED_AT);
 
@@ -93,15 +86,11 @@ describe('resolveOpenResetWindow', () => {
   });
 
   it('a later, never-consumed reset request cannot cancel a still-open post-completion window', () => {
-    // Reset A: requested T0, completed T0+2m. Reset B: requested T0+10m,
-    // never consumed — overwrites `passwordResetRequestOpenedAt` and sets
-    // `currentResetToken`, but `lastPasswordResetCompletedAt` /
-    // `lastPasswordResetCompletedRequestedAt` (paired at A's own consume)
-    // are untouched by a mere request.
+    // Reset A: requested T0, completed T0+2m. Reset B: requested T0+10m, never consumed: it overwrites passwordResetRequestOpenedAt and sets currentResetToken,
+    // but the lastPasswordResetCompleted* pair, set at A's consume, is untouched by a mere request.
     const completedAtA = new Date(REQUESTED_MS + 2 * 60_000).toISOString();
     const requestedAtB = new Date(REQUESTED_MS + 10 * 60_000).toISOString();
-    // Past B's own RESET_TTL_SEC (15 min from B), so the pending branch is
-    // closed on its own — the completed branch must still carry the window.
+    // Past B's own RESET_TTL_SEC the pending branch is closed on its own; the completed branch must still carry the window.
     const nowMs = Date.parse(requestedAtB) + RESET_TTL_SEC * 1000 + 60_000;
     const result = resolveOpenResetWindow(
       user({
@@ -118,8 +107,7 @@ describe('resolveOpenResetWindow', () => {
   it('returns the earlier requestedAt when the pending and completed branches are both open at once', () => {
     const completedAtA = new Date(REQUESTED_MS + 2 * 60_000).toISOString();
     const requestedAtB = new Date(REQUESTED_MS + 10 * 60_000).toISOString();
-    // Still within B's RESET_TTL_SEC, so both branches are simultaneously
-    // open; the older instant (A's own request) must win.
+    // Within B's RESET_TTL_SEC both branches are open; the older instant (A's own request) must win.
     const nowMs = Date.parse(requestedAtB) + 60_000;
     const result = resolveOpenResetWindow(
       user({

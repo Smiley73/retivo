@@ -1,12 +1,5 @@
-/**
- * Unit tests for PasskeyController's `register/finish` factor-notice wiring
- * and `authenticate/finish`'s session-generation
- * pinning. The API-integration
- * suite cannot drive a real WebAuthn ceremony — there is no virtual
- * authenticator in the harness — so both are covered at unit level: stub
- * every dependency, mock the WebAuthn verification to succeed, and assert
- * the collaborator call under test.
- */
+// PasskeyController's register/finish factor-notice wiring and authenticate/finish session-generation pinning. The integration suite has no virtual authenticator, so every
+// dependency is stubbed, WebAuthn verification is mocked to succeed, and the collaborator call under test is asserted.
 import 'reflect-metadata';
 
 const verifyRegistrationResponse = jest.fn();
@@ -16,7 +9,6 @@ jest.mock('@simplewebauthn/server', () => ({
   verifyRegistrationResponse: (...a: unknown[]) => verifyRegistrationResponse(...a),
 }));
 
-// Imported after the mock is registered.
 import { PasskeyController } from './passkey.controller.js';
 import { PasskeyChallengeStore } from './passkey-challenge-store.js';
 import { bootstrapTestApp, type TestApp } from '../test/test-helpers.js';
@@ -37,10 +29,7 @@ const WEB_ORIGIN = 'https://app.example.test';
 const USER_ID = 'u1';
 const CHALLENGE = 'webauthn-registration-challenge';
 
-// The challenge store is now a DynamoDB-backed async facade
-// with no in-process state and no sweep
-// interval to leak — a single real instance, pulled from a bootstrapped app's
-// DI container, is shared by every `build()` call in this file.
+// One real challenge store from a bootstrapped app's DI container is shared by every build() call, since it holds no in-process state.
 let t: TestApp;
 let realChallengeStore: PasskeyChallengeStore;
 
@@ -191,9 +180,6 @@ describe('PasskeyController.authenticateFinish — session generation pinning', 
   const DEVICE_ID = '11111111-1111-1111-1111-111111111111';
   const CREDENTIAL_ID = 'cred-1';
 
-  /** Only `response.id` and `response.response.userHandle` are read by the
-   *  controller once the challenge lookup and assertion verification are
-   *  stubbed; the rest is shape filler. */
   function assertionBody(): never {
     return {
       deviceId: DEVICE_ID,
@@ -228,10 +214,7 @@ describe('PasskeyController.authenticateFinish — session generation pinning', 
       restrictedPostReset: false,
     });
     assertions.verifyLoginAssertion.mockImplementation(async () => {
-      // The account-wide revocation boundary lands HERE — after the
-      // assertion proof is gathered, before the session is issued:
-      // `revokeAll` commits generation 0 → 1, so any read of the User row
-      // from this instant on observes 1.
+      // The account-wide revocation lands here, after the assertion proof is gathered and before the session is issued: revokeAll commits generation 0 to 1.
       users.findByIdConsistent.mockResolvedValue(afterRevoke);
       users.findById.mockResolvedValue(afterRevoke);
       return { verified: true };
@@ -250,16 +233,12 @@ describe('PasskeyController.authenticateFinish — session generation pinning', 
       { cookie: jest.fn() } as never,
     );
 
-    // Issuance is asked to stamp the PRE-assertion value (0), so the
-    // generation ConditionCheck against the User row (now 1) rejects this
-    // sign-in — instead of `issueSession`'s former fallback re-reading 1 and
-    // minting a session that survives the very revoke it should have died to.
+    // Issuance must stamp the pre-assertion value (0), so the generation ConditionCheck against the now-1 User row rejects the sign-in instead of a fallback re-read minting a session that survives the revoke.
     expect(loginSvc.issueSession).toHaveBeenCalledTimes(1);
     expect(loginSvc.issueSession).toHaveBeenCalledWith(
       expect.objectContaining({ userId: USER_ID, sessionGeneration: 0 }),
     );
-    // Exactly one User read — strongly consistent, taken before the
-    // assertion — and none after it.
+    // Exactly one User read, strongly consistent and before the assertion.
     expect(users.findByIdConsistent).toHaveBeenCalledTimes(1);
     expect(users.findById).not.toHaveBeenCalled();
     const [userRead] = users.findByIdConsistent.mock.invocationCallOrder;
@@ -282,8 +261,7 @@ describe('PasskeyController.authenticateFinish — session generation pinning', 
       email: 'person@example.test',
       sessionGeneration: 0,
     });
-    // The mock is untyped, so it can carry fields the real result no longer
-    // declares: a handler that still mapped them would leak them here.
+    // The mock is untyped and can carry fields the real result no longer declares; a handler that still mapped them would leak them.
     loginSvc.issueSession.mockResolvedValue({
       accessToken: 'access',
       expiresInSec: 300,

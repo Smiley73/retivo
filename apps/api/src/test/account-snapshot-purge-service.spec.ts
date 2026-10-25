@@ -1,17 +1,5 @@
-/**
- * AccountSnapshotPurgeService unit + emulator tests.
- *
- * The account-deletion ordering test stubs this service, so the real
- * implementation needs its own coverage. Two surfaces:
- *
- *  - Lambda-invocation path (deployed stack): a mocked LambdaClient drives
- *    success, SDK rejection, non-2xx StatusCode, and FunctionError —
- *    every non-success surfaces as SnapshotPurgeError so the deletion
- *    cascade aborts before the irreversible sweeps.
- *  - In-process fallback (local / emulator): real Moto S3 proves the
- *    purge deletes only `${householdId}/` keys; a stubbed partial-delete
- *    Errors[] response throws.
- */
+// AccountSnapshotPurgeService, which the account-deletion ordering test stubs: the Lambda path (a mocked LambdaClient drives success, SDK rejection, non-2xx and FunctionError, every non-success being a
+// SnapshotPurgeError so deletion aborts before the irreversible sweeps) and the in-process fallback (real Moto S3 deletes only `${householdId}/` keys; a stubbed partial-delete Errors[] response throws).
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
@@ -23,7 +11,6 @@ import {
 import type { LambdaClient } from '@aws-sdk/client-lambda';
 import {
   AccountSnapshotPurgeService,
-  SnapshotPurgeError,
 } from '../auth/account-snapshot-purge.service.js';
 import { S3_CLIENT } from '../aws/aws.module.js';
 import { bootstrapTestApp, type TestApp } from './test-helpers.js';
@@ -60,7 +47,7 @@ describe('AccountSnapshotPurgeService — Lambda invocation path', () => {
     await expect(service.purge(householdId)).resolves.toBeUndefined();
 
     const sent = lambdaSend.mock.calls[0][0];
-    // Payload carries ONLY the household id — no PII, no keepKeys.
+    // The payload carries only the household id: no PII, no keepKeys.
     expect(JSON.parse(Buffer.from(sent.input.Payload).toString())).toEqual({
       householdId,
     });
@@ -85,18 +72,14 @@ describe('AccountSnapshotPurgeService — Lambda invocation path', () => {
     const lambdaSend = jest.fn().mockRejectedValue(new Error('network down'));
     const service = makeService(lambdaSend);
 
-    await expect(service.purge(randomUUID())).rejects.toBeInstanceOf(
-      SnapshotPurgeError,
-    );
+    await expect(service.purge(randomUUID())).rejects.toMatchObject({ name: 'SnapshotPurgeError' });
   });
 
   it('throws SnapshotPurgeError on a non-2xx StatusCode', async () => {
     const lambdaSend = jest.fn().mockResolvedValue({ StatusCode: 500 });
     const service = makeService(lambdaSend);
 
-    await expect(service.purge(randomUUID())).rejects.toBeInstanceOf(
-      SnapshotPurgeError,
-    );
+    await expect(service.purge(randomUUID())).rejects.toMatchObject({ name: 'SnapshotPurgeError' });
   });
 
   it('throws SnapshotPurgeError when the payload reports a FunctionError', async () => {
@@ -105,9 +88,7 @@ describe('AccountSnapshotPurgeService — Lambda invocation path', () => {
       .mockResolvedValue({ StatusCode: 200, FunctionError: 'Unhandled' });
     const service = makeService(lambdaSend);
 
-    await expect(service.purge(randomUUID())).rejects.toBeInstanceOf(
-      SnapshotPurgeError,
-    );
+    await expect(service.purge(randomUUID())).rejects.toMatchObject({ name: 'SnapshotPurgeError' });
   });
 });
 
@@ -129,7 +110,7 @@ describe('AccountSnapshotPurgeService — in-process fallback (emulator S3)', ()
   });
 
   function makeService(): AccountSnapshotPurgeService {
-    // No function name → in-process path. Lambda client never used.
+    // No function name selects the in-process path; the Lambda client is never used.
     return new AccountSnapshotPurgeService(
       { send: jest.fn() } as unknown as LambdaClient,
       s3,
@@ -177,7 +158,6 @@ describe('AccountSnapshotPurgeService — in-process fallback (emulator S3)', ()
       keepKeys: [`${target}/live.json.gz`],
     });
 
-    // Only the preserved live snapshot survives.
     expect(await countUnder(target)).toBe(1);
     const list = await s3.send(
       new ListObjectsV2Command({ Bucket: bucket, Prefix: `${target}/` }),
@@ -187,8 +167,7 @@ describe('AccountSnapshotPurgeService — in-process fallback (emulator S3)', ()
 
   it('throws SnapshotPurgeError when DeleteObjects reports a partial-delete error', async () => {
     const householdId = randomUUID();
-    // Stub S3 so the list returns one key but the delete reports an
-    // Errors[] entry (the HTTP-200-with-Errors partial-failure shape).
+    // The list returns one key but the delete reports an Errors[] entry (the HTTP-200-with-Errors partial-failure shape).
     const stubS3 = {
       send: jest.fn().mockImplementation((cmd: { constructor: { name: string } }) => {
         if (cmd.constructor.name === 'ListObjectsV2Command') {
@@ -208,8 +187,6 @@ describe('AccountSnapshotPurgeService — in-process fallback (emulator S3)', ()
       makeConfig({ SNAPSHOTS_BUCKET: bucket }),
     );
 
-    await expect(service.purge(householdId)).rejects.toBeInstanceOf(
-      SnapshotPurgeError,
-    );
+    await expect(service.purge(householdId)).rejects.toMatchObject({ name: 'SnapshotPurgeError' });
   });
 });

@@ -1,17 +1,5 @@
-/**
- * Integration tests for the account-preserving encrypted-workspace reset:
- * `POST /api/v1/auth/encrypted-workspace-reset`.
- *
- * Covers:
- *  - the happy path wipes household sync rows (MutationLog, DeviceRegistry),
- *    S3 snapshots, and key-envelope rows, while PRESERVING the User /
- *    Credential / EmailReservation / RefreshToken-as-revoked + AuthEvent
- *    audit trail;
- *  - a wrong confirmation phrase is a 400 and changes nothing;
- *  - the endpoint is unauthenticated-rejected (CSRF middleware 403s before
- *    the JWT guard; a valid CSRF with no Authorization is 401);
- *  - a repeat reset on an already-empty household still succeeds (idempotent).
- */
+// POST /auth/encrypted-workspace-reset wipes household sync rows, snapshots and key envelopes while preserving User, Credential, EmailReservation, revoked
+// RefreshTokens and the audit trail; a wrong phrase or password is rejected and a repeat reset is idempotent.
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import KSUID from 'ksuid';
@@ -45,12 +33,7 @@ import type {
 
 const RESET_PHRASE = 'DELETE';
 
-/**
- * Seed a MutationLog row for the household directly. A plaintext
- * `POST /sync/push` 403s (and these calls all run on a freshly-created, still
- * unkeyed household before `seedEncryptedState`), so the reset-sweep tests seed
- * the row they expect the reset to purge rather than pushing it.
- */
+// A plaintext push 403s, so reset-sweep tests seed the row they expect the reset to purge.
 async function seedHouseholdMutation(t: TestApp, s: Session): Promise<void> {
   await t.doc.send(
     new PutCommand({
@@ -89,12 +72,10 @@ function reset(
     .set('Authorization', `Bearer ${s.accessToken}`)
     .set('X-CSRF-Token', s.csrfValue)
     .set('Cookie', [s.refreshCookie, s.csrfCookie].join('; '))
-    // The reset now carries a REQUIRED password re-verify alongside the confirmation phrase. This
-    // suite runs with AUTH_MFA_ENFORCED off, so the floor is phrase + password (no factor).
+    // The password re-verify is required alongside the phrase; this suite runs with AUTH_MFA_ENFORCED off, so the floor is phrase plus password.
     .send({ confirmation, currentPassword });
 }
 
-/** Seed a key-envelope slot + ENVELOPE_META row + a DeviceRegistry row. */
 async function seedEncryptedState(t: TestApp, s: Session): Promise<void> {
   const keyTable = tableName(t, 'TABLE_HOUSEHOLD_KEY_ENVELOPE');
   const now = new Date().toISOString();
@@ -163,10 +144,7 @@ describe('encrypted-workspace reset', () => {
     const res = await reset(t, s, RESET_PHRASE);
     expect(res.status).toBe(204);
 
-    // The response clears the caller's refresh + CSRF cookies so the SPA's
-    // hard reload to /login can't replay a now-revoked refresh cookie at
-    // GET /auth/refresh (mirrors DELETE /auth/account). Express clears a
-    // cookie by re-emitting it with an empty value + a past Expires date.
+    // The response clears the refresh and CSRF cookies so the SPA's reload to /login cannot replay a revoked refresh cookie; Express clears a cookie by re-emitting it with an empty value and a past Expires.
     const setCookie = res.headers['set-cookie'] as unknown as string[] | undefined;
     const clearedCookies = Array.isArray(setCookie) ? setCookie : [];
     const isCleared = (name: string): boolean =>
@@ -178,7 +156,6 @@ describe('encrypted-workspace reset', () => {
     expect(isCleared(REFRESH_COOKIE_NAME)).toBe(true);
     expect(isCleared(CSRF_COOKIE_NAME)).toBe(true);
 
-    // Household sync rows gone.
     const muts = (await scanAll<MutationLogRow>(
       t.doc,
       tableName(t, 'TABLE_MUTATION_LOG'),
@@ -191,14 +168,12 @@ describe('encrypted-workspace reset', () => {
     )).filter((r) => r.householdId === s.householdId);
     expect(devices).toHaveLength(0);
 
-    // Key-envelope rows (slots + ENVELOPE_META) gone.
     const keyRows = (await scanAll<HouseholdKeyEnvelopeRow>(
       t.doc,
       tableName(t, 'TABLE_HOUSEHOLD_KEY_ENVELOPE'),
     )).filter((r) => r.householdId === s.householdId);
     expect(keyRows).toHaveLength(0);
 
-    // S3 prefix empty.
     const list = await s3.send(
       new ListObjectsV2Command({
         Bucket: snapshotsBucket,
@@ -207,7 +182,6 @@ describe('encrypted-workspace reset', () => {
     );
     expect(list.KeyCount ?? 0).toBe(0);
 
-    // Auth rows PRESERVED — user + credential + email reservation survive.
     const userRow = await t.doc.send(
       new GetCommand({ TableName: tableName(t, 'TABLE_USER'), Key: { userId: s.userId } }),
     );
@@ -221,7 +195,6 @@ describe('encrypted-workspace reset', () => {
     );
     expect((cred.Item as CredentialRow | undefined)?.userId).toBe(s.userId);
 
-    // Sessions revoked — every refresh-token row for the user is revoked.
     const refresh = (await scanAll<RefreshTokenRow>(
       t.doc,
       tableName(t, 'TABLE_REFRESH_TOKEN'),
@@ -229,13 +202,11 @@ describe('encrypted-workspace reset', () => {
     expect(refresh.length).toBeGreaterThan(0);
     expect(refresh.every((r) => r.revokedAt !== null)).toBe(true);
 
-    // The current access token is denylisted.
     const stale = await request(t.app.getHttpServer())
       .get('/api/v1/auth/passkey/list')
       .set('Authorization', `Bearer ${s.accessToken}`);
     expect(stale.status).toBe(401);
 
-    // Audit trail retained — started + completed.
     const events = (await scanAll<AuthEventRow>(
       t.doc,
       tableName(t, 'TABLE_AUTH_EVENT'),
@@ -243,7 +214,6 @@ describe('encrypted-workspace reset', () => {
     expect(events.some((e) => e.eventType === 'encrypted_workspace_reset_started')).toBe(true);
     expect(events.some((e) => e.eventType === 'encrypted_workspace_reset_completed')).toBe(true);
 
-    // Account preserved: a fresh login with the same credentials succeeds.
     const reLogin = await request(t.app.getHttpServer())
       .post('/api/v1/auth/login')
       .set('Origin', process.env.WEB_ORIGIN!)
@@ -273,7 +243,7 @@ describe('encrypted-workspace reset', () => {
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
 
-    // Household data untouched — the gate fails closed before the sweep.
+    // The gate fails closed before the sweep.
     const muts = (await scanAll<MutationLogRow>(
       t.doc,
       tableName(t, 'TABLE_MUTATION_LOG'),
@@ -283,8 +253,7 @@ describe('encrypted-workspace reset', () => {
 
   it('applies the shared per-account backoff after repeated wrong passwords', async () => {
     const s = await signupVerifyLogin(t);
-    // The first 4 wrong-password attempts pass through the grace window; the 5th
-    // is throttled (mirrors delete-account's backoff coverage).
+    // The first 4 wrong-password attempts pass through the grace window; the 5th is throttled.
     for (let i = 0; i < 4; i += 1) {
       const r = await reset(t, s, RESET_PHRASE, 'WrongPassw0rd!');
       expect(r.status).toBe(401);
@@ -303,7 +272,6 @@ describe('encrypted-workspace reset', () => {
     const first = await reset(t, s, RESET_PHRASE);
     expect(first.status).toBe(204);
 
-    // The first reset revoked the session; mint a fresh one to re-run.
     const reLogin = await request(t.app.getHttpServer())
       .post('/api/v1/auth/login')
       .set('Origin', process.env.WEB_ORIGIN!)

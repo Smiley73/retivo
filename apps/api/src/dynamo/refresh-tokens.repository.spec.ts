@@ -1,15 +1,5 @@
-/**
- * Focused unit test for `RefreshTokensRepository.listAllForUser`'s pagination:
- * a user's refresh-token
- * partition can exceed DynamoDB's 1 MB `Query` response limit, at which point
- * DynamoDB returns a `LastEvaluatedKey` alongside a short `Items` page. The
- * old single-`Query` implementation silently returned only that first page —
- * both the account export's `refreshTokens` section and password-change's
- * revoke-all-sessions sweep would then miss the remaining rows. Stubs the
- * document client directly so
- * multi-page behavior is asserted at the boundary without needing to seed
- * enough real DynamoDB Local data to cross the 1 MB response threshold.
- */
+// RefreshTokensRepository against a stubbed document client: `listAllForUser` and `listFamily` follow LastEvaluatedKey past the 1 MB Query limit (a single Query would miss rows in the
+// account export and the revoke-all sweep), and `revokeFamily` chunks transactions past the 100-item cap.
 import { randomUUID } from 'node:crypto';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
@@ -74,14 +64,7 @@ describe('RefreshTokensRepository.listAllForUser — pagination', () => {
   });
 });
 
-/**
- * `listFamily` pagination: a single-`Query` implementation
- * stopped after the first page, so a token family whose rows landed past a
- * partition-level page boundary (driven by the whole user's partition, not
- * the family's own size) was returned incomplete — reuse detection would
- * then revoke and denylist only part of a compromised family. Mirrors the
- * `listAllForUser` stubbed-client harness above.
- */
+// A single-Query listFamily stopped after the first page, so a family past a partition-level page boundary came back incomplete and reuse detection revoked only part of it.
 describe('RefreshTokensRepository.listFamily — pagination', () => {
   it('loops on LastEvaluatedKey and returns every family row across multiple pages', async () => {
     const userId = randomUUID();
@@ -118,9 +101,7 @@ describe('RefreshTokensRepository.listFamily — pagination', () => {
   });
 
   it('keeps reading past pages whose filtered Items are empty but which carry a continuation key', async () => {
-    // The reported reproduction: a single filtered Query returned [] for a
-    // family that had members waiting on a later page. Two consecutive
-    // empty-but-continuing pages, to prove the loop doesn't stop after one.
+    // A filtered Query used to return [] for a family with members on a later page; two consecutive empty-but-continuing pages prove the loop does not stop after one.
     const userId = randomUUID();
     const tokenFamilyId = randomUUID();
     const pageOneKey = { userId, tokenHash: 'other-1' };
@@ -198,14 +179,7 @@ describe('RefreshTokensRepository.listFamily — pagination', () => {
   });
 });
 
-/**
- * `revokeFamily`: DynamoDB's
- * `TransactWriteItems` hard-caps at 100 items per call. `SessionRevocationService
- * .revokeAll` can pass every active refresh row for a user — well over 100 for
- * an account with many devices/rotations — so an unchunked single transaction
- * fails outright past that limit. Assert the chunking directly rather than
- * seeding 101 real rows through emulators.
- */
+// TransactWriteItems caps at 100 items, and revokeAll can pass well over 100 refresh rows for an account with many devices, so an unchunked transaction fails outright.
 describe('RefreshTokensRepository.revokeFamily — chunking past the 100-item transaction limit', () => {
   function row(userId: string, n: number): RefreshTokenRow {
     return { userId, tokenHash: `hash-${n}` } as RefreshTokenRow;

@@ -1,26 +1,5 @@
-/**
- * Jest `globalTeardown` — drops this run's namespaced DynamoDB tables
- * and S3 buckets once, after the whole suite finishes.
- *
- * Runs in the jest-main process, which already ran `jest.config.cjs`
- * (the single env-bootstrap point): the repo-root `.env`, the emulator
- * endpoint/credential defaults, and `JEST_RUN_ID` are all in
- * `process.env` here — no own dotenv, no reliance on `jest.setup.ts`
- * (which only runs inside workers).
- *
- * Every worker created `retirement-test-${JEST_RUN_ID}-${JEST_WORKER_ID}-*`
- * resources, so teardown prefix-matches `retirement-test-${JEST_RUN_ID}-`
- * (trailing hyphen anchored so a run id that is a numeric prefix of a
- * concurrent run's id cannot cross-delete) across *all* worker ids —
- * not the static 15-key `TABLE_ENV_KEYS`. A concurrently-running
- * second jest process owns a different `JEST_RUN_ID` and is untouched;
- * the shared container itself is never touched.
- *
- * A hard-killed run leaks its set (this hook never fires) — that is a
- * permanently accepted constraint: `-inMemory` DynamoDB Local
- * means any `pnpm emu:down`/restart wipes everything, and the next run
- * reusing that jest-main pid drops the matching prefix.
- */
+// Jest globalTeardown: drops this run's `retirement-test-${JEST_RUN_ID}-*` DynamoDB tables and S3 buckets across all worker ids.
+// A hard-killed run leaks its set; restarting the emulator wipes it.
 import {
   DynamoDBClient,
   ListTablesCommand,
@@ -34,19 +13,9 @@ import {
   DeleteBucketCommand,
 } from '@aws-sdk/client-s3';
 /**
- * Fail loud: jest.config.cjs must have stamped `JEST_RUN_ID` in the
- * jest-main process before the worker pool forked. A missing id means
- * the runner is misconfigured — worker namespacing would silently
- * degrade and this hook could not identify this run's resources (would
- * leak every table). The single shared guard for both this module and
- * `jest.setup.ts` (DRY) — message stays context-neutral so it reads
- * correctly from either call site.
- *
- * Exported so the negative path (unset → throw) is unit-testable
- * without booting a whole jest run.
- *
- * @returns the resolved `JEST_RUN_ID`
- * @throws if `process.env.JEST_RUN_ID` is unset/empty
+ * Fails loud when `JEST_RUN_ID` is unset: worker namespacing would degrade and this hook could not identify the run's resources.
+ * Exported so the unset-throws path is testable (test-isolation.spec.ts).
+ * @throws if `JEST_RUN_ID` is unset or empty
  */
 export function assertRunId(): string {
   const runId = process.env.JEST_RUN_ID;
@@ -85,10 +54,7 @@ async function dropTables(
   credentials: Creds,
 ): Promise<void> {
   const endpoint = process.env.DYNAMODB_ENDPOINT;
-  // jest.config.cjs unconditionally defaults DYNAMODB_ENDPOINT in this
-  // same jest-main process — a missing value means the runner is
-  // misconfigured, not a legitimate skip. Refuse to silently no-op
-  // (would orphan this run's tables).
+  // jest.config.cjs defaults the endpoint, so a missing value is a misconfigured runner; a silent no-op would orphan this run's tables.
   if (!endpoint) {
     throw new Error(
       'DYNAMODB_ENDPOINT is not set in globalTeardown — jest.config.cjs ' +
@@ -120,10 +86,7 @@ async function dropBuckets(
   credentials: Creds,
 ): Promise<void> {
   const endpoint = process.env.S3_ENDPOINT;
-  // jest.config.cjs unconditionally defaults S3_ENDPOINT in this same
-  // jest-main process — a missing value means the runner is
-  // misconfigured, not a legitimate skip. Refuse to silently no-op
-  // (would orphan this run's snapshot buckets).
+  // jest.config.cjs defaults the endpoint, so a missing value is a misconfigured runner; a silent no-op would orphan this run's buckets.
   if (!endpoint) {
     throw new Error(
       'S3_ENDPOINT is not set in globalTeardown — jest.config.cjs must ' +

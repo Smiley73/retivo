@@ -1,23 +1,5 @@
-/**
- * Server-authoritative "Delete workspace data" clear integration tests
- * against the local emulator (DynamoDB Local
- * + Moto S3).
- *
- * Covers POST /sync/workspace/clear: the authorized clear (zero live
- * aggregates on bootstrap incl. data this device never knew about + a wedged
- * version counter), password/backoff/CSRF/auth rejections, the JWT-scoped
- * household guard, DTO validation, audit events, eraseHistory on/off + the
- * keep-key purge that preserves the live snapshot, the purgeHistoryOnly
- * retry, and multi-device convergence via the strictly-greater watermark
- * (CURSOR_EXPIRED at since === pre-clear head).
- *
- * Per the repo's testing convention, sync/auth API behaviour is verified
- * end-to-end here (emulator-backed) through the real HTTP + DynamoDB + S3
- * path rather than via shallow unit tests. The forced-purge-failure seam
- * lives in clear-workspace-purge-order.spec.ts (needs a service override);
- * the @Throttle 5/hr limit lives in clear-workspace-throttle.spec.ts (the
- * shared harness disables throttling).
- */
+// POST /sync/workspace/clear against the local emulator: the authorized clear, rejections, household scoping, audit events, eraseHistory on/off, the
+// purgeHistoryOnly retry and multi-device convergence. The forced purge failure and the @Throttle 5/hr limit live in the clear-workspace-* specs.
 import request from 'supertest';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
@@ -36,12 +18,7 @@ import { CompactorService } from '../compactor/compactor.service.js';
 import { SnapshotsService } from '../sync/snapshots.service.js';
 import type { AuthEventRow, MutationLogRow } from '../dynamo/types.js';
 
-/**
- * Seed the full sync state for one mutation directly — WorkspaceMeta,
- * MutationLog, AND AggregateVersion. Bypasses `POST /sync/push` (a
- * plaintext push 403s). `sequenceId` is controllable so tests know the
- * pre-clear head cursor.
- */
+// Seeds WorkspaceMeta, MutationLog and AggregateVersion directly, since a plaintext push 403s; `sequenceId` is controllable so tests know the pre-clear head cursor.
 async function seedOne(
   t: TestApp,
   s: Session,
@@ -109,12 +86,7 @@ async function seedOne(
   return sequenceId;
 }
 
-/**
- * Seed an AggregateVersion row whose counter is WEDGED ahead of any durable
- * content (no MutationLog row, no snapshot). This is the 2026-07-01 incident
- * shape the old client-tombstone delete could not remove; the server sweep
- * is type-agnostic and clears it regardless.
- */
+// A wedged AggregateVersion counter with no MutationLog row or snapshot, the shape the old client-tombstone delete could not remove; the server sweep is type-agnostic.
 async function seedWedgedCounter(t: TestApp, s: Session): Promise<string> {
   const aggregateId = randomUUID();
   await t.doc.send(
@@ -254,8 +226,7 @@ describe('POST /sync/workspace/clear', () => {
   describe('authorized clear', () => {
     it('clears every live aggregate — incl. data this device never knew about — so bootstrap returns empty', async () => {
       const s = await loginAsFreshUser(t);
-      // Failure-mode #1: a device-B push this device never pulled. Seeded
-      // directly to represent server-side state A cannot enumerate locally.
+      // A device-B push this device never pulled, seeded directly as server-side state A cannot enumerate locally.
       await seedOne(t, s, randomUUID());
 
       const res = await clearWorkspace(t, s, {
@@ -284,7 +255,6 @@ describe('POST /sync/workspace/clear', () => {
       });
       expect(res.status).toBe(201);
 
-      // The type-agnostic sweep removed the wedged AggregateVersion row too.
       expect(await householdAggregateVersions(t, s.householdId)).toHaveLength(0);
       const boot = await bootstrap(t, s);
       expect(boot.body.workspaceSnapshot.aggregates).toHaveLength(0);
@@ -318,13 +288,10 @@ describe('POST /sync/workspace/clear', () => {
       expect(res.status).toBe(401);
       expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
 
-      // Nothing swept.
       expect((await householdMutations(t, s.householdId)).length).toBeGreaterThan(0);
       const events = await auditEventsFor(t, s.userId);
-      // A workspace_clear_failed audit row was written for the rejection.
       expect(events).toContain('workspace_clear_failed');
-      // _started lands only after a successful verify — a rejected password
-      // must never emit it (guards the audit ordering).
+      // `_started` lands only after a successful verify, so a rejected password must never emit it.
       expect(events).not.toContain('workspace_clear_started');
     });
 
@@ -340,7 +307,6 @@ describe('POST /sync/workspace/clear', () => {
       });
       expect(res.status).toBe(400);
 
-      // The other household's data is untouched — no cross-household clear.
       expect((await householdMutations(t, other.householdId)).length).toBeGreaterThan(0);
     });
   });
@@ -364,11 +330,9 @@ describe('POST /sync/workspace/clear', () => {
       expect(res.status).toBe(201);
       expect(res.body.historyErased).toBe(false);
 
-      // The prior snapshot survives alongside the fresh empty one.
       const snaps = (await listSnapshots(t, s)).body as Array<{ snapshotId: string }>;
       expect(snaps.map((x) => x.snapshotId)).toContain(priorSnapshotId);
 
-      // Restoring it actually recovers the prior workspace aggregate.
       const restored = await restore(t, s, priorSnapshotId);
       expect(restored.status).toBe(201);
       const boot = await bootstrap(t, s);
@@ -390,13 +354,10 @@ describe('POST /sync/workspace/clear', () => {
       expect(res.status).toBe(201);
       expect(res.body.historyErased).toBe(true);
 
-      // Only the fresh empty snapshot remains.
       const snaps = (await listSnapshots(t, s)).body as Array<{ snapshotId: string }>;
       expect(snaps).toHaveLength(1);
       expect(snaps.map((x) => x.snapshotId)).not.toContain('2026-01-01T00-00-00-000Z');
 
-      // WorkspaceMeta still resolves to a live snapshot object (no dangling
-      // pointer) and it is empty.
       const meta = await t.doc.send(
         new GetCommand({
           TableName: tableName(t, 'TABLE_WORKSPACE_META'),
@@ -414,8 +375,7 @@ describe('POST /sync/workspace/clear', () => {
   describe('multi-device convergence (watermark bump)', () => {
     it('a device sitting exactly at the pre-clear head cursor gets CURSOR_EXPIRED (since === max, strict watermark)', async () => {
       const s = await loginAsFreshUser(t);
-      // Backdated so the head is deterministically below the clear-time
-      // watermark regardless of same-second KSUID ordering.
+      // Backdated so the head is deterministically below the clear-time watermark regardless of same-second KSUID ordering.
       const headCursor = KSUID.fromParts(
         Date.now() - 10 * 60_000,
         randomBytes(16),
@@ -428,13 +388,11 @@ describe('POST /sync/workspace/clear', () => {
       });
       expect(res.status).toBe(201);
 
-      // A second device polling from the real pre-clear head cursor is
-      // force-expired → it re-bootstraps onto the empty snapshot.
+      // A second device polling from the real pre-clear head is force-expired and re-bootstraps onto the empty snapshot.
       const atHead = await pull(t, s, headCursor);
       expect(atHead.status).toBe(409);
       expect(atHead.body.error.code).toBe('CURSOR_EXPIRED');
 
-      // And a device further behind ('0') is likewise expired.
       const behind = await pull(t, s, '0');
       expect(behind.status).toBe(409);
       expect(behind.body.error.code).toBe('CURSOR_EXPIRED');

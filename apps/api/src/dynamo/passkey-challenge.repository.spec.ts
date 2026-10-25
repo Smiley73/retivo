@@ -1,16 +1,5 @@
-/**
- * Integration tests for `PasskeyChallengeRepository` against DynamoDB Local.
- * Covers the issue/consume contract at
- * the repository layer:
- *  - consume on a missing key returns null;
- *  - issue + consume round-trips the row and single-use-consumes it (a
- *    second consume of the same key returns null);
- *  - issue overwrites an existing row under the same key.
- *
- * The cross-instance / concurrent-consume / reader-enforced-expiry
- * GUARANTEES live in `../test/passkey-challenge-store.spec.ts` — this file
- * covers the repository's own contract in isolation.
- */
+// PasskeyChallengeRepository's issue/consume contract on DynamoDB Local: a missing key consumes to null, issue then consume round-trips and is single-use, and issue overwrites an existing row.
+// The cross-instance, concurrent-consume and expiry guarantees live in passkey-challenge-store.spec.ts.
 import { randomUUID } from 'node:crypto';
 import { bootstrapTestApp, type TestApp } from '../test/test-helpers.js';
 import { PasskeyChallengeRepository } from './passkey-challenge.repository.js';
@@ -43,7 +32,6 @@ describe('PasskeyChallengeRepository', () => {
     await repo.issue(row);
 
     expect(await repo.consume(key)).toEqual(row);
-    // Single-use: the same key is gone the second time.
     expect(await repo.consume(key)).toBeNull();
   });
 

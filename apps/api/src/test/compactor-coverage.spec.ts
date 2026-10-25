@@ -1,11 +1,4 @@
-/**
- * Coverage enforcement — focused unit test for the compactor's
- * verify-then-delete sweep. The emulator round-trip lives in `compactor.spec.ts`
- * (stray-keep / stray-delete / EMF); this file drives `CompactorService`
- * directly with stubbed DynamoDB + S3 clients so the coverage decision (delete a
- * COVERED row, KEEP an uncovered strand, emit `CompactorCoverageViolation`) is
- * asserted deterministically with no AppModule / emulator dependency.
- */
+// The compactor's verify-then-delete sweep driven directly with stubbed DynamoDB and S3 clients: delete a covered row, keep an uncovered strand, emit CompactorCoverageViolation.
 import {
   BatchWriteCommand,
   GetCommand,
@@ -22,7 +15,6 @@ import { CompactorService } from '../compactor/compactor.service.js';
 
 const MUTATION_LOG_TABLE = 'TABLE_MUTATION_LOG';
 
-/** A KSUID comfortably outside the compactor's 60 s safety margin. */
 function settledSeq(minutesAgo: number): string {
   return KSUID.fromParts(Date.now() - minutesAgo * 60_000, Buffer.alloc(16)).string;
 }
@@ -40,9 +32,7 @@ interface SnapshotAggregate {
 
 interface Harness {
   service: CompactorService;
-  /** sequenceIds actually issued to BatchWrite DeleteRequests. */
   deletedSeqs: string[];
-  /** Lines written to process.stdout during the run (EMF metrics). */
   stdoutLines: string[];
   restore: () => void;
 }
@@ -52,14 +42,12 @@ function buildHarness(opts: {
   baseline: SnapshotAggregate[];
   recent: Array<{ sequenceId: string; aggregateId: string; version: number; operation: 'create' | 'update' | 'delete' }>;
   sweep: Array<{ sequenceId: string; aggregateId: string; version: number }>;
-  /** Deployment stack the config stub reports for the per-stack EMF namespace. */
   stack?: string;
 }): Harness {
   const deletedSeqs: string[] = [];
   const doc = {
     send: jest.fn(async (command: unknown) => {
       if (command instanceof GetCommand) {
-        // fetchMeta
         return {
           Item: {
             householdId: 'hh-1',
@@ -74,8 +62,6 @@ function buildHarness(opts: {
       if (command instanceof QueryCommand) {
         const kce =
           (command.input as { KeyConditionExpression?: string }).KeyConditionExpression ?? '';
-        // queryAllSince (sequenceId > :s) returns the recent rows as full log
-        // rows; deleteUpToCutoff (sequenceId <= :c) returns the projected sweep.
         if (kce.includes('> :s')) {
           return {
             Items: opts.recent.map((r) => ({
@@ -121,19 +107,14 @@ function buildHarness(opts: {
     }),
   } as unknown as S3Client;
 
-  // Return the requested stack for the STACK key (drives the per-stack EMF
-  // namespace); every other config key echoes back its own name, matching
-  // the pre-existing stub behavior the table-name reads rely on.
+  // STACK returns the requested stack (drives the per-stack EMF namespace); every other key echoes its own name, as the table-name reads rely on.
   const stack = opts.stack ?? 'test';
   const config = {
     get: (k: string) => (k === 'STACK' ? stack : k),
   } as unknown as never;
   const service = new CompactorService(doc, s3, config);
 
-  // The EMF emitter uses a synchronous fd-1 write (`fs.writeSync`,
-  // Lambda-freeze-safe — see compactor.service.ts), NOT `process.stdout.write`,
-  // so capture at the `fs.writeSync` layer for fd 1 and pass every other fd
-  // through to the real implementation.
+  // The EMF emitter writes with `fs.writeSync` (Lambda-freeze-safe), not `process.stdout.write`, so capture fd 1 at that layer and pass other fds through.
   const stdoutLines: string[] = [];
   const realWriteSync = fs.writeSync.bind(fs);
   const stdoutSpy = jest.spyOn(fs, 'writeSync').mockImplementation(((
@@ -165,7 +146,6 @@ function baseAggregate(id: string, version: number): SnapshotAggregate {
   };
 }
 
-/** The CloudWatch namespace of a captured CompactorCoverageViolation EMF line. */
 function coverageNamespace(lines: string[]): string | undefined {
   const emf = coverageEmf(lines);
   if (!emf) return undefined;
@@ -202,7 +182,6 @@ describe('CompactorService — coverage sweep', () => {
       cursor,
       baseline: [baseAggregate('A', 1)],
       recent: [{ sequenceId: seqCovered, aggregateId: 'A', version: 2, operation: 'update' }],
-      // The <= cutoff sweep sees both the just-compacted A@2 and the orphan B@1.
       sweep: [
         { sequenceId: seqCovered, aggregateId: 'A', version: 2 },
         { sequenceId: seqStrand, aggregateId: 'B', version: 1 },
@@ -216,13 +195,10 @@ describe('CompactorService — coverage sweep', () => {
       h.restore();
     }
 
-    // Covered A@2 deleted; uncovered strand B@1 kept (never in the delete set).
     expect(h.deletedSeqs).toContain(seqCovered);
     expect(h.deletedSeqs).not.toContain(seqStrand);
 
-    // CompactorCoverageViolation EMF emitted, per-stack namespace
-    // Retivo/test/Compactor (default harness stack = `test`),
-    // value = the count of uncovered rows kept, no householdId dimension.
+    // The EMF line uses the per-stack namespace Retivo/test/Compactor, the count of uncovered rows kept as its value, and no householdId dimension.
     const emf = coverageEmf(h.stdoutLines);
     expect(emf).toBeTruthy();
     const aws = emf!._aws as {
@@ -238,12 +214,8 @@ describe('CompactorService — coverage sweep', () => {
   });
 
   it('KEEPS a stray whose aggregate IS in the snapshot but at a LOWER version than the swept row (counter v13 vs snapshot v10), emitting CompactorCoverageViolation', async () => {
-    // The confirmed incident shape: the AggregateVersion counter
-    // reached v13 but the durable snapshot only covers v10. The stray v13 log
-    // row's aggregate IS present in the snapshot map — key presence alone is
-    // NOT coverage; the snapshot version must be >= the row's version. A
-    // DIFFERENT aggregate's recent create drives the run so the merged snapshot
-    // keeps A at its baseline v10 (no recent mutation touches A).
+    // The incident shape: the AggregateVersion counter reached v13 but the durable snapshot only covers v10. Key presence in the snapshot map is not
+    // coverage; the snapshot version must be >= the row's version. A different aggregate's create drives the run, leaving A at its baseline v10.
     const cursor = settledSeq(30);
     const seqCovered = settledSeq(20); // recent create of C → covered
     const seqStrand = settledSeq(40); // below cursor, A committed at v13, snapshot only holds v10
@@ -251,7 +223,6 @@ describe('CompactorService — coverage sweep', () => {
       cursor,
       baseline: [baseAggregate('A', 10)],
       recent: [{ sequenceId: seqCovered, aggregateId: 'C', version: 1, operation: 'create' }],
-      // The <= cutoff sweep sees the just-compacted C@1 and the strand A@13.
       sweep: [
         { sequenceId: seqCovered, aggregateId: 'C', version: 1 },
         { sequenceId: seqStrand, aggregateId: 'A', version: 13 },
@@ -265,9 +236,7 @@ describe('CompactorService — coverage sweep', () => {
       h.restore();
     }
 
-    // Covered C@1 deleted; A@13 kept — the snapshot holds A only at v10, so a
-    // key-presence-only check (`snapshotVersion !== undefined`) would wrongly
-    // delete it; the `snapshotVersion >= row.version` guard is what keeps it.
+    // A key-presence-only check would wrongly delete A@13 (the snapshot holds A only at v10); the `snapshotVersion >= row.version` guard keeps it.
     expect(h.deletedSeqs).toContain(seqCovered);
     expect(h.deletedSeqs).not.toContain(seqStrand);
 
@@ -306,9 +275,7 @@ describe('CompactorService — coverage sweep', () => {
   });
 
   it('emits CompactorCoverageViolation into a per-stack namespace so dev and prod are isolated', async () => {
-    // A dev-stack emission and a prod-stack emission must land in DISTINCT
-    // namespaces — the whole point: a dev coverage violation can never
-    // trip the prod compactor-coverage alarm (and vice versa).
+    // A dev and a prod emission must land in distinct namespaces, so a dev coverage violation can never trip the prod alarm.
     const scenario = () => ({
       cursor: settledSeq(30),
       baseline: [baseAggregate('A', 1)],

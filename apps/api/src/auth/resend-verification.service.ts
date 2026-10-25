@@ -23,12 +23,10 @@ import { emailFingerprint } from '../common/email-fingerprint.js';
 import { SIGNUP_EXPIRY_SEC, VERIFICATION_TTL_SEC } from './signup.service.js';
 
 const RESEND_COOLDOWN_SEC = 60;
-export const RESEND_DAILY_LIMIT = 5;
-/**
- * Constant minimum handler time: early-return branches are far cheaper than a real send, so timing would be a
- * user-existence oracle. A fixed floor (not jitter, which averages out) makes it identical for every account state.
- */
-export const RESPONSE_TIME_FLOOR_MS = 200;
+const RESEND_DAILY_LIMIT = 5;
+// Constant minimum handler time: early-return branches are far cheaper than a real send, so timing would be a
+// user-existence oracle. A fixed floor (not jitter, which averages out) hides it.
+const RESPONSE_TIME_FLOOR_MS = 200;
 
 export interface ResendResult {
   /** Always set, so the response shape is identical for a hit and a no-op. */

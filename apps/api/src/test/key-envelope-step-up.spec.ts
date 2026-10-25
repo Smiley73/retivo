@@ -1,37 +1,8 @@
-/**
- * Step-up gate + archive coverage for the key-envelope write endpoints:
- * `PUT`/
- * `DELETE /auth/key-envelopes/:slotId` and `POST …/activate`, under
- * `AUTH_MFA_ENFORCED=true` (a dedicated flag-off describe block covers the
- * password floor with the flag off). Mirrors the pattern in
- * `destructive-ops-step-up.spec.ts`.
- *
- * Coverage:
- *  - a replacing PUT / a DELETE with no proof are refused (400
- *    STEP_UP_PROOF_MISSING) and leave the stored slot + meta byte-identical;
- *  - a valid proof succeeds and is consumed (single-use);
- *  - first activation (no slot rows) stays proofless; a PUT creating a
- *    brand-new slot id once the household already holds another slot now
- *    REQUIRES a proof (the reversal of the retired
- *    exemption);
- *  - a replace, a DELETE, and a change-password re-wrap of the password slot
- *    each leave the prior slot/meta readable as archive rows, invisible to
- *    GET / listSlots;
- *  - the post-reset re-wrap exemption is proved end to end (not merely at the
- *    pure-predicate level): proofless while owed, refused once repaired;
- *  - an encrypted-workspace reset / account deletion each leave no archive
- *    row behind (anti-resurrection);
- *  - a client-supplied archive-namespaced `:slotId` is rejected at the
- *    boundary;
- *  - `POST /auth/key-envelopes/activate`: atomic first-slot-set activation,
- *    refusal into a non-empty set, meta-only-residue activation, and a
- *    concurrent-activation race;
- *  - a stranded household (a `password` slot, no `recovery` slot) finishes
- *    through the proof-carrying repair PUT, on Email-OTP alone;
- *  - the `passkey_prf` password floor, in both `AUTH_MFA_ENFORCED` states.
- */
+// Step-up gate and archive coverage for PUT/DELETE /auth/key-envelopes/:slotId and POST .../activate under AUTH_MFA_ENFORCED=true,
+// plus the passkey_prf password floor with the flag off.
 import request from 'supertest';
 import { generateSync } from 'otplib';
+import { QueryCommand } from '@aws-sdk/lib-dynamodb';
 import {
   STRONG_PASSWORD,
   bootstrapTestApp,
@@ -84,8 +55,6 @@ function recoveryBody(
   };
 }
 
-/** A well-formed `password`-type slot PUT body, mirroring atomic-password-change.spec.ts's
- * `passwordSlot`. */
 function passwordSlotBody(
   householdId: string,
   envelopeSetVersion: number,
@@ -110,8 +79,6 @@ function passwordSlotBody(
   };
 }
 
-/** A well-formed `passkey_prf`-type slot PUT body. No `credentialBinding` — the ownership check only runs when one is
- *  present, and every caller here is proving the step-up gate, not that check. */
 function newPasskeyPrfBody(
   householdId: string,
   envelopeSetVersion: number,
@@ -151,19 +118,8 @@ describe('key-envelope step-up gate + archive', () => {
     else process.env.AUTH_MFA_ENFORCED = priorEnforced;
   });
 
-  /**
-   * Log in an EXISTING verified user through the MFA challenge. Factored out
-   * of `signupAndLoginMfa` so a test
-   * can re-authenticate under a NEW password after a reset and get a session
-   * whose write authority reflects the CURRENT credential revision — exactly
-   * what a real post-reset client does before it can write the canonical
-   * password slot again.
-   *
-   * Defaults to the email-OTP factor; pass `totpSecret` (an already-enrolled
-   * TOTP secret) to use TOTP instead — required for a SECOND login of the
-   * same user within one test, since Email-OTP send carries a 60s per-user
-   * cooldown shared across every purpose (a second send silently no-ops).
-   */
+  // Logs in an existing user through the MFA challenge, so a test can re-authenticate under a new password after a reset. Pass `totpSecret`
+  // for a second login in one test: Email-OTP send has a 60s per-user cooldown shared across purposes, so a second send silently no-ops.
   async function loginMfa(
     email: string,
     password: string,
@@ -225,7 +181,6 @@ describe('key-envelope step-up gate + archive', () => {
     return loginMfa(email, STRONG_PASSWORD, userId);
   }
 
-
   function putRecovery(s: Session, body: Record<string, unknown>): request.Test {
     return authSet(s)(request(t.app.getHttpServer()).put('/api/v1/auth/key-envelopes/recovery')).send(
       body,
@@ -244,11 +199,37 @@ describe('key-envelope step-up gate + archive', () => {
     ).send(body);
   }
 
-  /** `POST /auth/key-envelopes/activate`. */
   function activate(s: Session, body: Record<string, unknown>): request.Test {
     return authSet(s)(
       request(t.app.getHttpServer()).post('/api/v1/auth/key-envelopes/activate'),
     ).send(body);
+  }
+
+  async function keyEnvelopeRows(
+    householdId: string,
+    slotIdPrefix?: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    const raw = await t.doc.send(
+      new QueryCommand({
+        TableName: process.env.TABLE_HOUSEHOLD_KEY_ENVELOPE,
+        KeyConditionExpression: slotIdPrefix
+          ? 'householdId = :h AND begins_with(slotId, :p)'
+          : 'householdId = :h',
+        ExpressionAttributeValues: slotIdPrefix
+          ? { ':h': householdId, ':p': slotIdPrefix }
+          : { ':h': householdId },
+      }),
+    );
+    return (raw.Items ?? []) as Array<Record<string, unknown>>;
+  }
+
+  // The archived meta row carries the slot-id membership at the displaced version, the manifest the restore runbook keys off.
+  async function expectFirstVersionArchived(householdId: string, slotIds: string[]): Promise<void> {
+    const archived = await keyEnvelopeRows(householdId, 'ARCHIVE#');
+    expect(archived.some((r) => r.wrappedKey === 'b3JpZ2luYWw')).toBe(true);
+    expect(archived.some((r) => r.envelopeSetTag === 'dGFnMQ')).toBe(true);
+    expect(archived.every((r) => typeof r.expiresAt === 'number')).toBe(true);
+    expect(archived.find((r) => r.slotId === 'ARCHIVE#1#ENVELOPE_META')?.slotIds).toEqual(slotIds);
   }
 
   it('first activation (no slot rows) stays proofless even with MFA enforced', async () => {
@@ -258,14 +239,8 @@ describe('key-envelope step-up gate + archive', () => {
   });
 
   it('creating a brand-new slot id on a household that already holds a slot now REQUIRES a proof', async () => {
-    // This is the deliberate inversion of what this same integration case
-    // used to assert: a PUT creating a genuinely new slot id (the first-ever
-    // `passkey_prf` slot) used to stay exempt once the household already held
-    // another slot, on the theory that "an add displaces nothing". That was
-    // rejected — the exemption was reachable indefinitely on a
-    // stolen bearer session, which could mint a brand-new unlock path with no
-    // proof, any time. Refused proofless; accepted with a valid proof (and
-    // the password floor, since the written slot is `passkey_prf`).
+    // A PUT creating a new slot id on a household that already holds one needs a proof: otherwise a stolen bearer session could mint a new
+    // unlock path (e.g. a first `passkey_prf` slot) with no proof, any time. The password floor applies too, since the slot is `passkey_prf`.
     const s = await signupAndLoginMfa();
     await putRecovery(s, recoveryBody(s.householdId, 1, 'dGFnMQ')).expect(204);
 
@@ -318,7 +293,7 @@ describe('key-envelope step-up gate + archive', () => {
       });
       expect(ok.status).toBe(204);
 
-      // Replay the same (now-consumed) code on a third replace — rejected.
+      // The consumed code is rejected when replayed on a third replace.
       const replay = await putRecovery(s, {
         ...recoveryBody(s.householdId, 3, 'dGFnMw', 'cmVwbGFjZWQyfQ'),
         method: 'email_otp',
@@ -367,22 +342,13 @@ describe('key-envelope step-up gate + archive', () => {
   describe('the post-reset re-wrap exemption', () => {
     it('a password-slot PUT succeeds proofless while the re-wrap is owed, and is refused once the slot is repaired', async () => {
       const s = await signupAndLoginMfa();
-      // Enrol TOTP so the SECOND login below (after the reset) can verify its
-      // MFA challenge without a second Email-OTP send — that send shares a
-      // 60s per-user cooldown with the first login's, which would otherwise
-      // silently no-op.
+      // Enrolling TOTP lets the second login after the reset verify without a second Email-OTP send, which would hit the 60s cooldown.
       const totpSecret = await enrollTotp(t, s);
 
-      // Seed the canonical password slot under the PRE-reset credential
-      // revision (first activation — proofless regardless of slot type).
       await putPasswordSlot(s, passwordSlotBody(s.householdId, 1, 'dGFnMQ')).expect(204);
 
-      // A password-reset (forgot-password flow) mints a NEW credentialRevision
-      // WITHOUT touching the key-envelope password slot — the user, by
-      // definition, doesn't hold the old password needed to re-wrap it. This
-      // is exactly the state `isCanonicalPasswordRewrapOwed` exists to detect:
-      // the stored slot's revision no longer matches the credential's current
-      // one.
+      // A password reset mints a new credentialRevision without touching the password slot (the user lacks the old password to re-wrap it): the
+      // state `isCanonicalPasswordRewrapOwed` detects.
       const reqReset = await request(t.app.getHttpServer())
         .post('/api/v1/auth/request-password-reset')
         .set('Origin', ORIGIN())
@@ -396,25 +362,16 @@ describe('key-envelope step-up gate + archive', () => {
         .send({ token: resetToken, newPassword: NEW_PASSWORD });
       expect(consume.status).toBe(204);
 
-      // The reset revoked every session; sign back in under the new
-      // password to get write authority over the new credential revision.
       const s2 = await loginMfa(s.email, NEW_PASSWORD, s.userId, totpSecret);
 
-      // OWED: the stored slot still carries the pre-reset revision — the
-      // controller's `resolveCredentialRevision(existingPasswordSlot) !==
-      // resolveCredentialRevision(currentCredential)` compare (not merely the
-      // pure predicate) must actually derive `true` here for this to pass
-      // with no proof at all.
+      // Owed: the controller's revision compare, not only the predicate, must derive true here for the write to pass with no proof.
       const proofless = await putPasswordSlot(
         s2,
         passwordSlotBody(s2.householdId, 2, 'dGFnMg', 'cmV3cmFwcGVk'),
       );
       expect(proofless.status).toBe(204);
 
-      // REPAIRED: the slot now carries the CURRENT credential revision, so
-      // the same derivation must read `false` — the exemption closes and the
-      // next password-slot write is refused proofless, leaving the repaired
-      // slot + meta byte-identical.
+      // Repaired: the slot carries the current revision, so the exemption closes and the next password-slot write is refused, leaving slot and meta byte-identical.
       const repo = t.module.get(HouseholdKeyEnvelopesRepository);
       const before = await repo.getStableEnvelopeSet(s2.householdId);
 
@@ -446,26 +403,7 @@ describe('key-envelope step-up gate + archive', () => {
       expect(slots).toHaveLength(1);
       expect(slots[0]!.wrappedKey).toBe('cmVwbGFjZWQ');
 
-      // The archive row (namespaced, version 1) is directly readable off the
-      // table but invisible to every live-set reader.
-      const { DynamoDBDocumentClient, QueryCommand } = await import('@aws-sdk/lib-dynamodb');
-      void DynamoDBDocumentClient;
-      const raw = await t.doc.send(
-        new QueryCommand({
-          TableName: process.env.TABLE_HOUSEHOLD_KEY_ENVELOPE,
-          KeyConditionExpression: 'householdId = :h AND begins_with(slotId, :p)',
-          ExpressionAttributeValues: { ':h': s.householdId, ':p': 'ARCHIVE#' },
-        }),
-      );
-      const archived = (raw.Items ?? []) as Array<Record<string, unknown>>;
-      expect(archived.some((r) => r.wrappedKey === 'b3JpZ2luYWw')).toBe(true);
-      expect(archived.some((r) => r.envelopeSetTag === 'dGFnMQ')).toBe(true);
-      expect(archived.every((r) => typeof r.expiresAt === 'number')).toBe(true);
-      // The archived meta row carries the live slot-id membership at that
-      // version — the manifest the restore runbook keys off,
-      // since the archived slot rows alone only say what was displaced.
-      const archivedMeta = archived.find((r) => r.slotId === 'ARCHIVE#1#ENVELOPE_META');
-      expect(archivedMeta?.slotIds).toEqual(['recovery']);
+      await expectFirstVersionArchived(s.householdId, ['recovery']);
 
       const get = await authSet(s)(
         request(t.app.getHttpServer()).get('/api/v1/auth/key-envelopes'),
@@ -491,21 +429,7 @@ describe('key-envelope step-up gate + archive', () => {
       const { slots } = await repo.getStableEnvelopeSet(s.householdId);
       expect(slots).toHaveLength(0);
 
-      const { QueryCommand } = await import('@aws-sdk/lib-dynamodb');
-      const raw = await t.doc.send(
-        new QueryCommand({
-          TableName: process.env.TABLE_HOUSEHOLD_KEY_ENVELOPE,
-          KeyConditionExpression: 'householdId = :h AND begins_with(slotId, :p)',
-          ExpressionAttributeValues: { ':h': s.householdId, ':p': 'ARCHIVE#' },
-        }),
-      );
-      const archived = (raw.Items ?? []) as Array<Record<string, unknown>>;
-      expect(archived.some((r) => r.wrappedKey === 'b3JpZ2luYWw')).toBe(true);
-      expect(archived.some((r) => r.envelopeSetTag === 'dGFnMQ')).toBe(true);
-      expect(archived.every((r) => typeof r.expiresAt === 'number')).toBe(true);
-      // Membership manifest at the displaced version.
-      const archivedMeta = archived.find((r) => r.slotId === 'ARCHIVE#1#ENVELOPE_META');
-      expect(archivedMeta?.slotIds).toEqual(['recovery']);
+      await expectFirstVersionArchived(s.householdId, ['recovery']);
 
       const get = await authSet(s)(
         request(t.app.getHttpServer()).get('/api/v1/auth/key-envelopes'),
@@ -532,32 +456,13 @@ describe('key-envelope step-up gate + archive', () => {
       });
       expect(res.status).toBe(200);
 
-      const { QueryCommand } = await import('@aws-sdk/lib-dynamodb');
-      const raw = await t.doc.send(
-        new QueryCommand({
-          TableName: process.env.TABLE_HOUSEHOLD_KEY_ENVELOPE,
-          KeyConditionExpression: 'householdId = :h AND begins_with(slotId, :p)',
-          ExpressionAttributeValues: { ':h': s.householdId, ':p': 'ARCHIVE#' },
-        }),
-      );
-      const archived = (raw.Items ?? []) as Array<Record<string, unknown>>;
-      expect(archived.some((r) => r.wrappedKey === 'b3JpZ2luYWw')).toBe(true);
-      expect(archived.some((r) => r.envelopeSetTag === 'dGFnMQ')).toBe(true);
-      expect(archived.every((r) => typeof r.expiresAt === 'number')).toBe(true);
-      // The change-password commit stamps the same membership manifest as a
-      // key-envelope PUT would.
-      const archivedMeta = archived.find((r) => r.slotId === 'ARCHIVE#1#ENVELOPE_META');
-      expect(archivedMeta?.slotIds).toEqual(['password']);
+      await expectFirstVersionArchived(s.householdId, ['password']);
     });
 
     it('an account deletion removes archive rows too (anti-resurrection)', async () => {
       const s = await signupAndLoginMfa();
-      // enrollTotp() itself now spends one Email-OTP step-up proof (the
-      // enrollment gate's floor for an account with no factor yet);
-      // sendAndRecoverStepUpOtp clears the 60s
-      // cooldown before each send so the SECOND Email-OTP step below isn't
-      // silently no-op'd, and the final delete step below uses TOTP instead
-      // of a third Email-OTP send.
+      // enrollTotp() spends one Email-OTP step-up proof; sendAndRecoverStepUpOtp clears the 60s cooldown before each send, and the delete step
+      // uses TOTP instead of a third Email-OTP send.
       const secret = await enrollTotp(t, s);
       await putRecovery(s, recoveryBody(s.householdId, 1, 'dGFnMQ')).expect(204);
       const code = await sendAndRecoverStepUpOtp(t, s, 'key_envelope_replace');
@@ -571,20 +476,11 @@ describe('key-envelope step-up gate + archive', () => {
         .send({ currentPassword: STRONG_PASSWORD, method: 'totp', code: generateSync({ secret }) })
         .expect(204);
 
-      const { QueryCommand } = await import('@aws-sdk/lib-dynamodb');
-      const raw = await t.doc.send(
-        new QueryCommand({
-          TableName: process.env.TABLE_HOUSEHOLD_KEY_ENVELOPE,
-          KeyConditionExpression: 'householdId = :h',
-          ExpressionAttributeValues: { ':h': s.householdId },
-        }),
-      );
-      expect(raw.Items ?? []).toEqual([]);
+      expect(await keyEnvelopeRows(s.householdId)).toEqual([]);
     });
 
     it('an encrypted-workspace reset removes archive rows too', async () => {
       const s = await signupAndLoginMfa();
-      // Same two-factor-type split as the account-deletion case above.
       const secret = await enrollTotp(t, s);
       await putRecovery(s, recoveryBody(s.householdId, 1, 'dGFnMQ')).expect(204);
       const code = await sendAndRecoverStepUpOtp(t, s, 'key_envelope_replace');
@@ -605,24 +501,7 @@ describe('key-envelope step-up gate + archive', () => {
         })
         .expect(204);
 
-      const { QueryCommand } = await import('@aws-sdk/lib-dynamodb');
-      const raw = await t.doc.send(
-        new QueryCommand({
-          TableName: process.env.TABLE_HOUSEHOLD_KEY_ENVELOPE,
-          KeyConditionExpression: 'householdId = :h',
-          ExpressionAttributeValues: { ':h': s.householdId },
-        }),
-      );
-      expect(raw.Items ?? []).toEqual([]);
-    });
-
-    it('rejects a client-supplied archive-namespaced :slotId at the boundary', async () => {
-      const s = await signupAndLoginMfa();
-      const res = await authSet(s)(
-        request(t.app.getHttpServer()).put('/api/v1/auth/key-envelopes/ARCHIVE%231%23recovery'),
-      ).send(recoveryBody(s.householdId, 1, 'dGFnMQ'));
-      expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe('INVALID_SLOT_ID');
+      expect(await keyEnvelopeRows(s.householdId)).toEqual([]);
     });
   });
 
@@ -662,8 +541,6 @@ describe('key-envelope step-up gate + archive', () => {
       });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('ENVELOPE_SET_NOT_EMPTY');
-      // Distinct from an ordinary version conflict — the client must be able
-      // to tell the two apart.
       expect(res.body.error.code).not.toBe('STALE_ENVELOPE_VERSION');
 
       const after = await repo.getStableEnvelopeSet(s.householdId);
@@ -672,19 +549,8 @@ describe('key-envelope step-up gate + archive', () => {
 
     it('two concurrent activations cannot both win: the loser fails and leaves no partial slot behind', async () => {
       const s = await signupAndLoginMfa();
-      // Discriminating bodies: the two racers
-      // propose DIFFERENT final slot sets, so a stray row left behind by the
-      // loser is visible. `bodyA` writes only `password`; `bodyB` writes
-      // `password` AND `recovery` — a slot id `bodyA` never touches. The
-      // original version sent the identical single-slot body from both
-      // racers, so a non-atomic implementation (slot rows written first,
-      // meta conditional Put attempted second, with no real transaction
-      // tying them together) would satisfy `slots.toHaveLength(1)` even
-      // though it never actually rolled back the loser's write — the
-      // loser's row was byte-identical to the winner's. With distinct
-      // bodies, a stray `recovery` row from a losing `bodyB` survives in
-      // the final set even when `bodyA` (which never mentions `recovery`)
-      // is the one whose meta bump won.
+      // The racers propose different final slot sets (`bodyA` writes only `password`, `bodyB` also `recovery`), so a stray row from the loser is
+      // visible. Identical single-slot bodies would pass `slots.toHaveLength(1)` even for a non-atomic implementation that never rolled back.
       const bodyA = () => ({
         slots: [passwordSlotBody(s.householdId, 1, 'ignored').slot],
         envelopeSetVersion: 1,
@@ -708,18 +574,13 @@ describe('key-envelope step-up gate + archive', () => {
       const winners = attempts.filter((x) => x.res.status === 204);
       const losers = attempts.filter((x) => x.res.status !== 204);
       expect(winners).toHaveLength(1);
-      // A real ConditionalCheckFailed on the meta item (409) is the expected
-      // outcome; a transient transaction-conflict mapping (503) is also
-      // acceptable — mirrors the tolerance auth.spec.ts's own concurrent-write
-      // race uses. Never a partial write either way.
+      // A ConditionalCheckFailed on the meta item (409) is expected; a transient transaction-conflict mapping (503) is also acceptable. Never a partial write.
       expect([409, 503]).toContain(losers[0]!.res.status);
 
       const repo = t.module.get(HouseholdKeyEnvelopesRepository);
       const { slots, meta } = await repo.getStableEnvelopeSet(s.householdId);
       expect(meta?.envelopeSetVersion).toBe(1);
-      // The live slot set must be EXACTLY the winner's proposed set — never
-      // a mix that would reveal a stray row surviving from the loser's
-      // (supposedly rolled-back) transaction.
+      // The live slot set must be exactly the winner's proposed set, with no stray row from the loser's transaction.
       expect(slots.map((sl) => sl.slotId).sort()).toEqual(
         winners[0]!.slotIds.slice().sort(),
       );
@@ -733,9 +594,7 @@ describe('key-envelope step-up gate + archive', () => {
         expectedEnvelopeSetVersion: 0,
         envelopeSetTag: 'dGFnMQ',
       }).expect(204);
-      // Manufacture meta-only residue: the slot row is gone, but the
-      // meta row is still at version 1 — exactly what a failed prior attempt
-      // (meta bumped, slot write lost) leaves behind.
+      // Meta-only residue, as a failed prior attempt leaves it: the slot row is gone but the meta row is still at version 1.
       const repo = t.module.get(HouseholdKeyEnvelopesRepository);
       await repo.deleteSlot(s.householdId, 'password');
 
@@ -757,11 +616,8 @@ describe('key-envelope step-up gate + archive', () => {
       const repo = t.module.get(HouseholdKeyEnvelopesRepository);
       const before = await repo.getStableEnvelopeSet(s.householdId);
 
-      // Two `password`-type slots each pass the canonical-id pin on their
-      // own; only a check ACROSS elements catches the pair. Without it both
-      // build a `Put` on the same (householdId, slotId) item inside one
-      // transaction, which DynamoDB refuses with a `ValidationException`
-      // nothing in the commit path maps — a 500 for a client-controlled body.
+      // Two `password`-type slots each pass the canonical-id pin; only a check across elements catches the pair. Without it both build a Put on
+      // the same item in one transaction, which DynamoDB refuses with an unmapped ValidationException: a 500 for a client-controlled body.
       const res = await activate(s, {
         slots: [
           passwordSlotBody(s.householdId, 1, 'ignored').slot,
@@ -782,9 +638,7 @@ describe('key-envelope step-up gate + archive', () => {
 
   describe('stranded household repair', () => {
     it('a password-slot-only household PUTting the missing recovery slot is refused proofless, and succeeds with a valid key_envelope_replace proof on Email-OTP alone', async () => {
-      // No TOTP, no passkey enrolled — Email-OTP is the only factor this
-      // account has, proving the "setup session is long gone" claim: a test
-      // that enrolled a factor first would prove nothing about it.
+      // Email-OTP is this account's only factor; enrolling another first would not prove a repair works once the setup session is gone.
       const s = await signupAndLoginMfa();
       await putPasswordSlot(s, passwordSlotBody(s.householdId, 1, 'dGFnMQ')).expect(204);
 
@@ -841,8 +695,7 @@ describe('key-envelope step-up gate + archive', () => {
       const afterWrong = await repo.getStableEnvelopeSet(s.householdId);
       expect(afterWrong).toEqual(before);
 
-      // The wrong password failed BEFORE the factor was checked, so the same
-      // Email-OTP code is still unconsumed here.
+      // The wrong password failed before the factor was checked, so the same Email-OTP code is still unconsumed.
       const ok = await authSet(s)(
         request(t.app.getHttpServer()).put('/api/v1/auth/key-envelopes/passkey_prf'),
       ).send({
@@ -856,12 +709,7 @@ describe('key-envelope step-up gate + archive', () => {
   });
 });
 
-/**
- * The `passkey_prf` password floor's flag-OFF case — the gap being closed: before the password floor,
- * `!AUTH_MFA_ENFORCED` degraded a proof-required envelope write straight to the bare session with
- * NOTHING checked. Boots a SEPARATE app with the flag unset (read at controller construction),
- * mirroring `factor-management-step-up.spec.ts`'s flag-off block.
- */
+// Boots a separate app with the flag unset (read at controller construction): without the password floor, a proof-required envelope write would degrade to the bare session with nothing checked.
 describe('key-envelope password floor — flag-off degrade floor', () => {
   let t2: TestApp;
   let priorEnforced: string | undefined;

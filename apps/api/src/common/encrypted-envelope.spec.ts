@@ -1,8 +1,4 @@
-/**
- * Unit tests for the server-side strict encrypted-envelope detector.
- * Mirrors the web client's `isStrictEncryptedEnvelope`
- * cases so the two guards agree on the wire shape.
- */
+// The server-side strict encrypted-envelope detector, with the same cases as the web client's isStrictEncryptedEnvelope so the two guards agree on the wire shape.
 import { isStrictEncryptedEnvelope } from './encrypted-envelope.js';
 
 function validEnvelope(
@@ -58,9 +54,7 @@ describe('isStrictEncryptedEnvelope', () => {
     expect(isStrictEncryptedEnvelope(validEnvelope({ aadVersion: 'x' }))).toBe(false);
   });
 
-  // An otherwise-valid
-  // envelope carrying one extra key is refused at the zero-knowledge
-  // boundary, not stored/served alongside real ciphertext.
+  // An extra key is refused at the zero-knowledge boundary, not stored or served alongside real ciphertext.
   it('rejects an otherwise-valid envelope carrying one extra key', () => {
     expect(isStrictEncryptedEnvelope(validEnvelope({ name: 'plaintext-leak' }))).toBe(
       false,

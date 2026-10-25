@@ -1,20 +1,5 @@
-/**
- * Transient transaction cancels must not be cached as permanent
- * CONFLICTs. When a push's per-mutation TransactWriteItems is canceled
- * for a TRANSIENT reason (TransactionConflict from concurrent
- * transactions on the same item, throttling, …) — i.e. NO cancellation
- * reason is `ConditionalCheckFailed` — PushService must RETHROW so the
- * global exception filter returns a 5xx and the client retries. It must
- * NOT call buildConflictOutcome, which would fabricate a CONFLICT and
- * cache it in the idempotency table for 7 days, permanently rejecting a
- * valid mutation.
- *
- * Focused unit test (not an emulator integration test): the local
- * DynamoDB emulator cannot deterministically produce a TransactionConflict
- * cancellation, so we stub the document client to throw a crafted
- * `TransactionCanceledException` and assert (a) push rethrows and (b) no
- * idempotency row is written.
- */
+// A transient transaction cancel (TransactionConflict, throttling: no ConditionalCheckFailed reason) must be rethrown as a 5xx so the client retries, never fabricated into a CONFLICT cached for 7 days.
+// A unit test with a crafted TransactionCanceledException, since the emulator cannot produce a TransactionConflict deterministically.
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import {
   GetCommand,
@@ -57,12 +42,8 @@ describe('PushService — transient transaction cancel', () => {
     const householdId = 'hh-1';
     const deviceId = randomUUID();
 
-    // Track every command the doc client receives so we can assert no
-    // idempotency-row Put was attempted after the transient cancel.
     const sentCommands: unknown[] = [];
 
-    // A cancel whose reasons are ALL TransactionConflict (transient) — no
-    // ConditionalCheckFailed anywhere → classifyTransactCancel = 'unknown'.
     const transientCancel = new TransactionCanceledException({
       message: 'Transaction cancelled, please refer to CancellationReasons',
       $metadata: {},
@@ -77,13 +58,9 @@ describe('PushService — transient transaction cancel', () => {
       send: jest.fn(async (command: unknown) => {
         sentCommands.push(command);
         if (command instanceof TransactWriteCommand) {
-          // The per-mutation apply transaction is the only TransactWrite in
-          // this path; make it fail with the transient cancel.
           throw transientCancel;
         }
         if (command instanceof GetCommand) {
-          // fetchCurrentVersion (only reached on the conflict path we must
-          // NOT take) — return empty if ever called.
           return { Item: undefined };
         }
         return {};
@@ -116,10 +93,7 @@ describe('PushService — transient transaction cancel', () => {
       }),
     ).rejects.toBe(transientCancel);
 
-    // No idempotency row was cached: the only TransactWriteCommand sent was
-    // the apply transaction that threw — buildConflictOutcome (which sends a
-    // second TransactWriteCommand with the idempotency-key Put) was never
-    // reached, so a retry of the same mutation can still succeed.
+    // The only TransactWriteCommand sent was the apply transaction that threw; buildConflictOutcome (which would send the idempotency-key Put) was never reached, so a retry can still succeed.
     const transactWrites = sentCommands.filter(
       (c) => c instanceof TransactWriteCommand,
     );

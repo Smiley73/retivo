@@ -1,23 +1,5 @@
-/**
- * Integration tests for `PasskeysRepository.updateCounterAndLastUsed` — the
- * zero-counter-preserving conditional write that closes the signature-counter
- * TOCTOU on both passkey paths. Run against
- * DynamoDB Local.
- *
- * The condition is `attribute_not_exists(#counter) OR #counter = :zero OR
- * #counter < :counter` (`:counter` is the presented value; the zero-exception
- * keys on the STORED `#counter`):
- *  - the first write after enrollment is allowed,
- *  - a zero-counter authenticator (stored 0 → presented 0) still updates
- *    `lastUsedAt` (the majority of platform/synced passkeys report counter 0
- *    forever — must not break sign-in),
- *  - a monotonic advance on a counter-using authenticator is allowed,
- *  - a regression / lost update (stored > 0, presented ≤ stored, including a
- *    presented-0 rollback) is rejected.
- *
- * Fresh userIds/credentialIds per case keep the suite independent on the shared
- * DynamoDB Local instance.
- */
+// PasskeysRepository.updateCounterAndLastUsed on DynamoDB Local: the conditional write closes the signature-counter TOCTOU on both passkey paths. It allows the first write, a zero counter staying at 0 (most platform passkeys never advance) and a
+// monotonic advance, and rejects a regression or lost update. The zero-exception keys on the stored counter, so a presented-0 rollback of a non-zero counter is rejected.
 import { randomUUID } from 'node:crypto';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
@@ -79,13 +61,10 @@ describe('PasskeysRepository.updateCounterAndLastUsed — conditional write', ()
     const userId = randomUUID();
     const credentialId = randomUUID();
     await repo.insert(row(userId, credentialId, 0));
-    // First sign-in: 0 → 0 must succeed (most platform passkeys never advance).
     await repo.updateCounterAndLastUsed(userId, credentialId, 0, '2026-06-14T02:00:00.000Z');
     let got = await repo.find(userId, credentialId);
     expect(got?.counter).toBe(0);
     expect(got?.lastUsedAt).toBe('2026-06-14T02:00:00.000Z');
-    // A subsequent 0 → 0 sign-in must also succeed (regression test for existing
-    // zero-counter sign-in).
     await repo.updateCounterAndLastUsed(userId, credentialId, 0, '2026-06-14T03:00:00.000Z');
     got = await repo.find(userId, credentialId);
     expect(got?.lastUsedAt).toBe('2026-06-14T03:00:00.000Z');
@@ -104,15 +83,12 @@ describe('PasskeysRepository.updateCounterAndLastUsed — conditional write', ()
     const userId = randomUUID();
     const credentialId = randomUUID();
     await repo.insert(row(userId, credentialId, 9));
-    // presented < stored — a possible cloned-credential signal.
     await expect(
       repo.updateCounterAndLastUsed(userId, credentialId, 4, '2026-06-14T05:00:00.000Z'),
     ).rejects.toBeInstanceOf(ConditionalCheckFailedException);
-    // presented === stored on a non-zero counter — a lost update, also rejected.
     await expect(
       repo.updateCounterAndLastUsed(userId, credentialId, 9, '2026-06-14T05:00:00.000Z'),
     ).rejects.toBeInstanceOf(ConditionalCheckFailedException);
-    // The stored counter is unchanged.
     const got = await repo.find(userId, credentialId);
     expect(got?.counter).toBe(9);
   });
@@ -121,13 +97,10 @@ describe('PasskeysRepository.updateCounterAndLastUsed — conditional write', ()
     const userId = randomUUID();
     const credentialId = randomUUID();
     await repo.insert(row(userId, credentialId, 9));
-    // stored 9 / presented 0: the zero-exception must key on the STORED counter,
-    // not the presented value — otherwise a presented-0 assertion would roll the
-    // stored counter back to 0 at the DB layer and defeat clone detection.
+    // stored 9, presented 0: the zero-exception keys on the stored counter, or a presented-0 assertion would roll it back and defeat clone detection.
     await expect(
       repo.updateCounterAndLastUsed(userId, credentialId, 0, '2026-06-14T06:00:00.000Z'),
     ).rejects.toBeInstanceOf(ConditionalCheckFailedException);
-    // The stored counter is unchanged — no rollback occurred.
     const got = await repo.find(userId, credentialId);
     expect(got?.counter).toBe(9);
   });
@@ -179,12 +152,9 @@ describe('PasskeysRepository.listForUser — pagination', () => {
       seenStartKeys.push(input.ExclusiveStartKey);
       calls += 1;
       if (calls === 1) {
-        // First page reports only one row and a LastEvaluatedKey — the shape
-        // DynamoDB returns when the 1 MB response-size limit truncates a
-        // partition, not when the partition is actually exhausted.
+        // One row plus a LastEvaluatedKey is the shape DynamoDB returns when the 1 MB response limit truncates a partition, not when it is exhausted.
         return { Items: [rows[0]], LastEvaluatedKey: pageOneKey };
       }
-      // Second (final) page: the rest, no LastEvaluatedKey.
       return { Items: [rows[1], rows[2]] };
     });
 

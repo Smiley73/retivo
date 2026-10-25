@@ -13,8 +13,8 @@ import type { EnvConfig } from '../common/env.config.js';
 import { BaseRepository } from './base.repository.js';
 import type { WorkspaceMetaRow } from './types.js';
 
-/** UTC day stamp (`YYYY-MM-DD`), the daily push-quota reset boundary. */
-export function utcDayStamp(now: Date = new Date()): string {
+// UTC day stamp (`YYYY-MM-DD`), the daily push-quota reset boundary.
+function utcDayStamp(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
 
@@ -22,12 +22,10 @@ export type QuotaChargeResult =
   | { ok: true }
   | { ok: false; exceeded: 'mutations' | 'bytes' };
 
-/**
- * Thrown by `deleteForRestore` and `reinitializeForRestore` when a newer restore or clear already committed (its
- * `restoreEpoch` won). The caller must surface an error, since its reseed belongs to a different snapshot than the
- * winning pointer.
- */
-export class RestoreEpochLostError extends Error {
+// Thrown by `deleteForRestore` and `reinitializeForRestore` when a newer restore or clear already committed (its
+// `restoreEpoch` won). The caller must surface an error, since its reseed belongs to a different snapshot than the
+// winning pointer.
+class RestoreEpochLostError extends Error {
   constructor(readonly householdId: string) {
     super(
       `Workspace restore lost the epoch race for household ${householdId}; a newer restore/clear already committed.`,

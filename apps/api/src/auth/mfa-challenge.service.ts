@@ -11,7 +11,7 @@ import type { EnvConfig } from '../common/env.config.js';
 const MFA_CHALLENGE_TTL_SEC = 5 * 60;
 
 // The claim that bars the token from being used as a session bearer.
-export const MFA_CHALLENGE_PURPOSE = 'mfa_challenge';
+const MFA_CHALLENGE_PURPOSE = 'mfa_challenge';
 
 // The routine second factors; `passkey` leads when enrolled, being phishing-resistant.
 type MfaRoutineMethod = 'totp' | 'email_otp' | 'passkey';

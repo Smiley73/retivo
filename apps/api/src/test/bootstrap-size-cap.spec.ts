@@ -1,15 +1,5 @@
-/**
- * Focused unit tests for the bootstrap response size cap.
- *
- * The cap is "5 MB compressed". The old check approximated it
- * as `uncompressed > 5MB × 4`, assuming ~4:1 gzip on JSON — but every
- * payload is incompressible ciphertext, so that allowance
- * silently raised the cap to ~20 MB. The fixed check enforces the cap on
- * the ACTUAL gzipped size of the response.
- *
- * These tests stub the three repositories so they run WITHOUT the DynamoDB
- * emulator (the size logic lives entirely in BootstrapService.bootstrap).
- */
+// The bootstrap size cap is 5 MB compressed, enforced on the actual gzipped size: the old `uncompressed > 5MB x 4` check assumed ~4:1 gzip, but ciphertext is incompressible,
+// so it silently raised the cap to ~20 MB. The three repositories are stubbed, so no emulator is needed.
 import { randomBytes } from 'node:crypto';
 import { PayloadTooLargeException } from '@nestjs/common';
 import { BootstrapService } from '../sync/bootstrap.service.js';
@@ -31,13 +21,7 @@ function metaRow(): WorkspaceMetaRow {
   };
 }
 
-/**
- * Build a snapshot whose aggregate payloads carry `payloadFactory()`-shaped
- * bytes, sized so the JSON-serialized response totals at least `targetBytes`
- * uncompressed. High-entropy bytes barely shrink under gzip (so a >5 MB
- * uncompressed total stays >5 MB gzipped → 413); a compressible string of
- * the same uncompressed volume gzips far under 5 MB → passes.
- */
+// High-entropy bytes barely shrink under gzip, so a >5 MB uncompressed total stays >5 MB gzipped (413); a compressible string of the same volume gzips far under 5 MB.
 function buildSnapshot(
   targetBytes: number,
   payloadFactory: () => string,
@@ -68,7 +52,6 @@ function makeService(snapshot: SnapshotAggregate[]): BootstrapService {
     createIfMissing: async () => metaRow(),
   } as unknown as WorkspaceMetaRepository;
   const log = {
-    // No post-snapshot mutations — all the size lives in the snapshot half.
     pageSince: async () => ({ items: [], lastSequenceId: null, hasMore: false }),
   } as unknown as MutationLogRepository;
   const snapshots = {
@@ -79,9 +62,7 @@ function makeService(snapshot: SnapshotAggregate[]): BootstrapService {
 
 describe('BootstrapService — compressed size cap', () => {
   it('413s when the high-entropy (incompressible) response exceeds 5 MB gzipped', async () => {
-    // ~9 MB of random base64 gzips to ~6.8 MB (base64 only compresses ~25%),
-    // staying above the 5 MB compressed cap. The old ×4 allowance (which
-    // only tripped above ~20 MB uncompressed) would have passed this.
+    // ~9 MB of random base64 gzips to ~6.8 MB, above the cap; the old x4 allowance would have passed it.
     const snapshot = buildSnapshot(9 * 1024 * 1024, () =>
       randomBytes(48 * 1024).toString('base64'),
     );
@@ -94,13 +75,10 @@ describe('BootstrapService — compressed size cap', () => {
       details: { gzippedBytes: number };
     };
     expect(body.code).toBe('BOOTSTRAP_TOO_LARGE');
-    // The error reports the MEASURED gzipped size, and it is above the cap.
     expect(body.details.gzippedBytes).toBeGreaterThan(FIVE_MB);
   });
 
   it('passes the same uncompressed volume when it is highly compressible (gzips under 5 MB)', async () => {
-    // ~12 MB uncompressed of a single repeated character → gzips to a tiny
-    // fraction, well under the 5 MB compressed cap, so bootstrap succeeds.
     const snapshot = buildSnapshot(12 * 1024 * 1024, () => 'a'.repeat(64 * 1024));
     const service = makeService(snapshot);
 

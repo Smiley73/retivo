@@ -1,22 +1,5 @@
-/**
- * Unit tests for `SessionRevocationService.revokeAll`'s generation boundary.
- *
- * The integration suite (session-revocation-generation.spec.ts) only covers
- * the correctly-ordered cascade — the account row still exists and the
- * generation bump lands cleanly. These unit tests instead drive
- * `retireCurrentGeneration`'s two failure branches directly with a stubbed
- * `UsersRepository` / document client, mirroring
- * `dynamo/transact-write.spec.ts`'s crafted-`TransactionCanceledException`
- * approach (the local DynamoDB emulator cannot deterministically produce a
- * losing condition or a transient conflict):
- *
- *   (a) the `User` row is already gone → fails closed, no bump/tombstone Put
- *       is ever attempted;
- *   (b) the generation bump's own `ConditionCheck` loses on every bounded
- *       retry attempt → `503 SESSION_REVOCATION_CONFLICT`;
- *   (c) a transient cancellation survives `runTransactWrite`'s own bounded
- *       retry → the SAME `503 SESSION_REVOCATION_CONFLICT`, not a 500.
- */
+// SessionRevocationService.revokeAll's generation boundary, driving retireCurrentGeneration's failure branches with a stubbed UsersRepository and document client (the emulator cannot produce a losing condition or a transient conflict):
+// a missing User row fails closed with no bump or tombstone, and a bump that loses every bounded retry, or a transient cancellation outlasting runTransactWrite's retry, is 503 SESSION_REVOCATION_CONFLICT, not a 500.
 import 'reflect-metadata';
 import type { ConfigService } from '@nestjs/config';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
@@ -83,12 +66,7 @@ describe('SessionRevocationService.revokeAll — retireCurrentGeneration boundar
     await expect(svc.revokeAll({ userId: USER_ID })).rejects.toMatchObject({
       response: { code: 'SESSION_REVOCATION_CONFLICT' },
     });
-    // One `findByIdConsistent` + one `doc.send` per bounded-retry attempt — a
-    // losing ConditionCheck re-reads and retries rather than failing on the
-    // first loss (a concurrent revocation already achieved this call's goal).
-    // A strongly consistent re-read is used here specifically because the
-    // retry re-reads immediately after another writer's own commit to this
-    // item — the window where a plain replica read is likely stale.
+    // One consistent re-read and one doc.send per attempt: a losing ConditionCheck retries instead of failing on the first loss, and the re-read is strongly consistent because it follows another writer's commit to the same item.
     expect(users.findByIdConsistent).toHaveBeenCalledTimes(3);
     expect(doc.send).toHaveBeenCalledTimes(3);
   });
@@ -115,10 +93,7 @@ describe('SessionRevocationService.revokeAll — retireCurrentGeneration boundar
     await expect(svc.revokeAll({ userId: USER_ID })).rejects.toMatchObject({
       response: { code: 'SESSION_REVOCATION_CONFLICT' },
     });
-    // A transient reason is retried entirely INSIDE `runTransactWrite`'s own
-    // bounded retry (3 `doc.send` calls from ONE `retireCurrentGeneration`
-    // attempt) — it never loops `retireCurrentGeneration` itself again, so
-    // `findByIdConsistent` is read only once.
+    // A transient reason is retried inside runTransactWrite (3 doc.send calls from one attempt) and never loops retireCurrentGeneration, so the User row is read once.
     expect(users.findByIdConsistent).toHaveBeenCalledTimes(1);
     expect(doc.send).toHaveBeenCalledTimes(3);
   });

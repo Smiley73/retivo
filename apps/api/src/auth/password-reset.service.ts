@@ -37,13 +37,10 @@ import { SessionRevocationService } from './session-revocation.service.js';
  */
 export const RESET_TTL_SEC = 15 * 60;
 const RESET_COOLDOWN_SEC = 60;
-export const RESET_DAILY_LIMIT = 5;
-/**
- * Constant minimum elapsed time for the request handler: early-return branches are far cheaper than a real send, so
- * the timing would be a user-existence oracle. A fixed floor (not jitter, which averages out over repeated probes)
- * makes timing identical for every account state.
- */
-export const RESPONSE_TIME_FLOOR_MS = 200;
+const RESET_DAILY_LIMIT = 5;
+// Constant minimum elapsed time for the request handler: early-return branches are far cheaper than a real send, so
+// timing would be a user-existence oracle. A fixed floor (not jitter, which averages out) hides it.
+const RESPONSE_TIME_FLOOR_MS = 200;
 
 export interface RequestResetResult {
   /** Always set, so the response shape is identical for a hit and a no-op. */

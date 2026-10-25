@@ -1,34 +1,14 @@
-/**
- * Unit tests for PasswordValidatorService — the always-on HIBP breach check.
- *
- * Pins the post-flag behaviour:
- *   - The HIBP breach check runs on every validate() with no env flag (the
- *     removed HIBP_CHECK_ENABLED gate). A breached password → PASSWORD_PWNED.
- *   - The check fails open: when the HIBP call cannot complete (network
- *     error / timeout / non-200), the password is NOT rejected on that basis,
- *     while the local common-passwords check still rejects a known-weak one.
- *
- * No real network call is made: the "runs / rejects" cases stub
- * `HibpClient.isPwned`; the fail-open cases drive the real `HibpClient`
- * against a stubbed global `fetch` so the documented outage behaviour
- * (returns false) is exercised end-to-end.
- */
+// PasswordValidatorService's always-on HIBP check: a breached password is PASSWORD_PWNED, and the check fails open on network error, timeout or non-200
+// while the local common-passwords check still rejects.
 import 'reflect-metadata';
 import { BadRequestException } from '@nestjs/common';
 import { COMMON_PASSWORDS } from './data/common-passwords.js';
 import { HibpClient } from './hibp-client.js';
 import { PasswordValidatorService } from './password-validator.service.js';
 
-// Strong, unique, policy-passing password (≥16 chars, upper + lower + digit +
-// special, not in the common-passwords set) so only the HIBP branch can reject
-// it.
+// Policy-passing, so only the HIBP branch can reject it.
 const STRONG_UNIQUE_PASSWORD = 'Zq7vKp2mWx9rLt4n!';
-// Policy-passing length + complexity (16 chars, upper + lower + digit +
-// special), but its lowercase form is in the synthetic common-passwords set
-// injected for that one test → must still be rejected as PASSWORD_TOO_COMMON
-// regardless of HIBP availability. The complexity check runs on the original
-// password (so it needs an uppercase), while the common-set lookup is
-// case-insensitive (`password.toLowerCase()`).
+// Policy-passing, but its lowercase form is in the synthetic common-passwords set injected for one test; the complexity check runs on the original while the common-set lookup is case-insensitive.
 const COMMON_PASSWORD = 'CommonPassword1!';
 
 function pwnedCodeOf(err: unknown): string | undefined {
@@ -46,12 +26,10 @@ describe('PasswordValidatorService — length and complexity policy', () => {
     const service = new PasswordValidatorService(
       acceptingHibp as unknown as HibpClient,
     );
-    // 15 chars, otherwise fully compliant (upper + lower + digit + special).
     const fifteen = 'Zq7vKp2mWx4n!Rt';
     expect(fifteen).toHaveLength(15);
     const err = await service.validate(fifteen).catch((e: unknown) => e);
     expect(pwnedCodeOf(err)).toBe('PASSWORD_TOO_SHORT');
-    // The updated minimum (16) is surfaced in the message.
     expect((err as BadRequestException).getResponse()).toMatchObject({
       message: 'Password must be at least 16 characters.',
     });
@@ -61,7 +39,6 @@ describe('PasswordValidatorService — length and complexity policy', () => {
     const service = new PasswordValidatorService(
       acceptingHibp as unknown as HibpClient,
     );
-    // 16 chars with upper + lower + digit but NO special character.
     const noSpecial = 'Zq7vKp2mWx9rLt4n';
     expect(noSpecial).toHaveLength(16);
     const err = await service.validate(noSpecial).catch((e: unknown) => e);
@@ -89,7 +66,6 @@ describe('PasswordValidatorService — always-on HIBP breach check', () => {
       await expect(service.validate(STRONG_UNIQUE_PASSWORD)).rejects.toMatchObject({
         response: { code: 'PASSWORD_PWNED' },
       });
-      // The check ran without any env flag gating it.
       expect(hibp.isPwned).toHaveBeenCalledWith(STRONG_UNIQUE_PASSWORD);
     });
 
@@ -107,13 +83,11 @@ describe('PasswordValidatorService — always-on HIBP breach check', () => {
 
     afterEach(() => {
       globalThis.fetch = realFetch;
-      // Restores the COMMON_PASSWORDS.has spy the common-password case installs
-      // so every other test keeps the real, unmocked dataset.
+      // Restores the COMMON_PASSWORDS.has spy so other tests keep the real dataset.
       jest.restoreAllMocks();
     });
 
     it('accepts a strong password when the HIBP request errors', async () => {
-      // Real client, but the network layer rejects — its catch fails open.
       globalThis.fetch = jest
         .fn()
         .mockRejectedValue(new Error('network down')) as unknown as typeof fetch;
@@ -126,8 +100,6 @@ describe('PasswordValidatorService — always-on HIBP breach check', () => {
     });
 
     it('accepts a strong password when the HIBP request aborts (timeout)', async () => {
-      // Simulate the AbortController timeout path: fetch rejects with an
-      // AbortError, which the client's catch also fails open on.
       globalThis.fetch = jest.fn().mockImplementation(() => {
         const abort = new Error('The operation was aborted');
         abort.name = 'AbortError';
@@ -141,16 +113,7 @@ describe('PasswordValidatorService — always-on HIBP breach check', () => {
     });
 
     it('still rejects a known-weak password locally even when HIBP is down', async () => {
-      // Even with HIBP unreachable, the local common-passwords check is the
-      // primary defense and rejects before the HIBP call is ever reached.
-      // No real entry in the shipped dataset is both 16+ chars and carries a
-      // special character, so inject a synthetic common-passwords match scoped
-      // to just this test by spying on the shared `COMMON_PASSWORDS` set's
-      // `has` (restored via jest.restoreAllMocks() in afterEach so every other
-      // test keeps the real dataset). `COMMON_PASSWORD` clears the new
-      // length/complexity gates (16 chars, upper + lower + digit + special),
-      // and the lookup lowercases it — so the spy matches the lowercased form
-      // and validation reaches the common-passwords check.
+      // No shipped entry is both 16+ chars and carries a special character, so a synthetic match is injected by spying on COMMON_PASSWORDS' `has` for this test only; the lookup lowercases, so the spy matches the lowercased form.
       const hasSpy = jest
         .spyOn(COMMON_PASSWORDS, 'has')
         .mockImplementation((pw: string) => pw === COMMON_PASSWORD.toLowerCase());
@@ -163,7 +126,6 @@ describe('PasswordValidatorService — always-on HIBP breach check', () => {
       const err = await service.validate(COMMON_PASSWORD).catch((e: unknown) => e);
       expect(pwnedCodeOf(err)).toBe('PASSWORD_TOO_COMMON');
       expect(hasSpy).toHaveBeenCalledWith(COMMON_PASSWORD.toLowerCase());
-      // Local check short-circuits before any HIBP request.
       expect(fetchSpy).not.toHaveBeenCalled();
     });
   });

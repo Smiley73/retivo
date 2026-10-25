@@ -1,12 +1,5 @@
-/**
- * Unit tests for MfaService:
- *   - TOTP verification honours the ±1 step window and rejects outside it,
- *   - enroll start → confirm promotes the pending secret only on a live code,
- *   - disable clears the TOTP factor and remains idempotent.
- *
- * Pure unit test: the UserMfa repository + AuthEvents are stubbed, and otplib's
- * real TOTP implementation drives the math so the window behaviour is genuine.
- */
+// MfaService unit tests: TOTP ±1 step window, enrollment promotion, idempotent disable and the per-account TOTP lock, with the repository and
+// AuthEvents stubbed and otplib's real TOTP driving the math.
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
@@ -23,12 +16,7 @@ function buildAuth(): AuthEventsRepository {
   return { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuthEventsRepository;
 }
 
-/**
- * Default per-account TOTP lock stubs for tests that don't
- * exercise the lock itself: every attempt wins its reservation as failure #1,
- * well within the 3-failure grace window (never blocked), and clear is a
- * no-op success.
- */
+// Default lock stubs for tests that do not exercise the lock: every attempt wins its reservation as failure #1, inside the 3-failure grace window.
 function defaultLockStubs(): {
   reserveTotpAttempt: jest.Mock;
   clearTotpFailure: jest.Mock;
@@ -42,11 +30,7 @@ function defaultLockStubs(): {
   };
 }
 
-/**
- * A ±1-step (±30 s) TOTP helper matching the service's verify tolerance, built
- * on otplib v13's functional API. The default `@noble` crypto plugin is
- * sync-capable, so the sync variants keep these helpers synchronous.
- */
+// Matches the service's ±1-step (±30 s) verify tolerance; otplib v13's default @noble plugin is sync-capable, keeping the helpers synchronous.
 const TOTP_EPOCH_TOLERANCE_SECONDS = 30;
 const totp = {
   generateSecret: (): string => generateSecret(),
@@ -62,7 +46,6 @@ const totp = {
 describe('MfaService — TOTP', () => {
   it('accepts a current code and the immediately previous step (±1 window)', () => {
     const secret = totp.generateSecret();
-    // The service's own instance must accept a code generated for this secret.
     const code = totp.generate(secret);
     expect(totp.check(code, secret)).toBe(true);
   });
@@ -108,16 +91,13 @@ describe('MfaService — TOTP', () => {
     } as unknown as UserMfaRepository;
     const svc = new MfaService(userMfa, buildAuth());
 
-    // A code from a totally unrelated secret can't be within ±1 step.
     const wrong = totp.generate(totp.generateSecret());
     const ok = await svc.verifyTotp('u1', wrong);
     expect(ok).toBe(false);
   });
 
   it('verifyTotp returns false (not throw) on a malformed code', async () => {
-    // otplib v13's verify() throws TokenFormatError/TokenLengthError on
-    // non-digit or wrong-length input; the service must collapse those to a
-    // plain false so the controller returns 401 MFA_CODE_INVALID, not a 500.
+    // otplib v13's verify() throws TokenFormatError/TokenLengthError on non-digit or wrong-length input; the service must collapse that to false so the controller returns 401 MFA_CODE_INVALID, not a 500.
     const secret = totp.generateSecret();
     const row: UserMfaRow = {
       userId: 'u1',
@@ -179,11 +159,7 @@ describe('MfaService — enroll confirm', () => {
   });
 
   it('returns false, and does not audit, when the promotion loses a concurrent race (the conditional write rejects it)', async () => {
-    // Same shape as the happy-path test, but confirmTotpEnrollment reports a
-    // lost race — e.g. a concurrent enrollment already promoted a different
-    // pending secret between this read and the write. Before this repair,
-    // confirmTotpEnrollment's write was unconditional and its return type
-    // carried no such signal, so enrollConfirm always reported `true` here.
+    // confirmTotpEnrollment reports a lost race (a concurrent enrollment promoted a different pending secret between read and write); its write used to be unconditional, so enrollConfirm always reported true.
     const secret = totp.generateSecret();
     const row: UserMfaRow = {
       userId: 'u1',
@@ -236,8 +212,7 @@ describe('MfaService — enroll confirm', () => {
     const secret = totp.generateSecret();
     const confirmTotpEnrollment = jest.fn();
     const userMfa = {
-      // totpEnabled is true even though a pendingTotpSecret is also present —
-      // the race this guards against.
+      // totpEnabled with a pendingTotpSecret also present is the race this guards against.
       get: jest.fn().mockResolvedValue({
         userId: 'u1',
         totpEnabled: true,
@@ -312,7 +287,6 @@ describe('MfaService — disable (password-only step-up, controller-enforced)', 
 
     const changed = await svc.disable('u1');
     expect(changed).toBe(true);
-    // The cleared row drops the secret (a Put with the field absent).
     expect(put).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'u1', totpEnabled: false }),
     );
@@ -327,9 +301,7 @@ describe('MfaService — disable (password-only step-up, controller-enforced)', 
   });
 
   it('clears + audits a corrupt row (totpEnabled true, totpSecret absent)', async () => {
-    // A legacy/corrupt row with the flag set but no secret must still be
-    // clearable — otherwise the broken factor is no-op stuck and can never be
-    // re-enrolled (gate is on totpEnabled alone).
+    // A legacy or corrupt row with the flag set but no secret must still be clearable, or the broken factor is stuck and can never be re-enrolled.
     const put = jest.fn().mockResolvedValue(undefined);
     const userMfa = {
       get: jest
@@ -370,7 +342,6 @@ describe('MfaService — disable (password-only step-up, controller-enforced)', 
 });
 
 describe('MfaService — per-account TOTP lock', () => {
-  /** An enrolled row with no recorded miss. */
   function enabledRow(secret: string): UserMfaRow {
     return {
       userId: 'u1',
@@ -380,8 +351,6 @@ describe('MfaService — per-account TOTP lock', () => {
     };
   }
 
-  /** A row already past the 3-failure grace window with its latest failure
-   * "now" — `escalatingBackoffState` computes this as blocked. */
   function lockedRow(secret: string): UserMfaRow {
     return {
       ...enabledRow(secret),
@@ -390,14 +359,8 @@ describe('MfaService — per-account TOTP lock', () => {
     };
   }
 
-  /**
-   * In-memory stand-in for the repository's per-account lock contract, so a
-   * sequence (or a burst) of attempts sees the state each earlier attempt
-   * left behind: `reserveTotpAttempt` is a compare-and-swap on exactly the
-   * observed failure state — the same guarantee the real conditional
-   * `UpdateCommand` gives against a single item — and `getConsistent`
-   * reflects every committed swap and clear.
-   */
+  // An in-memory stand-in for the repository's lock contract: `reserveTotpAttempt` is a compare-and-swap on the observed failure state, as the real
+  // conditional UpdateCommand is, and `getConsistent` reflects every committed swap and clear.
   function lockStateStubs(
     row: UserMfaRow,
     initial: TotpFailureState = {},
@@ -461,7 +424,6 @@ describe('MfaService — per-account TOTP lock', () => {
     const auth = buildAuth();
     const svc = new MfaService(userMfa, auth);
 
-    // The CORRECT code — proving the lock refuses regardless of code validity.
     const code = totp.generate(secret);
     await expect(svc.verifyTotp('u1', code)).rejects.toBeInstanceOf(ThrottlerException);
     await expect(svc.verifyTotp('u1', code)).rejects.toMatchObject({ status: 429 });
@@ -499,8 +461,6 @@ describe('MfaService — per-account TOTP lock', () => {
       get: jest.fn().mockResolvedValue(row),
       getConsistent: jest.fn().mockResolvedValue(row),
       update: jest.fn().mockResolvedValue(undefined),
-      // The attempt is reserved before the code is checked — well within grace, so it must not
-      // block.
       reserveTotpAttempt: jest
         .fn()
         .mockResolvedValue({ totpFailureCount: 1, totpLastFailureAt: new Date().toISOString() }),
@@ -519,17 +479,14 @@ describe('MfaService — per-account TOTP lock', () => {
     const svc = new MfaService(userMfa, auth);
     const wrong = totp.generate(totp.generateSecret());
 
-    // 3 free (grace) misses, then the 4th miss — compared like any other, and
-    // the one that carries the count past the threshold (exponent 4 - 3 = 1
-    // → a 2 s window stamped "now").
+    // 3 free misses, then the 4th is compared like any other and carries the count past the threshold (a 2 s window stamped now).
     for (let i = 0; i < 4; i++) {
       expect(await svc.verifyTotp('u1', wrong)).toBe(false);
     }
     expect(state().totpFailureCount).toBe(4);
     expect(eventsOf(auth, 'mfa_totp_locked')).toHaveLength(1);
 
-    // Inside the window even the correct code is refused — and the refusal
-    // reserves nothing, so it cannot extend the window it was refused under.
+    // Inside the window even the correct code is refused, and the refusal reserves nothing so it cannot extend the window.
     await expect(svc.verifyTotp('u1', totp.generate(secret))).rejects.toBeInstanceOf(
       ThrottlerException,
     );
@@ -540,10 +497,7 @@ describe('MfaService — per-account TOTP lock', () => {
 
   it('reopens once the window has elapsed: the correct code is compared, verifies, and clears the lock', async () => {
     const secret = totp.generateSecret();
-    // Locked at the 4th miss (a 2 s window) stamped 3 s ago — elapsed. Previously
-    // this attempt was counted before being looked at, re-stamped the
-    // clock, and was refused: no correct code could ever verify again until
-    // 24 h of silence.
+    // Locked at the 4th miss (a 2 s window) stamped 3 s ago: elapsed. The attempt used to be counted before being looked at and re-stamped the clock, so no correct code could verify again for 24 h.
     const elapsed = new Date(Date.now() - 3_000).toISOString();
     const { userMfa, reserveTotpAttempt, clearTotpFailure, state } = lockStateStubs(
       enabledRow(secret),
@@ -553,7 +507,6 @@ describe('MfaService — per-account TOTP lock', () => {
     const svc = new MfaService(userMfa, auth);
 
     expect(await svc.verifyTotp('u1', totp.generate(secret))).toBe(true);
-    // Reserved against exactly the elapsed state it read, then undone.
     expect(reserveTotpAttempt).toHaveBeenCalledWith(
       'u1',
       expect.objectContaining({ totpFailureCount: 4, totpLastFailureAt: elapsed }),
@@ -592,11 +545,8 @@ describe('MfaService — per-account TOTP lock', () => {
     expect(state().totpFailureCount).toBe(5);
     expect(state().totpLastFailureAt).not.toBe(elapsed);
     expect(eventsOf(auth, 'mfa_totp_failed')).toHaveLength(1);
-    // Already past the threshold before this miss: the lock extends, it is
-    // not crossed again.
     expect(eventsOf(auth, 'mfa_totp_locked')).toHaveLength(0);
 
-    // Count 5 → a fresh 4 s window: refused without reserving.
     await expect(svc.verifyTotp('u1', totp.generate(secret))).rejects.toBeInstanceOf(
       ThrottlerException,
     );
@@ -605,11 +555,7 @@ describe('MfaService — per-account TOTP lock', () => {
 
   it('bounds a burst of genuinely concurrent requests to the same attempts an honest sequence gets, not letting every request in the burst evaluate a code', async () => {
     const secret = totp.generateSecret();
-    // Every request in the burst reads the SAME unlocked pre-burst row — the
-    // exact shape of the attacker model ("a pool of IP addresses"
-    // firing requests within the same few hundred milliseconds). The
-    // compare-and-swap admits exactly one of them per state version; the
-    // rest re-read and re-decide against the winner's stamp.
+    // Every request reads the same unlocked pre-burst row (an attacker with a pool of IPs); the compare-and-swap admits one per state version and the rest re-read against the winner's stamp.
     const { userMfa, state } = lockStateStubs(enabledRow(secret));
     const auth = buildAuth();
     const svc = new MfaService(userMfa, auth);
@@ -623,14 +569,9 @@ describe('MfaService — per-account TOTP lock', () => {
     const refused = results.filter(
       (r) => r.status === 'rejected' && r.reason instanceof ThrottlerException,
     );
-    // The 3 free misses plus the 4th that trips the lock reach a real code
-    // comparison — the same four an honest sequence gets; the old
-    // read-then-act check let all 10 through (every one read the same
-    // pre-burst row and passed `assertTotpNotLocked`).
+    // Only the 3 free misses plus the 4th that trips the lock reach a code comparison; the old read-then-act check let all 10 through.
     expect(evaluated).toHaveLength(4);
     expect(refused).toHaveLength(6);
-    // The six refusals wrote nothing: the count is exactly the four misses,
-    // and the threshold was crossed once.
     expect(state().totpFailureCount).toBe(4);
     expect(eventsOf(auth, 'mfa_totp_locked')).toHaveLength(1);
   });
@@ -695,5 +636,4 @@ describe('MfaService — MFA-failure incident log', () => {
       expect.anything(),
     );
   });
-
 });

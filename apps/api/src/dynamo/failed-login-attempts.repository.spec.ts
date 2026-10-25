@@ -1,13 +1,4 @@
-/**
- * Integration tests for `FailedLoginAttemptsRepository` against DynamoDB Local.
- * The decisive property is that `increment` is a
- * single atomic `UpdateItem` (`ADD`), so N CONCURRENT failed-login records
- * produce an exact `+N` — the previous find-then-`Put` was a read/modify/write
- * that could silently drop a concurrent increment (lost update).
- *
- * Uses fresh emails per case so suites stay independent on the shared
- * DynamoDB Local instance.
- */
+// FailedLoginAttemptsRepository on DynamoDB Local: `increment` is one atomic UpdateItem ADD, so N concurrent failures give an exact +N (the old find-then-Put could drop an increment).
 import { randomUUID } from 'node:crypto';
 import {
   GetCommand,
@@ -32,7 +23,6 @@ describe('FailedLoginAttemptsRepository.increment', () => {
   beforeAll(async () => {
     env = await createRepoTestEnv();
     repo = new FailedLoginAttemptsRepository(env.doc, env.config);
-    // checkBackoff only reads the repository; the other collaborators are unused.
     service = new FailedLoginService(repo, {} as never, {} as never);
   });
 
@@ -57,7 +47,6 @@ describe('FailedLoginAttemptsRepository.increment', () => {
     const email = freshEmail();
     const N = 8;
 
-    // Fire all increments concurrently — the whole point of the atomic ADD.
     await Promise.all(
       Array.from({ length: N }, () => repo.increment(email, TTL_SEC)),
     );
@@ -65,9 +54,7 @@ describe('FailedLoginAttemptsRepository.increment', () => {
     const row = await repo.find(email);
     expect(row?.consecutiveFailures).toBe(N);
 
-    // Backoff tier is DERIVED from the count + latest failure: 8 failures
-    // = 3 grace + exponent 5 → a 2^5 = 32 s wait, still inside the window since
-    // the misses just happened.
+    // The backoff tier is derived from count and latest failure: 8 failures = 3 grace + exponent 5, a 32 s wait still inside the window.
     const state = await service.checkBackoff(email);
     expect(state.blocked).toBe(true);
     expect(state.retryAfterSec).toBeGreaterThan(16);
@@ -77,14 +64,12 @@ describe('FailedLoginAttemptsRepository.increment', () => {
   it('a delayed increment with an older timestamp still counts +1 but never regresses lastFailedAt/expiresAt', async () => {
     const email = freshEmail();
 
-    // Newer failure commits first — a far-future clock so its TTL never purges.
+    // A far-future clock keeps the newer failure's TTL from purging.
     jest.spyOn(Date, 'now').mockReturnValue(2_000_000_000_000);
     const newer = await repo.increment(email, TTL_SEC);
     expect(newer.consecutiveFailures).toBe(1);
 
-    // A "delayed"/out-of-order request whose captured clock is OLDER lands after
-    // the newer one. The counter must still advance (fail-safe), but the
-    // timestamp/TTL must NOT move backward (monotonic advance).
+    // A delayed request with an older captured clock lands after the newer one: the counter still advances but the timestamp and TTL must not move backward.
     jest.spyOn(Date, 'now').mockReturnValue(1_000_000_000_000);
     const delayed = await repo.increment(email, TTL_SEC);
 
@@ -96,22 +81,15 @@ describe('FailedLoginAttemptsRepository.increment', () => {
   it('fallback after a concurrent clear() recreates a row with a valid lastFailedAt AND expiresAt', async () => {
     const email = freshEmail();
 
-    // Establish a row, then simulate a concurrent `clear()` that deletes it
-    // between the primary conditional write failing and the fallback running.
     await repo.increment(email, TTL_SEC);
     await repo.clear(email);
     expect(await repo.find(email)).toBeNull();
 
-    // Force the primary conditional `UpdateCommand` to raise
-    // ConditionalCheckFailedException so the fallback path runs — but against a
-    // row the `clear()` just deleted. A bare `ADD` would recreate a row with no
-    // `lastFailedAt`/`expiresAt`; the `if_not_exists` seed must repopulate both.
+    // Forcing the primary conditional write to fail runs the fallback against a row `clear()` just deleted; a bare ADD would recreate a row without
+    // `lastFailedAt`/`expiresAt`, so the `if_not_exists` seed must repopulate both.
     const doc = env.doc;
     const sendSpy = jest.spyOn(doc, 'send');
-    // The first send inside `increment` is the primary conditional write; reject
-    // it once. `mockImplementationOnce` applies only to that call — every later
-    // send (the fallback update, the `find` below) falls through to the real
-    // client the spy wraps.
+    // `mockImplementationOnce` rejects only the primary conditional write; later sends fall through to the real client.
     let primaryCmd: unknown;
     sendSpy.mockImplementationOnce((cmd: unknown) => {
       primaryCmd = cmd;
@@ -133,8 +111,6 @@ describe('FailedLoginAttemptsRepository.increment', () => {
     expect(typeof row.expiresAt).toBe('number');
     expect(row.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
 
-    // The persisted row (not just the returned attributes) carries both fields,
-    // so `checkBackoff` sees a finite timestamp and the row still TTL-expires.
     const persisted = await repo.find(email);
     expect(persisted?.lastFailedAt).toBeDefined();
     expect(persisted?.expiresAt).toBeDefined();
@@ -189,7 +165,6 @@ describe('FailedLoginAttemptsRepository — guessing-notice stamp', () => {
     const row = await repo.find(email);
     expect(row?.guessingNoticeSentAt).toBeDefined();
 
-    // A second crossing inside the same window is a no-op — one notice/24h.
     expect(await repo.stampGuessingNotice(email, TTL_SEC)).toBe(false);
   });
 
@@ -218,10 +193,8 @@ describe('FailedLoginAttemptsRepository — guessing-notice stamp', () => {
     await repo.increment(email, TTL_SEC);
     expect(await repo.stampGuessingNotice(email, TTL_SEC)).toBe(true);
 
-    // A successful sign-in clears the counter but preserves the stamp.
     await repo.clear(email);
 
-    // A fresh burst crosses the threshold again — still inside the 24h window.
     await repo.increment(email, TTL_SEC);
     expect(await repo.stampGuessingNotice(email, TTL_SEC)).toBe(false);
   });

@@ -1,26 +1,11 @@
-/**
- * Integration tests for `WorkspaceMetaRepository.bumpFreshnessHead` — the
- * best-effort monotonic freshness-head bump.
- *
- * Coverage:
- *  - first write (no stored head): stores + echoes the counter + tag;
- *  - monotonic no-op (incoming counter <= stored): returns the existing
- *    higher stored head without overwriting it;
- *  - re-read after a conditional failure echoes the already-stored head.
- *
- * The error-recovery `null` path (UpdateItem fails AND the GetItem re-read
- * also fails) cannot be triggered against a healthy DynamoDB Local without
- * mocking the boundary; the read-fallback branch is exercised here via the
- * conditional-failure no-op (same `find()` re-read), and the `null` contract
- * is asserted at the type level (return type is `... | null`).
- *
- * Uses fresh household IDs per case so suites stay independent on the
- * shared DynamoDB Local instance.
- */
+// WorkspaceMetaRepository against DynamoDB Local: the monotonic freshness-head bump and the daily push-quota carry-forward. The bump's error-recovery `null`
+// path (UpdateItem and the GetItem re-read both failing) cannot be triggered against a healthy emulator.
 import { createRepoTestEnv, type RepoTestEnv } from '../test/test-helpers.js';
-import { utcDayStamp, WorkspaceMetaRepository } from './workspace-meta.repository.js';
+import { WorkspaceMetaRepository } from './workspace-meta.repository.js';
 import type { WorkspaceMetaRow } from './types.js';
 import { randomUUID } from 'node:crypto';
+
+const utcDayStamp = (): string => new Date().toISOString().slice(0, 10);
 
 describe('WorkspaceMetaRepository.bumpFreshnessHead', () => {
   let env: RepoTestEnv;
@@ -68,12 +53,9 @@ describe('WorkspaceMetaRepository.bumpFreshnessHead', () => {
 
     await repo.bumpFreshnessHead(householdId, deviceId, 5, 'dGFnNQ');
 
-    // A lower counter is rejected by the conditional and re-read echoes the
-    // already-stored (higher) head — never overwriting it.
     const lower = await repo.bumpFreshnessHead(householdId, deviceId, 3, 'c3RhbGU');
     expect(lower).toEqual({ storedCounter: 5, storedTag: 'dGFnNQ' });
 
-    // An equal counter is likewise a no-op.
     const equal = await repo.bumpFreshnessHead(householdId, deviceId, 5, 'c3RhbGU');
     expect(equal).toEqual({ storedCounter: 5, storedTag: 'dGFnNQ' });
 
@@ -83,13 +65,8 @@ describe('WorkspaceMetaRepository.bumpFreshnessHead', () => {
   });
 });
 
-/**
- * Daily push-quota carry-forward primitives: the sweep's capturing delete, the `ADD`-merge that
- * puts the captured counters back, and the repoint that must not clobber a
- * charge already sitting on the row. Each case stands in for a push that was
- * already in flight when a household-triggerable sweep ran and whose
- * `chargeDailyQuota` landed on one side or the other of the sweep's delete.
- */
+// Carry-forward primitives for a push in flight when a household-triggerable sweep ran, whose `chargeDailyQuota` landed on either side of the sweep's delete:
+// the capturing delete, the `ADD`-merge that restores the counters, and the repoint that must not clobber a charge already on the row.
 describe('WorkspaceMetaRepository — daily push-quota carry-forward', () => {
   let env: RepoTestEnv;
   let repo: WorkspaceMetaRepository;
@@ -103,7 +80,6 @@ describe('WorkspaceMetaRepository — daily push-quota carry-forward', () => {
     env.destroy();
   });
 
-  /** A row as `deleteReturningPrior` would hand it back mid-sweep. */
   function captured(householdId: string): WorkspaceMetaRow {
     return {
       householdId,
@@ -150,9 +126,7 @@ describe('WorkspaceMetaRepository — daily push-quota carry-forward', () => {
 
   it('carryQuotaForward ADDs onto a same-day charge that recreated the row first — both survive', async () => {
     const householdId = randomUUID();
-    // An in-flight push's charge landing on the swept (absent) row recreates
-    // it with today's fresh count of 1 — the shape a conditional create would
-    // defer to and a full-row Put would clobber.
+    // A charge landing on the swept (absent) row recreates it with today's count of 1: the shape a conditional create would defer to and a full-row Put would clobber.
     expect(await repo.chargeDailyQuota(householdId, 1, 10, 10_000, 1_000_000)).toEqual({ ok: true });
 
     await repo.carryQuotaForward(householdId, captured(householdId));
@@ -173,8 +147,7 @@ describe('WorkspaceMetaRepository — daily push-quota carry-forward', () => {
       quotaDay: '2000-01-01',
     });
 
-    // Today's charge is authoritative; yesterday's counters are gone, exactly
-    // as chargeDailyQuota's own roll-over would have discarded them.
+    // Today's charge is authoritative; yesterday's counters are discarded, as chargeDailyQuota's own roll-over would.
     expect(await repo.find(householdId)).toMatchObject({
       quotaDay: utcDayStamp(),
       dailyMutationCount: 1,
@@ -202,8 +175,7 @@ describe('WorkspaceMetaRepository — daily push-quota carry-forward', () => {
 
   it('reinitializeForRestore repoints and clears the freshness head WITHOUT clobbering a quota charge already on the row', async () => {
     const householdId = randomUUID();
-    // A charge from a push in flight during the sweep recreated the row, and
-    // that push's best-effort head bump landed on it too.
+    // A charge from a push in flight during the sweep recreated the row, and that push's best-effort head bump landed on it too.
     expect(await repo.chargeDailyQuota(householdId, 2, 20, 10_000, 1_000_000)).toEqual({ ok: true });
     await repo.bumpFreshnessHead(householdId, randomUUID(), 5, 'dGFnNQ');
 

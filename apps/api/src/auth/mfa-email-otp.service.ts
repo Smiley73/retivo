@@ -26,13 +26,10 @@ import { escapeHtml } from '../common/escape-html.js';
 // Code validity window: 10 minutes.
 const MFA_EMAIL_OTP_TTL_SEC = 10 * 60;
 const MFA_EMAIL_OTP_COOLDOWN_SEC = 60;
-export const MFA_EMAIL_OTP_DAILY_LIMIT = 5;
-export const MFA_EMAIL_OTP_MAX_ATTEMPTS = 5;
-/**
- * Constant minimum elapsed time for the send handler, so a cooldown or cap no-op is not a timing oracle (as
- * `PasswordResetService.RESPONSE_TIME_FLOOR_MS`).
- */
-export const MFA_EMAIL_OTP_RESPONSE_FLOOR_MS = 200;
+const MFA_EMAIL_OTP_DAILY_LIMIT = 5;
+const MFA_EMAIL_OTP_MAX_ATTEMPTS = 5;
+// Constant minimum elapsed time for the send handler, so a cooldown or cap no-op is not a timing oracle.
+const MFA_EMAIL_OTP_RESPONSE_FLOOR_MS = 200;
 
 interface EmailOtpSendPlan {
   rawCode: string;

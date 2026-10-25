@@ -1,23 +1,7 @@
-/**
- * Step-up re-auth primitive integration tests.
- *
- * Covers the two generic prep endpoints (`step-up/email-otp/send`,
- * `step-up/passkey/options`) — authorized positive, unauthenticated → 401,
- * CSRF-missing → 403 (they are NOT in `EXEMPT_PATHS`) — plus the
- * per-operation single-use / binding guarantees: a step-up TOTP code is
- * consumed (rejected on reuse) and a step-up Email-OTP code minted for one op
- * purpose cannot authorize another.
- *
- * Runs under AUTH_MFA_ENFORCED=true (read at service construction), restored
- * after — mirrors change-email.spec.ts.
- */
+// Step-up primitive: the step-up/email-otp/send and step-up/passkey/options prep endpoints (authorized, unauthenticated 401, CSRF 403) and the per-operation
+// single-use and binding guarantees of a TOTP and an Email-OTP step-up code. Runs under AUTH_MFA_ENFORCED=true (read at service construction), restored after.
 
-// WebAuthn server boundary: mock ONLY `verifyAuthenticationResponse` so a
-// passkey step-up can be driven to a deterministic verified outcome without a
-// real authenticator (the repo's WebAuthn test seam — mirrors
-// passkey-assertion.service.spec.ts). `generateAuthenticationOptions`
-// passes through to the real implementation so the options-endpoint tests below
-// still exercise the true generator.
+// Mocks only `verifyAuthenticationResponse` (there is no software authenticator) so a passkey step-up reaches a deterministic verified outcome; `generateAuthenticationOptions` stays real for the options tests.
 const verifyAuthenticationResponse = jest.fn();
 jest.mock('@simplewebauthn/server', () => ({
   ...jest.requireActual('@simplewebauthn/server'),
@@ -48,14 +32,12 @@ import type { AuthEventRow, MfaEmailOtpRow, PasskeyRow } from '../dynamo/types.j
 
 const ORIGIN = () => process.env.WEB_ORIGIN!;
 
-/** A base64url clientDataJSON carrying the WebAuthn `challenge` (test-only). */
 function stepUpClientDataJSON(challenge: string): string {
   return Buffer.from(JSON.stringify({ challenge, type: 'webauthn.get' })).toString(
     'base64url',
   );
 }
 
-/** A minimal WebAuthn assertion naming `credentialId` + `challenge` (test-only). */
 function stepUpAssertion(credentialId: string, challenge: string) {
   return {
     id: credentialId,
@@ -70,7 +52,6 @@ function stepUpAssertion(credentialId: string, challenge: string) {
   };
 }
 
-/** A freshly-enrolled, zero-counter passkey row for `userId` (test-only). */
 function seedPasskeyRow(userId: string, credentialId: string): PasskeyRow {
   return {
     userId,
@@ -100,7 +81,6 @@ describe('step-up re-auth primitive', () => {
     if (priorEnforced === undefined) delete process.env.AUTH_MFA_ENFORCED;
     else process.env.AUTH_MFA_ENFORCED = priorEnforced;
   });
-
 
   describe('POST /auth/step-up/passkey/options', () => {
     it('returns scoped WebAuthn options for an authenticated caller', async () => {
@@ -143,10 +123,8 @@ describe('step-up re-auth primitive', () => {
           request(t.app.getHttpServer()).post('/api/v1/auth/step-up/email-otp/send'),
         ).send({ purpose: 'delete_account' });
 
-      // First send commits a code → exactly one step_up_challenge audit event.
       await send().expect(202);
-      // A second send inside the 60 s cooldown is a silent no-op (no code minted)
-      // → it must NOT record another step_up_challenge (audit integrity).
+      // A second send inside the 60 s cooldown is a silent no-op, so it must not record another step_up_challenge.
       await send().expect(202);
 
       const events = await scanAll<AuthEventRow>(t.doc, table(t, 'TABLE_AUTH_EVENT'));
@@ -166,7 +144,6 @@ describe('step-up re-auth primitive', () => {
       const secret = await enrollTotp(t, s);
       const code = generateSync({ secret });
 
-      // First change-email step-up consumes the TOTP step.
       await request(t.app.getHttpServer())
         .post('/api/v1/auth/change-email/request')
         .set('Origin', ORIGIN())
@@ -180,7 +157,6 @@ describe('step-up re-auth primitive', () => {
       ).send({ method: 'totp', code });
       expect(first.status).toBe(200);
 
-      // A second step-up reusing the SAME code is rejected (single-use).
       await request(t.app.getHttpServer())
         .post('/api/v1/auth/change-email/request')
         .set('Origin', ORIGIN())
@@ -211,7 +187,6 @@ describe('step-up re-auth primitive', () => {
       const stepRow = rows.find((r) => r.userId === stepUpOtpPk(s.userId))!;
       const code = await recoverCodeHash(stepRow.codeHash);
 
-      // Verifying against a DIFFERENT purpose is a wrong guess (not consumed).
       const wrong = await otpSvc.verifyStepUp({
         userId: s.userId,
         code,
@@ -221,7 +196,6 @@ describe('step-up re-auth primitive', () => {
       });
       expect(wrong.ok).toBe(false);
 
-      // The right purpose still verifies (code was never consumed by the miss).
       const right = await otpSvc.verifyStepUp({
         userId: s.userId,
         code,
@@ -274,15 +248,12 @@ describe('step-up re-auth primitive', () => {
       const options = await svc.generateStepUpOptions(userId, 'change_email');
       const assertion = stepUpAssertion(credentialId, options.challenge);
 
-      // Wrong purpose: the challenge lives under stepup:<userId>:change_email —
-      // the delete_account namespace has no such challenge, so it is rejected
-      // BEFORE any signature check (verifyAuthenticationResponse never runs).
+      // Under the wrong purpose the challenge namespace has no entry, so it is rejected before any signature check.
       await expect(
         svc.verifyStepUpAssertion(userId, 'delete_account', assertion as never),
       ).rejects.toMatchObject({ response: { code: 'MFA_CODE_INVALID' } });
       expect(verifyAuthenticationResponse).not.toHaveBeenCalled();
 
-      // The right purpose still verifies — the miss never consumed the challenge.
       verifyAuthenticationResponse.mockResolvedValue({
         verified: true,
         authenticationInfo: { newCounter: 1 },

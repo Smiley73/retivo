@@ -1,23 +1,5 @@
-/**
- * Unit tests for `AccountExportService.build`
- * covering two cases that are impractical to force
- * deterministically through the DynamoDB-Local integration harness
- * (`apps/api/src/test/account-export.spec.ts` covers the happy paths and
- * cross-user isolation there):
- *
- *  - A User row missing at read time (a concurrent account deletion racing
- *    the export) must fail closed rather than fabricate an empty account
- *    record and return a silently-partial `200` bundle.
- *  - A recycled `emailLowercase` — where a stale/eventually-consistent read
- *    of the caller's own email keys a lookup that now resolves to a
- *    DIFFERENT user's `EmailReservation` row — must never end up in the
- *    export, and a live/pending email that keeps changing across the
- *    bracketed consistent reads must fail closed rather than export
- *    possibly-mismatched data.
- *
- * Every dependency is a plain jest stub; only the methods `build()` actually
- * calls on a fully-populated, otherwise-empty account are wired up.
- */
+// AccountExportService.build cases the emulator suite cannot force deterministically: a User row missing at read time fails closed, and a recycled `emailLowercase`
+// resolving to another user's EmailReservation is never exported (a live email that keeps changing across the bracketed reads fails closed). Every dependency is a plain jest stub.
 import 'reflect-metadata';
 import {
   AccountExportEmailKeyReadConflictError,
@@ -73,12 +55,6 @@ function reservationRow(over: Partial<EmailReservationRow> = {}): EmailReservati
   };
 }
 
-/**
- * Build an `AccountExportService` with every constructor dependency stubbed.
- * `findByIdConsistent` is the only interesting mock by default (returns
- * `userRow()` every call); individual tests override it and
- * `emailReservations.findByEmail` to exercise the two findings.
- */
 function makeService() {
   const findByIdConsistent = jest.fn().mockResolvedValue(userRow());
   const users = { findByIdConsistent } as unknown as UsersRepository;
@@ -193,8 +169,7 @@ describe('AccountExportService.build — deleted-user fail-closed', () => {
 describe('AccountExportService.build — recycled-email-key defense', () => {
   it("never exports a reservation row owned by a different userId, even though it was reached via this user's own emailLowercase", async () => {
     const { service, findByEmail } = makeService();
-    // The live email key resolves to a row that belongs to SOMEONE ELSE —
-    // exactly what a recycled, released-then-reclaimed address looks like.
+    // A recycled address: the live email key resolves to a row belonging to someone else.
     findByEmail.mockResolvedValue(reservationRow({ userId: 'user-bob' }));
 
     const page = await service.build(USER_ID, HOUSEHOLD_ID, null);
@@ -217,8 +192,6 @@ describe('AccountExportService.build — recycled-email-key defense', () => {
 
   it('fails closed with AccountExportEmailKeyReadConflictError when the live email keeps changing across every bracketed consistent read', async () => {
     const { service, findByIdConsistent } = makeService();
-    // A different emailLowercase on every call means the before/after
-    // bracket can never agree, however many attempts are made.
     let n = 0;
     findByIdConsistent.mockImplementation(async () =>
       userRow({ emailLowercase: `alice-${n++}@example.test` }),

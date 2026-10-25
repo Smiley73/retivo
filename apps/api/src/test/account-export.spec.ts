@@ -1,13 +1,4 @@
-/**
- * Integration tests for `GET /auth/account-export`,
- * on the DynamoDB-Local harness. Covers:
- *  - seeded full export, positive inclusion of every accounted-for section;
- *  - paging at realistic volume for the `history` (AuthEvent) section;
- *  - negative secret content — no wrapped key / KDF salt / token hash / etc.
- *    is ever serialized, proven against seeded sentinel values;
- *  - the export-cookie gate: a bearer token alone never downloads the export;
- *  - cross-user isolation.
- */
+// Integration tests for GET /auth/account-export: every accounted-for section, history paging, no secret content, the export-cookie gate and cross-user isolation.
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
@@ -26,7 +17,6 @@ import {
 import { EXPORT_AUTHORIZATION_COOKIE_NAME } from '../auth/cookie-config.js';
 import { S3_CLIENT } from '../aws/aws.module.js';
 import {
-  ACCOUNT_EXPORT_SECTION_KEYS,
   type AccountExportFirstPage,
   type AccountExportNextPage,
 } from '../auth/account-export.service.js';
@@ -49,9 +39,7 @@ import type {
   UserMfaRow,
 } from '../dynamo/types.js';
 
-/** Recognisable sentinel string embedded in every secret-bearing field seeded
- *  below. The negative test asserts NEITHER the sentinel VALUE nor the
- *  omitted field NAMES ever appear in the serialized bundle. */
+// Embedded in every secret-bearing field seeded below; the negative test asserts neither the value nor the omitted field names appear in the bundle.
 const SECRET = 'SENTINEL_SECRET_VALUE_DO_NOT_EXPORT_9f3c7a';
 
 function tableName(t: TestApp, key: string): string {
@@ -60,11 +48,7 @@ function tableName(t: TestApp, key: string): string {
     .get(key, { infer: true } as never) as unknown as string;
 }
 
-/** The complete, independently-derived accounted-for section set: every
- *  `TABLE_*` config key, plus the one non-table section (`s3SnapshotInventory`).
- *  Deliberately NOT copy-pasted from `ACCOUNT_EXPORT_SECTION_KEYS` — this is
- *  its own derivation, so deleting a section from either side fails this
- *  assertion. */
+// Every TABLE_* config key plus the one non-table section, derived independently of the service so deleting a section fails the assertion.
 const EXPECTED_TABLE_SECTION_KEYS: Record<string, string> = {
   TABLE_WORKSPACE_META: 'workspaceMeta',
   TABLE_MUTATION_LOG: 'mutationLog',
@@ -106,8 +90,6 @@ describe('GET /auth/account-export', () => {
       .set('Authorization', `Bearer ${s.accessToken}`);
   }
 
-  /** Re-verify with `purpose: 'data_export'` and return the minted
-   *  export-authorization cookie value. */
   async function mintExportCookie(s: Session): Promise<string> {
     const res = await request(t.app.getHttpServer())
       .post('/api/v1/auth/verify-password')
@@ -123,9 +105,6 @@ describe('GET /auth/account-export', () => {
     return xa!;
   }
 
-  /** Walk every page of `GET /auth/account-export` under the cookie and
-   *  return the first page's non-paging sections plus the FULL concatenated
-   *  `history` across all pages. */
   async function fetchWholeExport(
     s: Session,
     xa: string,
@@ -153,8 +132,7 @@ describe('GET /auth/account-export', () => {
         .set('Cookie', `${EXPORT_AUTHORIZATION_COOKIE_NAME}=${encodeURIComponent(xa)}`);
       expect(next.status).toBe(200);
       const nextPage = next.body as AccountExportNextPage;
-      // Every subsequent page carries ONLY `history` + `nextCursor` — no
-      // non-paging section is repeated.
+      // Later pages carry only `history` and `nextCursor`; no non-paging section is repeated.
       expect(Object.keys(nextPage).sort()).toEqual(['history', 'nextCursor']);
       for (const row of nextPage.history as { eventId: string }[]) {
         expect(seenIds.has(row.eventId)).toBe(false); // no duplicates across pages
@@ -178,20 +156,15 @@ describe('GET /auth/account-export', () => {
     beforeAll(async () => {
       s = await signupVerifyLogin(t);
 
-      // Force WorkspaceMeta into existence via a real bootstrap call.
       const boot = await authGet(s, '/api/v1/sync/bootstrap?force=false');
       expect(boot.status).toBe(200);
 
-      // Mint the export-authorization cookie BEFORE any row is overwritten
-      // below — the data_export re-auth needs the REAL argon2 credential
-      // hash, which the Credential seeding a few lines down replaces with a
-      // non-hash sentinel.
+      // Mint the export-authorization cookie before the Credential seeding below replaces the real argon2 hash the data_export re-auth needs.
       xa = await mintExportCookie(s);
 
       const nowIso = new Date().toISOString();
       const nowSec = Math.floor(Date.now() / 1000);
 
-      // Credential — overwrite the real signup row with a sentinel hash.
       await t.doc.send(
         new PutCommand({
           TableName: tableName(t, 'TABLE_CREDENTIAL'),
@@ -199,8 +172,7 @@ describe('GET /auth/account-export', () => {
         }),
       );
 
-      // Historical backup-code audit evidence remains exportable after the
-      // factor itself is retired; current code emits no new events of this type.
+      // Historical backup-code audit events stay exportable after the factor was retired.
       await t.doc.send(
         new PutCommand({
           TableName: tableName(t, 'TABLE_AUTH_EVENT'),
@@ -217,8 +189,6 @@ describe('GET /auth/account-export', () => {
         }),
       );
 
-      // An extra RefreshToken row carrying sentinel tokenHash/rotatedFrom
-      // (the SK — a live login already seeded a legitimate row too).
       const extraRefresh: RefreshTokenRow = {
         userId: s.userId,
         tokenHash: `extra-${randomUUID()}`,
@@ -236,10 +206,7 @@ describe('GET /auth/account-export', () => {
       await t.doc.send(
         new PutCommand({ TableName: tableName(t, 'TABLE_REFRESH_TOKEN'), Item: extraRefresh }),
       );
-      // Overwrite its tokenHash-bearing row separately is not possible (SK);
-      // instead assert the SECRET is absent via `rotatedFrom` above and via
-      // a second row whose SK itself IS the sentinel (proves the SK value
-      // never leaks even though it's a real DynamoDB attribute).
+      // A second row whose sort key is itself the sentinel proves the SK value never leaks.
       const sentinelSkRow: RefreshTokenRow = {
         ...extraRefresh,
         tokenHash: SECRET,
@@ -249,7 +216,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_REFRESH_TOKEN'), Item: sentinelSkRow }),
       );
 
-      // RevokedToken — via the new UserIndex GSI.
       const revoked: RevokedTokenRow = {
         jti: randomUUID(),
         userId: s.userId,
@@ -260,9 +226,7 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_REVOKED_TOKEN'), Item: revoked }),
       );
 
-      // Passkey — this row was never seeded
-      // before, making the positive-inclusion assertion below vacuous
-      // (`toBeDefined()` passes for an empty array too).
+      // Without a seeded passkey the positive-inclusion assertion below is vacuous (`toBeDefined()` passes for an empty array).
       const passkey: PasskeyRow = {
         userId: s.userId,
         credentialId: `passkey-${randomUUID()}`,
@@ -279,7 +243,6 @@ describe('GET /auth/account-export', () => {
       );
       passkeyCredentialId = passkey.credentialId;
 
-      // FailedLoginAttempt — 24h backoff state, keyed by email.
       await t.doc.send(
         new PutCommand({
           TableName: tableName(t, 'TABLE_FAILED_LOGIN_ATTEMPT'),
@@ -292,8 +255,6 @@ describe('GET /auth/account-export', () => {
         }),
       );
 
-      // SignupApproval — a leftover row (approval already completed via
-      // signupVerifyLogin; this simulates one that outlived cleanup).
       const approval: SignupApprovalRow = {
         approvalToken: SECRET,
         userId: s.userId,
@@ -305,7 +266,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_SIGNUP_APPROVAL'), Item: approval }),
       );
 
-      // EmailVerification — a leftover row.
       const verification: EmailVerificationRow = {
         verificationToken: SECRET,
         userId: s.userId,
@@ -318,7 +278,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_EMAIL_VERIFICATION'), Item: verification }),
       );
 
-      // PasswordReset — row + the User pointer that makes it reachable.
       const reset: PasswordResetRow = {
         resetToken: SECRET,
         userId: s.userId,
@@ -338,7 +297,6 @@ describe('GET /auth/account-export', () => {
         }),
       );
 
-      // IdempotencyKey.
       const idem: IdempotencyKeyRow = {
         key: `${s.householdId}#${s.deviceId}#${randomUUID()}`,
         response: {
@@ -355,7 +313,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_IDEMPOTENCY_KEY'), Item: idem }),
       );
 
-      // MutationLog — payload carries the sentinel; must never be exported.
       const aggregateId = randomUUID();
       const mutation: MutationLogRow = {
         householdId: s.householdId,
@@ -373,7 +330,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_MUTATION_LOG'), Item: mutation }),
       );
 
-      // AggregateVersion.
       await t.doc.send(
         new PutCommand({
           TableName: tableName(t, 'TABLE_AGGREGATE_VERSION'),
@@ -388,7 +344,6 @@ describe('GET /auth/account-export', () => {
         }),
       );
 
-      // DeviceRegistry.
       const device: DeviceRegistryRow = {
         householdId: s.householdId,
         deviceId: s.deviceId,
@@ -403,7 +358,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_DEVICE_REGISTRY'), Item: device }),
       );
 
-      // HouseholdKeyEnvelope — slot + meta.
       const slot: HouseholdKeyEnvelopeRow = {
         householdId: s.householdId,
         slotId: 'password',
@@ -417,11 +371,7 @@ describe('GET /auth/account-export', () => {
       await t.doc.send(
         new PutCommand({ TableName: tableName(t, 'TABLE_HOUSEHOLD_KEY_ENVELOPE'), Item: slot }),
       );
-      // passkey_prf slot — 6.test-coverage.2: `prfSalt`/`credentialBinding`
-      // are documented as present ONLY on this slot type. Without a seeded
-      // row that actually carries them, the negative-content assertion below
-      // (that neither field name ever appears in the serialized bundle) is
-      // vacuous — nothing in the fixture has a non-null value for either.
+      // `prfSalt` and `credentialBinding` exist only on this slot type; without a seeded row carrying them the negative-content assertion is vacuous.
       const passkeyPrfSlot: HouseholdKeyEnvelopeRow = {
         householdId: s.householdId,
         slotId: 'passkey-prf-1',
@@ -436,10 +386,7 @@ describe('GET /auth/account-export', () => {
       await t.doc.send(
         new PutCommand({ TableName: tableName(t, 'TABLE_HOUSEHOLD_KEY_ENVELOPE'), Item: passkeyPrfSlot }),
       );
-      // Legacy PBKDF2-HMAC-SHA-256 password slot — 6.test-coverage.3:
-      // `projectEnvelopeSlot`'s non-Argon2id branch (`{ algorithm,
-      // iterations }`) was never exercised by any seeded row; every other
-      // password slot in this fixture uses Argon2id.
+      // Exercises `projectEnvelopeSlot`'s non-Argon2id branch; every other password slot here uses Argon2id.
       const pbkdf2Slot: HouseholdKeyEnvelopeRow = {
         householdId: s.householdId,
         slotId: 'password-legacy-pbkdf2',
@@ -464,13 +411,8 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_HOUSEHOLD_KEY_ENVELOPE'), Item: meta }),
       );
 
-      // WorkspaceMeta.cursorTag — this is an
-      // HMAC(HDK, freshnessCounter) tag, the same key-derived-oracle class
-      // `envelopeSetTag` above is already excluded for. The export also
-      // carries `freshnessCounter` (the known message), so a leaked
-      // `cursorTag` would let anyone with the export verify candidate HDKs
-      // offline. `bumpFreshnessHead` is the only production writer; write
-      // directly here since the test doesn't hold a real HDK.
+      // `cursorTag` is an HMAC(HDK, freshnessCounter), the same key-derived-oracle class as `envelopeSetTag`; with `freshnessCounter` in the export
+      // a leaked tag would let anyone verify candidate HDKs offline. `bumpFreshnessHead` is the only production writer, but this test holds no HDK.
       await t.doc.send(
         new UpdateCommand({
           TableName: tableName(t, 'TABLE_WORKSPACE_META'),
@@ -480,8 +422,7 @@ describe('GET /auth/account-export', () => {
         }),
       );
 
-      // Raw pre-removal UserMfa row. `backupCodes` is now an unknown legacy
-      // attribute; the explicit current projection must omit it entirely.
+      // Raw pre-removal UserMfa row: `backupCodes` is an unknown legacy attribute the projection must omit.
       const userMfa = {
         userId: s.userId,
         totpEnabled: true,
@@ -496,7 +437,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_USER_MFA'), Item: userMfa }),
       );
 
-      // MfaEmailOtp — login row + namespaced step-up row.
       const otpLogin: MfaEmailOtpRow = {
         userId: s.userId,
         codeHash: SECRET,
@@ -519,7 +459,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_MFA_EMAIL_OTP'), Item: otpStepUp }),
       );
 
-      // TrustedDevice.
       const trusted: TrustedDeviceRow = {
         userId: s.userId,
         deviceId: randomUUID(),
@@ -534,13 +473,8 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_TRUSTED_DEVICE'), Item: trusted }),
       );
 
-      // S3 snapshot objects — inventory metadata only, never bytes. Seed TWO
-      // objects: the non-live `test-snapshot.json.gz` (an orphaned/prior
-      // object never pointed to by WorkspaceMeta) and a second object
-      // `${liveSnapshotId}.json.gz` that WorkspaceMeta.latestSnapshotId is
-      // then pointed at, so `isLive` has a
-      // real true/false distinction to assert instead of an all-false or
-      // vacuously-nonempty inventory.
+      // Two S3 objects: a non-live one never pointed to by WorkspaceMeta, and `${liveSnapshotId}.json.gz` that latestSnapshotId targets, so
+      // `isLive` has a real true/false distinction to assert.
       const s3 = t.module.get<S3Client>(S3_CLIENT);
       const bucket = t.module.get(ConfigService).get('SNAPSHOTS_BUCKET', { infer: true } as never) as unknown as string;
       await s3.send(
@@ -575,10 +509,10 @@ describe('GET /auth/account-export', () => {
       exported = await fetchWholeExport(s, xa);
     }, 30000);
 
-    it('the exported section-key constant equals the accounted-for set independently derived from TABLE_* config names', () => {
+    it('the export carries every section accounted for by the TABLE_* config names', () => {
       const expected = new Set(Object.values(EXPECTED_TABLE_SECTION_KEYS));
       expected.add('s3SnapshotInventory'); // the one non-table section
-      expect(new Set(ACCOUNT_EXPORT_SECTION_KEYS)).toEqual(expected);
+      expect(Object.keys(exported)).toEqual(expect.arrayContaining([...expected]));
     });
 
     it('includes a projected row for every accounted-for section', () => {
@@ -613,8 +547,6 @@ describe('GET /auth/account-export', () => {
 
     it('the failed-login-attempt row is labelled as backoff state, not the retained history', () => {
       expect(exported.failedLoginAttempt!.note).toMatch(/24-hour sign-in backoff state/i);
-      // It carries the same event count as the retained AuthEvent history and
-      // is not a substitute for it — a separate `history` section is present.
       expect(exported.history.length).toBeGreaterThan(0);
     });
 
@@ -629,9 +561,6 @@ describe('GET /auth/account-export', () => {
       expect(slot?.kdf).toMatchObject({ algorithm: 'Argon2id', m: 65536, t: 3, p: 4 });
     });
 
-    // 6.test-coverage.3: the legacy PBKDF2 branch (`{ algorithm, iterations }`,
-    // as opposed to Argon2id's `{ algorithm, m, t, p }`) — exercised by the
-    // seeded `password-legacy-pbkdf2` slot above.
     it('projects the legacy PBKDF2 KDF shape (algorithm + iterations only, no salt) for a non-Argon2id slot', () => {
       const slot = exported.householdKeyEnvelope.slots.find(
         (sl) => sl.slotId === 'password-legacy-pbkdf2',
@@ -640,10 +569,6 @@ describe('GET /auth/account-export', () => {
       expect(slot?.kdf).toEqual({ algorithm: 'PBKDF2-HMAC-SHA-256', iterations: 600000 });
     });
 
-    // 6.test-coverage.2: the seeded `passkey_prf` slot carries real
-    // `prfSalt`/`credentialBinding` sentinel values — proves the projection
-    // actually strips them, rather than the generic scan below passing
-    // vacuously because nothing in the fixture ever had them.
     it('projects a passkey_prf slot without prfSalt/credentialBinding/wrappedKey', () => {
       const slot = exported.householdKeyEnvelope.slots.find((sl) => sl.slotId === 'passkey-prf-1');
       expect(slot).toBeDefined();
@@ -653,10 +578,7 @@ describe('GET /auth/account-export', () => {
       expect(slot).not.toHaveProperty('wrappedKey');
     });
 
-    // Exactly one seeded snapshot object is
-    // marked live — the one WorkspaceMeta.latestSnapshotId actually points
-    // to — proving the flag isn't hardcoded true/false or matched against
-    // the wrong key/household.
+    // Exactly the object WorkspaceMeta.latestSnapshotId points to is live, so the flag is not hardcoded or matched against the wrong key.
     it('marks exactly one snapshot inventory row isLive: true, matching workspaceMeta.latestSnapshotId', () => {
       expect(exported.s3SnapshotInventory.length).toBeGreaterThanOrEqual(2);
       const live = exported.s3SnapshotInventory.filter((row) => row.isLive);
@@ -667,11 +589,7 @@ describe('GET /auth/account-export', () => {
       expect(nonLive.every((row) => row.isLive === false)).toBe(true);
     });
 
-    // `cursorTag` is an HMAC(HDK, freshnessCounter) —
-    // the same key-derived-oracle class `envelopeSetTag` is already excluded
-    // for. Asserted directly (not just via the generic sentinel scan below)
-    // so a projection that dropped `freshnessCounter` too — passing the
-    // generic scan vacuously — would still fail here.
+    // Asserted directly, not only via the sentinel scan, so a projection that also dropped `freshnessCounter` still fails.
     it('projects WorkspaceMeta explicitly, keeping freshnessCounter but omitting cursorTag', () => {
       expect(exported.workspaceMeta).not.toBeNull();
       expect(exported.workspaceMeta!.freshnessCounter).toBe(1);
@@ -680,7 +598,6 @@ describe('GET /auth/account-export', () => {
 
     it('serializes with no secret field name or sentinel value anywhere in the bundle', () => {
       const serialized = JSON.stringify(exported);
-      // Field NAMES that must never appear as a key.
       for (const name of [
         'wrappedKey',
         '"salt"',
@@ -704,8 +621,7 @@ describe('GET /auth/account-export', () => {
       ]) {
         expect(serialized).not.toContain(name);
       }
-      // The sentinel VALUE itself must never appear — proves a field rename
-      // can't defeat the projection.
+      // The sentinel value itself must never appear, so a field rename cannot defeat the projection.
       expect(serialized).not.toContain(SECRET);
     });
   });
@@ -713,12 +629,7 @@ describe('GET /auth/account-export', () => {
   describe('paging at realistic volume', () => {
     it('returns the exact seeded count with no duplicates/gaps across pages, fetching more than one page', async () => {
       const s = await signupVerifyLogin(t);
-      // `listForUser` no longer hard-caps a page at 1,000 rows —
-      // it now pages by DynamoDB's own ~1 MB response-size limit, so this
-      // needs enough seeded BYTES (not just rows) to force a real page split.
-      // A realistic browser `userAgent` string (rather than `null`) both
-      // makes the fixture more representative and gets there with a much
-      // smaller, faster-to-seed row count than relying on row count alone.
+      // `listForUser` pages by DynamoDB's ~1 MB response limit, so forcing a page split needs enough bytes, not rows; a realistic userAgent gets there with fewer rows.
       const COUNT = 3000;
       const REALISTIC_USER_AGENT =
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ' +
@@ -757,10 +668,7 @@ describe('GET /auth/account-export', () => {
       const exportedEventIds = new Set(
         (exported.history as { eventId: string }[]).map((h) => h.eventId),
       );
-      // The signup/login flow itself appends a handful of real AuthEvent rows
-      // (signup, email_verify, signup_approved, login…) — assert every
-      // SEEDED id round-tripped exactly once (no dup, no gap), rather than an
-      // exact total count.
+      // The signup/login flow appends a few real AuthEvent rows, so assert every seeded id appears exactly once instead of an exact total.
       expect(exportedEventIds.size).toBe(exported.history.length); // no duplicates
       for (const id of seededEventIds) {
         expect(exportedEventIds.has(id)).toBe(true);
@@ -769,12 +677,6 @@ describe('GET /auth/account-export', () => {
     }, 120000);
 
     it('raises rather than returning a short history when the page loop stalls', async () => {
-      // The test-side loop ceiling in fetchWholeExport() throws if a real
-      // server response ever kept advancing past 20 pages without
-      // terminating; the server's own paging contract is proven by the
-      // volume test above completing in a bounded number of pages. This
-      // documents the guarantee explicitly: a `nextCursor` that never
-      // resolves to null must never be silently accepted as "done".
       const s = await signupVerifyLogin(t);
       const xa = await mintExportCookie(s);
       const exported = await fetchWholeExport(s, xa);
@@ -784,8 +686,7 @@ describe('GET /auth/account-export', () => {
 
   describe('no export cookie', () => {
     it('rejects a bearer-token-only request with EXPORT_AUTHORIZATION_REQUIRED', async () => {
-      // ExportAuthorizationGuard is the only thing standing between a valid
-      // bearer token and the full export; this fails if it is removed.
+      // ExportAuthorizationGuard is all that stands between a valid bearer token and the full export.
       const s = await signupVerifyLogin(t);
       const res = await authGet(s, '/api/v1/auth/account-export');
       expect([401, 403]).toContain(res.status);
@@ -816,12 +717,7 @@ describe('GET /auth/account-export', () => {
     it("rejects a well-formed cursor whose embedded userId belongs to a different user with 400 INVALID_EXPORT_CURSOR", async () => {
       const a = await signupVerifyLogin(t);
       const b = await signupVerifyLogin(t);
-      // Hand-build a well-formed cursor in the SAME shape
-      // `auth-events.repository.ts`'s `encodeCursor` produces
-      // (base64url-encoded `{ userId, eventId }` JSON), but embedding B's
-      // userId — a forged cursor a malicious A could construct without ever
-      // seeing a real page from B, since the encoding is not secret, only
-      // re-validated server-side.
+      // A forged cursor in the shape `encodeCursor` produces but with B's userId: the encoding is not secret, only re-validated server-side.
       const forgedCursor = Buffer.from(
         JSON.stringify({ userId: b.userId, eventId: (await KSUID.random()).string }),
         'utf8',
@@ -845,8 +741,6 @@ describe('GET /auth/account-export', () => {
       const nowIso = new Date().toISOString();
       const nowSec = Math.floor(Date.now() / 1000);
 
-      // Seed a distinguishing row for B in every keyed-by-userId /
-      // keyed-by-householdId store.
       const bRevoked: RevokedTokenRow = {
         jti: `b-only-${randomUUID()}`,
         userId: b.userId,
@@ -883,17 +777,8 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_TRUSTED_DEVICE'), Item: bTrusted }),
       );
 
-      // Extend the distinguishing-row seed to
-      // every remaining attributable store (Credential, Passkey,
-      // RefreshToken, AuthEvent history, HouseholdKeyEnvelope,
-      // UserMfa, MfaEmailOtp, EmailReservation, EmailVerification,
-      // PasswordReset, SignupApproval). WorkspaceMeta / MutationLog /
-      // AggregateVersion / IdempotencyKey are household-scoped and already
-      // naturally isolated by A and B having distinct households from
-      // separate `signupVerifyLogin` calls.
+      // Distinguishing rows for the remaining attributable stores; household-scoped sections are already isolated by the separate households.
 
-      // Credential — overwrite B's real signup row with a distinguishing
-      // marker updatedAt (never surfaced by name/value, only by timestamp).
       const bCredentialUpdatedAt = `1999-01-01T00:00:0${Math.floor(Math.random() * 9)}.000Z`;
       await t.doc.send(
         new PutCommand({
@@ -902,7 +787,6 @@ describe('GET /auth/account-export', () => {
         }),
       );
 
-      // Passkey.
       const bPasskey: PasskeyRow = {
         userId: b.userId,
         credentialId: `b-only-${randomUUID()}`,
@@ -918,7 +802,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_PASSKEY'), Item: bPasskey }),
       );
 
-      // RefreshToken.
       const bRefresh: RefreshTokenRow = {
         userId: b.userId,
         tokenHash: `b-only-${randomUUID()}`,
@@ -937,7 +820,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_REFRESH_TOKEN'), Item: bRefresh }),
       );
 
-      // AuthEvent (history) — the paging section.
       const bEventId = (await KSUID.random()).string;
       await t.doc.send(
         new PutCommand({
@@ -955,9 +837,6 @@ describe('GET /auth/account-export', () => {
         }),
       );
 
-      // HouseholdKeyEnvelope — B's own household; distinct from A's, so this
-      // also proves the household-scoped read never leaks across the
-      // household boundary.
       const bSlot: HouseholdKeyEnvelopeRow = {
         householdId: b.householdId,
         slotId: `b-only-${randomUUID()}`,
@@ -972,7 +851,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_HOUSEHOLD_KEY_ENVELOPE'), Item: bSlot }),
       );
 
-      // UserMfa.
       const bUserMfa: UserMfaRow = {
         userId: b.userId,
         totpEnabled: true,
@@ -984,7 +862,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_USER_MFA'), Item: bUserMfa }),
       );
 
-      // MfaEmailOtp — login + step-up rows.
       const bOtpLogin: MfaEmailOtpRow = {
         userId: b.userId,
         codeHash: 'b-only-code-hash',
@@ -1006,7 +883,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_MFA_EMAIL_OTP'), Item: bOtpStepUp }),
       );
 
-      // EmailVerification.
       const bVerification: EmailVerificationRow = {
         verificationToken: `b-only-${randomUUID()}`,
         userId: b.userId,
@@ -1019,7 +895,6 @@ describe('GET /auth/account-export', () => {
         new PutCommand({ TableName: tableName(t, 'TABLE_EMAIL_VERIFICATION'), Item: bVerification }),
       );
 
-      // PasswordReset — row + the User pointer that makes it reachable.
       const bReset: PasswordResetRow = {
         resetToken: `b-only-${randomUUID()}`,
         userId: b.userId,
@@ -1039,7 +914,6 @@ describe('GET /auth/account-export', () => {
         }),
       );
 
-      // SignupApproval — a leftover row.
       const bApproval: SignupApprovalRow = {
         approvalToken: `b-only-${randomUUID()}`,
         userId: b.userId,

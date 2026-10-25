@@ -1,44 +1,5 @@
-/**
- * Cross-household IDOR regression tests.
- *
- * Pins the 1:1 user↔household authorization invariant: a user must never
- * reach another household's data by tampering with the household id (or a
- * device / credential binding) on a sync, device-claim, or key-envelope
- * request. The app's whole authorization model assumes one user maps to
- * exactly one household; this test is the guard that fails a future
- * refactor which silently weakens that assumption. **Test-only — no
- * production source is touched.**
- *
- * Per the repo's testing convention, sync/auth API behaviour is verified
- * end-to-end against the local emulator (DynamoDB Local + Moto S3) through
- * the real HTTP + DynamoDB + S3 path, mirroring restore.spec.ts /
- * key-envelope.spec.ts.
- *
- * Coverage (the authorization checks each case pins):
- *  - POST /sync/push — `assertHousehold(me, dto.householdId)` 403s
- *    HOUSEHOLD_MISMATCH when the body householdId is not the caller's;
- *  - POST /sync/push — a body deviceId that differs from the JWT deviceId
- *    is 403 DEVICE_MISMATCH;
- *  - GET /sync/pull — uses the JWT household ONLY (no body field to
- *    tamper); proven by seeding household B's mutations directly and
- *    showing A's token returns only A's (empty) data;
- *  - GET /sync/bootstrap — same JWT-only pattern; bootstrap returns the
- *    caller's own household snapshot, never B's;
- *  - POST /sync/restore — the snapshot S3 key is `${householdId}/${id}`,
- *    so a foreign snapshotId under A's token 404s SNAPSHOT_NOT_FOUND
- *    rather than crossing households;
- *  - PUT /auth/key-envelopes/:slotId — a passkey_prf slot bound to a
- *    credential the caller does not own is 422 CREDENTIAL_NOT_FOUND;
- *  - PUT /auth/key-envelopes/:slotId — a tampered body `slot.householdId`
- *    is ignored: `toSlotRow(me.householdId, ...)` lands the row under the
- *    JWT household, never the foreign household the body named;
- *  - PUT /auth/key-envelopes/:slotId — binding to ANOTHER user's real,
- *    enrolled credentialId is still 422 CREDENTIAL_NOT_FOUND, because the
- *    ownership lookup is partitioned by `me.userId`.
- *
- * Each case uses fresh emails / device IDs so suites stay independent on
- * the shared DynamoDB Local instance.
- */
+// Cross-household IDOR regression tests: a user must never reach another household's data by tampering with the household id, device or
+// credential binding on a sync, device-claim or key-envelope request.
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import KSUID from 'ksuid';
@@ -63,8 +24,7 @@ function tableName(t: TestApp, key: string): string {
     .get(key, { infer: true } as never) as unknown as string;
 }
 
-/** A strict encrypted-envelope payload so push clears the
- *  Plaintext rejection and reaches the authorization checks. */
+// A strict encrypted-envelope payload, so push clears the plaintext rejection and reaches the authorization checks.
 function encryptedPayload(): Record<string, unknown> {
   return {
     encryptionVersion: 1,
@@ -75,11 +35,6 @@ function encryptedPayload(): Record<string, unknown> {
   };
 }
 
-/**
- * Build a well-formed push body. `householdId` / `bodyDeviceId` /
- * `mutationDeviceId` default to the caller's own claims; a test overrides
- * exactly the field whose tampering it is pinning.
- */
 function pushBody(
   s: Session,
   overrides?: {
@@ -119,11 +74,7 @@ function push(t: TestApp, s: Session, body: Record<string, unknown>): request.Te
     .send(body);
 }
 
-/**
- * Seed a MutationLog row for the given household directly. A
- * plaintext `POST /sync/push` 403s, so isolation tests seed household B's
- * data under B's own household partition rather than pushing it.
- */
+// Seeds a MutationLog row directly under the household's own partition, since a plaintext push 403s.
 async function seedMutation(t: TestApp, s: Session): Promise<void> {
   await t.doc.send(
     new PutCommand({
@@ -144,7 +95,6 @@ async function seedMutation(t: TestApp, s: Session): Promise<void> {
   );
 }
 
-/** Write a snapshot object directly to S3 under B's prefix. */
 async function seedSnapshot(
   s3: S3Client,
   bucket: string,
@@ -162,7 +112,6 @@ async function seedSnapshot(
   );
 }
 
-/** A well-formed passkey_prf upsert body bound to `credentialBinding`. */
 function passkeyPrfUpsertBody(
   householdId: string,
   credentialBinding: string,
@@ -181,20 +130,13 @@ function passkeyPrfUpsertBody(
       updatedAt: now,
     },
     envelopeSetVersion: 1,
-    // Fresh account, no envelope yet — expected version is 0 (PUT/DELETE
-    // require expectedEnvelopeSetVersion = envelopeSetVersion - 1).
+    // Fresh account, no envelope yet.
     expectedEnvelopeSetVersion: 0,
     envelopeSetTag: 'cHJmdGFn',
   };
 }
 
-/**
- * Enroll a real WebAuthn passkey credential for `s` directly into the
- * user-keyed `Passkey` table and return its credentialId. The
- * `assertCredentialBelongsToUser` check is a `passkeys.find(userId,
- * credentialId)` GetCommand, so the row must land under the user's own
- * partition (`userId = s.userId`) to be found.
- */
+// The ownership check is a `passkeys.find(userId, credentialId)` read, so the row must land under the user's own partition.
 async function seedPasskey(t: TestApp, s: Session): Promise<string> {
   const credentialId = `cred-${randomUUID()}`;
   await t.module.get(PasskeysRepository).insert({
@@ -232,8 +174,6 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
       const b = await signupVerifyLogin(t);
       expect(a.householdId).not.toBe(b.householdId);
 
-      // A's real token, but the body claims B's household. The controller's
-      // `assertHousehold(me, dto.householdId)` rejects before any DB work.
       const res = await push(t, a, pushBody(a, { householdId: b.householdId }));
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('HOUSEHOLD_MISMATCH');
@@ -242,9 +182,6 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
     it('rejects a body deviceId that differs from the JWT claim with 403 DEVICE_MISMATCH', async () => {
       const a = await signupVerifyLogin(t);
 
-      // Same household, but the top-level body deviceId is not the device
-      // the JWT was issued for. A JWT for device A cannot pair with
-      // mutations claiming device B.
       const res = await push(t, a, pushBody(a, { bodyDeviceId: freshDeviceId() }));
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('DEVICE_MISMATCH');
@@ -256,9 +193,7 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
       const a = await signupVerifyLogin(t);
       const b = await signupVerifyLogin(t);
 
-      // Seed a mutation for household B directly. There is no body
-      // householdId on pull to tamper — the endpoint keys off `me.householdId`
-      // only, so the IDOR invariant is proved by A seeing none of B's data.
+      // Pull has no body householdId to tamper with and keys off `me.householdId`, so A seeing none of B's data proves the invariant.
       await seedMutation(t, b);
 
       const res = await request(t.app.getHttpServer())
@@ -266,7 +201,6 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
         .query({ since: '0' })
         .set('Authorization', `Bearer ${a.accessToken}`);
       expect(res.status).toBe(200);
-      // A has pushed nothing → exactly zero changes, none of them B's.
       expect(res.body.changes).toEqual([]);
     });
   });
@@ -276,14 +210,12 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
       const a = await signupVerifyLogin(t);
       const b = await signupVerifyLogin(t);
 
-      // Seed data for household B; bootstrap keys off `me.householdId` only.
       await seedMutation(t, b);
 
       const res = await request(t.app.getHttpServer())
         .get('/api/v1/sync/bootstrap')
         .set('Authorization', `Bearer ${a.accessToken}`);
       expect(res.status).toBe(200);
-      // The snapshot is scoped to A's household and carries none of B's rows.
       expect(res.body.workspaceSnapshot.householdId).toBe(a.householdId);
       expect(res.body.workspaceSnapshot.householdId).not.toBe(b.householdId);
       expect(res.body.postSnapshotMutations).toEqual([]);
@@ -295,13 +227,10 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
       const a = await signupVerifyLogin(t);
       const b = await signupVerifyLogin(t);
 
-      // A real snapshot object exists under B's S3 prefix.
       const snapshotId = '2026-07-07T00-00-00-000Z';
       await seedSnapshot(s3, snapshotsBucket, b.householdId, snapshotId);
 
-      // A restores with B's snapshotId. The S3 key is built from
-      // `${me.householdId}/${snapshotId}`, so A's prefix has no such object
-      // → 404, never reading B's data.
+      // The S3 key is built from `${me.householdId}/${snapshotId}`, so A's prefix has no such object: 404, never B's data.
       const res = await request(t.app.getHttpServer())
         .post('/api/v1/sync/restore')
         .set('Origin', process.env.WEB_ORIGIN!)
@@ -318,10 +247,7 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
     it('rejects a passkey_prf slot bound to a credential the caller does not own with 422 CREDENTIAL_NOT_FOUND', async () => {
       const a = await signupVerifyLogin(t);
 
-      // No passkey is enrolled for A, so any credentialBinding is unowned.
-      // `assertCredentialBelongsToUser(me.userId, ...)` rejects before any
-      // write, so a client cannot bind a key slot to another account's
-      // credential.
+      // No passkey is enrolled for A, so any credentialBinding is unowned and rejected before any write.
       const res = await request(t.app.getHttpServer())
         .put('/api/v1/auth/key-envelopes/passkey_prf')
         .set('Origin', process.env.WEB_ORIGIN!)
@@ -338,15 +264,9 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
       const b = await signupVerifyLogin(t);
       expect(a.householdId).not.toBe(b.householdId);
 
-      // Enroll a real passkey for A so the ownership check
-      // (`assertCredentialBelongsToUser(me.userId, ...)`) passes and the
-      // request reaches `toSlotRow`.
       const aCredentialId = await seedPasskey(t, a);
 
-      // A's real token, but the body's `slot.householdId` claims B's
-      // household. `toSlotRow(me.householdId, slotId, body)` binds the row to
-      // the JWT household and IGNORES the body field, so the write must
-      // succeed and land under A — not cross into B.
+      // `toSlotRow(me.householdId, ...)` binds the row to the JWT household and ignores the body's `slot.householdId`, so the write lands under A, not B.
       const put = await request(t.app.getHttpServer())
         .put('/api/v1/auth/key-envelopes/passkey_prf')
         .set('Origin', process.env.WEB_ORIGIN!)
@@ -356,8 +276,6 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
         .send(passkeyPrfUpsertBody(b.householdId, aCredentialId));
       expect(put.status).toBe(204);
 
-      // The slot is readable under A's household (GET keys off
-      // `me.householdId`), confirming the row landed in A's partition.
       const aGet = await request(t.app.getHttpServer())
         .get('/api/v1/auth/key-envelopes')
         .set('Authorization', `Bearer ${a.accessToken}`);
@@ -367,8 +285,6 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
       expect(aPrf).toBeDefined();
       expect(aPrf?.householdId).toBe(a.householdId);
 
-      // The row is NOT under B's household: B (the household the tampered body
-      // named) sees no passkey_prf slot.
       const bGet = await request(t.app.getHttpServer())
         .get('/api/v1/auth/key-envelopes')
         .set('Authorization', `Bearer ${b.accessToken}`);
@@ -382,23 +298,12 @@ describe('cross-household IDOR (1:1 user↔household authorization invariant)', 
       const b = await signupVerifyLogin(t);
       expect(a.userId).not.toBe(b.userId);
 
-      // Enroll a REAL passkey for user B. This credentialId genuinely exists —
-      // but under B's partition only.
+      // B's credential exists, but only under B's partition.
       const bCredentialId = await seedPasskey(t, b);
 
-      // A's token binds the slot to B's real credentialId.
-      // `assertCredentialBelongsToUser` is a `passkeys.find(me.userId,
-      // credentialId)` GetCommand partitioned by userId, so it looks in A's
-      // partition, finds nothing, and 422s — even though the credential exists
-      // globally under B.
-      //
-      // Regression this catches that the random-UUID test cannot: if the
-      // lookup were ever changed to a global (un-scoped-by-userId) query, B's
-      // real credential WOULD be found and A's bind would wrongly succeed — a
-      // cross-user credential IDOR. A random UUID is absent from every
-      // partition, so it 422s under both the correct and the broken lookup and
-      // would let that regression pass silently. A real foreign credential
-      // forces the partitioning to be exercised.
+      // The ownership lookup is partitioned by userId, so it finds nothing in A's partition and 422s even though the credential exists under B.
+      // A random UUID would 422 under a global (un-scoped) lookup too and let a cross-user credential IDOR regression pass; a real foreign
+      // credential forces the partitioning to be exercised.
       const res = await request(t.app.getHttpServer())
         .put('/api/v1/auth/key-envelopes/passkey_prf')
         .set('Origin', process.env.WEB_ORIGIN!)
