@@ -54,7 +54,7 @@ import { ToolArgsError, type ToolEnv } from './define';
  * contribution, asset-mix and floor sections stay `excluded`: they carry free text, ids or shapes whose
  * absence has its own meaning, and widening is a later decision.
  */
-export const WHAT_IF_CLASSIFICATION = {
+const WHAT_IF_CLASSIFICATION = {
   retirementAge: 'allowed',
   socialSecurity: 'allowed',
   filingStatus: 'excluded',

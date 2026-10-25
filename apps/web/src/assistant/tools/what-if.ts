@@ -21,7 +21,7 @@ import { dollarsFor, headlineOf, requireMethodSlice, requirePageResult, resolveS
 import { gateOf, projectSection } from './scenario-report';
 import { monteCarloInputFor } from './stress-cache';
 import { STRESS_BASIS, monteCarloAssumptions, stressFigures } from './stress-figures';
-import { stressRunner, type StressRunner } from './stress-test';
+import { stressRunner } from './stress-test';
 import { buildWhatIf, getPath, setPath, type EchoChange, type EchoKept } from './what-if-overrides';
 
 /** The fixed label the throwaway scenario carries; the agent supplies no text of its own. */
@@ -32,7 +32,7 @@ const NOT_SAVED_STATEMENT =
   'Nothing was saved. This what-if is not a scenario: it does not appear on the Scenarios page and is gone when this call ends. To make it real, the person creates it in Retivo (Planning, Scenarios, Create scenario, with the base scenario as the parent) and sets the same values; it cannot be done through the assistant.';
 
 /** The throwaway child: every field the engines do not read is inert, so only the parent link and the overrides matter. */
-export function throwawayFor(base: ScenarioAggregate, overrides: ScenarioOverrides, now: Date): ScenarioAggregate {
+function throwawayFor(base: ScenarioAggregate, overrides: ScenarioOverrides, now: Date): ScenarioAggregate {
   return {
     id: crypto.randomUUID(),
     householdId: base.householdId,
@@ -148,80 +148,70 @@ function echoOf(changes: readonly EchoChange[], kept: readonly EchoKept[], env: 
   };
 }
 
-export interface WhatIfOptions {
-  /** The runner a stress test computes on. Production shares the stress-test tool's, so the two count as one run at a time. */
-  runner?: StressRunner;
-}
+export const retivoRunWhatIf = defineTool('retivo_run_what_if', async (args, env) => {
+  const baseId = resolveScenarioArg(args.baseScenarioId, env);
+  if (!env.choices.scenarios) return { data: { omittedSections: ['scenarios'] } };
+  const from = typeof args.fromYear === 'number' ? args.fromYear : undefined;
+  const to = typeof args.toYear === 'number' ? args.toYear : undefined;
+  if (from !== undefined && to !== undefined && from > to) throw new ToolArgsError('fromYear is after toYear.');
 
-export function makeWhatIfTool(options: WhatIfOptions = {}) {
-  const runner = options.runner ?? stressRunner;
-  return defineTool('retivo_run_what_if', async (args, env) => {
-    const baseId = resolveScenarioArg(args.baseScenarioId, env);
-    if (!env.choices.scenarios) return { data: { omittedSections: ['scenarios'] } };
-    const from = typeof args.fromYear === 'number' ? args.fromYear : undefined;
-    const to = typeof args.toYear === 'number' ? args.toYear : undefined;
-    if (from !== undefined && to !== undefined && from > to) throw new ToolArgsError('fromYear is after toYear.');
+  const built = buildWhatIf(baseId, args.overrides as WhatIfOverrides, env);
+  const base = env.workspace.scenarios.find((scenario) => scenario.id === baseId)!;
+  const throwaway = throwawayFor(base, built.overrides, env.now);
+  const whatIfEnv = withScenario(env, throwaway);
 
-    const built = buildWhatIf(baseId, args.overrides as WhatIfOverrides, env);
-    const base = env.workspace.scenarios.find((scenario) => scenario.id === baseId)!;
-    const throwaway = throwawayFor(base, built.overrides, env.now);
-    const whatIfEnv = withScenario(env, throwaway);
+  const baseRun = runPlan(baseId, env);
+  const basePage = requirePageResult(baseRun);
+  const baseSlice = requireMethodSlice(basePage, 'planned');
+  const whatIfRun = runPlan(throwaway.id, whatIfEnv);
+  const whatIfPage = requirePageResult(whatIfRun);
+  const whatIfSlice = requireMethodSlice(whatIfPage, 'planned');
 
-    const baseRun = runPlan(baseId, env);
-    const basePage = requirePageResult(baseRun);
-    const baseSlice = requireMethodSlice(basePage, 'planned');
-    const whatIfRun = runPlan(throwaway.id, whatIfEnv);
-    const whatIfPage = requirePageResult(whatIfRun);
-    const whatIfSlice = requireMethodSlice(whatIfPage, 'planned');
+  const dollars = dollarsFor(env);
+  const baseName = env.view().scenarios?.find((row) => row.id === baseId)?.name;
+  const wantRows = from !== undefined || to !== undefined;
 
-    const dollars = dollarsFor(env);
-    const baseName = env.view().scenarios?.find((row) => row.id === baseId)?.name;
-    const wantRows = from !== undefined || to !== undefined;
+  let stress: ReturnType<typeof stressFigures> | undefined;
+  let monteCarloNotes: string[] = [];
+  if (args.stressTest === true) {
+    const input = monteCarloInputFor(throwaway.id, whatIfEnv, stressRunner.pathCount);
+    if (input === null) throw new ToolFailure('INVALID_ARGS', PROJECTION_UNAVAILABLE_MESSAGE);
+    // Always computed: the saved results are neither read nor written, so a what-if cannot meet or leave an entry.
+    const summary = await stressRunner.run(input, env);
+    stress = stressFigures(summary, env);
+    monteCarloNotes = monteCarloAssumptions(summary);
+  }
 
-    let stress: ReturnType<typeof stressFigures> | undefined;
-    let monteCarloNotes: string[] = [];
-    if (args.stressTest === true) {
-      const input = monteCarloInputFor(throwaway.id, whatIfEnv, runner.pathCount);
-      if (input === null) throw new ToolFailure('INVALID_ARGS', PROJECTION_UNAVAILABLE_MESSAGE);
-      // Always computed: the saved results are neither read nor written, so a what-if cannot meet or leave an entry.
-      const summary = await runner.run(input, env);
-      stress = stressFigures(summary, env);
-      monteCarloNotes = monteCarloAssumptions(summary);
-    }
-
-    return {
-      data: {
-        saved: false,
-        statement: NOT_SAVED_STATEMENT,
-        base: { scenarioId: baseId, ...(typeof baseName === 'string' && { name: baseName }), headline: headlineData(basePage, dollars) },
-        whatIf: { label: WHAT_IF_LABEL, headline: headlineData(whatIfPage, dollars) },
-        difference: deltaOf(basePage, whatIfPage, dollars),
-        echo: echoOf(built.changes, built.kept, env),
-        ...(wantRows && {
-          years: {
-            base: projectionRows(basePage, baseSlice, from, to, dollars),
-            whatIf: projectionRows(whatIfPage, whatIfSlice, from, to, dollars),
-          },
-        }),
-        ...(stress !== undefined && {
-          stressTest: {
-            source: 'computed',
-            sourceNote: `Computed now in the open tab for the what-if only, with ${stress.pathCount.toLocaleString('en-US')} paths. Nothing was saved, and no saved stress-test result was read or changed.`,
-            basis: STRESS_BASIS,
-            ...stress,
-          },
-        }),
-      },
-      assumptions: [
-        ...new Set([
-          'The what-if starts from the base scenario and changes only the settings in the echo; everything else is inherited from the base as it resolves today. Both sides are the Planned projection.',
-          ...built.notes,
-          ...deterministicAssumptions(whatIfRun, 'planned', whatIfEnv),
-          ...monteCarloNotes,
-        ]),
-      ],
-    };
-  });
-}
-
-export const retivoRunWhatIf = makeWhatIfTool();
+  return {
+    data: {
+      saved: false,
+      statement: NOT_SAVED_STATEMENT,
+      base: { scenarioId: baseId, ...(typeof baseName === 'string' && { name: baseName }), headline: headlineData(basePage, dollars) },
+      whatIf: { label: WHAT_IF_LABEL, headline: headlineData(whatIfPage, dollars) },
+      difference: deltaOf(basePage, whatIfPage, dollars),
+      echo: echoOf(built.changes, built.kept, env),
+      ...(wantRows && {
+        years: {
+          base: projectionRows(basePage, baseSlice, from, to, dollars),
+          whatIf: projectionRows(whatIfPage, whatIfSlice, from, to, dollars),
+        },
+      }),
+      ...(stress !== undefined && {
+        stressTest: {
+          source: 'computed',
+          sourceNote: `Computed now in the open tab for the what-if only, with ${stress.pathCount.toLocaleString('en-US')} paths. Nothing was saved, and no saved stress-test result was read or changed.`,
+          basis: STRESS_BASIS,
+          ...stress,
+        },
+      }),
+    },
+    assumptions: [
+      ...new Set([
+        'The what-if starts from the base scenario and changes only the settings in the echo; everything else is inherited from the base as it resolves today. Both sides are the Planned projection.',
+        ...built.notes,
+        ...deterministicAssumptions(whatIfRun, 'planned', whatIfEnv),
+        ...monteCarloNotes,
+      ]),
+    ],
+  };
+});
