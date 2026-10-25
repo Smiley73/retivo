@@ -91,6 +91,11 @@ commands below. `openssl` and `jq` are needed only for the optional key step.
    `S3_ENDPOINT` pointing at the same ports. Set `REGISTRY` if you pull images
    from a mirror. `pnpm emu:down` stops them.
 
+   To run a second stack beside this one (for example in a worktree), set
+   `COMPOSE_PROJECT_NAME` in that checkout's `.env` as well as different
+   `EMU_*_HOST_PORT` values. The container names are prefixed with it
+   (`retivo` by default), so the two stacks do not collide.
+
 5. **Start the app.**
 
    ```bash

@@ -8,6 +8,8 @@
 #
 #   EMU_DYNAMODB_HOST_PORT  default 8000
 #   EMU_MOTO_HOST_PORT      default 5001
+#   COMPOSE_PROJECT_NAME    default retivo — prefixes the container names; set it (with
+#                           different host ports) to run a second stack, e.g. in a worktree
 #   REGISTRY                default (empty) — prefix images to pull from a private registry
 #                           e.g. REGISTRY=myregistry.example.com/
 #
@@ -31,7 +33,7 @@
 services:
   dynamodb-local:
     image: ${REGISTRY:-}amazon/dynamodb-local:3.3.0
-    container_name: retivo-dynamodb-local
+    container_name: ${COMPOSE_PROJECT_NAME:-retivo}-dynamodb-local
     command: -jar DynamoDBLocal.jar -sharedDb -inMemory
     ports:
       - "${EMU_DYNAMODB_HOST_PORT:-8000}:8000"
@@ -48,7 +50,7 @@ services:
 
   moto:
     image: ${REGISTRY:-}motoserver/moto:5.2.0
-    container_name: retivo-moto
+    container_name: ${COMPOSE_PROJECT_NAME:-retivo}-moto
     ports:
       - "${EMU_MOTO_HOST_PORT:-5001}:5000"
     environment:
