@@ -1,6 +1,7 @@
 // HTTP client for the key-envelope endpoints (`/auth/key-envelopes`: list, activate, upsert).
 // The CSRF echo on state-changing calls comes from `apiRequest` (AGENTS.md "Project-specific security").
 import type { AuthenticationResponseJSON } from '@simplewebauthn/browser';
+import { ENCRYPTED_WORKSPACE_RESET_PHRASE } from '@retirement/contracts';
 import { apiRequest } from '../api/client';
 import type { EnvelopeSetIntegrity, KeyEnvelopeSlot } from '../crypto/encryption-types';
 
@@ -73,12 +74,6 @@ export function activateKeyEnvelopes(body: ActivateKeyEnvelopesBody): Promise<vo
     },
   });
 }
-
-/**
- * Confirmation phrase for the encrypted-workspace reset; must match the server's `ENCRYPTED_WORKSPACE_RESET_PHRASE`
- * (`apps/api/src/auth/dto/auth.dto.ts`), which rejects anything else with a 400.
- */
-export const ENCRYPTED_WORKSPACE_RESET_PHRASE = 'DELETE';
 
 // Structurally matches `StepUpProof` from `components/useStepUp`.
 interface EncryptedWorkspaceResetProof {

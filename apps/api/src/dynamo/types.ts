@@ -1,6 +1,14 @@
 // DynamoDB row types, one interface per table; matches infrastructure/src/dynamo.ts. Tables are grouped by role in
 // docs/architecture.md, "Data".
 
+import type {
+  KdfParams,
+  PushedMutationApplied,
+  PushedMutationRejected,
+  SlotType,
+  SyncOperation,
+} from '@retirement/contracts';
+
 // ---------- Sync tables ----------
 
 export interface WorkspaceMetaRow {
@@ -38,7 +46,7 @@ export interface MutationLogRow {
   deviceId: string;
   aggregateId: string;
   aggregateType: string;
-  operation: 'create' | 'update' | 'delete';
+  operation: SyncOperation;
   payload: string; // JSON-stringified to avoid attribute-size friction
   version: number;
   timestamp: number;
@@ -57,7 +65,7 @@ export interface AggregateVersionRow {
 export interface IdempotencyKeyRow {
   /** `${householdId}#${deviceId}#${mutationId}` */
   key: string;
-  response: AppliedMutationResult | RejectedMutationResult;
+  response: PushedMutationApplied | PushedMutationRejected;
   createdAt: string;
   expiresAt: number; // 7-day TTL
   /**
@@ -76,32 +84,6 @@ export interface DeviceRegistryRow {
   syncCursor: string | null;
   osType: string | null;
   userAgent: string | null;
-}
-
-export interface AppliedMutationResult {
-  status: 'applied';
-  mutationId: string;
-  aggregateId: string;
-  newVersion: number;
-  newUpdatedAt: string;
-  /** KSUID of the MutationLog row this push wrote; absent on a replay served from the cache. */
-  sequenceId?: string;
-  /** True only when this create revived a tombstoned aggregate. */
-  recreatedOverTombstone?: boolean;
-}
-
-export interface RejectedMutationResult {
-  status: 'rejected';
-  mutationId: string;
-  aggregateId: string;
-  reason: 'CONFLICT' | 'NOT_FOUND' | 'SCHEMA_MISMATCH';
-  currentVersion: number;
-  currentUpdatedAt: string;
-  /**
-   * The current server row soft-delete timestamp; null when live or absent. Lets the client auto-repair tell
-   * recreating over its own tombstone from a collision with a live row.
-   */
-  currentDeletedAt: string | null;
 }
 
 // ---------- Auth tables ----------
@@ -612,39 +594,6 @@ export interface TrustedDeviceRow {
 
 // ---------- Zero-knowledge key-envelope table ----------
 
-// `password` slots carry `kdf`; `passkey_prf` carries `prfSalt` and `credentialBinding`; `oidc` is inert plumbing, no
-// OIDC login flow exists.
-type KeyEnvelopeSlotType =
-  | 'password'
-  | 'recovery'
-  | 'passkey_prf'
-  | 'oidc';
-
-/**
- * KDF parameters for a password slot: Argon2id for new slots, legacy PBKDF2 retained for existing ones. The server
- * stores the shape verbatim and derives nothing.
- */
-export type KeyEnvelopeKdf = KeyEnvelopePbkdf2Kdf | KeyEnvelopeArgon2idKdf;
-
-interface KeyEnvelopePbkdf2Kdf {
-  algorithm: 'PBKDF2-HMAC-SHA-256';
-  iterations: number;
-  /** base64url per-slot random salt. */
-  salt: string;
-}
-
-interface KeyEnvelopeArgon2idKdf {
-  algorithm: 'Argon2id';
-  /** memory cost (KiB). */
-  m: number;
-  /** time cost (passes). */
-  t: number;
-  /** parallelism (lanes). */
-  p: number;
-  /** base64url per-slot random salt. */
-  salt: string;
-}
-
 /**
  * One wrapped-key slot (PK householdId, SK slotId). The server stores the wrapped key and metadata opaquely and never
  * unwraps, validates or logs it.
@@ -653,14 +602,14 @@ export interface HouseholdKeyEnvelopeRow {
   householdId: string;
   /** SK. Per-slot id. Never the `ENVELOPE_META` sentinel. */
   slotId: string;
-  slotType: KeyEnvelopeSlotType;
+  slotType: SlotType;
   /**
    * The WebAuthn credential ID a `passkey_prf` slot is bound to, verified against the caller by the controller; null
    * or absent for other slots.
    */
   credentialBinding?: string | null;
   /** Present for `password` slots; recovery/passkey-PRF/oidc slots omit it. */
-  kdf?: KeyEnvelopeKdf;
+  kdf?: KdfParams;
   /** base64url PRF salt; present for `passkey_prf` slots. */
   prfSalt?: string;
   /** base64url authenticated AES-256-GCM wrap of the HDK. */

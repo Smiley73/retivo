@@ -31,6 +31,7 @@ import {
   withBatchedStoreSignals,
   writeKeyCacheEntry,
 } from '../db/store.js';
+import { MAX_PUSH_MUTATIONS } from '@retirement/contracts';
 import { cryptoUuid } from '../lib/crypto-uuid.js';
 import type { DeviceMetadata, PendingMutation } from '../db/types.js';
 import { collapseAndReQueue } from './mutation-queue.js';
@@ -121,9 +122,7 @@ const REWAKE_DEBOUNCE_MS = 5 * 1000;
 // debounces only the non-error cadence.
 const REFOCUS_BASE_MS = 5 * 1000;
 const REFOCUS_JITTER_MS = 1 * 1000;
-// Mirrors the server's @ArrayMaxSize(100) on POST /sync/push; a longer queue (demo load, bulk edit, long offline
-// session) pushes in sequential batches.
-const PUSH_BATCH_SIZE = 100;
+// A longer queue (demo load, bulk edit, long offline session) pushes in sequential batches of MAX_PUSH_MUTATIONS.
 
 // Badge message for mutations parked as `failed-error` (e.g. a FRESHNESS_HEAD_INVALID reject), shared with {@link
 // unsyncedBadgeGuard} so later ticks keep the wording instead of flipping to a false `synced`.
@@ -567,7 +566,7 @@ export function SyncProvider({
     });
     const run = async (): Promise<boolean> => {
       // Loop so a mutation queued mid-flight flushes in the same call; each iteration drains the whole queue in
-      // PUSH_BATCH_SIZE chunks. The cap bounds re-flush rounds, not mutations; 8 is well above any realistic demo-load
+      // MAX_PUSH_MUTATIONS chunks. The cap bounds re-flush rounds, not mutations; 8 is well above any realistic demo-load
       // or bulk-edit re-queue.
       let iterations = 0;
       while (iterations < 8) {
@@ -597,7 +596,7 @@ export function SyncProvider({
         // One mutation per aggregate per batch (see firstPerAggregate), capped at the server's 100. A retried batch is
         // safe: the server dedupes by `(householdId#deviceId#mutationId)`. Declared before the try so the
         // permanent-rejection catch can park exactly this batch's ids.
-        const batch = firstPerAggregate(pending, PUSH_BATCH_SIZE);
+        const batch = firstPerAggregate(pending, MAX_PUSH_MUTATIONS);
         try {
           {
             const result = await transportRef.current.push({

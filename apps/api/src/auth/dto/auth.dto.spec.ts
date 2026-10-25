@@ -5,6 +5,7 @@ import {
   PasskeyRemoveDto,
   UpdateAccountDto,
   UpsertKeyEnvelopeDto,
+  UpsertKeyEnvelopeSlotDto,
 } from './auth.dto.js';
 
 describe('UpdateAccountDto', () => {
@@ -123,6 +124,29 @@ describe('UpsertKeyEnvelopeDto', () => {
     delete b.slot;
     expect(dtoViolations(UpsertKeyEnvelopeDto, b)).toEqual(
       expect.arrayContaining(['slot:isDefined', 'slot:isObject']),
+    );
+  });
+});
+
+describe('UpsertKeyEnvelopeSlotDto', () => {
+  const slot = {
+    householdId: 'hh-1',
+    slotId: 'password',
+    slotType: 'password',
+    kdf: { algorithm: 'PBKDF2-HMAC-SHA-256', iterations: 600_000, salt: 'c2FsdA' },
+    wrappedKey: 'd3JhcHBlZA',
+    encryptionVersion: 1,
+    createdAt: '2026-10-09T00:00:00.000Z',
+    updatedAt: '2026-10-09T00:00:00.000Z',
+  };
+
+  it('accepts a known slotType', () => {
+    expect(dtoViolations(UpsertKeyEnvelopeSlotDto, slot)).toEqual([]);
+  });
+
+  it('rejects an unknown slotType', () => {
+    expect(dtoViolations(UpsertKeyEnvelopeSlotDto, { ...slot, slotType: 'bogus' })).toContain(
+      'slotType:isIn',
     );
   });
 });

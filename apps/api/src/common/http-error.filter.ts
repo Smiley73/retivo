@@ -8,6 +8,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import type { ErrorEnvelope } from '@retirement/contracts';
 import type { Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 
@@ -56,9 +57,8 @@ export class HttpErrorFilter implements ExceptionFilter {
 
     const traceId = (req.headers['x-correlation-id'] as string) ?? randomUUID();
 
-    res.status(status).json({
-      error: { code, message, details, traceId },
-    });
+    const body: ErrorEnvelope = { error: { code, message, details, traceId } };
+    res.status(status).json(body);
   }
 
   private defaultCode(status: number): string {

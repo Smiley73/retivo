@@ -6,10 +6,9 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { gzipSync } from 'node:zlib';
-import type { BootstrapResponseBody } from '@retirement/contracts';
+import type { BootstrapResponseBody, SyncChange } from '@retirement/contracts';
 import { MutationLogRepository } from '../dynamo/mutation-log.repository.js';
 import { WorkspaceMetaRepository } from '../dynamo/workspace-meta.repository.js';
-import type { PulledMutation } from './pull.service.js';
 import { isActiveAggregateType } from './aggregate-types.js';
 import {
   SnapshotsService,
@@ -24,7 +23,7 @@ interface BootstrapResponse {
     householdId: string;
     aggregates: SnapshotAggregate[];
   };
-  postSnapshotMutations: PulledMutation[];
+  postSnapshotMutations: SyncChange[];
   syncCursor: string;
   timestamp: string;
   /** The stored freshness head, echoed opaquely; omitted until one has been stored. */
@@ -100,9 +99,9 @@ export class BootstrapService {
   private async collectPostSnapshotMutations(
     householdId: string,
     latestSnapshotCursor: string | null | undefined,
-  ): Promise<{ changes: PulledMutation[]; syncCursor: string }> {
+  ): Promise<{ changes: SyncChange[]; syncCursor: string }> {
     const since = latestSnapshotCursor ?? '0';
-    const changes: PulledMutation[] = [];
+    const changes: SyncChange[] = [];
     let cursor = since;
     let sawAnyRow = false;
     while (true) {

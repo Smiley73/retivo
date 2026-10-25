@@ -91,7 +91,6 @@ vi.mock('../lib/data-import', async () => {
 });
 
 vi.mock('../auth/key-envelope-client', () => ({
-  ENCRYPTED_WORKSPACE_RESET_PHRASE: 'DELETE',
   resetEncryptedWorkspace: vi.fn().mockResolvedValue(undefined),
   getKeyEnvelopes: vi.fn().mockResolvedValue({
     slots: [],

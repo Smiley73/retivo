@@ -1,11 +1,12 @@
 // Shared builder from a validated `UpsertKeyEnvelopeSlotDto` to the persisted `HouseholdKeyEnvelopeRow`, used by the controller and the
 // change-password commit alike.
 import type { KeyEnvelopeKdfDto, UpsertKeyEnvelopeSlotDto } from './dto/auth.dto.js';
-import type { HouseholdKeyEnvelopeRow, KeyEnvelopeKdf } from '../dynamo/types.js';
+import type { KdfParams } from '@retirement/contracts';
+import type { HouseholdKeyEnvelopeRow } from '../dynamo/types.js';
 
 // Copies the validated KDF DTO into a plain row object, dispatching on `algorithm` so the row carries only that
 // algorithm work-factor fields.
-function toKdfRow(kdf: KeyEnvelopeKdfDto): KeyEnvelopeKdf {
+function toKdfRow(kdf: KeyEnvelopeKdfDto): KdfParams {
   if (kdf.algorithm === 'Argon2id') {
     return {
       algorithm: 'Argon2id',
@@ -13,13 +14,13 @@ function toKdfRow(kdf: KeyEnvelopeKdfDto): KeyEnvelopeKdf {
       ...(kdf.t === undefined ? {} : { t: kdf.t }),
       ...(kdf.p === undefined ? {} : { p: kdf.p }),
       salt: kdf.salt,
-    } as KeyEnvelopeKdf;
+    } as KdfParams;
   }
   return {
     algorithm: kdf.algorithm,
     ...(kdf.iterations === undefined ? {} : { iterations: kdf.iterations }),
     salt: kdf.salt,
-  } as KeyEnvelopeKdf;
+  } as KdfParams;
 }
 
 /**

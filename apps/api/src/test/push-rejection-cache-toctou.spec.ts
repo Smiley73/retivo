@@ -8,11 +8,8 @@ import { PushService } from '../sync/push.service.js';
 import { IdempotencyKeyRepository } from '../dynamo/idempotency-key.repository.js';
 import { WorkspaceMetaRepository } from '../dynamo/workspace-meta.repository.js';
 import type { PushMutationDto } from '../sync/dto/push.dto.js';
-import type {
-  AppliedMutationResult,
-  IdempotencyKeyRow,
-  RejectedMutationResult,
-} from '../dynamo/types.js';
+import type { PushedMutationApplied, PushedMutationRejected } from '@retirement/contracts';
+import type { IdempotencyKeyRow } from '../dynamo/types.js';
 
 function encryptedEnvelope(): Record<string, unknown> {
   return {
@@ -40,7 +37,7 @@ function mutation(overrides: Partial<PushMutationDto> = {}): PushMutationDto {
 }
 
 function rejectionRow(expectedVersion: number | undefined): IdempotencyKeyRow {
-  const response: RejectedMutationResult = {
+  const response: PushedMutationRejected = {
     status: 'rejected',
     mutationId: randomUUID(),
     aggregateId: randomUUID(),
@@ -59,7 +56,7 @@ function rejectionRow(expectedVersion: number | undefined): IdempotencyKeyRow {
 }
 
 function appliedRow(newVersion: number): IdempotencyKeyRow {
-  const response: AppliedMutationResult = {
+  const response: PushedMutationApplied = {
     status: 'applied',
     mutationId: randomUUID(),
     aggregateId: randomUUID(),

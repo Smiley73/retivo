@@ -20,7 +20,6 @@ vi.mock('../api/client', () => ({
 }));
 
 vi.mock('../auth/key-envelope-client', () => ({
-  ENCRYPTED_WORKSPACE_RESET_PHRASE: 'DELETE',
   resetEncryptedWorkspace: vi.fn().mockResolvedValue(undefined),
 }));
 
