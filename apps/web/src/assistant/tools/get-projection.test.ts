@@ -89,6 +89,7 @@ describe('retivo_get_projection', () => {
     expect(reversed).toMatchObject({ ok: false, error: { code: 'INVALID_ARGS' } });
     const unknown = await callPlanTool('retivo_get_projection', { scenarioId: 'no-such-scenario' });
     expect(unknown).toMatchObject({ ok: false, error: { code: 'INVALID_ARGS' } });
+    expect(JSON.stringify(unknown)).not.toContain('no-such-scenario');
   });
 
   it('answers historical from the same run when the plan has the history for it', async () => {
