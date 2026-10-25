@@ -54,6 +54,7 @@ import { ToolArgsError, type ToolEnv } from './define';
  * contribution, asset-mix and floor sections stay `excluded`: they carry free text, ids or shapes whose
  * absence has its own meaning, and widening is a later decision.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- read only through `typeof`; the compiler enforces coverage
 const WHAT_IF_CLASSIFICATION = {
   retirementAge: 'allowed',
   socialSecurity: 'allowed',
