@@ -11,7 +11,7 @@ import {
 import type { CashflowChartMarker } from '../components/CashflowProjectionChart';
 import type { TooltipMember } from '../components/tooltip-member';
 import { useChartColors } from '../lib/use-chart-tokens';
-import type { McBasis } from './balance-projection-page-pipeline';
+import type { McBasis } from '../lib/monte-carlo';
 import { useChartZoom } from '../lib/use-chart-zoom';
 import { ChartZoomReset } from '../components/ChartZoomReset';
 import type { PlanStressTestVm } from '../components/PlanStressTestSection';

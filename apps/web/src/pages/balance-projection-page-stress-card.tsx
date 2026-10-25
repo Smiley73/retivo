@@ -1,11 +1,8 @@
 /** "Stress-test outcomes" card: the Monte Carlo plan-success chart, its data-table disclosure and the market-stress comparison. yScale is page state read by this card and the per-year chart, passed in so the two cannot drift out of sync. */
 import React from 'react';
-import {
-  PlanStressTestEmpty,
-  PlanStressTestChart,
-  PlanStressTestMarketStress,
-  type PlanStressTestVm,
-} from '../components/PlanStressTestSection';
+import { PlanStressTestEmpty, type PlanStressTestVm } from '../components/PlanStressTestSection';
+import { PlanStressTestChart } from '../components/PlanStressTestChart';
+import { PlanStressTestMarketStress } from '../components/PlanStressTestCards';
 import { ChartInfoPopover } from '../components/ChartInfoPopover';
 import {
   CARD_SECTION_CLASS,

@@ -9,11 +9,8 @@ import type {
   ProjectionMethod,
 } from '../components/ProjectionChart';
 import type { DisplayMode, CashflowGranularity } from '../lib/view-deflator';
-import type {
-  PipelineData,
-  DrawdownByMethodResult,
-  McBasis,
-} from './balance-projection-page-data';
+import type { McBasis } from '../lib/monte-carlo';
+import type { PipelineData, DrawdownByMethodResult } from './balance-projection-page-data';
 import type { CashflowSeriesPipelineResult } from './balance-projection-page-cashflow';
 import type { YearlyTableRow } from './balance-projection-page-yearly';
 

@@ -5,7 +5,8 @@ import { buildSwrComparisonData, type BuildSwrComparisonDataParams } from './bal
 import { buildViewDeflator } from '../lib/view-deflator';
 import type { CashflowMonthlyPoint } from '../components/CashflowProjectionChart';
 import type { DrawdownYear } from '../lib/drawdown-engine';
-import type { DrawdownByMethodResult, RepresentativeRun } from './balance-projection-page-data';
+import type { RepresentativeRun } from '../lib/monte-carlo';
+import type { DrawdownByMethodResult } from './balance-projection-page-data';
 
 const IDENTITY = (): number => 1;
 

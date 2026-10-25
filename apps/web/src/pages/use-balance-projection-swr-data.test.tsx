@@ -5,7 +5,7 @@ import { renderHook } from '@testing-library/react';
 import { ThemeProvider } from '../contexts/ThemeContext';
 import { useBalanceProjectionViewModel } from './use-balance-projection-view-model';
 import { useBalanceProjectionSwrData } from './use-balance-projection-swr-data';
-import { loadPageData } from './balance-projection-page-pipeline';
+import { loadPageData } from './balance-projection-page-data';
 import { buildTaxBurdenRows } from './balance-projection-burden-rows';
 import type {
   AccountBalancePayload,

@@ -1,6 +1,7 @@
 /**
- * Button and input class strings for `components/` dialogs, kept here to avoid a `components/ → pages/ → components/`
- * cycle. Source-order rationale: "Buttons and destructive actions" in docs/ui-conventions.md.
+ * The one definition of the primary, secondary, danger and small-secondary button strings and the text input string; the
+ * page chrome re-exports them. They live in `components/` because a dialog importing `pages/*-chrome` would form a
+ * `components/ → pages/ → components/` cycle. Source-order rationale: "Buttons and destructive actions" in docs/ui-conventions.md.
  */
 
 /** Primary action button. */
@@ -38,7 +39,7 @@ export const btnSecondarySmClass =
   'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
   'disabled:cursor-not-allowed disabled:opacity-50';
 
-/** Text-entry class for `components/`-level dialogs. */
+/** Text-entry class; the darker `input-line` border keeps the control boundary above the WCAG 1.4.11 non-text contrast gate. */
 export const inputClass =
   'block w-full min-w-0 rounded-md border border-input-line bg-surface px-3 py-2 ' +
   'text-ink placeholder:text-muted ' +

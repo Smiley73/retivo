@@ -199,8 +199,7 @@ const GuardrailsComparisonCallout: React.FC<{
   comparison: PlanStressTestVm['guardrailComparison'];
 }> = ({ comparison }) => {
   if (comparison === undefined) return null;
-  const pct = (v: number | null): string =>
-    v === null ? '—' : `${Math.round(v * 100)}%`;
+  const pct = (v: number): string => `${Math.round(v * 100)}%`;
 
   if (comparison.state === 'pending') {
     // The sibling run's per-path progress isn't threaded into this VM, so the bar runs indeterminate (total 0) rather than showing a misleading 0%.
@@ -224,9 +223,6 @@ const GuardrailsComparisonCallout: React.FC<{
   }
 
   const { withPct, withoutPct, deltaPct, se } = comparison;
-  if (withPct === null || withoutPct === null || deltaPct === null || se === null) {
-    return null;
-  }
   // Signal only when the delta clears the conservative unpaired-SE bound (an upper bound on the true paired SE; see buildGuardrailComparison).
   const meaningful = Math.abs(deltaPct) > se;
   return (

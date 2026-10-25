@@ -27,7 +27,7 @@ vi.mock('../components/PlanStressTestSection', () => ({
 }));
 
 import { useBalanceProjectionViewModel } from './use-balance-projection-view-model';
-import type { PipelineData } from './balance-projection-page-pipeline';
+import type { PipelineData } from './balance-projection-page-data';
 
 // Minimal `PipelineData` stub carrying only the `pageResult.sharedCtx` fields the toggle-availability and fallback-disclosure derivations read.
 function makeData(opts: {

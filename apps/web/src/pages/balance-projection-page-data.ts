@@ -23,7 +23,6 @@ import type {
   MonteCarloSummary,
   RepresentativeRun,
 } from '../lib/monte-carlo';
-export type { McBasis, RepresentativeRun } from '../lib/monte-carlo';
 import type { ProjectionMethod } from '../components/ProjectionChart';
 import type { BreakdownAccountRow } from './balance-projection-page-yearly';
 

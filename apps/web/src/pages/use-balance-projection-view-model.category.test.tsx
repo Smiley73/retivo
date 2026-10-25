@@ -51,9 +51,9 @@ function catMonth(by: Record<string, number>): ExpenseCategoryMonthlyPoint {
   };
 }
 
-vi.mock('./balance-projection-page-pipeline', async (importOriginal) => {
+vi.mock('./balance-projection-page-cashflow', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('./balance-projection-page-pipeline')>();
+    await importOriginal<typeof import('./balance-projection-page-cashflow')>();
   return {
     ...actual,
     buildPageCashflowSeries: vi.fn(() => ({
@@ -73,7 +73,7 @@ vi.mock('./balance-projection-page-pipeline', async (importOriginal) => {
 });
 
 import { useBalanceProjectionViewModel } from './use-balance-projection-view-model';
-import type { PipelineData } from './balance-projection-page-pipeline';
+import type { PipelineData } from './balance-projection-page-data';
 
 // Minimal `PipelineData` stub: a primary member with a future retirement ISO so `cashflowChartEndYear` resolves (gating the cashflowSeries memo), and no death markers (`lastDeathFractional` null, so chartEndYear == retirement year).
 function makeData(): PipelineData {

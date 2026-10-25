@@ -1,6 +1,5 @@
 /**
- * Stat-card slot renderers and the market-stress comparison table, presentation over `PlanStressTestVm`. Re-exported
- * from `PlanStressTestSection.tsx`.
+ * Stat-card slot renderers and the market-stress comparison table, presentation over `PlanStressTestVm`.
  */
 import { useState } from 'react';
 import {
@@ -51,12 +50,8 @@ function GuardrailDeltaBadge({
 }: {
   comparison: PlanStressTestVm['guardrailComparison'];
 }) {
-  if (comparison === undefined) return null;
-  if (comparison.state === 'pending' || comparison.state === 'error') return null;
-  const { withPct, withoutPct, deltaPct, se } = comparison;
-  if (withPct === null || withoutPct === null || deltaPct === null || se === null) {
-    return null;
-  }
+  if (comparison?.state !== 'ready') return null;
+  const { deltaPct, se } = comparison;
   const meaningful = Math.abs(deltaPct) > se;
   const deltaPp = Math.round(deltaPct * 100);
   // A meaningful delta can still round to 0 at whole-point precision; "0pp" would contradict the

@@ -1,5 +1,6 @@
 /** Derived view-model hook for the Balance Projection page: deflators, markers, chart rows, cashflow, drawdown and strategy resolution. */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { McBasis, RepresentativeRun } from '../lib/monte-carlo';
 import { pickBandIndex } from '../lib/monte-carlo-summary';
 import {
   type CashflowGranularity,
@@ -46,15 +47,13 @@ import {
   type BreakdownAccountRow,
   type YearlyTableRow,
 } from './balance-projection-page-yearly';
+import { buildPageCashflowSeries } from './balance-projection-page-cashflow';
 import {
-  buildPageCashflowSeries,
   drawdownByMethodFromPageResult,
   representativeByBasisFromSummary,
   type PipelineData,
   type DrawdownByMethodResult,
-  type McBasis,
-  type RepresentativeRun,
-} from './balance-projection-page-pipeline';
+} from './balance-projection-page-data';
 import {
   buildIncomeView,
   buildUnifiedYearTableRows,

@@ -6,11 +6,9 @@ import type { ProjectionMethod } from '../components/ProjectionChart';
 import type { DisplayMode } from '../lib/view-deflator';
 import type { SwrComparisonResult } from '../lib/safe-withdrawal-rate-chart-types';
 import { buildViewDeflatorForExport } from './balance-projection-view-derivation';
-import {
-  buildPageCashflowSeries,
-  type McBasis,
-  type PipelineData,
-} from './balance-projection-page-pipeline';
+import type { McBasis } from '../lib/monte-carlo';
+import { buildPageCashflowSeries } from './balance-projection-page-cashflow';
+import type { PipelineData } from './balance-projection-page-data';
 import { buildSwrComparisonData } from './balance-projection-swr-derivation';
 import type { BalanceProjectionViewModel } from './use-balance-projection-view-model';
 

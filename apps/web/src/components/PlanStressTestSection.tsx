@@ -34,9 +34,9 @@ import { computeCacheKey, getCached, putCached } from '../db/monte-carlo-cache';
 import { isValidRmdIsoDate } from '../db/rmd-fact-validation';
 import type { LastSurvivor } from '../pages/balance-projection-page-markers';
 import { btnSecondarySmClass } from './dialog-chrome';
+import type { DisplayMode } from '../lib/view-deflator';
 
-/** Display mode for the page's "Today $ / Future $" toggle. */
-export type DisplayMode = 'today' | 'future';
+export type { DisplayMode };
 
 // Shared with the Scenarios-list cache-read helper: a different `pathCount` would change the cache
 // key.
@@ -123,22 +123,26 @@ export interface PlanStressTestVm {
 }
 
 /** Seed-paired with/without-guardrails comparison state. */
-export interface GuardrailComparisonVm {
-  /** `pending` while the forced-off sibling run is in flight, `error` on a worker failure. */
-  readonly state: 'pending' | 'error' | 'ready';
-  /** Success probability with guardrails (0..1); `null` until the primary run completes. */
-  readonly withPct: number | null;
-  /** Success probability without guardrails (0..1); `null` until the sibling run completes. */
-  readonly withoutPct: number | null;
-  /** `withPct − withoutPct`, or `null` when either side is absent. */
-  readonly deltaPct: number | null;
-  /**
-   * Unpaired two-proportion standard error on the delta (0..1), an upper bound on the true paired
-   * SE (no per-path outcomes are retained). The delta is signal only when `|deltaPct| > se`; erring
-   * high only over-suppresses.
-   */
-  readonly se: number | null;
-}
+export type GuardrailComparisonVm =
+  | {
+      readonly state: 'ready';
+      /** Success probability with guardrails (0..1). */
+      readonly withPct: number;
+      /** Success probability without guardrails (0..1). */
+      readonly withoutPct: number;
+      /** `withPct − withoutPct`. */
+      readonly deltaPct: number;
+      /**
+       * Unpaired two-proportion standard error on the delta (0..1), an upper bound on the true paired
+       * SE (no per-path outcomes are retained). The delta is signal only when `|deltaPct| > se`; erring
+       * high only over-suppresses.
+       */
+      readonly se: number;
+    }
+  /** The forced-off sibling run is in flight. */
+  | { readonly state: 'pending' }
+  /** The sibling run failed in the worker. */
+  | { readonly state: 'error' };
 
 /**
  * Page-derived presentation extras threaded into the hook (life-marker colours, retirement year).
@@ -247,9 +251,8 @@ export function usePlanStressTestVm(
   );
 
   // The signature must cover every field the kernel reads from `mcInput`: a same-scenario edit
-  // keeps `scenarioId`.
-   // When the input is invalid the provider can still hold the prior result, so keep a non-null
-   // token for `isStale`.
+  // keeps `scenarioId`. When the input is invalid the provider can still hold the prior result, so it
+  // stays a non-null string for `isStale` to compare against the last settled signature.
   const currentSignature = useMemo(() => {
     if (mcInput) return hashMcInput(mcInput, cbpFailed);
     return JSON.stringify({
@@ -261,7 +264,7 @@ export function usePlanStressTestVm(
 
   const kickRun = useCallback(
     (kind: 'reset' | 'reroll' | 'recalc') => {
-      if (!mcInput || !currentSignature) return;
+      if (!mcInput) return;
       let seed: number;
       if (kind === 'reset') {
         // Deterministic seed from the signature, so an unchanged plan reuses the same sample.
@@ -316,7 +319,7 @@ export function usePlanStressTestVm(
   );
 
   useEffect(() => {
-    if (!mcInput || !currentSignature) return;
+    if (!mcInput) return;
     if (currentSignature === lastRunSignature) return;
     if (cbpFailed) return;
     const handle = window.setTimeout(() => {
@@ -329,7 +332,7 @@ export function usePlanStressTestVm(
   // worker's path.
   const replayPath = useCallback(
     (seed: number): RepresentativeRun | null => {
-      if (!mcInput || !currentSignature) return null;
+      if (!mcInput) return null;
       return replayRepresentativePath(
         { ...mcInput, pathCount: PATH_COUNT, seed: seedFromString(currentSignature) },
         seed,
@@ -350,7 +353,6 @@ export function usePlanStressTestVm(
   const isStale =
     result !== null &&
     lastRunSignature !== null &&
-    currentSignature !== null &&
     lastRunSignature !== currentSignature;
   const isRunning = status === 'running';
   const runPending =
@@ -386,13 +388,11 @@ export function usePlanStressTestVm(
   // fixed, and re-keying on it re-arms the effect.
   const primarySeed = primarySettled ? (result?.seed ?? null) : null;
   const pairKey =
-    currentSignature !== null && primarySeed !== null
-      ? `${currentSignature}::${primarySeed}`
-      : null;
+    primarySeed !== null ? `${currentSignature}::${primarySeed}` : null;
 
   useEffect(() => {
     const latestMcInput = mcInputRef.current;
-    if (!guardrailEnabled || !latestMcInput || !currentSignature) {
+    if (!guardrailEnabled || !latestMcInput) {
       siblingStartedRef.current = null;
       setSiblingResult(null);
       return;
@@ -564,16 +564,12 @@ function buildGuardrailComparison(
   sibling: { withoutPct: number | null; state: 'pending' | 'error' | 'ready' } | null,
   pathCount: number | null,
 ): GuardrailComparisonVm {
+  if (sibling === null) return { state: 'pending' };
+  if (sibling.state === 'error') return { state: 'error' };
   const withPct = withProbability;
-  if (sibling === null) {
-    return { state: 'pending', withPct, withoutPct: null, deltaPct: null, se: null };
-  }
-  if (sibling.state === 'error') {
-    return { state: 'error', withPct, withoutPct: null, deltaPct: null, se: null };
-  }
   const withoutPct = sibling.withoutPct;
   if (sibling.state !== 'ready' || withPct === null || withoutPct === null) {
-    return { state: 'pending', withPct, withoutPct, deltaPct: null, se: null };
+    return { state: 'pending' };
   }
   const n = pathCount && pathCount > 0 ? pathCount : PATH_COUNT;
   const { delta, se } = successDeltaGate(withPct, n, withoutPct, n);
@@ -671,17 +667,3 @@ export function PlanStressTestRecalcButton({
     </button>
   );
 }
-
-// The stat-card slot renderers (`PlanStressTestSuccessCard`) and the
-// fan-chart + data-table renderer (`PlanStressTestChart`) were extracted
-// to sibling modules to keep this file under the shape limit.
-// They are pure presentation over the `PlanStressTestVm` built
-// above. Re-exported here so existing importers and the section's test
-// suite keep their `./PlanStressTestSection` import paths unchanged.
-export {
-  PlanStressTestSuccessCard,
-} from './PlanStressTestCards';
-export {
-  PlanStressTestChart,
-} from './PlanStressTestChart';
-export { PlanStressTestMarketStress } from './PlanStressTestCards';

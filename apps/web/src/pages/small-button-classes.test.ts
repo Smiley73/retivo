@@ -7,7 +7,6 @@ import {
   btnDangerSmClass,
 } from './accounts-page-chrome';
 import { btnSuccessSmClass } from './scenarios-page-chrome';
-import { btnSecondarySmClass as dialogBtnSecondarySmClass } from '../components/dialog-chrome';
 
 const COMPACT_TOKENS = ['px-2.5', 'py-1', 'text-xs'] as const;
 const FULL_SIZE_TOKENS = ['px-4', 'py-2', 'text-sm'] as const;
@@ -17,7 +16,6 @@ const STANDALONE_SM_CLASSES: ReadonlyArray<readonly [string, string]> = [
   ['btnSecondarySmClass', btnSecondarySmClass],
   ['btnDangerSmClass', btnDangerSmClass],
   ['btnSuccessSmClass', btnSuccessSmClass],
-  ['dialog btnSecondarySmClass', dialogBtnSecondarySmClass],
 ];
 
 describe('standalone small button classes', () => {

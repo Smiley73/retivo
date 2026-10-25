@@ -1,7 +1,7 @@
 /** Shared constants and labels for the Balance Projection page family. */
 import type { ProjectionMethod } from '../components/ProjectionChart';
 import { PROJECTION_METHOD_LABELS } from '../lib/projection-method-labels';
-import type { McBasis } from './balance-projection-page-pipeline';
+import type { McBasis } from '../lib/monte-carlo';
 
 export const METHOD_ORDER: ReadonlyArray<ProjectionMethod> = ['planned', 'twr'];
 

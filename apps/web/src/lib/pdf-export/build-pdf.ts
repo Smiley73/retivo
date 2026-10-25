@@ -28,7 +28,7 @@ import {
   type PdfLibLoader,
 } from './lazy-load';
 import type { DisplayMode } from '../view-deflator';
-import type { McBasis } from '../../pages/balance-projection-page-pipeline';
+import type { McBasis } from '../monte-carlo';
 import type { ProjectionMethod } from '../../components/ProjectionChart';
 import type { YearlyTableRow } from '../../pages/balance-projection-page-yearly';
 import type { PortfolioFlowYear } from '../../pages/balance-projection-page-yearly-builders';

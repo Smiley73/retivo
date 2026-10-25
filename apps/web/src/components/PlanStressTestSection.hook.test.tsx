@@ -852,6 +852,7 @@ describe('usePlanStressTestVm — guardrail with/without comparison', () => {
     expect(putCachedMock).not.toHaveBeenCalled();
     const cmp = result.current.guardrailComparison!;
     expect(cmp.state).toBe('ready');
+    if (cmp.state !== 'ready') throw new Error('expected a ready comparison');
     expect(cmp.withPct).toBeCloseTo(0.9, 6);
     expect(cmp.withoutPct).toBeCloseTo(0.55, 6);
     spy.mockRestore();
@@ -873,11 +874,11 @@ describe('usePlanStressTestVm — guardrail with/without comparison', () => {
     });
     const cmp = result.current.guardrailComparison!;
     expect(cmp.state).toBe('ready');
+    if (cmp.state !== 'ready') throw new Error('expected a ready comparison');
     expect(cmp.withPct).toBeCloseTo(0.9, 6);
     expect(cmp.withoutPct).toBeCloseTo(0.5, 6);
     expect(cmp.deltaPct).toBeCloseTo(0.4, 6);
-    expect(cmp.se).not.toBeNull();
-    expect(Math.abs(cmp.deltaPct!)).toBeGreaterThan(cmp.se!);
+    expect(Math.abs(cmp.deltaPct)).toBeGreaterThan(cmp.se);
 
     expect(putCachedMock).toHaveBeenCalledTimes(1);
     spy.mockRestore();

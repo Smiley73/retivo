@@ -17,7 +17,8 @@ import type {
   IncomeStreamPayload,
   SocialSecurityBenefitPayload,
 } from '../db/types';
-import type { PipelineData, McBasis } from './balance-projection-page-pipeline';
+import type { McBasis } from '../lib/monte-carlo';
+import type { PipelineData } from './balance-projection-page-data';
 import type { BalanceProjectionViewModel } from './use-balance-projection-view-model';
 import { useBalanceProjectionSwrData } from './use-balance-projection-swr-data';
 import type { SwrComparisonBundle } from '../lib/safe-withdrawal-rate-chart-types';

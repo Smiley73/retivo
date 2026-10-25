@@ -130,7 +130,6 @@ module.exports = {
           'apps/web/src/pages/balance-projection-page-constants\\.ts',
           'apps/web/src/pages/balance-projection-page-data\\.ts',
           'apps/web/src/pages/balance-projection-page-drawdown\\.ts',
-          'apps/web/src/pages/balance-projection-page-pipeline\\.ts',
           'apps/web/src/pages/balance-projection-page-yearly\\.tsx',
           'apps/web/src/pages/balance-projection-page-yearly-breakdown\\.tsx',
           'apps/web/src/pages/balance-projection-page-yearly-cashflow\\.tsx',

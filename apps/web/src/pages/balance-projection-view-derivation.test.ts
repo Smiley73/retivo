@@ -5,7 +5,7 @@ import {
   buildResolvedDrawdown,
   buildViewDeflatorForExport,
 } from './balance-projection-view-derivation';
-import type { RepresentativeRun } from './balance-projection-page-pipeline';
+import type { RepresentativeRun } from '../lib/monte-carlo';
 import type { DrawdownYear } from '../lib/drawdown-engine-types';
 import { DEFAULT_INFLATION_PCT } from '../db/types';
 

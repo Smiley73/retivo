@@ -1,6 +1,6 @@
 /**
  * Plan stress-test fan chart, percentile data table and CBP remediation banner, plus the market-stress comparison
- * fan. Re-exported from `PlanStressTestSection.tsx`.
+ * fan.
  */
 import {
   Cell,
