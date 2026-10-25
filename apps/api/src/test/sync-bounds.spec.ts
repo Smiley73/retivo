@@ -42,6 +42,7 @@ const VALID_CURSOR_TAG = 'a'.repeat(43);
 const MAX_DAILY_MUTATIONS = 10_000;
 const MAX_DAILY_BYTES = 50 * 1024 * 1024;
 const FRESHNESS_COUNTER_MAX_STEP = 1000;
+const MAX_PUSH_MUTATIONS = 100;
 const utcDayStamp = (): string => new Date().toISOString().slice(0, 10);
 
 async function push(
@@ -395,6 +396,26 @@ describe('sync push bounds', () => {
 
       const afterReplay = await repo.find(s.householdId);
       expect(afterReplay?.dailyMutationCount).toBe(1);
+    });
+  });
+
+  describe('mutations-per-push cap', () => {
+    const batch = (s: Session, n: number): PushMutation[] =>
+      Array.from({ length: n }, () => makeMutation(s, { payload: encryptedPayload() }));
+
+    it('accepts a push at the cap', async () => {
+      const s = await loginAsFreshUser(t);
+      const res = await push(t, s, batch(s, MAX_PUSH_MUTATIONS));
+      expect(res.status).toBe(201);
+      expect(res.body.applied).toHaveLength(MAX_PUSH_MUTATIONS);
+    });
+
+    it('rejects a push one over the cap with 400, writing nothing', async () => {
+      const s = await loginAsFreshUser(t);
+      const before = await countMutationLogRows(t, s.householdId);
+      const res = await push(t, s, batch(s, MAX_PUSH_MUTATIONS + 1));
+      expect(res.status).toBe(400);
+      expect(await countMutationLogRows(t, s.householdId)).toBe(before);
     });
   });
 
