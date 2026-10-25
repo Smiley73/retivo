@@ -1,12 +1,5 @@
-// CloudFront distribution + AWS WAF (CommonRuleSet + an IP rate-based BLOCK
-// rule, when `enableWaf`) + CloudFront Functions: strict security headers,
-// the SPA-route rewrite, and the dev-only viewer IP gate
-// (`edgeAllowedIps`). Geo-restriction is hardcoded US-only. Shield Standard
-// is automatic — nothing to configure.
-//
-// Important: AWS WAF Classic for CloudFront is GLOBAL (us-east-1) and
-// AWS WAFv2 must use the `us-east-1` region for CLOUDFRONT scope. We use
-// WAFv2.
+// CloudFront distribution, the optional WAF web ACL, and the CloudFront Functions (security headers, SPA
+// rewrite, dev viewer IP gate). WAFv2 for CLOUDFRONT scope must live in us-east-1.
 
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
@@ -20,57 +13,24 @@ import {
 
 interface CloudFrontOpts {
   readonly namePrefix: string;
-  /**
-   * Host for the `/api/*` origin. The regional API Gateway custom domain
-   * when `retivo:apiDomainName` is set (the execute-api endpoint is
-   * then disabled), else the raw execute-api invoke host. The edge
-   * shared-secret origin header is preserved either way.
-   */
+  /** Host for the `/api/*` origin: the API custom domain when set, else the execute-api invoke host. */
   readonly apiOriginUrl: pulumi.Output<string>;
   readonly spaBucketRegionalDomainName: pulumi.Output<string>;
   readonly spaOriginAccessControlId: pulumi.Output<string>;
-  /**
-   * Shared secret CloudFront will attach as `X-Edge-Auth` on every
-   * request it forwards to the API Gateway origin. The api Lambda's
-   * EdgeAuthMiddleware enforces it; direct hits to the APIGW invoke
-   * URL that bypass CloudFront fail with `EDGE_AUTH_REQUIRED`. Read
-   * from SSM at deploy time so rotation = `aws ssm put-parameter` +
-   * `pulumi up`.
-   */
+  /** Attached as `X-Origin-Verify` on every request to the API origin, which EdgeAuthMiddleware enforces. */
   readonly edgeSharedSecret: pulumi.Output<string>;
   readonly aliasDomain?: string;
   readonly acmCertificateArn?: pulumi.Output<string>;
-  /**
-   * Cost-control knob (REQUIRED at the call site, sourced from
-   * `retivo:enableWaf`): when false, the AWS WAF web ACL is not created
-   * and CloudFront ships without a `webAclId`. When true, the
-   * `AWSManagedRulesCommonRuleSet` ACL is provisioned alongside an IP
-   * rate-based BLOCK rule (2000 req / 5 min per IP).
-   */
+  /** Provision the WAF web ACL (managed CommonRuleSet plus a 2000 req / 5 min per-IP block rule). */
   readonly enableWaf: boolean;
-  /**
-   * Dev-only edge IP gate (sourced from `retivo:edgeAllowedIps`, already
-   * normalised to `a.b.c.d/nn`). Empty = off (today's behaviour). Non-empty:
-   * the SPA router function gains the allowlist check, a second function
-   * gates `/api/*`, and the distribution turns IPv6 off so every viewer
-   * arrives with an IPv4 address the allowlist can match.
-   */
+  /** Dev-only normalised `a.b.c.d/nn` allowlist; non-empty gates the SPA router and `/api/*` and turns IPv6 off. */
   readonly edgeAllowedIps: ReadonlyArray<string>;
-  /**
-   * AI assistant connector port (sourced from `retivo:assistantBridgePort`).
-   * Unset = off: the security-headers function is byte-identical to the one
-   * every stack already runs. Set: the SPA CSP gains exactly one
-   * `connect-src` entry, `ws://127.0.0.1:<port>`.
-   */
+  /** Assistant bridge port; set adds one `connect-src ws://127.0.0.1:<port>` CSP entry, unset leaves the function unchanged. */
   readonly assistantBridgePort?: number;
 }
 
-// US-only application by design — the
-// service is not localized, financial figures are USD-only, and the
-// SSA/IRS/tax-treatment rules baked into the planning math don't apply
-// outside the US. Restricting at the edge is the cheapest line of
-// defense (free, runs before WAF) and avoids exposing the API to
-// regions we don't intend to serve. If that changes, edit this list.
+// US-only by product decision (USD-only figures, US tax rules), kept out of stack config so
+// changing it goes through review.
 const GEO_ALLOWLIST: ReadonlyArray<string> = ["US"];
 
 export interface Edge {
@@ -79,14 +39,7 @@ export interface Edge {
   readonly webAcl?: aws.wafv2.WebAcl;
 }
 
-/**
- * CloudFront WAF is scoped CLOUDFRONT and only deployable in us-east-1.
- * This provider makes sure WAFv2 + ACM resources are created there even
- * if the rest of the stack is in another region.
- */
-// Default tags mirror the stack-config `aws:defaultTags` on the default
-// provider, so the resources this provider creates are tagged like
-// everything else in the stack.
+// WAFv2 and ACM for CLOUDFRONT scope must be created in us-east-1, whatever the stack's region.
 const usEast1 = new aws.Provider("aws-us-east-1", {
   region: "us-east-1",
   defaultTags: {
@@ -108,10 +61,8 @@ export function createEdge(opts: CloudFrontOpts): Edge {
     assistantBridgePort,
   } = opts;
 
-  // Edge IP gate — the function SOURCE is generated (and size-checked, 10 KB
-  // CloudFront limit) here, before the first `new aws.*` below, so an
-  // oversized or malformed allowlist fails the preview without registering
-  // any resource.
+  // Generated here, before any `new aws.*`, so an oversized or malformed allowlist fails the
+  // preview.
   const gated = edgeAllowedIps.length > 0;
   const gateRules = edgeAllowedIps.map(ipv4CidrToRule);
   const spaRouterSource = gated
@@ -120,10 +71,7 @@ export function createEdge(opts: CloudFrontOpts): Edge {
   const apiGateSource = gated ? gateOnlyCode(gateRules) : undefined;
   const securityHeadersSource = securityHeadersCode(assistantBridgePort);
 
-  // ---------- WAF web ACL with the AWS managed CommonRuleSet ----------
-  // Created only when enableWaf is true (cost-control knob). When false,
-  // CloudFront ships without a webAclId — geo-restriction + the security-
-  // headers function still apply, but the managed CommonRuleSet does not.
+  // ---------- WAF web ACL ----------
   const webAcl = enableWaf
     ? new aws.wafv2.WebAcl(
         `${namePrefix}-cloudfront-acl`,
@@ -145,15 +93,9 @@ export function createEdge(opts: CloudFrontOpts): Edge {
                 managedRuleGroupStatement: {
                   name: "AWSManagedRulesCommonRuleSet",
                   vendorName: "AWS",
-                  // SizeRestrictions_BODY caps request bodies at WAF's 8 KB
-                  // default and would also block bodies larger than the
-                  // raisable AssociationConfig ceiling (64 KB). The sync
-                  // push endpoint accepts up to 5 MB and enforces its own
-                  // per-mutation + per-batch limits at the application
-                  // layer (100 mutations, 64 KB/payload, 5 MB total). We
-                  // count this sub-rule instead of blocking on it; the rest
-                  // of CommonRuleSet (XSS / RFI / SQLi / etc.) stays in
-                  // BLOCK mode.
+                  // SizeRestrictions_BODY would block the sync push bodies (up to 5 MB); the
+                  // application enforces its own limits, so that one sub-rule counts instead of
+                  // blocking.
                   ruleActionOverrides: [
                     {
                       name: "SizeRestrictions_BODY",
@@ -192,8 +134,6 @@ export function createEdge(opts: CloudFrontOpts): Edge {
     : undefined;
 
   // ---------- CloudFront Function for security headers ----------
-  // Lightweight JS that runs on every viewer-response. Cannot import
-  // anything; must stay under 10 KB compiled.
   const securityHeadersFn = new aws.cloudfront.Function(
     `${namePrefix}-security-headers`,
     {
@@ -206,18 +146,8 @@ export function createEdge(opts: CloudFrontOpts): Edge {
   );
 
   // ---------- CloudFront Function for SPA routing fallback ----------
-  // Viewer-request on the SPA cache behavior only. Rewrites paths that
-  // look like SPA routes (no file extension, not under /api/) to
-  // /index.html so React Router can resolve them. Replaces the previous
-  // distribution-level customErrorResponses, which incorrectly rewrote
-  // real API 403/404 responses to /index.html and masked sync errors.
-  //
-  // When the dev edge IP gate is on, the SAME function (same name, so the
-  // change is an in-place UpdateFunction/PublishFunction) runs the viewer-IP
-  // allowlist check first and answers 403 from the edge for anyone else —
-  // CloudFront allows one function per event type per behavior, so the gate
-  // is folded into the router rather than chained. Generators live in
-  // edge-functions.mjs so the emitted code is executed under `node --test`.
+  // With the IP gate on, the same function (same name, an in-place update) checks the allowlist first:
+  // CloudFront allows one function per event type per behavior.
   const spaRouterFn = new aws.cloudfront.Function(
     `${namePrefix}-spa-router`,
     {
@@ -232,10 +162,6 @@ export function createEdge(opts: CloudFrontOpts): Edge {
   );
 
   // ---------- CloudFront Function gating /api/* (dev IP gate only) ----------
-  // Same allowlist, no rewrite: a viewer outside the list gets a 403 before
-  // API Gateway or the Lambda is invoked. Named with the stack's
-  // name prefix (CloudFront Functions are untaggable). Absent when the gate
-  // is off.
   const apiGateFn = apiGateSource
     ? new aws.cloudfront.Function(
         `${namePrefix}-api-gate`,
@@ -250,8 +176,6 @@ export function createEdge(opts: CloudFrontOpts): Edge {
     : undefined;
 
   // ---------- Origin: API Gateway (custom domain when configured) ----------
-  // Strip the protocol and trailing slash from the origin URL — CloudFront
-  // wants the bare host name as the origin.
   const apiHost = apiOriginUrl.apply((url) =>
     url.replace(/^https?:\/\//, "").replace(/\/$/, ""),
   );
@@ -260,15 +184,10 @@ export function createEdge(opts: CloudFrontOpts): Edge {
     `${namePrefix}-cdn`,
     {
       enabled: true,
-      // IPv6 is turned off while the dev IP gate is on: the allowlist is
-      // IPv4-only, and a dual-stack home connection would otherwise reach
-      // the edge over IPv6 and be refused. dns.ts skips the AAAA alias for
-      // the same reason.
+      // The allowlist is IPv4-only; dns.ts skips the AAAA alias for the same reason.
       isIpv6Enabled: !gated,
       comment: `${namePrefix} api edge`,
       priceClass: "PriceClass_100", // US, Canada, Europe — cheapest tier.
-      // Only attach the ACL when WAF is provisioned; omitted entirely when
-      // enableWaf=false so CloudFront has no webAclId.
       webAclId: webAcl?.arn,
       aliases: aliasDomain ? [aliasDomain] : [],
 
@@ -282,17 +201,7 @@ export function createEdge(opts: CloudFrontOpts): Edge {
             originProtocolPolicy: "https-only",
             originSslProtocols: ["TLSv1.2"],
           },
-          // Shared secret stamped on every request CloudFront forwards
-          // to APIGW. EdgeAuthMiddleware in the api Lambda rejects any
-          // request that doesn't carry it — closing the direct-APIGW
-          // bypass. Read from SSM at deploy time; rotation = put-
-          // parameter + pulumi up.
-          //
-          // Header name must avoid CloudFront's reserved list — any
-          // X-Edge-* / X-Amz-Cf-* / X-Amzn-* / standard HTTP header is
-          // rejected with `InvalidArgument: HeaderName ... not allowed`.
-          // `X-Origin-Verify` is the AWS-recommended convention for
-          // this exact pattern.
+          // Header name must avoid CloudFront's reserved X-Edge-*, X-Amz-Cf-* and X-Amzn-* names.
           customHeaders: [
             { name: "X-Origin-Verify", value: edgeSharedSecret },
           ],
@@ -302,15 +211,12 @@ export function createEdge(opts: CloudFrontOpts): Edge {
           // Regional domain name avoids the legacy global redirect.
           domainName: spaBucketRegionalDomainName,
           originAccessControlId: spaOriginAccessControlId,
-          // s3OriginConfig with empty originAccessIdentity — OAC supersedes OAI.
+          // OAC supersedes OAI, so the OAI is empty.
           s3OriginConfig: { originAccessIdentity: "" },
         },
       ],
 
-      // Default behavior serves the SPA from S3. Aggressively cached;
-      // the bootstrap script invalidates `/index.html` on each deploy
-      // (the asset URLs are content-hashed by Vite so they don't need
-      // invalidation).
+      // Cached aggressively; deploys invalidate `/index.html` and Vite content-hashes the assets.
       defaultCacheBehavior: {
         targetOriginId: "spa-s3",
         viewerProtocolPolicy: "redirect-to-https",
@@ -330,8 +236,6 @@ export function createEdge(opts: CloudFrontOpts): Edge {
         ],
       },
 
-      // /api/* path pattern routes to API Gateway. Caching disabled;
-      // forwards Authorization + Cookie + X-CSRF-Token + Origin headers.
       orderedCacheBehaviors: [
         {
           pathPattern: "/api/*",
@@ -345,8 +249,6 @@ export function createEdge(opts: CloudFrontOpts): Edge {
             "Managed-AllViewerExceptHostHeader",
           ),
           functionAssociations: [
-            // Dev IP gate on /api/* (viewer-request) — only when gated; the
-            // security-headers viewer-response association is unchanged.
             ...(apiGateFn
               ? [{ eventType: "viewer-request", functionArn: apiGateFn.arn }]
               : []),
@@ -358,13 +260,8 @@ export function createEdge(opts: CloudFrontOpts): Edge {
         },
       ],
 
-      // SPA routing fallback is handled by the spaRouterFn viewer-request
-      // function on the default cache behavior — it rewrites unmatched
-      // SPA paths to /index.html before S3 ever sees them. We deliberately
-      // do not set customErrorResponses here: those are distribution-wide
-      // and would also rewrite genuine 4xx responses from the /api/*
-      // cache behavior, masking real API errors (was the cause of an
-      // earlier sync regression).
+      // No customErrorResponses: they are distribution-wide and would rewrite real /api/* 4xx
+      // responses.
 
       restrictions: {
         geoRestriction: {
@@ -381,11 +278,8 @@ export function createEdge(opts: CloudFrontOpts): Edge {
           }
         : {
             cloudfrontDefaultCertificate: true,
-            // AWS ignores `minimumProtocolVersion` on the shared
-            // *.cloudfront.net certificate — TLS 1.0/1.1 remain enabled
-            // there. Set it anyway so intent is documented and the
-            // property carries over automatically the moment a custom
-            // ACM cert is attached.
+            // AWS ignores this on the shared *.cloudfront.net certificate; set so it carries over
+            // to a custom cert.
             minimumProtocolVersion: "TLSv1.2_2021",
           },
     },
@@ -395,10 +289,6 @@ export function createEdge(opts: CloudFrontOpts): Edge {
   return { distribution, webAcl };
 }
 
-/**
- * AWS publishes UUIDs for managed cache and origin-request policies.
- * Hard-coded here per AWS docs; stable across accounts.
- */
 function managedCachePolicyId(name: string): string {
   const map: Record<string, string> = {
     "Managed-CachingDisabled": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",

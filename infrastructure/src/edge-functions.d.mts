@@ -1,8 +1,4 @@
-// Type declarations for the dependency-free edge-functions.mjs runtime module
-// (CloudFront Function source generators). The implementation is plain ESM JS
-// so `node --test` can execute the generated handlers
-// (scripts/test/edge-functions.test.mjs); this .d.mts gives cloudfront.ts the
-// compile-time types tsc needs.
+// Types for edge-functions.mjs, which stays plain ESM so `node --test` can execute the generated handlers.
 
 export interface EdgeGateRule {
   readonly base: number;
