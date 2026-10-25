@@ -17,7 +17,12 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   </ThemeWrapper>
 );
 
-async function seedAccount(id: string, type: AccountType, endingBalance: number | null): Promise<void> {
+async function seedAccount(
+  id: string,
+  type: AccountType,
+  endingBalance: number | null,
+  mixedPostTax: number | null = null,
+): Promise<void> {
   const base = { householdId: HH, schemaVersion: 1, version: 1, updatedAt: '2026-05-01T00:00:00Z', deviceId: 'dev-1' };
   await putAggregate('account', {
     ...base,
@@ -27,7 +32,7 @@ async function seedAccount(id: string, type: AccountType, endingBalance: number 
       name: id,
       type,
       ownershipType: 'INDIVIDUAL',
-      taxTreatment: 'PRE_TAX',
+      taxTreatment: mixedPostTax === null ? 'PRE_TAX' : 'MIXED',
       ownerId: 'hm-1',
       institution: 'Bank',
       notes: '',
@@ -59,7 +64,7 @@ async function seedAccount(id: string, type: AccountType, endingBalance: number 
       distributions: 0,
       endingBalance,
       endingBalancePreTax: null,
-      endingBalancePostTax: null,
+      endingBalancePostTax: mixedPostTax,
       totalContributions: 0,
       comment: null,
     },
@@ -77,17 +82,19 @@ describe('useDashboardProjection — allocationByType', () => {
     expect(result.current.allocationByType).toEqual([]);
   });
 
+  // Ids sort in IndexedDB key order and are seeded in that order, with brokerage first and Roth last, so any order other than CATEGORY_ORDER differs.
   it('sums accounts per category in display order and drops categories with no balance', async () => {
-    await seedAccount('k', 'RETIREMENT_401K', 100_000);
-    await seedAccount('i', 'RETIREMENT_IRA', 50_000);
-    await seedAccount('r', 'RETIREMENT_ROTH_IRA', 50_000);
-    await seedAccount('b', 'BROKERAGE', 0);
-    await seedAccount('h', 'HSA', null);
+    await seedAccount('a', 'BROKERAGE', 50_000);
+    await seedAccount('b', 'RETIREMENT_401K', 100_000, 40_000);
+    await seedAccount('c', 'RETIREMENT_IRA', 50_000);
+    await seedAccount('d', 'RETIREMENT_ROTH_IRA', 50_000);
+    await seedAccount('e', 'HSA', null);
     const { result } = renderHook(() => useDashboardProjection(), { wrapper });
-    await waitFor(() => expect(result.current.allocationByType).toHaveLength(2));
+    await waitFor(() => expect(result.current.allocationByType).toHaveLength(3));
     expect(result.current.allocationByType).toEqual([
-      { category: 'retirement', dollars: 150_000, share: 0.75 },
-      { category: 'roth', dollars: 50_000, share: 0.25 },
+      { category: 'retirement', dollars: 150_000, share: 0.6 },
+      { category: 'roth', dollars: 50_000, share: 0.2 },
+      { category: 'brokerage', dollars: 50_000, share: 0.2 },
     ]);
   });
 });
