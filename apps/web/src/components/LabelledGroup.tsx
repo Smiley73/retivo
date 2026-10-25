@@ -1,16 +1,6 @@
 /**
- * Always-expanded bordered group wrapper for a labelled control cluster.
- *
- * WAI-ARIA labelled group (NOT `<fieldset>`). Visually
- * mirrors the expense form's `AnchorCard` in its expanded state (same
- * `rounded-xl border` frame, `px-4 py-3` semibold heading, `px-4 pb-4`
- * body) so the income and expense schedule pickers read as one system —
- * but always expanded: there is no chevron / summary / disclosure
- * behaviour.
- *
- * Promoted out of `IncomeSchedulePickers.tsx` so the non-collapsible
- * `ScheduleAnchorPicker` branch (income Start) and the income End picker
- * can share it without a component importing from a page.
+ * Always-expanded bordered group for a labelled control cluster, matching an expanded `AnchorCard`; a WAI-ARIA
+ * labelled group, not `<fieldset>`, shared by the non-collapsible income pickers.
  */
 import React from 'react';
 

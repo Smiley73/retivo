@@ -1,22 +1,6 @@
 /**
- * Expenses projection chart: two stacked area bands (Essential baseline +
- * Discretionary above, Total implied by combined stack height) from the
- * selected scenario's retirement year through the last surviving member's
- * projected end-of-life.
- *
- * Values are shown in today's dollars (factor 1.0): the page passes
- * `inflation: { ratePct: 0 }` so the chart matches the header totals
- * card above. Underlying expense list is the canonical one —
- * scenario-only `added` / `removed` overrides do NOT apply on this
- * page.
- *
- * Mirrors the cashflow band's death-marker conventions so the two
- * charts feel like siblings: per-member colour-coded vertical dashed
- * reference lines, label stagger when markers sit within 4 fractional
- * years of each other. Death is modelled on Dec 31 of `deathYear` (the
- * integer life-expectancy year); this always-monthly chart maps each
- * death marker to the December sample (`deathYear + 11/12`) — the last
- * monthly data point — so the marker hugs the data with no floating gap.
+ * Expenses projection: Essential and Discretionary bands from the retirement year to the last survivor's end of life,
+ * in today's dollars; scenario-only `added` / `removed` overrides do not apply here.
  */
 import React, { Suspense, lazy } from 'react';
 import type { ExpenseProjectionMonthlyPoint } from '../lib/expense-projection';
@@ -30,16 +14,14 @@ interface Props {
   rows: ExpenseProjectionMonthlyPoint[];
   markers?: CashflowChartMarker[];
   members?: TooltipMember[];
-  /** When set, render a single line with this legend / tooltip label
-   *  (the `total` series) instead of the Total / Essential /
-   *  Discretionary breakdown. The single-expense form preview passes
-   *  `"This expense"`; the Expenses list page omits it and keeps the
-   *  two stacked-area breakdown (byte-identical — no prop, no change). */
+  /**
+   * Renders a single line with this label (the `total` series) instead of the breakdown, e.g.
+   * `"This expense"` in the form preview.
+   */
   singleSeriesLabel?: string;
-  /** Pass `false` to disable drag-zoom. Single-expense form preview
-   *  opts out; the Expenses list page keeps the default `true`. */
+  /** Set `false` to disable drag-zoom; default `true`. */
   enableZoom?: boolean;
-  /** Zoom-state props injected by useChartZoom in the host section. */
+  /** Zoom state injected by `useChartZoom`. */
   xDomain?: [number, number] | null;
   yDomain?: [number, number] | null;
   dragSelection?: [number, number] | null;
@@ -78,8 +60,7 @@ export const ExpensesProjectionChart: React.FC<Props> = ({
       </p>
     );
   }
-  // When enableZoom is false (form preview), omit zoom props so the
-  // Inner chart has no drag handlers and no marquee.
+  // Without zoom the Inner chart gets no drag handlers or marquee.
   const zoomProps = enableZoom
     ? { xDomain, yDomain, dragSelection, mouseHandlers, isDragging }
     : {};

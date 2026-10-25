@@ -1,15 +1,6 @@
 /**
- * Plain-language explainer for the Balance Projection page header. Glosses
- * the five projection figures (Planned / TWR / Typical / Pessimistic /
- * Bad-luck) and the two display-unit modes of the adjacent toggle (Today's
- * dollars / Future dollars), in one plain sentence each. Rendered to the
- * left of the Today's/Future-dollars toggle; the trigger opens a read-only
- * shared <Modal>.
- *
- * Self-contained and prop-less: owns its own open state and copy — except the
- * method NAME and the past-performance disclaimer, which come from the
- * canonical `projection-method-labels.ts` so this explainer can never disagree
- * with the selector it explains.
+ * Prop-less explainer modal glossing the projection figures and the dollars toggle; names and the past-performance
+ * disclaimer come from `projection-method-labels.ts` so it cannot disagree with the selector.
  */
 import React, { useState } from 'react';
 import { Modal } from './Modal';
@@ -35,9 +26,8 @@ const METHODS: ReadonlyArray<Entry> = [
   },
   {
     term: TWR_METHOD_LABEL,
-    // The measured-return gloss closes with the past-performance disclaimer:
-    // this method replays a rate each account has ALREADY earned, and a
-    // realized return is a track record, not a prediction of the next one.
+    // The measured-return gloss closes with the past-performance disclaimer: a realized return is a
+    // track record, not a prediction.
     explanation:
       'Each account grows at the rate it has actually earned in your ' +
       'balance history: a check against your real track record. ' +

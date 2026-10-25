@@ -1,14 +1,6 @@
 /**
- * Inner SVG-engine chart for the income breakdown band. Lazily imported.
- *
- * Stacks five sources bottom-to-top:
- *   Social Security → Pension annuity → Part-time → One-off / lump-sum
- *   → Portfolio additions → Portfolio withdrawal (top).
- *
- * Pure income view: NO expense overlay line, and the tooltip has NO
- * Expenses or Shortfall row — only the six source amounts + Total income.
- *
- * Resolution: caller-driven via `granularity` ('monthly' / 'yearly').
+ * Inner SVG-engine chart for the income breakdown band: six stacked sources and Total income, with no expense overlay
+ * or Shortfall row.
  */
 import React from 'react';
 import type {
@@ -147,13 +139,9 @@ const InnerChart: React.FC<InnerProps> = ({
   );
   const xs = rows.map((r) => r.fractionalYear);
   const xMin = Math.floor(xs[0]);
-  // Death markers (`kind: 'death'`) arrive as the integer `deathYear`
-  // Map each to the terminal data point of its death year so it
-  // hugs the data: monthly → December sample (`deathYear + 11/12`);
-  // yearly → integer `deathYear`. Retirement markers (a true fractional
-  // date) are rendered as-is. Applied to BOTH the rendered reference line
-  // AND the `xMax` derivation so December data isn't clipped by a raw
-  // integer x.
+  // Death markers arrive as the integer `deathYear` and map to the terminal data point (monthly:
+  // December sample; yearly: integer). Applied to the reference line and `xMax` so December data is
+  // not clipped.
   const mappedMarkers = markers.map((m) =>
     m.kind === 'death' && granularity === 'monthly'
       ? { ...m, fractionalYear: Math.floor(m.fractionalYear) + 11 / 12 }

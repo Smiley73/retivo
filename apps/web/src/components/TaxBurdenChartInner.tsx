@@ -1,9 +1,6 @@
 /**
- * Inner SVG-engine impl for the Tax & Health-Cost Burden chart.
- *
- * Stacked signed bars:
- *  - Above zero: Federal income tax + IRMAA surcharge.
- *  - Below zero: ACA-PTC subsidy received (a benefit).
+ * Inner SVG-engine chart for the Tax & Health-Cost Burden chart: federal tax and IRMAA above zero, the ACA-PTC
+ * subsidy below.
  */
 import React from 'react';
 import type { TaxBurdenChartRow } from './TaxBurdenChart';
@@ -117,34 +114,26 @@ const InnerChart: React.FC<InnerProps> = ({
   const colors = useChartColors();
   const chrome = useChartChrome();
   const { hidden, toggle } = useSeriesVisibility();
-  // Bars map by `x` = their integer `year`. Death = Dec 31 of `deathYear`
-  // (the terminal year), so the death-year bar is a full-value bar on its
-  // integer year — no fractional/prorated terminal bar. (`r.year` is
-  // always set; `fractionalYear` is retained but never populated.)
+  // Bars sit on their integer `year`: death is Dec 31 of the terminal year, so there is no prorated
+  // terminal bar.
   const data: ChartDatum[] = React.useMemo(
     () => rows.map((r) => ({ ...r, x: r.fractionalYear ?? r.year })),
     [rows],
   );
   const xs = rows.map((r) => r.year);
   const xMin = xs[0];
-  // Markers are integer `deathYear`; the rightmost lands on the last
-  // bar (centered at `deathYear`). Drives the `xMax` so the bar stays
-  // un-clipped (matching the cashflow + portfolio-flow charts).
+  // The rightmost marker lands on the last bar and drives `xMax` so it is not clipped.
   const lastDeathFractional = markers?.length
     ? Math.max(...markers.map((m) => m.fractionalYear))
     : null;
-  // Inset the first/last bars from the plot edges: bars are centered on
-  // their x, so without padding the first bar lands on the Y-axis and the
-  // last on the right border. ~0.6yr is wider than a half bar at any zoom;
-  // the right edge still reaches the death marker when it falls later.
+  // Bars are centred on x, so inset the edges or the first bar lands on the Y-axis; the right edge
+  // still reaches a later death marker.
   const BAR_EDGE_PAD = 0.6;
   const xMinPadded = Math.floor(xMin) - BAR_EDGE_PAD;
   const xMax = Math.max(
     xs[xs.length - 1] + BAR_EDGE_PAD,
     lastDeathFractional ?? -Infinity,
   );
-  // Apply the same edge padding when zoomed (xDomain set) so the first/last
-  // bars of a zoomed view don't clip on the plot border either.
   const activeDomain: [number, number] = xDomain
     ? [xDomain[0] - BAR_EDGE_PAD, xDomain[1] + BAR_EDGE_PAD]
     : [xMinPadded, xMax];

@@ -1,17 +1,6 @@
 /**
- * "Restore previous version" modal.
- *
- * Lists the household's available S3 snapshots (newest-first) and lets
- * the user roll the workspace back to one. Two-step UX:
- *   1. Pick a snapshot row, click "Restore".
- *   2. A strong <ConfirmDialog> warns that every change since the chosen
- *      snapshot — including pending edits on this device — will be
- *      permanently lost. On confirm, `restoreSnapshot` wipes server +
- *      local sync state and re-bootstraps from the chosen snapshot.
- *
- * Built on the shared <Modal> / <ConfirmDialog> + React Aria
- * <Table>/<Row>/<Cell> primitives; the
- * list lives in <TableScroll> with `tabular-nums` timestamps.
+ * "Restore previous version" modal: pick an S3 snapshot, then confirm a destructive rollback of server and local
+ * state.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { CheckIcon, HistoryIcon } from './icons';
@@ -41,14 +30,6 @@ interface RestoreSnapshotModalProps {
   onClose: () => void;
 }
 
-/**
- * Selectable snapshot row. React Aria stamps `data-selected` /
- * `data-hovered` / `data-focus-visible` on the <Row>; the selected
- * state gets a clear indigo wash plus the leading ✓ cell so it is
- * unmistakable which version is picked, the bare
- * default selection styling was too subtle (it was "impossible to tell
- * which one is selected").
- */
 const rowClass =
   'cursor-pointer outline-none transition-colors ' +
   'data-[hovered]:bg-surface-sunken ' +
@@ -56,10 +37,8 @@ const rowClass =
   'data-[focus-visible]:ring-2 data-[focus-visible]:ring-inset ' +
   'data-[focus-visible]:ring-ring';
 
-/** Leading "is this row selected" cell — holds the check glyph for the pick. */
 const selectMarkClass = `${tdClass} w-8 text-center font-semibold text-accent-link`;
 
-/** Absolute timestamp for the snapshot row (e.g. "May 31, 2026, 12:00 PM"). */
 function formatAbsolute(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -72,7 +51,6 @@ function formatAbsolute(iso: string): string {
   });
 }
 
-/** Coarse relative time ("3 hours ago"). Plain Intl — no new dep. */
 function formatRelative(iso: string, now: number = Date.now()): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return '';
@@ -98,16 +76,14 @@ export const RestoreSnapshotModal: React.FC<RestoreSnapshotModalProps> = ({
   const [confirming, setConfirming] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
-  // Load the snapshot list each time the modal opens; reset transient
-  // state so a re-open starts clean.
+  // Reload the list on each open and reset transient state so a re-open starts clean.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setSelectedId(null);
     setError(null);
     setConfirming(false);
-    // Clear any prior list so a failed/in-flight reload never shows a stale,
-    // unverified snapshot the user could select and restore.
+    // Clear the prior list so a failed or in-flight reload never offers a stale snapshot.
     setSnapshots([]);
     setLoading(true);
     void (async () => {
@@ -144,8 +120,7 @@ export const RestoreSnapshotModal: React.FC<RestoreSnapshotModalProps> = ({
     try {
       const result = await restoreSnapshot(selectedId);
       if (!result.ok) {
-        // The reseed failed. If local data was already wiped, a reload is
-        // the recovery path (per SyncContext's cursor-reset
+        // If local data was already wiped a reload is the recovery path (SyncContext's cursor-reset
         // invariant); surface the failure either way.
         setError(
           result.wiped
@@ -155,17 +130,12 @@ export const RestoreSnapshotModal: React.FC<RestoreSnapshotModalProps> = ({
         setConfirming(false);
         return;
       }
-      // Restore wiped the device key cache (clearAllStores drops keyCache) but
-      // the in-memory HDK survives, so re-cache it before the modal unmounts —
-      // otherwise the next page refresh misses the cache and prompts for the
-      // password ("couldn't unlock your encrypted data"). Best-effort: the
-      // restore already succeeded, so a re-cache failure must not flip the
-      // success path into an error — swallow it here (the enter-password-once
-      // UX is the fallback on refresh) so the modal always closes.
+      // Restore dropped the device key cache but the in-memory HDK survives; re-cache it so the
+      // next refresh does not prompt for the password. Best-effort, so a failure must not flip the
+      // success path.
       try {
         await recacheHdk();
       } catch {
-        // Best-effort re-cache; the restore succeeded regardless.
       }
       setConfirming(false);
       onClose();

@@ -1,15 +1,6 @@
 /**
- * Inner SVG-engine chart for the Account Balance Stack chart.
- *
- * Stacked-area chart visualizing projected account balances over time.
- * The section wrapper (`balance-projection-page-account-balance-stack`)
- * computes the grouping (per-tier, per-AccountType fallback, or per-account)
- * and passes a flat `series` + `rows` pair. This component only renders.
- *
- * Series layering (bottom to top): the caller orders series meaningful for
- * the active grouping. Excluded accounts — shown only when the "Show
- * excluded accounts" toggle is on — are passed as the last series so they
- * render on top in a muted color.
+ * Inner SVG-engine stacked-area chart of projected account balances; the caller orders `series` (excluded accounts
+ * last, muted on top) and groups them.
  */
 import React from 'react';
 import type { ChartChrome } from '../lib/tokens';
@@ -22,29 +13,24 @@ import type { TooltipMember } from './tooltip-member';
 import { ChartFrame, ChartLegend, useSeriesVisibility } from './charts';
 import type { ChartDatum, MarkerSpec, SeriesSpec, SeriesZone } from './charts';
 
-/** One rendered series layer in the stack. */
 export interface AccountBalanceStackSeries {
-  /** Data key — must match a key in each `AccountBalanceStackRow`. */
   readonly dataKey: string;
-  /** Legend + tooltip label. */
   readonly name: string;
-  /** Hex fill / stroke color (from `CHART_COLORS` via the section wrapper). */
   readonly color: string;
-  /** Optional per-x-range style zones (projected region + carried-forward
-   *  spans). When present, the series renders one `<path>` per zone carrying a
-   *  `data-zone` attribute; absent → a single full-span path as before. */
+  /**
+   * Style zones for the projected region and carried-forward spans; each renders its own `<path>`
+   * with `data-zone`.
+   */
   readonly zones?: ReadonlyArray<SeriesZone>;
 }
 
-/** Dashed vertical boundary between the historical (actual) region and the
- *  projected region, drawn at the last actual year. */
+/** Dashed vertical boundary between the actual and projected regions, at the last actual year. */
 export interface AccountBalanceStackBoundary {
   readonly year: number;
   readonly label: string;
   readonly color: string;
 }
 
-/** One year's worth of per-series account balance data. */
 export type AccountBalanceStackRow = {
   readonly year: number;
   readonly [dataKey: string]: number;
@@ -55,8 +41,6 @@ interface InnerProps {
   series: AccountBalanceStackSeries[];
   members?: ReadonlyArray<TooltipMember>;
   markers?: ReadonlyArray<CashflowChartMarker>;
-  /** Dashed actual→projected boundary marker (last actual year). Absent on the
-   *  historical-only accounts-page surface. */
   boundary?: AccountBalanceStackBoundary | null;
   xDomain?: [number, number] | null;
   yDomain?: [number, number] | null;
@@ -111,7 +95,7 @@ function TooltipBody({
       )}
       {series.map((s) => {
         const val = datum[s.dataKey] ?? 0;
-        // Gate by dataKey to match the per-account `legendId` (names dup).
+        // Gate by dataKey to match the per-account `legendId`, since names are not unique.
         if (val === 0 || hidden.has(s.dataKey)) return null;
         return (
           <div key={s.dataKey} className="flex justify-between gap-4">
@@ -158,8 +142,8 @@ const InnerChart: React.FC<InnerProps> = ({
     color: s.color,
     stackId: 'balances',
     fillOpacity: 0.55,
-    // Account names aren't unique (two "Checking" accounts), so toggle by
-    // the unique dataKey — otherwise same-named accounts hide together.
+    // Account names are not unique, so toggle by the unique dataKey or same-named accounts hide
+    // together.
     legendId: s.dataKey,
     zones: s.zones,
   }));
@@ -168,8 +152,6 @@ const InnerChart: React.FC<InnerProps> = ({
   const xMax = xs[xs.length - 1];
   const activeDomain = xDomain ?? [xMin, xMax];
   const ticks = fiveYearTicks(activeDomain[0], Math.ceil(activeDomain[1]));
-  // The boundary marker joins the retirement/death markers in the shared
-  // label-slot assignment so its label never overlaps theirs.
   const allMarkers = boundary
     ? [
         ...(markers ?? []),

@@ -1,14 +1,6 @@
 /**
- * Live single-expense projection preview for the Expense create/edit
- * form. Charts ONLY the currently-edited draft expense over retirement,
- * reusing `<ExpensesProjectionChart>` verbatim so the axes, markers,
- * tooltip, and today's-dollars basis are identical to the main Expenses
- * page chart.
- *
- * All projection logic lives in the pure
- * `lib/expense-preview-projection` module (same builder the Expenses
- * page uses, resolved under the form's TARGET scenario); this file is
- * the thin `React.memo` wrapper that calls it and renders the result.
+ * Live projection preview of the expense being edited in the create/edit form, reusing `<ExpensesProjectionChart>`
+ * over `lib/expense-preview-projection`.
  */
 import React, { useMemo } from 'react';
 import {
@@ -26,23 +18,17 @@ import type {
 } from '../db/types';
 
 interface Props {
-  /** Draft built from the live form state via the shared
-   *  `buildExpensePayload`; null while the debounce has no value yet. */
+  /** Draft built from live form state; null until the debounce has a value. */
   draft: ExpensePayload | null;
   members: Aggregate<HouseholdMemberPayload>[];
   scenarios: ScenarioAggregate[];
-  /** Resolved target scenario id (scenario-patch / scenario-add), or
-   *  null to resolve under the primary scenario. */
+  /**
+   * Target scenario id for scenario-patch / scenario-add, or null to resolve under the primary
+   * scenario.
+   */
   targetScenarioId: string | null;
 }
 
-/**
- * The four-arm result body: no-amount / unresolvable guard copy, the
- * shared invalid-glide validator message, or the reused projection
- * chart. The persistent invalid-glide message is rendered as visible
- * error text, NOT `role="alert"`; the visual style is Tailwind
- * defaults.
- */
 function renderPreviewBody(result: PreviewResult): React.ReactNode {
   if (result.kind === 'no-amount') {
     return (
@@ -60,12 +46,8 @@ function renderPreviewBody(result: PreviewResult): React.ReactNode {
   }
   if (result.kind === 'invalid-glide') {
     return (
-      // Persistent preview state (not an action-triggered
-      // announcement) → visible error text, NOT `role="alert"`.
-      // The form's on-Save error keeps the single assertive live
-      // region; a live region here would re-announce on every
-      // memoised re-render. Same message as the Save block (one
-      // shared validator).
+      // Visible error text, not `role="alert"`: a live region would re-announce on every memoised
+      // re-render, and the form's on-Save error keeps the single assertive region.
       <p className="m-0 text-sm font-medium text-negative">
         {result.message}
       </p>
@@ -88,11 +70,8 @@ const ExpenseProjectionPreviewImpl: React.FC<Props> = ({
   scenarios,
   targetScenarioId,
 }) => {
-  // `resolvedTheme` is a useMemo dep so a live theme toggle
-  // re-runs the builder and re-flips the marker colors on this
-  // `React.memo` component even though the projection props are
-  // referentially stable — ExpensesPage's projection useMemo is keyed
-  // on `resolvedTheme` for the same reason.
+  // A memo dep so a live theme toggle re-runs the builder and re-flips marker colours despite
+  // stable projection props.
   const { resolvedTheme } = useTheme();
   const result = useMemo(
     () => buildPreview(draft, members, scenarios, targetScenarioId, resolvedTheme),
@@ -117,16 +96,8 @@ const ExpenseProjectionPreviewImpl: React.FC<Props> = ({
   );
 };
 
-/**
- * Memoised on purpose. The parent Expense form re-renders on every
- * keystroke; the `draft` prop is referentially stable between debounced
- * updates (the parent memoises it on the debounced form state), and
- * `members` / `scenarios` / `targetScenarioId` are stable too. Shallow-
- * prop memo therefore skips the per-keystroke re-render of this heavy
- * lazy projection chart entirely — without it, typing in a field
- * churns the chart and the form feels sluggish even though the
- * projection itself only recomputes on the debounce.
- */
+// Memoised because the parent re-renders per keystroke while `draft` is stable between debounced
+// updates.
 export const ExpenseProjectionPreview = React.memo(
   ExpenseProjectionPreviewImpl,
 );

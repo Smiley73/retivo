@@ -1,23 +1,6 @@
 /**
- * Success-probability explainer modal.
- *
- * Three-section walk-through: (a) what the success % means;
- * (b) what varies across simulated paths (returns + CPI);
- * (c) what stays the same vs. what shifts per path — flat-COLA income
- * (Tracks-scenario-inflation toggle off) stays constant; Social Security
- * and tracks-inflation income are scaled per path by cpiRatio, so they
- * vary slightly. Limitations callout at the bottom states, in plain English,
- * what the engine does and does not model: spending guardrails
- * when enabled, the
- * finite-sample error on 10,000 paths, the retained medical-inflation
- * (CPI-residual) approximation, the longer-life comparison's padded (not
- * rebuilt) extra years, the monthly-average volatility understatement, and
- * that no simulation is a forecast.
- *
- * Self-contained: owns open state + copy. The trigger is an unstyled
- * React Aria `<Button>` (react-aria-components) wrapping an
- * `<InfoCircleIcon>` so the icon is decorative (aria-hidden on the
- * SVG) and the button carries the accessible name via aria-label.
+ * Success-probability explainer modal: what the number means, what varies and stays fixed across simulated paths, and
+ * a plain-English limitations callout. Owns its open state and copy.
  */
 import React, { useState } from 'react';
 import { Button } from 'react-aria-components';
@@ -48,11 +31,6 @@ export const MonteCarloMethodologyModal: React.FC = () => {
         size="3xl"
         scrollBodyLabel="Success probability methodology details"
       >
-        {/* The wider panel keeps this content-heavy explainer from running
-            tall; `scrollBodyLabel` opts into the shared Modal's viewport-fit
-            mode (capped panel, pinned title, focusable scrolling body), so the
-            dialog always fits the screen. */}
-        {/* Section (a): what the number means */}
         <p className={BODY_CLASS}>
           The success probability is the share of 10,000 simulated retirement
           futures in which your portfolio still has money at the end of your
@@ -60,7 +38,6 @@ export const MonteCarloMethodologyModal: React.FC = () => {
           a positive balance.
         </p>
 
-        {/* Section (b): what varies */}
         <h3 className={SECTION_HEADING_CLASS}>What varies across simulations</h3>
         <p className={BODY_CLASS}>
           Each simulation draws a different sequence of historical monthly
@@ -70,7 +47,6 @@ export const MonteCarloMethodologyModal: React.FC = () => {
           so a run with high equity returns can still pair with high inflation.
         </p>
 
-        {/* Section (c): what stays fixed */}
         <h3 className={SECTION_HEADING_CLASS}>What stays the same across simulations</h3>
         <p className={BODY_CLASS}>
           Most income amounts are pre-computed from your scenario settings and
@@ -84,7 +60,6 @@ export const MonteCarloMethodologyModal: React.FC = () => {
           that path&apos;s CPI departs from the scenario&apos;s expected rate.
         </p>
 
-        {/* Limitations */}
         <h3 className={SECTION_HEADING_CLASS}>Limitations</h3>
         <p className={BODY_CLASS}>
           Past market sequences are not a guarantee of future returns. Taxes

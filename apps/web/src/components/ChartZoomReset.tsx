@@ -1,13 +1,6 @@
 /**
- * ChartZoomReset — "Reset view" button for zoomed SVG-engine charts.
- *
- * Returns null when the chart is not zoomed, so the button only appears
- * after a drag-zoom. The visible text "Reset view" is the accessible name;
- * no aria-label needed.
- *
- * Raw <button> + btnSecondarySmClass (dialog-chrome.ts).
- * React Aria Button not needed — AGENTS.md "ask before" only flags
- * <input>/<select>/<table>/<details>, not <button>.
+ * "Reset view" button for zoomed charts; renders null when not zoomed. A raw `<button>`, since AGENTS.md "ask before"
+ * flags only input, select, table and details.
  */
 import React from 'react';
 import { btnSecondarySmClass } from './dialog-chrome';

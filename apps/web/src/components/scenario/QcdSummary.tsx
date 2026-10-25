@@ -10,8 +10,6 @@ import {
   ConfigureResetActions,
 } from '../../pages/scenarios-page-chrome';
 
-/** True when this scenario carries a LOCAL QCD override (drives the card tint +
- *  Reset gating + the group customized count). */
 export function hasQcdOverride(ov: ScenarioOverrides): boolean {
   return ov.qualifiedCharitableDistributions !== undefined;
 }
@@ -25,12 +23,10 @@ export interface QcdSummaryProps {
   onResetToInherited: () => void;
 }
 
-/** Qualified Charitable Distributions summary. Shows how many QCD
- *  entries the engine actually applies — the count is taken from the HARDENED
- *  `resolveQcdForScenario` output (orphan / non-IRA / cross-owner / pre-70½
- *  entries already dropped), so the card never counts an invalid entry. The
- *  Configure button opens the dedicated editor; the tint + Reset stay keyed on
- *  a LOCAL override only (mirrors the Roth-conversions card). */
+/**
+ * QCD summary: counts the entries the hardened `resolveQcdForScenario` applies; tint and Reset key
+ * on a local override only.
+ */
 export const QcdSummaryCard: React.FC<QcdSummaryProps> = ({
   scenarioId,
   scenario,
@@ -44,9 +40,6 @@ export const QcdSummaryCard: React.FC<QcdSummaryProps> = ({
   const hasLocalOverride = hasQcdOverride(ov);
   const canResetToInherited = hasLocalOverride && !scenario.payload.isPrimary;
 
-  // The resolved (engine-applied) entry count: the hardened resolver reads the
-  // parent-chain effective list and drops every invalid entry, so the body
-  // matches what the projection actually applies for an inheriting child too.
   const resolvedCount = useMemo<number>(() => {
     try {
       return resolveQcdForScenario(
@@ -60,9 +53,6 @@ export const QcdSummaryCard: React.FC<QcdSummaryProps> = ({
     }
   }, [scenario.id, scenarios, accounts, members]);
 
-  // Nearest ancestor that actually sets the QCD key — shown only when the child
-  // inherits the list (no local override), mirroring the editor's inherited
-  // banner (first-ancestor-wins).
   const inheritedFromName = useMemo<string | null>(() => {
     if (ov.qualifiedCharitableDistributions !== undefined) return null;
     if (resolvedCount === 0) return null;

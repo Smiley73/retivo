@@ -1,26 +1,6 @@
 /**
- * The app's single bottom-anchored toast region. Mounted once in
- * `App.tsx`, above the routed subtree, so every route
- * reaches it — including the signed-out auth routes (`/login`, `/signup`,
- * `/auth/request-password-reset`, `/auth/reset-password`) that sit outside
- * `AppShell`/`RequireAuth`.
- *
- * Renders the ONE shared queue from `lib/toast-queue.ts`, branching on the
- * content kind:
- *   - `'version'` — the build-mismatch reload prompt (Dismiss →
- *     `dismissCurrentMismatch()`, `data-testid="version-banner"`).
- *     `VersionBanner` owns the build-id subscription and enqueues/closes
- *     into the shared queue; it renders no region of its own.
- *   - `'wait'` — the "Please wait N seconds before trying again." notice a
- *     non-sync `Retry-After` observation raises (`raiseWaitNotice`).
- *
- * Rendered at `fixed bottom-4 right-4 …` — a second region would place two
- * absolutely-positioned stacks at the same coordinates. `z-[60]`: a wait notice can raise while a `Modal`/`PasswordManagerModal`/
- * `ConfirmDialog` overlay is open (`z-50`, e.g. a throttled step-up
- * verification), and the region must sit above that overlay or the notice
- * is both visually washed out by the scrim and unreachable — the scrim
- * intercepts every pointer event below it, including the toast's own Close
- * button.
+ * The app's single bottom-anchored toast region, mounted once in `App.tsx` so signed-out routes reach it too. Renders
+ * the shared queue from `lib/toast-queue.ts`, branching on the content kind (`'version'`, `'wait'`).
  */
 import React, { useEffect, useState } from 'react';
 import {
@@ -35,13 +15,6 @@ import { appToastQueue, type AppToastContent } from '../lib/toast-queue';
 import { dismissCurrentMismatch, type MismatchReason } from '../lib/build-id';
 import { secondsUntil } from '../sync/badge-format';
 
-/**
- * Copy variants (shared with `VersionBanner.tsx`, which feeds the
- * toast queue). `schema-ahead` is the stronger signal — the current
- * bundle truly cannot read a pulled row, not just "a newer build exists" —
- * so it gets its own, more urgent description. Both share the same title,
- * Dismiss, and Reload actions.
- */
 function descriptionFor(reason: MismatchReason): string {
   if (reason === 'schema-ahead') {
     return 'A newer version of the app is required to read the latest changes — reload to update.';
@@ -49,22 +22,9 @@ function descriptionFor(reason: MismatchReason): string {
   return 'A newer version of the app is ready. Reload to pick it up. Your local data stays intact.';
 }
 
-/**
- * The live per-second countdown for a wait toast. One timer per notice,
- * started on mount and cleared on close/unmount; closes the toast itself
- * once the deadline passes (it disappears at zero or when the user closes
- * it).
- *
- * Accessibility hazard: react-aria's
- * `useToast` puts `role="alert" aria-atomic="true"` on `ToastContent` — an
- * implicit, atomic live region. A visible value that changes every second
- * inside it would re-announce the WHOLE toast every second for the length of
- * the wait. Mirrors `SyncBadge.tsx`'s "Retrying in Ns" countdown: the
- * ticking digits are `aria-hidden` (excluded from the accessible tree, so
- * their mutation is never picked up as a live-region change) and a separate,
- * unchanging `sr-only` string carries the accessible content instead — it
- * only changes when the toast is added/removed, never once a second.
- */
+// react-aria's `useToast` makes `ToastContent` an atomic live region, so a per-second value inside
+// it would re-announce the whole toast every second. The ticking digits are `aria-hidden` and a
+// fixed `sr-only` string carries the accessible content.
 function WaitToastDescription({
   toastKey,
   deadlineAt,
@@ -82,24 +42,15 @@ function WaitToastDescription({
   useEffect(() => {
     if (secondsLeft <= 0) appToastQueue.close(toastKey);
   }, [secondsLeft, toastKey]);
-  // Announced ONCE, at mount, from the seconds remaining at that instant —
-  // frozen for the toast's whole life rather than recomputed per tick.
-  // `deadlineAt` is fixed for a given toast (a coalescing
-  // extension closes this toast and mounts a fresh one with a new
-  // `toastKey`), so a `useState` initializer keyed on nothing is correct:
-  // this component instance never needs a second value. Screen readers get
-  // the same duration a sighted user sees at the moment the alert fires,
-  // rather than an open-ended "wait" with no number.
+  // Announced once, frozen at mount: `deadlineAt` is fixed per toast, so screen readers get the
+  // duration a sighted user sees when the alert fires.
   const [announcedSecondsLeft] = useState(() => secondsUntil(deadlineAt, Date.now()));
   return (
     <Text
       slot="description"
       className="text-sm text-muted"
     >
-      {/* Copy is fixed: "Please wait N seconds before
-          trying again." — not paraphrased, no retry button, nothing
-          disabled. At N=1 this literally reads "1 seconds"; there is
-          deliberately no singular form. */}
+      {/* Copy is fixed and not paraphrased; at N=1 it reads "1 seconds" by design. */}
       <span aria-hidden="true">
         Please wait <span aria-hidden="true">{secondsLeft}</span> seconds before trying again.
       </span>
@@ -114,12 +65,8 @@ export const AppToastRegion: React.FC = () => {
   return (
     <ToastRegion
       queue={appToastQueue}
-      // Fixed bottom-right (NOT a modal — the modal left-primary action
-      // rule deliberately does not apply to an off-modal notification;
-      // actions stay right-aligned). Position unchanged from the old
-      // VersionBanner-owned region. z-[60]: above the z-50 modal/dialog
-      // overlay scrim, so a wait notice raised while a modal (e.g. StepUp)
-      // is open stays legible and its Close button stays clickable.
+      // Not a modal, so actions stay right-aligned. `z-[60]` keeps a wait notice raised over an
+      // open modal legible and its Close button clickable.
       // eslint-disable-next-line no-restricted-syntax -- irreducible: default scale tops out at z-50 (Modal/ConfirmDialog/PasswordManagerModal's own overlay), and this region must stack above every one of them
       className="fixed bottom-4 right-4 left-auto z-[60] flex flex-col gap-2 outline-none max-sm:left-2 max-sm:right-2 max-sm:bottom-2"
     >
@@ -180,11 +127,8 @@ function AppToast({
         </Text>
       </ToastContent>
       <div className="flex justify-end gap-2">
-        {/* Not RA's `slot="close"` — that would force aria-label="Close"
-            and a queue-only close. Dismiss must route through
-            `dismissCurrentMismatch()` so the snooze is persisted in
-            sessionStorage (build-id.ts); the build-id subscription (still
-            in VersionBanner.tsx) then removes the toast. */}
+        {/* Not RA's `slot="close"`, which forces a queue-only close: Dismiss must go through
+            `dismissCurrentMismatch()` so the snooze is persisted. */}
         <Button
           className="inline-flex items-center rounded-md border border-line-strong bg-surface-raised px-3 py-1.5 text-sm font-medium text-accent-link outline-none transition-colors hover:bg-surface-sunken data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring"
           onPress={() => dismissCurrentMismatch()}

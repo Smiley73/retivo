@@ -1,24 +1,6 @@
 /**
- * Guided TOTP (authenticator-app) enrollment, shown
- * inside the Security 2FA card. A small internal state machine:
- *
- *   1. start    — call `enrollStart()` on mount → pending secret + otpauth URL.
- *   2. scan     — render the QR (rendered CLIENT-SIDE via `qrcode.toDataURL` so
- *                 the secret never round-trips an image service) + the raw
- *                 base32 secret for manual entry, then a Continue button.
- *
- * This screen collects NO code and performs NO write. Continue hands off to
- * `onContinue`, and the parent (`TwoFactorCard`) opens the password (+ step-up,
- * when enforced) gate; the live 6-digit code is typed in whichever of those
- * modals is the LAST step, so it is seconds old when that modal's own submit
- * performs the real `enrollTotpConfirm(code, password, proof)` write
- * A TOTP code is valid for only ~a minute
- * (server tolerance ±30 s), so it must be the last thing collected — an
- * emailed step-up code alone can take longer than that to arrive. Scanning,
- * the slow part, happens here BEFORE any proof is collected, so no proof's
- * TTL is spent on it.
- *
- * React Aria primitives + the shared form chrome; no raw color classes.
+ * TOTP enrollment screen: shows the QR and base32 secret, collects no code and writes nothing. The parent's last gate
+ * modal collects the code, since it is valid for only about a minute.
  */
 import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
@@ -28,15 +10,9 @@ import { ApiRequestError } from '../api/client';
 import { btnPrimarySmClass, btnSecondarySmClass } from '../pages/accounts-page-chrome';
 
 export interface TotpEnrollmentProps {
-  /** Back out without enrolling. */
   onCancel: () => void;
-  /** Begin enrollment: returns the base32 secret + the otpauth URL for the QR. */
   enrollStart: () => Promise<{ secret: string; otpauthUrl: string }>;
-  /**
-   * The person has scanned the QR / entered the key and pressed Continue —
-   * hands off to the parent to gate + confirm (see the header comment). The
-   * code itself is collected by the parent's last gate modal, not here.
-   */
+  /** The user scanned the QR and pressed Continue; the parent gates and confirms. */
   onContinue: () => void;
 }
 
@@ -52,10 +28,8 @@ export const TotpEnrollment: React.FC<TotpEnrollmentProps> = ({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Begin enrollment on mount. The otpauth URL is rendered to a QR client-side
-  // (qrcode.toDataURL) so the shared secret never leaves the browser via an
-  // image service. A QR-render failure is non-fatal: the manual base32 seed is
-  // always shown as the fallback.
+  // The QR renders client-side so the shared secret never goes through an image service; a render
+  // failure falls back to the manual seed.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -68,7 +42,6 @@ export const TotpEnrollment: React.FC<TotpEnrollmentProps> = ({
           const url = await QRCode.toDataURL(otpauthUrl);
           if (!cancelled) setQrDataUrl(url);
         } catch {
-          // QR render failed — leave qrDataUrl null; the manual seed covers it.
         }
       } catch (err) {
         if (cancelled) return;

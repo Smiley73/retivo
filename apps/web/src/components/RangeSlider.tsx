@@ -1,22 +1,6 @@
 /**
- * Shared range-slider input — single source of truth for slider entry.
- *
- * Built on React Aria's `Slider`. The public API
- * is FROZEN (consumers untouched): `id`, `ariaLabel`, `min`/`max`/`step`, `value`,
- * `onChange(next)`, `formatValue`, `formatAriaValue`, `disabled`,
- * `badgeWidth`. React Aria owns the full slider keyboard pattern
- * (Arrow/Home/End/PageUp/PageDown, step snapping) by construction.
- *
- * The left-of-thumb track fill is positioned from the live thumb
- * percentage. That single declaration is genuinely runtime-dynamic
- * (tracks `value`), so it carries a per-line documented
- * `no-restricted-syntax` disable — the sanctioned escape hatch
- * for an irreducible runtime style.
- *
- * Used in scenario configuration modals (Discretionary adjustment, Inflation,
- * Social Security claim assumptions, Life expectancy). Step is honoured
- * for the visible value via `formatValue` — callers pass a formatter
- * that understands the precision (e.g. `v.toFixed(1)` for 0.5 steps).
+ * Shared range slider on React Aria `Slider`; the left-of-thumb fill is the one runtime-dynamic style and carries a
+ * per-line disable.
  */
 import React, { useId } from 'react';
 import {
@@ -33,15 +17,12 @@ export interface RangeSliderProps {
   step: number;
   value: number;
   onChange: (next: number) => void;
-  /** Visible label to the right of the slider track (e.g. `+25%`,
-   *  `3.5%`, `95 years`). Receives the snapped value. */
+  /** Visible label beside the track; receives the snapped value. */
   formatValue: (value: number) => string;
-  /** Spoken description for AT — e.g. `plus 25 percent`. Defaults to
-   *  `formatValue(value)` if omitted. */
+  /** Spoken value for AT; defaults to `formatValue(value)`. */
   formatAriaValue?: (value: number) => string;
   disabled?: boolean;
-  /** Minimum width for the value badge. Defaults to `4.5rem` so the
-   *  slider track length doesn't jitter as the digit count changes. */
+  /** Minimum badge width, so the track does not jitter as digits change. Defaults to `4.5rem`. */
   badgeWidth?: string;
 }
 
@@ -54,7 +35,7 @@ const snapToStep = (
   if (!Number.isFinite(raw)) return min;
   const clamped = Math.max(min, Math.min(max, raw));
   const snapped = Math.round((clamped - min) / step) * step + min;
-  // Avoid floating-point drift on 0.5-step sliders (e.g. 0.30000…).
+  // Avoids floating-point drift on 0.5-step sliders.
   const decimals = step < 1 ? Math.max(0, Math.ceil(-Math.log10(step))) : 0;
   return Number(snapped.toFixed(decimals));
 };
@@ -62,11 +43,7 @@ const snapToStep = (
 const TRACK_CLASS =
   'relative h-1.5 w-full rounded-full bg-line-strong';
 
-// Matches the selected RadioOption indicator: a lime `bg-accent` circle
-// with a `bg-accent-ink` inner dot (rather than a bordered surface circle,
-// which read as a plain black dot in dark mode). The disabled dim lives on
-// the whole `SliderTrack` (below), so the thumb ("ball") and the track
-// fill ("line") fade together and always match.
+// The disabled dim sits on the whole `SliderTrack`, so thumb and fill fade together.
 const THUMB_CLASS =
   'top-1/2 flex size-4 items-center justify-center rounded-full bg-accent shadow ' +
   'outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-ring data-[focus-visible]:ring-offset-2 ' +
@@ -88,15 +65,9 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
   const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
   const display = formatValue(value);
   const ariaText = formatAriaValue ? formatAriaValue(value) : display;
-  // Stable accessible NAME = `ariaLabel`; the formatted spoken VALUE is
-  // a SEPARATE `aria-describedby` channel (frozen AT contract — a
-  // stable label + a spoken value, NOT one merged name string). The
-  // value text lives in a visually-hidden sibling OUTSIDE the RA
-  // `<Slider>` group on purpose: an in-group `<SliderOutput>` is folded
-  // by RA into the thumb's `aria-labelledby` (group ref), which would
-  // merge the value back into the NAME — the exact regression this
-  // fixes. The value stays visible in the badge below; this hidden
-  // span is the AT description only.
+  // The spoken value is a separate `aria-describedby` channel in a hidden sibling outside the RA
+  // group: an in-group `SliderOutput` is folded into the thumb's `aria-labelledby` and would merge
+  // the value into the name.
   const outputId = useId();
   return (
     <div className="flex min-w-0 items-center gap-4">
@@ -117,20 +88,12 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
       >
         <SliderTrack className="relative flex h-5 w-full items-center data-[disabled]:opacity-60">
           <div className={TRACK_CLASS}>
-            {/* Runtime-dynamic track-fill width tracks the live thumb
-                position — an irreducible runtime style (the React-Aria
-                successor to the prior `--range-pct` exception). */}
             <div
               className="absolute h-1.5 rounded-full bg-accent"
               // eslint-disable-next-line no-restricted-syntax -- runtime track-fill width tracks the live slider value (irreducible runtime style: the fill follows the live thumb position)
               style={{ width: `${pct}%` }}
             />
           </div>
-          {/* Stable accessible name (`ariaLabel`) on the thumb; the
-              formatted spoken value rides the `aria-describedby`
-              channel pointed at the visually-hidden value span above —
-              the frozen native-build contract (a stable label PLUS a
-              spoken value), not a merged name string. */}
           <SliderThumb
             aria-label={ariaLabel}
             aria-describedby={outputId}

@@ -1,7 +1,5 @@
 /**
- * Barrel for the in-house SVG chart engine. Chart `*Inner` components import the frame +
- * supporting types from here; the engine reads the theme-reactive
- * `CHART_COLORS` / `CHART_CHROME` tokens internally so series + chrome
+ * Barrel for the SVG chart engine; the engine reads `CHART_COLORS` / `CHART_CHROME` internally so series and chrome
  * re-flip on a `.dark` toggle.
  */
 export { ChartFrame } from './engine/ChartFrame';

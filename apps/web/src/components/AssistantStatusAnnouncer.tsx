@@ -1,13 +1,6 @@
 /**
- * The one screen-reader announcement for the assistant session: a permanently mounted `sr-only`
- * status region that reads "Assistant connected" and "Assistant disconnected" on those two
- * transitions and on nothing else (a new audit entry changes no text). It is mounted once in the
- * shell, never per badge: the badge exists twice (sidebar and banner) and the CSS-hidden twin would
- * otherwise announce too, and a live region must exist before its text changes or the first change
- * is swallowed.
- *
- * It renders nothing at all unless the build offers the assistant, so a build without the bridge
- * port keeps the shell's DOM exactly as it was. Once offered it exists even with no session, empty.
+ * Single `sr-only` live region announcing assistant connect and disconnect, mounted once and permanently in the
+ * shell: the badge exists twice, and a live region must exist before its text changes.
  */
 import React, { useState } from 'react';
 import { useOptionalAssistant } from '../assistant/AssistantContext';

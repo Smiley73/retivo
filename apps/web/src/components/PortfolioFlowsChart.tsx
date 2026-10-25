@@ -1,12 +1,6 @@
 /**
- * "Portfolio flows" chart on the Balance Projection page. Plots the
- * year-by-year inflows (contributions + investment gains + lump-sum
- * deposits) above zero and withdrawals below zero, with a net-change
- * line overlay. Distinct from the cashflow + income-breakdown bands:
- * those are the household-budget view; this is the portfolio's own
- * "money in / money out" view.
- *
- * Lazy-imported SVG-engine impl. See `PortfolioFlowsChartInner.tsx`.
+ * Year-by-year portfolio inflows above zero and withdrawals below it, with a net-change line; lazy-loads
+ * `PortfolioFlowsChartInner.tsx`.
  */
 import React, { Suspense, lazy } from 'react';
 import type { CashflowChartMarker } from './CashflowProjectionChart';
@@ -18,32 +12,34 @@ export interface PortfolioFlowsChartRow {
   contributions: number;
   gains: number;
   deposits: number;
-  /** Portfolio withdrawal that funds spending = gross draw net of any
-   *  reinvested/held RMD surplus. Negative so the engine renders below zero;
-   *  matches the income-breakdown withdrawal. */
+  /**
+   * Portfolio withdrawal funding spending (gross draw net of reinvested RMD surplus), negative so
+   * it renders below zero.
+   */
   withdrawals: number;
-  /** Qualified Charitable Distribution outflow for the year — the charitable
-   *  gift directed from a traditional IRA. Negative so the engine renders it
-   *  below zero as its own stripe alongside the spending withdrawal; 0 in
-   *  non-QCD years. Included in `netChange`. */
+  /**
+   * Qualified Charitable Distribution outflow, negative so it renders below zero as its own stripe;
+   * included in `netChange`.
+   */
   qcd: number;
   netChange: number;
-  /** Fractional X position. Always omitted now — death = Dec 31 of
-   *  `deathYear` (the terminal year), so every bar (including the
-   *  death-year bar) is a full year at its integer `year`; the chart
-   *  falls back to `year`. The integer-`deathYear` death marker lands on
-   *  the last bar. */
+  /**
+   * Fractional X position; always omitted now, since death is Dec 31 of the terminal year and every
+   * bar sits at its integer `year`.
+   */
   fractionalYear?: number;
 }
 
 interface Props {
   rows: PortfolioFlowsChartRow[];
   markers?: CashflowChartMarker[];
-  /** First year withdrawal < net need; drives the dashed depletion
-   *  marker. Null when the portfolio survives the horizon. */
+  /**
+   * First year withdrawal falls below net need, drawing the dashed depletion marker; null when the
+   * portfolio survives.
+   */
   depletionYear?: number | null;
   members?: TooltipMember[];
-  /** Zoom-state props injected by useChartZoom in the host section. */
+  /** Zoom state injected by `useChartZoom`. */
   xDomain?: [number, number] | null;
   yDomain?: [number, number] | null;
   dragSelection?: [number, number] | null;

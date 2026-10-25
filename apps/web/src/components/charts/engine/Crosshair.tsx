@@ -1,8 +1,6 @@
 /**
- * Pointer crosshair for the SVG chart engine — a vertical line that
- * tracks the nearest datum on hover. Rendered as an SVG `<line>` (no
- * HTML overlay, so no inline-style carve-out needed) plus a drag-marquee
- * `<rect>` when a zoom selection is in progress.
+ * Pointer crosshair for the chart engine: an SVG vertical line at the hovered datum plus a drag-marquee `<rect>`
+ * during zoom selection.
  */
 import React from 'react';
 import { useChartChrome } from '../../../lib/use-chart-tokens';
@@ -10,13 +8,10 @@ import type { ChartGeometry } from './types';
 import { xToPx } from './scales';
 
 interface CrosshairProps {
-  /** Data-space x of the hovered datum, or null when not hovering. */
   hoverX: number | null;
   geometry: ChartGeometry;
   xDomain: [number, number];
-  /** Drag-marquee selection [x1,x2] in data space, or null. */
   dragSelection: [number, number] | null;
-  /** Marquee fill / stroke colors (theme-resolved by the caller). */
   marqueeFill: string;
   marqueeStroke: string;
 }
