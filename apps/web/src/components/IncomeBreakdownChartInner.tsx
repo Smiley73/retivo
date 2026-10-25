@@ -40,7 +40,7 @@ interface TooltipRow {
   color: string;
 }
 
-export function makeIncomeTooltip(
+function makeIncomeTooltip(
   members: TooltipMember[],
   granularity: 'monthly' | 'yearly' = 'monthly',
   colors: ChartColors,

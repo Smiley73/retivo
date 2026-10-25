@@ -1,8 +1,4 @@
-/**
- * BlockOnDeleteDialog tests. Owns the reference-list cap behaviour
- * (moved out of ExpenseCategoriesPage) plus the optional footer link
- * and the mandatory shared-component a11y smoke (AGENTS.md).
- */
+/** BlockOnDeleteDialog: the reference-list cap and the optional footer link. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';

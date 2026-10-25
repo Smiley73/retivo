@@ -1,12 +1,4 @@
-/**
- * A11y smoke coverage for the scenario summary-card components pulled out
- * of ScenarioDetailPage.tsx to keep that file under the shape limit. Each of these files
- * renders `ConfigureResetActions` (real `<button>` elements), so per
- * AGENTS.md's a11y-smoke rule they are interactive, not purely
- * presentational. One representative instance per file collapses to a
- * single scan (AGENTS.md's "scans multiple variants" allowance) — this
- * file does not exhaustively cover every prop variant of every card.
- */
+/** The scenario summary cards render real buttons through ConfigureResetActions; one composed tree gets one scan. */
 import React from 'react';
 import { render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -93,91 +85,49 @@ function makeScenario(): ScenarioAggregate {
 }
 
 describe('scenario summary cards — a11y smoke', () => {
-  it('SummaryCard (RetirementAgeSummaryCard) has no a11y violations', async () => {
+  it('has no a11y violations with every card rendered', async () => {
     const scenario = makeScenario();
-    const { container } = render(
-      <RetirementAgeSummaryCard
-        scenario={scenario}
-        scenarios={[scenario]}
-        primaryMember={makeMember()}
-        secondaryMember={null}
-        onConfigure={() => {}}
-        onResetToInherited={() => {}}
-      />,
-    );
-    await expectNoA11yViolations(container);
-  });
-
-  it('ExpenseOverridesSummary has no a11y violations', async () => {
-    const scenario = makeScenario();
+    const onResetToInherited = () => {};
     const { container } = render(
       <MemoryRouter>
+        <RetirementAgeSummaryCard
+          scenario={scenario}
+          scenarios={[scenario]}
+          primaryMember={makeMember()}
+          secondaryMember={null}
+          onConfigure={() => {}}
+          onResetToInherited={onResetToInherited}
+        />
         <ExpenseOverridesSummaryCard
           scenarioId={scenario.id}
           scenario={scenario}
-          onResetToInherited={() => {}}
+          onResetToInherited={onResetToInherited}
         />
-      </MemoryRouter>,
-    );
-    await expectNoA11yViolations(container);
-  });
-
-  it('IncomeOverridesSummary has no a11y violations', async () => {
-    const scenario = makeScenario();
-    const { container } = render(
-      <MemoryRouter>
         <IncomeOverridesSummaryCard
           scenarioId={scenario.id}
           scenario={scenario}
-          onResetToInherited={() => {}}
+          onResetToInherited={onResetToInherited}
         />
-      </MemoryRouter>,
-    );
-    await expectNoA11yViolations(container);
-  });
-
-  it('RothConversionsSummary has no a11y violations', async () => {
-    const scenario = makeScenario();
-    const { container } = render(
-      <MemoryRouter>
         <RothConversionsSummaryCard
           scenarioId={scenario.id}
           scenario={scenario}
           scenarios={[scenario]}
           members={[makeMember()]}
-          onResetToInherited={() => {}}
+          onResetToInherited={onResetToInherited}
         />
-      </MemoryRouter>,
-    );
-    await expectNoA11yViolations(container);
-  });
-
-  it('QcdSummary has no a11y violations', async () => {
-    const scenario = makeScenario();
-    const { container } = render(
-      <MemoryRouter>
         <QcdSummaryCard
           scenarioId={scenario.id}
           scenario={scenario}
           scenarios={[scenario]}
           accounts={[makeAccount()]}
           members={[makeMember()]}
-          onResetToInherited={() => {}}
+          onResetToInherited={onResetToInherited}
         />
-      </MemoryRouter>,
-    );
-    await expectNoA11yViolations(container);
-  });
-
-  it('AccountOverridesSummary (AccountContributionsOverridesSummaryCard) has no a11y violations', async () => {
-    const scenario = makeScenario();
-    const { container } = render(
-      <MemoryRouter>
         <AccountContributionsOverridesSummaryCard
           scenarioId={scenario.id}
           scenario={scenario}
           activeAccountCount={1}
-          onResetToInherited={() => {}}
+          onResetToInherited={onResetToInherited}
         />
       </MemoryRouter>,
     );

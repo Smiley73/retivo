@@ -1,11 +1,4 @@
-/**
- * HouseholdReadyBanner — render + the two-key dismiss/demo-load behavior +
- * a11y smoke (AGENTS shared-component axe mandate).
- *
- * Verifies: the "Load demo data" button + dismiss control render; dismiss
- * writes the dismissed key, clears the pending key, and calls onDismiss;
- * "Load demo data" does the same two-key write then calls loadDemoData.
- */
+/** HouseholdReadyBanner: Load demo data and dismiss both write the dismissed key and clear the pending key. */
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -40,9 +33,7 @@ describe('HouseholdReadyBanner', () => {
 
   beforeEach(() => {
     localStorage.setItem(PENDING_KEY, '1');
-    // jsdom no-ops reload() and its `window.location` is non-configurable;
-    // replace `location` with a mockable copy (idiom from VersionBanner /
-    // WorkspacePage tests) so the post-load hard reload is observable.
+    // jsdom no-ops reload() and its `window.location` is non-configurable, so replace `location` with a mockable copy.
     originalLocation = window.location;
     Object.defineProperty(window, 'location', {
       configurable: true,
@@ -87,8 +78,6 @@ describe('HouseholdReadyBanner', () => {
       displayName: 'Me',
     });
     await waitFor(() => expect(onDismiss).toHaveBeenCalledTimes(1));
-    // Hard reload fires after a successful load so every page re-reads the
-    // demo aggregates.
     expect(window.location.reload).toHaveBeenCalledTimes(1);
   });
 

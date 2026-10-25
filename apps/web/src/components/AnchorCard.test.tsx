@@ -1,8 +1,4 @@
-/**
- * AnchorCard — collapsed-summary / expand behaviour, the disabled lock,
- * and the accessible-name + description wiring. `components/`-dir, so the
- * AGENTS axe-smoke rule applies (at least one `expectNoA11yViolations`).
- */
+/** AnchorCard: collapsed summary, expand behaviour, the disabled lock and the accessible-name and description wiring. */
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { AnchorCard, AnchorCardGroup } from './AnchorCard';
@@ -20,7 +16,6 @@ describe('AnchorCard', () => {
   it('collapsed by default: shows the summary, hides the body', () => {
     renderCard();
     expect(screen.getByText('At age 65')).toBeInTheDocument();
-    // The disclosure panel content is hidden until expanded.
     expect(
       screen.queryByRole('button', { name: 'inner control' }),
     ).toBeNull();
@@ -61,8 +56,6 @@ describe('AnchorCard', () => {
     expect(
       screen.getByRole('button', { name: 'inner control' }),
     ).toBeInTheDocument();
-    // Disabling the card (e.g. the floor toggled off) force-collapses it —
-    // the trigger can't be clicked, so it must not stay stuck open.
     rerender(
       <AnchorCard label="Start" summary="At age 65" disabled>
         <button type="button">inner control</button>
@@ -86,7 +79,6 @@ describe('AnchorCard', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(screen.getByRole('button', { name: 'start body' })).toBeInTheDocument();
-    // Opening End collapses Start (single-expand).
     fireEvent.click(screen.getByRole('button', { name: 'End' }));
     expect(screen.getByRole('button', { name: 'end body' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'start body' })).toBeNull();
@@ -103,10 +95,6 @@ describe('AnchorCard', () => {
   });
 
   it('has no a11y violations (expanded — the richer disclosure tree)', async () => {
-    // One representative scan of the expanded state (the collapsed tree is a
-    // strict subset). AnchorCard is interactive (disclosure button +
-    // `aria-describedby`), so the a11y-smoke rule applies (AGENTS *Testing
-    // setup*).
     const { container } = renderCard();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await expectNoA11yViolations(container);

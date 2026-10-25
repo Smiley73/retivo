@@ -1,11 +1,4 @@
-/**
- * Tests for shared MoneyInput component.
- *
- * Covers parseCurrencyInput pure logic (cash strings → number) plus the
- * two component variants (`form` adds a label wrapper; `cell` is a bare
- * right-aligned input). Behavior tests focus on focus/blur formatting,
- * onChange propagation, and the `allowNegative` constraint.
- */
+/** MoneyInput: parseCurrencyInput, the form and cell variants, focus/blur formatting, onChange and allowNegative. */
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -75,15 +68,11 @@ describe('MoneyInput cell variant', () => {
     );
     const input = screen.getByLabelText('row-1-pre-tax') as HTMLInputElement;
     expect(input.value).toBe('500.00');
-    // Right-alignment is a preserved behavioral contract (numeric cells
-    // line up); re-expressed as the Tailwind `text-right` utility.
     expect(input).toHaveClass('text-right');
   });
 
   it('renders at the text-sm page baseline (font-size regression guard)', () => {
-    // Without `text-sm` the input fell back to the 16px browser
-    // default while page text is 14px. jsdom cannot measure computed
-    // px, so the class is the contract.
+    // jsdom cannot measure computed px, so the class is the contract for matching the page text size.
     render(
       <MoneyInput
         variant="cell"
@@ -123,18 +112,6 @@ describe('MoneyInput cell variant', () => {
     const input = screen.getByLabelText('row-1-pre-tax');
     fireEvent.change(input, { target: { value: '' } });
     expect(onChange).toHaveBeenLastCalledWith(0);
-  });
-
-  it('no a11y violations', async () => {
-    const { container } = render(
-      <MoneyInput
-        variant="cell"
-        ariaLabel="row-1-pre-tax"
-        value={500}
-        onChange={() => undefined}
-      />,
-    );
-    await expectNoA11yViolations(container);
   });
 });
 

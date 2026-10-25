@@ -1,8 +1,4 @@
-/**
- * NotesField — label association, pass-through of rows + maxLength,
- * error rendered via `role="alert"`, plus the a11y smoke
- * required of every shared component (AGENTS rule).
- */
+/** NotesField: label association, rows and maxLength pass-through, and the error rendered via role="alert". */
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -56,8 +52,6 @@ describe('NotesField', () => {
     );
     const ta = screen.getByLabelText('Short');
     await user.type(ta, 'abcdefghij');
-    // Each keystroke fires onChange; the latest sum should not exceed
-    // the cap (React Aria + native maxLength enforce the truncation).
     const lastCall = onChange.mock.calls.at(-1)?.[0] as string | undefined;
     expect(lastCall?.length ?? 0).toBeLessThanOrEqual(5);
   });

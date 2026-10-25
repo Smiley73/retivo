@@ -1,13 +1,4 @@
-/**
- * PageHeader — title/subtitle render, button-not-Link primary action,
- * a11y smoke.
- *
- * Tailwind-defaults replacement for the legacy `.page-header` pattern.
- * Asserts the heading + subtitle render, and — the
- * framework-independent rule — the primary action is a real `<button>`
- * (never a `<Link>`) that fires `onClick` and respects `disabled`. Plus
- * the shared-component axe rule (AGENTS mandate).
- */
+/** PageHeader: title and subtitle, and a primary action that is a real button (never a Link) firing onClick and respecting disabled. */
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';

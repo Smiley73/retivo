@@ -6,9 +6,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Modal } from './Modal';
 import { btnPrimaryClass } from './dialog-chrome';
 
-export const PHONE_VIEWPORT_QUERY = '(max-width: 639px)';
+const PHONE_VIEWPORT_QUERY = '(max-width: 639px)';
 
-export const SMALL_SCREEN_NOTICE_DISMISSED_KEY = 'retivo:small-screen-notice-dismissed';
+const SMALL_SCREEN_NOTICE_DISMISSED_KEY = 'retivo:small-screen-notice-dismissed';
 
 function readDismissed(): boolean {
   try {

@@ -1,9 +1,4 @@
-/**
- * Render-level test for AccountBalanceStackChartInner — asserts the
- * stacked area series render, series colors source from the CHART_COLORS
- * map and flip light↔dark, and zoom/drag props drive the SVG
- * engine (marquee rect on drag selection).
- */
+/** AccountBalanceStackChartInner: stacked area series, theme-reactive colours and the drag marquee. */
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { fireEvent, within } from '@testing-library/react';
@@ -83,9 +78,7 @@ describe('AccountBalanceStackChartInner — drag-zoom', () => {
 
 describe('AccountBalanceStackChartInner — legend show/hide', () => {
   it('resolves same-named accounts independently (legendId = dataKey)', () => {
-    // Two accounts named "Checking" — account names aren't unique. Each legend
-    // button keys off its unique dataKey, so isolating one (isolate-first: the
-    // first click hides every other key) leaves exactly its own series, not both.
+    // Account names are not unique; each legend button keys off its own dataKey, so isolating one leaves exactly its series.
     const dupes = [
       { dataKey: 'acctA', name: 'Checking', color: CHART_COLORS.light.acctTaxable },
       { dataKey: 'acctB', name: 'Checking', color: CHART_COLORS.light.acctCash },
@@ -100,12 +93,10 @@ describe('AccountBalanceStackChartInner — legend show/hide', () => {
     );
     expect(container.querySelectorAll('path[name="Checking"]')).toHaveLength(2);
 
-    // Click the first of the two "Checking" toggle buttons → isolate it.
     const buttons = within(container).getAllByRole('button', { name: 'Checking' });
     expect(buttons).toHaveLength(2);
     fireEvent.click(buttons[0]);
 
-    // The isolated account survives; the other (distinct dataKey) hides.
     expect(container.querySelectorAll('path[name="Checking"]')).toHaveLength(1);
   });
 });

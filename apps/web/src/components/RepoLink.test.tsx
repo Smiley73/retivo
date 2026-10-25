@@ -1,7 +1,4 @@
-/**
- * RepoLink — exact accessible name/description, external-link attributes,
- * per-instance id uniqueness, and the a11y smoke scan.
- */
+/** RepoLink: exact accessible name and description, external-link attributes, and per-instance id uniqueness. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -29,7 +26,6 @@ describe('RepoLink', () => {
       `#${CSS.escape(link.getAttribute('aria-describedby')!)}`,
     );
     expect(desc).toHaveClass('sr-only');
-    // The hint is a SIBLING of the <a>, never a descendant of it.
     expect(link.contains(desc)).toBe(false);
   });
 

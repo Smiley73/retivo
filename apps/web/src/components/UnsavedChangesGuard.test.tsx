@@ -1,14 +1,4 @@
-/**
- * Hook-level tests for useUnsavedChangesGuard and useDirtyModalClose.
- *
- * Page-level smoke tests live in AccountContributionsPage.test.tsx; this
- * file exercises the hooks in isolation through small harness components.
- *
- * MemoryRouter doesn't go through window.history (it maintains its own
- * in-memory stack), so the navigation-guard tests call
- * window.history.pushState directly — that's the same call BrowserRouter
- * makes in production on a Link click or useNavigate().
- */
+/** useUnsavedChangesGuard and useDirtyModalClose, exercised in isolation through small harness components. */
 import { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -17,7 +7,7 @@ import { useUnsavedChangesGuard, useDirtyModalClose } from './UnsavedChangesGuar
 import { Modal } from './Modal';
 import { expectNoA11yViolations } from '../test/a11y';
 
-// --- useUnsavedChangesGuard ---
+// MemoryRouter keeps its own stack and never touches window.history, so the navigation tests call pushState directly as BrowserRouter does.
 
 interface GuardHarnessProps {
   initialDirty?: boolean;
@@ -44,7 +34,6 @@ describe('useUnsavedChangesGuard', () => {
   });
 
   afterEach(() => {
-    // Reset URL so test ordering doesn't matter.
     window.history.replaceState({}, '', originalPath);
   });
 
@@ -74,7 +63,6 @@ describe('useUnsavedChangesGuard', () => {
     expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
     expect(window.location.pathname).toBe(originalPath);
     expect(window.location.search).toBe('?filter=active');
-    // Restore for the afterEach reset.
     window.history.replaceState({}, '', originalPath);
   });
 
@@ -95,7 +83,6 @@ describe('useUnsavedChangesGuard', () => {
     fireEvent.click(screen.getByText('make-dirty'));
     fireEvent.click(screen.getByText('make-clean'));
 
-    // After flipping clean, pushState should pass through unguarded.
     window.history.pushState({}, '', '/freely');
     expect(window.location.pathname).toBe('/freely');
     expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
@@ -117,13 +104,10 @@ describe('useUnsavedChangesGuard', () => {
     );
     fireEvent.click(screen.getByText('make-dirty'));
 
-    // Calling navigateUnguarded must NOT show the prompt — it's the bypass path.
     fireEvent.click(screen.getByText('cancel-and-leave'));
     expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
   });
 });
-
-// --- useDirtyModalClose ---
 
 interface ModalHarnessProps {
   initialDirty: boolean;
@@ -151,12 +135,7 @@ describe('useDirtyModalClose', () => {
     const user = userEvent.setup();
     const realClose = vi.fn();
     render(<ModalHarness initialDirty={false} realClose={realClose} />);
-    // Move focus into the modal before Esc — React Aria's overlay
-    // dismiss is keyed off the focused element being within the
-    // overlay (a real user is interacting with it). `make-clean` keeps
-    // the harness clean + the modal open while parking focus inside it;
-    // doing this explicitly also isolates the test from focus state
-    // leaked by a prior suite's portal under the parallel runner.
+    // Park focus inside the modal before Esc: React Aria's overlay dismiss keys off the focused element, and a prior suite's portal can leak focus under the parallel runner.
     await user.click(screen.getByRole('button', { name: 'make-clean' }));
     await user.keyboard('{Escape}');
     expect(realClose).toHaveBeenCalledTimes(1);

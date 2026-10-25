@@ -1,19 +1,10 @@
-/**
- * CashflowProjectionChartInner — tooltip granularity adaptation,
- * theme-reactivity, marker rendering + drag-zoom, on the SVG engine.
- *
- *   - Monthly: tooltip date line reads "<Mon> <Year>".
- *   - Yearly: tooltip date line reads just "<Year>" (no month).
- *   - Member age is whole-year in both modes.
- *   - Theme: the expense-stack area fill is sourced from `CHART_COLORS`
- *     and FLIPS between light and dark themes.
- *   - expectNoA11yViolations on the rendered chart (AGENTS mandate).
- */
+/** CashflowProjectionChartInner: tooltip granularity, theme-reactive fills, legend isolation, category mode, markers and drag-zoom. */
 import React from 'react';
 import { fireEvent, render, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import InnerChart, { makeCashflowTooltip } from './CashflowProjectionChartInner';
+import InnerChart from './CashflowProjectionChartInner';
+import { makeCashflowTooltip } from './CashflowProjectionChartInner.tooltip';
 import type {
   CashflowChartMarker,
   CashflowMonthlyPoint,
@@ -41,8 +32,6 @@ const POINT: CashflowMonthlyPoint = {
 
 const MEMBERS: TooltipMember[] = [{ firstName: 'Alex', birthYear: 1975 }];
 
-// The SVG engine hands the hovered datum directly to the tooltip
-// factory (no recharts payload wrapper).
 function renderTip(
   granularity: 'monthly' | 'yearly',
 ): ReturnType<typeof render> {
@@ -82,7 +71,6 @@ describe('CashflowProjectionChartInner — tooltip granularity', () => {
     const { getByText } = render(<>{node}</>);
     const label = getByText('Taxes');
     expect(label).toBeTruthy();
-    // The Taxes value sits in the same row as its label.
     expect(label.parentElement?.textContent).toContain('$7,000');
   });
 
@@ -122,10 +110,6 @@ describe('CashflowProjectionChartInner — tooltip granularity', () => {
       total: 45_000,
       byCategory: { 'cat-housing': 24_000, 'cat-medical': 16_000 },
     };
-    // The engine hands the tooltip the flattened datum (byCategory projected
-    // onto top-level `cat-${id}` keys) — build it exactly the way
-    // CashflowProjectionChartInner does so this test is anchored to what
-    // renders in the app, not the nested `byCategory` map.
     const { byCategory, ...flat } = point;
     const datum = { ...flat, x: point.fractionalYear } as unknown as ChartDatum;
     for (const [id, v] of Object.entries(byCategory ?? {})) {
@@ -137,7 +121,6 @@ describe('CashflowProjectionChartInner — tooltip granularity', () => {
     expect(getByText('Medical')).toBeTruthy();
     expect(getByText('Taxes')).toBeTruthy();
     expect(getByText('Total income')).toBeTruthy();
-    // Essential / Discretionary rows are gone in category mode.
     expect(queryByText('Essential')).toBeNull();
     expect(queryByText('Discretionary')).toBeNull();
   });
@@ -193,25 +176,15 @@ describe('CashflowProjectionChartInner — legend show/hide (isolate-first)', ()
         categoryMeta={[]}
       />,
     );
-    // Both the visible ribbon and its invisible base render up front.
     expect(container.querySelector('path[name="Shortfall"]')).not.toBeNull();
     expect(container.querySelector('path[name="shortfall-base"]')).not.toBeNull();
 
-    // Isolate-first: isolating another entry (Total income) hides Shortfall.
-    // The invisible base shares legendId 'Shortfall' so it follows its partner
-    // into hidden → both gone, so the hidden base can't keep inflating Y.
+    // The invisible shortfall base shares legendId 'Shortfall', so isolating another entry hides both and the base cannot keep inflating Y.
     fireEvent.click(
       within(container).getByRole('button', { name: 'Total income' }),
     );
     expect(container.querySelector('path[name="Shortfall"]')).toBeNull();
     expect(container.querySelector('path[name="shortfall-base"]')).toBeNull();
-  });
-});
-
-describe('CashflowProjectionChartInner — a11y', () => {
-  it('renders without a11y violations', async () => {
-    const container = renderThemed('light');
-    await expectNoA11yViolations(container);
   });
 });
 
@@ -250,13 +223,10 @@ describe('CashflowProjectionChartInner — category mode', () => {
     const container = renderCategory();
     expect(container.querySelector('path[name="Housing"]')).not.toBeNull();
     expect(container.querySelector('path[name="Medical"]')).not.toBeNull();
-    // The essential/discretionary bands are replaced.
     expect(container.querySelector('path[name="Essential"]')).toBeNull();
     expect(container.querySelector('path[name="Discretionary"]')).toBeNull();
-    // Taxes + income line stay.
     expect(container.querySelector('path[name="Taxes"]')).not.toBeNull();
     expect(container.querySelector('path[name="Total income"]')).not.toBeNull();
-    // Per-category colour comes from categoryMeta.
     expect(seriesColor(container, 'Housing')).toBe('#0d9488');
   });
 

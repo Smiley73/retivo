@@ -1,13 +1,4 @@
-/**
- * RangeSlider — React Aria `Slider` keyboard + value behaviour + a11y
- * smoke. The behavior is the point here, not visual parity.
- *
- * Asserts the FROZEN public API (`value`/`onChange`/`min`/`max`/`step`/
- * `formatValue`/`formatAriaValue`/`ariaLabel`): renders a `slider` role
- * with the accessible name + spoken value, Arrow keys step + snap and
- * fire `onChange(next)`, Home/End jump to the bounds, disabled blocks
- * interaction. Interaction goes through `@testing-library/user-event`.
- */
+/** RangeSlider: slider role with accessible name and spoken value, Arrow/Home/End stepping, and disabled blocking. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -42,17 +33,13 @@ describe('RangeSlider', () => {
     expect(snapToStep(0.27, 0, 1, 0.05)).toBe(0.25);
   });
 
-  it('exposes a STABLE accessible name + the formatted spoken value as a separate description', () => {
+  it('exposes a stable accessible name + the formatted spoken value as a separate description', () => {
     setup(50);
-    // Frozen AT contract: the thumb's accessible NAME is the stable
-    // `ariaLabel` (never the value merged in), and the formatted spoken
-    // value rides the separate `aria-describedby` channel. The slider
-    // is a native range input — its value is the native `value`.
+    // The thumb's name is the stable `ariaLabel`; the formatted spoken value rides the separate `aria-describedby` channel.
     const slider = screen.getByRole('slider', { name: 'Adjustment' });
     expect(slider).toHaveValue('50');
     expect(slider).toHaveAccessibleName('Adjustment');
     expect(slider).toHaveAccessibleDescription('50 percent');
-    // Visible badge shows the formatted value.
     expect(screen.getByText('50%')).toBeInTheDocument();
   });
 
@@ -71,7 +58,6 @@ describe('RangeSlider', () => {
       />,
     );
     const slider = screen.getByRole('slider', { name: 'Adjustment' });
-    // Name unchanged; only the described spoken value moved.
     expect(slider).toHaveAccessibleName('Adjustment');
     expect(slider).toHaveAccessibleDescription('75 percent');
   });

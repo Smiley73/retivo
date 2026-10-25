@@ -1,12 +1,4 @@
-/**
- * Field — labelled control wrapper render + a11y smoke.
- *
- * Tailwind-defaults replacement for the legacy `.field` class.
- * Asserts the label is associated to the control, hint + error
- * render (error as a live region), and the `min-w-0`
- * flex-shrink guard is on the wrapper — plus the shared-component axe
- * rule (AGENTS mandate).
- */
+/** Field: label association, hint and error (error as a live region), and the min-w-0 flex-shrink guard. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';

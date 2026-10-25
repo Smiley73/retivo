@@ -1,13 +1,4 @@
-/**
- * ExpensesProjectionChartInner — canonical retirement-marker render
- * + a11y smoke, on the SVG chart engine.
- *
- * The Expenses projection chart must render the same teal
- * `Retires <Mon YYYY>` retirement marker as the Balance Projection
- * charts whenever the host feeds one. Asserts the marker renders as a
- * dashed vertical line with the canonical teal stroke + its label text.
- * expectNoA11yViolations satisfies the AGENTS component-test mandate.
- */
+/** ExpensesProjectionChartInner: the canonical teal retirement marker renders as a dashed vertical line with its label. */
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 

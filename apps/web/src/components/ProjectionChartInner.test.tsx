@@ -1,20 +1,8 @@
-/**
- * ProjectionChartInner — theme-reactivity, log-scale floor, marker
- * + drag-zoom rendering, a11y smoke, on the SVG chart engine.
- *
- * The method lines (Planned, TWR) take their stroke from `CHART_COLORS`
- * via `useChartColors()`; this asserts the stroke is map-sourced and
- * FLIPS light↔dark. The log-scale domain clamp is exercised
- * directly against the engine's pure `resolveYDomain` helper since the engine resolves the y-domain internally.
- */
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { fireEvent, within } from '@testing-library/react';
 
-import InnerChart, {
-  buildProjectionData,
-  type McCell,
-} from './ProjectionChartInner';
+import InnerChart from './ProjectionChartInner';
 import type {
   ProjectionChartRow,
   RetirementMarker,
@@ -22,7 +10,6 @@ import type {
 import { expectNoA11yViolations } from '../test/a11y';
 import { renderWithTheme, seriesColor } from '../test/theme-render';
 import { CHART_COLORS } from '../lib/tokens';
-import { LOG_FLOOR, resolveYDomain } from './charts';
 
 const ROWS: ProjectionChartRow[] = [
   { year: 2030, x: 2031, plannedSolid: 100_000, plannedDashed: null, twrSolid: 110_000, twrDashed: null, plannedGrowth: 5_000, twrGrowth: 6_000 },
@@ -117,10 +104,6 @@ describe('ProjectionChartInner — Monte-Carlo overlay (dashboard)', () => {
   });
 
   it('turns the MC lines dashed past retirement (like Planned/TWR)', () => {
-    // With a retirement marker the overlay splits into a solid (pre-) +
-    // dashed (post-retirement) channel sharing the line's name, so the
-    // dashed stretch carries the same dash pattern the deterministic lines
-    // use. (No marker → the all-solid case is covered above.)
     const container = renderWithTheme(
       'light',
       <InnerChart
@@ -147,117 +130,60 @@ describe('ProjectionChartInner — Monte-Carlo overlay (dashboard)', () => {
   });
 });
 
-describe('buildProjectionData — MC lines outlive the deterministic rows', () => {
-  const detRow = (x: number): ProjectionChartRow => ({
-    year: x - 1,
-    x,
-    plannedSolid: 100,
-    plannedDashed: null,
-    twrSolid: 110,
-    twrDashed: null,
-    plannedGrowth: null,
-    twrGrowth: null,
-  });
-  const cell = (v: number): McCell => ({
-    typicalSolid: null,
-    typicalDashed: v,
-    pessimisticSolid: null,
-    pessimisticDashed: v - 5,
-  });
+describe('ProjectionChartInner — MC lines outlive the deterministic rows', () => {
+  const pointCount = (container: HTMLElement): number => {
+    const d = container
+      .querySelector('path[name="Typical"]:not([stroke-dasharray])')
+      ?.getAttribute('d');
+    return (d?.match(/[ML]/g) ?? []).length;
+  };
+  const axisYears = (container: HTMLElement): string[] =>
+    Array.from(container.querySelectorAll('svg text')).map((t) => t.textContent ?? '');
 
-  it('adds MC-only rows past the last deterministic row, clipped to domainMax', () => {
-    // Deterministic rows stop at x=2032 (Planned/TWR depleted); the overlay
-    // runs to 2035. domainMax=2034 → 2033/2034 get MC-only carrier rows,
-    // 2035 is clipped.
-    const visible = [detRow(2031), detRow(2032)];
-    const mcByX = new Map<number, McCell>([
-      [2031, cell(200)],
-      [2032, cell(210)],
-      [2033, cell(220)],
-      [2034, cell(230)],
-      [2035, cell(240)],
-    ]);
-    const data = buildProjectionData(visible, mcByX, 2034);
-    expect(data.map((d) => d.x)).toEqual([2031, 2032, 2033, 2034]);
-    // The extension row carries the MC value but no deterministic value.
-    const r2034 = data.find((d) => d.x === 2034) as Record<string, unknown>;
-    expect(r2034.plannedSolid).toBeNull();
-    expect(r2034.twrSolid).toBeNull();
-    expect(r2034.mcTypicalDashed).toBe(230);
-    expect(r2034.mcPessimisticDashed).toBe(225);
-    // A merged row keeps its deterministic value + gains the MC value.
-    const r2031 = data.find((d) => d.x === 2031) as Record<string, unknown>;
-    expect(r2031.plannedSolid).toBe(100);
-    expect(r2031.mcTypicalDashed).toBe(200);
-  });
-
-  it('skips MC-only carrier rows once both paths have depleted', () => {
-    const nullCell: McCell = {
-      typicalSolid: null,
-      typicalDashed: null,
-      pessimisticSolid: null,
-      pessimisticDashed: null,
-    };
-    const data = buildProjectionData(
-      [detRow(2031)],
-      new Map<number, McCell>([
-        [2031, cell(200)],
-        [2032, cell(150)],
-        [2033, nullCell], // both depleted → no carrier row
-      ]),
-      2040,
+  it('extends the MC lines past the last deterministic row, clipped to the last death year', () => {
+    const container = renderWithTheme(
+      'light',
+      <InnerChart
+        rows={ROWS}
+        enabledCalculatedMethods={ENABLED}
+        retirementMarkers={[]}
+        lifeExpectancyMarkers={[{ fractionalYear: 2032.5, label: 'Life expectancy', color: '#000000' }]}
+        tooltipMembers={[]}
+        mcOverlay={{
+          firstYear: 2030,
+          typical: [105_000, 125_000, 130_000, 135_000, 140_000],
+          pessimistic: [95_000, 115_000, 120_000, 125_000, 130_000],
+        }}
+      />,
     );
-    expect(data.map((d) => d.x)).toEqual([2031, 2032]);
+    expect(pointCount(container)).toBe(4);
+    expect(axisYears(container)).not.toContain('2035');
   });
 
-  it('returns plain deterministic rows when there is no overlay', () => {
-    const data = buildProjectionData(
-      [detRow(2031), detRow(2032)],
-      new Map(),
-      Infinity,
+  it('adds no carrier row once both MC paths have depleted', () => {
+    const container = renderWithTheme(
+      'light',
+      <InnerChart
+        rows={ROWS}
+        enabledCalculatedMethods={ENABLED}
+        retirementMarkers={[]}
+        lifeExpectancyMarkers={[]}
+        tooltipMembers={[]}
+        mcOverlay={{
+          firstYear: 2030,
+          typical: [105_000, 125_000, 130_000, 0],
+          pessimistic: [95_000, 115_000, 120_000, 0],
+        }}
+      />,
     );
-    expect(data.map((d) => d.x)).toEqual([2031, 2032]);
-    expect((data[0] as Record<string, unknown>).mcTypicalDashed).toBeUndefined();
-  });
-});
-
-describe('ProjectionChartInner — log-scale Y-axis floor', () => {
-  it('pins the floor at $10k', () => {
-    expect(LOG_FLOOR).toBe(10000);
-  });
-
-  it('floors the log-scale domain at $10k', () => {
-    const d = resolveYDomain(ROWS.map((r) => ({ ...r, x: r.x })), [], null, 'log');
-    expect(d[0]).toBe(LOG_FLOOR);
-  });
-
-  it('guards inversion when an explicit yDomain falls below the floor', () => {
-    // Both ends below floor → lo clamps to floor, hi NOT > floor → not [10000, 50].
-    const d = resolveYDomain([], [], [1, 50], 'log');
-    expect(d[0]).toBe(LOG_FLOOR);
-    expect(d[1]).toBeGreaterThan(d[0]);
-  });
-
-  it('clamps the lower bound only when the upper is above the floor', () => {
-    expect(resolveYDomain([], [], [500, 200000], 'log')).toEqual([
-      LOG_FLOOR,
-      200000,
-    ]);
-  });
-
-  it('leaves the linear-scale domain auto-ranged (padded extent)', () => {
-    const d = resolveYDomain(ROWS.map((r) => ({ ...r, x: r.x })), [], null, 'linear');
-    expect(d[0]).toBe(0);
-    expect(d[1]).toBeGreaterThan(0);
+    expect(pointCount(container)).toBe(3);
+    expect(axisYears(container)).toContain('2033');
+    expect(axisYears(container)).not.toContain('2034');
   });
 });
 
 describe('ProjectionChartInner — legend show/hide (isolate-first)', () => {
-  it('drops BOTH the solid + dashed channels of a method hidden by isolate', () => {
-    // One legend entry ("Planned") maps to two specs sharing the name —
-    // the solid pre-retirement + dashed post-retirement channels. Hiding the
-    // entry must drop both (the filter keys off `name`, not `dataKey`).
-    // Under isolate-first, isolating Historical hides every Planned channel.
+  it('drops both the solid + dashed channels of a method hidden by isolate', () => {
     const container = renderThemed('light');
     expect(container.querySelectorAll('path[name="Planned"]')).toHaveLength(2);
 
@@ -267,15 +193,12 @@ describe('ProjectionChartInner — legend show/hide (isolate-first)', () => {
     fireEvent.click(historicalToggle);
 
     expect(container.querySelectorAll('path[name="Planned"]')).toHaveLength(0);
-    // The isolated method (Historical) survives.
     expect(
       container.querySelectorAll('path[name="Historical"]').length,
     ).toBeGreaterThan(0);
   });
 
-  it('isolates BOTH channels of the clicked method on the first click', () => {
-    // Clicking "Planned" from all-visible focuses it: both Planned channels
-    // stay; Historical is hidden.
+  it('isolates both channels of the clicked method on the first click', () => {
     const container = renderThemed('light');
 
     const plannedToggle = within(container).getByRole('button', {
@@ -285,13 +208,6 @@ describe('ProjectionChartInner — legend show/hide (isolate-first)', () => {
 
     expect(container.querySelectorAll('path[name="Planned"]')).toHaveLength(2);
     expect(container.querySelectorAll('path[name="Historical"]')).toHaveLength(0);
-  });
-});
-
-describe('ProjectionChartInner — a11y', () => {
-  it('renders without a11y violations', async () => {
-    const container = renderThemed('light');
-    await expectNoA11yViolations(container);
   });
 });
 

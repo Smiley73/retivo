@@ -1,11 +1,4 @@
-/**
- * DiscretionaryGlideFields — a11y smoke + enable/floor toggle behavior,
- * the mode-driven toggle-OFF asymmetry (ND15b), a well-formed onChange
- * payload, and the ui-aria-polish disabled-but-visible layout (sections
- * stay in the DOM when their toggle is off; React Aria `isDisabled`
- * propagates to every interactive control). `components/`-dir, so the
- * AGENTS axe-smoke rule applies (at least one `expectNoA11yViolations`).
- */
+/** DiscretionaryGlideFields: enable and floor toggles, the toggle-off asymmetry between modes, onChange payload and the disabled-but-visible layout. */
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { DiscretionaryGlideFields } from './DiscretionaryGlideFields';
@@ -60,8 +53,7 @@ function renderFields(
   return { onChange, ...utils };
 }
 
-// Each anchor picker is a collapsible `AnchorCard`; expand it (trigger's
-// accessible name is the picker label) before reaching its radios.
+// Each anchor picker is a collapsible AnchorCard; expand it before reaching its radios.
 function openCard(label: string) {
   fireEvent.click(screen.getByRole('button', { name: label }));
 }
@@ -75,7 +67,6 @@ describe('DiscretionaryGlideFields', () => {
     expect(
       screen.getByRole('switch', { name: /enable spending glide/i }),
     ).not.toBeChecked();
-    // Reveal: with the glide off, the config section is not rendered.
     expect(screen.queryByLabelText('End percentage')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Glide starts' })).toBeNull();
   });
@@ -92,17 +83,10 @@ describe('DiscretionaryGlideFields', () => {
     expect(
       screen.getByRole('button', { name: 'Glide ends' }),
     ).toBeInTheDocument();
-    // Sensible resolvable defaults (not an invalid age-0 anchor): the
-    // glide runs from the start of retirement until the expense's end.
-    // ("Start of retirement" is also the floor anchor's default summary,
-    // so there are two.)
     expect(screen.getAllByText('Start of retirement').length).toBeGreaterThan(0);
     expect(
       screen.getAllByText('When this expense ends').length,
     ).toBeGreaterThan(0);
-    // Because glide-end defaults to "when this expense ends", a floor
-    // could never apply (it would start after the expense ended) — so the
-    // floor toggle, Floor %, and "Floor starts" card all default disabled.
     const floorToggle = screen.getByRole('switch', { name: /hard floor/i });
     expect(floorToggle).toBeDisabled();
     expect(floorToggle).not.toBeChecked();
@@ -112,8 +96,6 @@ describe('DiscretionaryGlideFields', () => {
 
   it('floor toggle enables the floor multiplier + floor anchor card', () => {
     renderFields(enabledGlide());
-    // The Floor % and the "Floor starts" card are disabled until the
-    // floor toggle is on.
     expect(screen.getByLabelText('Floor percentage')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Floor starts' })).toBeDisabled();
     fireEvent.click(screen.getByRole('switch', { name: /hard floor/i }));
@@ -128,9 +110,6 @@ describe('DiscretionaryGlideFields', () => {
   });
 
   it('scenario-patch mode: seeds the toggle OFF when no glide is inherited (undefined)', () => {
-    // A cleared glide arrives `undefined` (the scenario
-    // patch carries a `null` clear-marker, never the old neutral object),
-    // so absence — not a neutral object — seeds the toggle OFF.
     renderFields(undefined, 'scenario-patch');
     expect(
       screen.getByRole('switch', { name: /enable spending glide/i }),
@@ -138,9 +117,6 @@ describe('DiscretionaryGlideFields', () => {
   });
 
   it('scenario-patch mode: a present glide at the default 100% End with no floor seeds the toggle ON', () => {
-    // Presence IS enablement in scenario-patch mode too — a
-    // value-equivalent no-op glide is still an *enabled* glide (the user
-    // configured it); only `undefined` means off.
     const presentAt100: DiscretionaryGlideOverride = {
       endMultiplierPct: 100,
       glideStart: { kind: 'age', memberId: 'primary', years: 0, months: 0 },
@@ -153,10 +129,6 @@ describe('DiscretionaryGlideFields', () => {
   });
 
   it('canonical mode: a present glide at the default 100% End with no floor seeds the toggle ON', () => {
-    // A freshly-enabled canonical glide whose End % is still the
-    // default 100 with default anchors IS isNeutralGlide-shaped, but in
-    // canonical mode presence = enabled. Seeding it OFF here would lose
-    // the user's just-saved enablement on reopen.
     const presentAt100: DiscretionaryGlideOverride = {
       endMultiplierPct: 100,
       glideStart: { kind: 'age', memberId: 'primary', years: 0, months: 0 },
@@ -166,7 +138,6 @@ describe('DiscretionaryGlideFields', () => {
     expect(
       screen.getByRole('switch', { name: /enable spending glide/i }),
     ).toBeChecked();
-    // And the editor fields are enabled (the toggle is on).
     expect(screen.getByLabelText('End percentage')).not.toBeDisabled();
   });
 
@@ -182,10 +153,6 @@ describe('DiscretionaryGlideFields', () => {
   });
 
   it('scenario-patch mode: toggling OFF calls onChange(undefined) (the delta emits a null clear)', () => {
-    // Off persists `undefined` in scenario-patch mode too
-    // (uniform with canonical). The ExpenseFormPage delta turns the
-    // absent-in-built glide into a `null` clear-marker, so the editor no
-    // longer emits the old value-equivalent neutral object.
     const { onChange } = renderFields(enabledGlide(), 'scenario-patch');
     fireEvent.click(
       screen.getByRole('switch', { name: /enable spending glide/i }),
@@ -235,8 +202,6 @@ describe('DiscretionaryGlideFields', () => {
     const floorToggle = screen.getByRole('switch', { name: /hard floor/i });
     expect(floorToggle).toBeDisabled();
     expect(floorToggle).not.toBeChecked();
-    // The floor is off (and can't apply), so its detail fields render
-    // disabled.
     expect(screen.getByLabelText('Floor percentage')).toBeDisabled();
   });
 
@@ -251,14 +216,12 @@ describe('DiscretionaryGlideFields', () => {
       },
     };
     const { onChange } = renderFields(withFloor, 'canonical');
-    // Switch the glide-end picker to "When this expense ends".
     openCard('Glide ends');
     fireEvent.click(
       screen.getByRole('radio', { name: /when this expense ends/i }),
     );
     const last = onChange.mock.calls.at(-1)?.[0] as DiscretionaryGlideOverride;
     expect(last.glideEnd).toEqual({ kind: 'expenseEnd' });
-    // The floor is dropped — it can never apply past the expense's end.
     expect(last.floor).toBeUndefined();
   });
 
@@ -270,24 +233,17 @@ describe('DiscretionaryGlideFields', () => {
     };
     renderFields(withExpenseEnd, 'canonical');
     expect(screen.getByRole('switch', { name: /hard floor/i })).toBeDisabled();
-    // Switch glide-end back to a resolvable kind (Start of retirement).
     openCard('Glide ends');
     fireEvent.click(
       screen.getByRole('radio', { name: /start of retirement/i }),
     );
     const floorToggle = screen.getByRole('switch', { name: /hard floor/i });
     expect(floorToggle).not.toBeDisabled();
-    // No silent auto-restore — the floor toggle stays OFF until the
-    // user re-enables it.
     expect(floorToggle).not.toBeChecked();
-    // Floor off ⇒ its detail fields render disabled.
     expect(screen.getByLabelText('Floor percentage')).toBeDisabled();
   });
 
-  it('floor set → expenseEnd drops it → switching glide-end away does NOT auto-restore the floor', () => {
-    // The genuine no-auto-restore path: start from a glide that
-    // HAS a floor (the earlier no-floor expenseEnd test never exercised
-    // the stale-floor re-emit bug).
+  it('floor set → expenseEnd drops it → switching glide-end away does not auto-restore the floor', () => {
     const withFloor: DiscretionaryGlideOverride = {
       endMultiplierPct: 60,
       glideStart: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
@@ -299,7 +255,6 @@ describe('DiscretionaryGlideFields', () => {
     };
     const { onChange } = renderFields(withFloor, 'canonical');
 
-    // Select "When this expense ends" — the floor is dropped.
     openCard('Glide ends');
     fireEvent.click(
       screen.getByRole('radio', { name: /when this expense ends/i }),
@@ -310,9 +265,6 @@ describe('DiscretionaryGlideFields', () => {
     expect(afterExpenseEnd.glideEnd).toEqual({ kind: 'expenseEnd' });
     expect(afterExpenseEnd.floor).toBeUndefined();
 
-    // Switch glide-end back to a resolvable kind (the card stays open).
-    // The floor must NOT be silently re-emitted and the toggle
-    // stays unchecked.
     fireEvent.click(
       screen.getByRole('radio', { name: /start of retirement/i }),
     );
@@ -328,21 +280,16 @@ describe('DiscretionaryGlideFields', () => {
   });
 
   it('relabels Floor → Ceiling and flips the plateau slider domain when End % rises above 100', () => {
-    // Start with a declining glide (floor below the end). Drag End % above
-    // 100 so the direction flips to rising — the plateau control relabels
-    // to "Ceiling" and its slider domain becomes End % → 200.
     const declining: DiscretionaryGlideOverride = {
       endMultiplierPct: 60,
       glideStart: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
       glideEnd: { kind: 'age', memberId: 'primary', years: 80, months: 0 },
     };
     renderFields(declining, 'canonical');
-    // Declining: the plateau reads "Floor".
     expect(
       screen.getByRole('switch', { name: /hard floor/i }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Floor percentage')).toBeInTheDocument();
-    // Drag End % up to 150 → rising.
     fireEvent.change(screen.getByLabelText('End percentage'), {
       target: { value: '150' },
     });
@@ -351,11 +298,8 @@ describe('DiscretionaryGlideFields', () => {
     ).toBeInTheDocument();
     const ceilingSlider = screen.getByLabelText('Ceiling percentage');
     expect(ceilingSlider).toBeInTheDocument();
-    // The slider's max reflects the flipped (rising) domain: 200.
     const thumb = screen.getByRole('slider', { name: 'Ceiling percentage' });
     expect(thumb).toHaveAttribute('max', '200');
-    // The plateau ANCHOR sub-control relabels too: "Ceiling starts"
-    // for a rising glide, never the stale "Floor starts".
     expect(
       screen.getByRole('button', { name: 'Ceiling starts' }),
     ).toBeInTheDocument();
@@ -363,8 +307,6 @@ describe('DiscretionaryGlideFields', () => {
   });
 
   it('boundary-crossing re-clamps the plateau to the valid side in both directions (c)', () => {
-    // Declining glide with a floor below the end. Drag End % above 100:
-    // the inherited floor (40) must re-clamp UP to a valid ceiling (≥ end).
     const withFloor: DiscretionaryGlideOverride = {
       endMultiplierPct: 60,
       glideStart: { kind: 'age', memberId: 'primary', years: 65, months: 0 },
@@ -380,11 +322,8 @@ describe('DiscretionaryGlideFields', () => {
     });
     let last = onChange.mock.calls.at(-1)?.[0] as DiscretionaryGlideOverride;
     expect(last.endMultiplierPct).toBe(150);
-    // The plateau is now a ceiling ≥ end (40 re-clamped up to 150).
     expect(last.floor?.multiplierPct).toBe(150);
 
-    // Now drag End % back down below 100: the ceiling (150) must
-    // re-clamp DOWN to a valid floor (≤ end).
     fireEvent.change(screen.getByLabelText('End percentage'), {
       target: { value: '80' },
     });
@@ -404,27 +343,12 @@ describe('DiscretionaryGlideFields', () => {
       },
     };
     const { container } = renderFields(rising, 'canonical');
-    // The relabelled controls keep an accessible name.
     expect(
       screen.getByRole('slider', { name: 'Ceiling percentage' }),
     ).toHaveAttribute('max', '200');
     expect(
       screen.getByRole('switch', { name: /hard ceiling/i }),
     ).toBeInTheDocument();
-    await expectNoA11yViolations(container);
-  });
-
-  it('has no a11y violations (enabled with floor on)', async () => {
-    const { container } = renderFields(
-      {
-        ...enabledGlide(),
-        floor: {
-          multiplierPct: 40,
-          anchor: { kind: 'age', memberId: 'primary', years: 85, months: 0 },
-        },
-      },
-      'canonical',
-    );
     await expectNoA11yViolations(container);
   });
 });

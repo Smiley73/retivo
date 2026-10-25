@@ -1,13 +1,4 @@
-/**
- * Unit tests for BalanceProjectionHistoricalFallbackNote.
- *
- * The component's `joinNames` helper has three branches:
- *   n=1 → bare name ("A")
- *   n=2 → "A and B" (no Oxford comma)
- *   n≥3 → "A, B, and C" (Oxford comma)
- * and a pronoun toggle (isSingle → "This account" / "it"; else "These accounts" / "them").
- * These are the primary behavioural cases this file covers.
- */
+/** BalanceProjectionHistoricalFallbackNote: name joining for one, two and three or more accounts, and the matching pronouns. */
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -22,14 +13,11 @@ describe('BalanceProjectionHistoricalFallbackNote — joinNames + pronoun branch
       />,
       { wrapper: ThemeWrapper },
     );
-    // Strong lead text names the single account directly, no conjunction.
     expect(
       screen.getByText(/Historical uses your planned return for Roth IRA\./i),
     ).toBeInTheDocument();
-    // Singular pronoun forms ("This account" / "it").
     expect(screen.getByText(/This account/)).toBeInTheDocument();
     expect(screen.getByText(/projects it at/)).toBeInTheDocument();
-    // Plural forms must be absent.
     expect(screen.queryByText(/These accounts/)).not.toBeInTheDocument();
     expect(screen.queryByText(/projects them at/)).not.toBeInTheDocument();
   });
@@ -44,12 +32,10 @@ describe('BalanceProjectionHistoricalFallbackNote — joinNames + pronoun branch
       />,
       { wrapper: ThemeWrapper },
     );
-    // "A and B" — no comma before "and".
     expect(
       screen.getByText(/401\(k\) and Roth IRA\./),
     ).toBeInTheDocument();
     expect(screen.queryByText(/401\(k\), Roth IRA/)).not.toBeInTheDocument();
-    // Plural pronoun forms.
     expect(screen.getByText(/These accounts/)).toBeInTheDocument();
     expect(screen.getByText(/projects them at/)).toBeInTheDocument();
   });
@@ -65,7 +51,6 @@ describe('BalanceProjectionHistoricalFallbackNote — joinNames + pronoun branch
       />,
       { wrapper: ThemeWrapper },
     );
-    // "A, B, and C" — comma before final "and".
     expect(
       screen.getByText(/401\(k\), Roth IRA, and HSA\./),
     ).toBeInTheDocument();

@@ -1,8 +1,4 @@
-/**
- * EmptyState render tests — teaching copy renders, the optional action slot
- * is forwarded, `bare` drops the Card wrapper, and the block carries no axe
- * violations (AGENTS shared-rule).
- */
+/** EmptyState: teaching copy, the forwarded action slot, and `bare` dropping the Card wrapper. */
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
@@ -33,7 +29,6 @@ describe('EmptyState', () => {
 
   it('wraps in a Card by default and drops it when bare', () => {
     const { container, rerender } = render(<EmptyState>Body</EmptyState>);
-    // Default: the Card primitive carries the rounded-2xl card chrome.
     expect(container.querySelector('.rounded-2xl')).not.toBeNull();
 
     rerender(<EmptyState bare>Body</EmptyState>);

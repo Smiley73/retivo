@@ -1,11 +1,4 @@
-/**
- * KbdHint — keyboard hint render.
- *
- * Tailwind-defaults replacement for the legacy `.kbd-hint` class.
- * Asserts the hint text renders muted/extra-small. Purely presentational (a static `<p>` hint line — no
- * interactive control / ARIA / focus / keyboard handler) → exempt from the
- * a11y-smoke mandate (AGENTS *Testing setup*).
- */
+/** KbdHint: the hint text renders muted and extra-small; presentational, so no a11y scan. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';

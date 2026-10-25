@@ -1,7 +1,4 @@
-/**
- * The one status region: empty with no session, one message per transition, silent on everything
- * else, and absent altogether when the build does not offer the assistant.
- */
+/** The one status region: empty with no session, one message per transition, silent otherwise, and absent when the build lacks the assistant. */
 import React from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,7 +48,6 @@ describe('AssistantStatusAnnouncer', () => {
     act(() => assistants.set(assistantValue({ phase: 'ready' })));
     expect(region).toHaveTextContent('Assistant connected, reported as Claude Code');
 
-    // A call settling, a new audit entry or a drop count must not announce again.
     const mutations: string[] = [];
     const observer = new MutationObserver((records) => records.forEach((record) => mutations.push(record.type)));
     observer.observe(region, { childList: true, characterData: true, subtree: true });

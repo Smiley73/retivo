@@ -1,14 +1,4 @@
-/**
- * RadioOption — visible circle indicator + a11y smoke.
- *
- * Wraps React Aria `Radio` with a styled ring/filled-dot indicator.
- * Asserts: indicator class swap on selection, text-sm label pin, role
- * pass-through, keyboard nav (Tab / ArrowDown / Space), disabled visual
- * state, and the shared-component axe rule (AGENTS mandate).
- *
- * Interaction via `@testing-library/user-event` — React Aria's
- * `usePress` model requires real pointer/keyboard events.
- */
+/** RadioOption: indicator class swap on selection, text size, role pass-through, keyboard navigation and disabled styling. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -17,7 +7,6 @@ import { RadioGroup } from 'react-aria-components';
 import { RadioOption } from './RadioOption';
 import { expectNoA11yViolations } from '../test/a11y';
 
-// Helper — React Aria requires Radio elements inside a RadioGroup.
 function renderGroup(
   ui: React.ReactElement,
   defaultValue?: string,
@@ -60,14 +49,11 @@ describe('RadioOption', () => {
       'a',
     );
     const indicators = container.querySelectorAll('[aria-hidden]');
-    // First option selected → filled
     const selectedIndicator = indicators[0];
     expect(selectedIndicator!.className).toContain('bg-accent');
-    // Inner dot present
     const innerDot = selectedIndicator!.querySelector('span');
     expect(innerDot).not.toBeNull();
     expect(innerDot!.className).toContain('bg-accent-ink');
-    // Second option unselected → border only, no inner dot
     const unselectedIndicator = indicators[1];
     expect(unselectedIndicator!.className).toContain('border');
     expect(unselectedIndicator!.querySelector('span')).toBeNull();
@@ -77,8 +63,7 @@ describe('RadioOption', () => {
     const { container } = renderGroup(
       <RadioOption value="a">Option A</RadioOption>,
     );
-    // React Aria renders Radio as <label class="…"> wrapping a hidden <input>.
-    // The className lives on the <label>, not the <input> (role=radio).
+    // React Aria renders Radio as a <label> wrapping a hidden <input>; the classes live on the label.
     const label = container.querySelector('label');
     expect(label).not.toBeNull();
     expect(label!.className).toContain('text-sm');
@@ -118,8 +103,6 @@ describe('RadioOption', () => {
     const { container } = renderGroup(
       <RadioOption value="a" isDisabled>Option A</RadioOption>,
     );
-    // React Aria renders Radio as <label class="…">; data-[disabled] utility
-    // classes live on that label element, not the hidden <input> (role=radio).
     const label = container.querySelector('label');
     expect(label).not.toBeNull();
     expect(label!.className).toContain('data-[disabled]:cursor-not-allowed');

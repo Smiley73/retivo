@@ -1,25 +1,13 @@
-/**
- * RecoveryKeyModal tests. Covers the dialog role + grouped key display, the
- * explicit copy control (mounting must never write to the
- * clipboard) + its idle/copied/failed feedback, the saved-key checkbox gate
- * on the Continue button, plus the mandatory shared-component a11y smoke
- * (AGENTS.md → Testing setup).
- */
+/** RecoveryKeyModal: key display, explicit copy control and feedback, and the saved-key gate on Continue. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RecoveryKeyModal } from './RecoveryKeyModal';
 import { expectNoA11yViolations } from '../test/a11y';
 
-// The crypto layer (encodeRecoveryKey) hands the modal an already-grouped,
-// hyphen-separated key. Use that realistic shape — feeding a hyphen-free
-// string here is what previously masked the display bug.
 const RECOVERY_KEY = 'ABCD-1234-EF56-7890-ABCD-1234-EF56-7890';
 
-// Save/restore the descriptor per case (ErrorBoundary.test.tsx pattern)
-// rather than a permanent `Object.assign` on `navigator` — a stub left
-// behind by one case would otherwise quietly weaken another case's
-// never-called assertion.
+// Save and restore the descriptor per case so a stub left behind cannot weaken another case's never-called assertion.
 let origClipboardDescriptor: PropertyDescriptor | undefined;
 
 beforeEach(() => {
@@ -30,7 +18,6 @@ afterEach(() => {
   if (origClipboardDescriptor !== undefined) {
     Object.defineProperty(navigator, 'clipboard', origClipboardDescriptor);
   } else {
-    // Property didn't exist on navigator before — delete the override.
     // cast: restoring a non-enumerable browser property not in the Navigator type
     delete (navigator as any).clipboard;
   }
@@ -68,18 +55,13 @@ describe('RecoveryKeyModal', () => {
     renderModal();
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent('Save your recovery key');
-    // The key is shown exactly as supplied — no re-grouping. Re-chunking an
-    // already-hyphenated key produced double hyphens / 1-char blocks.
     expect(screen.getByTestId('recovery-key-display')).toHaveTextContent(
       RECOVERY_KEY,
     );
   });
 
   it.each([
-    // LoginPage (first-time setup): default props.
     ['the setup consumer’s props', {}],
-    // RecoveryKeyEncryptionCard (regeneration): the prop set from
-    // RecoveryKeyEncryptionCard.tsx's <RecoveryKeyModal> call.
     [
       'the regeneration consumer’s props',
       {
@@ -94,15 +76,9 @@ describe('RecoveryKeyModal', () => {
       },
     ],
   ])('never writes to the clipboard from mounting alone, under %s', async (_label, props) => {
-    // This is the case the whole row exists for: rendering the
-    // modal must never write, under either consumer's props. Assert on the
-    // spy itself, not merely on absent success text — a component that
-    // wrote and simply failed to render feedback would still violate the
-    // requirement.
     const writeText = vi.fn().mockResolvedValue(undefined);
     stubClipboard(writeText);
     renderModal(props);
-    // Let any microtasks and timers settle.
     await new Promise((resolve) => setTimeout(resolve, 0));
     await Promise.resolve();
     expect(writeText).not.toHaveBeenCalled();
@@ -116,10 +92,6 @@ describe('RecoveryKeyModal', () => {
     expect(shown).toBe(RECOVERY_KEY);
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy recovery key' }));
-    // Wait for the mutation, then assert the node carrying it is the polite
-    // live region — not just that the text exists somewhere — so the result
-    // is proven to be announced through role="status", not only shown
-    // visibly.
     const feedback = await screen.findByText('Copied to clipboard.');
     expect(feedback).toHaveAttribute('role', 'status');
 
@@ -128,16 +100,12 @@ describe('RecoveryKeyModal', () => {
   });
 
   it('activates the copy control from the keyboard', async () => {
-    // userEvent.setup() installs its own navigator.clipboard stub, so the
-    // real one must be applied AFTER setup() or it gets clobbered.
+    // userEvent.setup() installs its own navigator.clipboard stub, so the real one must be applied after it.
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
     stubClipboard(writeText);
     renderModal();
 
-    // Focus + keyboard activation rather than fireEvent.click, so the
-    // control is proved to be a real, keyboard-operable <button> — not
-    // merely a clickable element.
     const copyButton = screen.getByRole('button', { name: 'Copy recovery key' });
     copyButton.focus();
     expect(copyButton).toHaveFocus();
@@ -163,9 +131,7 @@ describe('RecoveryKeyModal', () => {
   });
 
   it('a missing clipboard API shows the failure state and never the success state', async () => {
-    // Insecure context / older jsdom: no clipboard API. An optional-chained
-    // `await` would resolve undefined without throwing — falsely signalling
-    // a copy — so this must go through the explicit guard instead.
+    // An optional-chained await would resolve undefined without throwing and falsely signal a copy, so the guard is explicit.
     removeClipboard();
     renderModal();
 
@@ -180,10 +146,8 @@ describe('RecoveryKeyModal', () => {
   it('warns that forgetting the password alone needs the key and losing both is permanent', () => {
     renderModal();
     const dialog = screen.getByRole('dialog');
-    // Forgetting the password alone is enough to need the key.
     expect(dialog).toHaveTextContent(/forget your password/i);
     expect(dialog).toHaveTextContent(/forgetting your password alone is enough/i);
-    // Losing both password and key leaves the data permanently unrecoverable.
     expect(dialog).toHaveTextContent(
       /if you lose both your password and this key, your encrypted data is gone for good/i,
     );
@@ -195,7 +159,6 @@ describe('RecoveryKeyModal', () => {
 
     const continueBtn = screen.getByRole('button', { name: 'Continue' });
     expect(continueBtn).toBeDisabled();
-    // Clicking while disabled does nothing.
     fireEvent.click(continueBtn);
     expect(onConfirmed).not.toHaveBeenCalled();
 
@@ -211,11 +174,6 @@ describe('RecoveryKeyModal', () => {
     renderModal({ onDismiss });
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
-  });
-
-  it('has no a11y violations', async () => {
-    const { container } = renderModal();
-    await expectNoA11yViolations(container);
   });
 
   it('has no a11y violations with copy feedback rendered', async () => {

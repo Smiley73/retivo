@@ -42,8 +42,7 @@ interface Row extends ChartDatum {
   band_p25_to_p50: number;
 }
 
-/** Builds the fan-chart tooltip; a factory so it can be unit-tested by direct call. */
-export function makeTooltipContent(
+function makeTooltipContent(
   chrome: ChartChrome,
 ): (datum: ChartDatum) => React.ReactNode {
   return (datum: ChartDatum): React.ReactNode => {

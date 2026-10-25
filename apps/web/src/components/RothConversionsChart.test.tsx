@@ -1,9 +1,4 @@
-/**
- * Render-level test for the Roth conversions chart inner on the SVG
- * engine — asserts one bar per conversion year, the violet `acctRoth`
- * series colour, theme-reactivity, and a11y smoke. The series arrives
- * pre-deflated, so bar heights are read verbatim.
- */
+/** RothConversionsChart inner: one bar per conversion year, the Roth series colour and theme reactivity. */
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 
@@ -43,11 +38,6 @@ describe('RothConversionsChartInner', () => {
     await expectNoA11yViolations(container);
   });
 
-  // Regression: a SINGLE un-stacked bar must still scale the y-axis to its
-  // value. Without a stackId the auto y-domain fell through `computeYExtent`'s
-  // stacked/line branches and collapsed to the [0, 1] fallback — the axis
-  // topped out at "$1" while the lone bar overflowed (every other test uses
-  // two years, so the single-year case slipped through).
   it('scales the y-axis to the converted amount for a single year (not the [0,1] fallback)', () => {
     const container = renderWithTheme(
       'light',
@@ -57,8 +47,6 @@ describe('RothConversionsChartInner', () => {
       .map((t) => t.textContent ?? '')
       .filter((s) => s.startsWith('$'));
     expect(currencyTicks.length).toBeGreaterThan(0);
-    // formatCurrencyShort($27,992) → "$28k"; the buggy [0,1] domain only ever
-    // renders "$0"/"$1" ticks, so a thousands tick proves the fix.
     expect(currencyTicks.some((s) => /\$\d+(\.\d+)?[km]/i.test(s))).toBe(true);
   });
 });

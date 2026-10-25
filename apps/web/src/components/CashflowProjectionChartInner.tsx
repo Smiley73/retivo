@@ -17,7 +17,6 @@ import type { ChartMouseHandlers } from '../lib/use-chart-zoom';
 import { ChartFrame, ChartLegend, useSeriesVisibility } from './charts';
 import type { ChartDatum, MarkerSpec, SeriesSpec } from './charts';
 
-export { makeCashflowTooltip };
 
 interface InnerProps {
   rows: CashflowMonthlyPoint[];

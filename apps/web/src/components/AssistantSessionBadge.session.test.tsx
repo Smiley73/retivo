@@ -1,8 +1,4 @@
-/**
- * The shell indicator against the real provider and session on a scripted socket: the pill appears
- * when the person allows, a call lands in the viewer exactly as it was sent, and Disconnect closes
- * the socket with the `disconnect` reason, announces it once, and leaves focus on the Menu button.
- */
+/** The shell indicator against the real provider and session on a scripted socket: pill on allow, verbatim viewer, Disconnect leaving focus on Menu. */
 import React from 'react';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -91,7 +87,6 @@ describe('AssistantSessionBadge with a real session', () => {
     await user.click(screen.getByRole('button', { name: /^Assistant connected/ }));
     const dialog = await screen.findByRole('dialog', { name: 'Assistant activity' });
     await user.click(within(dialog).getByRole('button', { name: /retivo_status/ }));
-    // The text on screen is the text inside the frame that went out on the socket.
     const shown = within(dialog).getByRole('region', { name: /^Sent text/ }).textContent!;
     expect(shown).toBe(assistant().audit[0]!.payload);
     expect(shown).toContain('1500.5');

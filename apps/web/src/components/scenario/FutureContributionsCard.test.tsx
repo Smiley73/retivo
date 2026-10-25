@@ -1,11 +1,4 @@
-/**
- * FutureContributionsCard — interactive summary card (reset button +
- * ToggleSwitch), pulled out of ScenarioDetailPage.tsx to keep that file
- * under the shape limit. Per AGENTS.md's a11y-smoke rule, an interactive
- * component landing in a new file under `components/` needs its own
- * `expectNoA11yViolations` assertion — `ScenarioDetailPage.test.tsx`
- * doesn't carry one.
- */
+/** FutureContributionsCard: the interactive summary card with its reset button and ToggleSwitch. */
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

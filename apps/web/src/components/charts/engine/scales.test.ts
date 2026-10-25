@@ -1,18 +1,10 @@
-/**
- * Unit tests for the pure SVG chart-engine scale + stacking helpers.
- * No DOM — these are the math the renderer relies on.
- */
 import { describe, expect, it } from 'vitest';
 import {
   areaPath,
   computeStackBands,
-  computeYExtent,
   defaultXDomain,
   linePath,
-  linearScale,
-  logScale,
   nearestRow,
-  padExtent,
   resolveYDomain,
   rowsInDomain,
   xToPx,
@@ -22,121 +14,117 @@ import type { ChartDatum, SeriesSpec } from './types';
 
 const plot = { x: 10, y: 5, width: 100, height: 50 };
 
-describe('linearScale / xToPx / yToPx', () => {
-  it('maps domain endpoints to range endpoints', () => {
-    expect(linearScale(0, 0, 10, 0, 100)).toBe(0);
-    expect(linearScale(10, 0, 10, 0, 100)).toBe(100);
-    expect(linearScale(5, 0, 10, 0, 100)).toBe(50);
-  });
-
+describe('xToPx / yToPx', () => {
   it('xToPx maps left→right across the plot width', () => {
     expect(xToPx(2020, [2020, 2040], plot)).toBe(10);
+    expect(xToPx(2030, [2020, 2040], plot)).toBe(60);
     expect(xToPx(2040, [2020, 2040], plot)).toBe(110);
   });
 
   it('yToPx inverts (larger y → smaller pixel)', () => {
-    expect(yToPx(0, [0, 100], plot)).toBe(55); // bottom
-    expect(yToPx(100, [0, 100], plot)).toBe(5); // top
+    expect(yToPx(0, [0, 100], plot)).toBe(55);
+    expect(yToPx(100, [0, 100], plot)).toBe(5);
   });
 
-  it('logScale clamps below the floor', () => {
-    const v = logScale(100, 10000, 1_000_000, 100, 0);
-    expect(v).toBe(100); // clamped to floor → bottom of range
+  it('log scale clamps a value below the floor to the bottom of the plot', () => {
+    expect(yToPx(100, [10000, 1_000_000], plot, 'log')).toBe(55);
   });
 });
 
-describe('computeYExtent + signed stacking', () => {
-  const series: SeriesSpec[] = [
+describe('resolveYDomain over the data extent', () => {
+  const domain = (
+    rows: ChartDatum[],
+    series: SeriesSpec[],
+    extraValues?: number[],
+  ): [number, number] => resolveYDomain(rows, series, null, 'linear', extraValues);
+
+  function expectDomain(actual: [number, number], expected: [number, number]): void {
+    expect(actual[0]).toBeCloseTo(expected[0], 6);
+    expect(actual[1]).toBeCloseTo(expected[1], 6);
+  }
+
+  const stacked: SeriesSpec[] = [
     { kind: 'bar', dataKey: 'pos', name: 'pos', color: '#0a0', stackId: 's' },
     { kind: 'bar', dataKey: 'neg', name: 'neg', color: '#a00', stackId: 's' },
   ];
-  const rows: ChartDatum[] = [
+  const stackedRows: ChartDatum[] = [
     { x: 1, pos: 100, neg: -40 },
     { x: 2, pos: 60, neg: -90 },
   ];
+  const bar: SeriesSpec[] = [{ kind: 'bar', dataKey: 'v', name: 'v', color: '#0' }];
+  const line: SeriesSpec[] = [{ kind: 'line', dataKey: 'v', name: 'v', color: '#0' }];
 
-  it('tracks the highest positive sum and lowest negative sum', () => {
-    expect(computeYExtent(rows, series)).toEqual([-90, 100]);
+  it('tracks the highest positive sum and lowest negative sum, padded 5% on each non-zero side', () => {
+    expectDomain(domain(stackedRows, stacked), [-99.5, 109.5]);
   });
 
   it('computeStackBands stacks positives up and negatives down from zero', () => {
-    const bands = computeStackBands(rows, series);
+    const bands = computeStackBands(stackedRows, stacked);
     expect(bands.get('pos')).toEqual({ base: [0, 0], top: [100, 60] });
     expect(bands.get('neg')).toEqual({ base: [-40, -90], top: [0, 0] });
   });
 
-  it('keeps a positive un-stacked bar on a [0, v] baseline', () => {
-    const s: SeriesSpec[] = [{ kind: 'bar', dataKey: 'v', name: 'v', color: '#0' }];
-    const extent = computeYExtent([{ x: 1, v: 500 }], s);
-    expect(extent).toEqual([0, 500]);
-    expect(extent[0]).toBe(0); // min pinned to the 0 baseline
+  it('keeps a positive un-stacked bar on a zero baseline', () => {
+    expectDomain(domain([{ x: 1, v: 500 }], bar), [0, 525]);
   });
 
-  it('keeps a loose un-stacked area on a [0, v] baseline', () => {
-    const s: SeriesSpec[] = [{ kind: 'area', dataKey: 'v', name: 'v', color: '#0' }];
-    expect(computeYExtent([{ x: 1, v: 300 }], s)).toEqual([0, 300]);
+  it('keeps a loose un-stacked area on a zero baseline', () => {
+    const area: SeriesSpec[] = [{ kind: 'area', dataKey: 'v', name: 'v', color: '#0' }];
+    expectDomain(domain([{ x: 1, v: 300 }], area), [0, 315]);
   });
 
-  it('drops min below zero for a negative un-stacked bar', () => {
-    const s: SeriesSpec[] = [{ kind: 'bar', dataKey: 'v', name: 'v', color: '#0' }];
-    expect(computeYExtent([{ x: 1, v: -200 }], s)).toEqual([-200, 0]);
+  it('drops the minimum below zero for a negative un-stacked bar', () => {
+    expectDomain(domain([{ x: 1, v: -200 }], bar), [-210, 0]);
   });
 
-  it('falls back to [0, 1] for all-zero data', () => {
-    const s: SeriesSpec[] = [{ kind: 'bar', dataKey: 'v', name: 'v', color: '#0' }];
-    expect(computeYExtent([{ x: 1, v: 0 }], s)).toEqual([0, 1]);
+  it('falls back to a unit extent for all-zero data', () => {
+    expectDomain(domain([{ x: 1, v: 0 }], bar), [0, 1.05]);
   });
 
   it('skips non-finite line values and falls back when all are non-finite', () => {
-    const s: SeriesSpec[] = [{ kind: 'line', dataKey: 'v', name: 'v', color: '#0' }];
-    expect(computeYExtent([{ x: 1, v: 100 }, { x: 2, v: NaN }], s)).toEqual([0, 100]);
-    expect(computeYExtent([{ x: 1, v: NaN }, { x: 2, v: NaN }], s)).toEqual([0, 1]);
+    expectDomain(domain([{ x: 1, v: 100 }, { x: 2, v: NaN }], line), [0, 105]);
+    expectDomain(domain([{ x: 1, v: NaN }, { x: 2, v: NaN }], line), [0, 1.05]);
   });
 
-  it('stacks two un-stacked bars (sum, like BarStack)', () => {
-    const s: SeriesSpec[] = [
+  it('sums two un-stacked bars like a stack', () => {
+    const two: SeriesSpec[] = [
       { kind: 'bar', dataKey: 'a', name: 'a', color: '#0' },
       { kind: 'bar', dataKey: 'b', name: 'b', color: '#1' },
     ];
-    expect(computeYExtent([{ x: 1, a: 200, b: 150 }], s)).toEqual([0, 350]);
+    expectDomain(domain([{ x: 1, a: 200, b: 150 }], two), [0, 367.5]);
   });
 
   it('keeps two loose areas independent (max, not summed)', () => {
-    const s: SeriesSpec[] = [
+    const two: SeriesSpec[] = [
       { kind: 'area', dataKey: 'a', name: 'a', color: '#0' },
       { kind: 'area', dataKey: 'b', name: 'b', color: '#1' },
     ];
-    expect(computeYExtent([{ x: 1, a: 400, b: 250 }], s)).toEqual([0, 400]);
+    expectDomain(domain([{ x: 1, a: 400, b: 250 }], two), [0, 420]);
   });
 
-  it('extraValues positive widens max beyond data', () => {
-    const s: SeriesSpec[] = [{ kind: 'line', dataKey: 'v', name: 'v', color: '#0' }];
-    expect(computeYExtent([{ x: 1, v: 100 }], s, [500])).toEqual([0, 500]);
+  it('widens the extent by finite extra values and ignores non-finite ones', () => {
+    const rows = [{ x: 1, v: 100 }];
+    expectDomain(domain(rows, line, [500]), [0, 525]);
+    expectDomain(domain(rows, line, [-50]), [-57.5, 107.5]);
+    expectDomain(domain(rows, line, [NaN, Infinity]), [0, 105]);
   });
 
-  it('extraValues negative widens min below data', () => {
-    const s: SeriesSpec[] = [{ kind: 'line', dataKey: 'v', name: 'v', color: '#0' }];
-    expect(computeYExtent([{ x: 1, v: 100 }], s, [-50])).toEqual([-50, 100]);
-  });
-
-  it('extraValues non-finite values are ignored', () => {
-    const s: SeriesSpec[] = [{ kind: 'line', dataKey: 'v', name: 'v', color: '#0' }];
-    expect(computeYExtent([{ x: 1, v: 100 }], s, [NaN, Infinity])).toEqual([0, 100]);
-  });
-});
-
-describe('padExtent / resolveYDomain', () => {
-  it('pads non-zero sides', () => {
-    expect(padExtent([0, 100], 0.1)).toEqual([0, 110]);
-  });
-
-  it('resolveYDomain honors an explicit zoom domain', () => {
+  it('honors an explicit zoom domain', () => {
     expect(resolveYDomain([], [], [10, 20], 'linear')).toEqual([10, 20]);
   });
 
-  it('resolveYDomain clamps log floor', () => {
-    const d = resolveYDomain([], [], [1, 5], 'log');
+  it('floors the log domain at $10k', () => {
+    expect(resolveYDomain([], [], null, 'log')[0]).toBe(10000);
+  });
+
+  it('guards inversion when both explicit log ends are below the floor', () => {
+    const d = resolveYDomain([], [], [1, 50], 'log');
     expect(d[0]).toBe(10000);
+    expect(d[1]).toBeGreaterThan(d[0]);
+  });
+
+  it('clamps the explicit log lower bound only when the upper is above the floor', () => {
+    expect(resolveYDomain([], [], [500, 200000], 'log')).toEqual([10000, 200000]);
   });
 });
 

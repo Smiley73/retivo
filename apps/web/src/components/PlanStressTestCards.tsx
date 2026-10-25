@@ -13,16 +13,11 @@ import {
 } from 'react-aria-components';
 import { MonteCarloMethodologyModal } from './MonteCarloMethodologyModal';
 import { Badge } from './Badge';
-import { formatCurrencyShort } from '../lib/format-currency';
-import { horizonStatus } from '../lib/horizon-status';
-import { useTheme } from '../contexts/ThemeContext';
 import { TableScroll } from './TableScroll';
 import { btnSecondarySmClass } from './dialog-chrome';
 import {
   STAT_BOX,
   STAT_LABEL,
-  STAT_VALUE,
-  STATUS_HEX,
   STATUS_TEXT_CLASS,
   TABLE_CLASS,
   TD_CENTER_CLASS,
@@ -49,11 +44,9 @@ import {
 import { McProgressBar } from './McProgressBar';
 import type { PlanStressTestVm } from './PlanStressTestSection';
 
-/**
- * Success-probability delta pill under the headline number; nothing while the comparison is
- * pending, erroring or absent. Shares the unpaired-SE gate with `GuardrailsComparisonCallout`.
- */
-export function GuardrailDeltaBadge({
+// Success-probability delta pill under the headline number; nothing while the comparison is
+// pending, erroring or absent. Shares the unpaired-SE gate with `GuardrailsComparisonCallout`.
+function GuardrailDeltaBadge({
   comparison,
 }: {
   comparison: PlanStressTestVm['guardrailComparison'];
@@ -103,165 +96,6 @@ export function PlanStressTestSuccessCard({ vm }: { vm: PlanStressTestVm }) {
       </div>
       <GuardrailDeltaBadge comparison={vm.guardrailComparison} />
     </div>
-  );
-}
-
-/**
- * Typical, Pessimistic and Bad-luck "At retirement" cards, rendered as fragments in the host page's
- * `.stat-grid`.
- */
-export function PlanStressTestRetirementCards({ vm }: { vm: PlanStressTestVm }) {
-  const dim = vm.isStale || vm.isRunning;
-  const boxClass = `${STAT_BOX} transition-opacity duration-150 ${
-    dim ? 'opacity-50' : 'opacity-100'
-  }`;
-  return (
-    <>
-      <div className={boxClass} aria-busy={dim}>
-        <div data-testid="stress-stat-label" className={STAT_LABEL}>At retirement: Typical</div>
-        <div data-testid="stress-stat-value" className={STAT_VALUE}>
-          {vm.startTypical != null ? formatCurrencyShort(vm.startTypical) : '—'}
-        </div>
-      </div>
-      <div className={boxClass} aria-busy={dim}>
-        <div data-testid="stress-stat-label" className={STAT_LABEL}>At retirement: Pessimistic</div>
-        <div data-testid="stress-stat-value" className={STAT_VALUE}>
-          {vm.startPessimistic != null
-            ? formatCurrencyShort(vm.startPessimistic)
-            : '—'}
-        </div>
-      </div>
-      <div className={boxClass} aria-busy={dim}>
-        <div data-testid="stress-stat-label" className={STAT_LABEL}>At retirement: Bad-luck</div>
-        <div data-testid="stress-stat-value" className={STAT_VALUE}>
-          {vm.startBadLuck != null ? formatCurrencyShort(vm.startBadLuck) : '—'}
-        </div>
-      </div>
-    </>
-  );
-}
-
-/**
- * Typical, Pessimistic and Bad-luck "At horizon" cards; a path that depletes before the last member
- * dies tints danger.
- */
-export function PlanStressTestHorizonCards({ vm }: { vm: PlanStressTestVm }) {
-  // Danger tint resolved against the live theme.
-  const { resolvedTheme } = useTheme();
-  const dangerHex = STATUS_HEX[resolvedTheme].danger;
-  const dim = vm.isStale || vm.isRunning;
-  const boxClass = `${STAT_BOX} transition-opacity duration-150 ${
-    dim ? 'opacity-50' : 'opacity-100'
-  }`;
-  const lastDeathYear = vm.lastDeathYear;
-  const typicalStatus = horizonStatus({
-    balance: vm.endTypical,
-    depletionYear: vm.typicalDepletionYear,
-    lastDeathYear,
-  });
-  const pessimisticStatus = horizonStatus({
-    balance: vm.endPessimistic,
-    depletionYear: vm.pessimisticDepletionYear,
-    lastDeathYear,
-  });
-  const badLuckStatus = horizonStatus({
-    balance: vm.endBadLuck,
-    depletionYear: vm.badLuckDepletionYear,
-    lastDeathYear,
-  });
-  // Neutral ink by default; only a depleted path tints red.
-  const dangerStyle = (isDanger: boolean): { color: string } | undefined =>
-    isDanger ? { color: dangerHex } : undefined;
-  const depletionLine = (year: number | null, balance: number | null): string => {
-    if (balance === null) return '';
-    return year !== null ? `Runs out ${year}` : 'Funds the full horizon';
-  };
-  const subLineClass =
-    'mt-1 text-center text-sm text-muted';
-  return (
-    <>
-      <div className={boxClass} aria-busy={dim}>
-        <div
-          data-testid="stress-stat-label"
-          className={STAT_LABEL}
-          // eslint-disable-next-line no-restricted-syntax -- runtime danger tint computed at render from the horizon status (theme-reactive STATUS_HEX)
-          style={dangerStyle(typicalStatus.isDanger)}
-        >
-          At horizon: Typical
-        </div>
-        <div
-          data-testid="stress-stat-value"
-          className={STAT_VALUE}
-          // eslint-disable-next-line no-restricted-syntax -- runtime danger tint computed at render from the horizon status (theme-reactive STATUS_HEX)
-          style={dangerStyle(typicalStatus.isDanger)}
-        >
-          {vm.endTypical != null ? formatCurrencyShort(vm.endTypical) : '—'}
-        </div>
-        {vm.endTypical !== null && (
-          <div
-            className={subLineClass}
-            // eslint-disable-next-line no-restricted-syntax -- runtime danger tint computed at render from the horizon status (theme-reactive STATUS_HEX)
-            style={dangerStyle(typicalStatus.isDanger)}
-          >
-            {depletionLine(vm.typicalDepletionYear, vm.endTypical)}
-          </div>
-        )}
-      </div>
-      <div className={boxClass} aria-busy={dim}>
-        <div
-          data-testid="stress-stat-label"
-          className={STAT_LABEL}
-          // eslint-disable-next-line no-restricted-syntax -- runtime danger tint computed at render from the horizon status (theme-reactive STATUS_HEX)
-          style={dangerStyle(pessimisticStatus.isDanger)}
-        >
-          At horizon: Pessimistic
-        </div>
-        <div
-          data-testid="stress-stat-value"
-          className={STAT_VALUE}
-          // eslint-disable-next-line no-restricted-syntax -- runtime danger tint computed at render from the horizon status (theme-reactive STATUS_HEX)
-          style={dangerStyle(pessimisticStatus.isDanger)}
-        >
-          {vm.endPessimistic != null ? formatCurrencyShort(vm.endPessimistic) : '—'}
-        </div>
-        {vm.endPessimistic !== null && (
-          <div
-            className={subLineClass}
-            // eslint-disable-next-line no-restricted-syntax -- runtime danger tint computed at render from the horizon status (theme-reactive STATUS_HEX)
-            style={dangerStyle(pessimisticStatus.isDanger)}
-          >
-            {depletionLine(vm.pessimisticDepletionYear, vm.endPessimistic)}
-          </div>
-        )}
-      </div>
-      <div className={boxClass} aria-busy={dim}>
-        <div
-          data-testid="stress-stat-label"
-          className={STAT_LABEL}
-          // eslint-disable-next-line no-restricted-syntax -- runtime danger tint computed at render from the horizon status (theme-reactive STATUS_HEX)
-          style={dangerStyle(badLuckStatus.isDanger)}
-        >
-          At horizon: Bad-luck
-        </div>
-        <div
-          data-testid="stress-stat-value"
-          className={STAT_VALUE}
-          // eslint-disable-next-line no-restricted-syntax -- runtime danger tint computed at render from the horizon status (theme-reactive STATUS_HEX)
-          style={dangerStyle(badLuckStatus.isDanger)}
-        >
-          {vm.endBadLuck != null ? formatCurrencyShort(vm.endBadLuck) : '—'}
-        </div>
-        {vm.endBadLuck !== null && (
-          <div
-            className={subLineClass}
-            // eslint-disable-next-line no-restricted-syntax -- runtime danger tint computed at render from the horizon status (theme-reactive STATUS_HEX)
-            style={dangerStyle(badLuckStatus.isDanger)}
-          >
-            {depletionLine(vm.badLuckDepletionYear, vm.endBadLuck)}
-          </div>
-        )}
-      </div>
-    </>
   );
 }
 

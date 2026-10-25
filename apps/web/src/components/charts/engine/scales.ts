@@ -3,10 +3,10 @@
  */
 import type { ChartDatum, SeriesSpec } from './types';
 
-/** Floor ($) for log-scale Y domains: starting at 1 wastes the height on the empty $1-$10k band. */
-export const LOG_FLOOR = 10000;
+// Floor ($) for log-scale Y domains: starting at 1 wastes the height on the empty $1-$10k band.
+const LOG_FLOOR = 10000;
 
-export function linearScale(
+function linearScale(
   value: number,
   d0: number,
   d1: number,
@@ -17,7 +17,7 @@ export function linearScale(
   return r0 + ((value - d0) / (d1 - d0)) * (r1 - r0);
 }
 
-export function logScale(
+function logScale(
   value: number,
   d0: number,
   d1: number,
@@ -66,12 +66,10 @@ function signedStack(d: ChartDatum, group: SeriesSpec[]): { pos: number; neg: nu
   return { pos, neg };
 }
 
-/**
- * Data-space y extent across all series and rows, grouped as the renderer (`Series.tsx`) does: all
- * bars form one signed stack, areas stack per `stackId` (loose areas against zero), and lines
- * contribute independently.
- */
-export function computeYExtent(
+// Data-space y extent across all series and rows, grouped as the renderer (`Series.tsx`) does: all
+// bars form one signed stack, areas stack per `stackId` (loose areas against zero), and lines
+// contribute independently.
+function computeYExtent(
   rows: ChartDatum[],
   series: SeriesSpec[],
   extraValues: number[] = [],
@@ -121,7 +119,7 @@ export function computeYExtent(
   return [min, max];
 }
 
-export function padExtent(
+function padExtent(
   extent: [number, number],
   frac = 0.05,
 ): [number, number] {

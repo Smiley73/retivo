@@ -1,11 +1,4 @@
-/**
- * Render-level test for the charitable-distributions (QCD) chart inner on the
- * SVG engine — asserts one bar per QCD year, the pink `qcd` series colour,
- * theme-reactivity (light↔dark), empty-rows handling, and a11y smoke. The
- * series arrives pre-deflated, so bar heights are read verbatim.
- *
- * Mirrors `RothConversionsChart.test.tsx`.
- */
+/** QcdChart inner: one bar per QCD year, the qcd series colour, theme reactivity and empty rows. */
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 
@@ -46,8 +39,6 @@ describe('QcdChartInner', () => {
     expect(container.querySelectorAll(`rect[name="${SERIES}"]`)).toHaveLength(0);
   });
 
-  // Regression mirror of the Roth chart: a SINGLE un-stacked bar must still
-  // scale the y-axis to its value (the [0,1] fallback would top out at "$1").
   it('scales the y-axis to the gift amount for a single year (not the [0,1] fallback)', () => {
     const container = renderWithTheme(
       'light',

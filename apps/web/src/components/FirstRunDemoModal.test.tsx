@@ -1,11 +1,4 @@
-/**
- * FirstRunDemoModal — render + interaction tests.
- *
- * Drives the modal through fake-indexeddb so the real
- * `loadDemoData` path runs end-to-end. Asserts the loader
- * actually populates IndexedDB on confirm and that Skip closes
- * without writing anything.
- */
+/** FirstRunDemoModal: the real loadDemoData path runs on confirm through fake-indexeddb, and Skip writes nothing. */
 import 'fake-indexeddb/auto';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -72,10 +65,7 @@ describe('FirstRunDemoModal', () => {
     expect(accounts.length).toBeGreaterThan(0);
     expect(members.length).toBeGreaterThanOrEqual(2);
     const pending = await listPendingMutations();
-    // 1 primary + 1 secondary + 14 accounts + 140 balances + 2 SS + 4 scenarios
-    // (Base + Retire early at 62 + Delay — work to 70 + Funds Run Out) + 8
-    // expense categories + 24 expenses + 1 income stream (CBP-payout-to-IRA
-    // lump sum) = 195 mutations.
+    // Demo household: 1 primary + 1 secondary, 14 accounts, 140 balances, 2 SS, 4 scenarios, 8 expense categories, 24 expenses, 1 income stream.
     expect(pending.length).toBe(195);
   });
 

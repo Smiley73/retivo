@@ -7,9 +7,6 @@ export const STAT_BOX =
   'rounded-lg border px-4 py-3 shadow-sm border-line bg-surface-raised';
 export const STAT_LABEL =
   'mb-1 text-center text-sm text-muted';
-export const STAT_VALUE =
-  'text-center text-2xl font-semibold tracking-tight tabular-nums ' +
-  'text-ink';
 
 export const BTN_SM =
   'inline-flex items-center rounded-md border border-line-strong bg-surface-raised px-2.5 py-1 ' +
