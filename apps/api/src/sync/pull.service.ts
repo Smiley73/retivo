@@ -1,22 +1,11 @@
 // Sync pull: range-queries MutationLog from the cursor, 100 per page. A `since` below `mutationLogCursorBase` throws
 // CURSOR_EXPIRED (409), since an incremental pull would silently miss compacted data.
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
-import type { PullResponseBody } from '@retirement/contracts';
+import type { PullResponseBody, SyncChange } from '@retirement/contracts';
 import { MutationLogRepository } from '../dynamo/mutation-log.repository.js';
 import { WorkspaceMetaRepository } from '../dynamo/workspace-meta.repository.js';
 import type { MutationLogRow } from '../dynamo/types.js';
 import { isActiveAggregateType } from './aggregate-types.js';
-
-export interface PulledMutation {
-  aggregateId: string;
-  aggregateType: string;
-  operation: 'create' | 'update' | 'delete';
-  payload: unknown;
-  version: number;
-  schemaVersion: number;
-  updatedAt: string;
-  deviceId: string;
-}
 
 const PAGE_LIMIT = 100;
 
@@ -42,7 +31,7 @@ export class PullService {
     }
     const result = await this.log.pageSince(householdId, since, PAGE_LIMIT);
     // The cursor advances past retired-type rows so a backlog of them cannot stall sync.
-    const changes: PulledMutation[] = [];
+    const changes: SyncChange[] = [];
     for (const row of result.items) {
       if (!isActiveAggregateType(row.aggregateType)) {
         this.logger.warn(
@@ -68,7 +57,7 @@ export class PullService {
   }
 }
 
-function toPulled(row: MutationLogRow): PulledMutation {
+function toPulled(row: MutationLogRow): SyncChange {
   let payload: unknown = {};
   try {
     payload = JSON.parse(row.payload);

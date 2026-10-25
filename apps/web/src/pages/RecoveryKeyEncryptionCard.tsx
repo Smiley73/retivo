@@ -14,10 +14,8 @@ import { StepUpModal } from '../components/StepUpModal';
 import { useStepUp, type StepUpProof } from '../components/useStepUp';
 import { HiddenUsernameField, PM_IGNORE_ATTRS } from '../components/password-manager';
 import { clearAllLocalData } from '../lib/local-data';
-import {
-  ENCRYPTED_WORKSPACE_RESET_PHRASE,
-  resetEncryptedWorkspace,
-} from '../auth/key-envelope-client';
+import { ENCRYPTED_WORKSPACE_RESET_PHRASE } from '@retirement/contracts';
+import { resetEncryptedWorkspace } from '../auth/key-envelope-client';
 import {
   SettingsCard,
   SuccessNotice,

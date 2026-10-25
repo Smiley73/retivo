@@ -27,6 +27,11 @@ import {
   type ValidationArguments,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  ENCRYPTED_WORKSPACE_RESET_PHRASE,
+  SLOT_TYPES,
+  type SlotType,
+} from '@retirement/contracts';
 import { WebAuthnAuthenticationResponseDto } from './passkey.dto.js';
 import type { FactorUndoKind } from '../factor-notice-mail.js';
 import {
@@ -43,9 +48,6 @@ const FACTOR_UNDO_KINDS: FactorUndoKind[] = [
 ];
 
 export { STEP_UP_FACTOR_METHODS, StepUpProofMatchesMethodConstraint, type StepUpFactorMethod };
-
-// The exact phrase the user must type to reset the encrypted workspace; shared with the web client.
-const ENCRYPTED_WORKSPACE_RESET_PHRASE = 'DELETE';
 
 // Cap on opaque base64url blobs. Declared here, before the key-envelope DTOs, because `ChangePasswordDto` needs it at
 // class-definition time.
@@ -218,13 +220,6 @@ export class FactorUndoConsumeDto {
 // Declared before `ChangePasswordDto` because `emitDecoratorMetadata` evaluates a decorated property type eagerly,
 // so a forward reference to `UpsertKeyEnvelopeSlotDto` throws a TDZ error.
 
-const KEY_ENVELOPE_SLOT_TYPES = [
-  'password',
-  'recovery',
-  'passkey_prf',
-  'oidc',
-] as const;
-
 /**
  * KDF metadata for a password slot, shape-only: the server stores it verbatim and derives no key. The Argon2id and
  * legacy PBKDF2 work-factor fields are all `@IsOptional()` so either shape clears `forbidNonWhitelisted`; the client
@@ -271,8 +266,8 @@ export class UpsertKeyEnvelopeSlotDto {
   @MaxLength(80)
   slotId!: string;
 
-  @IsIn(KEY_ENVELOPE_SLOT_TYPES as readonly string[])
-  slotType!: (typeof KEY_ENVELOPE_SLOT_TYPES)[number];
+  @IsIn(SLOT_TYPES)
+  slotType!: SlotType;
 
   @IsOptional()
   @ValidateNested()

@@ -33,8 +33,12 @@ export const freshnessHeadSchema = z.object({
 });
 export type FreshnessHeadBody = z.infer<typeof freshnessHeadSchema>;
 
-const operationSchema = z.enum(['create', 'update', 'delete']);
+export const OPERATIONS = ['create', 'update', 'delete'] as const;
+const operationSchema = z.enum(OPERATIONS);
 export type SyncOperation = z.infer<typeof operationSchema>;
+
+/** Most mutations one `POST /sync/push` request may carry. */
+export const MAX_PUSH_MUTATIONS = 100;
 
 /**
  * One pulled mutation / post-snapshot change on the wire. `payload` is OPAQUE

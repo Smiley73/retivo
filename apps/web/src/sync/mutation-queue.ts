@@ -7,6 +7,7 @@ import {
   type Batch,
   type GuardedAccountWrite,
 } from '../db/store.js';
+import type { SyncOperation } from '@retirement/contracts';
 import { currentSchemaVersion } from '../db/migrations.js';
 import { cryptoUuid } from '../lib/crypto-uuid.js';
 import type {
@@ -28,7 +29,7 @@ interface QueueArgs<T extends Record<string, unknown>> {
   type: AggregateType;
   aggregateId: string;
   householdId: string;
-  operation: 'create' | 'update' | 'delete';
+  operation: SyncOperation;
   expectedVersion: number;
   payload: T;
 }
@@ -97,7 +98,7 @@ interface CollapseArgs {
   aggregateType: AggregateType;
   aggregateId: string;
   householdId: string;
-  operation: 'create' | 'update' | 'delete';
+  operation: SyncOperation;
   /**
    * The version the fresh mutation targets: the server's true counter for a re-base, `0` for a NOT_FOUND-on-update
    * recreate.

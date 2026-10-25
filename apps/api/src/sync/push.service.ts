@@ -18,7 +18,11 @@ import {
   TransactWriteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
-import type { PushResponseBody } from '@retirement/contracts';
+import type {
+  PushedMutationApplied,
+  PushedMutationRejected,
+  PushResponseBody,
+} from '@retirement/contracts';
 import KSUID from 'ksuid';
 import { DYNAMO_DOC_CLIENT } from '../aws/aws.module.js';
 import type { EnvConfig } from '../common/env.config.js';
@@ -27,10 +31,8 @@ import { WorkspaceMetaRepository } from '../dynamo/workspace-meta.repository.js'
 import { isStrictEncryptedEnvelope } from '../common/encrypted-envelope.js';
 import type {
   AggregateVersionRow,
-  AppliedMutationResult,
   IdempotencyKeyRow,
   MutationLogRow,
-  RejectedMutationResult,
 } from '../dynamo/types.js';
 import type { PushMutationDto } from './dto/push.dto.js';
 
@@ -59,13 +61,13 @@ interface PushArgs {
 type CancelTarget = 'aggregate' | 'log' | 'idempotency' | 'unknown';
 
 type ApplyOutcome =
-  | { kind: 'committed'; applied: AppliedMutationResult; sequenceId: string }
-  | { kind: 'replayed-applied'; applied: AppliedMutationResult }
-  | { kind: 'rejected'; outcome: RejectedMutationResult };
+  | { kind: 'committed'; applied: PushedMutationApplied; sequenceId: string }
+  | { kind: 'replayed-applied'; applied: PushedMutationApplied }
+  | { kind: 'rejected'; outcome: PushedMutationRejected };
 
 // `bytes` is measured once in preflight and reused by the daily byte quota; a `cached` replay writes nothing and is free.
 type PreflightItem =
-  | { type: 'cached'; result: AppliedMutationResult | RejectedMutationResult }
+  | { type: 'cached'; result: PushedMutationApplied | PushedMutationRejected }
   | { type: 'pending'; idemKey: string; mutation: PushMutationDto; bytes: number }
   | {
       type: 'stale-rejection';
@@ -103,8 +105,8 @@ export class PushService {
     // Classify every mutation before any write, so a mixed batch 403s with nothing persisted, createIfMissing included.
     const preflight = await this.preflightBatch(args);
 
-    const applied: AppliedMutationResult[] = [];
-    const rejected: RejectedMutationResult[] = [];
+    const applied: PushedMutationApplied[] = [];
+    const rejected: PushedMutationRejected[] = [];
     const committedRows: CommittedRow[] = [];
     let lastSequenceId = '';
 
@@ -301,7 +303,7 @@ export class PushService {
     const sequenceId = (await KSUID.random()).string;
     const newVersion = m.version + 1;
     const newUpdatedAt = new Date().toISOString();
-    const appliedResult: AppliedMutationResult = {
+    const appliedResult: PushedMutationApplied = {
       status: 'applied',
       mutationId: m.id,
       aggregateId: m.aggregateId,
@@ -342,7 +344,7 @@ export class PushService {
     sequenceId: string,
     newVersion: number,
     newUpdatedAt: string,
-    appliedResult: AppliedMutationResult,
+    appliedResult: PushedMutationApplied,
   ): NonNullable<TransactWriteCommand['input']['TransactItems']> {
     const aggregateVersionRow: AggregateVersionRow = {
       householdId,
@@ -548,13 +550,13 @@ export class PushService {
     householdId: string,
     idemKey: string,
     m: PushMutationDto,
-  ): Promise<{ kind: 'rejected'; outcome: RejectedMutationResult }> {
+  ): Promise<{ kind: 'rejected'; outcome: PushedMutationRejected }> {
     const cur = await this.fetchCurrentVersion(householdId, m.aggregateId);
-    const reason: RejectedMutationResult['reason'] =
+    const reason: PushedMutationRejected['reason'] =
       cur === null && (m.operation === 'update' || m.operation === 'delete')
         ? 'NOT_FOUND'
         : 'CONFLICT';
-    const outcome: RejectedMutationResult = {
+    const outcome: PushedMutationRejected = {
       status: 'rejected',
       mutationId: m.id,
       aggregateId: m.aggregateId,
@@ -604,7 +606,7 @@ export class PushService {
     const newVersion = tombstoneVersion + 1;
     const newUpdatedAt = new Date().toISOString();
     const sequenceId = (await KSUID.random()).string;
-    const appliedResult: AppliedMutationResult = {
+    const appliedResult: PushedMutationApplied = {
       status: 'applied',
       mutationId: m.id,
       aggregateId: m.aggregateId,
@@ -701,6 +703,3 @@ function classifyTransactCancel(
   if (isFail(1)) return 'log';
   return 'unknown';
 }
-
-// re-export for the controller's request-shaping
-export type { AppliedMutationResult, RejectedMutationResult };

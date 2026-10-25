@@ -1,4 +1,12 @@
 // Wire and storage shapes for the zero-knowledge encryption boundary (types only); see docs/security.md "Encryption".
+import type { KdfParams, SlotType } from '@retirement/contracts';
+
+export type {
+  Argon2idKdfParams,
+  KdfParams,
+  Pbkdf2KdfParams,
+  SlotType,
+} from '@retirement/contracts';
 
 /** Encrypted aggregate payload; the server stores it opaquely. `keyId` names the HDK generation. */
 export interface EncryptedPayloadEnvelope {
@@ -23,33 +31,6 @@ export interface AadMetadata {
   aggregateType: string;
   encryptionVersion: number;
 }
-
-/** Credential that unwraps a key-envelope slot; `oidc` is inert plumbing, no external login is enabled. */
-export type SlotType = 'password' | 'recovery' | 'passkey_prf' | 'oidc';
-
-/** Legacy PBKDF2 KDF parameters for a password slot. */
-export interface Pbkdf2KdfParams {
-  algorithm: 'PBKDF2-HMAC-SHA-256';
-  iterations: number;
-  /** base64url-encoded per-slot random salt. */
-  salt: string;
-}
-
-/**
- * Argon2id parameters for a new password slot: `m` memory KiB, `t` iterations, `p` lanes (OWASP 2024 interactive
- * baseline m=65536, t=3, p=4).
- */
-export interface Argon2idKdfParams {
-  algorithm: 'Argon2id';
-  m: number;
-  t: number;
-  p: number;
-  /** base64url-encoded per-slot random salt. */
-  salt: string;
-}
-
-/** Key-derivation parameters for password/recovery slots. */
-export type KdfParams = Pbkdf2KdfParams | Argon2idKdfParams;
 
 /**
  * One unlock slot: an AES-256-GCM wrap of the HDK, bound via the wrap AAD to its own metadata so a server cannot

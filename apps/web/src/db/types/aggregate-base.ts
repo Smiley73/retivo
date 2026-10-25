@@ -2,7 +2,7 @@
 
 // The aggregate inventory is defined once in `@retirement/contracts` (the API's `ACTIVE_AGGREGATE_TYPES_LIST` uses it
 // too).
-import type { AggregateType } from '@retirement/contracts';
+import type { AggregateType, PushedMutationRejected, SyncOperation } from '@retirement/contracts';
 
 export type { AggregateType };
 
@@ -113,7 +113,7 @@ export interface PendingMutation {
   id: string; // client UUID
   aggregateId: string;
   aggregateType: AggregateType;
-  operation: 'create' | 'update' | 'delete';
+  operation: SyncOperation;
   expectedVersion: number;
   schemaVersion: number;
   payload: Record<string, unknown>;
@@ -126,7 +126,7 @@ export interface PendingMutation {
    * write without a reason clears a stale one (`updateMutationStatus`). Additive optional: the `mutations` queue is a
    * local non-aggregate store, so no version bump.
    */
-  reason?: 'CONFLICT' | 'NOT_FOUND' | 'SCHEMA_MISMATCH';
+  reason?: PushedMutationRejected['reason'];
   /**
    * The server's true version at rejection time, persisted on a parked `failed-conflict` row so the Resolve UI can
    * re-base the kept edit without a round-trip. Additive optional; absent on a `pending` row and on a legacy conflict.

@@ -18,6 +18,7 @@ import {
   type ValidationArguments,
   type ValidatorConstraintInterface,
 } from 'class-validator';
+import { MAX_PUSH_MUTATIONS, OPERATIONS, type SyncOperation } from '@retirement/contracts';
 import { ACTIVE_AGGREGATE_TYPES_LIST } from '../aggregate-types.js';
 
 @ValidatorConstraint({ name: 'createRequiresVersionZero', async: false })
@@ -73,8 +74,8 @@ export class PushMutationDto {
   @IsIn(ACTIVE_AGGREGATE_TYPES_LIST as readonly string[])
   aggregateType!: string;
 
-  @IsIn(['create', 'update', 'delete'])
-  operation!: 'create' | 'update' | 'delete';
+  @IsIn(OPERATIONS)
+  operation!: SyncOperation;
 
   @IsInt()
   @Min(0)
@@ -116,7 +117,7 @@ export class PushDto {
 
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(100)
+  @ArrayMaxSize(MAX_PUSH_MUTATIONS)
   @ValidateNested({ each: true })
   @Type(() => PushMutationDto)
   mutations!: PushMutationDto[];

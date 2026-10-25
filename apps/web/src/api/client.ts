@@ -1,5 +1,6 @@
 // Single entry point for API calls: bearer token, one refresh-and-retry on 401, normalised responses, timeouts.
 // Tokens live in AuthContext; this module holds getter/refresher references so it stays framework-free.
+import type { ErrorEnvelope } from '@retirement/contracts';
 import { API_BASE_URL } from '../lib/api-base-url';
 import { recordServerBuildId } from '../lib/build-id';
 import { retryAfterMs } from '../lib/retry-backoff';
@@ -7,17 +8,10 @@ import { raiseWaitNotice } from '../lib/toast-queue';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
-export interface ApiError {
-  code: string;
-  message: string;
-  details?: unknown;
-  traceId?: string;
-}
-
 export class ApiRequestError extends Error {
   constructor(
     public status: number,
-    public error: ApiError,
+    public error: ErrorEnvelope['error'],
     /** Parsed `Retry-After` in ms; `null`/undefined when absent or unparseable, distinct from a zero-length wait. */
     public retryAfterMs?: number | null,
   ) {
@@ -149,7 +143,7 @@ export async function apiRequest<T = unknown>(
     const json = JSON.parse(bodyText);
 
     if (!res.ok) {
-      const err = (json?.error as ApiError) ?? {
+      const err = (json?.error as ErrorEnvelope['error']) ?? {
         code: 'UNKNOWN_ERROR',
         message: res.statusText,
       };

@@ -78,7 +78,7 @@ The folders you will touch most:
 | `apps/web/src/workers` | The Web Worker entry points (Monte Carlo and the claim-age optimizer). |
 | `apps/web/src/lib/demo-data-loader.ts` | The demo dataset. |
 | `apps/api/src` | One folder per API module: `auth`, `sync`, `dynamo`, `compactor`, `janitor`, `aws`, `common`, `health`, `throttle` and `logger`. The Lambda entry files sit directly in `apps/api/src`. |
-| `packages/contracts/src` | The wire schemas (`sync-envelopes.ts`, `error-envelope.ts`) and `aggregate-types.ts`. |
+| `packages/contracts/src` | The wire schemas (`sync-envelopes.ts`, `error-envelope.ts`), the key-envelope types (`key-envelope-types.ts`) and `aggregate-types.ts`. |
 | `apps/mcp-bridge/src` | The assistant bridge: the pairing-code store (`pairing-code-store.ts`), the loopback WebSocket server (`loopback-server.ts`), the tab session state machine (`session.ts`), the call relay (`relay.ts`), the MCP tool registration (`mcp-server.ts`) and the entry point (`bin.ts`). |
 | `packages/assistant-protocol/src` | The assistant message frames (`frames.ts`), the tool registry (`registry.ts`), the result envelope (`result.ts`) and the pairing proofs (`pairing.ts`). |
 | `infrastructure/src` | One file per resource group: `dynamo.ts`, `lambda.ts`, `s3.ts`, `cloudfront.ts`, `api-gateway.ts`, `iam.ts` and more. |

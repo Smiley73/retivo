@@ -5,9 +5,9 @@ import { ConfigService } from '@nestjs/config';
 import { PutCommand } from '@aws-sdk/lib-dynamodb';
 import { bootstrapTestApp, type TestApp } from '../test/test-helpers.js';
 import { IdempotencyKeyRepository } from './idempotency-key.repository.js';
-import type { AppliedMutationResult, RejectedMutationResult } from './types.js';
+import type { PushedMutationApplied, PushedMutationRejected } from '@retirement/contracts';
 
-function rejection(overrides: Partial<RejectedMutationResult> = {}): RejectedMutationResult {
+function rejection(overrides: Partial<PushedMutationRejected> = {}): PushedMutationRejected {
   return {
     status: 'rejected',
     mutationId: randomUUID(),
@@ -20,7 +20,7 @@ function rejection(overrides: Partial<RejectedMutationResult> = {}): RejectedMut
   };
 }
 
-function applied(overrides: Partial<AppliedMutationResult> = {}): AppliedMutationResult {
+function applied(overrides: Partial<PushedMutationApplied> = {}): PushedMutationApplied {
   return {
     status: 'applied',
     mutationId: randomUUID(),
@@ -51,7 +51,7 @@ describe('IdempotencyKeyRepository — version-aware rejection replay', () => {
   async function seedRow(
     key: string,
     expectedVersion?: number,
-    response: AppliedMutationResult | RejectedMutationResult = rejection(),
+    response: PushedMutationApplied | PushedMutationRejected = rejection(),
   ): Promise<void> {
     await t.doc.send(
       new PutCommand({
