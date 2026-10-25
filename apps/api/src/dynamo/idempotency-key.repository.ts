@@ -36,21 +36,10 @@ export class IdempotencyKeyRepository extends BaseRepository {
   }
 
   /**
-   * Conditional single-key delete for the version-aware rejection replay.
-   * Deletes the cached row ONLY if it is STILL a
-   * `rejected` outcome at the exact `expectedVersion` the caller just read —
-   * closing the TOCTOU: an unconditional delete could wipe a
-   * concurrently-applied idempotency row (a race where retry A applies while
-   * retry B's blind delete removes A's row and re-runs into an advanced
-   * aggregate, caching a false CONFLICT over an applied mutation).
-   *
-   * `expectedVersion === undefined` targets a LEGACY cached row that
-   * predates this field (never stamped it) — the condition then requires
-   * `attribute_not_exists(expectedVersion)` instead of an equality match.
-   *
-   * Returns `false` (never throws) when the condition fails — the row was
-   * deleted / re-cached / changed underneath by a concurrent request since
-   * the caller's read. The caller replays whatever now occupies the key.
+   * Conditional delete for the version-aware rejection replay: removes the cached row only if it is still a
+   * `rejected` outcome at `expectedVersion`, so a blind delete cannot wipe a concurrently applied row and cache a
+   * false CONFLICT over an applied mutation. `undefined` targets a legacy row that never stamped the field. Returns
+   * false (never throws) when the row changed underneath.
    */
   async delete(key: string, expectedVersion: number | undefined): Promise<boolean> {
     const names: Record<string, string> = {
@@ -77,11 +66,8 @@ export class IdempotencyKeyRepository extends BaseRepository {
       );
       return true;
     } catch (err) {
-      // Deleting an absent key also lands here (attribute_exists(#k) fails)
-      // — treated the same as "changed underneath" (the pattern used
-      // elsewhere in this codebase: string-compare the SDK error name
-      // rather than importing the exception class, matching
-      // workspace-meta.repository.ts).
+      // An absent key also lands here; treated as changed underneath. The SDK error name is string-compared, as in
+      // workspace-meta.repository.ts.
       if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
         return false;
       }
@@ -90,16 +76,9 @@ export class IdempotencyKeyRepository extends BaseRepository {
   }
 
   /**
-   * Hard-delete every idempotency-key row whose composite key starts with
-   * `<householdId>#`. Used only by the shared household-data sweep
-   * (`HouseholdSweepService`) — the four authorised consumers: account
-   * deletion (`DELETE /auth/account`), encrypted-workspace reset
-   * (`POST /auth/encrypted-workspace-reset`), self-service restore
-   * (`POST /sync/restore`), and the server-authoritative workspace clear
-   * (`POST /sync/workspace/clear`). The table has no GSI on householdId,
-   * so a Scan with `begins_with` is the only option. Volume is small
-   * (≤ 7-day TTL × push rate). The api-role IAM policy permits
-   * `BatchWriteItem` on this table for that sweep.
+   * Hard-deletes every idempotency row whose key starts with `<householdId>#`, for the shared sweep
+   * (`HouseholdSweepService`; see AGENTS.md, "Project-specific security"). No GSI on householdId, so a Scan with
+   * `begins_with`; volume is small (7-day TTL).
    */
   async deleteAllForHousehold(householdId: string): Promise<void> {
     const prefix = `${householdId}#`;
@@ -129,11 +108,8 @@ export class IdempotencyKeyRepository extends BaseRepository {
   }
 
   /**
-   * Every idempotency-key row whose composite key starts with `<householdId>#`,
-   * WHOLE — unlike {@link deleteAllForHousehold}'s
-   * key-only projection. Household id is unindexed by design; this Scans
-   * with a `begins_with` filter, the same explicit-scan case the sweep uses —
-   * no new grant.
+   * Every idempotency row for the household, whole (unlike the key-only projection of `deleteAllForHousehold`), by
+   * the same `begins_with` Scan.
    */
   async listForHousehold(householdId: string): Promise<IdempotencyKeyRow[]> {
     const prefix = `${householdId}#`;
@@ -158,14 +134,8 @@ export class IdempotencyKeyRepository extends BaseRepository {
   }
 
   /**
-   * Caller is expected to write idempotency rows as part of the same
-   * TransactWriteItems that materializes the mutation; this helper
-   * just produces a row with a ready-to-use TTL.
-   *
-   * `expectedVersion` is stamped only when caching a
-   * REJECTED outcome — the mutation's attempted `version` at rejection time,
-   * read later by the version-aware replay comparison. Applied outcomes
-   * never need it (exact-replay semantics are unchanged).
+   * Builds a row with a ready-to-use TTL, to write in the same TransactWriteItems as the mutation. `expectedVersion`
+   * is stamped only when caching a rejected outcome, for the version-aware replay comparison.
    */
   static rowFor(
     key: string,

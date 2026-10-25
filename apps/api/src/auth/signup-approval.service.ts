@@ -1,26 +1,5 @@
-/**
- * Owner-approval gate. Three responsibilities:
- *
- *   1. Dispatch the approval mail to APPROVER_EMAIL when somebody other
- *      than the owner finishes verifying their email. Called by
- *      EmailVerificationService.consumeToken once the verification flips.
- *   2. Consume an approval token via approve / decline, each as ONE atomic
- *      transaction. Approve conditionally deletes the token row AND flips
- *      User.approvalStatus pending → approved together. Decline tears the
- *      user-row sub-graph down directly (token + User + Credential +
- *      EmailReservation in one four-item transaction) with no intermediate
- *      'declined' write.
- *   3. Provide a shared `cascadeDeleteUser` for the TTL-expiry cascade (the
- *      decline path runs its own inline transaction and no longer routes
- *      through it). Idempotent — replays after a partial-success retry hit
- *      "row already gone" branches gracefully.
- *
- * The owner is identified by the APPROVER_EMAIL env var, which falls
- * back to SES_FROM_ADDRESS when unset (single-var deployments). Compare
- * is always case-insensitive.
- *
- * See docs/security.md, "Sign-up".
- */
+// Owner-approval gate: dispatches the approval mail, and consumes approve and decline tokens each in one atomic transaction;
+// `cascadeDeleteUser` serves the TTL cascade. See docs/security.md, "Sign-up".
 import { formatMailSource } from './mail-source.js';
 import {
   BadRequestException,
@@ -49,7 +28,7 @@ import type { SignupApprovalRow } from '../dynamo/types.js';
 import { emailFingerprint } from '../common/email-fingerprint.js';
 import { escapeHtml } from '../common/escape-html.js';
 
-/** Approval token TTL — long enough for an owner on vacation. */
+// Long enough for an owner on vacation.
 const APPROVAL_TTL_SEC = 7 * 24 * 60 * 60;
 
 @Injectable()
@@ -85,16 +64,13 @@ export class SignupApprovalService {
     this.approvalTable = config.get('TABLE_SIGNUP_APPROVAL', { infer: true });
   }
 
-  /** Lowercase string-compare against APPROVER_EMAIL. */
   isOwnerEmail(email: string): boolean {
     return email.trim().toLowerCase() === this.approverEmail.trim().toLowerCase();
   }
 
   /**
-   * Issue a fresh approval token for a verified-but-pending user and
-   * mail the owner. Caller (EmailVerificationService) is responsible for
-   * deciding whether the user qualifies — this method is pure issue +
-   * dispatch, no policy.
+   * Issues a fresh approval token for a verified-but-pending user and mails the owner; pure issue and dispatch, with
+   * the policy decided by the caller.
    */
   async requestApproval(args: {
     userId: string;
@@ -103,11 +79,8 @@ export class SignupApprovalService {
     lastName?: string;
   }): Promise<{ approvalToken: string }> {
     const approvalToken = randomBytes(32).toString('base64url');
-    // Hash at the service boundary:
-    // only the SHA-256 digest is stored under the `approvalToken` PK; the raw
-    // token rides the owner's mail link (and, in dev/test, the response) and is
-    // never persisted or logged. Read access to the table therefore reveals no
-    // usable approval link. Mirrors PasswordResetService's hash-at-rest pattern.
+    // Hash at the service boundary: only the SHA-256 digest is stored under the PK, so table read access reveals no
+    // usable approval link.
     const approvalTokenHash = sha256(approvalToken);
     const now = new Date().toISOString();
     const nowSec = Math.floor(Date.now() / 1000);
@@ -125,10 +98,7 @@ export class SignupApprovalService {
       eventType: 'signup_approval_requested',
     });
 
-    // Best-effort SES dispatch — a delivery failure leaves a usable
-    // token on the row, and the user / owner can re-request via the
-    // resend path (out of scope for v1; today the user re-signs up
-    // after the 7d TTL).
+    // Best-effort SES dispatch: a failure leaves a usable token on the row.
     try {
       await this.sendApprovalMail(args.email, approvalToken, {
         firstName: args.firstName,
@@ -139,9 +109,8 @@ export class SignupApprovalService {
         {
           userId: args.userId,
           emailFingerprint: emailFingerprint(args.email),
-          // Error class only, never `err.message`: an SES rejection embeds the
-          // raw recipient address in its message, which `redact` cannot scrub
-          // inside a string value. Matches the `Approved-notification` log.
+          // Error class only, never `err.message`: an SES rejection embeds the recipient address, which `redact` cannot
+          // scrub inside a string.
           reason: err instanceof Error ? err.name : 'unknown',
         },
         'Approval mail dispatch failed',
@@ -151,14 +120,9 @@ export class SignupApprovalService {
   }
 
   /**
-   * Consume a token via the approve path.
-   * A single atomic transaction conditionally deletes the presented approval
-   * row AND flips an existing `approvalStatus = pending` user to `approved` —
-   * both commit or neither does, so a crash/timeout can't approve a user while
-   * leaving a live approval link (or vice-versa), and a concurrent approve/
-   * decline settles on exactly one terminal state. Post-commit side effects
-   * (audit, approved-notification mail) run
-   * ONLY after the transaction commits, in their existing order.
+   * Consumes a token via approve: one transaction conditionally deletes the approval row and flips an existing
+   * pending user to approved, so a crash cannot approve a user while leaving a live link and a concurrent approve and
+   * decline settle on one terminal state. Audit and the notification mail run only after commit.
    */
   async approve(token: string): Promise<{ userId: string; email: string }> {
     const row = await this.loadAndValidate(token);
@@ -168,8 +132,7 @@ export class SignupApprovalService {
         this.doc,
         [
           {
-            // Delete by the stored digest key (`row.approvalToken` is the
-            // SHA-256 hash), never the raw presented token.
+            // Delete by the stored digest key, never the raw presented token.
             Delete: {
               TableName: this.approvalTable,
               Key: { approvalToken: row.approvalToken },
@@ -187,10 +150,8 @@ export class SignupApprovalService {
           },
         ],
         () => {
-          // A ConditionalCheckFailed on either item: the token was consumed
-          // concurrently, or the user is no longer pending (raced with a
-          // decline / already approved). Reuse the existing approval-conflict
-          // response — no live account is touched.
+          // The token was consumed concurrently or the user is no longer pending: reuse the approval-conflict response;
+          // no live account is touched.
           throw new BadRequestException({
             code: 'APPROVAL_TOKEN_INVALID',
             message: 'Approval link is invalid or has already been used.',
@@ -214,24 +175,10 @@ export class SignupApprovalService {
     return { userId: row.userId, email: row.email };
   }
 
-  /**
-   * Best-effort "you're approved" notice to the freshly-approved user,
-   * with a link to the login page. Wholly self-contained: the user-row
-   * lookup (to personalise with the first name) AND the SES send both
-   * live inside this method's single try/catch, so neither a DynamoDB
-   * read failure nor an SES outage can ever bubble into `approve()` —
-   * the approval itself has already committed by the time we get here.
-   *
-   *   - User row found with a first name → "Hi <firstName>,".
-   *   - User row absent (deleted in a race) → generic "Hi," — degraded,
-   *     not skipped.
-   *   - `findById` throws → caught + logged, no mail sent.
-   *
-   * The first name is attacker-controlled signup input, so it is always
-   * routed through `escapeHtml(...)` before it lands in the HTML body.
-   * The catch logs `emailFingerprint(email)` rather than the
-   * raw recipient so no PII reaches CloudWatch.
-   */
+  // Best-effort "you are approved" notice. The user lookup and the SES send share one try/catch, so neither a read
+  // failure nor an SES outage can bubble into `approve()`, which has already committed. The first name is
+  // attacker-controlled signup input, so it always goes through `escapeHtml`; the catch logs
+  // `emailFingerprint(email)`, not the recipient.
   private async sendApprovedNotificationMail(
     userId: string,
     recipientEmail: string,
@@ -288,41 +235,26 @@ export class SignupApprovalService {
   }
 
   /**
-   * Consume a token via the decline path.
-   * Tears the pending signup down in ONE atomic four-item transaction: the
-   * presented approval row plus the User, Credential, and EmailReservation rows
-   * are deleted together (the User delete conditioned on `approvalStatus` still
-   * being pending/declined). There is NO intermediate `declined` status write —
-   * the account is removed directly, so a concurrent approve either wins (this
-   * decline's condition then fails → `400 APPROVAL_TOKEN_INVALID`, no live
-   * account touched) or loses (its own condition fails). When the user row is
-   * already gone (an earlier decline/expiry cascade won), the orphaned approval
-   * row is best-effort dropped and the applicant email is returned idempotently.
-   * The DynamoDB stream still fires on the approval-row delete; the cascade
-   * Lambda filters for TTL-driven deletes only and ignores it.
+   * Consumes a token via decline: one four-item transaction deletes the approval row, User, Credential and
+   * EmailReservation (the User delete conditioned on pending or declined), with no intermediate declined write. A
+   * concurrent approve either wins (this decline fails with 400 APPROVAL_TOKEN_INVALID, no live account touched) or
+   * loses. If the user is already gone, the orphaned approval row is dropped and the email returned idempotently. The
+   * cascade Lambda ignores the stream event, since it handles TTL deletes only.
    */
   async decline(token: string): Promise<{ email: string }> {
     const row = await this.loadAndValidate(token);
-    // Strongly-consistent read: a null here takes the early-exit branch
-    // that deletes the approval token OUTSIDE the atomic cascade. An
-    // eventually-consistent stale miss on a user that actually still exists
-    // would drop the only decline/approve retry handle and leave the pending
-    // User/Credential/EmailReservation rows orphaned with no TTL-cascade
-    // trigger. The consistent lookup makes the absence authoritative.
+    // Strongly consistent: a stale null here takes the early exit that deletes the approval token outside the
+    // cascade, orphaning the pending rows with no retry handle and no TTL-cascade trigger.
     const user = await this.users.findByIdConsistent(row.userId);
     if (!user) {
-      // The user is already gone (an earlier decline/expiry cascade won). The
-      // presented approval row is orphaned — best-effort drop it and report the
-      // applicant email idempotently.
+      // Already gone (an earlier decline or expiry cascade won): drop the orphaned approval row and report the email
+      // idempotently.
       await this.approvals.deleteToken(row.approvalToken).catch(() => undefined);
       return { email: row.email };
     }
 
-    // One atomic transaction: delete the
-    // presented approval row plus the pending user, credential, and email
-    // reservation together. The user delete is conditioned on the account still
-    // being pending/declined, so a concurrent approve settles the state and this
-    // decline refuses rather than trashing a live account.
+    // The user delete is conditioned on pending or declined, so a concurrent approve settles the state and this
+    // decline refuses rather than trash a live account.
     try {
       await runTransactWrite(
         this.doc,
@@ -337,8 +269,7 @@ export class SignupApprovalService {
           ...this.cascadeDeleteItems(user),
         ],
         () => {
-          // ConditionalCheckFailed: the account was approved between load and
-          // commit (or already swept) — refuse rather than delete a live user.
+          // Approved between load and commit (or already swept): refuse rather than delete a live user.
           throw new BadRequestException({
             code: 'APPROVAL_TOKEN_INVALID',
             message: 'Approval link is invalid or has already been used.',
@@ -361,27 +292,16 @@ export class SignupApprovalService {
       metadata: { householdId: user.householdId },
     });
 
-    // Best-effort sweep of any redundant approval rows for this user — the user
-    // no longer exists, so they cannot approve or recreate it.
+    // Best-effort sweep of redundant approval rows for the now-nonexistent user.
     await this.approvals.deleteAllForUser(row.userId).catch(() => undefined);
 
     return { email: row.email };
   }
 
   /**
-   * Cascade-delete the user-row sub-graph for an unapproved signup.
-   *   - User row (must still be in pending or declined state — guards
-   *     against a race where the owner approves on one tab and TTL
-   *     fires moments later on another).
-   *   - Credential row.
-   *   - EmailReservation row.
-   *   - Any remaining approval rows for the same user.
-   *
-   * The TTL-expiry cascade path (apps/api/src/signup-cascade-lambda.ts). The
-   * decline endpoint no longer routes through this shared helper — it runs its
-   * own inline four-item transaction that also consumes the presented token
-   * (see {@link decline}). Idempotent — every Delete is conditional so replays
-   * after a partial-success retry don't trip on "row already gone".
+   * Cascade-deletes the unapproved signup sub-graph (User, Credential, EmailReservation, remaining approval rows) for
+   * the TTL-expiry cascade in `signup-cascade-lambda.ts`. The User delete requires pending or declined, so an owner
+   * approval racing the TTL cannot lose the account. Every Delete is conditional, so replays are idempotent.
    */
   async cascadeDeleteUser(args: {
     userId: string;
@@ -389,15 +309,11 @@ export class SignupApprovalService {
   }): Promise<{ deleted: boolean }> {
     const user = await this.users.findById(args.userId);
     if (!user) {
-      // Nothing to cascade — either an earlier replay won, or the user
-      // was already swept by /auth/account.
+      // Nothing to cascade: an earlier replay won or /auth/account swept it.
       return { deleted: false };
     }
 
-    // Guard against running over an approved user. If somebody hits the
-    // decline link after they've already been approved (link races, owner
-    // changes their mind too late), we refuse rather than trash a live
-    // account.
+    // Refuse to run over an approved user rather than trash a live account.
     const status = user.approvalStatus ?? null;
     if (status !== 'pending' && status !== 'declined') {
       return { deleted: false };
@@ -411,16 +327,13 @@ export class SignupApprovalService {
       );
     } catch (err) {
       if (err instanceof TransactionCanceledException) {
-        // Lost a race against an approve-then-login or another cascade
-        // replay. Both are benign.
+        // Lost a race against an approve-then-login or another replay; benign.
         return { deleted: false };
       }
       throw err;
     }
 
-    // Best-effort approval-row sweep — any unconsumed token for this
-    // user is now meaningless. The trigger record itself is also one
-    // of these rows; the cascade Lambda's caller already deleted it.
+    // Any unconsumed token is now meaningless; the trigger record was already deleted by the cascade Lambda caller.
     await this.approvals.deleteAllForUser(args.userId);
 
     await this.auth.record({
@@ -434,17 +347,8 @@ export class SignupApprovalService {
     return { deleted: true };
   }
 
-  /**
-   * Build the three cascade Delete transaction-item parts for an unapproved
-   * signup's user-row sub-graph — the `EmailReservation` (conditioned on it
-   * still pointing at this user), the `User` (conditioned on the account still
-   * being pending/declined, so a user approved between the caller's `findById`
-   * and the commit is never trashed), and the `Credential`. Single-sourced so
-   * {@link decline} (which prepends its own approval-row Delete) and
-   * {@link cascadeDeleteUser} share one guard expression + table set rather than
-   * duplicating them. Mirrors the transaction-item builder pattern in
-   * `users.repository.ts` (`approveSignupUpdate` / `markEmailVerifiedUpdate`).
-   */
+  // The three cascade Deletes (EmailReservation still pointing at the user, User still pending or declined,
+  // Credential), shared by `decline` and `cascadeDeleteUser` so there is one guard expression.
   private cascadeDeleteItems(user: {
     userId: string;
     emailLowercase: string;
@@ -481,14 +385,8 @@ export class SignupApprovalService {
     ];
   }
 
-  /**
-   * Compose + send the approval mail. Token rides in the URL fragment
-   * so the SES log + the recipient client never
-   * leak it onto the wire. Two clearly-labeled links: approve + decline.
-   * The subject + body name the applicant (first + last + email) so the
-   * owner can triage at a glance. Birthdate is deliberately NOT included
-   * (PII).
-   */
+  // Composes and sends the approval mail; the token rides the URL fragment so it never reaches the SES log or the
+  // recipient client. The owner sees the applicant name and email; the birthdate is deliberately omitted (PII).
   private async sendApprovalMail(
     applicantEmail: string,
     token: string,
@@ -496,8 +394,7 @@ export class SignupApprovalService {
   ): Promise<void> {
     const approveLink = `${this.webOrigin}/auth/approve-signup#token=${encodeURIComponent(token)}`;
     const declineLink = `${this.webOrigin}/auth/decline-signup#token=${encodeURIComponent(token)}`;
-    // `Jane Smith <jane@example.com>` when a name is present; bare email
-    // otherwise (old client / API-direct signup).
+    // `Jane Smith <jane@example.com>` when a name is present, else the bare email.
     const fullName = [name.firstName, name.lastName]
       .filter((part): part is string => !!part && part.trim().length > 0)
       .join(' ')
@@ -506,10 +403,8 @@ export class SignupApprovalService {
       ? `${fullName} <${applicantEmail}>`
       : applicantEmail;
     if (!this.sesEnabled) {
-      // Dev/test mode: no SES. The approve/decline links each carry a token,
-      // and `applicantLabel` carries the applicant's name + email — none of
-      // which is redactable inside a message string (`redact` masks by field
-      // name, not string content). Drop them all; log a fixed marker only.
+      // Dev and test: no SES. The links and applicant label are not redactable inside a message string, so log a
+      // fixed marker only.
       this.logger.log('approval_link_dev_mode_sent');
       return;
     }
@@ -545,10 +440,8 @@ export class SignupApprovalService {
   }
 
   private async loadAndValidate(token: string): Promise<SignupApprovalRow> {
-    // Hash the presented raw token and look up ONLY by its digest: a
-    // legacy raw-token row (keyed by the 43-char base64url token itself) can
-    // never match a 64-hex-char digest lookup, so legacy links are rejected as
-    // invalid and must be reissued.
+    // Look up only by the digest: a legacy raw-token row never matches a 64-hex digest, so legacy links are
+    // rejected and must be reissued.
     const tokenHash = sha256(token);
     const row = await this.approvals.findByToken(tokenHash);
     if (!row) {
@@ -559,17 +452,10 @@ export class SignupApprovalService {
     }
     const nowSec = Math.floor(Date.now() / 1000);
     if (row.expiresAt < nowSec) {
-      // Do NOT proactively delete the expired row here. The household-cleanup
-      // cascade (apps/api/src/signup-cascade-lambda.ts) only processes REMOVE
-      // stream events attributed to DynamoDB's own TTL sweep — it explicitly
-      // skips any REMOVE caused by an application-issued DeleteItem
-      // (see isTtlDelete() / `if (!isTtlDelete(record)) continue;`). An
-      // application delete here would therefore permanently defeat the only
-      // cleanup trigger for the associated pending User/Credential/
-      // EmailReservation rows, stranding them forever. Leave the row in place
-      // and let DynamoDB's TTL sweep remove it via a real TTL-attributed REMOVE
-      // event, which the cascade Lambda WILL process. The 410 below is correct
-      // regardless of whether the row still physically exists.
+      // Do not delete the expired row here: the cascade Lambda only processes TTL-attributed REMOVE events
+      // (`isTtlDelete`) and skips application deletes, so deleting would permanently defeat the only cleanup trigger
+      // for the pending User, Credential and EmailReservation. Leave it for the real TTL REMOVE; the 410 is correct
+      // either way.
       throw new GoneException({
         code: 'APPROVAL_TOKEN_EXPIRED',
         message: 'Approval link has expired.',

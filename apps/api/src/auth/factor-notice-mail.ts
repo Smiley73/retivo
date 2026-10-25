@@ -1,12 +1,5 @@
-/**
- * Pure mail-body builder for the factor-change notice. Kept separate from
- * `factor-notice.service.ts` and free of any SES / Nest wiring so it is unit-testable without a
- * stub client — the service calls this to get the strings it hands to `SendEmailCommand`.
- *
- * Copy below is a DRAFT pending owner approval. The TOTP wording is derived
- * from the passkey wording by substituting the factor label; it is not itself
- * independently drafted and needs the same sign-off.
- */
+// Pure mail-body builder for the factor-change notice, free of SES wiring so it is unit-testable. Copy is a draft pending owner approval; the
+// TOTP wording derives from the passkey wording.
 import { escapeHtml } from '../common/escape-html.js';
 
 export type FactorUndoKind = 'passkey_add' | 'passkey_remove' | 'totp_add' | 'totp_remove';
@@ -35,9 +28,9 @@ function isAddKind(kind: FactorUndoKind): boolean {
   return kind === 'passkey_add' || kind === 'totp_add';
 }
 
-/** Plain-English body, shared by the text and HTML parts before the link is
- *  spliced in — differs only by whether the change is undoable (an add
- *  is fully undoable; a removal only ends every session). */
+/**
+ * Plain-English body shared by the text and HTML parts; an add is fully undoable, a removal only ends every session.
+ */
 export function bodyIntro(kind: FactorUndoKind): string {
   const label = FACTOR_LABEL[kind];
   return isAddKind(kind)
@@ -52,15 +45,9 @@ export function bodyIntro(kind: FactorUndoKind): string {
 }
 
 /**
- * Build the fragment-form undo link (repo-wide rule: a token-bearing link
- * always rides the URL fragment, never a query string, so it never reaches
- * CloudFront/API-GW access logs or a `Referer`). Carries `userId` alongside
- * the opaque `token` — the consume endpoint has no session to resolve the
- * account from otherwise. Also carries
- * `kind` — NOT sent to the consume endpoint, only read by the landing page
- * to choose its pre-click copy (which factor, undoable or not); the kind is
- * not secret (the recipient already read it in this same mail) and the
- * consume response stays opaque regardless of what the fragment claims.
+ * Builds the fragment-form undo link (a token-bearing link always rides the URL fragment, so it never reaches access
+ * logs or Referer). Carries `userId` (the consume endpoint has no session) and `kind`, which is read only by the
+ * landing page to pick its copy; it is not secret and the consume response stays opaque.
  */
 export function buildFactorUndoLink(
   webOrigin: string,
@@ -75,11 +62,8 @@ export function buildFactorUndoLink(
 }
 
 /**
- * Build the subject + text + HTML parts for a factor-change notice. Every
- * interpolated value in the HTML body is routed through the shared
- * `escapeHtml` — the link is built from operator config
- * plus opaque tokens, not user input, but the rule is applied mechanically
- * rather than case-by-case.
+ * Builds the subject, text and HTML parts. Every HTML interpolation goes through `escapeHtml` mechanically, even
+ * though the link is built from operator config and opaque tokens.
  */
 export function buildFactorNoticeMail(args: {
   kind: FactorUndoKind;

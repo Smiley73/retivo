@@ -1,19 +1,5 @@
-/**
- * Standalone-bootstrap wrapper for the janitor Lambda.
- *
- * `janitor-lambda.ts` calls
- * `NestFactory.createApplicationContext(JanitorLambdaModule)` —
- * that's the entry point for the deployed handler. The wrapper exists
- * so `JanitorModule` itself stays free of `ConfigModule.forRoot`
- * (AppModule already registers ConfigModule globally; registering it
- * twice when AppModule imports JanitorModule would double-register).
- *
- * The `load` factory below is intentionally minimal — the full
- * `envConfigProvider` validates AUTH_JWT_PRIVATE_KEYS / etc as
- * required, but the janitor's Lambda env doesn't carry them. This
- * loader supplies just the env vars the janitor reads, with the same
- * defaults as production so local tests behave the same.
- */
+// Standalone-bootstrap wrapper for the janitor Lambda, so JanitorModule stays free of ConfigModule.forRoot; its loader supplies only
+// the env vars the janitor reads.
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JanitorModule } from './janitor.module.js';

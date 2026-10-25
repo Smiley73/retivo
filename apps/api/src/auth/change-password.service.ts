@@ -1,20 +1,5 @@
-/**
- * Change-password orchestrator. Validates the
- * current password, hashes the new one, and commits the credential row +
- * (when the caller supplies a re-wrapped slot) the household-key `password`
- * slot + the envelope-set meta bump in ONE `TransactWriteItems` — the
- * credential and the key either both change or neither does. A
- * server-confirmed no-password-slot (recovery-only) household may instead
- * commit the credential alone, with the slot's continued absence asserted as
- * a condition of that same transaction.
- *
- * After a committed change: revokes every existing refresh family, denylists
- * every live `jti`, and issues a fresh session recording the revision THIS
- * commit just minted (not the one it authenticated against). Audit event
- * lands as `password_change`.
- *
- * See docs/security.md, "Password change, password reset".
- */
+// Change-password orchestrator: commits the credential (and, when supplied, the re-wrapped `password` slot and meta bump) in one
+// transaction, then revokes every session. See docs/security.md, "Password change, password reset".
 import {
   BadRequestException,
   ConflictException,
@@ -46,19 +31,13 @@ import { StepUpService, type StepUpMethod } from './step-up.service.js';
 import { SessionRevocationService } from './session-revocation.service.js';
 import { TrustedDeviceService } from './trusted-device.service.js';
 
-/** One item of a `TransactWriteCommand`'s `TransactItems` array. */
 type TransactItem = NonNullable<
   ConstructorParameters<typeof TransactWriteCommand>[0]['TransactItems']
 >[number];
 
-/**
- * The single error code shared by every "this request cannot be evaluated as
- * sent" rejection on the change-password / key-envelope write paths (the rolling-deployment cases): a stale bundle posting no envelope fields to a
- * slot-holding household, and a session whose write authority the credential
- * `ConditionCheck` finds stale or missing (a superseded session, or a
- * pre-rollout session that never recorded one). The web maps this ONE code to
- * a reload prompt, never a validation error on a form.
- */
+// The one code for every "cannot be evaluated as sent" rejection on the change-password and key-envelope write paths
+// (a stale bundle posting no envelope fields to a slot-holding household, or a session whose write authority is stale
+// or missing); the web maps it to a reload prompt, never a form error.
 const UPGRADE_REQUIRED_ERROR = {
   code: 'UPGRADE_REQUIRED',
   message: 'Reload the page to continue.',
@@ -68,37 +47,31 @@ export interface ChangePasswordArgs {
   userId: string;
   householdId: string;
   deviceId: string;
-  /** Device-trust cookie value — lets a
-   *  trusted device's password re-verify bypass the per-address backoff,
-   *  mirroring login/delete-account. */
+  /** Device-trust cookie value; lets a trusted device bypass the per-address backoff, as in login. */
   deviceTrustToken?: string;
   currentJti: string;
   currentAccessExp: number;
   currentPassword: string;
   newPassword: string;
-  /** Fresh step-up factor — required after the
-   * password gate when `AUTH_MFA_ENFORCED` is on; absent on the flag-off
-   * password-only floor. Closes the key-strand rotation vector. */
+  /**
+   * Fresh step-up factor, required after the password gate when `AUTH_MFA_ENFORCED` is on; closes the key-strand
+   * rotation vector.
+   */
   method?: StepUpMethod;
   code?: string;
   assertion?: AuthenticationResponseJSON;
   ip: string | null;
   userAgent: string | null;
   /**
-   * The CURRENT session's recorded write authority, resolved by the controller from the refresh
-   * cookie the same way `logout` resolves its row — never a client-supplied value. Asserted as the
-   * credential row's own conditional-`Put` predecessor: a superseded session (one whose sign-in
-   * predates a credential rotation that has since landed), or one carrying no recorded revision at
-   * all, fails the commit.
+   * The current session recorded write authority, resolved by the controller from the refresh cookie, never
+   * client-supplied. It is the credential conditional Put predecessor, so a superseded session, or one with no
+   * recorded revision, fails the commit.
    */
   sessionCredentialRevision: string;
   /**
-   * The re-wrapped `password` slot to commit atomically with the credential.
-   * Present together with `envelopeSetVersion` /
-   * `expectedEnvelopeSetVersion` / `envelopeSetTag`, or all four absent (the
-   * server-confirmed no-slot / recovery-only exception). Never a client
-   * choice — the server decides which shape applies from its own read of the
-   * household's slots, below.
+   * The re-wrapped `password` slot to commit with the credential. Present together with the three envelope fields, or
+   * all four absent (the recovery-only exception); the server decides which shape applies from its own read of the
+   * slots.
    */
   slot?: UpsertKeyEnvelopeSlotDto;
   envelopeSetVersion?: number;
@@ -130,26 +103,17 @@ export class ChangePasswordService {
   async change(args: ChangePasswordArgs): Promise<LoginResult> {
     const user = await this.users.findById(args.userId);
     if (!user) {
-      // JWT-valid claim whose User row is gone — treat as a credential failure.
+      // A JWT-valid claim whose User row is gone: a credential failure.
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Current password is incorrect.',
       });
     }
 
-    // Password re-verify wrapped with the shared per-account backoff —
-    // the same treatment
-    // delete-account already uses on its own inline Argon2 check (change-password
-    // does not call VerifyPasswordService, so this is a parallel internal wrap).
-    // A lockout throws 429 before argon2 is paid; a wrong password records one
-    // failure + throws 401 INVALID_CREDENTIALS; a backend/argon2 fault
-    // propagates uncounted. No `password_verify` audit here, preserving
-    // change-password's existing audit contract (`password_change` on success).
-    //
-    // Device identity: resolve trust the same
-    // way the other password-proof callers do, so a valid trusted-device
-    // cookie bypasses the per-address backoff and a miss counts against that
-    // device's own ceiling instead of the shared address counter.
+    // Password re-verify under the shared per-account backoff (change-password does not call VerifyPasswordService,
+    // so this is a parallel wrap): a lockout is 429 before argon2, a wrong password is 401 and one failure, a
+    // backend fault propagates uncounted. No `password_verify` audit, keeping the `password_change` contract. Trust
+    // resolves as for other password-proof callers.
     const trust = {
       trusted: await this.trustedDeviceSvc.verify(
         args.userId,
@@ -170,11 +134,8 @@ export class ChangePasswordService {
       trust,
     });
 
-    // Fresh second-factor step-up — layered on top
-    // of the password gate when `AUTH_MFA_ENFORCED` is on; skipped on the flag-off
-    // floor. Runs before the credential rotation so a bad factor never
-    // rotates the password / strands the household key. The `StepUpService` emits
-    // its own audit and throws `MFA_CODE_INVALID` (or a passkey-specific code).
+    // Fresh step-up layered on the password gate when `AUTH_MFA_ENFORCED` is on, before the credential rotates so a
+    // bad factor never rotates the password or strands the household key.
     if (this.mfaEnforced) {
       if (!args.method) {
         await this.stepUpSvc.recordMissingProofFailure({
@@ -208,31 +169,18 @@ export class ChangePasswordService {
 
     await this.passwords.validate(args.newPassword);
 
-    // ---- Server-read eligibility, then the atomic commit ----
-    //
-    // The eligibility read decides WHICH commit shape applies; the actual
-    // absence (for the no-slot shape) is re-asserted as a condition of the
-    // commit itself, below, so a slot created between this read and the write
-    // still fails the whole change.
-    // Strongly consistent: an eventually-consistent read
-    // can return the canonical `password` slot while missing a SECOND,
-    // noncanonical password-type row that already exists (a state the
-    // previous endpoint allowed). Inspect EVERY password-type slot, not just
-    // the first one DynamoDB happens to return — a household holding more
-    // than one is exactly as unsafe to proceed on as one at the wrong id: the
-    // web client's re-wrap is only ever computed over the canonical slot, so
-    // a stray second row would be left wrapped under the old password while
-    // the stored tag (computed over the substituted canonical set) claims it
-    // covers the true slot set.
+    // The read decides which commit shape applies; the no-slot absence is re-asserted in the commit itself, so a
+    // slot created in between still fails the change. Strongly consistent, and every password-type slot is
+    // inspected: an eventual read could miss a noncanonical second row, and the client re-wrap covers only the
+    // canonical slot, which would leave a stray row wrapped under the old password.
     const existingSlots = await this.envelopes.listSlots(args.householdId, true);
     const existingPasswordSlots = existingSlots.filter((s) => s.slotType === 'password');
     if (
       existingPasswordSlots.length > 1 ||
       (existingPasswordSlots.length === 1 && existingPasswordSlots[0]!.slotId !== PASSWORD_SLOT_ID)
     ) {
-      // A legacy/duplicate password-type slot (impossible for any household
-      // created by a shipped bundle) is refused, never moved/merged — a move
-      // is two rows across two version steps with no atomic shape.
+      // A legacy or duplicate password-type slot is refused, never moved or merged; a move is two rows across two
+      // version steps with no atomic shape.
       throw new ConflictException({
         code: 'PASSWORD_SLOT_NOT_CANONICAL',
         message:
@@ -254,45 +202,29 @@ export class ChangePasswordService {
       });
     }
 
-    // A body carrying no envelope fields from a household that DOES hold a
-    // password slot is never performed as a credential-only change — that is
-    // exactly the commit-or-neither contract this method exists to
-    // enforce (an old bundle, or a bug, must not silently downgrade to a
-    // credential-only change on a household with a key to re-wrap).
+    // A body with no envelope fields from a household that holds a password slot is never performed
+    // credential-only: an old bundle or a bug must not silently downgrade a household with a key to re-wrap.
     if (!hasRewrapBody && householdHoldsPasswordSlot) {
       throw new ConflictException(UPGRADE_REQUIRED_ERROR);
     }
 
-    // The reverse direction of the same contract (the server decides which
-    // shape applies from its own read of the household's slots, never the
-    // client): a rewrap-shaped body from a household the server
-    // confirms holds NO password slot must not pick the three-item commit —
-    // committing it would silently mint a brand-new canonical `password`
-    // slot through change-password, a shape that endpoint was never meant to create. The
-    // legitimate client only ever reaches this on a stale view of the slot
-    // set (the slot vanished between its read and this request), so the
-    // same reload answer applies.
+    // The reverse: the server decides the shape, so a re-wrap body from a household with no password slot must not
+    // mint a new canonical slot through change-password. A legitimate client reaches this only on a stale slot
+    // view, so the same reload answer applies.
     if (hasRewrapBody && !householdHoldsPasswordSlot) {
       throw new ConflictException(UPGRADE_REQUIRED_ERROR);
     }
 
-    // Same single-version-step guard `KeyEnvelopeController.upsert` applies
-    // at its boundary:
-    // the proposed `envelopeSetVersion` must be exactly the caller's held
-    // `expectedEnvelopeSetVersion` + 1. `buildMetaPutTransactItem`'s
-    // DynamoDB condition only checks the row's CURRENT stored version against
-    // `expectedEnvelopeSetVersion` — it never constrains the NEW value being
-    // written, so this boundary check is the only thing standing between a
-    // correct `expectedEnvelopeSetVersion` and an arbitrary, non-adjacent
-    // `envelopeSetVersion` jump.
+    // Same single-version-step guard as `KeyEnvelopeController.upsert`: `buildMetaPutTransactItem` only checks the
+    // stored version against `expectedEnvelopeSetVersion`, never the new value, so this check stops a non-adjacent
+    // jump.
     if (hasRewrapBody) {
       assertSingleVersionStep(args.expectedEnvelopeSetVersion!, args.envelopeSetVersion!);
     }
 
     const newHash = await argon2.hash(args.newPassword, { type: argon2.argon2id });
     const now = new Date().toISOString();
-    // Minted ONCE into a local and put into both items below — never
-    // read a clock or `randomUUID()` twice and hope the two agree.
+    // Minted once and used in both items, never a clock or `randomUUID()` read twice.
     const newRevision = randomUUID();
     const credentialRow: CredentialRow = {
       userId: args.userId,
@@ -305,19 +237,14 @@ export class ChangePasswordService {
       args.sessionCredentialRevision,
     );
 
-    // Archive the displaced password slot + envelope-set meta — this commit re-wraps the canonical
-    // `password` slot exactly like a key-envelope PUT would, so it must archive like one. Read
-    // close to commit time (consistent); a race that actually changes the meta row before this
-    // transaction lands fails the meta `Put`'s own `ConditionExpression` INSIDE the same
-    // transaction, so nothing here commits on a stale read.
+    // Archive the displaced password slot and meta like a key-envelope PUT; a race that changes the meta row fails
+    // its Put condition inside the same transaction.
     const archiveItems = hasRewrapBody
       ? this.envelopes.buildArchiveTransactItems(
           args.householdId,
           existingPasswordSlots[0],
           await this.envelopes.getEnvelopeMeta(args.householdId, true),
-          // The live slot-id membership at the displaced version — the
-          // archived meta's restore manifest, from the same
-          // consistent `listSlots` read above.
+          // Live slot ids at the displaced version: the archived meta restore manifest.
           existingSlots.map((s) => s.slotId),
         )
       : [];
@@ -348,24 +275,16 @@ export class ChangePasswordService {
 
     await this.commitChangeTransaction(transactItems, hasRewrapBody);
 
-    // Revoke every existing session through the shared capability —
-    // including the current device's; the
-    // caller mints a new session below so the current tab keeps working. This
-    // now denylists still-valid access-token jtis from ALL of the user's
-    // refresh rows, not just the active ones, tightening this method's prior
-    // active-rows-only scope.
+    // Revoke every existing session, including this device (a new one is minted below), denylisting still-valid
+    // access jtis from all refresh rows, not just active ones.
     const { sessionGeneration } = await this.sessions.revokeAll({
       userId: args.userId,
       extraJti: { jti: args.currentJti, expiresAt: args.currentAccessExp },
     });
 
-    // Record the revision THIS commit just minted — not the one the session
-    // authenticated against — so the freshly-issued session immediately
-    // carries write authority for a subsequent change. `sessionGeneration` is
-    // the value `revokeAll` just committed — never re-read via `issueSession`'s
-    // own eventually-consistent `findById`, which could observe a stale
-    // replica still holding the generation THIS call just retired and turn
-    // an already-committed password change into a spurious 401.
+    // Record the revision this commit just minted, so the new session carries write authority for a subsequent
+    // change. `sessionGeneration` is the value `revokeAll` just committed, not re-read: a stale replica could hold
+    // the generation just retired and turn a committed change into a spurious 401.
     const session = await this.loginSvc.issueSession({
       userId: args.userId,
       householdId: args.householdId,
@@ -387,17 +306,10 @@ export class ChangePasswordService {
     return session;
   }
 
-  /**
-   * Run the credential(+slot+meta) transaction and map its cancellation
-   * reasons. Item 0 is always the credential `Put`, conditioned on the
-   * session's recorded write authority — a failure there is the ONE
-   * `UPGRADE_REQUIRED` code shared with the key-envelope write path. On the
-   * re-wrap shape, item 2 (the meta `Put`) failing is a real envelope-set
-   * version conflict; on the no-slot shape, item 1 (the absence
-   * `ConditionCheck`) failing means a password slot appeared between the
-   * eligibility read and this commit. A transient reason that survives the
-   * shared bounded retry is a `503`, never a business conflict.
-   */
+  // Runs the transaction and maps cancellations. Item 0 (credential Put, conditioned on the session write authority)
+  // failing is the shared UPGRADE_REQUIRED; on the re-wrap shape item 2 (meta Put) failing is a real version
+  // conflict; on the no-slot shape item 1 (absence check) failing means a slot appeared since the read. A transient
+  // reason past the bounded retry is 503.
   private async commitChangeTransaction(
     transactItems: TransactItem[],
     isRewrap: boolean,
@@ -420,7 +332,7 @@ export class ChangePasswordService {
               'A password unlock method was just set up for this account. Reload and try again.',
           });
         }
-        // Defensive fallback — every guarded item above is enumerated.
+        // Defensive fallback: every guarded item is enumerated above.
         throw new ConflictException({
           code: 'STALE_ENVELOPE_VERSION',
           message: 'Envelope-set version is stale or non-monotonic.',

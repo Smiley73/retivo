@@ -1,15 +1,5 @@
-/**
- * HTTP layer for the account half of "Export my data".
- *
- *   GET /api/v1/auth/account-export?cursor=<opaque> — one page of the export
- *
- * Mounted under the existing `auth` concern, mirroring the key-envelope
- * controller. The route needs a bearer token AND a valid
- * export-authorization cookie (`POST /auth/verify-password` with
- * `purpose: 'data_export'`). Throttled
- * like the sync read routes: the export cookie is a 5-minute window, and the
- * history section pages in a small, bounded number of round trips within it.
- */
+// HTTP layer for the account half of "Export my data" (`GET /auth/account-export?cursor=`). Needs a bearer token and the export-authorization
+// cookie from `POST /auth/verify-password` with `purpose: data_export`; throttled like the sync reads.
 import {
   BadRequestException,
   ConflictException,
@@ -40,8 +30,7 @@ export class AccountExportController {
 
   @Get('account-export')
   @UseGuards(JwtAuthGuard, ExportAuthorizationGuard)
-  // `ExportAuthorizationGuard` re-verifies the export cookie for EVERY caller,
-  // so a bearer token alone is never sufficient.
+  // `ExportAuthorizationGuard` re-verifies the cookie for every caller, so a bearer token alone is never enough.
   @Throttle({ default: { ttl: 60_000, limit: 120 } })
   async export(
     @CurrentUser() me: AccessTokenClaims,
@@ -56,32 +45,24 @@ export class AccountExportController {
           message: err.message,
         });
       }
-      // A concurrent account deletion removed the User row mid-request
-      // (deletion sweeps the other stores non-atomically after it, so
-      // continuing would return a partial bundle presented as complete).
-      // Fail closed with a `409` rather than fabricating an empty account
-      // record — never a `200` with a silently-incomplete export.
+      // A concurrent account deletion removed the User row mid-request and the other stores are swept non-atomically
+      // after it, so continuing would present a partial bundle as complete. Fail closed with 409.
       if (err instanceof AccountExportUserGoneError) {
         throw new ConflictException({
           code: 'ACCOUNT_EXPORT_CONFLICT',
           message: err.message,
         });
       }
-      // The bracketed, strongly-consistent User read around the email-keyed
-      // sections (emailReservations, failedLoginAttempt) could not settle
-      // within the bounded retry — mirrors the envelope-set conflict mapping
-      // just below rather than risk keying those sections off a recycled
-      // `emailLowercase`.
+      // The bracketed User read could not settle within the bounded retry; refuse rather than key the email sections
+      // off a recycled `emailLowercase`.
       if (err instanceof AccountExportEmailKeyReadConflictError) {
         throw new ServiceUnavailableException({
           code: 'ACCOUNT_EXPORT_EMAIL_KEY_CONFLICT',
           message: err.message,
         });
       }
-      // The key-envelope slots/meta are now read via the bracketed,
-      // strongly-consistent `getStableEnvelopeSet`, which fails
-      // closed with this error rather than risking a torn slots/meta pair —
-      // mirrors `key-envelope.controller.ts`'s own mapping of the same error.
+      // The bracketed key-envelope read fails closed rather than return a torn slots and meta pair, as in
+      // `key-envelope.controller.ts`.
       if (err instanceof EnvelopeReadConflictError) {
         throw new ServiceUnavailableException({
           code: 'ENVELOPE_READ_CONFLICT',

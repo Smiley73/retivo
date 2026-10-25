@@ -1,31 +1,5 @@
-/**
- * Snapshot-purge invoker for the `DELETE /auth/account` cascade.
- *
- * On a deployed stack (SNAPSHOT_PURGE_FUNCTION_NAME set) this invokes the
- * dedicated least-privilege snapshot-purge Lambda synchronously
- * (RequestResponse) so the api role no longer needs bucket-wide
- * s3:DeleteObject. A
- * non-2xx status code or a `FunctionError` payload is surfaced as a
- * thrown SnapshotPurgeError so the caller fails the deletion request
- * before any irreversible DynamoDB / auth-state sweep (purge-first
- * ordering).
- *
- * In local / emulator runtime (function name unset) it runs the same S3
- * list+delete in-process so `pnpm dev` and the emulator test suite don't
- * require a deployed Lambda. The invocation payload carries ONLY the
- * household id (+ an optional keep-key list) — no email, token, password,
- * or other PII.
- *
- * Optional keep-key mode: the
- * erase-history workspace clear passes `{ keepKeys }` so the just-minted
- * live empty snapshot is EXCLUDED from the delete — otherwise the purge
- * would delete the very object `WorkspaceMeta` was just repointed at,
- * re-creating the dangling pointer purge-last exists to avoid. When
- * `keepKeys` is absent/empty the behaviour is UNCHANGED (delete every
- * `${householdId}/` object), so delete-account + encrypted-reset are
- * untouched. IAM is unchanged — same `s3:DeleteObject` on the prefix; the
- * keep-key is only a delete-list filter.
- */
+// Snapshot-purge invoker for the `DELETE /auth/account` cascade: invokes the least-privilege purge Lambda synchronously (local runs purge in
+// process); a failure throws before any irreversible sweep. See "Background Lambdas" in docs/architecture.md.
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -43,7 +17,6 @@ import type { EnvConfig } from '../common/env.config.js';
 
 const DELETE_BATCH_SIZE = 1000; // S3 DeleteObjects hard cap.
 
-/** Thrown when the snapshot purge fails; the caller aborts the deletion. */
 export class SnapshotPurgeError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
@@ -69,12 +42,10 @@ export class AccountSnapshotPurgeService {
   }
 
   /**
-   * Delete every snapshot under `${householdId}/`, EXCLUDING any
-   * `opts.keepKeys` (the keep-key mode used by the erase-history workspace
-   * clear). Throws SnapshotPurgeError on any failure so a caller that
-   * needs purge-first ordering (delete-account) aborts before touching
-   * DynamoDB / auth state. When `keepKeys` is absent/empty the behaviour is
-   * unchanged (delete everything under the prefix).
+   * Deletes every snapshot under `${householdId}/` except `opts.keepKeys` (the erase-history clear keeps the
+   * just-minted live snapshot, which `WorkspaceMeta` points at). Throws SnapshotPurgeError on any failure so
+   * delete-account aborts before touching DynamoDB. The payload carries only the household id and the keep list, no
+   * PII.
    */
   async purge(
     householdId: string,
@@ -85,7 +56,7 @@ export class AccountSnapshotPurgeService {
       await this.invokePurgeLambda(this.purgeFunctionName, householdId, keepKeys);
       return;
     }
-    // Local / emulator fallback — no deployed Lambda to call.
+    // Local and emulator fallback: no deployed Lambda to call.
     await this.purgeInProcess(householdId, keepKeys);
   }
 
@@ -100,9 +71,7 @@ export class AccountSnapshotPurgeService {
         new InvokeCommand({
           FunctionName: functionName,
           InvocationType: 'RequestResponse',
-          // Include `keepKeys` ONLY when non-empty so the delete-account /
-          // encrypted-reset payload stays exactly `{ householdId }`
-          // (unchanged); the erase-history clear adds the keep list.
+          // Include `keepKeys` only when non-empty, so other callers payload stays exactly `{ householdId }`.
           Payload: Buffer.from(
             JSON.stringify(
               keepKeys.length > 0 ? { householdId, keepKeys } : { householdId },
@@ -116,8 +85,7 @@ export class AccountSnapshotPurgeService {
         { cause: err },
       );
     }
-    // A delivery-level non-2xx (throttling, permissions) or a handler
-    // exception (FunctionError) both mean the snapshots may not be gone.
+    // A delivery-level non-2xx or a handler FunctionError both mean the snapshots may not be gone.
     if ((res.StatusCode ?? 0) < 200 || (res.StatusCode ?? 0) >= 300) {
       throw new SnapshotPurgeError(
         `Snapshot-purge Lambda returned status ${res.StatusCode ?? 'unknown'}`,
@@ -149,8 +117,7 @@ export class AccountSnapshotPurgeService {
         const keys = (list.Contents ?? [])
           .map((o) => o.Key)
           .filter((k): k is string => typeof k === 'string')
-          // Keep-key mode: never delete a preserved object (the live
-          // empty snapshot the workspace clear just repointed to).
+          // Never delete a preserved object.
           .filter((k) => !keep.has(k));
         for (let i = 0; i < keys.length; i += DELETE_BATCH_SIZE) {
           const slice = keys.slice(i, i + DELETE_BATCH_SIZE);
@@ -160,11 +127,8 @@ export class AccountSnapshotPurgeService {
               Delete: { Objects: slice.map((Key) => ({ Key })), Quiet: true },
             }),
           );
-          // DeleteObjects returns HTTP 200 with a per-object Errors[] on
-          // partial failure. Treat any error as a purge failure so the
-          // deletion cascade aborts before the irreversible sweeps —
-          // never report success with orphaned snapshots left behind.
-          // No object keys in the message (no PII / no key leakage).
+          // DeleteObjects returns 200 with per-object Errors on partial failure; treat it as a purge failure so the
+          // cascade aborts. No object keys in the message.
           if (out.Errors && out.Errors.length > 0) {
             throw new SnapshotPurgeError(
               `In-process snapshot purge failed to delete ${out.Errors.length} object(s)`,
@@ -176,8 +140,7 @@ export class AccountSnapshotPurgeService {
           : undefined;
       } while (continuationToken);
     } catch (err) {
-      // Already a typed purge failure (e.g. a partial-delete Errors[]
-      // thrown above) → surface it as-is; don't double-wrap.
+      // Already a typed purge failure: surface as-is.
       if (err instanceof SnapshotPurgeError) throw err;
       throw new SnapshotPurgeError('In-process snapshot purge failed', {
         cause: err,

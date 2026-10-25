@@ -1,51 +1,14 @@
-/**
- * The password-reset "restriction window" for newly-enrolled factors
- * (the compensating control for the reset→inbox-
- * takeover path). An
- * attacker who owns the mailbox resets the password, signs in, and satisfies
- * an emailed-code step-up (the floor for an account with no enrolled factor) —
- * step-up alone does not close that variant, because the emailed code IS
- * the thing that gets satisfied. This window is the compensating control.
- *
- * A factor enrolled while the window is open is durably marked restricted at
- * WRITE time (see `passkey.controller.ts#registerFinish` /
- * `mfa.controller.ts#mfaTotpEnrollConfirm`) — restriction is state on the
- * factor row, never re-derived from these timestamps at read time, so it
- * stays restricted after the window closes until an explicit
- * `confirm-restriction` lift.
- *
- * Window boundaries — the pending and completed branches are resolved
- * INDEPENDENTLY and unioned (never one superseding the other), because both
- * `User.currentResetToken` / `User.passwordResetRequestOpenedAt` are
- * overwritten by every new reset request (`resetSendUpdate`), including one
- * fired and abandoned AFTER an earlier reset already completed:
- *  - Opens when a reset is REQUESTED (`User.currentResetToken` set,
- *    `User.passwordResetRequestOpenedAt` stamped by `resetSendUpdate`).
- *    Bounded to `RESET_TTL_SEC` after the request even when the link is never
- *    consumed — the reset TOKEN's own TTL — so a stale/abandoned
- *    `currentResetToken` on a long-dormant account (nothing else clears it
- *    short of a consume) cannot restrict factors forever.
- *  - Closes `FACTOR_RESTRICTION_WINDOW_SEC` after the reset COMPLETES
- *    (`User.lastPasswordResetCompletedAt`, stamped by `resetConsumeUpdate`)
- *    — the inbox-takeover sign-in happens AFTER the request, so the window
- *    must stay open past consume, not just up to it. Evaluated against
- *    `User.lastPasswordResetCompletedRequestedAt` — the request instant
- *    `resetConsumeUpdate` durably pairs with the completion — NOT the
- *    current `passwordResetRequestOpenedAt`, so a later, never-consumed
- *    request can only ever widen this window, never end it early.
- */
+// The password-reset restriction window for newly enrolled factors, the control against the reset-then-inbox-takeover path: an attacker who
+// owns the mailbox satisfies an emailed-code step-up, so step-up alone does not close it.
 import { RESET_TTL_SEC } from './password-reset.service.js';
 import type { UserRow } from '../dynamo/types.js';
 
 /**
- * Post-completion restriction window: 24 hours gives the legitimate owner a full day —
- * spanning at least one normal login — to notice the reset they didn't
- * request and act, while keeping the window tied to the actual reset event
- * rather than lingering indefinitely.
+ * Post-completion restriction window, 24 hours: long enough for the owner to notice a reset they did not request,
+ * tied to the actual reset event.
  */
 export const FACTOR_RESTRICTION_WINDOW_SEC = 24 * 60 * 60;
 
-/** The subset of `UserRow` {@link resolveOpenResetWindow} reads. */
 export type ResetWindowUser = Pick<
   UserRow,
   | 'currentResetToken'
@@ -55,16 +18,14 @@ export type ResetWindowUser = Pick<
 >;
 
 /**
- * The still-open reset window, if any, that a factor enrolled at `nowMs`
- * falls inside — or `null` when none is open. `requestedAt` is the ISO stamp
- * of the reset REQUEST that opened it (never the completion time) —
- * `passkey.controller.ts` / `mfa.controller.ts` stamp it onto the newly-
- * restricted factor row so a later `confirm-restriction` lift can compare a
- * proving factor's own enrollment against the correct instant. When both the
- * pending and completed branches are open at once, the EARLIER of the two
- * `requestedAt`s is returned, so a later abandoned request can only widen
- * this comparison instant, never move it forward and let more factors
- * "predate" it.
+ * The still-open reset window a factor enrolled at `nowMs` falls inside, or null. A factor is marked restricted
+ * durably at write time and stays so after the window closes until `confirm-restriction`; it is never re-derived from
+ * these timestamps. The pending branch opens at the request (`passwordResetRequestOpenedAt`) and is bounded to
+ * `RESET_TTL_SEC`, so an abandoned `currentResetToken` cannot restrict factors forever. The completed branch stays
+ * open `FACTOR_RESTRICTION_WINDOW_SEC` after completion, evaluated against `lastPasswordResetCompletedRequestedAt`,
+ * so a later never-consumed request can only widen the window. The branches are resolved independently and unioned.
+ * `requestedAt` is the reset REQUEST instant (never completion), the earlier of the two when both are open, so an
+ * abandoned request cannot move the comparison forward and let more factors predate it.
  */
 export function resolveOpenResetWindow(
   user: ResetWindowUser,
@@ -79,9 +40,7 @@ export function resolveOpenResetWindow(
     }
   };
 
-  // Pending, unconsumed request — bounded to the reset token's own TTL so an
-  // abandoned `currentResetToken` (only a successful consume ever clears it)
-  // cannot keep the window open forever on a long-dormant account.
+  // Pending, unconsumed request, bounded to the reset token TTL.
   const requestedAtIso = user.passwordResetRequestOpenedAt;
   if (requestedAtIso) {
     const requestedMs = Date.parse(requestedAtIso);
@@ -94,15 +53,9 @@ export function resolveOpenResetWindow(
     }
   }
 
-  // Completed reset, still inside the post-completion window. Resolved from
-  // `lastPasswordResetCompletedRequestedAt` — the request instant
-  // `resetConsumeUpdate` durably pairs with the completion — NEVER from the
-  // current `passwordResetRequestOpenedAt` above, which a later, never-
-  // consumed reset request overwrites. That decoupling is the whole point:
-  // without it, a second, abandoned reset request would close this branch
-  // early by making the completion look like it predates the (unrelated)
-  // newer request. Falls back to the completion stamp itself for a row
-  // written before this field existed.
+  // Completed reset still inside its window, resolved from `lastPasswordResetCompletedRequestedAt`, never the
+  // overwritable `passwordResetRequestOpenedAt`: otherwise an abandoned second request would close this branch
+  // early. Falls back to the completion stamp for rows from before the field.
   const completedAtIso = user.lastPasswordResetCompletedAt;
   if (completedAtIso) {
     const completedMs = Date.parse(completedAtIso);

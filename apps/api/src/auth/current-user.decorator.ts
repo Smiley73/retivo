@@ -1,7 +1,4 @@
-/**
- * Parameter decorator: extract the authenticated user's claims from the
- * request, populated by JwtAuthGuard. Only safe to use on guarded routes.
- */
+// Parameter decorator extracting the authenticated claims set by JwtAuthGuard; guarded routes only.
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
 import type { AccessTokenClaims } from './jwt.service.js';

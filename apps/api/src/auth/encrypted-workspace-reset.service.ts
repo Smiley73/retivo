@@ -1,25 +1,5 @@
-/**
- * Account-preserving encrypted-workspace reset.
- *
- * The recovery path for an authenticated user whose encrypted household
- * data is unreadable (every unwrapper lost). It wipes the unreadable
- * household sync state + snapshots + key envelopes and revokes all
- * sessions, but keeps the account credentials and the AuthEvent audit
- * history — so the user re-bootstraps clean against a now-empty,
- * re-keyable household instead of deleting the account.
- *
- * Order mirrors `DeleteAccountService` (purge-first — most reversible):
- *   audit started → revoke all sessions → S3 snapshot purge → shared
- *   household-data sweep → key-envelope delete → audit completed.
- *
- * The snapshot purge runs BEFORE any irreversible DynamoDB delete: a
- * purge failure throws here, leaving the account intact with only
- * sessions revoked (recoverable by re-login + retry). The household
- * sync-row sweep reuses the shared `HouseholdSweepService` — no
- * second `BatchWriteItem` code path. Key-envelope deletion is NOT part of
- * the shared sweep; it belongs exclusively to this flow, so account
- * deletion never touches the key table.
- */
+// Account-preserving encrypted-workspace reset: the recovery path when encrypted household data is unreadable. Wipes sync state, snapshots and
+// key envelopes and revokes sessions, keeping credentials and audit history; purge-first like `DeleteAccountService`.
 import {
   BadRequestException,
   Injectable,
@@ -43,18 +23,15 @@ export interface ResetEncryptedWorkspaceArgs {
   householdId: string;
   currentJti: string;
   currentAccessExp: number;
-  /** Password re-verify — always required now
-   * (the flag-off floor is phrase + password). */
+  /** Password re-verify, always required (the flag-off floor is phrase plus password). */
   currentPassword: string;
-  /** Fresh step-up factor — required when `AUTH_MFA_ENFORCED` is on. */
+  /** Fresh step-up factor, required when `AUTH_MFA_ENFORCED` is on. */
   method?: StepUpMethod;
   code?: string;
   assertion?: AuthenticationResponseJSON;
   ip: string | null;
   userAgent: string | null;
-  /** Device identity — lets a trusted
-   *  device's password re-verify bypass the per-address backoff, mirroring
-   *  login/delete-account. */
+  /** Lets a trusted device bypass the per-address backoff, as in login. */
   deviceId?: string;
   deviceTrustToken?: string;
 }
@@ -79,25 +56,20 @@ export class EncryptedWorkspaceResetService {
   }
 
   async resetEncryptedWorkspace(args: ResetEncryptedWorkspaceArgs): Promise<void> {
-    // The confirmation phrase itself is validated at the DTO layer. Before the started audit runs
-    // the caller must clear the raised gate: a password re-verify (always) + a fresh step-up factor
-    // (when `AUTH_MFA_ENFORCED` is on).
+    // The phrase is validated at the DTO layer; the caller must clear the password re-verify and, when
+    // `AUTH_MFA_ENFORCED` is on, a fresh step-up before the started audit.
     const user = await this.users.findById(args.userId);
     if (!user) {
-      // The JWT claim names a user whose row is gone — treat as a credential
-      // failure rather than leaking the state (mirrors DeleteAccountService).
+      // The claim names a user whose row is gone: a credential failure, leaking no state.
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Current password is incorrect.',
       });
     }
 
-    // Password re-verify via VerifyPasswordService, which now owns the per-account backoff
-    // internally — dropping this service's former outer `verifyWithBackoff` wrap so a single wrong
-    // password isn't double-counted. A wrong password throws `401 INVALID_CREDENTIALS`
-    // (backoff-counted first); a lockout throws `429 LOGIN_BACKOFF`; a backend/transient fault
-    // propagates uncounted. `VerifyPasswordService.verify` writes its own `password_verify` /
-    // `password_verify_failed` audit; `currentPassword` is never logged.
+    // `VerifyPasswordService` owns the per-account backoff and its `password_verify` audit, so a single wrong
+    // password is not double-counted. A lockout is 429, a wrong password 401, a backend fault uncounted;
+    // `currentPassword` is never logged.
     await this.verifyPasswordSvc.verify({
       userId: args.userId,
       currentPassword: args.currentPassword,
@@ -107,8 +79,7 @@ export class EncryptedWorkspaceResetService {
       deviceTrustToken: args.deviceTrustToken,
     });
 
-    // Fresh second-factor step-up — layered on top of phrase + password
-    // when the flag is on; skipped on the flag-off floor.
+    // Step-up layered on phrase and password when the flag is on.
     if (this.mfaEnforced) {
       if (!args.method) {
         throw new BadRequestException({
@@ -127,9 +98,7 @@ export class EncryptedWorkspaceResetService {
       });
     }
 
-    // Audit first — the AuthEvent table is never swept, so the started
-    // event survives even if the reset aborts mid-flight (e.g. a purge
-    // failure), giving an audit trail of the attempt.
+    // Audit first: the AuthEvent table is never swept, so the started event survives an aborted reset.
     await this.auth.record({
       userId: args.userId,
       eventType: 'encrypted_workspace_reset_started',
@@ -139,50 +108,34 @@ export class EncryptedWorkspaceResetService {
     });
 
     try {
-      // Revoke every session so each device re-bootstraps clean against
-      // the now-empty, re-keyable household.
+      // Revoke every session so each device re-bootstraps against the empty, re-keyable household.
       await this.sweep.revokeAllSessions({
         userId: args.userId,
         currentJti: args.currentJti,
         currentAccessExp: args.currentAccessExp,
       });
 
-      // Purge S3 snapshots BEFORE any irreversible DynamoDB delete. A
-      // purge failure throws here, leaving the account intact (only
-      // sessions revoked, recoverable by re-login + retry).
+      // Purge S3 snapshots before any irreversible DynamoDB delete: a failure leaves the account intact, recoverable
+      // by re-login and retry.
       await this.snapshotPurge.purge(args.householdId);
 
-      // Shared household-data sweep: MutationLog, IdempotencyKey, AggregateVersion, WorkspaceMeta,
-      // DeviceRegistry. Its WorkspaceMeta delete is the capturing one (`DeleteItem` +
-      // `ReturnValues: 'ALL_OLD'`), so the daily push-quota state comes back exactly as it stood
-      // when the row went away — no separate read for an in-flight push's charge to slip past, and
-      // no second delete to erase a charge that recreated the row in between. An
-      // encrypted-workspace reset is household-triggerable and must not grant a fresh budget.
+      // The sweep capturing WorkspaceMeta delete returns the push-quota state, so a household-triggerable reset
+      // cannot grant a fresh budget.
       const { priorWorkspaceMeta } = await this.sweep.sweepHouseholdData(
         args.householdId,
       );
 
-      // Recreate the (now-empty) WorkspaceMeta row, then MERGE the captured
-      // counters back onto it. Unlike `RestoreService`/`ClearWorkspaceService`
-      // there is no fresh snapshot to point a `reinitializeForRestore` at
-      // here (this flow wipes ALL sync state and mints nothing to replace
-      // it), so this reuses `createIfMissing`'s bare-row shape — the same
-      // row a first-ever push would create. The carry-forward is a separate
-      // atomic `ADD` rather than a field on the create: the create's
-      // conditional Put defers to a row a concurrent push may already have
-      // recreated with its own fresh charge, and an `ADD` keeps BOTH that
-      // charge and the captured counters instead of discarding one of them.
+      // Recreate the empty WorkspaceMeta with `createIfMissing` (no fresh snapshot to point `reinitializeForRestore`
+      // at) and merge the captured counters back with an atomic ADD, which keeps both a concurrent push fresh charge
+      // and the captured counters.
       await this.workspaceMeta.createIfMissing(args.householdId);
       await this.workspaceMeta.carryQuotaForward(args.householdId, priorWorkspaceMeta);
 
-      // Key-envelope rows — exclusive to this flow (NOT in the shared
-      // sweep): all slots + the ENVELOPE_META sentinel.
+      // Key-envelope rows are exclusive to this flow, outside the shared sweep.
       await this.householdKeyEnvelopes.deleteAllForHousehold(args.householdId);
     } catch (err) {
-      // Surface the failure in the server log before re-throwing — the
-      // operator needs a trail when a reset aborts mid-flight (e.g. a
-      // snapshot-purge failure leaving only sessions revoked). No PII /
-      // secrets: only the householdId, which is already in the audit row.
+      // Log the failure server-side before rethrowing, for an operator trail; only the householdId, already in the
+      // audit row.
       this.logger.warn(
         `Encrypted workspace reset failed for household ${args.householdId}`,
         err instanceof Error ? err.stack : String(err),

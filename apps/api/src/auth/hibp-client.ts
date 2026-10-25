@@ -1,15 +1,5 @@
-/**
- * Have-I-Been-Pwned k-anonymity client.
- *
- * Sends only the first 5 chars of the SHA-1 hash to api.pwnedpasswords.com,
- * receives every full-hash suffix that shares that prefix, and looks for the
- * remaining 35 chars locally. The plaintext password never leaves the server.
- *
- * Always invoked by PasswordValidatorService (no opt-out flag). A request
- * timeout (3s AbortController), network failure, or non-200 fails open
- * (returns false) — the local common-passwords check still runs as the
- * primary defense, so an HIBP outage never blocks a password change.
- */
+// Have-I-Been-Pwned k-anonymity client: only the first 5 chars of the SHA-1 leave the server. A timeout (3s), network failure or non-200 fails
+// open, since the local common-passwords check is the primary defense.
 import { Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
@@ -20,7 +10,7 @@ const REQUEST_TIMEOUT_MS = 3000;
 export class HibpClient {
   private readonly logger = new Logger(HibpClient.name);
 
-  /** True if the password's SHA-1 appears in the HIBP breach corpus. */
+  /** True if the password SHA-1 appears in the HIBP corpus. */
   async isPwned(password: string): Promise<boolean> {
     const sha1 = createHash('sha1').update(password).digest('hex').toUpperCase();
     const prefix = sha1.slice(0, 5);

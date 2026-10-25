@@ -22,13 +22,8 @@ export class FailedLoginAttemptsRepository extends BaseRepository {
   }
 
   async find(emailLowercase: string): Promise<FailedLoginAttemptRow | null> {
-    // `ConsistentRead`: this read enforces the brute-force backoff/lockout
-    // window. On the very next login attempt after an atomic `increment` commits,
-    // an eventually-consistent replica could still return the stale pre-increment
-    // count/timestamp and admit an attempt the fresh state should have blocked. A
-    // strongly-consistent single-item read closes that window; the ~2x RCU cost is
-    // negligible at this table's traffic and adds no extra request. `checkBackoff`
-    // is the only production caller and always wants the freshest state.
+    // ConsistentRead: this read enforces the brute-force lockout window, and a stale replica after an atomic increment
+    // would admit an attempt the fresh state should block.
     const r = await this.doc.send(
       new GetCommand({
         TableName: this.tableName,
@@ -40,46 +35,16 @@ export class FailedLoginAttemptsRepository extends BaseRepository {
   }
 
   /**
-   * Atomically record one failed attempt in a single `UpdateItem`: `ADD` 1 to
-   * the running counter, stamp the latest-failure time, and (re)arm the numeric
-   * epoch-second TTL. Returns the post-increment row (`ALL_NEW`) so the caller
-   * needs no separate read.
+   * Atomically records one failed attempt in a single UpdateItem (ADD 1, stamp the latest-failure time, re-arm the
+   * TTL) and returns the post-increment row. An atomic ADD cannot lose a concurrent increment, unlike a
+   * find-then-Put. No idempotency token wraps it: an ambiguous SDK retry could double-count, which only makes the
+   * backoff more conservative (fail-safe).
    *
-   * This is the race fix: the previous
-   * find-then-`Put` was a read/modify/write that silently dropped a concurrent
-   * increment (lost update) — two racers each read count `N` and both wrote
-   * `N+1`. An atomic `ADD` cannot lose an increment, so `N` concurrent misses
-   * always land an exact `+N`.
-   *
-   * No idempotency token wraps this write: an ambiguous-response SDK retry
-   * (DynamoDB applied the `ADD`, but the response was lost) could rarely
-   * double-count one failed-login attempt. That is accepted deliberately — the
-   * effect is strictly fail-SAFE (over-counting only makes the derived backoff
-   * slightly more conservative, never weaker), so the transactional-write
-   * `ClientRequestToken` machinery would add cost/complexity for no security
-   * gain.
-   *
-   * The timestamp/TTL advance is **monotonic**: the counter `ADD` is
-   * fail-safe (it can only climb), but a blind `SET lastFailedAt = :ts` is not —
-   * a delayed / out-of-order request (or an ambiguous SDK retry that lands after
-   * a newer failure already committed a later timestamp) could stamp its OLDER
-   * timestamp on top and move `lastFailedAt`/`expiresAt` BACKWARD, shortening the
-   * derived backoff window below what the newer failure earned. So the primary
-   * write gates the whole `UpdateItem` on `attribute_not_exists(lastFailedAt) OR
-   * lastFailedAt <= :ts`; if that condition fails (this request's timestamp would
-   * regress), a fallback update still lands the increment WITHOUT overwriting a
-   * newer timestamp/TTL. The counter therefore always advances on every call, and
-   * the timestamp/TTL never move backward.
-   *
-   * The fallback still `SET`s `lastFailedAt`/`expiresAt` via `if_not_exists`:
-   * a concurrent `clear()` (an unconditional `DeleteCommand`) can delete
-   * the row between the primary conditional write failing and this fallback
-   * running. A bare `ADD` on the now-absent item would recreate a row holding
-   * ONLY the key + counter — no `lastFailedAt` (so `checkBackoff` reads a
-   * non-finite timestamp and fails open) and no `expiresAt` (so the row never
-   * TTL-expires). `if_not_exists` seeds valid values on a freshly-recreated row
-   * while leaving a genuinely-existing newer timestamp from a concurrent winner
-   * untouched.
+   * The timestamp and TTL advance monotonically: the primary write is gated on `attribute_not_exists(lastFailedAt) OR
+   * lastFailedAt <= :ts`, so a delayed request cannot move them backward and shorten the backoff. If that fails, a
+   * fallback still lands the increment and SETs both via `if_not_exists`: a concurrent `clear()` may have deleted the
+   * row, and a bare ADD would recreate it with no `lastFailedAt` (checkBackoff would fail open) and no `expiresAt`
+   * (never TTL-expired).
    */
   async increment(
     emailLowercase: string,
@@ -94,7 +59,7 @@ export class FailedLoginAttemptsRepository extends BaseRepository {
           Key: { emailLowercase },
           UpdateExpression:
             'SET lastFailedAt = :ts, expiresAt = :exp ADD consecutiveFailures :one',
-          // Advance the timestamp/TTL only when it does not regress (monotonic).
+          // Advance the timestamp and TTL only when they do not regress.
           ConditionExpression:
             'attribute_not_exists(lastFailedAt) OR lastFailedAt <= :ts',
           ExpressionAttributeValues: {
@@ -108,12 +73,7 @@ export class FailedLoginAttemptsRepository extends BaseRepository {
       return r.Attributes as FailedLoginAttemptRow;
     } catch (err) {
       if (!(err instanceof ConditionalCheckFailedException)) throw err;
-      // This request's timestamp would move `lastFailedAt` backward — a newer
-      // failure already stamped a later time. Still land the increment (the
-      // counter is fail-safe and must never be skipped), and seed
-      // `lastFailedAt`/`expiresAt` via `if_not_exists` so a row that a concurrent
-      // `clear()` just deleted is recreated with valid values while a
-      // genuinely-existing newer timestamp is left at its newer values.
+      // Would regress `lastFailedAt`: still land the increment, seeding the timestamps with `if_not_exists`.
       const r = await this.doc.send(
         new UpdateCommand({
           TableName: this.tableName,
@@ -133,14 +93,8 @@ export class FailedLoginAttemptsRepository extends BaseRepository {
   }
 
   /**
-   * Clear the counter on a success. An unconditional delete would destroy an
-   * existing guessing-notice stamp — the row would
-   * come back empty on the account's very next burst and re-notify inside the
-   * same 24h window the stamp exists to bound. So: delete ONLY when no stamp
-   * is present (the common, no-notice-yet path); when a stamp exists, fall
-   * back to removing just the counter fields, leaving the stamp (and the
-   * row's TTL) alive. Mirrors `increment`'s primary/fallback shape — one
-   * round trip on the common path.
+   * Clears the counter on success. An unconditional delete would destroy a guessing-notice stamp and let the next
+   * burst re-notify inside the same 24h, so a row holding a stamp has only its counter fields removed.
    */
   async clear(emailLowercase: string): Promise<void> {
     try {
@@ -164,13 +118,8 @@ export class FailedLoginAttemptsRepository extends BaseRepository {
   }
 
   /**
-   * Unconditional delete for account-lifecycle cleanup — always removes the row, including any
-   * guessing-notice stamp. `clear()` deliberately preserves that stamp on a
-   * successful login so a still-guessed account isn't re-notified inside the
-   * same 24h window; but account deletion must not leave the row (and its
-   * stamp) behind, or a newly registered account reusing the freed address
-   * would inherit the old notice-suppression state. Only `DeleteAccountService`
-   * should call this — every other caller of the shared primitive wants the
+   * Unconditional delete for account deletion, stamp included, so a newly registered account reusing the address does
+   * not inherit the old notice-suppression state. Only `DeleteAccountService` should call it; others want the
    * stamp-preserving `clear()`.
    */
   async deleteRow(emailLowercase: string): Promise<void> {
@@ -183,13 +132,9 @@ export class FailedLoginAttemptsRepository extends BaseRepository {
   }
 
   /**
-   * Once-per-24h gate for the guessing notice: one
-   * atomic conditional `UpdateItem` so two concurrent threshold-crossing
-   * requests can't both win. Advances (and returns `true`) only when no stamp
-   * exists yet or the existing one is more than 24h old; otherwise a no-op
-   * (`false`) — including when this call is racing another winner. Also
-   * re-arms the row's TTL via `if_not_exists` so a stamp written on an
-   * otherwise-cleared row still survives ~24h.
+   * Once-per-24h gate for the guessing notice: one atomic conditional UpdateItem, so two concurrent
+   * threshold-crossing requests cannot both win. Returns true only when no stamp exists or it is over 24h old; also
+   * re-arms the TTL via `if_not_exists`.
    */
   async stampGuessingNotice(
     emailLowercase: string,

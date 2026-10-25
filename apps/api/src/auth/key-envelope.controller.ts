@@ -1,21 +1,5 @@
-/**
- * HTTP layer for zero-knowledge household key envelopes.
- *
- *   GET    /api/v1/auth/key-envelopes            — list slots + envelope-set meta
- *   POST   /api/v1/auth/key-envelopes/activate    — atomic first-slot-set activation
- *   PUT    /api/v1/auth/key-envelopes/:slotId     — upsert a slot
- *   DELETE /api/v1/auth/key-envelopes/:slotId     — remove a slot
- *
- * All routes are JWT-authenticated (the global `JwtAuthGuard` applies),
- * CSRF-protected, and Origin-checked (the global middleware on every
- * state-changing request).
- *
- * The server stores wrapped key material OPAQUELY. It never unwraps,
- * decrypts, validates, or logs `wrappedKey`, and it never recomputes the
- * envelope-set HMAC (it holds no household data key). Its only active role on
- * write is enforcing a monotonic `envelopeSetVersion` so a stale client cannot
- * roll the set version backwards.
- */
+// HTTP layer for zero-knowledge household key envelopes: list, activate, upsert and delete slots. The server stores wrapped key
+// material opaquely and only enforces a monotonic `envelopeSetVersion`.
 import {
   BadRequestException,
   Body,
@@ -80,37 +64,20 @@ interface ListEnvelopesResponse {
   envelopeSetVersion: number;
   envelopeSetTag: string;
   /**
-   * The account credential's CURRENT revision, read fresh on every call — never cached, never
-   * derived from the slot set. The client compares this against a `password` slot's own
-   * `credentialRevision` to decide whether a re-wrap is owed. Resolved the same way the write path
-   * resolves it ({@link resolveCredentialRevision}), so a legacy credential row (no
-   * `credentialRevision` yet) reads the same fixed sentinel here as it does on the write's
-   * `ConditionCheck`.
+   * The account credential current revision, read fresh on every call. The client compares it with a `password` slot
+   * `credentialRevision` to decide whether a re-wrap is owed; resolved like the write path
+   * (`resolveCredentialRevision`), so a legacy row reads the same sentinel as the write ConditionCheck.
    */
   currentCredentialRevision: string;
 }
 
-/** Upper bound on a client-chosen `:slotId` — matches the DTO's `slotId` cap. */
+// Upper bound on a client-chosen `:slotId`; matches the DTO cap.
 const MAX_SLOT_ID_LEN = 64;
 
-/**
- * Validate a client-chosen slot id (a DynamoDB sort key the client controls
- * directly) BEFORE any read/write. Shared by {@link SlotIdValidationPipe}
- * (the single-slot `PUT`/`DELETE` route param) and `activate` (every element
- * of its bulk `slots` array) — one
- * definition, so the two routes can never drift on what a valid slot id is:
- *  - the reserved `ENVELOPE_META` sentinel is rejected — it is the per-household
- *    envelope-set integrity row (envelopeSetVersion/envelopeSetTag). Letting a
- *    client PUT/DELETE it would overwrite or delete the set's integrity meta and
- *    corrupt the household's key-envelope set;
- *  - an id starting with the archive namespace ({@link isArchiveSlotId}) is rejected — same reasoning as the
- *    `ENVELOPE_META` reservation: a client write there would corrupt or spoof
- *    an archived envelope-set version;
- *  - empty / whitespace-only ids are rejected (a blank sort key is meaningless
- *    and would land as an empty-string key);
- *  - an over-long id is rejected (bounds abuse, matches the DTO cap).
- * Throws `400 INVALID_SLOT_ID` at the boundary (fail fast) on any violation.
- */
+// Validates a client-chosen slot id (a DynamoDB sort key) before any read or write, shared by `SlotIdValidationPipe`
+// and `activate` so the two routes cannot drift. Rejects the reserved `ENVELOPE_META` sentinel and the archive
+// namespace (a client write there would corrupt or spoof the integrity meta or an archived version), blank ids, and
+// over-long ids, with 400 INVALID_SLOT_ID.
 function assertValidSlotId(value: string): void {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new BadRequestException({
@@ -132,8 +99,7 @@ function assertValidSlotId(value: string): void {
   }
 }
 
-/** Validates the `:slotId` path parameter shared by `upsert` + `remove` — see
- *  {@link assertValidSlotId}. */
+// Validates the `:slotId` path parameter shared by `upsert` and `remove`.
 @Injectable()
 class SlotIdValidationPipe implements PipeTransform<string, string> {
   transform(value: string): string {
@@ -161,16 +127,9 @@ export class KeyEnvelopeController {
   }
 
   /**
-   * Return the household's key-envelope slot collection plus the
-   * envelope-set integrity meta. Modest read limit (20/min): a fresh
-   * unlock fetches the set once; this is not a hot path.
-   *
-   * Reads a CONSISTENT snapshot via {@link HouseholdKeyEnvelopesRepository.getStableEnvelopeSet} —
-   * a bracketed, strongly-consistent read that never returns a torn
-   * slots/meta pair. If a concurrent atomic slot+meta write keeps landing
-   * mid-read past the bounded retry, the read surfaces `503
-   * ENVELOPE_READ_CONFLICT` instead of an inconsistent pair the client's HMAC
-   * check would fail closed on.
+   * Returns the household slot collection and the integrity meta from a bracketed, strongly consistent read
+   * (`getStableEnvelopeSet`), so it never returns a torn pair; if concurrent writes outlast the bounded retry it
+   * surfaces 503 ENVELOPE_READ_CONFLICT. Read limit 20/min.
    */
   @Get('key-envelopes')
   @Throttle({ default: { ttl: 60_000, limit: 20 } })
@@ -190,13 +149,9 @@ export class KeyEnvelopeController {
       }
       throw err;
     }
-    // Server-authored current credential revision: read fresh, alongside the slot set, so the
-    // client's owed-ness compare never has to make a second round-trip. A caller with no credential
-    // row (should not happen for an authenticated JWT) resolves to the same legacy sentinel
-    // `resolveCredentialRevision` gives an absent row. Strongly consistent: an
-    // eventually-consistent replica read can still see the pre-reset revision for a moment after a
-    // reset commits elsewhere, which would falsely compare equal to a stale slot revision and
-    // suppress a re-wrap that is genuinely owed.
+    // Read fresh and strongly consistent: a replica could show the pre-reset revision, which would falsely equal a
+    // stale slot revision and suppress a re-wrap that is owed. A caller with no credential row resolves to the
+    // legacy sentinel.
     const credential = await this.credentials.findByUserIdConsistent(me.userId);
     return {
       slots,
@@ -207,30 +162,13 @@ export class KeyEnvelopeController {
   }
 
   /**
-   * Atomically activate a household's ENTIRE initial key-envelope slot set.
-   * Genuine first-time activation is the
-   * ONLY proofless add the step-up matrix allows, so it must never be
-   * reachable via two separate PUTs whose intermediate state (one slot
-   * committed, the rest not yet) the OLD matrix used to exempt outright —
-   * this route commits every slot, the meta bump, and archive rows for any
-   * meta-only residue in ONE transaction at a SINGLE version bump instead.
-   *
-   * Refuses with a distinct `409 ENVELOPE_SET_NOT_EMPTY` — never
-   * `STALE_ENVELOPE_VERSION` — when the household already holds a live slot;
-   * the client must be able to tell "someone else already keyed this
-   * household" apart from an ordinary version race. Emptiness is fenced
-   * against a race even though DynamoDB cannot condition on "no other item
-   * exists in this partition": {@link readEnvelopeWriteSnapshot} is a
-   * strongly-consistent, torn-read-guarded pre-read, and the conditional
-   * `ENVELOPE_META` item this transaction ALSO carries makes that emptiness
-   * hold to commit — a concurrent write that made the set non-empty must move
-   * `envelopeSetVersion` first, failing this transaction's own meta
-   * condition. This is not a TOCTOU gap to "fix" with a second read.
-   *
-   * Emptiness is `existingSlots.length === 0` — NEVER derived from the
-   * envelope-set version. A failed prior attempt can leave meta-only residue
-   * (`{ slots: [], envelopeSetVersion: N > 0 }`): such a household is
-   * empty and must still activate, at `N + 1`.
+   * Atomically activates the household entire initial slot set. First-time activation is the only proofless add the
+   * step-up matrix allows, so it commits every slot, the meta bump and any meta-only-residue archive in one
+   * transaction at a single version bump, never two PUTs with an exempt intermediate state. Refuses with 409
+   * ENVELOPE_SET_NOT_EMPTY (distinct from STALE_ENVELOPE_VERSION) when a live slot exists. Emptiness is fenced by the
+   * strongly consistent pre-read plus the conditional meta item in the same transaction (a concurrent write must move
+   * `envelopeSetVersion` first), so a second read would add nothing. Empty means `existingSlots.length === 0`, never
+   * derived from the version: a failed attempt can leave meta-only residue that must still activate at N + 1.
    */
   @Post('key-envelopes/activate')
   @Throttle({ default: { ttl: 60_000, limit: 5 } })
@@ -240,15 +178,9 @@ export class KeyEnvelopeController {
     @Body() body: ActivateKeyEnvelopesDto,
     @Req() req: Request,
   ): Promise<void> {
-    // Per-slot invariants (mirrors `upsert`): validate every client-chosen
-    // slot id, verify passkey_prf credential ownership, and pin the canonical
-    // password id — BEFORE any read, so a rejected slot touches nothing.
-    // Slot ids must also be unique ACROSS the body:
-    // two elements at one id — e.g. two `password`-type slots, each passing
-    // the canonical-id pin on its own — would build two `Put`s on the same
-    // (householdId, slotId) item inside one transaction, which DynamoDB
-    // refuses with a `ValidationException` that nothing in the commit path
-    // maps. A client-controlled body must be a 400 here, never a 500 there.
+    // Per-slot invariants as in `upsert`, before any read so a rejected slot touches nothing. Ids must be unique
+    // across the body: two Puts on one item in a transaction make DynamoDB throw a ValidationException nothing
+    // maps, so a client-controlled body must be a 400 here.
     const seenSlotIds = new Set<string>();
     for (const slot of body.slots) {
       assertValidSlotId(slot.slotId);
@@ -283,10 +215,8 @@ export class KeyEnvelopeController {
       });
     }
 
-    // Write authority: identical to `upsert`'s
-    // handling — a `password`-type slot in the activating set is stamped with
-    // the writing session's recorded credential revision, asserted as a
-    // `ConditionCheck` inside the same transaction.
+    // A password slot is stamped with the writing session recorded revision, asserted as a ConditionCheck in the
+    // same transaction, as in `upsert`.
     const passwordSlot = body.slots.find((s) => s.slotType === 'password');
     const credentialRevision = passwordSlot
       ? await resolveSessionCredentialRevision(req, me.userId, me.jti, this.refreshTokens)
@@ -301,9 +231,7 @@ export class KeyEnvelopeController {
       ),
     );
 
-    // Activation is always proofless (see the class doc comment) — no
-    // step-up gate call here, matching the exemption matrix's own
-    // `exempt-activation` branch.
+    // Activation is always proofless (the `exempt-activation` branch), so no step-up gate here.
     await this.commitEnvelopeTransaction(() =>
       this.envelopes.transactActivateSlots({
         householdId: me.householdId,
@@ -315,9 +243,7 @@ export class KeyEnvelopeController {
           credentialRevision !== undefined
             ? [this.credentials.conditionCheckRevisionTransactItem(me.userId, credentialRevision)]
             : undefined,
-        // Nothing at the slot level is displaced (a genuinely empty set has
-        // no live slot to archive); a stale meta-only residue row, when one
-        // exists, still needs archiving.
+        // Nothing at the slot level is displaced; a stale meta-only residue row still needs archiving.
         archive: { previousSlot: undefined, previousMeta, previousSlotIds: [] },
       }),
     );
@@ -338,25 +264,11 @@ export class KeyEnvelopeController {
   }
 
   /**
-   * Upsert a key-envelope slot. The slot metadata shape is validated by the
-   * DTO; the `wrappedKey` and `envelopeSetTag` are stored verbatim (never
-   * decrypted, never HMAC-recomputed). The slot write + the envelope-set meta
-   * bump are applied under a monotonic-version guard: a non-monotonic
-   * `envelopeSetVersion` is rejected with `409 STALE_ENVELOPE_VERSION`.
-   *
-   * `:slotId` is the authoritative slot id; the body's `slot.householdId` is
-   * overridden by the JWT household so a tampered body cannot cross households.
-   * Tight write limit (5/min): slot mutation is rare.
-   *
-   * A write into a household that already holds a slot — a DELETE, a PUT
-   * replacing any existing slot other than an owed password re-wrap, or a PUT
-   * creating a brand-new slot id — demands a fresh step-up proof before
-   * anything is read for the write authority or committed:
-   * see {@link resolveEnvelopeWriteExemption}
-   * for the exemption matrix and {@link enforceEnvelopeStepUp} for the gate.
-   * A proof-required write of a `passkey_prf` slot ALSO requires the account
-   * password (the password floor), in either `AUTH_MFA_ENFORCED` state —
-   * see the `currentPassword` handling in {@link enforceEnvelopeStepUp}.
+   * Upserts a slot; `wrappedKey` and `envelopeSetTag` are stored verbatim under a monotonic-version guard (409
+   * STALE_ENVELOPE_VERSION). The body householdId is overridden by the JWT household. Write limit 5/min. A write into
+   * a household that already holds a slot (DELETE, replacing a slot other than an owed password re-wrap, or a new
+   * slot id) demands a fresh step-up proof before anything is read or committed: see `resolveEnvelopeWriteExemption`
+   * and `enforceEnvelopeStepUp`, which also require the account password for a `passkey_prf` slot.
    */
   @Put('key-envelopes/:slotId')
   @Throttle({ default: { ttl: 60_000, limit: 5 } })
@@ -367,13 +279,9 @@ export class KeyEnvelopeController {
     @Body() body: UpsertKeyEnvelopeDto,
     @Req() req: Request,
   ): Promise<void> {
-    // Ownership check: a `passkey_prf` slot binds the
-    // wrap to a specific WebAuthn credential. Verify that credential ID belongs
-    // to the caller (keyed by `me.userId` — the `Passkey` table is user-keyed)
-    // so a client cannot bind a slot to another account's credential. Existence
-    // is the check; a missing credential is `422 CREDENTIAL_NOT_FOUND`. Run
-    // before any write so a rejected binding touches nothing. Other slot types
-    // (and a `passkey_prf` slot with no binding) skip this check unchanged.
+    // A `passkey_prf` slot binds the wrap to a WebAuthn credential; verify it belongs to the caller (the Passkey
+    // table is user-keyed) so a slot cannot bind another account credential. A missing one is 422
+    // CREDENTIAL_NOT_FOUND, before any write.
     if (
       body.slot.slotType === 'passkey_prf' &&
       body.slot.credentialBinding != null
@@ -381,10 +289,8 @@ export class KeyEnvelopeController {
       await this.assertCredentialBelongsToUser(me.userId, body.slot.credentialBinding);
     }
 
-    // Canonical slot id: a `password`-type
-    // write may only ever target the one literal `password` id — pinning the
-    // id is what turns "this household holds no password slot" into a single
-    // absence condition. A non-canonical id is refused outright, never moved.
+    // A `password` write may only target the literal `password` id, which turns "no password slot" into a single
+    // absence condition; a non-canonical id is refused, never moved.
     if (body.slot.slotType === 'password' && slotId !== PASSWORD_SLOT_ID) {
       throw new BadRequestException({
         code: 'INVALID_SLOT_ID',
@@ -392,14 +298,11 @@ export class KeyEnvelopeController {
       });
     }
 
-    // Reject a version jump at the boundary: the proposed
-    // `envelopeSetVersion` must be exactly the client's currently-held
-    // `expectedEnvelopeSetVersion` + 1. No operation may skip versions.
+    // Reject a version jump: the proposed version must be exactly the held version + 1.
     assertSingleVersionStep(body.expectedEnvelopeSetVersion, body.envelopeSetVersion);
 
-    // Consistent, torn-read-free snapshot —
-    // see {@link readEnvelopeWriteSnapshot}. Both the exemption decision below
-    // and the archive payload further down are built from this SAME read.
+    // One consistent snapshot feeds both the exemption decision and the archive payload (see
+    // `readEnvelopeWriteSnapshot`).
     const { slots: existingSlots, meta: previousMeta } = await this.readEnvelopeWriteSnapshot(
       me.householdId,
       body.expectedEnvelopeSetVersion,
@@ -407,19 +310,14 @@ export class KeyEnvelopeController {
     const existed = existingSlots.some((s) => s.slotId === slotId);
     const householdHasAnySlot = existingSlots.length > 0;
 
-    // The post-reset re-wrap exemption is conditional on the re-wrap being
-    // OWED (the stored canonical password slot's `credentialRevision` !== the
-    // credential's CURRENT revision) — never on slot type alone, which would
-    // hand an attacker a permanent bypass on every password-slot write.
+    // The post-reset re-wrap exemption applies only when the re-wrap is owed (stored `credentialRevision` differs
+    // from the current one), never on slot type alone, which would give a permanent bypass on every password-slot
+    // write.
     let rewrapOwed = false;
     if (body.slot.slotType === 'password' && slotId === PASSWORD_SLOT_ID && existed) {
       const existingPasswordSlot = existingSlots.find((s) => s.slotId === PASSWORD_SLOT_ID);
-      // The ACCOUNT's current credential revision — same resolution `list()`
-      // gives the client for its own owed-ness compare, never the writing
-      // session's revision (that governs write authority below, a different
-      // question). Strongly consistent for the same reason `list()` is: an
-      // eventually-consistent read can still see the pre-reset revision for a
-      // moment after a reset commits elsewhere.
+      // The account current revision, not the writing session (that governs write authority below). Strongly
+      // consistent for the same reason as `list()`.
       const currentCredential = await this.credentials.findByUserIdConsistent(me.userId);
       rewrapOwed =
         resolveCredentialRevision(existingPasswordSlot) !==
@@ -437,38 +335,26 @@ export class KeyEnvelopeController {
       { method: body.method, code: body.code, response: body.response, currentPassword: body.currentPassword },
       exemption,
       'key_envelope_replace',
-      // The password floor applies only to a proof-required write of a
-      // `passkey_prf` slot — never to a DELETE (which never reaches this call
-      // site), the recovery-key regeneration PUT, or the repair branch's
-      // `recovery` PUT (out of scope; a separate owner decision).
+      // The password floor applies only to a proof-required write of a `passkey_prf` slot; never to a DELETE, the
+      // recovery-key regeneration PUT, or the repair `recovery` PUT.
       body.slot.slotType === 'passkey_prf',
     );
 
-    // Write authority: a `password`-type slot
-    // is stamped with the revision the WRITING SESSION carries — resolved
-    // per request from the refresh cookie, never the body — and that same
-    // revision is asserted, as a `ConditionCheck` INSIDE this same
-    // transaction, to still equal the credential row's CURRENT revision. A
-    // session whose credential has since been rotated (a reset landing
-    // mid-session, an MFA completion carrying a pre-reset revision) cannot
-    // write a slot. Other slot types are unaffected — no revision, no
-    // condition, exactly today's shape.
+    // Write authority: a password slot is stamped with the revision the writing session carries (resolved per
+    // request from the refresh cookie, never the body) and that revision is asserted as a ConditionCheck in this
+    // transaction, so a session whose credential has since rotated cannot write a slot.
     const credentialRevision =
       body.slot.slotType === 'password'
         ? await resolveSessionCredentialRevision(req, me.userId, me.jti, this.refreshTokens)
         : undefined;
 
-    // Archive what this write is about to displace: the previous slot at this id, when one exists,
-    // the previous envelope-set meta row, when one exists (every write past first activation), and
-    // the id of every live slot at that version (the archived meta's membership manifest) — all
-    // from the SAME snapshot read above, written INSIDE the same transaction as the live write,
-    // below.
+    // Archive what the write displaces (previous slot and meta, and the live slot ids as the membership manifest),
+    // all from the same snapshot and written in the same transaction.
     const previousSlot = existed ? existingSlots.find((s) => s.slotId === slotId) : undefined;
     const previousSlotIds = existingSlots.map((s) => s.slotId);
 
-    // Atomic slot+meta write: the slot PUT and the conditional
-    // envelope-set meta PUT commit together or not at all, so a crash/timeout
-    // can never strand a slot under a version the set never advanced to.
+    // Slot and conditional meta PUT commit together or not at all, so a crash cannot strand a slot under a version
+    // the set never reached.
     await this.commitEnvelopeTransaction(() =>
       this.envelopes.transactUpsertSlot({
         slot: buildKeyEnvelopeSlotRow(me.householdId, slotId, body.slot, credentialRevision),
@@ -496,33 +382,12 @@ export class KeyEnvelopeController {
     });
   }
 
-  /**
-   * Single, testable gate shared by `upsert` + `remove`: apply the matrix-only {@link
-   * resolveEnvelopeWriteExemption} verdict, then — like every other step-up consumer — read
-   * `AUTH_MFA_ENFORCED` itself and demand the factor only when it is on. Returns the branch that
-   * ran, for the caller's audit metadata; the branch is not a separate decision, only a record of
-   * which path this call took.
-   *
-   * `requiresPasswordFloor` is `true` only for a
-   * proof-required write of a `passkey_prf` slot — `upsert` computes it from
-   * the written slot's type, `remove` never passes it. When set, the account
-   * password is required IN EITHER `AUTH_MFA_ENFORCED` STATE: on the enforced
-   * path it rides into {@link StepUpService.verify}'s own `currentPassword`
-   * re-verify (audited, backoff-counted, never logged); on the flag-off path —
-   * which used to degrade straight to the bare session with nothing left to
-   * check — it is verified directly through {@link VerifyPasswordService}. A
-   * missing password is coerced to an empty string rather than skipped, so it
-   * fails the SAME way a wrong password does (below) instead of silently
-   * satisfying an `undefined`-skips-the-check floor.
-   *
-   * @throws on a missing/invalid proof exactly like every other consumer
-   *   (`400 STEP_UP_PROOF_MISSING`, or whatever {@link StepUpService.verify}
-   *   throws for a wrong factor) — before the caller reads anything else for
-   *   the write, let alone commits it. A missing/wrong password on a
-   *   `requiresPasswordFloor` write throws the same `401 INVALID_CREDENTIALS`
-   *   {@link VerifyPasswordService.verify} surfaces for every other password
-   *   gate in this codebase, before any factor work runs.
-   */
+  // Single gate shared by `upsert` and `remove`: applies the `resolveEnvelopeWriteExemption` verdict, then demands
+  // the factor only when `AUTH_MFA_ENFORCED` is on. `requiresPasswordFloor` (a proof-required `passkey_prf` write)
+  // requires the account password in either flag state: through `StepUpService.verify` when enforced, directly
+  // through `VerifyPasswordService` otherwise. A missing password is coerced to an empty string so it fails like a
+  // wrong one (401 INVALID_CREDENTIALS) instead of skipping the floor. A missing proof is 400 STEP_UP_PROOF_MISSING,
+  // before anything is read for the write.
   private async enforceEnvelopeStepUp(
     me: AccessTokenClaims,
     req: Request,
@@ -540,11 +405,8 @@ export class KeyEnvelopeController {
     const ip = req.ip ?? null;
     const userAgent = (req.headers['user-agent'] as string | undefined) ?? null;
     if (!this.mfaEnforced) {
-      // The factor requirement degrades to the bare session, as it does for
-      // every other step-up consumer — but the password floor on a
-      // passkey-encryption enrollment write is NOT the flow-shaped keying this
-      // gate otherwise bans: it tightens a write the matrix already requires a
-      // proof for, and applies regardless of the flag.
+      // The factor requirement degrades to the bare session as for every step-up consumer, but the password floor
+      // tightens a write the matrix already requires proof for and applies regardless of the flag.
       if (requiresPasswordFloor) {
         await this.verifyPasswordSvc.verify({
           userId: me.userId,
@@ -567,13 +429,10 @@ export class KeyEnvelopeController {
       purpose,
       method: proof.method,
       code: proof.code,
-      // Passkey factor rides in `response`, validated as the WebAuthn
-      // envelope; the service expects the `@simplewebauthn/server` shape
-      // (mirrors `auth.controller.ts`'s `deleteAccount`).
+      // The passkey factor rides in `response`, validated as the WebAuthn envelope (as in `auth.controller.ts`
+      // deleteAccount).
       assertion: proof.response as unknown as AuthenticationResponseJSON | undefined,
-      // The password floor: verified BEFORE any factor work when this write
-      // requires it. Coerced to `''` (never `undefined`) so a caller that
-      // omits the field fails the password check rather than skipping it.
+      // Verified before any factor work; coerced to an empty string so an omitted field fails rather than skips.
       currentPassword: requiresPasswordFloor ? proof.currentPassword ?? '' : undefined,
       ip,
       userAgent,
@@ -581,14 +440,8 @@ export class KeyEnvelopeController {
     return 'verified';
   }
 
-  /**
-   * Run one atomic slot+meta transaction and map the repository's typed
-   * failures to the API envelope (shared by `upsert` + `remove`): a real
-   * version conflict → `409 STALE_ENVELOPE_VERSION` (the client refetches +
-   * retries); a transient transaction conflict that survived the bounded
-   * retry → `503` so a throughput/network blip never masquerades as another
-   * writer's edit.
-   */
+  // Runs one atomic slot+meta transaction and maps typed failures: a version conflict is 409 STALE_ENVELOPE_VERSION,
+  // and a transient conflict past the bounded retry is 503, so a blip never masquerades as another writer edit.
   private async commitEnvelopeTransaction(run: () => Promise<void>): Promise<void> {
     try {
       await run();
@@ -599,12 +452,9 @@ export class KeyEnvelopeController {
           message: 'Envelope-set version is stale or non-monotonic.',
         });
       }
-      // The session's write authority is stale or missing: a `password`-type write from a session
-      // whose credential has since been rotated, OR a stale bundle whose session never recorded a
-      // revision at all (every session alive before this shipped). Both share the ONE
-      // `UPGRADE_REQUIRED` code the change- password commit also uses for its request-shape upgrade
-      // case — the web maps it to a reload prompt, never a validation
-      // error on a form.
+      // A stale or missing session write authority (credential rotated since, or a session that never recorded a
+      // revision) maps to UPGRADE_REQUIRED, the code the change-password commit also uses; the web shows a reload
+      // prompt, not a form error.
       if (err instanceof SessionCredentialStaleError) {
         throw new ConflictException({
           code: 'UPGRADE_REQUIRED',
@@ -621,25 +471,11 @@ export class KeyEnvelopeController {
     }
   }
 
-  /**
-   * Read the `{ slots, meta }` snapshot a write's step-up exemption decision
-   * and archive payload are built from.
-   * Before this, `upsert`/`remove` each issued an eventually-consistent
-   * `listSlots` plus a SEPARATE `getEnvelopeMeta` call: a replica lagging a
-   * just-committed first slot could still report `[]`, misclassifying a
-   * replace as `exempt-activation`; and because the two reads were not
-   * atomic with each other, a write landing between them could leave
-   * `previousSlot` missing the row actually being displaced, so the archive
-   * silently dropped it while the destructive write still committed.
-   *
-   * {@link HouseholdKeyEnvelopesRepository.getStableEnvelopeSet} closes both:
-   * it is strongly consistent and bracketed so `slots` and `meta` are never
-   * torn relative to each other. The snapshot's meta version is additionally
-   * asserted here to equal the client's `expectedEnvelopeSetVersion` — the
-   * transaction's own `ConditionExpression` enforces the same bound again at
-   * commit time, but a stale snapshot could otherwise still decide the wrong
-   * exemption/archive before ever reaching it.
-   */
+  // Reads the `{ slots, meta }` snapshot the exemption decision and archive are built from, via
+  // `getStableEnvelopeSet`: separate eventually consistent reads could misclassify a replace as `exempt-activation`
+  // or drop the displaced slot from the archive. The meta version is also asserted equal to the client
+  // `expectedEnvelopeSetVersion`, since a stale snapshot could decide the wrong exemption before the transaction
+  // condition runs.
   private async readEnvelopeWriteSnapshot(
     householdId: string,
     expectedEnvelopeSetVersion: number,
@@ -665,13 +501,8 @@ export class KeyEnvelopeController {
     return snapshot;
   }
 
-  /**
-   * Verify a `passkey_prf` slot's `credentialBinding` references a WebAuthn
-   * credential enrolled for the caller. The `Passkey`
-   * table is keyed by `userId`, so this is the correct ownership scope (v1 is
-   * 1:1 user↔household). Existence is the check; a binding to a credential the
-   * caller does not hold is `422 CREDENTIAL_NOT_FOUND`.
-   */
+  // Verifies a `passkey_prf` slot `credentialBinding` references a credential enrolled for the caller (the Passkey
+  // table is keyed by userId); otherwise 422 CREDENTIAL_NOT_FOUND.
   private async assertCredentialBelongsToUser(
     userId: string,
     credentialId: string,
@@ -686,14 +517,9 @@ export class KeyEnvelopeController {
   }
 
   /**
-   * Remove a key-envelope slot, then bump the envelope-set meta to the
-   * client-recomputed version + tag (the client recomputes the HMAC over the
-   * remaining slots; the server stores it verbatim). The bump is applied under
-   * the same monotonic guard — a non-monotonic version is `409
-   * STALE_ENVELOPE_VERSION`. Tight write limit (5/min): slot mutation is rare.
-   *
-   * A DELETE always demands a fresh step-up proof (no exemption in the matrix) before anything
-   * commits — see {@link enforceEnvelopeStepUp}.
+   * Removes a slot and bumps the meta to the client-recomputed version and tag under the same monotonic guard (409
+   * STALE_ENVELOPE_VERSION). Write limit 5/min. A DELETE always demands a fresh step-up proof: see
+   * `enforceEnvelopeStepUp`.
    */
   @Delete('key-envelopes/:slotId')
   @Throttle({ default: { ttl: 60_000, limit: 5 } })
@@ -715,10 +541,8 @@ export class KeyEnvelopeController {
       'key_envelope_delete',
     );
 
-    // Archive what this delete is about to displace — the slot being removed, the previous meta
-    // row, and the live slot-id membership at that version, all read as ONE consistent snapshot
-    // (see {@link readEnvelopeWriteSnapshot}) and written INSIDE the same transaction as the
-    // delete, below.
+    // Archive the removed slot, previous meta and live slot ids from one consistent snapshot, written in the same
+    // transaction as the delete.
     const { slots: existingSlots, meta: previousMeta } = await this.readEnvelopeWriteSnapshot(
       me.householdId,
       body.expectedEnvelopeSetVersion,
@@ -726,9 +550,8 @@ export class KeyEnvelopeController {
     const previousSlot = existingSlots.find((s) => s.slotId === slotId);
     const previousSlotIds = existingSlots.map((s) => s.slotId);
 
-    // Atomic slot-delete + meta write: both commit together or
-    // neither does, so a stale delete can never remove a slot while the set
-    // version fails to advance to a tag computed over the post-delete set.
+    // Slot delete and meta write commit together, so a stale delete cannot remove a slot while the version fails to
+    // advance.
     await this.commitEnvelopeTransaction(() =>
       this.envelopes.transactDeleteSlot({
         householdId: me.householdId,

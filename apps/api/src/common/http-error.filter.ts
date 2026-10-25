@@ -1,18 +1,5 @@
-/**
- * Global exception filter that normalizes every error into the project's
- * standard envelope):
- *
- *   { error: { code, message, details?, traceId } }
- *
- * Behavior:
- * - HttpExceptions: honor their status + optional `code`/`details`, falling
- *   back to a stable default code for the status class.
- * - Unknown errors: surface as 500 `INTERNAL_ERROR` and log with stack.
- *   We deliberately do not leak the underlying message to clients.
- * - Correlation: echo an incoming `x-correlation-id` header as `traceId`,
- *   or mint one. This is the hook clients use to link logs/traces to a
- *   specific failure.
- */
+// Global exception filter normalizing every error into `{ error: { code, message, details?, traceId } }`; unknown errors become 500
+// INTERNAL_ERROR with the message withheld from the client.
 import {
   ArgumentsHost,
   Catch,
@@ -44,8 +31,8 @@ export class HttpErrorFilter implements ExceptionFilter {
       if (typeof resp === 'string') {
         message = resp;
       } else if (resp && typeof resp === 'object') {
-        // Callers may attach a machine-readable `code` and optional `details`.
-        // Anything else on the response object is ignored to keep the shape stable.
+        // Callers may attach a machine-readable `code` and `details`; anything else on the response object is ignored
+        // to keep the shape stable.
         const r = resp as Record<string, unknown>;
         message = (r.message as string) ?? message;
         code = (r.code as string) ?? this.defaultCode(status);
@@ -53,9 +40,8 @@ export class HttpErrorFilter implements ExceptionFilter {
       }
       code = code === 'INTERNAL_ERROR' ? this.defaultCode(status) : code;
     } else if (exception instanceof Error) {
-      // Express middleware errors (body-parser PayloadTooLargeError, etc.)
-      // expose a numeric `status`/`statusCode`. Honor it so 413/415 etc. surface
-      // as their proper code instead of being flattened to 500.
+      // Express middleware errors (body-parser PayloadTooLargeError) expose a numeric status; honor it so 413 and 415
+      // are not flattened to 500.
       const expressErr = exception as Error & { status?: number; statusCode?: number };
       const expressStatus = expressErr.status ?? expressErr.statusCode;
       if (typeof expressStatus === 'number' && expressStatus >= 400 && expressStatus < 600) {
@@ -63,7 +49,7 @@ export class HttpErrorFilter implements ExceptionFilter {
         code = this.defaultCode(status);
         message = exception.message;
       } else {
-        // Unknown error class: record server-side, but never reveal internals.
+        // Unknown error class: log server-side, never reveal internals.
         this.logger.error(exception.message, exception.stack);
       }
     }

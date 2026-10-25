@@ -1,39 +1,5 @@
-/**
- * Self-service account email change. A signed-in user changes their sign-in email through a
- * verified, re-authenticated flow:
- *
- *   - `request` (auth): re-verify the password, pre-check the new address for
- *     uniqueness (`409 EMAIL_TAKEN`), persist the pending intent on the `User`
- *     row (`pendingEmail` + a ~15-min logical `pendingEmailExpiresAt`). When
- *     `AUTH_MFA_ENFORCED` it returns `{ stepUpRequired, methods }` and mints
- *     no token yet — the authenticated session + the pending intent ARE the
- *     binding (no challenge JWT, so nothing to replay across operations).
- *     When the flag is off it goes straight to minting the change-email token
- *     + mailing the link (password-only path).
- *   - `sendStepUpOtp` / `verifyStepUp` (auth): complete a fresh MFA factor for
- *     the authenticated session. Both reject an expired/absent pending intent.
- *     On a valid factor the change-email token is minted (an `EmailVerification`
- *     row with `purpose: 'change_email'`) and the verification link is mailed
- *     to the NEW address.
- *   - `confirm` (public, token-authenticated): consume the change-email token
- *     (rejecting any non-`change_email` purpose) under the single-valid-link
- *     invariant — one `TransactWriteItems` atomically moves the
- *     `EmailReservation` old→new (uniqueness-checked) and swaps
- *     `User.email`/`emailLowercase`, conditioned on
- *     `currentPendingEmailToken == sha256(presented)` AND the pending address
- *     still matching. A superseded/stale token aborts the whole transaction
- *     (no swap, no reservation move). After commit it invalidates any pending
- *     `PasswordReset`, mails a security notice to the OLD address, and audits
- *     `email_change`. The old email stays live until confirm.
- *
- * No new infrastructure: the change-email token reuses the existing
- * `EmailVerification` table (PK `sha256(token)`, existing TTL) with the
- * `purpose` discriminator; the pending fields are additive `User` attributes;
- * the swap reuses the `EmailReservation` table. Mails are best-effort (a SES
- * failure is logged, never rolls back a committed swap).
- *
- * See docs/security.md, "Emails the app sends about your account".
- */
+// Self-service email change: `request` re-verifies the password and persists a pending intent, step-up completes a fresh factor,
+// `confirm` consumes the token. See docs/security.md, "Emails the app sends about your account".
 import { formatMailSource } from './mail-source.js';
 import {
   BadRequestException,
@@ -72,13 +38,11 @@ import { sha256 } from './refresh-token.service.js';
 import { emailFingerprint } from '../common/email-fingerprint.js';
 import { escapeHtml } from '../common/escape-html.js';
 
-/** Change-email verification-link validity (mirrors VERIFICATION_TTL_SEC). */
+// Change-email verification-link validity.
 const CHANGE_EMAIL_TOKEN_TTL_SEC = 15 * 60;
-/** Logical pending-intent expiry (~15 min): bounds the request→step-up window. */
+// Logical pending-intent expiry, bounding the request to step-up window.
 const PENDING_EMAIL_EXPIRY_SEC = 15 * 60;
-/** Minimum spacing between two change-email verification mails for one user. */
 const CHANGE_EMAIL_COOLDOWN_SEC = 60;
-/** Hard cap on change-email verification mails per UTC day per user. */
 const CHANGE_EMAIL_DAILY_LIMIT = 5;
 
 export interface ChangeEmailRequestArgs {
@@ -87,22 +51,17 @@ export interface ChangeEmailRequestArgs {
   currentPassword: string;
   ip: string | null;
   userAgent: string | null;
-  /** Device identity — lets a trusted
-   *  device's password re-verify bypass the per-address backoff, mirroring
-   *  login/delete-account. */
+  /** Lets a trusted device bypass the per-address backoff, as in login. */
   deviceId?: string;
   deviceTrustToken?: string;
 }
 
 export interface ChangeEmailRequestResult {
-  /** True when a fresh MFA factor is still required (AUTH_MFA_ENFORCED on). */
+  /** True when a fresh MFA factor is still required (`AUTH_MFA_ENFORCED` on). */
   stepUpRequired: boolean;
-  /** Routine factor options when step-up is required (`['totp']` / `['email_otp']`). */
   methods?: string[];
-  /** Recovery factor options when step-up is required. */
   recoveryMethods?: string[];
-  /** Returned in dev/test only (no step-up path) so the developer can click
-   * the link without a real SES delivery. */
+  /** Dev and test only (no step-up path), so a developer can click the link without SES delivery. */
   changeEmailToken?: string;
 }
 
@@ -144,36 +103,27 @@ export class ChangeEmailService {
     this.mfaEnforced = config.get('AUTH_MFA_ENFORCED', { infer: true }) === 'true';
     const node = config.get('NODE_ENV', { infer: true });
     this.sesEnabled = node === 'production' || !!config.get('SES_ENDPOINT', { infer: true });
-    // Same dev trapdoor as signup / reset — returns the raw change-email token
-    // in the response on the password-only path so the SPA / tests can click
-    // through without a real SES delivery. Local development only —
-    // hard-refused at boot on any deployed stack.
+    // Same dev trapdoor as signup and reset: local development only, hard-refused at boot on a deployed stack.
     this.returnToken =
       node !== 'production' ||
       config.get('EXPOSE_VERIFICATION_TOKEN', { infer: true }) === 'true';
   }
 
   /**
-   * Start a verified email change. Re-verifies the password (a wrong password
-   * throws `401 INVALID_CREDENTIALS` via VerifyPasswordService), pre-checks the
-   * new address for uniqueness (`409 EMAIL_TAKEN`), and persists the pending
-   * intent. When `AUTH_MFA_ENFORCED` it returns `{ stepUpRequired: true }` and
-   * mints no token; otherwise it mints the change-email token + mails the link
-   * straight away (password-only path).
+   * Starts a verified change: re-verifies the password, pre-checks the new address (409 EMAIL_TAKEN) and persists the
+   * pending intent. With `AUTH_MFA_ENFORCED` it returns `{ stepUpRequired: true }` and mints no token; otherwise it
+   * mints the token and mails the link.
    */
   async request(args: ChangeEmailRequestArgs): Promise<ChangeEmailRequestResult> {
     const user = await this.users.findById(args.userId);
     if (!user) {
-      // The session names a user that no longer exists. Treat as a credential
-      // failure rather than leaking the state.
+      // The session names a user that no longer exists: a credential failure, without leaking state.
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'Current password is incorrect.',
       });
     }
 
-    // Password re-auth (records a `password_verify` AuthEvent; a wrong password
-    // throws 401 INVALID_CREDENTIALS + the failure event).
     await this.verifyPasswordSvc.verify({
       userId: args.userId,
       currentPassword: args.currentPassword,
@@ -190,9 +140,8 @@ export class ChangeEmailService {
         message: 'The new email is the same as your current email.',
       });
     }
-    // Pre-check uniqueness: immediate UX feedback on the common
-    // typo/duplicate case. The authoritative race-safe gate is the conditional
-    // EmailReservation put inside the confirm-time swap.
+    // The pre-check is UX feedback; the authoritative race-safe gate is the conditional EmailReservation put in the
+    // confirm swap.
     const existing = await this.users.findByEmail(newEmailLowercase);
     if (existing) {
       throw new ConflictException({
@@ -220,10 +169,8 @@ export class ChangeEmailService {
     });
 
     if (this.mfaEnforced) {
-      // Fresh-factor step-up required. The authenticated session + the pending intent are the
-      // binding — no challenge token is minted. The client completes send-otp / passkey-options +
-      // verify-step-up. The eligible factors come from the shared step-up computation, so passkey
-      // is offered alongside TOTP / Email-OTP.
+      // The authenticated session plus the pending intent are the binding; no challenge token is minted. Factors come
+      // from the shared step-up computation.
       const factors = await this.stepUpSvc.computeFactors(args.userId);
       return {
         stepUpRequired: true,
@@ -232,9 +179,7 @@ export class ChangeEmailService {
       };
     }
 
-    // Password-only path (AUTH_MFA_ENFORCED off — local-dev default): mint the
-    // token + mail the link directly. Re-read the user so the freshly-stamped
-    // pending fields are present.
+    // Password-only path (flag off): re-read the user so the freshly stamped pending fields are present.
     const fresh = await this.users.findById(args.userId);
     const token = fresh ? await this.mintAndSendToken(fresh) : null;
     return {
@@ -244,10 +189,8 @@ export class ChangeEmailService {
   }
 
   /**
-   * Send a fresh Email-OTP for the pending change-email step-up. Rejects an expired/absent pending
-   * intent (the user must restart with a fresh password re-auth). Delegates to the shared
-   * `MfaEmailOtpService` (one `userId`-keyed code row + the cooldown/daily-cap counters shared with
-   * the login OTP path) — sent to the CURRENT email.
+   * Sends a fresh Email-OTP for the pending step-up, to the current email, via the shared `MfaEmailOtpService`;
+   * rejects an expired or absent intent.
    */
   async sendStepUpOtp(args: ChangeEmailStepArgs): Promise<void> {
     const user = await this.requirePendingIntent(args.userId);
@@ -260,18 +203,9 @@ export class ChangeEmailService {
   }
 
   /**
-   * Verify a fresh MFA factor for the authenticated session, delegating to
-   * the shared `StepUpService.verify`. Rejects an
-   * expired/absent pending intent. On a valid factor mints the change-email
-   * token + mails the verification link to the new address. TOTP / passkey need
-   * no prior send; Email-OTP requires a prior `sendStepUpOtp`.
-   *
-   * The pending-email intent (`requirePendingIntent`) is the per-op binding here,
-   * so Email-OTP verifies on the LEGACY `<userId>` row (`emailOtpSource:
-   * 'legacy'`) — change-email keeps its own `send-otp` on that row, unchanged.
-   * Passkey is newly accepted. `StepUpService.verify` throws
-   * `MFA_CODE_INVALID` (or a passkey-specific code) on a failed factor, so the
-   * wire contract is identical to the prior inline implementation.
+   * Verifies a fresh MFA factor for the session through `StepUpService.verify`, then mints the token and mails the
+   * new address; rejects an expired or absent intent. The pending intent is the per-operation binding, so Email-OTP
+   * verifies on the legacy `<userId>` row.
    */
   async verifyStepUp(
     args: ChangeEmailStepArgs & {
@@ -298,13 +232,10 @@ export class ChangeEmailService {
   }
 
   /**
-   * Consume the change-email verification token (clicked from the new inbox,
-   * possibly another browser — public + token-authenticated). Rejects a
-   * non-`change_email` purpose, an unknown/expired token, then runs the
-   * single-valid-link atomic swap. After commit invalidates any pending
-   * `PasswordReset`, mails the old-address security notice (best-effort), and
-   * audits `email_change`. Throws `400 CHANGE_EMAIL_TOKEN_INVALID` /
-   * `410 CHANGE_EMAIL_TOKEN_EXPIRED` / `409 EMAIL_TAKEN` (confirm-race).
+   * Consumes the change-email token (clicked from the new inbox, possibly another browser) and runs the
+   * single-valid-link swap. After commit it invalidates any pending PasswordReset, mails the old address a notice
+   * (best-effort) and audits `email_change`. Throws 400 CHANGE_EMAIL_TOKEN_INVALID, 410 CHANGE_EMAIL_TOKEN_EXPIRED or
+   * 409 EMAIL_TAKEN (confirm race).
    */
   async confirm(args: {
     token: string;
@@ -313,8 +244,7 @@ export class ChangeEmailService {
   }): Promise<{ email: string }> {
     const tokenHash = sha256(args.token);
     const row = await this.verifications.findByToken(tokenHash);
-    // A missing row, or a token that is not a change-email token, is invalid.
-    // Do NOT delete a non-`change_email` row — it belongs to the signup flow.
+    // A token that is not a change-email token is invalid; do not delete it, since it belongs to the signup flow.
     if (!row || row.purpose !== 'change_email') {
       throw new BadRequestException({
         code: 'CHANGE_EMAIL_TOKEN_INVALID',
@@ -352,11 +282,8 @@ export class ChangeEmailService {
       oldEmailLowercase,
     });
 
-    // Post-commit side effects (variable-size / best-effort; never roll back a
-    // committed swap). Drop the consumed token, invalidate any pending reset
-    // (a reset link must not mail the old address after the swap), notify
-    // the old address, and audit. Each is individually wrapped so a failure in
-    // one can't strand the others or surface as a 5xx after the swap committed.
+    // Post-commit and best-effort, each wrapped so one failure cannot strand the others or surface as a 5xx after
+    // the swap committed; a reset link must not mail the old address.
     try {
       await this.verifications.deleteToken(tokenHash);
     } catch (err) {
@@ -388,9 +315,8 @@ export class ChangeEmailService {
         {
           userId: user.userId,
           emailFingerprint: emailFingerprint(oldEmail),
-          // Error class only, never `err.message`: an SES rejection embeds the
-          // raw recipient address in its message, which `redact` cannot scrub
-          // inside a string value.
+          // Error class only, never `err.message`: an SES rejection embeds the recipient address, which `redact` cannot
+          // scrub inside a string.
           reason: err instanceof Error ? err.name : 'unknown',
         },
         'Email-change security notice dispatch failed',
@@ -400,12 +326,8 @@ export class ChangeEmailService {
     return { email: newEmail };
   }
 
-  /**
-   * Load the user + enforce a live pending email-change intent. Throws
-   * `409 PENDING_EMAIL_CHANGE_EXPIRED` when there is no pending intent or it
-   * has elapsed `pendingEmailExpiresAt` — the user must restart with a fresh
-   * password re-auth. Returns the user when the intent is valid.
-   */
+  // Loads the user and enforces a live pending intent; throws 409 PENDING_EMAIL_CHANGE_EXPIRED when absent or
+  // elapsed.
   private async requirePendingIntent(userId: string): Promise<UserRow> {
     const user = await this.users.findById(userId);
     const nowSec = Math.floor(Date.now() / 1000);
@@ -423,25 +345,17 @@ export class ChangeEmailService {
     return user;
   }
 
-  /**
-   * Mint the change-email `EmailVerification` token (`purpose: 'change_email'`,
-   * `email` = the pending NEW address), stamp the token handle + send
-   * bookkeeping on the User row under a TOCTOU condition pinned to the pending
-   * intent (a superseded request aborts the stale send), then mail the
-   * verification link to the new address (best-effort). Returns the raw token
-   * (the caller decides whether to surface it in dev). Silently no-ops the
-   * mail floor / cooldown is left to the per-user counters; a cooldown / cap
-   * breach throws so the client surfaces it.
-   */
+  // Mints the `change_email` EmailVerification token, stamps the handle and send bookkeeping under a condition pinned
+  // to the pending intent (a superseded request aborts the stale send), then mails the new address. A cooldown or cap
+  // breach throws so the client surfaces it.
   private async mintAndSendToken(user: UserRow): Promise<string> {
     const pendingEmail = user.pendingEmail!;
     const pendingEmailLowercase = user.pendingEmailLowercase!;
     const nowMs = Date.now();
     const nowSec = Math.floor(nowMs / 1000);
 
-    // Per-user cooldown + daily cap on the change-email send (mirrors the
-    // verify-email counters). A breach throws CHANGE_EMAIL_RATE_LIMITED — the
-    // requester is already authenticated, so this is not an enumeration oracle.
+    // Per-user cooldown and daily cap; the requester is authenticated, so CHANGE_EMAIL_RATE_LIMITED is no
+    // enumeration oracle.
     if (user.lastPendingEmailSentAt) {
       const lastMs = Date.parse(user.lastPendingEmailSentAt);
       if (Number.isFinite(lastMs) && nowMs - lastMs < CHANGE_EMAIL_COOLDOWN_SEC * 1000) {
@@ -473,9 +387,8 @@ export class ChangeEmailService {
       purpose: 'change_email',
     };
 
-    // Best-effort: invalidate the prior change-email token first so two valid
-    // links never co-exist. Failure is benign — the prior link's TTL bounds it
-    // and the confirm pins the newest token.
+    // Invalidate the prior token first so two valid links never co-exist; failure is benign, since its TTL bounds
+    // it and confirm pins the newest.
     if (user.currentPendingEmailToken) {
       try {
         await this.verifications.deleteToken(user.currentPendingEmailToken);
@@ -490,8 +403,7 @@ export class ChangeEmailService {
       new PutCommand({ TableName: this.emailVerificationTable, Item: verification }),
     );
 
-    // Advance the User send bookkeeping under a condition pinned to the pending
-    // intent (a newer request for a different address supersedes this one).
+    // Advance the bookkeeping under a condition pinned to the pending intent.
     const upd = this.users.pendingEmailSendUpdate({
       userId: user.userId,
       pendingEmailLowercase,
@@ -523,11 +435,8 @@ export class ChangeEmailService {
       );
     } catch (err) {
       if (err instanceof TransactionCanceledException) {
-        // The condition failed: either the pending intent moved under us (a
-        // newer request superseded this one) OR a concurrent send already
-        // advanced the rate-limit counters the handler read (TOCTOU loser).
-        // Either way a duplicate was about to go out — drop the orphaned token
-        // row and surface rate-limit semantics so the client backs off.
+        // The condition failed: the intent moved or a concurrent send advanced the counters. A duplicate was about to
+        // go out, so drop the orphaned token and surface rate-limit semantics.
         await this.verifications.deleteToken(tokenHash);
         throw new ConflictException({
           code: 'CHANGE_EMAIL_RATE_LIMITED',
@@ -544,9 +453,7 @@ export class ChangeEmailService {
         {
           userId: user.userId,
           emailFingerprint: emailFingerprint(pendingEmail),
-          // Error class only, never `err.message`: an SES rejection embeds the
-          // raw recipient address in its message, which `redact` cannot scrub
-          // inside a string value.
+          // Error class only, never `err.message`: an SES rejection embeds the recipient address.
           reason: err instanceof Error ? err.name : 'unknown',
         },
         'Change-email verification mail dispatch failed',
@@ -555,16 +462,10 @@ export class ChangeEmailService {
     return rawToken;
   }
 
-  /**
-   * The single-valid-link confirm transaction: move the `EmailReservation`
-   * old→new (conditional put on the new lowercased address for uniqueness;
-   * delete the old) AND swap `User.email`/`emailLowercase` under
-   * `currentPendingEmailToken == sha256(presented)` AND the pending address
-   * still matching. Any failure aborts the WHOLE transaction. A
-   * uniqueness-collision on the new reservation surfaces as `409 EMAIL_TAKEN`
-   * (confirm-race); a superseded/stale token or a moved pending intent
-   * surfaces as `400 CHANGE_EMAIL_TOKEN_INVALID` with no swap.
-   */
+  // The single-valid-link confirm transaction: moves the EmailReservation old to new (conditional put for uniqueness)
+  // and swaps the User email under `currentPendingEmailToken == sha256(presented)` and the pending address still
+  // matching. Any failure aborts the whole transaction: a new-reservation collision is 409 EMAIL_TAKEN, a stale token
+  // or moved intent is 400 CHANGE_EMAIL_TOKEN_INVALID.
   private async commitSwap(args: {
     user: UserRow;
     tokenHash: string;
@@ -590,9 +491,7 @@ export class ChangeEmailService {
         new TransactWriteCommand({
           TransactItems: [
             {
-              // New-address uniqueness gate (race-safe): the authoritative
-              // EMAIL_TAKEN check. Fails closed if the address was claimed
-              // between request and confirm.
+              // Authoritative EMAIL_TAKEN check; fails closed if the address was claimed between request and confirm.
               Put: {
                 TableName: this.emailReservationTable,
                 Item: reservation,
@@ -600,8 +499,7 @@ export class ChangeEmailService {
               },
             },
             {
-              // Free the old reservation, but only if it still belongs to this
-              // user (defensive — a concurrent recycle shouldn't drop it).
+              // Free the old reservation only if it still belongs to this user.
               Delete: {
                 TableName: this.emailReservationTable,
                 Key: { emailLowercase: args.oldEmailLowercase },
@@ -623,9 +521,7 @@ export class ChangeEmailService {
       );
     } catch (err) {
       if (err instanceof TransactionCanceledException) {
-        // Disambiguate the two failure modes from the cancellation reasons:
-        // a ConditionalCheckFailed on the new-reservation Put = EMAIL_TAKEN;
-        // anything else (stale token / moved pending intent) = invalid link.
+        // A ConditionalCheckFailed on the new-reservation Put is EMAIL_TAKEN; anything else is an invalid link.
         const reasons = err.CancellationReasons ?? [];
         const reservationClash = reasons[0]?.Code === 'ConditionalCheckFailed';
         if (reservationClash) {
@@ -643,22 +539,13 @@ export class ChangeEmailService {
     }
   }
 
-  /**
-   * Invalidate any pending password reset on a committed swap: clear
-   * `User.currentResetToken` + the reset counters and best-effort delete the
-   * `PasswordReset` row so a reset link can't mail the (now-old) address. A
-   * single keyed delete by the stored handle — no Scan. Best-effort: a failure
-   * is logged, never rolls back the committed swap.
-   */
+  // Clears `currentResetToken` and the reset counters and best-effort deletes the PasswordReset row on a committed
+  // swap, so a reset link cannot mail the old address. A single keyed delete, no Scan.
   private async invalidatePendingReset(user: UserRow): Promise<void> {
     if (!user.currentResetToken) return;
     try {
       await this.resets.deleteToken(user.currentResetToken);
-      // Clear the handle on the User row so a stale row can't be honored.
-      // (The swap update already bumped updatedAt; this is a separate write
-      // because the swap is conditioned on token/pending fields, not reset
-      // fields, and runs post-commit.) Conditioned on the pre-swap token so a
-      // fresh reset minted AFTER the swap (before this cleanup) isn't wiped.
+      // Post-commit write, conditioned on the pre-swap token so a reset minted after the swap is not wiped.
       await this.users.clearPendingResetHandle(user.userId, user.currentResetToken ?? undefined);
     } catch (err) {
       this.logger.warn(
@@ -672,13 +559,11 @@ export class ChangeEmailService {
   }
 
   private async sendVerificationMail(toAddress: string, token: string): Promise<void> {
-    // Token in the URL fragment (#) so it never reaches the server, never lands
-    // in API-GW / CloudFront access logs, and never leaks via Referer.
+    // Token in the URL fragment so it never reaches the server, access logs or Referer.
     const link = `${this.webOrigin}/auth/change-email/confirm#token=${encodeURIComponent(token)}`;
     if (!this.sesEnabled) {
-      // Local dev: log only a non-reversible fingerprint, never the token/link
-      // or recipient (CODING_STANDARDS "Never log secrets, tokens, or PII").
-      // The dev shortcut is served by the `returnToken` API response.
+      // Log only a non-reversible fingerprint, never the token, link or recipient (CODING_STANDARDS "Never log secrets,
+      // tokens, or PII").
       this.logger.log(
         { emailFingerprint: emailFingerprint(toAddress) },
         'Change-email verification link generated (local dev — token in API response)',

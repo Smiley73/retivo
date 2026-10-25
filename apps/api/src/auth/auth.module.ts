@@ -83,24 +83,14 @@ import { LoginGuessingNoticeService } from './login-guessing-notice.service.js';
     MfaChallengeService,
     MfaEmailOtpService,
     StepUpService,
-    // Shared fresh-proof gate in front of the two factor-enrollment writes —
-    // see the service's own header comment.
+    // Shared fresh-proof gate in front of the two factor-enrollment writes.
     FactorEnrollmentGuardService,
     TrustedDeviceService,
-    // Shared "revoke every session" capability — the one implementation `HouseholdSweepService.revokeAllSessions`,
-    // change-password, and password-reset all delegate to.
+    // The one "revoke every session" implementation that sweep, change-password and password-reset delegate to.
     SessionRevocationService,
-    // Factor-change notice + single-use undo.
     FactorNoticeService,
-    // Per-address guessing notice, injected into
-    // FailedLoginService — the shared backoff primitive.
     LoginGuessingNoticeService,
-    // Mints/verifies the 5-min session-bound export-authorization cookie.
-    // Injected by AuthController's `verify-password` handler and by
-    // ExportAuthorizationGuard.
     DataExportAuthorizationService,
-    // Global guard: JwtAuthGuard authenticates the bearer and attaches
-    // `req.auth`; `@Public()` routes pass through.
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
@@ -110,19 +100,10 @@ import { LoginGuessingNoticeService } from './login-guessing-notice.service.js';
     AccessTokenService,
     JwtKeyStore,
     SignupApprovalService,
-    // Exported so SyncModule's RestoreService can inject the shared
-    // household-data sweep. `workspace/clear` (the server-authoritative
-    // "Delete workspace data" endpoint) is the FOURTH authorised consumer of
-    // the locked BatchWriteItem sweep, alongside DELETE /auth/account, the
-    // encrypted-workspace reset, and POST /sync/restore — see AGENTS.md,
-    // "Project-specific security". AuthModule is @Global(), so exporting makes it globally
-    // injectable.
+    // Exported so SyncModule `RestoreService` can inject the shared sweep (see AGENTS.md, "Project-specific security");
+    // AuthModule is @Global().
     HouseholdSweepService,
-    // Exported for SyncModule's services: ClearWorkspaceService's
-    // workspace/clear password gate (via FailedLoginService.verifyWithBackoff
-    // + VerifyPasswordService) and RestoreService's keep-key snapshot purge (the
-    // erase-history path). The auth-service coupling lives in the sync service
-    // layer, not the sync controller.
+    // Exported for SyncModule services: the `workspace/clear` password gate and `RestoreService` keep-key purge.
     VerifyPasswordService,
     FailedLoginService,
     AccountSnapshotPurgeService,

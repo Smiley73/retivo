@@ -1,11 +1,5 @@
-/**
- * API bootstrap.
- *
- * The API runs as a NestJS app — locally on Express or wrapped in a Lambda handler.
- * The SPA is served
- * from CloudFront in production and from the Vite dev server locally;
- * we no longer bundle static assets into the API process.
- */
+// API bootstrap for local dev on Express; the SPA is served from CloudFront in production and from Vite locally, never bundled into
+// the API.
 import 'reflect-metadata';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
@@ -25,16 +19,8 @@ import {
 import { validateEnv } from './common/env.config.js';
 import { createCorsPreflightHandler, CORS_EXPOSED_HEADERS } from './common/cors-preflight.js';
 
-/**
- * Local-dev convenience for the RS256 migration.
- * On `pnpm dev` (NODE_ENV != production) with AUTH_JWT_PRIVATE_KEYS still
- * unset or the .env.example placeholder, mint an ephemeral keypair so
- * the developer doesn't have to hand-craft PEMs the moment they pull
- * the change. Mirrors the per-Jest-worker approach in test/jest.setup.ts.
- * Persisted real PEMs (set in `.env`) take precedence and survive
- * restarts; ephemeral keys reset on each boot, but the SPA's normal
- * stale-token recovery handles that.
- */
+// Local dev only: when AUTH_JWT_PRIVATE_KEYS is unset or the .env.example placeholder, mint an ephemeral keypair.
+// Real PEMs in `.env` take precedence.
 function ensureDevJwtKeys(): void {
   if (process.env.NODE_ENV === 'production') return;
   const existing = process.env.AUTH_JWT_PRIVATE_KEYS;
@@ -47,8 +33,7 @@ function ensureDevJwtKeys(): void {
   process.env.AUTH_JWT_PRIVATE_KEYS = JSON.stringify({ 'local-dev': privateKey });
   process.env.AUTH_JWT_PUBLIC_KEYS = JSON.stringify({ 'local-dev': publicKey });
   process.env.AUTH_JWT_CURRENT_KID = process.env.AUTH_JWT_CURRENT_KID ?? 'local-dev';
-  // Pino is not yet wired this early in bootstrap; a plain console.warn
-  // is the only thing that will surface on stdout.
+  // Pino is not wired this early in bootstrap, so only console.warn surfaces on stdout.
   // eslint-disable-next-line no-console
   console.warn(
     '[auth] AUTH_JWT_PRIVATE_KEYS missing or placeholder — generated an ephemeral RSA-2048 keypair for this dev session. Set AUTH_JWT_PRIVATE_KEYS + AUTH_JWT_PUBLIC_KEYS in .env to persist across restarts.',
@@ -57,8 +42,7 @@ function ensureDevJwtKeys(): void {
 
 async function bootstrap() {
   ensureDevJwtKeys();
-  // Validate + parse env once up front so the CORS/preflight allowlist and
-  // the bind host all read the single zod-validated source.
+  // Validate once up front so CORS, preflight and the bind host read one zod-validated source.
   const env = validateEnv();
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
@@ -67,26 +51,20 @@ async function bootstrap() {
   app.useLogger(app.get(Logger));
   const logger = app.get(Logger);
 
-  // Trust the upstream proxy so req.ip is the real client IP behind
-  // CloudFront / API Gateway. Required for per-IP rate limiting.
+  // Trust the upstream proxy so req.ip is the real client IP; required for per-IP rate limiting.
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
 
-  // Answer CORS preflight for OPTIONS /api/v1/* with the same explicit
-  // 204 + headers the Lambda handler uses, so local dev and AWS behave
-  // identically. Uses the parsed WEB_ALLOWED_ORIGINS allowlist.
+  // Answer the preflight exactly as the Lambda handler does, so local dev and AWS behave identically.
   app.use(
     '/api/v1',
     createCorsPreflightHandler(env.WEB_ALLOWED_ORIGINS_PARSED),
   );
 
-  // Sync push allows up to 5 MB per request. Auth and
-  // simple reads stay tiny; the larger limit is gated by the per-route
-  // size check inside the sync controller.
+  // Sync push allows up to 5 MB; the larger limit is gated by the per-route size check in the sync controller.
   app.use(json({ limit: '5mb' }));
   app.use(urlencoded({ extended: true, limit: '5mb' }));
 
-  // Helmet baseline. CSP for API responses is intentionally tight — no
-  // inline anything; the SPA's own CSP comes from CloudFront Functions.
+  // Helmet baseline: the API CSP is tight (no inline anything); the SPA CSP comes from CloudFront Functions.
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -99,8 +77,7 @@ async function bootstrap() {
           frameAncestors: ["'none'"],
         },
       },
-      // HSTS is appended at the edge by the CloudFront security-headers
-      // function. Disable here to avoid duplicate headers when we re-deploy.
+      // HSTS is appended at the edge; disabled here to avoid duplicate headers.
       hsts: false,
       crossOriginEmbedderPolicy: true,
       crossOriginOpenerPolicy: true,
@@ -136,8 +113,7 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1', { exclude: [] });
 
-  // Local emulator only: create missing DynamoDB tables + S3 bucket so a
-  // fresh `pnpm emu:up` + `pnpm dev` Just Works. No-op in real AWS.
+  // Local emulator only: create missing tables and the S3 bucket; a no-op in real AWS.
   const summary = await ensureLocalAwsResources(env);
   if (summary && (summary.tablesCreated.length || summary.bucketCreated)) {
     logger.log(
@@ -147,9 +123,7 @@ async function bootstrap() {
     );
   }
 
-  // Local emulator only: seed a pre-verified, auto-approved dev user
-  // (`dev@local.test`) so the developer doesn't have to sign up again
-  // every fresh boot. No-op in real AWS or production builds.
+  // Local emulator only: seed `dev@local.test`; a no-op in real AWS or production builds.
   const userResult = await ensureLocalDevUser(env);
   if (userResult === 'created') {
     logger.log(
@@ -158,9 +132,8 @@ async function bootstrap() {
     );
   }
 
-  // Bind to API_HOST (default 127.0.0.1 → loopback only, so the dev API and
-  // its seeded credentials are NOT reachable from the LAN); set
-  // API_HOST=0.0.0.0 in .env to opt IN to LAN exposure.
+  // Bind to API_HOST (default loopback), so the dev API and its seeded credentials are not LAN-reachable unless
+  // `API_HOST=0.0.0.0` opts in.
   const port = env.API_PORT;
   const host = env.API_HOST;
   await app.listen(port, host);

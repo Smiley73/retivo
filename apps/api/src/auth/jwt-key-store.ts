@@ -1,28 +1,11 @@
-/**
- * JWT signing-key registry for RS256.
- *
- * Holds two maps keyed by the same `kid` set:
- *   AUTH_JWT_PRIVATE_KEYS: { kid → PKCS#8 PEM private key }  // sign
- *   AUTH_JWT_PUBLIC_KEYS:  { kid → SPKI PEM public key }     // verify + JWKS
- *
- * The "current" kid signs new access tokens; verify accepts any kid in
- * the public map; the public map is also surfaced verbatim by
- * `GET /auth/.well-known/jwks.json`. Rotation = add a new kid pair to
- * both SSM parameters, switch the current pointer, wait ≥ access-token
- * TTL, remove the old. The cross-validation in env.config.ts ensures
- * the two maps stay in sync.
- */
+// RS256 signing-key registry: private and public maps share one `kid` set; the current kid signs, verify accepts any, and the public map is
+// served at `/auth/.well-known/jwks.json`. Rotate by adding a pair, switching current, waiting out the access-token TTL, removing the old.
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createPublicKey } from 'node:crypto';
 import type { EnvConfig } from '../common/env.config.js';
 
-/**
- * RFC 7517 JWK rendering of one public key. We don't enumerate every
- * possible JWK field — the shape comes straight from
- * `KeyObject.export({ format: 'jwk' })` and just gets `kid`/`use`/`alg`
- * stamped on top.
- */
+/** RFC 7517 JWK of one public key, from `KeyObject.export({ format: jwk })` with `kid`, `use` and `alg` added. */
 export type JwksKey = {
   kid: string;
   use: 'sig';
@@ -42,8 +25,7 @@ export class JwtKeyStore implements OnModuleInit {
     this.publicKeys = { ...this.config.get('AUTH_JWT_PUBLIC_KEYS', { infer: true }) };
     const explicit = this.config.get('AUTH_JWT_CURRENT_KID', { infer: true });
     if (explicit) {
-      // env.config.ts already verified `explicit` is in the private map
-      // (and that the maps' kid sets match).
+      // env.config.ts already verified `explicit` is in the private map and the kid sets match.
       this.currentKid = explicit;
       return;
     }
@@ -54,22 +36,17 @@ export class JwtKeyStore implements OnModuleInit {
     this.currentKid = first;
   }
 
-  /** Kid + private PEM for signing a freshly issued access token. */
+  /** Kid and private PEM for signing a new access token. */
   current(): { kid: string; privateKey: string } {
     return { kid: this.currentKid, privateKey: this.privateKeys[this.currentKid] };
   }
 
-  /** Look up a public PEM by kid for verification. Returns null on unknown kid. */
+  /** Public PEM by kid for verification; null on an unknown kid. */
   publicFor(kid: string): string | null {
     return this.publicKeys[kid] ?? null;
   }
 
-  /**
-   * Render every active public key as a JWK (RFC 7517) for the
-   * `/auth/.well-known/jwks.json` endpoint. Node's `createPublicKey`
-   * handles the SPKI → JWK conversion natively, so we just attach the
-   * `kid`, `use`, and `alg` metadata.
-   */
+  /** Renders every active public key as a JWK for the JWKS endpoint. */
   jwks(): JwksKey[] {
     return Object.entries(this.publicKeys).map(([kid, pem]) => {
       const jwk = createPublicKey(pem).export({ format: 'jwk' });

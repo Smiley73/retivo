@@ -1,32 +1,5 @@
-/**
- * Sends + verifies emailed 6-digit MFA codes. Mirrors
- * the `PasswordResetService` rate-limit posture:
- *   - per-email cooldown (60 s) + daily cap (5) — counters on the `User` row so
- *     they survive the `MfaEmailOtp` ~10-min TTL,
- *   - a constant 200 ms response floor so a cooled-down / capped branch is not
- *     a timing oracle,
- *   - hash-at-rest: only `sha256(rawCode)` is stored in `MfaEmailOtpRow`; the
- *     raw 6-digit code is emailed and never persisted or logged,
- *   - a per-code hard attempt cap (5 wrong guesses invalidate the code + force
- *     a resend), tracked as `attempts` on the row,
- *   - a TOCTOU `ConditionExpression` on the User rate-limit state
- *     (`planSend` / `commitSend` / `afterSend` split, like reset).
- *
- * Why the User-counter update and the `MfaEmailOtp` Put are NOT one cross-table
- * transaction: it is a deliberate simplicity/cost choice (matching
- * `PasswordResetService`), not an IAM limitation. DynamoDB has no
- * `TransactWriteItems`-named IAM action to withhold — a transaction is
- * authorized by the per-item `PutItem`/`UpdateItem` actions already granted on
- * each table, so the absence of a transaction here buys nothing IAM-wise. The
- * real isolation boundary is the narrow point-ops action set (no Query/Scan)
- * plus api-role-only access to these secret tables. The conditional User update
- * commits first (winning the cooldown race for at most one sender), then the
- * code row is Put — the same "advance counters under condition, then side
- * effect" ordering reset uses. A lost cooldown race aborts before any code
- * lands.
- *
- * See docs/security.md, "The second factor".
- */
+// Sends and verifies emailed 6-digit MFA codes: per-email cooldown (60 s) and daily cap (5) on the User row, a 200 ms response
+// floor, hash-at-rest, a 5-attempt cap. See docs/security.md, "The second factor".
 import { formatMailSource } from './mail-source.js';
 import {
   GoneException,
@@ -50,19 +23,14 @@ import { sha256 } from './refresh-token.service.js';
 import { emailFingerprint } from '../common/email-fingerprint.js';
 import { escapeHtml } from '../common/escape-html.js';
 
-/** Code validity window: 10 minutes. */
+// Code validity window: 10 minutes.
 const MFA_EMAIL_OTP_TTL_SEC = 10 * 60;
-/** Minimum spacing between two code sends for the same user. */
 const MFA_EMAIL_OTP_COOLDOWN_SEC = 60;
-/** Hard cap on Email-OTP sends per UTC day per user. */
 export const MFA_EMAIL_OTP_DAILY_LIMIT = 5;
-/** Per-code wrong-attempt cap: the 5th wrong guess invalidates the code. */
 export const MFA_EMAIL_OTP_MAX_ATTEMPTS = 5;
 /**
- * Constant minimum elapsed time for the send handler (anti-timing-oracle).
- * Mirrors `PasswordResetService.RESPONSE_TIME_FLOOR_MS`: the cooldown / cap
- * no-op branches are far cheaper than a real SES dispatch, so hold every branch
- * to a fixed floor measured from handler start.
+ * Constant minimum elapsed time for the send handler, so a cooldown or cap no-op is not a timing oracle (as
+ * `PasswordResetService.RESPONSE_TIME_FLOOR_MS`).
  */
 export const MFA_EMAIL_OTP_RESPONSE_FLOOR_MS = 200;
 
@@ -72,12 +40,8 @@ interface EmailOtpSendPlan {
   userUpdate: ReturnType<UsersRepository['mfaEmailOtpSendUpdate']>;
 }
 
-/**
- * Live-expiry guard for the numeric epoch-second TTL. Returns `true` only when `expiresAt` is a
- * finite number strictly in the future. A legacy ISO-string value (`typeof === 'string'`), a
- * NaN/Infinity, or an already-elapsed numeric value all return `false`, so a pre-cutover row is
- * treated as expired and forces a fresh code.
- */
+// Live-expiry guard: true only for a finite number strictly in the future, so a pre-cutover ISO-string row reads as
+// expired and forces a fresh code.
 function isLiveEpochSeconds(expiresAt: unknown, nowMs = Date.now()): boolean {
   return (
     typeof expiresAt === 'number' &&
@@ -107,13 +71,9 @@ export class MfaEmailOtpService {
   }
 
   /**
-   * Send a fresh 6-digit code to `email` for `userId` (best effort). Returns
-   * `202`-shaped semantics: the handler never reveals whether a code already
-   * exists or whether the cooldown / cap blocked the send. Wrapped in the
-   * constant response floor. The user is already password-authenticated at the
-   * MFA step (the challenge token names them), so this is not an enumeration
-   * oracle — the floor + opaque shape defend against a within-account timing
-   * probe of the rate-limit state.
+   * Sends a fresh code (best effort) with 202-shaped semantics that never reveal whether a code exists or the
+   * cooldown or cap blocked it. The user is already password-authenticated, so this is no enumeration oracle; the
+   * floor defends against a within-account timing probe of the rate-limit state.
    */
   async send(args: {
     userId: string;
@@ -153,12 +113,8 @@ export class MfaEmailOtpService {
     await this.afterSend(args.email, plan.rawCode, args.userId, args.ip, args.userAgent);
   }
 
-  /**
-   * Evaluate the per-user cooldown / daily cap and, when permitted, build the
-   * send plan: a fresh 6-digit code, the `MfaEmailOtp` row to Put (code hashed),
-   * and the conditional User update pinned to the observed rate-limit state.
-   * Returns `null` on every blocked branch (silent no-op).
-   */
+  // Evaluates the cooldown and daily cap and, when permitted, builds the send plan: a fresh code, the hashed row to
+  // Put, and the User update pinned to the observed rate-limit state. Null on every blocked branch.
   private planSend(user: UserRow): EmailOtpSendPlan | null {
     const nowMs = Date.now();
     const nowSec = Math.floor(nowMs / 1000);
@@ -178,7 +134,6 @@ export class MfaEmailOtpService {
         : 0;
     if (countToday >= MFA_EMAIL_OTP_DAILY_LIMIT) return null; // Daily cap.
 
-    // 6-digit, uniformly random over 000000..999999 (leading zeros kept).
     const rawCode = randomInt(0, 1_000_000).toString().padStart(6, '0');
     const sentAtIso = new Date(nowMs).toISOString();
     const otpRow: MfaEmailOtpRow = {
@@ -202,14 +157,10 @@ export class MfaEmailOtpService {
     return { rawCode, otpRow, userUpdate };
   }
 
-  /**
-   * Commit the send: the conditional User-counter update first (TOCTOU guard —
-   * a lost cooldown race aborts here), then Put the code row. Returns `true` on
-   * commit; `false` when a concurrent send won the cooldown window. Not one
-   * cross-table transaction — a deliberate simplicity/cost choice, not an IAM
-   * limitation (see file header): the User update is a plain conditional
-   * `UpdateItem`; the code Put follows only on success.
-   */
+  // The conditional User-counter update first (a lost cooldown race aborts here), then the code Put. Deliberately not
+  // one cross-table transaction: a simplicity choice matching `PasswordResetService`, not an IAM limit, since a
+  // transaction is authorized by the per-item actions already granted. The real boundary is the point-ops action set
+  // (no Query or Scan) plus api-role-only access to these secret tables.
   private async commitSend(plan: EmailOtpSendPlan): Promise<boolean> {
     const { userUpdate, otpRow } = plan;
     try {
@@ -226,7 +177,7 @@ export class MfaEmailOtpService {
       if (err instanceof ConditionalCheckFailedException) return false;
       throw err;
     }
-    // Counter advanced — now persist the live code (replaces any prior row).
+    // Counter advanced: persist the live code, replacing any prior row.
     await this.otps.put(otpRow);
     return true;
   }
@@ -251,10 +202,8 @@ export class MfaEmailOtpService {
         {
           userId,
           emailFingerprint: emailFingerprint(email),
-          // Error class only, never `err.message`: an SES rejection embeds the
-          // raw recipient address in its message (e.g. "Email address is not
-          // verified: user@example.com"), which `redact` cannot scrub inside a
-          // string value. Matches the `Approved-notification` failure log.
+          // Error class only, never `err.message`: an SES rejection embeds the recipient address, which `redact` cannot
+          // scrub inside a string.
           reason: err instanceof Error ? err.name : 'unknown',
         },
         'MFA Email-OTP mail dispatch failed',
@@ -263,16 +212,10 @@ export class MfaEmailOtpService {
   }
 
   /**
-   * Verify a presented code for `userId`. Returns `{ ok: true }` on match
-   * (consumes the code) and `{ ok: false }` on a wrong guess (increments the
-   * per-code attempt counter). Throws:
-   *   - `MFA_CODE_EXPIRED` (410) when the code's TTL has elapsed (best-effort
-   *     delete of the stale row),
-   *   - `MFA_CODE_INVALID` (401) when no live code exists, or after the 5th
-   *     wrong guess (the code is invalidated + the row deleted, forcing a
-   *     resend).
-   * The raw code is hashed at this boundary and compared hash-to-hash; the raw
-   * value never touches DynamoDB or logs.
+   * Verifies a presented code. `{ ok: true }` consumes it; `{ ok: false }` on a wrong guess increments the attempt
+   * counter. Throws MFA_CODE_EXPIRED (410) when the TTL elapsed (best-effort delete) and MFA_CODE_INVALID (401) when
+   * no live code exists or after the 5th wrong guess (row deleted, forcing a resend). The code is hashed at this
+   * boundary.
    */
   async verify(args: {
     userId: string;
@@ -283,8 +226,7 @@ export class MfaEmailOtpService {
     const row = await this.otps.get(args.userId);
     if (!row) throw this.invalid();
 
-    // Numeric epoch-second TTL. A nonnumeric (legacy ISO) or elapsed
-    // value is rejected here — the pre-cutover code is invalidated.
+    // A nonnumeric legacy ISO or elapsed expiry is rejected: the pre-cutover code is invalidated.
     if (!isLiveEpochSeconds(row.expiresAt)) {
       await this.throwExpired(() => this.otps.delete(args.userId), args.userId);
     }
@@ -300,14 +242,12 @@ export class MfaEmailOtpService {
       return { ok: true };
     }
 
-    // Wrong guess — increment the per-code attempt counter (conditional on the
-    // row still being the one we read, so a concurrent resend isn't clobbered).
+    // Increment conditioned on the row still being the one read, so a concurrent resend is not clobbered.
     let attempts: number;
     try {
       attempts = await this.otps.incrementAttempts(args.userId, row.sentAt);
     } catch (err) {
-      // Row gone or replaced under us (concurrent resend) → treat as invalid.
-      // Re-throw anything else (network error, throughput error, SDK error).
+      // Row gone or replaced (a concurrent resend): invalid. Rethrow anything else.
       if (!(err instanceof ConditionalCheckFailedException)) throw err;
       throw this.invalid();
     }
@@ -317,15 +257,14 @@ export class MfaEmailOtpService {
       ip: args.ip ?? null,
       userAgent: args.userAgent ?? null,
     });
-    // Incident-context warn only. The `MfaVerifyFailed` metric is now emitted
-    // as direct EMF from AuthEventsRepository off the `mfa_email_otp_failed`
-    // AuthEvent — this log is NOT its source. Never log the code.
+    // Incident-context warn only; the MfaVerifyFailed metric comes from AuthEventsRepository off the audit event.
+    // Never log the code.
     this.logger.warn('MFA verification failed', {
       userId: args.userId,
       factor: 'email_otp',
     });
     if (attempts >= MFA_EMAIL_OTP_MAX_ATTEMPTS) {
-      // Hard cap hit — invalidate the code, force a resend.
+      // Hard cap hit: invalidate the code and force a resend.
       await this.otps.delete(args.userId);
       throw this.invalid();
     }
@@ -333,19 +272,10 @@ export class MfaEmailOtpService {
   }
 
   /**
-   * Send a fresh 6-digit step-up code to `email` for `userId`, bound to `purpose`.
-   * Same opaque/floored posture as {@link send},
-   * but writes the namespaced `<userId>#stepup` code row (carrying `purpose`) and
-   * draws on the SEPARATE step-up daily-cap/cooldown budget on the `User` row, so
-   * a step-up user's allowance is never drained by login sends (and vice versa).
-   * Concurrent different-purpose sends overwrite the single step-up row
-   * (last-write-wins — the superseded op simply re-requests).
-   *
-   * Returns `{ committed }`: `true` only when a code row was actually persisted
-   * (and the mail dispatched). A cooldown / daily-cap / lost-race no-op returns
-   * `false` so the caller does NOT record a `step_up_challenge` audit event for a
-   * challenge that was never minted (the opaque 202 shape + response floor still
-   * hide which branch ran from the client).
+   * Sends a fresh step-up code bound to `purpose`, on the namespaced `<userId>#stepup` row and the separate step-up
+   * budget on the User row, so login and step-up allowances never drain each other. Concurrent different-purpose
+   * sends overwrite the single row. Returns `{ committed }`, true only when a code row was persisted, so the caller
+   * records `step_up_challenge` only for a challenge that was minted.
    */
   async sendStepUp(args: {
     userId: string;
@@ -371,7 +301,6 @@ export class MfaEmailOtpService {
     return { committed };
   }
 
-  /** Step-up analogue of {@link planSend}, on the step-up budget + namespaced row. */
   private planStepUpSend(user: UserRow, purpose: string): EmailOtpSendPlan | null {
     const nowMs = Date.now();
     const nowSec = Math.floor(nowMs / 1000);
@@ -415,7 +344,6 @@ export class MfaEmailOtpService {
     return { rawCode, otpRow, userUpdate };
   }
 
-  /** Step-up analogue of {@link commitSend}: conditional User update, then the namespaced Put. */
   private async commitStepUpSend(plan: EmailOtpSendPlan): Promise<boolean> {
     const { userUpdate, otpRow } = plan;
     try {
@@ -437,12 +365,8 @@ export class MfaEmailOtpService {
   }
 
   /**
-   * Verify a presented step-up code for `userId` bound to `purpose`. Same lifecycle as {@link
-   * verify} on the namespaced `<userId>#stepup` row, plus a per-op binding check: a code whose
-   * stored `purpose` does not match the presented one is rejected as `MFA_CODE_INVALID` (a wrong
-   * guess against it), so a code minted for one op can never authorize another. Returns `{ ok: true
-   * }` on a matching, correct, unexpired, right-purpose code (consumed); `{ ok: false }` on a wrong
-   * guess.
+   * Verifies a step-up code bound to `purpose`. As `verify` on the namespaced row, plus a per-operation binding: a
+   * right code for another purpose counts as a wrong guess, so a code cannot authorize a different operation.
    */
   async verifyStepUp(args: {
     userId: string;
@@ -454,8 +378,7 @@ export class MfaEmailOtpService {
     const row = await this.otps.getStepUp(args.userId);
     if (!row) throw this.invalid();
 
-    // Numeric epoch-second TTL. A nonnumeric (legacy ISO) or elapsed
-    // value is rejected here — the pre-cutover code is invalidated.
+    // A nonnumeric legacy ISO or elapsed expiry is rejected: the pre-cutover code is invalidated.
     if (!isLiveEpochSeconds(row.expiresAt)) {
       await this.throwExpired(
         () => this.otps.deleteStepUp(args.userId),
@@ -463,8 +386,7 @@ export class MfaEmailOtpService {
       );
     }
 
-    // Per-op binding: a right code for the wrong op counts as a wrong guess
-    // (never consumed for the mismatched op), so a code cannot cross operations.
+    // A right code for the wrong operation is a wrong guess and is never consumed.
     const rightPurpose = row.purpose === args.purpose;
     if (rightPurpose && sha256(args.code) === row.codeHash) {
       await this.otps.deleteStepUp(args.userId);
@@ -501,12 +423,7 @@ export class MfaEmailOtpService {
     return { ok: false };
   }
 
-  /**
-   * Shared expired/legacy-code path for {@link verify} and {@link verifyStepUp}:
-   * best-effort delete the stale row (via the caller's `del`, so each verifier
-   * targets its own — login vs step-up — row), then throw the typed
-   * `MFA_CODE_EXPIRED`. Never returns normally (`Promise<never>`).
-   */
+  // Shared expired path: best-effort delete of the stale row via the caller `del`, then throw MFA_CODE_EXPIRED.
   private async throwExpired(
     del: () => Promise<void>,
     userId: string,
@@ -518,12 +435,7 @@ export class MfaEmailOtpService {
     });
   }
 
-  /**
-   * Best-effort hygiene delete of an expired/legacy code row. A transient
-   * DynamoDB fault on this delete must NEVER prevent the caller's normal
-   * fallback (throwing `MFA_CODE_EXPIRED`) — swallow + warn, then let the
-   * caller throw the typed error. Never logs the code.
-   */
+  // Best-effort hygiene delete: a transient fault must never block the MFA_CODE_EXPIRED fallback. Never logs the code.
   private async bestEffortDeleteExpired(
     del: () => Promise<void>,
     userId: string,
@@ -547,9 +459,7 @@ export class MfaEmailOtpService {
 
   private async sendCodeMail(toAddress: string, code: string): Promise<void> {
     if (!this.sesEnabled) {
-      // Local dev: never log the raw code or recipient email (CODING_STANDARDS
-      // "Never log secrets, tokens, or PII"). The integration test suite reads
-      // the code from the stored row's known plaintext, not a log line.
+      // Local dev: never log the raw code or recipient (CODING_STANDARDS "Never log secrets, tokens, or PII").
       this.logger.log(
         { emailFingerprint: emailFingerprint(toAddress) },
         'MFA Email-OTP code generated (local dev — not logged)',

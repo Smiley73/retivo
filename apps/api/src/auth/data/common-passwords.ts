@@ -1,7 +1,4 @@
-/**
- * Top common passwords curated from published breach-analysis datasets.
- * Checked case-insensitively in PasswordValidatorService.
- */
+// Top common passwords from published breach-analysis datasets, checked case-insensitively in PasswordValidatorService.
 // prettier-ignore
 export const COMMON_PASSWORDS: ReadonlySet<string> = new Set([
   // ── pure numbers ──────────────────────────────────────────────────────────

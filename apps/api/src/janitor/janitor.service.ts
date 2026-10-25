@@ -1,20 +1,5 @@
-/**
- * Daily snapshot janitor. Replaces the 90-day blanket S3 lifecycle
- * rule that used to live on the snapshots bucket.
- *
- * Per household:
- *   1. Always keep the N most recent snapshots (`SNAPSHOT_MIN_KEEP`,
- *      default 10), regardless of age. Inactive users with sparse
- *      history don't lose data.
- *   2. Of the remainder, delete anything older than
- *      `SNAPSHOT_MIN_AGE_DAYS` (default 90) days.
- *
- * The age check parses the ISO-with-dashes timestamp embedded in the
- * key (the compactor writes `<householdId>/<isoTimestamp>.json.gz` —
- * see CompactorService). LastModified is a fallback for any legacy
- * objects whose key shape we can't parse, so a malformed key is
- * always *kept*, never silently deleted.
- */
+// Daily snapshot janitor: per household, keeps the newest SNAPSHOT_MIN_KEEP snapshots and deletes the rest older than
+// SNAPSHOT_MIN_AGE_DAYS. A key that does not parse falls back to LastModified and is kept, never deleted.
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -48,11 +33,8 @@ export class JanitorService {
     config: ConfigService<EnvConfig, true>,
   ) {
     this.snapshotsBucket = config.get('SNAPSHOTS_BUCKET', { infer: true });
-    // SNAPSHOT_MIN_KEEP / SNAPSHOT_MIN_AGE_DAYS are janitor-specific
-    // knobs not in the global EnvConfig schema. Read them straight
-    // from process.env so the same code path works whether the
-    // service is bootstrapped via AppModule (typed config, no extra
-    // keys loaded) or via JanitorLambdaModule (custom loader).
+    // Janitor-specific knobs outside the global EnvConfig schema, read from process.env so both AppModule and
+    // JanitorLambdaModule bootstrap work.
     this.minKeep = parseIntOrDefault(process.env.SNAPSHOT_MIN_KEEP, 10);
     this.minAgeDays = parseIntOrDefault(process.env.SNAPSHOT_MIN_AGE_DAYS, 90);
   }
@@ -71,9 +53,7 @@ export class JanitorService {
     };
 
     for (const [householdId, objects] of grouped) {
-      // Sort newest-first by key (ISO timestamp embedded in the key
-      // sorts lexicographically). Falls back to LastModified for any
-      // object whose key has a non-conformant suffix.
+      // Newest first: the ISO timestamp in the key sorts lexicographically.
       objects.sort((a, b) => compareNewestFirst(a, b));
 
       const toDelete: string[] = [];
@@ -88,7 +68,7 @@ export class JanitorService {
         if (fromKey === null) summary.unparseableKeys += 1;
         const lastModifiedMs = fromKey ?? obj.LastModified?.getTime() ?? null;
         if (lastModifiedMs === null) {
-          // Neither key parsed nor LastModified available — keep it.
+          // Neither the key nor LastModified is usable: keep it.
           kept += 1;
           continue;
         }
@@ -140,8 +120,7 @@ export class JanitorService {
       for (const obj of r.Contents ?? []) {
         if (!obj.Key) continue;
         const slash = obj.Key.indexOf('/');
-        // Skip non-prefixed objects (e.g. accidental top-level files);
-        // we only manage `<householdId>/...` snapshots.
+        // Skip non-prefixed objects; only `<householdId>/...` snapshots are managed.
         if (slash <= 0) continue;
         const householdId = obj.Key.slice(0, slash);
         const list = out.get(householdId) ?? [];
@@ -179,8 +158,6 @@ function parseIntOrDefault(v: unknown, fallback: number): number {
 }
 
 function compareNewestFirst(a: S3Object, b: S3Object): number {
-  // Sort by key descending — works because the compactor writes keys
-  // shaped `<household>/<sortable-iso-timestamp>.json.gz`.
   const ak = a.Key ?? '';
   const bk = b.Key ?? '';
   if (ak !== bk) return ak < bk ? 1 : -1;
@@ -194,10 +171,8 @@ function parseTimestampFromKey(key: string | undefined): number | null {
   const filename = key.slice(slash + 1);
   if (!filename.endsWith('.json.gz')) return null;
   const stem = filename.slice(0, -'.json.gz'.length);
-  // Compactor mints keys via:
-  //   new Date().toISOString().replace(/[:.]/g, '-')
-  // → YYYY-MM-DDTHH-MM-SS-sssZ. Reverse the replacement carefully so
-  // a malformed key returns null instead of NaN.
+  // Reverses the compactor `toISOString().replace(/[:.]/g, "-")` carefully, so a malformed key returns null
+  // instead of NaN.
   const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(stem);
   if (!m) return null;
   const [, date, h, mi, s, ms] = m;

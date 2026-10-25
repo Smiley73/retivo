@@ -1,15 +1,5 @@
-/**
- * Authenticated route guard. Verifies the access-token JWT (signature,
- * kid lookup, expiry), checks the RevokedToken denylist, and attaches
- * the resolved claims to the request object for `@CurrentUser()`.
- *
- * Routes marked `@Public()` skip both checks. There is **no** role
- * check — v1 has no roles.
- *
- * The household-claim equality check (JWT householdId === body
- * householdId) is enforced separately by `HouseholdClaimGuard` on
- * sync routes; the JWT guard is concerned with identity only.
- */
+// Authenticated route guard: verifies the access-token JWT, checks the RevokedToken denylist and attaches claims for `@CurrentUser()`.
+// `@Public()` routes skip it; there are no roles in v1.
 import {
   CanActivate,
   ExecutionContext,
@@ -63,9 +53,8 @@ export class JwtAuthGuard implements CanActivate {
       });
     }
 
-    // Reject a non-session token presented as a bearer. The MFA challenge token is signed by the
-    // same key store but carries `purpose: 'mfa_challenge'`; a normal access token has NO
-    // `purpose`. Any verified token that carries one is not a session bearer.
+    // Reject a non-session token presented as a bearer: the MFA challenge token (same keys) carries a `purpose`
+    // claim, and a normal access token has none.
     if (claims.purpose !== undefined) {
       throw new UnauthorizedException({
         code: 'UNAUTHENTICATED',
@@ -73,11 +62,8 @@ export class JwtAuthGuard implements CanActivate {
       });
     }
 
-    // Cutover: a token minted before
-    // this shipped carries no `sessionGeneration` claim at all. Rejected
-    // with the SAME outcome as a tombstoned generation — never trusted as an
-    // implicit "generation 0" — so no legacy no-generation session survives
-    // the deploy.
+    // Cutover: a token minted before `sessionGeneration` existed is rejected like a tombstoned generation, never
+    // trusted as generation 0.
     if (claims.sessionGeneration === undefined) {
       throw new UnauthorizedException({
         code: 'ACCESS_TOKEN_REVOKED',
@@ -85,10 +71,8 @@ export class JwtAuthGuard implements CanActivate {
       });
     }
 
-    // Both point reads against the SAME table, issued CONCURRENTLY — never
-    // one `await`ed before the other starts. A sequential implementation
-    // would pass every behavioural test here while doubling this hot path's
-    // added latency.
+    // Both point reads are issued concurrently, never one awaited before the other starts: a sequential version
+    // passes every behavioural test while doubling this hot path latency.
     const [jtiRevoked, generationRevoked] = await Promise.all([
       this.revoked.isRevoked(claims.jti),
       this.revoked.isGenerationRevoked(claims.userId, claims.sessionGeneration),

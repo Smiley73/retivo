@@ -1,23 +1,5 @@
-/**
- * Per-address guessing notice — the mail sent to the address's owner after
- * repeated failed sign-ins. Injected into `FailedLoginService` (the shared backoff primitive) so
- * every consumer of the per-address counter inherits it, but kept as its own
- * small service (owning SES + a users lookup + config) so the primitive
- * itself stays lean, mirroring `FactorNoticeService`.
- *
- * Threshold: 10 consecutive per-address failures — by then the derived wait
- * is already at its 64s cap, so it is unambiguous guessing, not a typo
- * streak. At most one notice per 24h, enforced by
- * `FailedLoginAttemptsRepository.stampGuessingNotice`'s atomic conditional
- * write (never a TOCTOU read-then-write here).
- *
- * Enumeration/latency: the notice
- * only ever sends for a real account, so the SES call is dispatched WITHOUT
- * being awaited — a real address must not become measurably slower at the
- * crossing attempt than an unknown one. An unknown email still pays the same
- * stamp-check + user-lookup shape before returning, so the code path is
- * identical up to that point.
- */
+// Guessing notice mailed to the address owner after 10 consecutive failures, at most once per 24h (atomic stamp). The SES call is not awaited
+// and an unknown email takes the same path, so there is no latency or existence oracle.
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SendEmailCommand, SESClient } from '@aws-sdk/client-ses';
@@ -32,10 +14,9 @@ import type { UserRow } from '../dynamo/types.js';
 import { formatMailSource } from './mail-source.js';
 import { formatUtcTimestamp } from './login-guessing-notice-mail.js';
 
-/** By the 10th consecutive per-address failure the derived wait is already
- *  capped at 64s — unambiguous guessing. */
+// By the 10th consecutive failure the derived wait is capped at 64 s: unambiguous guessing.
 const GUESSING_NOTICE_THRESHOLD = 10;
-/** Once-per-24h window, mirroring the `FailedLoginAttempt` row's own TTL. */
+// Once-per-24h window, mirroring the `FailedLoginAttempt` row TTL.
 const GUESSING_NOTICE_WINDOW_SEC = 24 * 60 * 60;
 const SUBJECT = 'Failed sign-in attempts on your Retivo account';
 
@@ -58,11 +39,9 @@ export class LoginGuessingNoticeService {
   }
 
   /**
-   * Called from `FailedLoginService.recordFailure` after every per-address
-   * increment. Below the threshold: no-op. At/above it: gate on the 24h
-   * stamp (atomic — never sends twice for a race), then resolve the account.
-   * An unknown email follows the identical stamp-check + lookup shape and
-   * simply resolves to nothing (no mail, no user-linked audit record).
+   * Called after every per-address increment. Below the threshold it is a no-op; at or above it gates on the atomic
+   * 24h stamp, then resolves the account. An unknown email follows the identical shape and resolves to nothing (no
+   * mail, no user-linked audit).
    */
   async notifyIfNeeded(
     emailLowercase: string,
@@ -84,8 +63,8 @@ export class LoginGuessingNoticeService {
       ip,
       userAgent,
     });
-    // Fire-and-forget: the caller (the failed-login response) must not wait
-    // on SES latency. Its own catch logs a fingerprint + error name only.
+    // Fire-and-forget so the failed-login response does not wait on SES; its own catch logs a fingerprint and error
+    // name only.
     this.dispatchMail(user).catch((err) => {
       this.logger.warn(
         'Guessing-notice mail dispatch failed (best-effort)',
@@ -102,8 +81,7 @@ export class LoginGuessingNoticeService {
       );
       return;
     }
-    // Composed INLINE (not via a separate builder) so the repo's HTML
-    // mail-escaping regression guard can see this interpolation.
+    // Composed inline so the HTML mail-escaping regression guard can see this interpolation.
     const when = formatUtcTimestamp(new Date());
     await this.ses.send(
       new SendEmailCommand({

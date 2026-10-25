@@ -1,20 +1,5 @@
-/**
- * AWS Lambda handler for the daily snapshot janitor.
- *
- * Boots `JanitorLambdaModule` (a thin wrapper that registers
- * `ConfigModule.forRoot` + imports `JanitorModule`) once per cold
- * start, caches it, and invokes `JanitorService.runOnce()` on each
- * EventBridge tick.
- *
- * No `loadSecretsFromSsm()` — the janitor doesn't sign JWTs / send
- * SES / enforce edge auth, and its IAM role omits `ssm:GetParameter`
- * by design. Bucket name + retention knobs arrive via Lambda env
- * vars from `infrastructure/src/lambda.ts`.
- *
- * Returns the run summary for CloudWatch — the EventBridge target
- * does not consume the response, but a structured summary helps
- * when inspecting Lambda logs.
- */
+// AWS Lambda handler for the daily snapshot janitor: boots JanitorLambdaModule once per cold start and runs
+// `JanitorService.runOnce()`. No SSM load, since its IAM role omits ssm:GetParameter.
 import 'reflect-metadata';
 import type { Handler, ScheduledEvent } from 'aws-lambda';
 import { NestFactory } from '@nestjs/core';
@@ -46,22 +31,13 @@ export const handler: Handler<ScheduledEvent> = async () => {
   return svc.runOnce();
 };
 
-/**
- * Resolve a provider from `app`, returning `undefined` when the symbol is
- * not registered in the bootstrapped module. `JanitorLambdaModule` imports
- * only `JanitorModule`, so AWS clients that module never pulls in are
- * legitimately absent — Nest throws `UnknownElementException` for those,
- * which is the only error swallowed here. Any other resolution failure is
- * rethrown.
- */
+// Resolves a provider, returning undefined when it is not registered: the lambda module imports only JanitorModule,
+// so Nest throws UnknownElementException for the AWS clients it never pulls in. Any other error is rethrown.
 function tryGet<T>(app: INestApplicationContext, token: symbol): T | undefined {
   try {
     return app.get<T>(token);
   } catch (err) {
-    // UnknownElementException is not exported from @nestjs/core's public
-    // surface; identify it by constructor name (the same pattern used in
-    // the test suite) so an unregistered provider is the only swallowed
-    // case and every other error propagates.
+    // UnknownElementException is not exported from the public surface, so it is identified by constructor name.
     if (err instanceof Error && err.constructor.name === 'UnknownElementException') {
       return undefined;
     }
@@ -70,12 +46,8 @@ function tryGet<T>(app: INestApplicationContext, token: symbol): T | undefined {
 }
 
 /**
- * Test-only teardown. Destroys every AWS SDK client held by the cached
- * standalone context — each owns its own HTTP keep-alive pool that
- * `app.close()` does not drain (the clients implement no `OnModuleDestroy`)
- * — then closes the Nest context and clears the module-level cache so the
- * next test boots fresh. Never called in production; the lambda handler
- * keeps `cachedApp` warm across invocations by design.
+ * Test-only teardown: destroys every AWS SDK client in the cached context (each keeps an HTTP keep-alive pool that
+ * `app.close()` does not drain), then closes the context and clears the cache. Never called in production.
  */
 export async function closeForTests(): Promise<void> {
   const app = cachedApp;

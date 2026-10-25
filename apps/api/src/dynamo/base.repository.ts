@@ -1,12 +1,5 @@
-/**
- * Shared DI/config boilerplate for the Dynamo repository classes.
- *
- * Each concrete repo passes its TABLE_* env key to `super()` so the
- * resolved table name lives at `this.tableName` and `this.doc` is the
- * shared `DynamoDBDocumentClient`. Subclasses declare their own
- * constructor (Nest reads injection metadata from the subclass) and
- * forward the two injected args plus the table key.
- */
+// Shared DI/config base for the Dynamo repositories: each passes its TABLE_* env key to super(), and subclasses declare their own
+// constructor because Nest reads injection metadata from the subclass.
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';

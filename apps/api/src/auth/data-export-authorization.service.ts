@@ -1,23 +1,5 @@
-/**
- * Mints and verifies the short-lived export-authorization cookie.
- *
- * Account export requires an explicit password re-verification. After a
- * successful `data_export`-purpose `POST /auth/verify-password`,
- * this service sets a 5-minute, HttpOnly, `SameSite=Strict`, production-`Secure`
- * signed cookie bound to the caller's `userId`, `householdId`, and the CURRENT
- * access-token `jti`. `GET /auth/account-export` (via `ExportAuthorizationGuard`)
- * accepts it only when all three bindings match the request's authenticated
- * claims — a wrong session / user / household, a tampered token, or an expired
- * one is rejected.
- *
- * Same key store + RS256 signing as `AccessTokenService` (jwt.service.ts) and
- * `MfaChallengeService`, but the token carries `purpose: 'data_export'`.
- * `JwtAuthGuard` rejects any verified token that carries a `purpose`, so the
- * export authorization can NEVER be used as a session bearer — it only works as
- * the HttpOnly cookie read here.
- *
- * See docs/security.md, "Deleting and exporting your data".
- */
+// Mints and verifies the 5-minute export-authorization cookie (HttpOnly, SameSite=Strict, signed, bound to userId, householdId and the
+// access-token jti). Its `purpose` claim bars it as a session bearer. See docs/security.md, "Deleting and exporting your data".
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import jwt, { type JwtPayload } from 'jsonwebtoken';
@@ -30,21 +12,17 @@ import {
   exportAuthorizationCookieOptions,
 } from './cookie-config.js';
 
-/** Distinguishing claim that bars the token from being used as a session bearer. */
+// The claim that bars the token from being used as a session bearer.
 export const DATA_EXPORT_AUTHORIZATION_PURPOSE = 'data_export';
 
-/** The session identity an export authorization is bound to. */
 export interface ExportAuthorizationBinding {
   userId: string;
   householdId: string;
-  /** The access-token `jti` in force when the authorization was minted. */
   jti: string;
 }
 
 @Injectable()
 export class DataExportAuthorizationService {
-  /** Token-domain claims signed onto and strictly required by every
-   *  export-authorization token. */
   private readonly issuer: string;
   private readonly audience: string;
 
@@ -56,10 +34,7 @@ export class DataExportAuthorizationService {
     this.audience = config.get('AUTH_JWT_AUDIENCE', { infer: true });
   }
 
-  /**
-   * Set the export-authorization cookie on the response, bound to the caller's
-   * session. Called only after a successful `data_export` re-verification.
-   */
+  /** Sets the cookie bound to the caller session, only after a successful `data_export` re-verification. */
   issueCookie(res: Response, binding: ExportAuthorizationBinding): void {
     res.cookie(
       EXPORT_AUTHORIZATION_COOKIE_NAME,
@@ -68,7 +43,6 @@ export class DataExportAuthorizationService {
     );
   }
 
-  /** Sign a 5-min export-authorization token bound to `binding`. */
   sign(binding: ExportAuthorizationBinding): string {
     const { kid, privateKey } = this.keys.current();
     return jwt.sign(
@@ -90,10 +64,8 @@ export class DataExportAuthorizationService {
   }
 
   /**
-   * Read the export-authorization cookie off `req` and verify it against the
-   * caller's authenticated session. Returns `false` (never throws) for a
-   * missing / expired / malformed / wrong-session cookie so the guard can fail
-   * closed with `EXPORT_AUTHORIZATION_REQUIRED`.
+   * Verifies the cookie against the authenticated session; false (never throws) for a missing, expired, malformed or
+   * wrong-session cookie, so the guard fails closed with EXPORT_AUTHORIZATION_REQUIRED.
    */
   verifyFromRequest(req: Request, expected: ExportAuthorizationBinding): boolean {
     const token = readCookie(req, EXPORT_AUTHORIZATION_COOKIE_NAME);
@@ -101,12 +73,7 @@ export class DataExportAuthorizationService {
     return this.verify(token, expected);
   }
 
-  /**
-   * Verify a presented export-authorization token: signature + kid lookup +
-   * expiry + `purpose` + all three session bindings. Returns `false` on ANY
-   * failure (fail closed). Never accepted as a session bearer — the `purpose`
-   * claim also bars it at `JwtAuthGuard`.
-   */
+  /** Verifies signature, kid, expiry, purpose and all three bindings; false on any failure. */
   verify(token: string, expected: ExportAuthorizationBinding): boolean {
     const decoded = jwt.decode(token, { complete: true });
     if (!decoded || typeof decoded === 'string') return false;
@@ -117,17 +84,14 @@ export class DataExportAuthorizationService {
 
     let payload: JwtPayload;
     try {
-      // Strictly require the environment-specific issuer/audience alongside
-      // the existing purpose/binding checks below — a missing or wrong claim
-      // fails closed like any other verification failure.
+      // Strictly require the environment-specific issuer and audience; a missing or wrong claim fails closed.
       payload = jwt.verify(token, publicKey, {
         algorithms: ['RS256'],
         issuer: this.issuer,
         audience: this.audience,
       }) as JwtPayload;
     } catch {
-      // Bad signature, unknown kid, expiry, or wrong/missing issuer/audience —
-      // all fail closed.
+      // Bad signature, unknown kid, expiry or wrong claims all fail closed.
       return false;
     }
 
@@ -140,7 +104,6 @@ export class DataExportAuthorizationService {
   }
 }
 
-/** Read a single cookie value off the raw `Cookie` header. */
 function readCookie(req: Request, name: string): string | undefined {
   const header = req.headers.cookie ?? '';
   for (const pair of header.split(';')) {
@@ -149,8 +112,8 @@ function readCookie(req: Request, name: string): string | undefined {
       try {
         return decodeURIComponent(rest.join('='));
       } catch {
-        // Malformed percent-encoding in an attacker-controlled cookie: treat as
-        // an absent cookie so `verify*` fails closed rather than throwing URIError.
+        // Malformed percent-encoding in an attacker-controlled cookie: treat as absent so `verify*` fails closed
+        // instead of throwing URIError.
         return undefined;
       }
     }

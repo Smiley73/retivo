@@ -42,11 +42,8 @@ export class MutationLogRepository extends BaseRepository {
   }
 
   /**
-   * The highest `sequenceId` (KSUID) currently live for a household, or
-   * `null` when the log is empty. `RestoreService.clearToEmpty` uses it to
-   * derive a convergence watermark strictly greater than every live device
-   * cursor. A `ScanIndexForward: false` query with `Limit: 1` returns
-   * the partition's top sort key.
+   * The highest live `sequenceId` for a household, or null when the log is empty; `RestoreService.clearToEmpty`
+   * derives its convergence watermark from it.
    */
   async maxSequenceId(householdId: string): Promise<string | null> {
     const r = await this.doc.send(
@@ -65,12 +62,8 @@ export class MutationLogRepository extends BaseRepository {
   }
 
   /**
-   * Every mutation-log row for a household, WHOLE —
-   * unlike {@link pageSince} (which is bounded to `PAGE_LIMIT` per call for the
-   * live sync-pull loop), this pages internally until exhausted so the caller
-   * gets the complete household history in one call. The account-export
-   * builder drops `payload` (ciphertext already covered by the `aggregates`
-   * export section) at the service layer, not here.
+   * Every mutation-log row for a household, whole, paged internally until exhausted (unlike `pageSince`). The export
+   * builder drops `payload` at the service layer.
    */
   async listForHousehold(householdId: string): Promise<MutationLogRow[]> {
     const out: MutationLogRow[] = [];
@@ -93,14 +86,8 @@ export class MutationLogRepository extends BaseRepository {
   }
 
   /**
-   * Hard-delete every mutation-log row for a household. Used only by the
-   * shared household-data sweep (`HouseholdSweepService`) — the four
-   * authorised consumers: account deletion (`DELETE /auth/account`),
-   * encrypted-workspace reset (`POST /auth/encrypted-workspace-reset`),
-   * self-service restore (`POST /sync/restore`), and the
-   * server-authoritative workspace clear (`POST /sync/workspace/clear`).
-   * The api-role IAM policy permits `BatchWriteItem` on this table for
-   * that sweep.
+   * Hard-deletes every mutation-log row for a household, for the shared household sweep only
+   * (`HouseholdSweepService`; see AGENTS.md, "Project-specific security").
    */
   async deleteAllForHousehold(householdId: string): Promise<void> {
     let lastKey: Record<string, unknown> | undefined;

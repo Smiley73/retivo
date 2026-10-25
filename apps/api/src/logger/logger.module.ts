@@ -1,46 +1,21 @@
-/**
- * Structured JSON logger using pino with secret redaction.
- *
- * Redacted paths prevent passwords, tokens, and cookies from appearing in
- * log output, satisfying the CODING_STANDARDS.md "never log secrets" rule.
- */
+// Structured pino JSON logger with secret redaction, satisfying the CODING_STANDARDS "never log secrets" rule.
 import { Module } from '@nestjs/common';
 import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
 import pino, { type DestinationStream } from 'pino';
 
 /**
- * Build the pino log destination: a SonicBoom sink bound to fd 1 with
- * `sync: true`, so every line is written with `fs.writeSync` before the call
- * returns.
- *
- * Under Lambda's freeze-after-return execution model `process.stdout` is a
- * pipe, and Node buffers writes to a pipe in userland (`process.stdout.write`
- * is asynchronous on a pipe). A line logged near the end of an invocation can
- * therefore sit in that JS buffer when the execution environment is frozen and
- * never reach CloudWatch — the production defect this repairs. Pino's own
- * default destination (`pino.destination(1)`) is likewise async. Only an
- * explicitly synchronous destination guarantees the byte is handed to the OS
- * before the handler returns; `sync: true` is the load-bearing flag the unit
- * test asserts.
+ * Builds the pino destination: a SonicBoom sink on fd 1 with `sync: true`. Under Lambda freeze a pipe write is
+ * buffered in userland (including pino default `pino.destination(1)`), so a line logged near the end of an invocation
+ * could never reach CloudWatch; only a synchronous destination hands the byte to the OS before the handler returns.
  */
 export function createSyncStdoutDestination(): DestinationStream {
   return pino.destination({ dest: 1, sync: true });
 }
 
-// pino redact paths use leading-segment matching: `password` covers the field
-// at root, `*.password` covers the field at depth 1. Cover both so values like
-// `{ password }` and `{ body: { password } }` are both masked. This is
-// leading-segment matching only — NOT arbitrary-depth coverage (pino's
-// `redact` does not support a `**` wildcard), so a value nested deeper than
-// depth 1 must not be logged in the first place.
-//
-// Redaction policy: only secrets, tokens, credentials, and the second-factor /
-// email families below are masked. Internal opaque identifiers (`userId`,
-// `householdId`, correlation IDs) are deliberately NOT redacted — they appear
-// as structured log fields today (e.g. refresh-token.service.ts's
-// `refresh_token_reuse_detected` warn) and stay visible for incident
-// investigation. That is this repo's existing convention, not a decision made
-// here.
+// pino redact matches leading segments only: `password` covers the root and `*.password` depth 1, with no `**`
+// wildcard, so a value nested deeper must not be logged. Only secrets, tokens, credentials and the second-factor
+// and email families are masked; opaque ids (userId, householdId, correlation ids) stay visible for incident
+// investigation, by existing convention.
 const REDACTED_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
@@ -84,26 +59,17 @@ const REDACTED_PATHS = [
 @Module({
   imports: [
     PinoLoggerModule.forRoot({
-      // Tuple form `[options, stream]` (nestjs-pino / pino-http): write to an
-      // explicitly synchronous fd-1 SonicBoom destination (see
-      // `createSyncStdoutDestination`) rather than pino's default async fd-1
-      // sink or `process.stdout`. Both of those buffer in userland and can drop
-      // or delay a service log written near the end of a Lambda invocation when
-      // the runtime freezes the process, which is why `new Logger(...).warn/
-      // error` markers never reached CloudWatch in the deployed JSON shape. The
-      // synchronous destination delivers each line to the Lambda log pipe
-      // before the handler returns.
+      // Tuple form `[options, stream]` with the synchronous fd-1 destination; pino default and `process.stdout` buffer
+      // in userland, which is why service log markers never reached CloudWatch.
       pinoHttp: [
         {
           redact: {
             paths: REDACTED_PATHS,
             censor: '[REDACTED]',
           },
-          // Structured JSON in all environments.
-          // For human-readable local output: pipe to pino-pretty (not installed
-          // by default — `pnpm --filter @retirement/api add -D pino-pretty`).
+          // Pipe to pino-pretty for human-readable local output (not installed by default).
           level: process.env.LOG_LEVEL ?? 'info',
-          // Omit the raw req/res objects from the default log line to reduce noise.
+          // Omit the raw req and res objects to reduce noise.
           serializers: {
             req(req: { method: string; url: string }) {
               return { method: req.method, url: req.url };

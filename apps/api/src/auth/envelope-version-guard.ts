@@ -1,16 +1,10 @@
-/**
- * Single-version-step guard shared by the ordinary key-envelope PUT/DELETE
- * paths (`KeyEnvelopeController`) and the change-password commit's
- * re-wrap branch. Extracted so the "no
- * operation may skip versions" invariant has exactly one definition.
- */
+// Single-version-step guard shared by the key-envelope PUT and DELETE paths and the change-password re-wrap, so "no operation may skip
+// versions" has one definition.
 import { ConflictException } from '@nestjs/common';
 
 /**
- * Enforce that a proposed envelope-set version advances the client's held
- * version by exactly one. A jump/regression reuses the existing `409
- * STALE_ENVELOPE_VERSION` contract so the current client refetch flow
- * handles it without a new error code.
+ * Enforces that a proposed envelope-set version advances the held version by exactly one; a jump or regression reuses
+ * 409 STALE_ENVELOPE_VERSION so the client refetch flow handles it.
  */
 export function assertSingleVersionStep(expected: number, proposed: number): void {
   if (proposed !== expected + 1) {

@@ -1,10 +1,5 @@
-/**
- * Email verification flow. Two responsibilities: dispatching the
- * verification mail via SES and consuming the token to flip
- * `User.emailVerifiedAt`.
- *
- * See docs/security.md, "Sign-up".
- */
+// Email verification flow: dispatches the verification mail via SES and consumes the token to set `User.emailVerifiedAt`. See
+// docs/security.md, "Sign-up".
 import { formatMailSource } from './mail-source.js';
 import {
   BadRequestException,
@@ -49,30 +44,21 @@ export class EmailVerificationService {
     this.fromAddress = config.get('SES_FROM_ADDRESS', { infer: true });
     this.webOrigin = config.get('WEB_ORIGIN', { infer: true });
     this.emailVerificationTable = config.get('TABLE_EMAIL_VERIFICATION', { infer: true });
-    // Local dev / test: skip the actual send. SES_ENDPOINT being set
-    // signals we want to talk to a local emulator instead.
+    // Local dev and test skip the send; a set SES_ENDPOINT means a local emulator.
     const node = config.get('NODE_ENV', { infer: true });
     this.sesEnabled = node === 'production' || !!config.get('SES_ENDPOINT', { infer: true });
-    // Same trapdoor used by signup / resend-verification. Local development only — refused at boot
-    // on any deployed stack, which all run NODE_ENV=production.
+    // Same trapdoor as signup: local development only, refused at boot on a deployed stack.
     this.devShortcutEnabled =
       node !== 'production' ||
       config.get('EXPOSE_VERIFICATION_TOKEN', { infer: true }) === 'true';
   }
 
   async sendVerificationMail(toAddress: string, token: string): Promise<void> {
-    // Token lives in the URL fragment (#) so it never leaves the
-    // browser — fragments are not sent in HTTP requests, never logged
-    // by API Gateway / CloudFront, and never appear in Referer headers
-    // on subsequent navigation.
+    // Token in the URL fragment, so it never reaches the server, access logs or Referer.
     const link = `${this.webOrigin}/auth/verify-email#token=${encodeURIComponent(token)}`;
     if (!this.sesEnabled) {
-      // Dev/test mode: no SES. The raw token + recipient email must never be
-      // interpolated into a log message — `redact` masks by field name, not
-      // message-string content, so a value baked into the string can't be
-      // masked. `devShortcutEnabled` already returns the same token in the API
-      // response for local click-through, so the link here is redundant. Log a
-      // fixed, argument-free marker only.
+      // Dev and test: never interpolate the token or recipient into a log message, since `redact` masks by field
+      // name, not string content. Log a fixed marker.
       this.logger.log('verification_link_dev_mode_sent');
       return;
     }
@@ -107,8 +93,7 @@ export class EmailVerificationService {
   async consumeToken(
     token: string,
   ): Promise<{ userId: string; approvalToken?: string }> {
-    // The URL carries the raw token; the table stores its SHA-256 hash. Hash once at the boundary
-    // and use the hash for every DynamoDB key (lookup + both cleanup deletes).
+    // Hash once at the boundary and use the hash for every DynamoDB key.
     const tokenHash = sha256(token);
     const row = await this.verifications.findByToken(tokenHash);
     if (!row) {
@@ -117,11 +102,8 @@ export class EmailVerificationService {
         message: 'Verification token is invalid or already used.',
       });
     }
-    // Purpose discriminator: signup
-    // verify-email accepts `verify_email` and legacy absent-purpose rows, but
-    // must reject a `change_email` token so the two flows never cross-consume.
-    // A `change_email` token presented here is treated as invalid (do NOT
-    // delete it — it still belongs to the live change-email flow).
+    // Reject a `change_email` token here so the flows never cross-consume; do not delete it, it belongs to the live
+    // change-email flow.
     if (row.purpose === 'change_email') {
       throw new BadRequestException({
         code: 'VERIFICATION_TOKEN_INVALID',
@@ -130,7 +112,6 @@ export class EmailVerificationService {
     }
     const nowSec = Math.floor(Date.now() / 1000);
     if (row.expiresAt < nowSec) {
-      // Best-effort cleanup; TTL handles eventual consistency too.
       await this.verifications.deleteToken(tokenHash);
       throw new GoneException({
         code: 'VERIFICATION_TOKEN_EXPIRED',
@@ -138,13 +119,9 @@ export class EmailVerificationService {
       });
     }
     const verifiedAt = new Date().toISOString();
-    // Atomic single-use consume: one
-    // transaction conditionally deletes the hashed token row AND marks the
-    // still-unverified user whose `currentVerificationToken` exactly matches
-    // the presented digest — both commit or neither does. A stale/superseded
-    // token (the handle already rotated or removed) fails the condition and
-    // writes nothing. Post-commit side effects (audit, approval
-    // request) run only after the transaction commits.
+    // Atomic single-use consume: one transaction deletes the hashed token row and marks the user whose
+    // `currentVerificationToken` matches, so a superseded token writes nothing. Audit and approval request run
+    // after commit.
     const userUpdate = this.users.markEmailVerifiedUpdate(row.userId, verifiedAt, tokenHash);
     try {
       await runTransactWrite(
@@ -168,9 +145,7 @@ export class EmailVerificationService {
           },
         ],
         () => {
-          // ConditionalCheckFailed: a superseded/already-consumed token, or the
-          // user's verification handle moved. Reuse the existing stale-token
-          // response with no writes.
+          // A superseded or consumed token, or a moved handle: reuse the stale-token response with no writes.
           throw new BadRequestException({
             code: 'VERIFICATION_TOKEN_INVALID',
             message: 'Verification token is invalid or already used.',
@@ -191,12 +166,8 @@ export class EmailVerificationService {
       eventType: 'email_verify',
     });
 
-    // Owner-approval gate: load the user fresh and, if they're still in
-    // 'pending', dispatch the approval mail to APPROVER_EMAIL. Failure
-    // here is logged inside the service and doesn't fail the verify
-    // call — the user has done their part; the owner will get a fresh
-    // mail next time the token is regenerated, or the lazy-recycle path
-    // will reclaim the row.
+    // Load the user fresh and, if still pending, dispatch the approval mail. A failure is logged in the service and
+    // does not fail the verify.
     const user = await this.users.findById(row.userId);
 
     let approvalToken: string | undefined;
@@ -214,9 +185,7 @@ export class EmailVerificationService {
           {
             userId: row.userId,
             emailFingerprint: emailFingerprint(row.email),
-            // Error class only, never `err.message`: an SES rejection embeds the
-            // raw recipient address in its message, which `redact` cannot scrub
-            // inside a string value.
+            // Error class only, never `err.message`: an SES rejection embeds the recipient address.
             reason: err instanceof Error ? err.name : 'unknown',
           },
           'Approval-mail request failed',
@@ -225,13 +194,8 @@ export class EmailVerificationService {
     }
     return {
       userId: row.userId,
-      // Surface the raw approvalToken in the response only when the same
-      // dev trapdoor that returns the verification token is on
-      // (`EXPOSE_VERIFICATION_TOKEN=true`, local development only —
-      // refused at boot on any deployed stack). Lets the SPA's
-      // VerifyEmailPage offer a "Dev
-      // shortcut: approve" link so local dev works without a real SES
-      // delivery to APPROVER_EMAIL.
+      // The raw approvalToken is surfaced only under the dev trapdoor (`EXPOSE_VERIFICATION_TOKEN`, local only), so
+      // VerifyEmailPage can offer an approve shortcut.
       ...(approvalToken && this.devShortcutEnabled
         ? { approvalToken }
         : {}),

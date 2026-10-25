@@ -1,13 +1,5 @@
-/**
- * Repository for the `MfaEmailOtp` table (PK `userId`, TTL on `expiresAt` ~10 min) — the live
- * Email-OTP code hash for a user. Holds only the SHA-256 code hash + attempt counter; the daily-cap
- * + cooldown counters live on the `User` row (see UserRow) so the cap survives this table's short
- * TTL.
- *
- * Point-ops only (the api-role grant on this table is Get/Put/Update/Delete —
- * no Query, no Scan): every access is keyed by `userId`. The raw code is
- * NEVER stored or logged.
- */
+// Repository for the MfaEmailOtp table (PK userId, TTL ~10 min): the live Email-OTP code hash and attempt counter. Point-ops only;
+// the cap counters live on the User row; the raw code is never stored or logged.
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -22,12 +14,7 @@ import type { EnvConfig } from '../common/env.config.js';
 import { BaseRepository } from './base.repository.js';
 import type { MfaEmailOtpRow } from './types.js';
 
-/**
- * PK-value suffix for a step-up Email-OTP code row. The step-up code lives at `<userId>#stepup`, a
- * distinct row from the login / change-email `<userId>` code so a step-up send never clobbers (or
- * is clobbered by) the login code, and vice versa. Same single-attribute PK — a namespaced VALUE
- * only, no key-schema change.
- */
+// PK suffix for a step-up code row (`<userId>#stepup`), distinct from the login code so neither clobbers the other.
 const STEP_UP_OTP_PK_SUFFIX = '#stepup';
 
 /** Namespaced PK value for a user's step-up Email-OTP code row. */
@@ -60,16 +47,9 @@ export class MfaEmailOtpRepository extends BaseRepository {
   }
 
   /**
-   * Atomically increment the wrong-attempt counter for the live code,
-   * conditional on the row still being the one the caller read (`sentAt`
-   * pin) so a concurrent resend's fresh row is never clobbered. Returns the
-   * post-increment `attempts` value. Throws the AWS SDK
-   * `ConditionalCheckFailedException` when the row is gone or was replaced (the
-   * caller treats that as "code no longer valid").
-   *
-   * The per-code hard cap (5 wrong → invalidate + force resend) is enforced by
-   * the service: it increments here, and when the returned count reaches the
-   * cap it deletes the row.
+   * Atomically increments the wrong-attempt counter, pinned on `sentAt` so a concurrent resend fresh row is never
+   * clobbered; returns the new count. Throws ConditionalCheckFailedException when the row is gone or replaced (the
+   * code is no longer valid). The service enforces the 5-attempt cap by deleting the row.
    */
   async incrementAttempts(userId: string, sentAt: string): Promise<number> {
     const r = await this.doc.send(
@@ -86,9 +66,7 @@ export class MfaEmailOtpRepository extends BaseRepository {
   }
 
   /**
-   * Keyed delete — drops the live code (after a successful verify, on a
-   * resend, on the per-code attempt-cap invalidation, or via the
-   * account-deletion cascade).
+   * Keyed delete of the live code (after verify, on resend, on the attempt cap, or in the account-deletion cascade).
    */
   async delete(userId: string): Promise<void> {
     await this.doc.send(
@@ -97,10 +75,8 @@ export class MfaEmailOtpRepository extends BaseRepository {
   }
 
   // ---------- Step-up code row ----------
-  // The step-up code lives at `<userId>#stepup` and carries a `purpose`; these
-  // helpers mirror the login-code point-ops on the namespaced key so the two
-  // rows never collide. `userId` args are the bare user id; the suffix is
-  // applied here.
+  // Point-ops on the namespaced `<userId>#stepup` key; the callers pass the bare user id and the suffix is applied
+  // here.
 
   /** The user's live step-up Email-OTP row, or null if none is outstanding. */
   async getStepUp(userId: string): Promise<MfaEmailOtpRow | null> {
@@ -110,10 +86,7 @@ export class MfaEmailOtpRepository extends BaseRepository {
     return (r.Item as MfaEmailOtpRow | undefined) ?? null;
   }
 
-  /**
-   * Put (create or replace) the live step-up Email-OTP row. `row.userId` MUST
-   * already be the namespaced value (built via {@link stepUpOtpPk}).
-   */
+  /** Puts the step-up row; `row.userId` must already be namespaced via `stepUpOtpPk`. */
   async putStepUp(row: MfaEmailOtpRow): Promise<void> {
     await this.doc.send(
       new PutCommand({ TableName: this.tableName, Item: row }),

@@ -1,34 +1,9 @@
-/**
- * Standalone health-check probe Lambda.
- *
- * The EventBridge schedule that invoked this every 5 minutes is DISABLED on
- * both stacks (the probe was the largest scheduled consumer of the
- * account's shared Lambda concurrency quota) — the code is kept so
- * re-enabling the schedule is a one-word change. Calls the public shallow
- * `${API_ENDPOINT}/api/v1/health` endpoint with native `fetch` and emits a
- * `HealthCheckStatus` metric (1 = healthy, 0 = unhealthy) to CloudWatch via
- * Embedded Metric Format (one JSON line to stdout; CloudWatch Logs
- * auto-extracts it — no `cloudwatch:PutMetricData` grant needed).
- *
- * `API_ENDPOINT` is the CloudFront distribution domain
- * (`https://<dist>.cloudfront.net`), NOT the raw API Gateway host: only
- * CloudFront injects the `X-Origin-Verify` header the edge-auth middleware
- * requires, so a direct API GW call would be rejected.
- *
- * Standalone — no NestJS bootstrap. The probe is a single fetch + metric
- * emit; the framework cold-start cost is not worth it. Every failure mode
- * (non-2xx, network error, missing API_ENDPOINT) maps to
- * HealthCheckStatus=0 with no thrown error, so the alarm — not a Lambda
- * crash loop — is the signal.
- *
- * Namespace: `Retivo/${STACK}/HealthCheck`.
- */
+// Health-check probe Lambda (schedule disabled): fetches `${API_ENDPOINT}/api/v1/health` and emits a HealthCheckStatus EMF metric;
+// every failure maps to 0, never a throw. API_ENDPOINT is the CloudFront domain, which injects X-Origin-Verify.
 import 'reflect-metadata';
 import type { Handler, ScheduledEvent } from 'aws-lambda';
 
-// Bounded outbound call (repo non-negotiable: every outbound call is
-// time-bounded). 5s is ample for a shallow /health probe
-// and stays well inside the Lambda timeout.
+// Bounded outbound call; 5 s is ample for a shallow probe.
 const FETCH_TIMEOUT_MS = 5_000;
 
 interface HealthCheckResult {
@@ -38,8 +13,7 @@ interface HealthCheckResult {
 async function probe(): Promise<number> {
   const endpoint = process.env.API_ENDPOINT;
   if (!endpoint) {
-    // Misconfiguration is an unhealthy signal, not a crash — emit 0 and
-    // surface the cause in logs so the alarm fires and the operator sees why.
+    // Misconfiguration is an unhealthy signal, not a crash: emit 0 so the alarm fires.
     console.error('health-check probe: API_ENDPOINT is not set');
     return 0;
   }
@@ -60,10 +34,6 @@ async function probe(): Promise<number> {
   }
 }
 
-/**
- * Emit the HealthCheckStatus EMF metric. Stack-scoped via the
- * namespace; no dimensions.
- */
 function emit(status: number): void {
   const stack = process.env.STACK ?? 'local';
   const emf = {
