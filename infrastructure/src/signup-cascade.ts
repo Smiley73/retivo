@@ -1,15 +1,5 @@
-// Stream-triggered Lambda that reaps the user-row sub-graph when an
-// approval token's TTL fires.
-//
-// Trigger: DynamoDB stream on the SignupApproval table (NEW_AND_OLD_IMAGES).
-// Action: for each REMOVE event whose old-image flags `userId` against a
-// still-pending or declined User row, delete user + credential + email-
-// reservation in a TransactWrite. Idempotent — replays on retries are
-// safe because the conditional deletes treat "row already gone" as a no-op.
-//
-// IAM is intentionally narrower than the api role: cascade-only deletes
-// on the four tables it touches, plus DescribeStream + GetRecords on the
-// SignupApproval stream. No SES, no S3, no GSI access.
+// Stream-triggered Lambda that deletes the user, credential and email-reservation rows when a SignupApproval TTL fires.
+// Its role is narrower than the api role: cascade deletes on four tables plus the approval stream.
 
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
@@ -21,16 +11,9 @@ interface SignupCascadeOpts {
   readonly namePrefix: string;
   readonly stack: string;
   readonly tables: Tables;
-  /**
-   * Cost-control knob (sourced from `retivo:logRetentionDays`):
-   * CloudWatch Logs retention in days for the signup-cascade log group.
-   * Dev example=7, prod=90.
-   */
+  /** CloudWatch Logs retention in days for the log group. */
   readonly logRetentionDays: number;
-  /**
-   * Optional permissions-boundary ARN for the cascade role — same
-   * contract as iam.ts.
-   */
+  /** Permissions-boundary ARN for the cascade role, as in iam.ts. */
   readonly permissionsBoundaryArn?: string;
 }
 
@@ -44,17 +27,6 @@ const LAMBDA_BUILD_DIR = path.join(
 );
 const SHELLS_DIR = path.resolve(__dirname, "..", "lambda-shells");
 
-/**
- * Returns the deployable artifact for the signup-cascade Lambda. Delegates to
- * the shared `resolveLambdaArtifact()` (lambda-artifact.ts) — the SAME
- * full-coverage fail-closed invariant as lambda.ts's `lambdaCode()`: because
- * every Lambda ships from this one shared build directory, the artifact is used
- * only when ALL six deployed handler files are present (not just
- * `signup-cascade-lambda.js`). During `pulumi preview` only, it falls back to
- * the placeholder shell so a fresh checkout that hasn't run `build:lambda` can still
- * preview; on a real `pulumi up` with the artifact incomplete it throws instead
- * of silently deploying the non-functional 501/no-op shell.
- */
 function cascadeCode(): pulumi.asset.Archive {
   return resolveLambdaArtifact(
     LAMBDA_BUILD_DIR,
@@ -100,15 +72,8 @@ export function createSignupCascade(opts: SignupCascadeOpts): aws.lambda.Functio
       {
         sid: "ReadAndCleanUser",
         effect: "Allow",
-        // GetItem to load the user, DeleteItem on the cascade tables, and
-        // ConditionCheckItem for the atomic cleanup transaction. The cascade's
-        // `TransactWriteItems` needs NO dedicated IAM action: AWS has no
-        // `dynamodb:TransactWriteItems` action — the transaction is authorized
-        // by the per-item `DeleteItem`/`ConditionCheckItem` operations already
-        // granted here. The former inert string was removed with no change to
-        // effective permissions. Scoped to the four tables this Lambda is
-        // allowed to touch — no GSI access (the cascade reads by primary key
-        // only).
+        // TransactWriteItems has no IAM action; the transaction is authorized by DeleteItem and
+        // ConditionCheckItem. No GSI access.
         actions: [
           "dynamodb:GetItem",
           "dynamodb:DeleteItem",
@@ -177,10 +142,8 @@ export function createSignupCascade(opts: SignupCascadeOpts): aws.lambda.Functio
     retentionInDays: logRetentionDays,
   });
 
-  // Stream → Lambda binding. `LATEST` so a fresh deploy doesn't replay
-  // historical TTL deletes; the only reason we'd ever want TRIM_HORIZON
-  // is to backfill missed events, and the lazy-recycle path on the next
-  // signup with the same email still covers any cleanup we miss.
+  // `LATEST` so a fresh deploy does not replay historical TTL deletes; the next signup with the
+  // same email recycles misses.
   new aws.lambda.EventSourceMapping(`${namePrefix}-signup-cascade-stream`, {
     eventSourceArn: tables.signupApproval.streamArn,
     functionName: fn.name,

@@ -1,18 +1,8 @@
-// Pure, dependency-free parse/validate helpers for the stack config keys —
-// both the required ones (enableWaf, manageCloudTrail, enablePitr,
-// enableBackups, the four alarm-group switches, logRetentionDays, and the
-// conditionally required alarmNotificationEmail) and the optional ones (lambdaConcurrencyQuota,
-// edgeAllowedIps, apiThrottleRatePerSec, apiThrottleBurst, assistantBridgePort). Kept out of
-// config.ts — and free of any @pulumi
-// import — so they can be unit-tested under `node --test` without AWS
-// credentials or a Pulumi runtime (scripts/test/config-coverage.test.mjs).
-// config.ts adapts pulumi.Config to the plain `(key) => string | undefined`
-// getter these helpers consume. See docs/deploy.md.
+// Pure parse/validate helpers for the stack config keys, free of @pulumi imports so `node --test` runs them.
+// config.ts passes pulumi.Config's raw getter; see docs/deploy.md.
 
 /**
- * AWS CloudWatch Logs only accepts a fixed enum of retention periods.
- * Any other value is silently coerced by the AWS API, so we reject it at
- * config-load time instead. Source: AWS::Logs::LogGroup RetentionInDays.
+ * CloudWatch Logs retention values the AWS API accepts; it silently coerces any other, so config load rejects it.
  * @type {ReadonlyArray<number>}
  */
 export const CLOUDWATCH_LOG_RETENTION_DAYS = [
@@ -21,9 +11,7 @@ export const CLOUDWATCH_LOG_RETENTION_DAYS = [
 ];
 
 /**
- * Parse a REQUIRED boolean stack-config key. Fail loud when absent — these
- * cost knobs have no default so the operator must make an explicit choice.
- * Accepts only the canonical Pulumi boolean strings "true"/"false".
+ * Parse a required boolean key; throws when absent, and accepts only "true" or "false".
  * @param {(key: string) => string | undefined} get raw string getter
  * @param {string} key bare config key (without the `retivo:` namespace)
  * @returns {boolean}
@@ -43,8 +31,7 @@ export function parseRequiredBoolean(get, key) {
 }
 
 /**
- * The switches that make a stack send alerts: the four alarm groups and
- * `enableBackups` (whose no-job alarm and failed-job rule alert on their own).
+ * The switches that make a stack send alerts: the four alarm groups and `enableBackups`.
  * @type {ReadonlyArray<string>}
  */
 const ALERT_SWITCHES = [
@@ -56,7 +43,7 @@ const ALERT_SWITCHES = [
 ];
 
 /**
- * The alert switches that are on, by key name. Missing keys count as off.
+ * The alert switches that are on, by key name; a missing key counts as off.
  * @param {Readonly<Record<string, boolean>>} switches parsed switch values
  * @returns {string[]}
  */
@@ -65,12 +52,9 @@ function enabledAlertSwitches(switches) {
 }
 
 /**
- * The single definition of "something on this stack sends alerts": any of the
- * four alarm groups or `enableBackups`. Both the alarm SNS topic
- * (monitoring.ts) and the `alarmNotificationEmail` requirement
- * (parseAlarmNotificationEmail) follow it, so they cannot drift apart. It is
- * deliberately not stack-aware: `enableCapacityAlarms` counts on a non-prod
- * stack even though that group deploys no alarms there.
+ * Whether anything on this stack sends alerts. The alarm SNS topic (monitoring.ts) and the
+ * `alarmNotificationEmail` requirement both follow it, so they cannot drift. Not stack-aware:
+ * `enableCapacityAlarms` counts on a non-prod stack even though it deploys no alarms there.
  * @param {Readonly<Record<string, boolean>>} switches parsed switch values
  * @returns {boolean}
  */
@@ -79,14 +63,8 @@ export function anythingSendsAlerts(switches) {
 }
 
 /**
- * Parse the CONDITIONALLY required `alarmNotificationEmail` key. Required (and
- * non-empty) whenever `anythingSendsAlerts(switches)` is true; fail loud then,
- * naming the key, the switch(es) that need it and the fix, so a missing
- * address does not surface as an opaque SNS error at `pulumi up`. When nothing
- * sends alerts the key is neither required nor read, and `undefined` comes
- * back. Format validation is intentionally NOT done here: a bad address
- * surfaces as a failed SNS subscription with a clear AWS error, which is
- * acceptable for a single-operator ops key.
+ * Parse `alarmNotificationEmail`, required whenever `anythingSendsAlerts(switches)`; otherwise
+ * `undefined`. The format is not validated: a bad address fails as an SNS subscription error.
  * @param {(key: string) => string | undefined} get raw string getter
  * @param {Readonly<Record<string, boolean>>} switches parsed switch values
  * @returns {string | undefined}
@@ -105,8 +83,7 @@ export function parseAlarmNotificationEmail(get, switches) {
 }
 
 /**
- * Parse + validate the REQUIRED logRetentionDays key against the AWS
- * CloudWatch Logs enum. Fail loud when absent or not an allowed value.
+ * Parse the required logRetentionDays key against the CloudWatch Logs enum.
  * @param {(key: string) => string | undefined} get raw string getter
  * @returns {number}
  */
@@ -128,20 +105,14 @@ export function parseLogRetentionDays(get) {
 }
 
 /**
- * Default lambdaConcurrencyQuota when the key is absent: the account's
- * current shared Lambda concurrency quota (dev + prod share one account).
+ * Default lambdaConcurrencyQuota: the shared Lambda concurrency quota (dev and prod share one account).
  * @type {number}
  */
 export const DEFAULT_LAMBDA_CONCURRENCY_QUOTA = 10;
 
 /**
- * Parse + validate the OPTIONAL lambdaConcurrencyQuota key. Absent ⇒
- * DEFAULT_LAMBDA_CONCURRENCY_QUOTA — raising the real quota is a config
- * change (`pulumi config set retivo:lambdaConcurrencyQuota <n>`), not a code
- * change. The value is fed straight into the prod-only ConcurrentExecutions
- * alarm's threshold (`quota - 2`), so a nonsense value must fail here rather
- * than deploy an alarm that can never leave ALARM: reject a non-integer or a
- * value too small (< 3) to leave the alarm any usable headroom.
+ * Parse the optional lambdaConcurrencyQuota key. It sets the prod ConcurrentExecutions alarm threshold
+ * (`quota - 2`), so a non-integer or a value under 3 (no usable headroom) throws.
  * @param {(key: string) => string | undefined} get raw string getter
  * @returns {number}
  */
@@ -161,20 +132,19 @@ export function parseLambdaConcurrencyQuota(get) {
 }
 
 /**
- * Default API Gateway stage throttle when `apiThrottleRatePerSec` is absent:
- * steady-state requests per second across the whole `$default` route.
+ * Default `$default` route steady-state requests per second.
  * @type {number}
  */
 export const DEFAULT_API_THROTTLE_RATE_PER_SEC = 20;
 
 /**
- * Default API Gateway stage throttle burst when `apiThrottleBurst` is absent.
+ * Default `$default` route burst.
  * @type {number}
  */
 export const DEFAULT_API_THROTTLE_BURST = 50;
 
 /**
- * Parse one OPTIONAL positive-integer throttle key.
+ * Parse one optional positive-integer throttle key.
  * @param {(key: string) => string | undefined} get raw string getter
  * @param {string} key bare config key
  * @param {number} fallback value when the key is absent or blank
@@ -193,11 +163,8 @@ function parsePositiveInteger(get, key, fallback) {
 }
 
 /**
- * Parse + validate the OPTIONAL API Gateway stage-throttle pair:
- * `apiThrottleRatePerSec` (default 20) and `apiThrottleBurst` (default 50).
- * Both feed the `$default` stage's route settings verbatim. AWS treats them
- * as independent, best-effort targets (a burst below the rate is legal and
- * documented), so no cross-field rule is enforced here.
+ * Parse the optional API Gateway throttle pair. AWS treats them as independent targets, so a burst
+ * below the rate is legal and no cross-field rule applies.
  * @param {(key: string) => string | undefined} get raw string getter
  * @returns {{ ratePerSec: number, burst: number }}
  */
@@ -217,21 +184,15 @@ export function parseApiThrottle(get) {
 }
 
 /**
- * Lowest and highest port the AI assistant connector's loopback `connect-src`
- * entry may name: any registered or dynamic port, never a well-known one.
- * Shared by the parser below, the CSP generator (edge-functions.mjs) and the
- * build-time check in infrastructure/scripts/lib/deploy-common.sh.
+ * Port range the assistant connector's loopback `connect-src` entry may name. Shared with the CSP
+ * generator (edge-functions.mjs) and the build-time check in infrastructure/scripts/lib/deploy-common.sh.
  * @type {{ min: number, max: number }}
  */
 export const ASSISTANT_BRIDGE_PORT_RANGE = { min: 1024, max: 65_535 };
 
 /**
- * Parse + validate the OPTIONAL `assistantBridgePort` key: the loopback port
- * the AI assistant connector's bridge listens on. Absent/blank ⇒ `undefined`
- * (the connector is off: no `VITE_ASSISTANT_BRIDGE_PORT` in the SPA build, no
- * extra `connect-src` entry). Otherwise a plain decimal integer in
- * {@link ASSISTANT_BRIDGE_PORT_RANGE}; anything else (`24580.5`, `0x6004`,
- * `abc`, `80`) throws naming the key.
+ * Parse the optional `assistantBridgePort` key. Absent or blank means the connector is off; otherwise
+ * a plain decimal integer in {@link ASSISTANT_BRIDGE_PORT_RANGE}.
  * @param {(key: string) => string | undefined} get raw string getter
  * @returns {number | undefined}
  */
@@ -250,24 +211,14 @@ export function parseAssistantBridgePort(get) {
   return value;
 }
 
-// Octets and the prefix must be plain decimal with no leading zero:
-// `010.0.0.1` is octal 8 to inet_aton/curl but decimal 10 to a naive parse,
-// so an operator would test one host and allow another. Reject it instead.
+// Plain decimal only: `010.0.0.1` is octal to inet_aton/curl but decimal to a naive parse.
 const IPV4_CIDR_RE =
   /^(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})(?:\/(0|[1-9]\d?))?$/;
 
 /**
- * Parse the OPTIONAL `edgeAllowedIps` key: a comma-separated list of IPv4
- * addresses or IPv4/prefix CIDR blocks. Absent/blank ⇒ `[]` (the edge IP
- * gate is off). Every entry is normalised to `a.b.c.d/nn` (a bare address
- * becomes `/32`). Rejected, naming the key: an empty element, IPv6, a
- * partial or non-numeric address, a leading-zero octet or prefix (`010`,
- * `/01` — octal to inet_aton, decimal here), an octet above 255, or a prefix
- * outside 1–32 — `/0` stays rejected because it would allow every viewer
- * (and a 32-bit shift by 32 is undefined in JS). This is a guard against
- * the obvious mistake, not a proof of coverage: `0.0.0.0/1,128.0.0.0/1`
- * also allows everyone, and the operator gating their own dev stack is the
- * only party that could be hurt by it.
+ * Parse the optional `edgeAllowedIps` key: comma-separated IPv4 addresses or IPv4/prefix blocks,
+ * normalised to `a.b.c.d/nn`. Blank means the gate is off. A `/0` is rejected because it allows
+ * every viewer (and a 32-bit shift by 32 is undefined in JS).
  * @param {(key: string) => string | undefined} get raw string getter
  * @returns {string[]} normalised CIDR strings
  */
@@ -306,9 +257,8 @@ export function parseEdgeAllowedIps(get) {
 }
 
 /**
- * Turn a normalised IPv4 CIDR (`a.b.c.d/nn`, as produced by
- * parseEdgeAllowedIps) into the unsigned 32-bit `{ base, mask }` pair the
- * CloudFront Function compares against: `((ip & mask) >>> 0) === base`.
+ * Turn a normalised CIDR into the unsigned `{ base, mask }` pair the CloudFront Function compares:
+ * `((ip & mask) >>> 0) === base`.
  * @param {string} cidr normalised IPv4 CIDR
  * @returns {{ base: number, mask: number }}
  */
@@ -330,10 +280,7 @@ export function ipv4CidrToRule(cidr) {
 }
 
 /**
- * Stack guard for the edge IP gate: prod is a public product, so a
- * non-empty allowlist there is a misconfiguration and fails config load
- * before any resource is composed. A blank/absent key is fine on every
- * stack. Pure so the guard is testable without a Pulumi runtime.
+ * Fails config load when the public prod stack has a non-empty edge allowlist; the gate is dev-only.
  * @param {string} stack Pulumi stack name
  * @param {ReadonlyArray<string>} edgeAllowedIps parsed allowlist
  */

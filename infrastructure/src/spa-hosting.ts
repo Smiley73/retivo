@@ -1,15 +1,5 @@
-// Private S3 bucket that hosts the built React SPA. Reachable only
-// via the CloudFront distribution through Origin Access Control (OAC),
-// so the bucket itself stays fully private (BucketOwnerEnforced, public
-// access blocked).
-//
-// The bucket is uploaded to by `infrastructure/scripts/bootstrap-stack.sh`
-// after pass 1 of `pulumi up` creates the bucket — Pulumi owns the
-// resource shape; the script owns the asset contents.
-//
-// @pulumi/aws v7 deprecated the `*V2` resource names; we use the
-// canonical types + `aliases` for state migration. See the matching
-// pattern in `s3.ts` for the snapshots bucket.
+// Private S3 bucket for the built SPA, read only through CloudFront Origin Access Control; bootstrap-stack.sh uploads the assets.
+// The `BucketV2` alias is load-bearing for the v6 to v7 migration; dropping it recreates the live bucket (same as s3.ts).
 
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
@@ -32,31 +22,20 @@ export function createSpaHosting(opts: SpaHostingOpts): SpaHosting {
     `${namePrefix}-spa`,
     {
       bucket: undefined, // let Pulumi pick a globally-unique name
-      // The bucket holds only the built SPA bundle (rebuildable from source),
-      // but it is deletion-protected unconditionally — on every stack,
-      // including dev — because `pulumi destroy` is the one path that could
-      // otherwise wipe it silently, including after an operator empties it
-      // first. `forceDestroy: false` is the second layer, for the case
-      // protection has been deliberately lifted. Lifting protection is
-      // `pulumi state unprotect <this bucket's URN>`, or deleting the
-      // `protect: true` line below and running `pulumi up` first — either
-      // way a deliberate act, which is the point.
+      // `protect: true` and `forceDestroy: false` on every stack, dev included: `pulumi destroy`
+      // could otherwise wipe the bucket silently. Lifting protection is a deliberate `pulumi state
+      // unprotect`.
       forceDestroy: false,
       tags: { purpose: "spa-static-hosting" },
     },
     {
-      // `protect: true` blocks REPLACEMENT as well as deletion. Safe here:
-      // the bucket takes an auto-generated name (`bucket: undefined` above),
-      // so no property change that would force a replace is in flight.
+      // `protect` also blocks replacement, which is safe here as the name is auto-generated.
       protect: true,
-      // Load-bearing for the v6→v7 `@pulumi/aws` type migration — dropping
-      // this alias would destroy and recreate the live bucket.
+      // Dropping this alias would destroy and recreate the live bucket.
       aliases: [{ type: "aws:s3/bucketV2:BucketV2" }],
     },
   );
 
-  // Block every form of public access. Reads come exclusively through
-  // CloudFront's OAC.
   new aws.s3.BucketPublicAccessBlock(`${namePrefix}-spa-public-block`, {
     bucket: bucket.id,
     blockPublicAcls: true,
@@ -65,8 +44,7 @@ export function createSpaHosting(opts: SpaHostingOpts): SpaHosting {
     restrictPublicBuckets: true,
   });
 
-  // Owner enforcement disables ACLs entirely — the only authorization
-  // surface is the bucket policy attached below.
+  // ACLs are disabled; the bucket policy below is the only authorization surface.
   new aws.s3.BucketOwnershipControls(`${namePrefix}-spa-ownership`, {
     bucket: bucket.id,
     rule: { objectOwnership: "BucketOwnerEnforced" },
@@ -87,8 +65,6 @@ export function createSpaHosting(opts: SpaHostingOpts): SpaHosting {
     },
   );
 
-  // OAC — Origin Access Control — the modern (signed-V4) replacement
-  // for OAI. Required for CloudFront to read from a private bucket.
   const originAccessControl = new aws.cloudfront.OriginAccessControl(
     `${namePrefix}-spa-oac`,
     {
@@ -108,11 +84,7 @@ export function createSpaHosting(opts: SpaHostingOpts): SpaHosting {
   };
 }
 
-/**
- * Bucket policy that grants the CloudFront distribution `s3:GetObject`
- * via the OAC. Created separately from the bucket so we can wait for
- * the distribution ARN — closing the OAC trust loop.
- */
+/** Bucket policy granting the distribution `s3:GetObject` via OAC; created after it because it needs the distribution ARN. */
 export function attachSpaBucketPolicy(opts: {
   namePrefix: string;
   bucket: aws.s3.Bucket;

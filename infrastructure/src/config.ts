@@ -1,6 +1,4 @@
-// Typed wrapper around Pulumi's stack configuration. Centralizes all
-// `pulumi config get/set` keys in one place so the rest of the program
-// can import a typed object instead of stringly-typed lookups.
+// Typed wrapper around the `retivo:` Pulumi stack config; keys are documented in docs/deploy.md.
 
 import * as pulumi from "@pulumi/pulumi";
 import {
@@ -18,225 +16,63 @@ import {
 const cfg = new pulumi.Config("retivo");
 
 /**
- * Stack-config view: typed, with sensible defaults where applicable.
- *
- * Update keys via:
- *   pulumi config set retivo:webOrigin https://...
- *   pulumi config set retivo:domainName ...
- *   pulumi config set retivo:apiDomainName api.dev.retivo.example.com
- *   pulumi config set retivo:sesFromAddress no-reply@example.com
- *   pulumi config set retivo:approverEmail owner@example.com
- *
- * The CloudFront geo-restriction is intentionally *not* a config knob —
- * this is a US-only application by design.
- * If that ever changes, edit `cloudfront.ts` directly so the decision
- * lives in code review rather than in a stack config that can silently
- * drift between dev and prod.
+ * Typed stack config. The `enable*`, `manageCloudTrail` and `logRetentionDays` knobs are required
+ * with no default (a missing key fails config load), so a newcomer is never billed or left without
+ * alerting by accident. The CloudFront geo restriction is not a knob: it is US-only by design and
+ * lives in `cloudfront.ts` so changing it goes through code review.
  */
 export interface StackConfig {
-  /** The exact origin the SPA is served from. Used for CORS + Origin checks. */
+  /** The exact origin the SPA is served from; used for CORS and Origin checks. */
   readonly webOrigin: string;
-  /** Optional. If set, Route53 + ACM cert will be provisioned. */
+  /** Optional; when set, Route53 and an ACM certificate are provisioned. */
   readonly domainName: string | undefined;
-  /**
-   * Optional custom domain for the API (e.g. `api.dev.retivo.example.com`).
-   * When set, a regional API Gateway custom domain + certificate are
-   * provisioned and CloudFront's `/api/*` origin points at it; it must sit
-   * under a Route53 hosted zone the stack can manage, and is validated as a
-   * real FQDN. When empty (the default), CloudFront reaches the API through
-   * the default execute-api host, which stays reachable but refuses any
-   * request that did not come through CloudFront (the edge shared secret).
-   */
+  /** Optional API custom domain (a real FQDN under a Route53 zone the stack manages). */
   readonly apiDomainName: string | undefined;
-  /**
-   * Two-step edge cutover flag (default false). Keep false on the first
-   * `pulumi up` that adds the custom domain + points CloudFront `/api/*`
-   * at it; verify `/api/*` works; then set true on a second `pulumi up`
-   * to disable the public execute-api endpoint (API reachable only via
-   * the custom domain). Rollback = set back to false + `pulumi up`. Only
-   * honored when `apiDomainName` is set. See docs/deploy.md.
-   */
+  /** Two-step cutover (docs/deploy.md): disables the public execute-api endpoint; needs `apiDomainName`. */
   readonly disableExecuteApiEndpoint: boolean;
-  /**
-   * Verified-in-SES sender for signup verification mail. Goes into
-   * the SSM parameter the api Lambda reads at cold start. While SES is
-   * in sandbox mode (default for new accounts), this address must be
-   * verified via `aws sesv2 create-email-identity` before any mail
-   * actually delivers — `bootstrap-stack.sh` triggers the verification
-   * email automatically on first run. Defaults to a placeholder so
-   * the stack provisions without forcing the operator to set it up
-   * front; with the placeholder no verification mail is sent and a deployed
-   * api never returns the verification token, so a new sign-up cannot
-   * verify its email or sign in until a real address is set.
-   */
+  /** SES sender. The placeholder default sends no mail, so sign-ups cannot verify until a real one is set. */
   readonly sesFromAddress: string;
-  /**
-   * Owner/approver inbox for owner approval of new sign-ups
-   * (`retivo:approverEmail`). The api Lambda receives it as APPROVER_EMAIL:
-   * new-signup notices go here, and a signup from this exact address is
-   * auto-approved as the owner. REQUIRED whenever `sesFromAddress` is a real
-   * (non-placeholder) address — without it the api falls back to the sender,
-   * which is a dead `noreply@` mailbox on deployed stacks.
-   */
+  /** Owner inbox for sign-up approvals (APPROVER_EMAIL); required when `sesFromAddress` is a real address. */
   readonly approverEmail: string | undefined;
-  /** The Pulumi stack name (`dev`, `prod`, etc). Used in resource naming. */
+  /** The Pulumi stack name (`dev`, `prod`); used in resource naming. */
   readonly stack: string;
-  /**
-   * Janitor retention floor: minimum number of snapshots per
-   * household the daily janitor must keep, regardless of age. Default
-   * 10.
-   */
+  /** Janitor floor: snapshots per household kept regardless of age (default 10). */
   readonly snapshotMinKeep: number;
-  /**
-   * Janitor age cutoff: snapshots older than this many days are
-   * eligible for deletion (subject to the floor above). Default 90.
-   */
+  /** Janitor age cutoff in days, subject to the floor (default 90). */
   readonly snapshotMinAgeDays: number;
-  /**
-   * Cost-control knob (REQUIRED, no default): provision the CloudFront
-   * AWS WAF web ACL (`AWSManagedRulesCommonRuleSet` + IP rate rule). The prod
-   * example ships `true`, the dev example `false`; a dev stack may run
-   * `false` behind the edge IP gate (`edgeAllowedIps`) instead, and
-   * `loadConfig` warns when a stack has neither. See docs/deploy.md.
-   */
+  /** CloudFront WAF web ACL; a dev stack may run `false` behind `edgeAllowedIps` (docs/deploy.md "Firewall and the dev edge IP gate"). */
   readonly enableWaf: boolean;
-  /**
-   * Dev-only edge IP gate (OPTIONAL, default empty = off): IPv4 addresses
-   * or IPv4/prefix blocks allowed to reach the CloudFront distribution.
-   * When non-empty, the SPA router CloudFront Function and a new `/api/*`
-   * gate function answer 403 at the edge for any other viewer IP (no
-   * origin, no Lambda), IPv6 is turned off on the distribution, and the
-   * web domain's AAAA alias is skipped so a dual-stack browser cannot
-   * arrive over an unmatched IPv6 address. Baked into the function code at
-   * deploy time — a new home IP is `pulumi config set` + deploy. Prod
-   * refuses a non-empty value (public product). Parsed/normalised in
-   * config-helpers.mjs.
-   */
+  /** Dev-only IPv4 allowlist enforced at the edge; empty = off, and prod refuses a non-empty value. */
   readonly edgeAllowedIps: ReadonlyArray<string>;
-  /**
-   * API Gateway `$default` stage throttle, steady-state requests/second
-   * (OPTIONAL, default 20). Aggregate across every route and caller (the
-   * HTTP API has one `$default` route), best-effort, and independent of
-   * the burst value. Excess requests get API Gateway's own 429 without a
-   * Lambda invocation — the free flood/cost guard on both stacks.
-   */
+  /** API Gateway `$default` stage steady-state throttle, requests/second (default 20). */
   readonly apiThrottleRatePerSec: number;
-  /**
-   * API Gateway `$default` stage throttle burst (OPTIONAL, default 50).
-   * See `apiThrottleRatePerSec`; AWS documents the two as independent, so
-   * a burst below the rate is accepted.
-   */
+  /** API Gateway `$default` stage throttle burst (default 50); independent of the rate. */
   readonly apiThrottleBurst: number;
-  /**
-   * Enforced-MFA master switch. OPTIONAL, defaults `true` —
-   * a missing key fails secure (enforcement ON). When `true`, a password
-   * login on a new/untrusted device returns an MFA challenge instead of a
-   * session; `false` disables enforcement (the rollback kill-switch) without
-   * a code change. Threaded to the api Lambda's AUTH_MFA_ENFORCED env var.
-   */
+  /** Enforced-MFA master switch (AUTH_MFA_ENFORCED); defaults `true` so a missing key fails secure. */
   readonly authMfaEnforced: boolean;
-  /**
-   * Cost-control knob (REQUIRED, no default): own the account-level
-   * CloudTrail trail from this stack. `false` skips trail + log bucket
-   * entirely — NEW STACKS ONLY (the trail bucket has object-lock GOVERNANCE
-   * + `forceDestroy: false`, so an existing stack cannot flip this without
-   * manual Pulumi state surgery). See docs/deploy.md → "Audit trail
-   * (`manageCloudTrail`)".
-   */
+  /** Own the account-level CloudTrail trail; new stacks only (docs/deploy.md "Audit trail (`manageCloudTrail`)"). */
   readonly manageCloudTrail: boolean;
-  /**
-   * Cost-control knob (REQUIRED, no default): enable DynamoDB
-   * point-in-time recovery on every table. Prod example ships `true`; dev
-   * example ships `false` (explicit cost/DR tradeoff — see docs/deploy.md →
-   * "Point-in-time recovery (`enablePitr`)").
-   */
+  /** DynamoDB point-in-time recovery on every table (docs/deploy.md "Point-in-time recovery (`enablePitr`)"). */
   readonly enablePitr: boolean;
-  /**
-   * Cost-control knob (REQUIRED, no default): provision the immutable
-   * AWS Backup vault (GOVERNANCE Vault Lock, daily, 90-day retention) over
-   * every DynamoDB table + the S3 snapshots bucket, and enable S3 versioning
-   * + the noncurrent-version lifecycle rule on the snapshots bucket. Prod
-   * example ships `true`; dev example ships `false` — prod-only by design
-   * (dev has no production data and a GOVERNANCE-locked vault would resist a
-   * routine dev `pulumi destroy`). The region-global `RegionSettings`
-   * singleton is prod-owned, so dev must never set this `true` while prod
-   * owns it. See docs/deploy.md → "Backups (`enableBackups`)".
-   */
+  /** The immutable AWS Backup vault; prod-only (docs/deploy.md "Backups (`enableBackups`)"). */
   readonly enableBackups: boolean;
-  /**
-   * Alarm-group switch (REQUIRED, no default): the three intrusion-detection
-   * alarms in `infrastructure/src/monitoring.ts` (refresh-token reuse,
-   * MFA-failed burst, failed-login burst), on every stack. Gates exactly
-   * that group. Required like the other paid-service switches: a default of
-   * `true` would quietly bill a newcomer and a default of `false` would
-   * quietly drop alerting. See docs/deploy.md.
-   */
+  /** Alarm group: refresh-token reuse, MFA-failed burst and failed-login burst. */
   readonly enableSecurityAlarms: boolean;
-  /**
-   * Alarm-group switch (REQUIRED, no default): the api error-count alarm on
-   * every stack, plus the whole-API p95 latency alarm on the `prod` stack
-   * only. Gates exactly that group.
-   */
+  /** Alarm group: api error count on every stack, plus p95 latency on prod. */
   readonly enableApiHealthAlarms: boolean;
-  /**
-   * Alarm-group switch (REQUIRED, no default): the five compactor alarms
-   * (failure, coverage, snapshot-read-error, budget-limited, heartbeat) on
-   * every stack, plus the janitor heartbeat on the `prod` stack only. Gates
-   * exactly that group.
-   */
+  /** Alarm group: the five compactor alarms on every stack, plus the janitor heartbeat on prod. */
   readonly enableBackgroundJobAlarms: boolean;
-  /**
-   * Alarm-group switch (REQUIRED, no default): the two account-wide Lambda
-   * concurrency alarms (throttles, concurrency headroom). This group is
-   * prod-only: on any other stack the switch deploys no alarms, though the
-   * alarm topic and the `alarmNotificationEmail` requirement still follow it.
-   */
+  /** Alarm group: the two account-wide Lambda concurrency alarms; deploys on prod only. */
   readonly enableCapacityAlarms: boolean;
-  /**
-   * Cost-control knob (REQUIRED, no default): CloudWatch Logs retention (in
-   * days) applied to every Lambda + API Gateway log group. Must be one of
-   * the AWS CloudWatch Logs retention enum values; any other value (e.g. 45)
-   * fails config load. Dev example ships 7, prod ships 90.
-   */
+  /** CloudWatch Logs retention in days for every Lambda and API Gateway log group; must be an AWS enum value. */
   readonly logRetentionDays: number;
-  /**
-   * Email address the per-stack CloudWatch alarm SNS topic subscribes.
-   * REQUIRED (no default) whenever something sends alerts — any of the four
-   * alarm-group switches or `enableBackups` is `true` (the shared
-   * `anythingSendsAlerts` predicate in config-helpers.mjs); config load fails
-   * loud without it. With all five off there is no topic, the key is neither
-   * required nor read, and this is `undefined`. Format is NOT validated here
-   * — a bad address surfaces as a failed SNS subscription with a clear
-   * AWS error, acceptable for a single-operator ops key. The operator must
-   * confirm the SNS subscription from their inbox after the first
-   * `pulumi up`. See docs/deploy.md → "Alarms".
-   */
+  /** Alarm SNS topic subscriber; required whenever `anythingSendsAlerts` holds (docs/deploy.md "Alarms"). */
   readonly alarmNotificationEmail: string | undefined;
-  /**
-   * OPTIONAL (default 10 — the account's current shared Lambda concurrency
-   * quota; dev and prod share one account): the ceiling the prod-only
-   * account-wide `ConcurrentExecutions` alarm's threshold (`quota - 2`) is
-   * computed from. This key is the ONLY place the ceiling is written —
-   * raising it here and redeploying moves the alarm threshold; nothing else
-   * needs editing. Validated (integer, >= 3) in config-helpers.mjs.
-   */
+  /** Shared Lambda concurrency quota (default 10) that the prod concurrency alarm's threshold derives from. */
   readonly lambdaConcurrencyQuota: number;
-  /**
-   * Optional ARN of the IAM permissions boundary attached to every role this
-   * stack creates. For accounts whose
-   * policy requires every created role to carry a boundary. Unset (the
-   * default) = no boundary.
-   */
+  /** Permissions-boundary ARN attached to every role this stack creates; unset = none. */
   readonly iamPermissionsBoundaryArn: string | undefined;
-  /**
-   * AI assistant connector switch (OPTIONAL, default unset = off): the
-   * loopback port of the local bridge. When set, the SPA build bakes it in as
-   * `VITE_ASSISTANT_BRIDGE_PORT` (build_spa in deploy-common.sh) and the
-   * CloudFront security-headers function adds exactly one CSP entry,
-   * `connect-src 'self' ws://127.0.0.1:<port>`. Unset adds nothing to the
-   * build or the CSP, so the published function is unchanged. A config edit
-   * plus a redeploy. Parsed/validated (1024–65535) in config-helpers.mjs.
-   */
+  /** Loopback port of the local assistant bridge; adds one CSP `connect-src` entry. Unset = off. */
   readonly assistantBridgePort: number | undefined;
 }
 
@@ -244,15 +80,11 @@ const DEFAULT_SES_FROM = "no-reply@example.invalid";
 const DEFAULT_SNAPSHOT_MIN_KEEP = 10;
 const DEFAULT_SNAPSHOT_MIN_AGE_DAYS = 90;
 
-// A real FQDN: ≥ 2 dot-separated labels, each label alphanumeric with
-// optional internal hyphens. Rejects empty labels, leading/trailing
-// dots, and obviously bogus values so a misconfigured domain fails at
-// preview rather than bricking the edge on deploy.
+// A real FQDN, so a bad domain fails at preview rather than bricking the edge on deploy.
 const FQDN_PATTERN =
   /^(?=.{1,253}$)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
 
-// Minimal mailbox@host shape — enough to catch a pasted FQDN or an empty
-// local part; SES/the api's zod `.email()` do the stricter check.
+// Minimal mailbox@host shape; SES and the api's zod `.email()` check strictly.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function loadConfig(): StackConfig {
@@ -271,11 +103,8 @@ export function loadConfig(): StackConfig {
     cfg.getNumber("snapshotMinAgeDays") ?? DEFAULT_SNAPSHOT_MIN_AGE_DAYS;
   const iamPermissionsBoundaryArn = cfg.get("iamPermissionsBoundaryArn") ?? "";
 
-  // Cost-control knobs are REQUIRED — no defaults. The strict parse/validate
-  // helpers live in config-helpers.mjs (dependency-free, unit-tested) so they
-  // run without a Pulumi runtime; we hand them pulumi.Config's raw string
-  // getter. A missing key, a non-boolean, or an off-enum logRetentionDays all
-  // throw here → `pulumi preview/up` fails loud before any resource is touched.
+  // Required knobs have no default: a missing key, non-boolean or off-enum retention throws here,
+  // before any resource is touched. The parsers take pulumi.Config's raw string getter.
   const rawGet = (key: string): string | undefined => cfg.get(key);
   const enableWaf = parseRequiredBoolean(rawGet, "enableWaf");
   const manageCloudTrail = parseRequiredBoolean(rawGet, "manageCloudTrail");
@@ -298,8 +127,7 @@ export function loadConfig(): StackConfig {
     "enableCapacityAlarms",
   );
   const logRetentionDays = parseLogRetentionDays(rawGet);
-  // The email is required only when something sends alerts; the same
-  // predicate decides whether monitoring.ts builds the alarm topic.
+  // The same predicate decides whether monitoring.ts builds the alarm topic.
   const alertSwitches = {
     enableSecurityAlarms,
     enableApiHealthAlarms,
@@ -316,10 +144,8 @@ export function loadConfig(): StackConfig {
   const apiThrottle = parseApiThrottle(rawGet);
   const assistantBridgePort = parseAssistantBridgePort(rawGet);
 
-  // Edge IP gate is dev-only: a non-empty allowlist on prod fails here,
-  // before any resource is composed. A stack with neither WAF nor the gate
-  // is allowed (the lowest-cost profile, see docs/deploy.md → "Firewall and
-  // the dev edge IP gate") but warns on every preview/up so it is never an accident.
+  // Edge IP gate is dev-only. Neither WAF nor the gate is the lowest-cost posture; warn so it is
+  // never an accident.
   assertEdgeAllowedIpsForStack(stack, edgeAllowedIps);
   if (!enableWaf && edgeAllowedIps.length === 0) {
     pulumi.log.warn(

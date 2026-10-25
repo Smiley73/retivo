@@ -1,10 +1,5 @@
-// Optional Route53 + ACM wiring. Only runs when stack config has
-// retivo:domainName set. ACM certificates for CloudFront must live
-// in us-east-1, so we use the dedicated provider here.
-//
-// Assumes the parent zone is already in Route53 (i.e. you've delegated
-// example.com to AWS). The stack registers an ACM cert for the configured
-// domain and an A/AAAA alias pointing at the CloudFront distribution.
+// Optional Route53 and ACM wiring when `retivo:domainName` is set; the parent zone must already be in Route53.
+// CloudFront certificates must live in us-east-1, hence the dedicated provider.
 
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
@@ -19,9 +14,6 @@ export interface DnsResult {
   readonly hostedZoneId: pulumi.Output<string>;
 }
 
-// Default tags mirror the stack-config `aws:defaultTags` on the default
-// provider, so the resources this provider creates are tagged like
-// everything else in the stack.
 const usEast1 = new aws.Provider("aws-us-east-1-dns", {
   region: "us-east-1",
   defaultTags: {
@@ -29,11 +21,6 @@ const usEast1 = new aws.Provider("aws-us-east-1-dns", {
   },
 });
 
-/**
- * Look up the parent Route53 zone (e.g. for `dev.retivo.example.com`,
- * find `example.com`). The user is responsible for owning the zone and
- * delegating it to AWS — Pulumi does not create the zone.
- */
 function parentZoneFqdn(domain: string): string {
   const parts = domain.split(".");
   if (parts.length < 2) {
@@ -41,7 +28,6 @@ function parentZoneFqdn(domain: string): string {
       `domainName must be at least two labels (got "${domain}"). Set a real FQDN like dev.retivo.example.com.`,
     );
   }
-  // Use the parent so wildcards / subdomains share one zone.
   return parts.slice(-2).join(".");
 }
 
@@ -51,7 +37,6 @@ export function createDns(opts: DnsOpts): DnsResult {
   const parentZone = parentZoneFqdn(domainName);
   const zone = aws.route53.getZoneOutput({ name: parentZone, privateZone: false });
 
-  // ACM cert in us-east-1 for the CloudFront alias.
   const certificate = new aws.acm.Certificate(
     `${namePrefix}-cert`,
     {
@@ -61,7 +46,6 @@ export function createDns(opts: DnsOpts): DnsResult {
     { provider: usEast1 },
   );
 
-  // DNS validation records. ACM emits one per domain.
   const validationRecord = new aws.route53.Record(
     `${namePrefix}-cert-validation`,
     {
@@ -87,13 +71,8 @@ export function createDns(opts: DnsOpts): DnsResult {
 }
 
 /**
- * Create the alias A/AAAA records pointing the configured domain at the
- * CloudFront distribution. Done after the distribution is up so we can
- * read its `domainName` and `hostedZoneId`. The AAAA alias is skipped when
- * the distribution has IPv6 off (the dev edge IP gate is on): with no AAAA
- * record a dual-stack browser resolves only the A record and arrives with
- * an IPv4 address the allowlist can match. The API domain's own AAAA
- * (createApiDomainAlias) is untouched — that host is not gated.
+ * Creates the A/AAAA aliases to the distribution. The AAAA alias is skipped when IPv6 is off (dev edge IP gate), so a
+ * dual-stack browser arrives over IPv4, which the allowlist can match.
  */
 export function createCloudFrontAliases(args: {
   readonly namePrefix: string;
@@ -101,7 +80,6 @@ export function createCloudFrontAliases(args: {
   readonly domainName: string;
   readonly distributionDomainName: pulumi.Output<string>;
   readonly distributionHostedZoneId: pulumi.Output<string>;
-  /** Mirrors the distribution's `isIpv6Enabled`; false skips the AAAA alias. */
   readonly ipv6Enabled: boolean;
 }): void {
   const {
@@ -143,21 +121,12 @@ export function createCloudFrontAliases(args: {
 }
 
 export interface ApiDnsResult {
-  /** Regional ACM cert (validated) for the API Gateway custom domain. */
   readonly certificate: aws.acm.Certificate;
   readonly certificateValidationArn: pulumi.Output<string>;
   readonly hostedZoneId: pulumi.Output<string>;
 }
 
-/**
- * Certificate wiring for the API Gateway custom domain. Distinct from
- * the CloudFront cert above: API Gateway HTTP API custom domains are
- * REGIONAL, so this cert is issued in the API's own region (the default
- * provider) — not us-east-1. DNS-validated via the parent Route53 zone.
- * Decoupled from the web `retivo:domainName`: the API domain can sit
- * in the same parent zone or a different one, and is provisioned even
- * when no web custom domain is configured.
- */
+/** Certificate wiring for the API custom domain; regional, so it uses the default provider, not us-east-1. */
 export function createApiDns(opts: {
   readonly namePrefix: string;
   readonly apiDomainName: string;
@@ -167,8 +136,7 @@ export function createApiDns(opts: {
   const parentZone = parentZoneFqdn(apiDomainName);
   const zone = aws.route53.getZoneOutput({ name: parentZone, privateZone: false });
 
-  // Regional cert — default provider (API Gateway custom domains are
-  // regional). No `{ provider: usEast1 }` here on purpose.
+  // Regional cert: deliberately no `{ provider: usEast1 }`.
   const certificate = new aws.acm.Certificate(`${namePrefix}-api-cert`, {
     domainName: apiDomainName,
     validationMethod: "DNS",
@@ -201,11 +169,6 @@ export function createApiDns(opts: {
   };
 }
 
-/**
- * Alias the API custom domain at the API Gateway regional domain target.
- * Done after the custom domain is created so we can read its regional
- * domain name + hosted-zone id.
- */
 export function createApiDomainAlias(args: {
   readonly namePrefix: string;
   readonly hostedZoneId: pulumi.Output<string>;

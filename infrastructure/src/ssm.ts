@@ -1,14 +1,5 @@
-// SSM Parameter Store entries for runtime secrets.
-//
-// Pulumi creates each parameter with a placeholder value on first
-// `pulumi up`. The bootstrap script (`infrastructure/scripts/bootstrap-stack.sh`)
-// runs `aws ssm put-parameter --overwrite` to replace the placeholders
-// with real, randomly-generated secrets. We mark `value` and
-// `description` in `ignoreChanges` so subsequent `pulumi up` runs do
-// not revert those manual rotations.
-//
-// SecureString uses the AWS-managed alias/aws/ssm KMS key by default.
-// The api Lambda's IAM policy grants kms:Decrypt only via that key.
+// SSM parameters for runtime secrets, created with a placeholder and `value`/`description` in `ignoreChanges`,
+// so a rotation by `aws ssm put-parameter` survives `pulumi up` (AGENTS.md "JWT signing-key rotation").
 
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
@@ -31,8 +22,6 @@ export interface SsmParameters {
 const PLACEHOLDER =
   "phase-1-placeholder-replace-via-aws-ssm-put-parameter-overwrite";
 
-// Ignore drift on `value` so the bootstrap script's secret rotation
-// survives `pulumi up`. Description churn shouldn't fight us either.
 const SECRET_IGNORE: pulumi.CustomResourceOptions = {
   ignoreChanges: ["value", "description"],
 };
@@ -41,14 +30,8 @@ export function createSsmParameters(opts: SsmOpts): SsmParameters {
   const { stack, sesFromAddress } = opts;
   const base = `/retivo/${stack}`;
 
-  // RS256 keypair. Two SSM parameters keyed by
-  // the same `kid` set: private (PKCS#8 PEM) signs new access tokens,
-  // public (SPKI PEM) verifies and is also surfaced on the api's JWKS
-  // endpoint. The bootstrap script generates a real RSA-2048 keypair on
-  // first run and overwrites both placeholders. Both parameters are
-  // SecureString for uniformity — the public key is technically not
-  // secret, but the IAM grant + KMS condition cover both lookups
-  // identically.
+  // Both JWT keys are SecureString, though the public one is not secret, so one IAM grant and one
+  // KMS condition cover both.
   const jwtPrivateKeys = new aws.ssm.Parameter(
     `${stack}-ssm-jwt-private-keys`,
     {
@@ -96,11 +79,7 @@ export function createSsmParameters(opts: SsmOpts): SsmParameters {
     SECRET_IGNORE,
   );
 
-  // Unlike the random secrets above, the SES from-address is just a
-  // config value. Pulumi owns it — change `retivo:sesFromAddress`
-  // in stack config and the next `pulumi up` updates it. No
-  // ignoreChanges, so manual `aws ssm put-parameter` against this one
-  // would be reverted (as it should be).
+  // A plain config value owned by Pulumi: no ignoreChanges, so a manual put-parameter is reverted.
   const sesFromAddressParam = new aws.ssm.Parameter(`${stack}-ssm-ses-from`, {
     name: `${base}/ses/from-address`,
     type: "String",
