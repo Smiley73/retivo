@@ -78,7 +78,7 @@ function latestSnapshotYear(values: Readonly<Record<number, unknown>>): number {
 }
 
 /** The cliff threshold (whole dollars) the entered ceiling is compared against, from the live calibration snapshots; null when no table is available. */
-export function resolveCliffThreshold(
+function resolveCliffThreshold(
   line: MagiCapLine,
   memberCount: number,
 ): number | null {

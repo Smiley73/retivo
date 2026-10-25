@@ -1,12 +1,4 @@
-/**
- * SignupPage submit-handler client-side validation + the not-financial-advice
- * acknowledgement.
- *
- * The form is `noValidate`, so the onSubmit handler must block submission
- * (without calling signup()) when first name, last name, birthdate, or the
- * acknowledgement checkbox is missing/unchecked, and pass all through when
- * valid.
- */
+// SignupPage submit-handler validation (the form is `noValidate`, so onSubmit must block without calling signup() when a name, birthdate or the acknowledgement is missing) and the not-financial-advice acknowledgement.
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -101,9 +93,6 @@ describe('SignupPage client-side validation', () => {
     ).toBeInTheDocument();
   });
 
-  // The account cannot be created until the unchecked checkbox is checked.
-  // The Create account button stays present/clickable, but submit is blocked
-  // with an accessible (role="alert") error and signup() is never called.
   it('blocks submission and announces an error when the checkbox is unchecked', async () => {
     const user = userEvent.setup();
     renderPage();
@@ -138,8 +127,6 @@ describe('SignupPage client-side validation', () => {
     );
   });
 
-  // The visible label is the checkbox's accessible name (queried by role and
-  // name above), and it is the only checkbox on the page.
   it('has exactly one checkbox, unchecked, required, named by its visible label', () => {
     renderPage();
     expect(screen.getAllByRole('checkbox')).toHaveLength(1);
@@ -162,9 +149,6 @@ describe('SignupPage client-side validation', () => {
     fetchSpy.mockRestore();
   });
 
-  // Submitting with the box unchecked shows the accessible error and never
-  // calls signup(); checking the box clears the alert; a subsequent submit then
-  // goes through.
   it('clears the error once the box is checked, then submits', async () => {
     const user = userEvent.setup();
     signupMock.mockResolvedValue({ email: 'jane@example.test' });
@@ -182,10 +166,7 @@ describe('SignupPage client-side validation', () => {
     await waitFor(() => expect(signupMock).toHaveBeenCalledTimes(1));
   });
 
-  // Password-manager interop: the email field
-  // is the credential identifier, so it hints `username` (not `email`) —
-  // managers capture it with the new-password save prompt. type="email"
-  // keeps the email keyboard + native semantics.
+  // The email field is the credential identifier, so it hints `username` (not `email`) and managers capture it with the new-password save prompt; type="email" keeps the email keyboard.
   it('hints the email field as the credential identifier (autocomplete="username")', () => {
     renderPage();
     const email = screen.getByLabelText('Email');
@@ -197,19 +178,13 @@ describe('SignupPage client-side validation', () => {
     );
   });
 
-  // Password policy: the client-side
-  // minLength hint reflects the raised 16-character minimum and the new
-  // required special character. The field is `minLength`/`required` only for
-  // the browser hint — the form is `noValidate`, so the server still enforces
-  // the policy and surfaces PASSWORD_TOO_SHORT / PASSWORD_WEAK.
+  // The form is `noValidate`, so minLength/required are browser hints only; the server enforces the policy and surfaces PASSWORD_TOO_SHORT / PASSWORD_WEAK.
   it('reflects the 16-character + special-character policy in the field and info-icon tooltip', async () => {
     const user = userEvent.setup();
     renderPage();
     const password = screen.getByLabelText('Password');
     expect(password).toHaveAttribute('minLength', '16');
-    // The requirement copy now lives behind an info-(i) tooltip next to the
-    // "Password" label instead of an always-visible hint. It is hidden until
-    // the keyboard-focusable trigger is focused, then reveals the full text.
+    // The requirement copy sits behind an info tooltip trigger, hidden until it is focused.
     const trigger = screen.getByLabelText('Password requirements');
     expect(trigger).toHaveClass('cursor-help');
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
@@ -249,10 +224,7 @@ describe('SignupPage client-side validation', () => {
     });
   });
 
-  // Inline "service is busy" copy: a gateway-level throttle/timeout with no
-  // error envelope shows
-  // the shared busy sentence in the page-level `signup-error` surface only —
-  // never `signup-field-error`.
+  // A gateway throttle or timeout with no error envelope shows the shared busy sentence in the page-level `signup-error` surface only, never `signup-field-error`.
   describe('busy-response handling', () => {
     const BUSY_MESSAGE = 'The service is busy right now. Please try again in a moment.';
 

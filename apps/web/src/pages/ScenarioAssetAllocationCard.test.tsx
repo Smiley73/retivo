@@ -1,24 +1,4 @@
-/**
- * AssetAllocationCard and AssetAllocationModal — display and intro-copy contracts.
- *
- * AssetAllocationCard (base-scenario display behaviour):
- *   Pins the base-scenario rule:
- *   on the base scenario the card shows its effective value even
- *   with no local override ("Off" when no allocation is configured), and
- *   the accent tint (`bg-accent-subtle`) never appears on the base scenario
- *   regardless of override state (tint guard).
- *
- * AssetAllocationModal (intro-copy + percent-format contracts):
- *   Pins the scenario-modal copy convention:
- *   the modal opens with a plain-English
- *   `<p className="m-0 text-sm">` intro paragraph before any form control, at
- *   the page-baseline body-copy size (`text-sm` pinned-size rule).
- *   Percent-format consistency: the read-only income-share `Muted` labels
- *   route through `formatPercent()`, which always renders one decimal — so the
- *   derived share reads `25.0% income`, not `25% income`. The growth sliders'
- *   spoken value (formatAriaValue) is also aligned to one decimal, matching the
- *   visible badge format.
- */
+// AssetAllocationCard and AssetAllocationModal: base-scenario display (effective value with no override, no `bg-accent-subtle` tint), the intro paragraph and one-decimal percent formats.
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
@@ -37,8 +17,6 @@ import type {
 import type { ScenarioAggregate } from '../lib/scenario-resolution';
 
 const HH = 'hh-test';
-
-// ── Factory helpers for AssetAllocationModal tests ──────────────────────────
 
 function makeMember(): Aggregate<HouseholdMemberPayload> {
   return {
@@ -81,8 +59,6 @@ function makeScenario(
   };
 }
 
-// ── Factory helper for AssetAllocationCard tests ─────────────────────────────
-
 const allocScenario = (
   id: string,
   retirementAllocation?: RetirementAllocationOverride,
@@ -109,8 +85,6 @@ afterEach(async () => {
   await clearAllStores();
   vi.clearAllMocks();
 });
-
-// ── AssetAllocationCard — base-scenario display ───────────────────────────────
 
 describe('AssetAllocationCard — base scenario', () => {
   it('shows the effective default "Off" on the base scenario when no override set', () => {
@@ -152,8 +126,6 @@ describe('AssetAllocationCard — base scenario', () => {
   });
 });
 
-// ── AssetAllocationModal — intro copy ────────────────────────────────────────
-
 describe('AssetAllocationModal — intro copy', () => {
   it('renders a plain-English intro paragraph at text-sm', () => {
     const scenario = makeScenario();
@@ -172,11 +144,8 @@ describe('AssetAllocationModal — intro copy', () => {
   });
 });
 
-// ── AssetAllocationModal — income-share format ────────────────────────────────
-
 describe('AssetAllocationModal — income-share format', () => {
   it('shows the initial income share with one decimal (formatPercent)', () => {
-    // startGrowthPct 75 → incomeShare 25 → "25.0% income", not "25% income".
     const scenario = makeScenario({
       growthRatePct: 7,
       incomeRatePct: 3,
@@ -200,7 +169,6 @@ describe('AssetAllocationModal — income-share format', () => {
   });
 
   it('shows the glide end income share with one decimal (formatPercent)', () => {
-    // endGrowthPct 30 → endIncomeShare 70 → "70.0% income".
     const scenario = makeScenario({
       growthRatePct: 7,
       incomeRatePct: 3,
@@ -224,18 +192,8 @@ describe('AssetAllocationModal — income-share format', () => {
   });
 });
 
-// ── AssetAllocationModal — slider aria-valuetext format ───────────────────────
-
 describe('AssetAllocationModal — slider aria-valuetext format', () => {
-  // RangeSlider exposes the spoken value via an `aria-describedby` channel
-  // (a visually-hidden sibling span holding `formatAriaValue(value)`), not
-  // a native `aria-valuetext` attribute — see components/RangeSlider.tsx,
-  // which deliberately keeps the value OUT of the slider's accessible NAME.
-  // So the screen-reader-announced value is the slider's accessible
-  // DESCRIPTION; `toHaveAccessibleDescription` resolves that channel.
-  // These tests pin the growth sliders' announcement to the one-decimal
-  // badge format (`50.0% growth`), guarding the formatAriaValue alignment
-  // fix from silently regressing back to integer-only (`50 percent growth`).
+  // RangeSlider exposes the spoken value through `aria-describedby` (a visually hidden span holding `formatAriaValue(value)`), not `aria-valuetext`, so the announced value is the slider's accessible description. These tests pin it to the one-decimal badge format (`50.0% growth`).
   it('initial growth slider announces one-decimal growth value (formatAriaValue)', () => {
     const scenario = makeScenario({
       growthRatePct: 7,
@@ -262,8 +220,6 @@ describe('AssetAllocationModal — slider aria-valuetext format', () => {
   });
 
   it('glide end growth slider announces one-decimal growth value (formatAriaValue)', () => {
-    // endGrowthPct non-null + endYear seeds glideOn=true, mounting the
-    // "End growth percentage" slider.
     const scenario = makeScenario({
       growthRatePct: 7,
       incomeRatePct: 3,

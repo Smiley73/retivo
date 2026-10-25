@@ -1,14 +1,4 @@
-/**
- * TaxAssumptionsModal — unit tests.
- *
- * The Tax assumptions editor is a STANDALONE modal (decoupled from the
- * withdrawal-strategy modal). Its two concerns are split into React Aria tabs
- * ("HSA" + "Penalty exemptions"), modelled after the withdrawal-strategy modal.
- * Covers: HSA slider persistence (default tab); per-account penalty-exempt
- * toggle (Penalty exemptions tab); non-penalty account types render no toggle;
- * Save writes ONLY the tax keys (unrelated overrides preserved); orphaned
- * (deleted-account) ids pruned on save; Save disabled when clean; a11y smoke.
- */
+// TaxAssumptionsModal, a standalone modal (decoupled from the withdrawal-strategy modal) with HSA and Penalty-exemptions tabs: HSA slider persistence, per-account penalty-exempt toggles, no toggle for non-penalty account types, tax-only saves, orphan pruning, the filing editor and its repair paths.
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -120,9 +110,6 @@ afterEach(async () => {
 
 describe('TaxAssumptionsModal', () => {
   it('renders a plain-English intro paragraph at text-sm above the tabs', async () => {
-    // Scenario-modal copy convention: the modal
-    // opens with a `<p className="m-0 text-sm">` plain-English intro above the
-    // tab strip (pinned body-copy size).
     const scenario = makeScenario('sc-intro');
     render(
       <MemoryRouter>
@@ -147,7 +134,7 @@ describe('TaxAssumptionsModal', () => {
 
   it('opens on the HSA tab by default with an HSA + Penalty exemptions tab strip', async () => {
     const scenario = makeScenario('sc-open');
-    const { container } = render(
+    render(
       <MemoryRouter>
         <TaxAssumptionsModal
           open
@@ -161,19 +148,16 @@ describe('TaxAssumptionsModal', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-    // Two tabs, modelled after the withdrawal-strategy modal.
     expect(screen.getByRole('tab', { name: 'HSA' })).toHaveAttribute(
       'data-selected',
       'true',
     );
     expect(screen.getByRole('tab', { name: /Penalty exemptions/i })).toBeTruthy();
-    // HSA panel content is visible on first paint (default tab).
     expect(
       screen.getByRole('slider', {
         name: /Percent of emergency HSA withdrawals still backed by qualified medical care/i,
       }),
     ).toBeTruthy();
-    await expectNoA11yViolations(container);
   });
 
   it('saves hsaQualifiedMedicalExpensePct from the slider', async () => {
@@ -194,7 +178,7 @@ describe('TaxAssumptionsModal', () => {
     );
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
 
-    // Slider defaults to 100; step is 5, so four ArrowLeft presses → 80.
+    // Step is 5, so four ArrowLeft presses from 100 give 80.
     const pct = screen.getByRole('slider', {
       name: /Percent of emergency HSA withdrawals still backed by qualified medical care/i,
     });
@@ -268,18 +252,13 @@ describe('TaxAssumptionsModal', () => {
     );
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
     await userEvent.click(screen.getByRole('tab', { name: /Penalty exemptions/i }));
-    // Nudge reads coherently for the Roth-IRA row: contributions penalty-free,
-    // income tax on earnings still applies, and the app does not validate the
-    // exemption eligibility rules. (The a11y scan lives in the dedicated
-    // smoke describe below — one representative scan per the AGENTS rule.)
+    // The Roth-IRA nudge: contributions penalty-free, income tax on earnings still applies, and the app does not validate the exemption eligibility rules.
     expect(screen.getByText(/does not check those eligibility rules/i)).toBeTruthy();
     expect(screen.getByText(/your own contributions always come out penalty-free/i)).toBeTruthy();
   });
 
   it('renders a penalty toggle for a Roth IRA (Option A, earnings tranche)', async () => {
-    // A pre-59½ Roth IRA earnings draw can incur the 10% penalty, so
-    // the picker now lists Roth IRAs and toggling persists the id (waiving the
-    // earnings-tranche penalty; the income tax on the earnings still applies).
+    // A pre-59½ Roth IRA earnings draw can incur the 10% penalty, so the picker lists Roth IRAs and toggling persists the id (waiving the earnings-tranche penalty; the income tax on the earnings still applies).
     const roth = makeAccount('roth-a', 'RETIREMENT_ROTH_IRA');
     const scenario = makeScenario('sc-roth');
     const onClose = vi.fn();
@@ -316,7 +295,7 @@ describe('TaxAssumptionsModal', () => {
   });
 
   it('Save writes ONLY the tax key, preserving an unrelated existing override', async () => {
-    // Pre-existing withdrawal-strategy override must survive a tax-only save.
+    // A pre-existing withdrawal-strategy override must survive a tax-only save.
     const scenario = makeScenario('sc-preserve', {
       withdrawalStrategy: { kind: 'rothFirst' },
     });
@@ -352,7 +331,6 @@ describe('TaxAssumptionsModal', () => {
       .payload as ScenarioPayload;
     expect(payload.overrides.hsaQualifiedMedicalExpensePct).toBe(95);
     expect(payload.overrides.withdrawalStrategy).toEqual({ kind: 'rothFirst' });
-    // The penalty key was never touched, so it stays absent.
     expect(
       Object.prototype.hasOwnProperty.call(
         payload.overrides,
@@ -362,9 +340,7 @@ describe('TaxAssumptionsModal', () => {
   });
 
   it('prunes a deleted-account id from the exempt list on save', async () => {
-    // Scenario locally exempts a live account + one that has since been
-    // deleted (absent from `accounts`). Toggling the live account off then on
-    // keeps the modal dirty; saving drops the orphan.
+    // The scenario locally exempts a live account and one since deleted (absent from `accounts`); toggling the live account off then on keeps the modal dirty, and saving drops the orphan.
     const live = makeAccount('acct-live');
     const scenario = makeScenario('sc-prune', {
       earlyWithdrawalPenaltyExemptAccountIds: ['acct-live', 'acct-deleted'],
@@ -385,8 +361,7 @@ describe('TaxAssumptionsModal', () => {
     );
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
 
-    // Nudge the HSA slider so the modal is dirty (the exempt list itself is
-    // unchanged by the user, but prune-on-save still cleans the orphan).
+    // Nudge the HSA slider so the modal is dirty; prune-on-save still cleans the orphan.
     const pct = screen.getByRole('slider', {
       name: /Percent of emergency HSA withdrawals still backed by qualified medical care/i,
     });
@@ -427,10 +402,6 @@ describe('TaxAssumptionsModal', () => {
 });
 
 describe('TaxAssumptionsModal — filing editor', () => {
-  // -------------------------------------------------------------------------
-  // Filing editor
-  // -------------------------------------------------------------------------
-
   it('a couple defaults to filing together, with the exception list empty', async () => {
     const scenario = makeScenario('sc-filing-default');
     render(
@@ -522,9 +493,7 @@ describe('TaxAssumptionsModal — filing editor', () => {
   });
 
   it('resolving a legacy scalar saves a plan with NO filingStatus key and no stored null', async () => {
-    // A two-member household carrying a `Single` scalar is the ambiguous case:
-    // the resolver refuses it, the editor prompts, and saving must OMIT the
-    // legacy key entirely rather than storing a `null` sentinel.
+    // A two-member household with a `Single` scalar is the ambiguous case: the resolver refuses it, the editor prompts, and saving must omit the legacy key entirely rather than store a `null` sentinel.
     const scenario = makeScenario('sc-filing-legacy', {
       filingStatus: 'Single',
       hsaQualifiedMedicalExpensePct: 70,
@@ -545,9 +514,7 @@ describe('TaxAssumptionsModal — filing editor', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-    // The resolution prompt is shown. Switching over is an EXPLICIT act —
-    // Save stays disabled until the user actually uses the filing controls, so
-    // the prompt carries a one-click "use the choice shown" affordance.
+    // Switching over is explicit: Save stays disabled until the filing controls are used, so the prompt carries a one-click "use the choice shown" affordance.
     expect(
       screen.getByText(/older filing setting that we cannot read for both of you/i),
     ).toBeInTheDocument();
@@ -564,13 +531,11 @@ describe('TaxAssumptionsModal — filing editor', () => {
     const pending = await listPendingMutations();
     const payload = pending.find((p) => p.aggregateId === 'sc-filing-legacy')!
       .payload as ScenarioPayload;
-    // The key is ABSENT, not present-and-null (a stored null would survive sync
-    // as a dead key on every device).
+    // The key is absent, not present-and-null (a stored null would survive sync as a dead key on every device).
     expect('filingStatus' in payload.overrides).toBe(false);
     expect(payload.overrides.filingStatus).toBeUndefined();
     expect(JSON.stringify(payload.overrides)).not.toContain('null');
     expect(payload.overrides.taxFilingPlan).toEqual({ kind: 'joint' });
-    // Unrelated overrides survive untouched.
     expect(payload.overrides.hsaQualifiedMedicalExpensePct).toBe(70);
   });
 
@@ -694,7 +659,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
         />
       </MemoryRouter>,
     );
-  /** React Aria `<Select>` — open the trigger, then pick the option by label. */
+  // React Aria `<Select>`: open the trigger, then pick the option by label.
   const chooseOption = async (
     trigger: HTMLElement,
     optionName: string | RegExp,
@@ -711,11 +676,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   };
 
   it('an HSA-only save keeps an AMBIGUOUS legacy scalar and writes no plan', async () => {
-    // The regression: a two-member `Single` scalar is unresolvable, and the
-    // editor used to treat its mere PRESENCE as "the filing editor changed
-    // something" — so nudging the HSA slider on a tab the user never left
-    // deleted `filingStatus` and stored a GUESSED `{ kind: 'joint' }` plan,
-    // silently re-filing the whole projection as MFJ.
+    // Regression: a two-member `Single` scalar is unresolvable, and the editor treated its mere presence as "the filing editor changed", so nudging the HSA slider on a tab the user never left deleted `filingStatus` and stored a guessed `{ kind: 'joint' }` plan, silently re-filing the projection as MFJ.
     const scenario = makeScenario('sc-f11-hsa-only', {
       filingStatus: 'Single',
       hsaQualifiedMedicalExpensePct: 80,
@@ -724,7 +685,6 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
     renderModal(scenario, COUPLE, onClose);
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
 
-    // Touch ONLY the HSA control.
     const slider = screen.getByRole('slider');
     await act(async () => {
       fireEvent.keyDown(slider, { key: 'ArrowLeft' });
@@ -742,8 +702,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('the unsaved-changes guard does not fire on a read-only open and close', async () => {
-    // `filingDirty` used to be unconditionally true for an unresolvable scalar,
-    // so simply opening and closing the modal raised the discard prompt.
+    // `filingDirty` was unconditionally true for an unresolvable scalar, so opening and closing the modal raised the discard prompt.
     const scenario = makeScenario('sc-f11-readonly', { filingStatus: 'Single' });
     const onClose = vi.fn();
     renderModal(scenario, COUPLE, onClose, 'filing');
@@ -752,23 +711,17 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('a one-member HoH scalar keeps head-of-household treatment on save', async () => {
-    // A one-member `HoH` scalar RESOLVES cleanly (open-ended HoH), but the
-    // editor used to seed a bare `{ kind: 'individual' }` plan — so the first
-    // filing-adjacent save silently downgraded the household to Single
-    // (2026: a $24,150 standard deduction drops to $16,100, plus narrower
-    // brackets), with no warning and no control to re-express HoH.
+    // A one-member `HoH` scalar resolves cleanly, but the editor seeded a bare `{ kind: 'individual' }` plan, so the first filing-adjacent save silently downgraded the household to Single (2026: a $24,150 standard deduction drops to $16,100, plus narrower brackets) with no control to re-express HoH.
     const scenario = makeScenario('sc-f12-hoh', { filingStatus: 'HoH' });
     const onClose = vi.fn();
     renderModal(scenario, SOLO, onClose, 'filing');
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-    // No resolution prompt — this scalar converts cleanly.
     expect(
       screen.queryByText(/older filing setting that we cannot read/i),
     ).not.toBeInTheDocument();
-    // The standing-status control opens on Head of household.
     expect(screen.getByLabelText('Files as')).toHaveTextContent('Head of household');
 
-    // Any filing edit (adding an exception window) must PRESERVE the HoH plan.
+    // Any filing edit (adding an exception window) must preserve the HoH plan.
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /add an exception/i }));
     });
@@ -795,7 +748,6 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('radio', { name: /file apart on two returns/i }));
     });
-    // Change the SECOND spouse's status + return size.
     await chooseOption(screen.getAllByLabelText('Files as')[1], 'Head of household');
     await chooseOption(
       screen.getAllByLabelText('People counted on this return')[1],
@@ -835,8 +787,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
       name: /lived together at some point during the year/i,
     });
     expect(toggle).not.toBeDisabled();
-    // §2(c)/§7703(b): HoH requires living APART for the last six months, so
-    // selecting it must clear the contradictory fact and lock the toggle.
+    // §2(c)/§7703(b): HoH requires living apart for the last six months, so selecting it must clear the contradictory fact and lock the toggle.
     await chooseOption(screen.getAllByLabelText('Files as')[0], 'Head of household');
     expect(
       screen.getByRole('switch', { name: /lived together at some point during the year/i }),
@@ -849,18 +800,13 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
 
     const overrides = await savedOverrides('sc-f120-hoh');
     const plan = overrides.taxFilingPlan;
-    // The key is ABSENT (absent → lived apart), never an explicit `false`.
+    // The key is absent (absent means lived apart), never an explicit `false`.
     expect(plan && 'livedTogether' in plan).toBe(false);
     expect(JSON.stringify(plan)).not.toContain('livedTogether');
   });
 
   it('a couple whose scenario holds a one-person plan can still choose how they file', async () => {
-    // The household editor supports adding a spouse at any time, so an
-    // `{ kind: 'individual' }` plan saved while the user was alone outlives the
-    // household it described. The Filing tab used to render the one-person
-    // "Files as" control for it — no joint/separate radios anywhere — leaving
-    // the couple with no way to fix a plan that files ONE Single return for
-    // both of them.
+    // The household editor can add a spouse at any time, so an `{ kind: 'individual' }` plan saved while alone outlives the household it described; the Filing tab rendered the one-person "Files as" control for it with no joint/separate radios, leaving the couple no way to fix a plan that files one Single return for both.
     const scenario = makeScenario('sc-f21-individual-couple', {
       taxFilingPlan: { kind: 'individual' },
     });
@@ -868,13 +814,10 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
     renderModal(scenario, COUPLE, onClose, 'filing');
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
 
-    // The prompt explains the saved choice could not be used, and
-    // the joint/separate control is reachable.
     expect(
       screen.getByText(/could not use the filing choice saved for this scenario/i),
     ).toBeInTheDocument();
-    // The editor opens on the composition default (joint) and BOTH options are
-    // reachable, so the couple can express either treatment.
+    // The editor opens on the composition default (joint) and both options are reachable.
     expect(screen.getByRole('radio', { name: /file together on one return/i })).toBeChecked();
     const separate = screen.getByRole('radio', { name: /file apart on two returns/i });
     await act(async () => {
@@ -894,12 +837,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('a lone member with a stored couple plan sees the one-person control', async () => {
-    // The mirror of the case above (the spouse was removed after the plan was
-    // saved). Which picker renders follows the household that exists NOW, so a
-    // one-person household never sees a joint/separate choice — and the
-    // one-person "Files as" control stays reachable. The stored joint plan needs
-    // no reset: with no spouse it already resolves to the sole member's Single
-    // return.
+    // The mirror case (the spouse was removed after the plan was saved): the picker follows the household that exists now, so a one-person household never sees a joint/separate choice and the one-person "Files as" control stays reachable. The stored joint plan needs no reset: with no spouse it already resolves to the sole member's Single return.
     const scenario = makeScenario('sc-f21-joint-solo', {
       taxFilingPlan: { kind: 'joint' },
     });
@@ -913,10 +851,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('a corrupt separate payload opens on a sane default instead of throwing', async () => {
-    // `taxFilingPlan` is user/sync data with no runtime schema behind it, and
-    // the separate-returns controls index `units[0]`/`units[1]` directly — so a
-    // short payload crashed the render of the very tab the resolution prompt deep-links
-    // to for repairing it.
+    // `taxFilingPlan` is user/sync data with no runtime schema, and the separate-returns controls index `units[0]`/`units[1]` directly, so a short payload crashed the render of the very tab the resolution prompt deep-links to for repairing it.
     const scenario = makeScenario('sc-f22-corrupt', {
       taxFilingPlan: {
         kind: 'separate',
@@ -927,17 +862,14 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
     expect(() => renderModal(scenario, COUPLE, onClose, 'filing')).not.toThrow();
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
 
-    // Opened on the composition default (joint), with the reset explained.
     expect(
       screen.getByText(/could not use the filing choice saved for this scenario/i),
     ).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /file together on one return/i })).toBeChecked();
-    // No half-rendered separate editor.
     expect(
       screen.queryByRole('switch', { name: /lived together at some point during the year/i }),
     ).not.toBeInTheDocument();
 
-    // And the user can repair it from here — adopting the shown choice saves.
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /use the choice shown below/i }));
     });
@@ -949,10 +881,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('a stored filing plan that is not an object opens on a sane default', async () => {
-    // `taxFilingPlan: null` (and a list, and a bare string) all cleared the
-    // `!== undefined` boundary check and then threw on the first `.kind` read,
-    // so the Filing tab — the one surface that can repair the data — crashed on
-    // open instead of falling back like every other unusable payload.
+    // `taxFilingPlan: null` (and a list, a bare string) cleared the `!== undefined` boundary check and then threw on the first `.kind` read, so the one surface that can repair the data crashed on open instead of falling back like every other unusable payload.
     for (const [index, stored] of [null, [{ kind: 'joint' }], 'joint', 7].entries()) {
       const scenario = makeScenario(`sc-f31-corrupt-${index}`, {
         taxFilingPlan: stored as unknown as ScenarioPayload['overrides']['taxFilingPlan'],
@@ -968,11 +897,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('a stored separate plan on a solo household shows only one-person controls', async () => {
-    // The spouse was removed after the plan was saved. The filing-status picker already picked the
-    // one-person picker from CURRENT membership, but the kind-specific
-    // sub-editor still followed the stored `separate` kind — so the two-return
-    // editor (two "Files as" selects, the lived-together toggle) rendered
-    // directly beneath it, describing a spouse who is no longer in the plan.
+    // The spouse was removed after the plan was saved. The filing-status picker followed current membership, but the kind-specific sub-editor still followed the stored `separate` kind, so the two-return editor rendered beneath the one-person picker, describing a spouse no longer in the plan.
     const scenario = makeScenario('sc-f36-separate-solo', {
       taxFilingPlan: {
         kind: 'separate',
@@ -986,15 +911,12 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
     renderModal(scenario, SOLO, vi.fn(), 'filing');
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
 
-    // No two-return editor: no lived-together toggle, no per-spouse returns.
     expect(
       screen.queryByRole('switch', { name: /lived together at some point during the year/i }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/'s return/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/people counted on this return/i)).not.toBeInTheDocument();
-    // No spouse-death copy for a household with no spouse.
     expect(screen.queryByText(/the year a spouse dies/i)).not.toBeInTheDocument();
-    // Only the one-person control, and no joint/separate radios.
     expect(screen.getByLabelText('Files as')).toBeInTheDocument();
     expect(
       screen.queryByRole('radio', { name: /file apart on two returns/i }),
@@ -1018,14 +940,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('a standing status set while the spouse was away still matches what the engine files', async () => {
-    // The reachable sequence behind the bug: a JOINT plan, the spouse is removed
-    // for a while (so the one-person "Files as" control is the only filing
-    // control on the tab), head of household is chosen there, and the spouse is
-    // added back later. The stored plan is still `joint` — the radios were never
-    // touched — but it now carries an OPEN-ENDED head-of-household window that
-    // the couple's controls neither show nor list, while the resolver files the
-    // survivor's return under it forever after a later death. The summary used to
-    // promise "later years file single" regardless.
+    // The reachable sequence: a joint plan, the spouse is removed (the one-person "Files as" control is then the only filing control), head of household is chosen there, and the spouse is added back later. The stored plan is still `joint` but carries an open-ended head-of-household window the couple's controls neither show nor list, while the resolver files the survivor under it after a later death; the summary used to promise "later years file single" regardless.
     const solo = makeScenario('sc-f41-standing', { taxFilingPlan: { kind: 'joint' } });
     const onClose = vi.fn();
     const soloView = renderModal(solo, SOLO, onClose, 'filing');
@@ -1039,8 +954,6 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
     expect(stored).toEqual({ kind: 'joint', statusWindows: [openEndedStatusWindow('HoH')] });
     soloView.unmount();
 
-    // The spouse is back: the couple's editor offers the joint/separate radios,
-    // no standing-status control, and no exception row for that window.
     const couple = makeScenario('sc-f41-standing-couple', { taxFilingPlan: stored });
     renderModal(couple, COUPLE, vi.fn(), 'filing');
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
@@ -1048,8 +961,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
     expect(screen.queryByLabelText('Files as')).not.toBeInTheDocument();
     expect(screen.getByText(/no exception years/i)).toBeInTheDocument();
 
-    // So the summary is the only surface left that can disclose it — and it must
-    // say exactly what the resolver files for the survivor.
+    // The summary is the only surface left that can disclose it, and it must say exactly what the resolver files for the survivor.
     const summary = summarizeFilingPlan({
       taxFilingPlan: stored,
       hasSecondaryMember: true,
@@ -1071,10 +983,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('switching how a couple files drops a leftover standing status', async () => {
-    // A couple's plan has no standing status of its own, so an open-ended window
-    // on one can only be a leftover from a spell when the spouse was removed.
-    // Choosing how the two of them file no longer carries it into the new plan —
-    // the year-bounded exception the user really entered still comes across.
+    // A couple's plan has no standing status of its own, so an open-ended window on one can only be a leftover from a spell when the spouse was removed; choosing how the two file no longer carries it into the new plan, while the year-bounded exception the user entered still comes across.
     const exception: FilingStatusWindow = {
       status: 'QSS',
       start: { kind: 'year', year: 2036 },
@@ -1107,12 +1016,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('an exception added to a standing head-of-household plan really is filed', async () => {
-    // The bug, end to end through the editor: a one-person plan that files head of
-    // household every year, then a qualifying-surviving-spouse exception added on
-    // top. The row rendered and the plan saved, but the standing head-of-household
-    // window covers every tax year — stored ahead of the exception it shadowed it,
-    // so those years were still filed head of household with nothing on any screen
-    // saying so.
+    // The bug end to end: a one-person plan that files head of household every year, then a qualifying-surviving-spouse exception added on top. The standing HoH window covers every tax year and, stored ahead of the exception, shadowed it, so those years were still filed HoH with nothing on screen saying so.
     const scenario = makeScenario('sc-f51-inert-exception', {
       taxFilingPlan: { kind: 'individual', statusWindows: [openEndedStatusWindow('HoH')] },
     });
@@ -1127,7 +1031,6 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
     });
     await waitFor(() => expect(onClose).toHaveBeenCalledWith(true));
 
-    // The fresh exception row is the two calendar years starting next year.
     const firstExceptionYear = new Date().getFullYear() + 1;
     const stored = (await savedOverrides('sc-f51-inert-exception')).taxFilingPlan!;
     expect(stored).toEqual({
@@ -1138,14 +1041,11 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
           start: { kind: 'year', year: firstExceptionYear },
           end: { kind: 'year', year: firstExceptionYear + 2 },
         },
-        // Stored LAST: the standing status is the fallback the exceptions above
-        // interrupt, so the array reads in the order the resolver applies it.
+        // Stored last: the standing status is the fallback the exceptions interrupt, so the array reads in the order the resolver applies it.
         openEndedStatusWindow('HoH'),
       ],
     });
 
-    // What the engines file for the SAVED plan: the exception years, then the
-    // standing status again.
     const statusIn = (taxYear: number): string | undefined => {
       const res = resolveFilingPlanForYear({
         taxFilingPlan: stored,
@@ -1163,9 +1063,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
   });
 
   it('the editor copy names the standing status instead of promising single', async () => {
-    // A plan whose standing status is head of household: the fallback the editor
-    // describes must be that status, not a hardcoded "single" the resolver never
-    // files. Same rule the report card and PDF sentence already follow.
+    // A plan whose standing status is head of household: the fallback the editor describes must be that status, not a hardcoded "single" the resolver never files (as the report card and PDF sentence already do).
     const solo = makeScenario('sc-f52-copy-solo', {
       taxFilingPlan: { kind: 'individual', statusWindows: [openEndedStatusWindow('HoH')] },
     });
@@ -1180,8 +1078,7 @@ describe('TaxAssumptionsModal — filing editor (review fixes)', () => {
     expect(screen.queryByText(/filed single/i)).not.toBeInTheDocument();
     soloView.unmount();
 
-    // The couple's intro sentence names it too — the standing window a joint plan
-    // can still carry from a spell when the spouse was away.
+    // The couple's intro sentence names it too (the standing window a joint plan can still carry from a spell when the spouse was away).
     renderModal(
       makeScenario('sc-f52-copy-couple', {
         taxFilingPlan: { kind: 'joint', statusWindows: [openEndedStatusWindow('HoH')] },

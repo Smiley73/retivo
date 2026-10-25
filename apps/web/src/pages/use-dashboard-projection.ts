@@ -79,7 +79,7 @@ const CATEGORY_ORDER: ReadonlyArray<AccountCategory> = [
 ];
 
 /** Buckets whole accounts by accountCategory (a MIXED 401(k) shows in full under retirement); $0 categories are dropped. */
-export function deriveByAccountTypeAllocation(
+function deriveByAccountTypeAllocation(
   accounts: ReadonlyArray<AccountWithCurrentBalance>,
 ): ReadonlyArray<DashboardByTypeSlice> {
   const byCategory = new Map<AccountCategory, number>();

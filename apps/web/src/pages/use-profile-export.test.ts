@@ -1,11 +1,4 @@
-/**
- * Tests for `useProfileExport`'s `verifyForExport`: the access token captured
- * for the export transport must be fresh BEFORE the export-authorization
- * cookie is minted, never refreshed during the export itself (see
- * `use-profile-export.ts`'s `downloadExport` comment). A password verification that
- * lands seconds before the access token's natural expiry must not mint the
- * cookie for a token that is already stale.
- */
+// `useProfileExport`'s `verifyForExport`: the access token captured for the export transport must be fresh before the export-authorization cookie is minted and never refreshed during the export (see `downloadExport` in `use-profile-export.ts`); a password verification landing seconds before token expiry must not mint the cookie for a stale token.
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
@@ -24,18 +17,13 @@ vi.mock('../auth/AuthContext', () => ({
   }),
 }));
 
-/** Real `getCurrentAccessToken`/`configureApi` swapped for a controllable
- *  stub so tests can simulate a token with a chosen remaining TTL — the
- *  refresh regression test below needs to assert `refreshAccessToken` is
- *  NOT called when the captured token already has most of its life left. */
+// Swap the real `getCurrentAccessToken`/`configureApi` for a controllable stub so tests can simulate a token with a chosen remaining TTL (the refresh regression test asserts `refreshAccessToken` is not called when the token has most of its life left).
 let currentAccessToken: string | null = null;
 vi.mock('../api/client', () => ({
   getCurrentAccessToken: () => currentAccessToken,
 }));
 
-/** Build a syntactically-valid (unsigned) JWT string whose payload decodes
- *  to the given claims — `decodeJwt` only reads the payload, never verifies
- *  the signature, so a fake signature segment is fine for this test. */
+// A syntactically valid unsigned JWT: `decodeJwt` only reads the payload and never verifies the signature.
 function fakeJwt(claims: Record<string, unknown>): string {
   const b64url = (obj: unknown) =>
     Buffer.from(JSON.stringify(obj)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -46,8 +34,7 @@ describe('useProfileExport — verifyForExport freshness', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     verifyPasswordMock.mockResolvedValue(undefined);
-    // Mirror the real `refreshAccessToken`'s side effect: a successful
-    // refresh updates the token `getCurrentAccessToken()` will next return.
+    // Mirror the real `refreshAccessToken`'s side effect: a successful refresh updates the token `getCurrentAccessToken()` next returns.
     refreshAccessTokenMock.mockImplementation(async () => {
       currentAccessToken = fakeJwt({
         userId: 'u1',
@@ -82,15 +69,12 @@ describe('useProfileExport — verifyForExport freshness', () => {
     expect(verifyPasswordMock).toHaveBeenCalledWith('correct-password', {
       purpose: 'data_export',
     });
-    // The refresh must complete before verifyPassword mints the cookie —
-    // otherwise a token that was near expiry when the user opened the
-    // password prompt is exactly what gets bound to the export cookie.
+    // The refresh must complete before verifyPassword mints the cookie, or a token near expiry when the prompt opened is what gets bound to the export cookie.
     expect(order).toEqual(['refresh', 'verify']);
   });
 
   it('still verifies the password even when the refresh attempt is transient-fails (no worse than before this fix)', async () => {
-    // A token already existed before the failed refresh attempt — a
-    // transient refresh failure leaves it untouched rather than clearing it.
+    // A transient refresh failure leaves an existing token untouched rather than clearing it.
     currentAccessToken = fakeJwt({
       userId: 'u1',
       householdId: 'h1',
@@ -105,11 +89,7 @@ describe('useProfileExport — verifyForExport freshness', () => {
     expect(verifyPasswordMock).toHaveBeenCalledTimes(1);
   });
 
-  // Refreshing unconditionally — even when the captured token
-  // already has most of its life left — creates a cross-tab race against a
-  // sibling tab's concurrent `/auth/refresh` on the shared rotating refresh
-  // cookie. The loser gets a definitive 401 and is logged out. Refreshing
-  // should only happen when the token actually needs it.
+  // Refreshing unconditionally, even when the captured token has most of its life left, creates a cross-tab race against a sibling tab's concurrent `/auth/refresh` on the shared rotating cookie; the loser gets a 401 and is logged out. Refresh only when the token needs it.
   it('does NOT refresh when the captured token still has most of its TTL left (avoids the cross-tab refresh race)', async () => {
     currentAccessToken = fakeJwt({
       userId: 'u1',
@@ -150,10 +130,7 @@ describe('useProfileExport — verifyForExport freshness', () => {
     expect(refreshAccessTokenMock).toHaveBeenCalledTimes(1);
   });
 
-  // Regression: a token with 61s remaining (comfortably
-  // above the OLD 60s threshold, which only covered verifyPassword's own
-  // round trip) skipped the refresh even though the five-minute export
-  // window it is about to be bound to can easily outlive it.
+  // Regression: a token with 61s left, above the old 60s threshold (which only covered verifyPassword's own round trip), skipped the refresh although the five-minute export window it is bound to can outlive it.
   it('DOES refresh a token with 61 seconds remaining, comfortably inside the export window', async () => {
     currentAccessToken = fakeJwt({
       userId: 'u1',
@@ -168,10 +145,7 @@ describe('useProfileExport — verifyForExport freshness', () => {
     expect(verifyPasswordMock).toHaveBeenCalledTimes(1);
   });
 
-  // The token `downloadExport` is later handed must be the EXACT one
-  // `verifyForExport` used to mint the export-authorization cookie — not a
-  // second independent `getCurrentAccessToken()` read that a same-tab
-  // background refresh could have raced in between.
+  // The token `downloadExport` is later handed must be the exact one `verifyForExport` used to mint the cookie, not a second `getCurrentAccessToken()` read that a same-tab background refresh could have raced in between.
   it('returns the exact (possibly refreshed) token used to mint the export cookie', async () => {
     currentAccessToken = fakeJwt({
       userId: 'u1',
@@ -190,13 +164,7 @@ describe('useProfileExport — verifyForExport freshness', () => {
   });
 });
 
-// `downloadExport`'s core invariant — the SAME captured
-// access token feeding both the sync transport and `fetchAccountExport` — was
-// never exercised end-to-end (every other test mocks `exportServerData`
-// away). This drives the REAL `exportServerData` → real
-// `createExportSyncTransport`/`HttpSyncClient` → real `fetchAccountExport`
-// chain, stubbing only `fetch` itself, and inspects the `Authorization`
-// header every real request actually carried.
+// `downloadExport`'s core invariant, the same captured token feeding both the sync transport and `fetchAccountExport`, was never exercised end to end (other tests mock `exportServerData`). This drives the real `exportServerData` → `createExportSyncTransport`/`HttpSyncClient` → `fetchAccountExport` chain, stubbing only `fetch`, and inspects the `Authorization` header every request carried.
 describe('useProfileExport — downloadExport token wiring (real exportServerData)', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -246,26 +214,19 @@ describe('useProfileExport — downloadExport token wiring (real exportServerDat
     const { result } = renderHook(() => useProfileExport());
     await result.current.downloadExport('hh-1', 'captured-token-abc');
 
-    // Every real network call (bootstrap, pull, account-export) fired.
     expect(authHeaders.some((h) => h.url.includes('/sync/bootstrap'))).toBe(true);
     expect(authHeaders.some((h) => h.url.includes('/sync/pull'))).toBe(true);
     expect(authHeaders.some((h) => h.url.includes('/auth/account-export'))).toBe(true);
 
-    // Every one of them carried the SAME bearer token — the invariant the
-    // export-authorization cookie's jti binding depends on.
+    // Every request carried the same bearer token, which the export-authorization cookie's jti binding depends on.
     const distinctAuthValues = new Set(authHeaders.map((h) => h.auth));
     expect(distinctAuthValues).toEqual(new Set(['Bearer captured-token-abc']));
 
-    // No mid-export refresh — a refresh would rotate the jti and orphan the
-    // already-minted export-authorization cookie.
+    // No mid-export refresh: it would rotate the jti and orphan the minted export-authorization cookie.
     expect(refreshAccessTokenMock).not.toHaveBeenCalled();
   });
 
-  // The account-export deadline must come from the
-  // captured token's own `exp` claim (the export-authorization cookie's TTL
-  // is designed to match it) — not restart a fresh 5-minute window from
-  // when `fetchAccountExport` itself happens to start, which would let a
-  // served wait sleep well past the real cookie/token expiry.
+  // The account-export deadline must come from the captured token's own `exp` (the cookie's TTL is designed to match it), not restart a fresh 5-minute window when `fetchAccountExport` starts, which would let a served wait sleep well past the real expiry.
   it('derives the account-export deadline from the exact captured token, so a served wait past its real remaining life fails visibly', async () => {
     const nearExpiryToken = fakeJwt({
       userId: 'u1',
@@ -288,8 +249,7 @@ describe('useProfileExport — downloadExport token wiring (real exportServerDat
         return jsonResponse({ changes: [], newCursor: '1', hasMore: false });
       }
       if (u.includes('/auth/account-export')) {
-        // A served wait (60s) longer than the 30s of real authorization
-        // life the captured token actually has left.
+        // A served wait (60s) longer than the 30s of authorization life the captured token has left.
         return new Response(JSON.stringify({ error: { message: 'Too many requests' } }), {
           status: 429,
           headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
@@ -304,9 +264,7 @@ describe('useProfileExport — downloadExport token wiring (real exportServerDat
       result.current.downloadExport('hh-1', nearExpiryToken),
     ).rejects.toThrow(/export session window/);
 
-    // Failed on the very first attempt — no sleep was ever started, proving
-    // the deadline check ran against the token's real ~30s of life, not a
-    // fresh 5-minute window.
+    // Failed on the very first attempt with no sleep started: the deadline check ran against the token's real ~30s of life, not a fresh 5-minute window.
     const accountExportCalls = fetchMock.mock.calls.filter(([url]) =>
       String(url).includes('/auth/account-export'),
     );

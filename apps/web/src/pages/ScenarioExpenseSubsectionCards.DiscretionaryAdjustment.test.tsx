@@ -1,11 +1,4 @@
-/**
- * Tests for DiscretionaryAdjustmentCard and DiscretionaryAdjustmentModal.
- *
- * Pins the bipolar slider domain (-100..+100), formatValue /
- * formatAriaValue contracts, active-state card summary copy (U+2212 minus
- * sign, clamped stored values), and save→IndexedDB round-trip via
- * fake-indexeddb.
- */
+// DiscretionaryAdjustmentCard and Modal: the bipolar slider domain (-100..+100), formatValue / formatAriaValue contracts, summary copy and the save→IndexedDB round trip.
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -105,8 +98,16 @@ describe('DiscretionaryAdjustmentCard', () => {
     expect(screen.queryByText('No scenario overrides.')).not.toBeInTheDocument();
   });
 
-  it('shows active summary with "No discretionary adjustment." for bumpPct=0', () => {
-    const s = discScenario('s', { bumpPct: 0, durationYears: null });
+  // Minus is U+2212; stored values outside -100..+100 are clamped to match the projection math.
+  it.each([
+    ['bumpPct=0', { bumpPct: 0, durationYears: null }, 'No discretionary adjustment.'],
+    ['a positive bumpPct with a "+" prefix', { bumpPct: 25, durationYears: null }, '+25% on discretionary spending, whole retirement.'],
+    ['a negative bumpPct with U+2212', { bumpPct: -25, durationYears: null }, '−25% on discretionary spending, whole retirement.'],
+    ['durationYears when set', { bumpPct: 10, durationYears: 3 }, '+10% on discretionary spending for the first 3 years.'],
+    ['a stored bumpPct=200 clamped to +100%', { bumpPct: 200, durationYears: null }, '+100% on discretionary spending, whole retirement.'],
+    ['a stored bumpPct=-150 clamped to −100%', { bumpPct: -150, durationYears: null }, '−100% on discretionary spending, whole retirement.'],
+  ])('summarises %s', (_title, override, text) => {
+    const s = discScenario('s', override);
     render(
       <DiscretionaryAdjustmentCard
         scenario={s}
@@ -115,87 +116,7 @@ describe('DiscretionaryAdjustmentCard', () => {
         onResetToInherited={() => {}}
       />,
     );
-    expect(screen.getByText('No discretionary adjustment.')).toBeInTheDocument();
-  });
-
-  it('shows positive bumpPct with "+" prefix in summary', () => {
-    const s = discScenario('s', { bumpPct: 25, durationYears: null });
-    render(
-      <DiscretionaryAdjustmentCard
-        scenario={s}
-        scenarios={[s]}
-        onConfigure={() => {}}
-        onResetToInherited={() => {}}
-      />,
-    );
-    // Contains "+25%" (whole retirement)
-    expect(
-      screen.getByText('+25% on discretionary spending, whole retirement.'),
-    ).toBeInTheDocument();
-  });
-
-  it('shows negative bumpPct with U+2212 minus sign in summary', () => {
-    const s = discScenario('s', { bumpPct: -25, durationYears: null });
-    render(
-      <DiscretionaryAdjustmentCard
-        scenario={s}
-        scenarios={[s]}
-        onConfigure={() => {}}
-        onResetToInherited={() => {}}
-      />,
-    );
-    // U+2212 (−) not ASCII hyphen (-)
-    expect(
-      screen.getByText('−25% on discretionary spending, whole retirement.'),
-    ).toBeInTheDocument();
-  });
-
-  it('shows duration in summary when durationYears set', () => {
-    const s = discScenario('s', { bumpPct: 10, durationYears: 3 });
-    render(
-      <DiscretionaryAdjustmentCard
-        scenario={s}
-        scenarios={[s]}
-        onConfigure={() => {}}
-        onResetToInherited={() => {}}
-      />,
-    );
-    expect(
-      screen.getByText('+10% on discretionary spending for the first 3 years.'),
-    ).toBeInTheDocument();
-  });
-
-  it('clamps stored bumpPct=200 to +100% in summary', () => {
-    // Legacy stored value outside the UI domain → card must show clamped value
-    // matching the projection math, not the raw stored "+200%".
-    const s = discScenario('s', { bumpPct: 200, durationYears: null });
-    render(
-      <DiscretionaryAdjustmentCard
-        scenario={s}
-        scenarios={[s]}
-        onConfigure={() => {}}
-        onResetToInherited={() => {}}
-      />,
-    );
-    expect(
-      screen.getByText('+100% on discretionary spending, whole retirement.'),
-    ).toBeInTheDocument();
-  });
-
-  it('clamps stored bumpPct=-150 to −100% in summary', () => {
-    // U+2212 (−) not ASCII hyphen (-); clamped to −100 not −150.
-    const s = discScenario('s', { bumpPct: -150, durationYears: null });
-    render(
-      <DiscretionaryAdjustmentCard
-        scenario={s}
-        scenarios={[s]}
-        onConfigure={() => {}}
-        onResetToInherited={() => {}}
-      />,
-    );
-    expect(
-      screen.getByText('−100% on discretionary spending, whole retirement.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 });
 
@@ -225,9 +146,6 @@ describe('DiscretionaryAdjustmentModal', () => {
   });
 
   it('renders a plain-English intro paragraph at text-sm before the controls', () => {
-    // Scenario-modal copy convention: the modal
-    // opens with a `<p className="m-0 text-sm">` plain-English intro before any
-    // form control (pinned body-copy size).
     const s = discScenario('s');
     render(
       <DiscretionaryAdjustmentModal
@@ -303,8 +221,7 @@ describe('DiscretionaryAdjustmentModal', () => {
           onClose={() => {}}
         />,
       );
-      // The visible badge span renders the formatValue output (aria-hidden).
-      // getAllByText handles the sr-only + visible duplicate for value=0.
+      // The visible badge renders the formatValue output (aria-hidden); getAllByText covers the sr-only plus visible duplicate for value=0.
       expect(screen.getAllByText(expected).length).toBeGreaterThanOrEqual(1);
     },
   );
@@ -340,8 +257,6 @@ describe('DiscretionaryAdjustmentModal', () => {
         onClose={() => {}}
       />,
     );
-    // When bumpPct !== 0 the Duration group should NOT carry aria-disabled.
-    // The FieldGroup renders a div with role="group"; check it lacks aria-disabled.
     const group = screen.getByRole('group', { name: 'Duration' });
     expect(group).not.toHaveAttribute('aria-disabled', 'true');
   });
@@ -359,7 +274,6 @@ describe('DiscretionaryAdjustmentModal', () => {
       />,
     );
 
-    // Slider starts at 0 — step up 5 ticks to reach +25
     const slider = screen.getByRole('slider', {
       name: 'Discretionary adjustment percentage',
     });
@@ -378,8 +292,6 @@ describe('DiscretionaryAdjustmentModal', () => {
   });
 
   it('Save persists negative bumpPct and durationYears to IndexedDB', async () => {
-    // Seed modal with bumpPct=-50, durationYears=5, switch to "First N
-    // years", save, assert the persisted override is { bumpPct: -50, durationYears: 5 }.
     const s = discScenario('s', { bumpPct: -50, durationYears: 5 });
     await putAggregate('scenario', s);
 
@@ -392,9 +304,7 @@ describe('DiscretionaryAdjustmentModal', () => {
       />,
     );
 
-    // The scenario is seeded with durationYears=5, so the modal initialises
-    // to "First N years" already. Switch to "Whole retirement" then back to
-    // "First N years" to confirm the Duration radio is interactive.
+    // Seeded with durationYears=5, so the modal starts on "First N years"; switch away and back to prove the radio is interactive.
     await user.click(screen.getByRole('radio', { name: 'Whole retirement' }));
     await user.click(screen.getByRole('radio', { name: 'First N years' }));
 

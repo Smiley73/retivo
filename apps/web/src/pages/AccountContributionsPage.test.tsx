@@ -1,11 +1,4 @@
-/**
- * AccountContributionsPage render tests.
- *
- * Drives IndexedDB through fake-indexeddb and verifies the empty,
- * populated paths, plus the Save-only-when-dirty header behavior.
- * The math is covered in `lib/contributions-calc.test.ts` — this file
- * just checks the page wires reads / drafts / save through correctly.
- */
+// AccountContributionsPage: empty and populated reads and the Save-only-when-dirty header; the math is in `lib/contributions-calc.test.ts`.
 import 'fake-indexeddb/auto';
 import {
   render,
@@ -169,7 +162,6 @@ describe('AccountContributionsPage', () => {
     await seedMember();
     renderPage();
     expect(await screen.findByText(/No accounts yet/i)).toBeInTheDocument();
-    // Save header button is hidden in clean state.
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 
@@ -178,22 +170,17 @@ describe('AccountContributionsPage', () => {
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0);
     renderPage();
     await waitFor(() => expect(screen.getByText('My 401k')).toBeInTheDocument());
-    // The labelled input cell can mount a tick after the name cell under
-    // parallel load; `findByLabelText` retries until it is present.
+    // The labelled input cell can mount a tick after the name cell under parallel load.
     expect(
       await screen.findByLabelText(/My 401k planned pre-tax/i),
     ).toBeInTheDocument();
   });
 
   it('no longer shows the stale flat-nominal contribution hint (contributions now track inflation)', async () => {
-    // Contributions are inflation-indexed
-    // by default, so the old "projected as a flat amount … increase manually"
-    // hint is removed. Assert its absence (the planning-target + IRS-limit
-    // guidance below still renders — see the next test).
+    // Contributions are inflation-indexed by default, so the old flat-amount "increase manually" hint must be gone.
     await seedMember();
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0);
     renderPage();
-    // Wait for the page to settle on a stable element, then assert absence.
     await screen.findByText(/does not enforce the statutory IRS contribution limits/i);
     expect(
       screen.queryByText(/projected as a flat amount/i),
@@ -207,12 +194,9 @@ describe('AccountContributionsPage', () => {
     await seedMember();
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0);
     renderPage();
-    // Explicit statement that the app does not enforce statutory IRS limits.
     expect(
       await screen.findByText(/does not enforce the statutory IRS contribution limits/i),
     ).toBeInTheDocument();
-    // Planning-target wording replaces "headroom" — the subtitle uses it; assert
-    // no "headroom" wording survives on the page.
     expect(screen.queryByText(/headroom/i)).toBeNull();
     expect(screen.getAllByText(/Remaining planned amount/i).length).toBeGreaterThan(0);
   });
@@ -242,42 +226,27 @@ describe('AccountContributionsPage', () => {
 
   it('relabels an over-contributed Remaining tile as "Overpaid" with the absolute value', async () => {
     await seedMember();
-    // Pre-tax account planned $1,000 but $5,000 already contributed →
-    // pre-tax + total remaining = −$4,000 (over-contributed). The
-    // post-tax side has nothing planned (remaining $0, ≥ 0) so it
-    // keeps the "Remaining" wording — only the negative tiles flip.
     await seedAccount('acc-pre', 'My 401k', 'PRE_TAX', 1000, 0);
     await seedBalance('acc-pre', 5000);
     renderPage();
     await waitFor(() =>
       expect(screen.getByText('My 401k')).toBeInTheDocument(),
     );
-    // Scope to the stat-tile grid — the per-account table rows still
-    // show the signed value (abs() is the Overpaid-tile branch
-    // only, the table is unchanged).
+    // Scoped to the tile grid: the per-account table rows still show the signed value.
     const grid = within(
       screen.getByLabelText('Annual contributions summary'),
     );
-    // Over-contributed tiles relabel to "… Overpaid".
     expect(grid.getByText('Total Overpaid')).toBeInTheDocument();
     expect(grid.getByText('Pre-Tax Overpaid')).toBeInTheDocument();
-    // The non-negative post-tax side keeps "Remaining".
     expect(grid.getByText('Post-Tax Remaining')).toBeInTheDocument();
     expect(grid.queryByText('Total Remaining')).not.toBeInTheDocument();
     expect(grid.queryByText('Pre-Tax Remaining')).not.toBeInTheDocument();
-    // Absolute value (no minus sign) on the over-contributed tiles —
-    // Total + Pre-Tax both read $4,000.
     expect(grid.getAllByText('$4,000')).toHaveLength(2);
     expect(grid.queryByText('-$4,000')).not.toBeInTheDocument();
   });
 
   it('renders a single-row header with compound "Remaining *" column names', async () => {
-    // The legacy two-row grouped header (Remaining colSpan parent over
-    // Pre-tax / Post-tax / Total leaves) collapses to compound names:
-    // the grouping survives in the accessible name, the
-    // visual two-row hierarchy disappears. The "Remaining" group word
-    // stacks visually over its leaf (no em-dash); the accessible name
-    // joins the two with a single space.
+    // The accessible name joins the group word and the leaf with a single space; there is no visual two-row header.
     await seedMember();
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0);
     renderPage();
@@ -305,11 +274,7 @@ describe('AccountContributionsPage', () => {
   });
 
   it('renders the RA grid landmark + a focusable in-row control', async () => {
-    // RA Table renders role="grid" + aria-label; the editable
-    // MoneyInput stays the first focusable in-row control. Full
-    // arrow-key keyboard model is jsdom-brittle (RA's grid focus
-    // delegate fires browser-level events) and is covered by the
-    // manual keyboard check (Chromium / Firefox / Safari).
+    // The full arrow-key model is jsdom-brittle (React Aria's grid focus delegate fires browser-level events), so only the grid name and first in-row control are asserted.
     await seedMember();
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0);
     renderPage();
@@ -318,8 +283,7 @@ describe('AccountContributionsPage', () => {
         screen.getByRole('grid', { name: 'Annual contributions per account' }),
       ).toBeInTheDocument(),
     );
-    // The labelled input cell can mount a tick after the grid landmark under
-    // parallel load; `findByLabelText` retries until it is present.
+    // The labelled input cell can mount a tick after the grid landmark under parallel load.
     const input = await screen.findByLabelText(/My 401k planned pre-tax/i);
     expect(input).toBeInTheDocument();
   });
@@ -332,19 +296,14 @@ describe('AccountContributionsPage', () => {
     await waitFor(() =>
       expect(screen.getByText('Notes 401k')).toBeInTheDocument(),
     );
-    // NotesIndicator surfaces an SVG with role="img" + aria-label
-    // "Notes" — one per row whose notes is non-empty. The indicator mounts
-    // with the row body, which can lag the name cell under parallel load;
-    // poll until exactly one indicator renders.
+    // The indicator mounts with the row body, which can lag the name cell under parallel load.
     await waitFor(() =>
       expect(screen.getAllByRole('img', { name: 'Notes' })).toHaveLength(1),
     );
   });
 
   it('shows the non-numeric "Match inflation" placeholder when no rate is set (household)', async () => {
-    // This page has no scenario context (reads accounts/balances/members
-    // only), so the empty annual-increase placeholder is the non-numeric
-    // copy "Match inflation" — no resolved %.
+    // This page has no scenario context, so the empty annual-increase placeholder is the non-numeric "Match inflation".
     await seedMember();
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0);
     renderPage();
@@ -353,7 +312,6 @@ describe('AccountContributionsPage', () => {
       name: /My 401k annual increase — match inflation \(set a rate\)/i,
     });
     expect(placeholder).toHaveTextContent('Match inflation');
-    // No numeric annual-increase input until a rate is set.
     expect(
       screen.queryByLabelText('My 401k annual increase'),
     ).not.toBeInTheDocument();
@@ -364,7 +322,6 @@ describe('AccountContributionsPage', () => {
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0);
     renderPage();
     await waitFor(() => expect(screen.getByText('My 401k')).toBeInTheDocument());
-    // Begin editing (placeholder → 0), then type a rate.
     await act(async () => {
       fireEvent.click(
         screen.getByRole('button', {
@@ -396,8 +353,7 @@ describe('AccountContributionsPage', () => {
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0);
     renderPage();
     await waitFor(() => expect(screen.getByText('My 401k')).toBeInTheDocument());
-    // Clicking the placeholder sets an explicit 0 (flat-nominal) — a Save
-    // is immediately available because 0 is distinct from absent.
+    // An explicit 0 (flat-nominal) is distinct from absent, so Save is immediately available.
     await act(async () => {
       fireEvent.click(
         screen.getByRole('button', {
@@ -420,8 +376,6 @@ describe('AccountContributionsPage', () => {
   });
 
   it('clears an explicit rate back to the match-inflation default (household)', async () => {
-    // A seeded explicit rate renders the input; the clear affordance drops
-    // it back to absent (the field is omitted on save → tracks inflation).
     await seedMember();
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0, '', 5);
     renderPage();
@@ -436,7 +390,6 @@ describe('AccountContributionsPage', () => {
         }),
       );
     });
-    // Back to the placeholder.
     await screen.findByRole('button', {
       name: /My 401k annual increase — match inflation \(set a rate\)/i,
     });
@@ -486,9 +439,6 @@ describe('AccountContributionsPage', () => {
   });
 
   it('disables the annual-increase control on an inactive account', async () => {
-    // An inactive account renders the "Match inflation" placeholder button
-    // with `disabled={!a.active}` so its growth cannot be edited until the
-    // account is reactivated.
     await seedMember();
     await seedAccount('acc-inactive', 'Old 401k', 'PRE_TAX', 22500, 0, '', undefined, false);
     renderPage();
@@ -500,17 +450,13 @@ describe('AccountContributionsPage', () => {
   });
 
   it('does not discard an in-progress draft on WORKSPACE_CHANGED_EVENT (exclusion)', async () => {
-    // This explicit-Save page is intentionally excluded from the
-    // workspace-revision migration: its load effect resets
-    // `baselineRef.current` + `setDrafts(...)`, so a revision re-read
-    // would clobber unsaved per-account edits and mark them clean.
+    // This explicit-Save page is excluded from the workspace-revision migration: a revision re-read would clobber unsaved edits and mark them clean.
     await seedMember();
     await seedAccount('acc-1', 'My 401k', 'PRE_TAX', 22500, 0);
     renderPage();
     await waitFor(() => expect(screen.getByText('My 401k')).toBeInTheDocument());
 
-    // The labelled input cell can mount a tick after the name cell under
-    // parallel load; `findByLabelText` retries until it is present.
+    // The labelled input cell can mount a tick after the name cell under parallel load.
     const input = (await screen.findByLabelText(
       /My 401k planned pre-tax/i,
     )) as HTMLInputElement;
@@ -519,19 +465,16 @@ describe('AccountContributionsPage', () => {
       fireEvent.change(input, { target: { value: '24000' } });
       fireEvent.blur(input);
     });
-    // Dirty guard surfaces Save.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument(),
     );
 
-    // A sync pull / demo fill / bootstrap commits mid-edit and dispatches
-    // the workspace-change event.
+    // A sync pull, demo fill or bootstrap commits mid-edit and dispatches the workspace-change event.
     const { notifyWorkspaceChanged } = await import('../lib/workspace-events');
     await act(async () => {
       notifyWorkspaceChanged();
     });
 
-    // The draft survives and the dirty guard still sees unsaved changes.
     expect(
       (screen.getByLabelText(/My 401k planned pre-tax/i) as HTMLInputElement)
         .value,

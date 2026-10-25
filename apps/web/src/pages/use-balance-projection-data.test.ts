@@ -1,19 +1,4 @@
-/**
- * useBalanceProjectionData re-read regression test.
- *
- * Reproduces the reported Balance Projection symptom: the data hook
- * mounted against a half-synced (here, empty) workspace and never
- * re-read when the sync layer finished filling IndexedDB and dispatched
- * `WORKSPACE_CHANGED_EVENT` — so the page rendered stale partial data
- * until a manual reload.
- *
- * The hook now reads through the reactive `useAggregates(type)` live-query
- * layer, so a store write (or a coarse `WORKSPACE_CHANGED_EVENT` bulk fill)
- * re-reads without a remount. Dispatching the event after seeding an account
- * must surface the new account in the hook's `accounts` slice, and a bulk
- * fill that populates the scenarios store while BPP is mounted on an empty
- * workspace must re-resolve the base scenario.
- */
+// useBalanceProjectionData re-read regression: the hook mounted against a half-synced (empty) workspace never re-read when the sync layer finished filling IndexedDB and dispatched `WORKSPACE_CHANGED_EVENT`, so the page showed stale partial data until a manual reload. It now reads through the reactive `useAggregates(type)` layer, so a store write or a coarse bulk fill re-reads without a remount.
 import 'fake-indexeddb/auto';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -92,18 +77,15 @@ describe('useBalanceProjectionData re-read on workspace change', () => {
       wrapper,
     });
 
-    // First settle: empty workspace, hook ready with no accounts.
     await waitFor(() => expect(result.current.ready).toBe(true));
     expect(result.current.accounts).toHaveLength(0);
 
-    // Simulate the sync layer committing a bulk fill after the page is
-    // already mounted, then dispatching the workspace-change event.
+    // Simulate the sync layer committing a bulk fill after mount, then dispatching the workspace-change event.
     await seedAccount();
     act(() => {
       notifyWorkspaceChanged();
     });
 
-    // The same hook instance (no remount) picks up the new account.
     await waitFor(() => expect(result.current.accounts).toHaveLength(1));
     expect(result.current.accounts[0]?.payload.name).toBe('My 401k');
   });
@@ -115,19 +97,15 @@ describe('useBalanceProjectionData re-read on workspace change', () => {
       wrapper,
     });
 
-    // First settle: empty workspace — no scenarios, no selection.
     await waitFor(() => expect(result.current.ready).toBe(true));
     expect(result.current.selectedScenarioId).toBeNull();
 
-    // The sync layer fills the workspace (here, a base scenario) after the
-    // page is already mounted, then dispatches the workspace-change event.
+    // The sync layer fills the workspace (a base scenario) after mount, then dispatches the event.
     const baseId = await seedBaseScenario();
     act(() => {
       notifyWorkspaceChanged();
     });
 
-    // The scenario-tracking effect re-resolves and falls back to the base
-    // scenario instead of staying null.
     await waitFor(() =>
       expect(result.current.selectedScenarioId).toBe(baseId),
     );
@@ -143,11 +121,7 @@ describe('useBalanceProjectionData re-read on workspace change', () => {
     await waitFor(() => expect(result.current.ready).toBe(true));
     expect(result.current.selectedScenarioId).toBeNull();
 
-    // A bulk fill writes scenario rows directly into IDB (no per-row fine
-    // signal reaches this reader) and dispatches the coarse event once. The
-    // selected-scenario resolution must re-run off the reactive scenarios
-    // list and fall back to the base scenario — the exact stale-mount bug
-    // this guards against (selectedScenarioId staying null while scenarios populate).
+    // A bulk fill writes scenario rows into IDB with no per-row fine signal and dispatches the coarse event once; selected-scenario resolution must re-run off the reactive scenarios list and fall back to the base scenario (the stale-mount bug: selectedScenarioId staying null while scenarios populate).
     const handle = await db();
     await handle.put('scenarios', {
       id: 'scn-base-bulk',

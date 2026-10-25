@@ -1,15 +1,8 @@
-/**
- * Unit tests for `seedTierState`.
- *
- * Covers: HSA defaults to Excluded; non-HSA accounts default to tier 0;
- * existing customDrawdownOrder is respected (not re-seeded); stale IDs pruned.
- */
+// Withdrawal-strategy shared helpers: `seedTierState` (HSA defaults to Excluded, non-HSA to tier 0, an existing customDrawdownOrder is respected, stale ids pruned), penalty and Roth-target eligibility, and the benchmark and health-coverage seed helpers.
 import { describe, expect, it } from 'vitest';
 import {
-  EARLY_WITHDRAWAL_PENALTY_ELIGIBLE_TYPES,
   healthCoverageBlockReason,
   isPenaltyEligibleAccount,
-  isRothConversionTarget,
   rothConversionTargets,
   seedTierState,
   toDraftBenchmarkRows,
@@ -47,7 +40,7 @@ function makeAccount(
   };
 }
 
-/** An active, INHERITED Roth IRA (`rmdInheritedAccount: true`). */
+// An active inherited Roth IRA (`rmdInheritedAccount: true`).
 function makeInheritedRothIra(id: string): Aggregate<AccountPayload> {
   const a = makeAccount(id, 'RETIREMENT_ROTH_IRA');
   return { ...a, payload: { ...a.payload, rmdInheritedAccount: true } };
@@ -130,44 +123,20 @@ describe('seedTierState — existing customDrawdownOrder respected', () => {
   });
 });
 
-describe('EARLY_WITHDRAWAL_PENALTY_ELIGIBLE_TYPES — Option A', () => {
-  it('includes RETIREMENT_ROTH_IRA now that its earnings tranche can be penalized', () => {
-    expect(EARLY_WITHDRAWAL_PENALTY_ELIGIBLE_TYPES.has('RETIREMENT_ROTH_IRA')).toBe(true);
-  });
-
-  it('keeps the pre-existing pre-59½ retirement types eligible', () => {
-    for (const t of [
+describe('isPenaltyEligibleAccount', () => {
+  it('is true for the pre-59½ retirement and Roth IRA / employer-Roth types, false for the rest', () => {
+    const eligible: AccountType[] = [
       'RETIREMENT_401K',
       'RETIREMENT_IRA',
       'RETIREMENT_403B',
       'RETIREMENT_TSP',
       'RETIREMENT_CASH_BALANCE',
-    ] as const) {
-      expect(EARLY_WITHDRAWAL_PENALTY_ELIGIBLE_TYPES.has(t)).toBe(true);
-    }
-  });
-
-  it('includes the 10%-penalty designated-Roth employer types (401K/403B/TSP)', () => {
-    for (const t of ['RETIREMENT_ROTH_401K', 'RETIREMENT_ROTH_403B', 'RETIREMENT_ROTH_TSP'] as const) {
-      expect(EARLY_WITHDRAWAL_PENALTY_ELIGIBLE_TYPES.has(t)).toBe(true);
-    }
-  });
-
-  it('still excludes 457(b), Roth 457(b), brokerage, savings, and HSA', () => {
-    // RETIREMENT_ROTH_457B: governmental §72(t) exemption → 0% penalty, excluded.
-    for (const t of ['RETIREMENT_457B', 'RETIREMENT_ROTH_457B', 'BROKERAGE', 'SAVINGS', 'HSA'] as const) {
-      expect(EARLY_WITHDRAWAL_PENALTY_ELIGIBLE_TYPES.has(t)).toBe(false);
-    }
-  });
-
-  it('isPenaltyEligibleAccount is true for Roth IRA and employer Roth types, false for excluded', () => {
-    const eligible: AccountType[] = [
       'RETIREMENT_ROTH_IRA',
       'RETIREMENT_ROTH_401K',
       'RETIREMENT_ROTH_403B',
       'RETIREMENT_ROTH_TSP',
-      'RETIREMENT_401K',
     ];
+    // 457(b) and Roth 457(b) carry the governmental §72(t) exemption.
     const excluded: AccountType[] = ['RETIREMENT_457B', 'RETIREMENT_ROTH_457B', 'BROKERAGE', 'SAVINGS', 'HSA'];
     for (const t of eligible) {
       expect(isPenaltyEligibleAccount(makeAccount('x', t))).toBe(true);
@@ -178,58 +147,26 @@ describe('EARLY_WITHDRAWAL_PENALTY_ELIGIBLE_TYPES — Option A', () => {
   });
 });
 
-describe('rothConversionTargets / isRothConversionTarget', () => {
-  it('matches only an active RETIREMENT_ROTH_IRA by type', () => {
-    expect(isRothConversionTarget(makeAccount('r', 'RETIREMENT_ROTH_IRA'))).toBe(true);
-  });
-
-  it('does NOT match designated-Roth employer types (would re-tax the basis fold)', () => {
-    // Employer Roth accounts are excluded as conversion targets: routing a
-    // pre-tax → Roth employer conversion would silently no-op the at-retirement
-    // basis fold and re-tax the principal.
-    for (const t of [
-      'RETIREMENT_ROTH_401K',
-      'RETIREMENT_ROTH_403B',
-      'RETIREMENT_ROTH_457B',
-      'RETIREMENT_ROTH_TSP',
-    ] as const) {
-      expect(isRothConversionTarget(makeAccount('emp', t))).toBe(false);
-    }
-  });
-
-  it('rejects a pre-tax / non-Roth account', () => {
-    expect(isRothConversionTarget(makeAccount('p', 'RETIREMENT_401K'))).toBe(false);
-    expect(isRothConversionTarget(makeAccount('b', 'BROKERAGE'))).toBe(false);
-  });
-
-  it('rejects an inactive Roth IRA account', () => {
-    expect(isRothConversionTarget(makeAccount('r', 'RETIREMENT_ROTH_IRA', false))).toBe(false);
-  });
-
-  it('rejects an INHERITED Roth IRA (the engine refuses it as a Fill target)', () => {
-    // A beneficiary cannot roll into an inherited IRA (§408A(e)), and
-    // `findTargetRothIndex` returns undefined for one — offering it in the
-    // picker would advertise a conversion that runs $0.
-    expect(isRothConversionTarget(makeInheritedRothIra('inh'))).toBe(false);
-  });
-
-  it('rothConversionTargets returns only active, non-inherited RETIREMENT_ROTH_IRA accounts', () => {
+describe('rothConversionTargets', () => {
+  it('returns only active, non-inherited RETIREMENT_ROTH_IRA accounts', () => {
     const accounts = [
-      makeAccount('p', 'RETIREMENT_401K'),
       makeAccount('r1', 'RETIREMENT_ROTH_IRA'),
-      makeAccount('r2', 'RETIREMENT_ROTH_401K'), // employer Roth — excluded
-      makeAccount('r3', 'RETIREMENT_ROTH_IRA', false), // inactive — excluded
-      makeInheritedRothIra('r4'), // inherited — excluded
+      makeAccount('p', 'RETIREMENT_401K'),
+      makeAccount('b', 'BROKERAGE'),
+      // Employer Roth accounts cannot accept a roll-in; routing one would no-op the basis fold and re-tax the principal.
+      makeAccount('e1', 'RETIREMENT_ROTH_401K'),
+      makeAccount('e2', 'RETIREMENT_ROTH_403B'),
+      makeAccount('e3', 'RETIREMENT_ROTH_457B'),
+      makeAccount('e4', 'RETIREMENT_ROTH_TSP'),
+      makeAccount('r3', 'RETIREMENT_ROTH_IRA', false),
+      // §408A(e): the engine converts $0 into an inherited IRA, so the picker must not offer it.
+      makeInheritedRothIra('r4'),
     ];
     expect(rothConversionTargets(accounts).map((a) => a.id)).toEqual(['r1']);
   });
 });
 
-// ---------------------------------------------------------------------------
-// The modal seed reads the benchmark override through the ONE
-// shape-checked enumerator (the array arrives from an envelope-only-validated
-// import, so a non-array payload used to throw out of the whole modal).
-// ---------------------------------------------------------------------------
+// The modal seed reads the benchmark override through the one shape-checked enumerator: the array arrives from an envelope-only-validated import, so a non-array payload used to throw out of the whole modal.
 describe('toDraftBenchmarkRows', () => {
   it('seeds the editor rows ascending by tax year', () => {
     expect(

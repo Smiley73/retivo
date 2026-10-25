@@ -21,7 +21,7 @@ import { createMcPool, type McPool } from '../monte-carlo/mc-worker-pool';
 import MCWorker from '../workers/monte-carlo.worker.ts?worker';
 
 /** Bound on the "Check now" run: a hung worker resolves the page as timed out instead of spinning forever. */
-export const GUARDRAILS_LIVE_MC_TIMEOUT_MS = 20_000;
+const GUARDRAILS_LIVE_MC_TIMEOUT_MS = 20_000;
 
 const GUARDRAILS_POS_TEMPER_THRESHOLD_PCT = 80;
 

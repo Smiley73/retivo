@@ -119,7 +119,7 @@ export const DEFAULT_HSA_QUALIFIED_PCT = 100;
 * Account types whose pre-59½ withdrawals carry the 10% §72(t) penalty and so may be marked exempt; the toggle waives only that penalty, not income tax.
 * Roth 457(b) is excluded (governmental §72(t) exemption). See "Early-withdrawal penalties" in docs/math-taxes.md.
 */
-export const EARLY_WITHDRAWAL_PENALTY_ELIGIBLE_TYPES: ReadonlySet<AccountType> =
+const EARLY_WITHDRAWAL_PENALTY_ELIGIBLE_TYPES: ReadonlySet<AccountType> =
   new Set<AccountType>([
     'RETIREMENT_401K',
     'RETIREMENT_IRA',
@@ -140,7 +140,7 @@ export function isPenaltyEligibleAccount(a: Aggregate<AccountPayload>): boolean 
 * Whether an account can receive Fill-mode Roth conversions: an active Roth IRA only, because Fill mode models an in-plan IRA conversion
 * and employer-plan Roth accounts cannot accept a roll-in. Inherited Roth IRAs are excluded (§408A(e)): the engine would convert $0.
 */
-export function isRothConversionTarget(a: Aggregate<AccountPayload>): boolean {
+function isRothConversionTarget(a: Aggregate<AccountPayload>): boolean {
   if (a.payload.rmdInheritedAccount === true) return false;
   return a.payload.active && a.payload.type === 'RETIREMENT_ROTH_IRA';
 }

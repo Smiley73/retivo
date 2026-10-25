@@ -15,8 +15,8 @@ import type { CbpInfoRow } from './scenario-withdrawal-strategy-shared';
 
 const ACCOUNT_DRAG_TYPE = 'application/x-tier-account-id';
 
-/** Moves `movedId` to `targetKey` ('tier-N' or 'excluded'), optionally before `beforeId`; pure so tests can exercise it without the DnD component. */
-export function moveAccountAcrossTiers(
+// Moves `movedId` to `targetKey` ('tier-N' or 'excluded'), optionally before `beforeId`.
+function moveAccountAcrossTiers(
   tiers: string[][],
   excludedAccountIds: string[],
   movedId: string,

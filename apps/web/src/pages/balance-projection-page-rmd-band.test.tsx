@@ -1,24 +1,11 @@
-/**
- * RmdBand — render + summary-stat + null-gate + a11y smoke.
- *
- * Covers the card's own derivation surface: the summary tiles
- * (`summarizeRmd`), the conditional shortfall / surplus / QCD-side tiles,
- * the null gate when no RMD rows exist (even when QCD figures are present —
- * the gift itself is a sibling card), the red shortfall bar segment, and the
- * QCD → net-taxable IRA RMD split chart under its own sub-heading. Roth
- * conversions and the QCD gift chart are sibling cards and must NOT render
- * here.
- */
+// RmdBand: summary tiles, the conditional shortfall / surplus / QCD-side tiles, the null gate when no RMD rows exist (even with QCD figures: the gift is a sibling card), the red shortfall segment and the QCD → net-taxable IRA RMD split chart.
+// Roth conversions and the QCD gift chart are sibling cards and must not render here.
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import {
-  RmdBand,
-  summarizeRmd,
-  type RmdBandProps,
-} from './balance-projection-page-rmd-band';
+import { RmdBand, type RmdBandProps } from './balance-projection-page-rmd-band';
 import type { RmdChartRow } from '../components/RmdChart';
 import type { QcdRmdSplitRow } from '../components/QcdRmdSplitChart';
 import { ThemeProvider } from '../contexts/ThemeContext';
@@ -36,8 +23,6 @@ function renderBand(
   );
 }
 
-/** Open the card's `(i)` info popover by its accessible button name and
- *  return the opened dialog (the methodology prose lives inside it). */
 async function openInfo(name: RegExp): Promise<HTMLElement> {
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name }));
@@ -61,7 +46,6 @@ const SPLIT_ROWS: QcdRmdSplitRow[] = [
   { year: 2031, rmdOffsetDollars: 8_000, netTaxableDollars: 12_000 },
 ];
 
-/** Every conditional QCD-side figure present (a QCD that offsets an RMD). */
 const QCD_SIDE: Partial<RmdBandProps> = {
   hasQcd: true,
   totalNetTaxableRmd: 32_000,
@@ -71,45 +55,6 @@ const QCD_SIDE: Partial<RmdBandProps> = {
 
 const SPLIT_HEADING = /IRA required withdrawal in QCD years — covered by QCD vs taxable/i;
 const OFFSET_BAR = 'rect[name="Covered by QCD (tax-free)"]';
-
-describe('summarizeRmd', () => {
-  it('derives first year, count, peak, shortfall, and surplus', () => {
-    expect(summarizeRmd(WITH_SHORTFALL, 12_345)).toEqual({
-      firstYear: 2030,
-      totalYears: 2,
-      peakAnnual: 25_000, // 22_000 + 3_000 for 2031
-      totalShortfall: 3_000,
-      totalSurplus: 12_345,
-      totalNetTaxableRmd: 0,
-      totalRmdOffset: 0,
-    });
-  });
-
-  it('carries the net-taxable-RMD + RMD-offset totals through', () => {
-    const s = summarizeRmd(NO_SHORTFALL, 0, 15_000, 8_000);
-    expect(s.totalNetTaxableRmd).toBe(15_000);
-    expect(s.totalRmdOffset).toBe(8_000);
-  });
-
-  it('defaults the optional totals to 0 when omitted', () => {
-    const s = summarizeRmd(WITH_SHORTFALL);
-    expect(s.totalSurplus).toBe(0);
-    expect(s.totalNetTaxableRmd).toBe(0);
-    expect(s.totalRmdOffset).toBe(0);
-  });
-
-  it('returns a null first year and zeroed figures for empty rows', () => {
-    expect(summarizeRmd([])).toEqual({
-      firstYear: null,
-      totalYears: 0,
-      peakAnnual: 0,
-      totalShortfall: 0,
-      totalSurplus: 0,
-      totalNetTaxableRmd: 0,
-      totalRmdOffset: 0,
-    });
-  });
-});
 
 describe('RmdBand', () => {
   it('renders the summary stat row + chart bars for a scenario with RMD years', async () => {
@@ -122,10 +67,19 @@ describe('RmdBand', () => {
     expect(screen.getByText('Total RMD years')).toBeInTheDocument();
     expect(screen.getByText('Peak annual RMD')).toBeInTheDocument();
     expect(container.querySelectorAll('#rmd-heading')).toHaveLength(1);
-    // Both years render a met segment (chart is lazy-loaded — await it).
+    // The chart is lazy-loaded; await it.
     await waitFor(() =>
       expect(container.querySelectorAll('rect[name="RMD met"]')).toHaveLength(2),
     );
+  });
+
+  it('derives the first year, year count, peak annual requirement and total shortfall', () => {
+    renderBand(WITH_SHORTFALL);
+    const tile = (label: string) => screen.getByText(label).parentElement!;
+    expect(tile('First RMD year')).toHaveTextContent('2030');
+    expect(tile('Total RMD years')).toHaveTextContent('2');
+    expect(tile('Peak annual RMD')).toHaveTextContent('$25k');
+    expect(tile('Total shortfall')).toHaveTextContent('$3k');
   });
 
   it('renders nothing when there are no RMD rows', () => {
@@ -134,8 +88,7 @@ describe('RmdBand', () => {
   });
 
   it('renders nothing when there are no RMD rows even when QCD figures are present', () => {
-    // A pre-RMD-age gift: the QCD itself is a sibling card; this card has no
-    // required withdrawal to describe, so it is absent rather than empty.
+    // A pre-RMD-age gift: the QCD is a sibling card, and this card has no required withdrawal to describe, so it is absent rather than empty.
     const { container } = renderBand([], { hasQcd: true, totalNetTaxableRmd: 0 });
     expect(container).toBeEmptyDOMElement();
   });
@@ -173,9 +126,8 @@ describe('RmdBand', () => {
 
   it('keeps the RMD surplus tile inline; renders its explainer inside the (i) at the 1-cent boundary', async () => {
     renderBand(NO_SHORTFALL, { totalSurplus: 0.01 });
-    // Tile stays inline.
+    // The tile stays inline while its explainer lives behind the card's (i).
     expect(screen.getByText('Total RMD surplus')).toBeInTheDocument();
-    // Explainer is not inline — it lives behind the card (i).
     expect(
       screen.queryByText(/Total RMD surplus is the lifetime total/i),
     ).not.toBeInTheDocument();
@@ -188,19 +140,17 @@ describe('RmdBand', () => {
     expect(screen.queryByText('Total RMD surplus')).not.toBeInTheDocument();
     const dialog = await openInfo(RMD_INFO);
     expect(dialog).not.toHaveTextContent(/Total RMD surplus is the lifetime total/i);
-    // The always-on main RMD caption is present in the popover.
     expect(dialog).toHaveTextContent(/The IRS requires a minimum withdrawal/i);
   });
 
   it('shows the Net taxable IRA RMD tile + its explainer only when the plan makes a QCD', async () => {
-    // No QCD → tile absent + the net-taxable explainer absent from the (i).
+    // Without a QCD the tile and the net-taxable explainer are absent from the (i).
     const { unmount } = renderBand(NO_SHORTFALL, { totalNetTaxableRmd: 15_000 });
     expect(screen.queryByText('Net taxable IRA RMD')).not.toBeInTheDocument();
     const noDialog = await openInfo(RMD_INFO);
     expect(noDialog).not.toHaveTextContent(/Net taxable IRA RMD is the part/i);
     unmount();
 
-    // QCD present → tile renders with the deflated lifetime figure + explainer.
     renderBand(NO_SHORTFALL, { hasQcd: true, totalNetTaxableRmd: 15_000 });
     expect(screen.getByText('Net taxable IRA RMD')).toBeInTheDocument();
     expect(screen.getByText('$15k')).toBeInTheDocument();
@@ -246,15 +196,12 @@ describe('RmdBand', () => {
 describe('RmdBand — QCD → net-taxable IRA RMD split chart', () => {
   it('renders the split chart + its own heading + the "RMD covered by QCD" tile', async () => {
     const { container } = renderBand(NO_SHORTFALL, QCD_SIDE);
-    // The tile renders (gated on totalRmdOffset > 0).
     expect(screen.getByText('RMD covered by QCD')).toBeInTheDocument();
     expect(screen.getByText('$18k')).toBeInTheDocument();
-    // The split chart owns its own distinct heading id.
     expect(
       screen.getByRole('heading', { name: SPLIT_HEADING }),
     ).toBeInTheDocument();
     expect(container.querySelectorAll('#qcd-rmd-split-heading')).toHaveLength(1);
-    // rmd-heading stays unique (the split bar never re-uses it).
     expect(container.querySelectorAll('#rmd-heading')).toHaveLength(1);
     await waitFor(() => {
       expect(container.querySelectorAll(OFFSET_BAR)).toHaveLength(2);
@@ -265,23 +212,18 @@ describe('RmdBand — QCD → net-taxable IRA RMD split chart', () => {
   it('surfaces the split-bar captions in the card (i) when the split chart renders', async () => {
     renderBand(NO_SHORTFALL, QCD_SIDE);
     const dialog = await openInfo(RMD_INFO);
-    // The caption states the QCD-years-only scope up front.
     expect(dialog).toHaveTextContent(/The split bar covers the years you make a QCD/i);
-    // The offset slice is amber (its own hue) and the connecting note
-    // points at the sibling QCD card for the full gift.
     expect(dialog).toHaveTextContent(/the amber part your QCD covered/i);
     expect(dialog).toHaveTextContent(/The amber part is not always your whole QCD/i);
     expect(dialog).toHaveTextContent(
       /The Qualified Charitable Distributions card below shows the full amount you gave/i,
     );
-    // The renamed tile is quoted by its new name; "your gift" is gone.
     expect(dialog).toHaveTextContent(/“RMD covered by QCD”/);
     expect(dialog).not.toHaveTextContent(/your gift/i);
   });
 
   it('omits the split chart + tile when the QCD never overlaps an RMD year (no split rows, offset 0)', () => {
-    // RMD years exist and a QCD exists, but only in pre-RMD years: the
-    // net-taxable tile still renders (hasQcd), the split surface does not.
+    // RMD years and a QCD exist but only in pre-RMD years: the net-taxable tile still renders (hasQcd), the split surface does not.
     const { container } = renderBand(NO_SHORTFALL, {
       hasQcd: true,
       totalNetTaxableRmd: 45_000,
@@ -300,10 +242,5 @@ describe('RmdBand — QCD → net-taxable IRA RMD split chart', () => {
     renderBand(NO_SHORTFALL, { hasQcd: true, totalNetTaxableRmd: 45_000 });
     const dialog = await openInfo(RMD_INFO);
     expect(dialog).not.toHaveTextContent(/The split bar covers/i);
-  });
-
-  it('has no a11y violations with the split chart + tile present', async () => {
-    const { container } = renderBand(NO_SHORTFALL, QCD_SIDE);
-    await expectNoA11yViolations(container);
   });
 });

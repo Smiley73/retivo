@@ -1,12 +1,5 @@
-/**
- * LoginPage MFA-challenge step tests. When
- * `useAuth().mfaChallenge` is non-null, the page renders MfaChallengeForm in
- * place of the sign-in form. A successful verify with a remembered device
- * surfaces the "this device is now trusted" notice — and because the real
- * `verifyMfa` clears `mfaChallenge` in the same render that sets the notice,
- * the notice is rendered on the sign-in surface, not inside the challenge
- * block.
- */
+// LoginPage MFA-challenge step: a non-null `mfaChallenge` renders MfaChallengeForm in place of the sign-in form.
+// The real `verifyMfa` clears `mfaChallenge` in the same render that sets the "device trusted" notice, so the notice shows on the sign-in surface, not in the challenge block.
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -27,8 +20,7 @@ vi.mock('react-router', async (importOriginal) => {
 
 vi.mock('../api/client', () => ({
   apiRequest: vi.fn(),
-  // Defined inside the factory (vitest hoists vi.mock above imports, so a
-  // module-scope class would hit a TDZ error). Re-imported below for the test.
+  // Defined inside the factory: vi.mock is hoisted above imports, so a module-scope class would hit a TDZ error.
   ApiRequestError: class ApiRequestError extends Error {
     constructor(public status: number, public error: { code: string; message: string }) {
       super(error.message);
@@ -37,8 +29,7 @@ vi.mock('../api/client', () => ({
   configureApi: vi.fn(),
 }));
 
-// WebAuthn-support detection used by MfaChallengeForm to gate the passkey
-// factor. Defaults to supported; individual tests flip it.
+// WebAuthn-support detection gating MfaChallengeForm's passkey factor; defaults to supported and individual tests flip it.
 const browserSupportsWebAuthn = vi.fn(() => true);
 vi.mock('@simplewebauthn/browser', () => ({
   browserSupportsWebAuthn: () => browserSupportsWebAuthn(),
@@ -84,7 +75,6 @@ describe('LoginPage — MFA challenge step', () => {
     expect(
       screen.getByRole('heading', { name: 'Two-factor authentication' }),
     ).toBeInTheDocument();
-    // The sign-in form heading is not rendered while challenged.
     expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument();
   });
 
@@ -101,10 +91,7 @@ describe('LoginPage — MFA challenge step', () => {
   });
 
   it('shows the device-trusted notice after a remembered verify', async () => {
-    // Model the real AuthContext: verifyMfa resolves deviceRemembered=true AND
-    // clears mfaChallenge. The component sets deviceTrustedNotice in the same
-    // render, so the notice must surface on the sign-in surface (challenge gone)
-    // rather than inside the challenge block.
+    // Model the real AuthContext: verifyMfa resolves deviceRemembered=true and clears mfaChallenge.
     const auth: Record<string, unknown> = {
       login: vi.fn(),
       loginWithPasskey: vi.fn(),
@@ -118,7 +105,6 @@ describe('LoginPage — MFA challenge step', () => {
       clearMfaChallenge: vi.fn(),
     };
     auth.verifyMfa = vi.fn().mockImplementation(async () => {
-      // Mirror the context: a successful verify clears the pending challenge.
       auth.mfaChallenge = null;
       return { deviceRemembered: true };
     });
@@ -136,8 +122,7 @@ describe('LoginPage — MFA challenge step', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /trust this device/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
-    // Re-render with the cleared challenge (the real provider re-renders on the
-    // setMfaChallenge(null) state change inside verifyMfa).
+    // Re-render with the cleared challenge, as the real provider does on `setMfaChallenge(null)` inside verifyMfa.
     await waitFor(() => expect(auth.mfaChallenge).toBeNull());
     rerender(
       <MemoryRouter>
@@ -146,7 +131,6 @@ describe('LoginPage — MFA challenge step', () => {
     );
 
     expect(await screen.findByText(/this device is now trusted/i)).toBeInTheDocument();
-    // It renders on the sign-in surface, not the (now-gone) challenge form.
     expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
   });
 
@@ -183,15 +167,12 @@ describe('LoginPage — MFA challenge step', () => {
       mfaChallenge: { challengeToken: 'tok', methods: ['passkey'], recoveryMethods: ['email_otp'] },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Use a passkey' }));
-    // The expired-token branch clears the challenge (back to the password form)
-    // rather than re-throwing to the form.
+    // The expired-token branch clears the challenge (back to the password form) rather than re-throwing to the form.
     await waitFor(() => expect(clearMfaChallenge).toHaveBeenCalledTimes(1));
   });
 
   it('maps an expired-after-entry code-factor challenge back to the password form', async () => {
-    // Sibling of the passkey case above: a code factor whose challenge
-    // expired between entry and submit must route back to sign-in with the same
-    // "session expired" copy, not strand the user on the challenge form.
+    // A code factor whose challenge expired between entry and submit must route back to sign-in with the same "session expired" copy, not strand the user on the challenge form.
     const clearMfaChallenge = vi.fn();
     const verifyMfa = vi
       .fn()

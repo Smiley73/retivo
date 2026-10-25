@@ -1,17 +1,9 @@
-/**
- * Unit coverage for `optimizerAggregatesSignature` — the content/stability
- * contract the SsOptimizerPage `reload` bail-early guard depends on. The
- * signature must be idempotent for identical input, change on any version bump
- * or row add/remove across any aggregate set, and stay order-independent for
- * the `medicalCategoryIds` set.
- */
+// `optimizerAggregatesSignature`, the content/stability contract the SsOptimizerPage `reload` bail-early guard depends on: idempotent for identical input, changes on any version bump or row add/remove across any aggregate set, order-independent for the `medicalCategoryIds` set.
 import { describe, expect, it } from 'vitest';
 import { optimizerAggregatesSignature } from './ss-optimizer-page-helpers';
 import type { OptimizerAggregates } from './ss-optimizer-page-chrome';
 
-/** The signature reads only `id` + `version` per row (plus the medical-category
- *  id set), so a minimal `{ id, version }` row cast to the aggregate type is a
- *  faithful fixture without seeding full payloads. */
+// The signature reads only `id` + `version` per row (plus the medical-category id set), so a minimal cast row is a faithful fixture.
 function row(id: string, version: number): { id: string; version: number } {
   return { id, version };
 }

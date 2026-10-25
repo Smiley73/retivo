@@ -1,6 +1,3 @@
-/**
- * Tests for the ApproveSignupPage component.
- */
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
@@ -25,10 +22,7 @@ function setHashToken(token: string | null): void {
 }
 
 describe('ApproveSignupPage', () => {
-  // Snapshot the initial URL once so we restore the exact same value the
-  // worker started with after each test. Replacing with `/` instead would
-  // leak across files in the same vitest worker and break unrelated
-  // suites that read `window.location`.
+  // Restore the initial URL after each test; replacing with `/` would leak across files in the same worker and break suites that read `window.location`.
   const initialHref = window.location.href;
 
   afterEach(() => {
@@ -59,7 +53,6 @@ describe('ApproveSignupPage', () => {
     expect(await screen.findByText(/foo@example.com/)).toBeInTheDocument();
     expect(screen.getByText(/can now sign in/)).toBeInTheDocument();
 
-    // Fragment is scrubbed from the URL.
     expect(window.location.hash).toBe('');
   });
 

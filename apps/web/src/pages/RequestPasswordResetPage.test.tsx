@@ -1,6 +1,3 @@
-/**
- * Tests for the RequestPasswordResetPage component.
- */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
@@ -88,7 +85,6 @@ describe('RequestPasswordResetPage', () => {
     expect(await screen.findByText('Slow down.')).toBeInTheDocument();
   });
 
-  // Inline "service is busy" copy.
   it('shows the busy sentence for a no-envelope 5xx', async () => {
     const { ApiRequestError } = await import('../api/client');
     const fn = vi

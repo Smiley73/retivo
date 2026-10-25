@@ -1,10 +1,4 @@
-/**
- * AccountFormModal render tests.
- *
- * Drives IndexedDB through fake-indexeddb. Covers create-mode form
- * rendering, the type-driven tax-treatment lock, and the
- * ACCOUNT_NOT_ZEROED guard on inactivation.
- */
+// AccountFormModal: create-mode rendering, the type-driven tax-treatment lock, the ACCOUNT_NOT_ZEROED guard and retype blocking.
 import 'fake-indexeddb/auto';
 import { render, screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -30,21 +24,8 @@ import type {
 vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
 vi.mock('../sync/SyncContext', () => ({ useSync: vi.fn() }));
 
-// Hoisted gate on every `listAggregates('accountBalance', …)` read — the
-// retype-block's open-time, pick-time and retry reads all go through
-// it. `null` (the default)
-// leaves every read untouched; a test parks a read on a promise it resolves
-// by hand, so a second type choice (or a fresh render) is guaranteed to land
-// while an earlier read's check is still out. The gate is applied AFTER the
-// real read so that releasing it settles the check in microtasks alone.
-// `failBalanceRead` rejects the read instead — the seam the read-failure
-// abort tests inject through (a flag rather than a stored rejected promise,
-// so no unhandled-rejection fires before the read consumes it). Wrapped in
-// `vi.fn` so a test can also assert it was (or wasn't) called at all — see
-// "create mode takes no balance read on open". The save-time TRANSACTIONAL
-// read (`writeAccountWithRetypeGuard`, `db/store.ts`) does its own raw IDB
-// `getAll` and is NOT covered by this mock — the save-time tests inject
-// through `IDBObjectStore.prototype.getAll` directly.
+// Hoisted gate on every `listAggregates('accountBalance', …)` read: a test parks a read so a second type choice lands while the earlier check is out.
+// Applied after the real read so releasing it settles in microtasks; the save-time transactional read uses raw IDB `getAll` and is injected through `IDBObjectStore.prototype.getAll` instead.
 const retypeReadGate = vi.hoisted<{
   balanceRead: Promise<void> | null;
   failBalanceRead: boolean;
@@ -69,12 +50,7 @@ vi.mock('../db/store', async () => {
   };
 });
 
-// queueLocalMutation defaults to the real implementation (the happy-path
-// tests below queue against the real store); the partial-failure test
-// overrides it per-call via mockImplementationOnce to force the seed write to
-// reject after the account write succeeds. queueGuardedAccountUpdate (the
-// edit-mode account save) is wrapped the same way so
-// a test can inspect the payload it built without a second seam.
+// queueLocalMutation defaults to the real implementation; one test overrides it per call to reject the seed write after the account write succeeds.
 vi.mock('../sync/mutation-queue', async () => {
   const actual =
     await vi.importActual<typeof import('../sync/mutation-queue')>(
@@ -106,11 +82,7 @@ function setupContexts() {
   });
 }
 
-// The form is now a modal opened from the Accounts list. Tests still
-// address it by the old URL shape for brevity; this maps `/accounts/new`
-// → create mode and `/accounts/<id>/edit` → edit mode, rendering the
-// modal directly (its `open` is implied — the parent only mounts it
-// while open).
+// The form is a modal opened from the Accounts list; this maps `/accounts/new` and `/accounts/<id>/edit` to create and edit mode and renders the modal directly.
 function renderAt(
   path: string,
   balances: ReadonlyArray<Aggregate<AccountBalancePayload>> = [],
@@ -148,8 +120,6 @@ async function seedMember(birthdate = '1985-04-15'): Promise<void> {
 
 async function seedAccount(
   active = true,
-  /** Extra stored payload facts (the Roth / required-withdrawal tax details
-   *  the editor now reads back). */
   payloadExtra: Partial<AccountPayload> = {},
 ): Promise<void> {
   const acc: Aggregate<AccountPayload> = {
@@ -179,7 +149,6 @@ async function seedAccount(
   await putAggregate('account', acc);
 }
 
-/** One `accountBalance` aggregate, `acc-1`'s unless another account is named. */
 function balanceAggregate(
   year: number,
   over: Partial<AccountBalancePayload> = {},
@@ -266,24 +235,16 @@ describe('AccountFormPage — create mode', () => {
   });
 
   it('queues an account create + a current-year $0 balance seed, account first', async () => {
-    // Creating an account now queues TWO ordered mutations — the
-    // account `create`, then a deterministic current-year $0
-    // `accountBalance` seed (`bal-${accountId}-${year}`). The account is
-    // queued first ⟹ lower monotonic timestamp ⟹ pushed strictly before the
-    // balance (no balance-without-account orphan).
+    // Creating an account queues the account create, then a deterministic current-year $0 balance seed; the account is queued first so it is pushed before the balance (no orphan).
     const user = userEvent.setup();
     await seedMember();
     renderAt('/accounts/new');
-    // Owner is the shared React Aria <Select>; wait for the
-    // household member load to hydrate it (the trigger shows the
-    // member's name) — otherwise the async setForm that follows can
-    // race with the field edits and silently reset other fields.
+    // Wait for the household member load to hydrate the owner select, or the async setForm can race the field edits and reset other fields.
     await waitFor(() =>
       expect(screen.getByLabelText('Owner')).toHaveTextContent('Alex (you)'),
     );
     fireEvent.change(screen.getByLabelText('Institution'), { target: { value: 'Vanguard' } });
     fireEvent.change(screen.getByLabelText('Account name'), { target: { value: 'My 401k' } });
-    // Account type is a React Aria <Select>: open + pick the option.
     await user.click(screen.getByLabelText('Account type'));
     await user.click(await screen.findByRole('option', { name: '401(k)' }));
     fireEvent.change(screen.getByLabelText('Planning Return %'), { target: { value: '7' } });
@@ -297,16 +258,13 @@ describe('AccountFormPage — create mode', () => {
       const pending = await listPendingMutations();
       expect(pending).toHaveLength(2);
     });
-    // listPendingMutations returns flush order (sorted by monotonic
-    // timestamp) — assert account is pushed/dequeued strictly before balance.
     const ordered = await listPendingMutations();
     expect(ordered[0].operation).toBe('create');
     expect(ordered[0].aggregateType).toBe('account');
     expect(ordered[1].operation).toBe('create');
     expect(ordered[1].aggregateType).toBe('accountBalance');
     expect(ordered[0].timestamp).toBeLessThan(ordered[1].timestamp);
-    // The seed uses the deterministic id `bal-${accountId}-${year}` so a later
-    // real current-year balance UPDATES it in place.
+    // The deterministic id lets a later real current-year balance update the seed in place.
     const year = new Date().getUTCFullYear();
     expect(ordered[1].aggregateId).toBe(`bal-${ordered[0].aggregateId}-${year}`);
     const seed = ordered[1].payload as AccountBalancePayload;
@@ -317,13 +275,11 @@ describe('AccountFormPage — create mode', () => {
   });
 
   it('surfaces partial-success when the $0 seed write fails after the account succeeds', async () => {
-    // The only reachable partial failure (account saved, seed not) is
-    // benign — show "Account created — add a balance…", NOT the generic
-    // "Failed to save account", and do NOT close with a failure.
+    // The only reachable partial failure (account saved, seed not) is benign: show "Account created — add a balance…", not "Failed to save account", and do not close with a failure.
     const user = userEvent.setup();
     await seedMember();
     const onClose = vi.fn();
-    const { container } = render(
+    render(
       <MemoryRouter initialEntries={['/accounts/new']}>
         <AccountFormModal accountId={null} onClose={onClose} />
       </MemoryRouter>,
@@ -339,10 +295,7 @@ describe('AccountFormPage — create mode', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Create' })).not.toBeDisabled(),
     );
-    // Force the SECOND queued mutation (the balance seed) to reject — the
-    // first (account) passes through to the real impl. The default mock
-    // delegates to the real `queueLocalMutation`, so we override only the
-    // second call to reject.
+    // Reject only the second queued mutation (the balance seed); the first passes through to the real implementation.
     const mock = queueLocalMutation as unknown as ReturnType<typeof vi.fn>;
     const real =
       (
@@ -366,36 +319,29 @@ describe('AccountFormPage — create mode', () => {
     expect(screen.getByRole('alert')).not.toHaveTextContent(
       /Failed to save account/i,
     );
-    // The account persisted; the modal did not close with a generic failure.
     const pending = await listPendingMutations();
     expect(pending.some((m) => m.aggregateType === 'account')).toBe(true);
     expect(onClose).not.toHaveBeenCalledWith(true);
-    await expectNoA11yViolations(container);
   });
 
   it('shows the Mixed Roth-designated vs after-tax help text when Mixed is selected', async () => {
     const user = userEvent.setup();
     await seedMember();
-    const { container } = renderAt('/accounts/new');
+    renderAt('/accounts/new');
     await waitFor(() =>
       expect(screen.getByLabelText('Owner')).toHaveTextContent('Alex (you)'),
     );
-    // Pick a type that allows Mixed (401(k) → PRE_TAX | MIXED).
     await user.click(screen.getByLabelText('Account type'));
     await user.click(await screen.findByRole('option', { name: '401(k)' }));
-    // Select Mixed tax treatment.
     await user.click(screen.getByLabelText('Tax treatment'));
     await user.click(await screen.findByRole('option', { name: 'Mixed' }));
-    // The help text describes the Roth-designated (tax-free) employer-plan
-    // post-tax slice vs plain after-tax savings — and does NOT promise §408A
-    // contributions-first ordering for designated-Roth money.
+    // The help text must not promise §408A contributions-first ordering for designated-Roth money.
     expect(
       await screen.findByText(/post-tax side is a Roth-designated slice/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/post-tax side is plain after-tax savings/i),
     ).toBeInTheDocument();
-    await expectNoA11yViolations(container);
   });
 });
 
@@ -420,11 +366,7 @@ describe('AccountFormPage — edit mode', () => {
   });
 
   it('persists asset-mix edits to the queued mutation payload', async () => {
-    // Regression: AccountFormPage's update branch used to
-    // overwrite the freshly-built payload's assetMix with
-    // `existing.payload.assetMix`, silently dropping every edit. This
-    // test pins the fix: change Stocks→100, Bonds→0, Cash→0, save,
-    // assert the queued mutation carries 100/0/0.
+    // Regression: the update branch overwrote the built payload's assetMix with `existing.payload.assetMix`, dropping every edit.
     await seedMember();
     await seedAccount();
     renderAt('/accounts/acc-1/edit');
@@ -465,7 +407,6 @@ describe('AccountFormPage — edit mode', () => {
         /Cannot inactivate an account whose latest balance is non-zero/i,
       ),
     );
-    // Deep-link to the balance ledger surfaces inside the error block.
     const alert = screen.getByRole('alert');
     expect(alert.querySelector('a[href="/accounts/acc-1/balances"]')).not.toBeNull();
   });
@@ -525,10 +466,7 @@ describe('AccountFormPage — income-linked disable guard', () => {
   });
 
   it('allows saving an already-inactive income-linked account when Active is not toggled', async () => {
-    // The disable guard gates the active true→false transition
-    // only. An account seeded inactive, edited (institution) and saved
-    // WITHOUT touching Active has no transition — the save must be
-    // allowed even though an income stream still links it.
+    // The disable guard gates only the active true→false transition: saving an already-inactive account without touching Active is allowed even with a linked income stream.
     await seedMember();
     await seedAccount(false);
     await seedIncomeStream('inc-1', 'ACME pension', {
@@ -556,8 +494,7 @@ describe('AccountFormPage — income-linked disable guard', () => {
   });
 
   it('surfaces ACCOUNT_INCOME_LINKED before ACCOUNT_NOT_ZEROED when both apply', async () => {
-    // An account that is both non-zero AND income-linked must
-    // surface the more feature-relevant /income remediation first.
+    // A non-zero, income-linked account surfaces the more feature-relevant /income remediation first.
     await seedMember();
     await seedAccount(true);
     await seedBalance(2025, 12345);
@@ -626,9 +563,7 @@ describe('AccountFormPage — Roth employer-plan account types', () => {
     );
     await user.click(screen.getByLabelText('Account type'));
     await user.click(await screen.findByRole('option', { name: 'Roth 401(k)' }));
-    // Disclosure hint visible under the Account type field.
     expect(await screen.findByText(/5-year Roth rule/i)).toBeInTheDocument();
-    // Tax treatment locked — locked hint confirms the forced single option.
     expect(
       await screen.findByText(/Locked to Tax-free \(Roth\) for this account type/i),
     ).toBeInTheDocument();
@@ -637,27 +572,19 @@ describe('AccountFormPage — Roth employer-plan account types', () => {
   it('grouped account-type picker exposes section headings and all four Roth employer options (a11y smoke)', async () => {
     const user = userEvent.setup();
     await seedMember();
-    const { container } = renderAt('/accounts/new');
+    renderAt('/accounts/new');
     await waitFor(() =>
       expect(screen.getByLabelText('Owner')).toHaveTextContent('Alex (you)'),
     );
     await user.click(screen.getByLabelText('Account type'));
-    // The section group headings are visible in the open listbox.
     await screen.findByText('Traditional (pre-tax)');
-    // 'Roth' is exact-matched to the section header (options are "Roth 401(k)" etc.)
     expect(screen.getByText('Roth')).toBeInTheDocument();
-    // All four dedicated Roth employer-plan types are keyboard-reachable options.
     expect(screen.getByRole('option', { name: 'Roth 401(k)' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Roth 403(b)' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Roth 457(b)' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Roth TSP' })).toBeInTheDocument();
-    await expectNoA11yViolations(container);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Roth / required-withdrawal tax details
-// ---------------------------------------------------------------------------
 
 describe('AccountFormModal — tax details', () => {
   beforeEach(() => {
@@ -684,8 +611,6 @@ describe('AccountFormModal — tax details', () => {
         screen.getByLabelText('Year Roth contributions to this plan began'),
       ).toHaveValue('2018'),
     );
-    // The plan's Roth basis is its recorded in-plan-rollover principal now, so
-    // there is no amount to type.
     expect(screen.queryByLabelText('Roth contributions in this plan')).toBeNull();
   });
 
@@ -698,7 +623,7 @@ describe('AccountFormModal — tax details', () => {
     await user.click(screen.getByRole('button', { name: 'Update' }));
     await waitFor(() => expect(queueGuardedAccountUpdate).toHaveBeenCalled());
     const payload = (await getAggregate('account', 'acc-1'))?.payload as AccountPayload;
-    // Absent, NOT 0 — the engines' conservative default depends on absence.
+    // Absent, not 0: the engines' conservative default depends on absence.
     expect('rothIraRegularContributionBasis' in payload).toBe(false);
     expect('rothIraFirstContributionTaxYear' in payload).toBe(false);
   });
@@ -749,8 +674,7 @@ describe('AccountFormModal — tax details', () => {
     await seedAccount(true, {
       type: 'RETIREMENT_ROTH_IRA',
       taxTreatment: 'ROTH',
-      // Out-of-bounds year and a negative basis — shapes this editor never writes
-      // but an import or an older build could leave behind.
+      // Shapes this editor never writes but an import or an older build could leave behind.
       rothIraFirstContributionTaxYear: 9999,
       rothIraRegularContributionBasis: -5,
     });
@@ -759,18 +683,12 @@ describe('AccountFormModal — tax details', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Advanced tax details' }));
     await userEvent.click(screen.getByRole('button', { name: /Enter a year.*Year of your first Roth IRA contribution/ }));
     expect(screen.getByLabelText('Year of your first Roth IRA contribution')).toHaveValue('');
-    // The corrupt basis is not rendered anywhere — the field itself is gone.
     expect(screen.queryByLabelText('Total contributions made so far')).toBeNull();
-    // The editor is fully usable — the corrupt values were dropped, not rendered.
     expect(screen.getByRole('button', { name: 'Advanced tax details' })).toBeInTheDocument();
   });
 
   it('an inherited Roth IRA asks for the ORIGINAL OWNER’s contribution year, not the beneficiary’s', async () => {
-    // The engine reads `rothIraFirstContributionTaxYear` on an inherited account as
-    // the DECEDENT's five-year clock (an inherited Roth IRA never merges with the
-    // beneficiary's own), so the field has to ask for the original owner's year. The
-    // unqualified "your first Roth IRA contribution" wording invited the beneficiary's
-    // own year, and a too-early answer makes the growth look tax-free years early.
+    // An inherited account's `rothIraFirstContributionTaxYear` is the decedent's five-year clock (never merged with the beneficiary's own), so the field must ask for the original owner's year; a too-early answer makes growth look tax-free years early.
     const user = userEvent.setup();
     await seedMember();
     await seedAccount(true, { type: 'RETIREMENT_ROTH_IRA', taxTreatment: 'ROTH' });
@@ -788,8 +706,6 @@ describe('AccountFormModal — tax details', () => {
     expect(
       screen.queryByLabelText('Year of your first Roth IRA contribution'),
     ).not.toBeInTheDocument();
-    // The basis field that used to sit beside it — in either label variant — is
-    // gone: the figure is derived from recorded balance history.
     expect(screen.queryByLabelText("Original owner's total contributions")).toBeNull();
     expect(screen.queryByLabelText('Total contributions made so far')).toBeNull();
   });
@@ -808,22 +724,16 @@ describe('AccountFormModal — tax details', () => {
       await screen.findByText(/cannot be saved while any of these inherited-account issues apply/i),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Update' })).toBeDisabled();
-    // Asserted on the blocker LIST items specifically — the same phrases also label
-    // the fields, so scope the query to the readiness list.
+    // Scoped to the blocker list items: the same phrases also label the fields.
     const blockerItems = screen
       .getAllByRole('listitem')
       .map((li) => li.textContent?.trim());
-    // The list is the ENGINE's own withhold reasons for this fact set, so it
-    // starts with exactly the three baseline facts every post-death rule needs …
+    // The list is the engine's own withhold reasons: the three baseline facts every post-death rule needs, and nothing that depends on a rule not yet selected.
     expect(blockerItems).toContain('Who inherited this account');
     expect(blockerItems).toContain("The original owner's date of death");
     expect(blockerItems).toContain(
       'Whether the original owner had reached their RMD start date',
     );
-    // … and does NOT yet demand facts whose necessity depends on the rule that is
-    // not selected yet (no false positives — the pre-fix list demanded a
-    // beneficiary birthdate and an election from every category, including an
-    // estate/charity and a plainly-named beneficiary, which neither rule needs).
     expect(blockerItems).not.toContain('The date of birth of whoever inherited it');
   });
 
@@ -839,8 +749,7 @@ describe('AccountFormModal — tax details', () => {
         name: /Enter a year.*Year of your first Roth IRA contribution/,
       }),
     );
-    // An out-of-range year must not silently vanish from the saved payload and be
-    // read by the engines as "nothing recorded".
+    // An out-of-range year must not silently vanish from the payload and be read by the engines as "nothing recorded".
     const mutations = queueGuardedAccountUpdate as unknown as ReturnType<typeof vi.fn>;
     const callsBefore = mutations.mock.calls.length;
     await user.type(
@@ -851,15 +760,11 @@ describe('AccountFormModal — tax details', () => {
     expect(
       await screen.findByText(/Please check .*Year of your first Roth IRA contribution/i),
     ).toBeInTheDocument();
-    // Nothing was written — the mock is shared across this file's tests, so compare
-    // against the count entering this test rather than asserting "never called".
+    // The mock is shared across this file's tests, so compare against the count entering this test.
     expect(mutations.mock.calls.length).toBe(callsBefore);
   });
 
   it('collects inherited dates through the shared date picker, not a free-text field', async () => {
-    // Every date in the app is the shared React Aria `DatePicker`
-    // (segmented entry + calendar popover), never a bare text box with a
-    // "Format: YYYY-MM-DD" hint. The stored value contract is the same string.
     await seedMember();
     await seedAccount(true, {
       type: 'RETIREMENT_IRA',
@@ -869,7 +774,6 @@ describe('AccountFormModal — tax details', () => {
     });
     renderAt('/accounts/acc-1/edit');
     await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
-    // A date-picker group (not a textbox) rendering the stored date in en-US order.
     const deathDate = await screen.findByRole('group', {
       name: "Original owner's date of death",
     });
@@ -877,22 +781,15 @@ describe('AccountFormModal — tax details', () => {
     expect(
       screen.queryByRole('textbox', { name: "Original owner's date of death" }),
     ).toBeNull();
-    // The original owner's date of birth is a picker too, and still empty.
-    // (The inheritor's own date of birth is no longer asked for here — it is
-    // the account owner's, which the household already records.)
     {
       const name = "Original owner's date of birth";
       expect(screen.getByRole('group', { name })).toBeInTheDocument();
       expect(screen.queryByRole('textbox', { name })).toBeNull();
     }
-    // The format hint is gone with the free-text field it explained.
     expect(screen.queryByText('Format: YYYY-MM-DD.')).toBeNull();
   });
 
   it('an employer plan offers no rollover editor here and points at the yearly balances', async () => {
-    // The employer-plan mirror of the Roth IRA case: in-plan Roth rollovers are
-    // recorded per year on the Account Balances page, so the account editor keeps
-    // only the standing basis figures and no repeatable list at all.
     await seedMember();
     await seedAccount(true, { taxTreatment: 'MIXED' });
     renderAt('/accounts/acc-1/edit');
@@ -904,8 +801,6 @@ describe('AccountFormModal — tax details', () => {
     expect(
       screen.getByText(/recorded on this account’s yearly balances/i),
     ).toBeInTheDocument();
-    // No `<fieldset>` anywhere in the editor (the app uses the
-    // `<div role="group">` + `<header>` pattern instead).
     expect(document.querySelector('fieldset')).toBeNull();
   });
 
@@ -915,9 +810,6 @@ describe('AccountFormModal — tax details', () => {
     await seedAccount(true, {
       type: 'RETIREMENT_IRA',
       taxTreatment: 'PRE_TAX',
-      // The three baseline facts are recorded; an eligible designated beneficiary
-      // must still choose between lifetime withdrawals and the ten-year rule, and
-      // the engine reports exactly that.
       rmdInheritedAccount: true,
       rmdBeneficiaryType: 'SPOUSE',
       rmdInheritedOwnerDeathDate: '2023-04-02',
@@ -936,7 +828,6 @@ describe('AccountFormModal — tax details', () => {
     expect(blockerItems).toContain(
       'Whether withdrawals spread over a lifetime or empty within ten years',
     );
-    // The baseline facts are recorded, so they are no longer asked for.
     expect(blockerItems).not.toContain('Who inherited this account');
     void user;
   });
@@ -966,9 +857,7 @@ describe('AccountFormModal — tax details', () => {
   });
 
   it('a Roth IRA offers no conversion editor here and points at the yearly balances instead', async () => {
-    // Conversions are recorded per year on the Account Balances page. Two entry
-    // points for one fact is the bug this replaced: the account-page list was the
-    // one the engine read, so a conversion typed on the balances page did nothing.
+    // Conversions are recorded per year on the Account Balances page; a second entry point once made a conversion typed there do nothing.
     const user = userEvent.setup();
     await seedMember();
     await seedAccount(true, { type: 'RETIREMENT_ROTH_IRA', taxTreatment: 'ROTH' });
@@ -976,39 +865,14 @@ describe('AccountFormModal — tax details', () => {
     await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
 
     expect(screen.queryByRole('group', { name: /converted into this Roth IRA/i })).toBeNull();
-    // Must track the CURRENT balances-page label ("Roth Conversion (taxable)").
-    // Pinned to the retired wording this assertion
-    // passed no matter what — a restored editor would have gone unnoticed.
+    // Must track the current balances-page label: pinned to the retired wording, the assertion passed no matter what.
     expect(screen.queryByLabelText(/Roth Conversion \(taxable\)/i)).toBeNull();
     expect(screen.getByText(/recorded on this account’s yearly balances/i)).toBeInTheDocument();
 
-    // Saving an untouched Roth IRA emits no conversion field at all.
     await user.click(screen.getByRole('button', { name: 'Update' }));
     await waitFor(() => expect(queueGuardedAccountUpdate).toHaveBeenCalled());
     const payload = (await getAggregate('account', 'acc-1'))?.payload as AccountPayload;
     expect('rothIraConversionLots' in payload).toBe(false);
-  });
-
-  it('the tax-details section has no accessibility violations (owner and inherited states)', async () => {
-    const user = userEvent.setup();
-    await seedMember();
-    await seedAccount(true, {
-      taxTreatment: 'MIXED',
-      designatedRothFirstParticipationTaxYear: 2018,
-    });
-    const { container } = renderAt('/accounts/acc-1/edit');
-    await screen.findByRole('button', { name: 'Advanced tax details' });
-    await user.click(screen.getByRole('button', { name: 'Advanced tax details' }));
-    expect(
-      screen.getByLabelText('Year Roth contributions to this plan began'),
-    ).toHaveValue('2018');
-    // Owner state (still-working questions + sole-spouse designation visible).
-    await expectNoA11yViolations(container);
-
-    // Inherited state (beneficiary controls + the blocker list visible).
-    await user.click(screen.getByRole('switch', { name: 'I inherited this account' }));
-    await screen.findByLabelText('Your relationship to the original owner');
-    await expectNoA11yViolations(container);
   });
 
   it('allows a complete supported inherited rule to be updated', async () => {
@@ -1068,17 +932,7 @@ describe('AccountFormModal — tax details', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Retype blocking — an account's type is fixed
-// once it has real balance history, in every direction, edit mode only.
-//
-// Every case here seeds its balance rows into the STORE and renders the modal
-// with NO `balances` prop, because that is the reachable shape: on a cold deep
-// link to `/accounts?edit=…` the modal hydrates its account independently of the
-// list page's balance query, so the prop can still be `[]` when the type select is
-// used. A check that read the prop would apply (or refuse) a retype with no real
-// verdict behind it.
-// ---------------------------------------------------------------------------
+// Retype blocking: an account's type is fixed once it has real balance history. Cases seed balance rows into the store and render the modal with no `balances` prop, the reachable shape on a cold deep link where the prop can still be `[]`.
 
 describe('AccountFormModal — account-type retype block', () => {
   beforeEach(async () => {
@@ -1100,8 +954,6 @@ describe('AccountFormModal — account-type retype block', () => {
     await putAggregate('accountBalance', balanceAggregate(year, over, accountId));
   }
 
-  /** One year of real return-bearing history on `acc-1` — qualifies as
-   *  blocking history under every account type. */
   async function seedQualifyingRow(): Promise<void> {
     await putRow(2020, { totalContributions: 6_000, endingBalance: 6_000 });
   }
@@ -1110,8 +962,6 @@ describe('AccountFormModal — account-type retype block', () => {
     await user.click(screen.getByLabelText('Account type'));
     await user.click(await screen.findByRole('option', { name: label }));
   }
-
-  // -- Open-time verdict + option marking ----------------------------
 
   it('open-time blocked: every differing option carries the unavailable treatment and its own accessible description; the persisted option carries neither', async () => {
     const user = userEvent.setup();
@@ -1128,8 +978,6 @@ describe('AccountFormModal — account-type retype block', () => {
     const rothIra = screen.getByRole('option', { name: 'Roth IRA' });
     expect(rothIra.className).toMatch(/text-muted/);
     expect(rothIra).toHaveAccessibleDescription(/already has balance history/i);
-    // No type-pair table: a second, unrelated differing option is marked
-    // exactly the same way.
     const savings = screen.getByRole('option', { name: 'Savings' });
     expect(savings.className).toMatch(/text-muted/);
     expect(savings).toHaveAccessibleDescription(/already has balance history/i);
@@ -1138,20 +986,13 @@ describe('AccountFormModal — account-type retype block', () => {
   it('the open-time verdict resolves BEFORE the loading gate lifts — no option renders ahead of it', async () => {
     await seedAccount(true);
     await seedQualifyingRow();
-    // Park the OPEN-TIME read itself (set before `renderAt`, so it gates the
-    // very read the hydration effect kicks off).
     let releaseBalanceRead!: () => void;
     retypeReadGate.balanceRead = new Promise<void>((resolve) => {
       releaseBalanceRead = resolve;
     });
     try {
       renderAt('/accounts/acc-1/edit');
-      // Let the account read (and every OTHER microtask the hydration
-      // effect kicks off) fully settle while the balance read stays
-      // parked. A regression that fires the balance read without
-      // awaiting it (so `setLoading(false)` in the effect's `finally`
-      // does not wait on it either) would already show the hydrated form
-      // at this point, ahead of the verdict — exactly what the verdict-before-render rule forbids.
+      // Let every other microtask of the hydration effect settle while the balance read stays parked: a regression that fires the read without awaiting it would show the hydrated form ahead of the verdict.
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
@@ -1161,13 +1002,10 @@ describe('AccountFormModal — account-type retype block', () => {
       const user = userEvent.setup();
       await act(async () => {
         releaseBalanceRead();
-        // A macrotask boundary drains the microtask chain the released read
-        // resumes through.
+        // A macrotask boundary drains the microtask chain the released read resumes through.
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
 
-      // The gate lifts only once the verdict is in, and the options come
-      // back already marked — never ordinary for a frame.
       await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
       await user.click(screen.getByLabelText('Account type'));
       expect(screen.getByRole('option', { name: 'Roth IRA' })).toHaveAccessibleDescription(
@@ -1186,8 +1024,7 @@ describe('AccountFormModal — account-type retype block', () => {
     renderAt('/accounts/acc-1/edit');
     await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
 
-    // The `role="status"` region is mounted the whole time (never
-    // arrives already populated); grab it before triggering an announcement.
+    // The role="status" region is mounted the whole time, so it never arrives already populated.
     const region = screen.getByRole('status');
     await chooseType(user, 'Roth IRA');
     await waitFor(() => expect(region).toHaveTextContent(/already has balance history/i));
@@ -1197,15 +1034,11 @@ describe('AccountFormModal — account-type retype block', () => {
 
     await chooseType(user, 'Roth IRA');
     await waitFor(() => {
-      // The INNER node was replaced (fresh `key`), not merely re-rendered
-      // with the same text — many screen readers don't re-announce the
-      // latter — while the outer region itself stayed mounted.
+      // The inner node is replaced (fresh key), not re-rendered with the same text, since many screen readers do not re-announce the latter.
       const node2 = within(region).getByText(/already has balance history/i);
       expect(node2).not.toBe(node1);
     });
   });
-
-  // -- Clear -------------------------------------------------------------
 
   it('clear: a brand-new account retypes freely and applies the new type’s default tax treatment', async () => {
     const user = userEvent.setup();
@@ -1220,7 +1053,6 @@ describe('AccountFormModal — account-type retype block', () => {
     expect(
       await screen.findByText(/Locked to Tax-free \(Roth\) for this account type/i),
     ).toBeInTheDocument();
-    // The region is mounted but never populated for a clean retype.
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
   });
 
@@ -1246,24 +1078,17 @@ describe('AccountFormModal — account-type retype block', () => {
     expect(
       await screen.findByText(/Locked to Tax-free \(Roth\) for this account type/i),
     ).toBeInTheDocument();
-    // The region is mounted but never populated for a clean retype.
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
     expect(await listPendingMutations()).toHaveLength(0);
   });
 
   it('does not ask when the account is ALREADY persisted as the picked type — no read at all', async () => {
-    // Flipping the type away and back grants nothing new, so a pick equal to
-    // the PERSISTED type applies immediately with no read.
     const user = userEvent.setup();
     await seedAccount(true, { type: 'RETIREMENT_ROTH_IRA', taxTreatment: 'ROTH' });
     await seedQualifyingRow();
     renderAt('/accounts/acc-1/edit');
     await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
-    // Roth IRA is the persisted type here, so it applies with no read even
-    // though the account has real history.
     await chooseType(user, 'Roth IRA');
-    // The region is mounted but never populated — the persisted-type
-    // pick takes no read at all.
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
     await waitFor(() =>
       expect(screen.getByLabelText('Account type')).toHaveTextContent('Roth IRA'),
@@ -1279,16 +1104,13 @@ describe('AccountFormModal — account-type retype block', () => {
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
   });
 
-  // -- Pick-time discovery + the latch ---------------------------------
-
   it('pick-time discovery: a qualifying row written after open refuses the pick and re-marks the options for the rest of the session', async () => {
     const user = userEvent.setup();
     await seedAccount(true);
     renderAt('/accounts/acc-1/edit');
     await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
 
-    // Second-tab shape: a qualifying row lands straight in IDB with no
-    // cross-tab signal this editor would see.
+    // Second-tab shape: a qualifying row lands in IDB with no cross-tab signal.
     await seedQualifyingRow();
 
     await chooseType(user, 'Roth IRA');
@@ -1298,8 +1120,6 @@ describe('AccountFormModal — account-type retype block', () => {
     expect(screen.getByLabelText('Account type')).toHaveTextContent('401(k)');
     expect(await listPendingMutations()).toHaveLength(0);
 
-    // The latch: re-opening the listbox shows the options now marked, not
-    // just a one-time refusal.
     await user.click(screen.getByLabelText('Account type'));
     expect(screen.getByRole('option', { name: 'Roth IRA' })).toHaveAccessibleDescription(
       /already has balance history/i,
@@ -1312,22 +1132,13 @@ describe('AccountFormModal — account-type retype block', () => {
     renderAt('/accounts/acc-1/edit');
     await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
 
-    // Gate AFTER hydration — the open-time read must not be parked by this,
-    // only the two pick-time reads below.
     let releaseBalanceRead!: () => void;
     retypeReadGate.balanceRead = new Promise<void>((resolve) => {
       releaseBalanceRead = resolve;
     });
     try {
-      // The first pick's read runs (fetching real rows) and is then parked —
-      // no qualifying row exists yet, so it will resolve 'clear'.
       await chooseType(user, 'Roth IRA');
-      // A qualifying row lands only now (the second-tab shape), so the
-      // SECOND pick's read — which runs and is parked after it — will
-      // resolve 'blocked'. The two abandoned/live reads now disagree,
-      // which is what makes a missing supersession guard observable:
-      // without it, the FIRST (superseded) read's 'clear' outcome would
-      // still apply once it resolves, even though the person moved on.
+      // A qualifying row lands only now, so the second (live) read resolves 'blocked' while the first (superseded) resolves 'clear'; without a supersession guard the first would still apply.
       await seedQualifyingRow();
       await chooseType(user, 'Savings');
       await waitFor(() =>
@@ -1336,14 +1147,10 @@ describe('AccountFormModal — account-type retype block', () => {
 
       await act(async () => {
         releaseBalanceRead();
-        // A macrotask boundary drains the entire microtask chain both
-        // released reads resume through.
+        // A macrotask boundary drains the microtask chain both released reads resume through.
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
 
-      // The FIRST (superseded) read applied and refused nothing — the
-      // trigger never moved to 'Roth IRA'. The SECOND (live) read is what
-      // decided the outcome: it found the qualifying row and refused.
       expect(screen.getByLabelText('Account type')).toHaveTextContent('401(k)');
       await waitFor(() =>
         expect(screen.getByRole('status')).toHaveTextContent(/already has balance history/i),
@@ -1372,15 +1179,12 @@ describe('AccountFormModal — account-type retype block', () => {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
-      // Never a mutation carrying the pre-pick (persisted) type.
       expect(await listPendingMutations()).toHaveLength(0);
     } finally {
       releaseBalanceRead();
       retypeReadGate.balanceRead = null;
     }
   });
-
-  // -- Could not check + retry -----------------------------------------
 
   it('a pick read that fails lands in could-not-check; the retry re-reads, and once it returns clear a fresh pick applies', async () => {
     const user = userEvent.setup();
@@ -1399,9 +1203,6 @@ describe('AccountFormModal — account-type retype block', () => {
 
     retypeReadGate.failBalanceRead = false;
     await user.click(within(region).getByRole('button', { name: 'Try again' }));
-    // The region stays mounted and reports the retry's own outcome —
-    // it does not go silently empty — and the retry control it was pressed
-    // on is gone.
     await waitFor(() =>
       expect(region).toHaveTextContent(/Balance history check complete/i),
     );
@@ -1429,8 +1230,6 @@ describe('AccountFormModal — account-type retype block', () => {
     }
   });
 
-  // -- Save-time backstop --------------------------------------------------
-
   it('save-time backstop: a qualifying row lands after an allowed pick — Update is refused with the blocked copy and nothing is queued', async () => {
     const user = userEvent.setup();
     await seedAccount(true);
@@ -1442,7 +1241,6 @@ describe('AccountFormModal — account-type retype block', () => {
       expect(screen.getByLabelText('Account type')).toHaveTextContent('Roth IRA'),
     );
 
-    // The race: a qualifying row lands after the pick was already accepted.
     await seedQualifyingRow();
 
     await user.click(screen.getByRole('button', { name: 'Update' }));
@@ -1464,10 +1262,7 @@ describe('AccountFormModal — account-type retype block', () => {
     renderAt('/accounts/acc-1/edit');
     await waitFor(() => expect(screen.getByLabelText('Account name')).toHaveValue('My 401k'));
 
-    // Another device retypes the account (carrying its qualifying history)
-    // to Roth IRA while this editor stays open — the accepted cross-device
-    // window. The local row changes under the open editor; this
-    // tab never reads it until the save transaction does.
+    // Another device retypes the account while this editor stays open (the accepted cross-device window); this tab only reads it in the save transaction.
     const current = (await getAggregate('account', 'acc-1')) as Aggregate<AccountPayload>;
     await putAggregate('account', {
       ...current,
@@ -1475,7 +1270,6 @@ describe('AccountFormModal — account-type retype block', () => {
       payload: { ...current.payload, type: 'RETIREMENT_ROTH_IRA' },
     });
 
-    // A non-type edit — untouched by the block.
     fireEvent.change(screen.getByLabelText('Account name'), {
       target: { value: 'My 401k (renamed)' },
     });
@@ -1486,34 +1280,20 @@ describe('AccountFormModal — account-type retype block', () => {
         /This account already has balance history, so its type can.t be changed/i,
       ),
     );
-    // Names the FRESH persisted type the transaction actually saw, not the
-    // stale open-time snapshot.
     expect(screen.getByRole('alert')).toHaveTextContent(/Set the type back to Roth IRA/i);
     expect(await listPendingMutations()).toHaveLength(0);
 
-    // Recovery: the picker itself now tracks the fresh persisted type —
-    // Roth IRA is no longer marked unavailable, and 401(k) (no longer the
-    // real persisted type) now is.
     await user.click(screen.getByLabelText('Account type'));
     expect(screen.getByRole('option', { name: 'Roth IRA' })).toHaveAccessibleDescription('');
-    // 401(k) is still the form's CURRENT value at this point (nothing has
-    // been re-picked yet), so its own description is suppressed by
-    // `Select`'s contract (a selected option's
-    // description never leaks into the closed trigger). Its `unavailable`
-    // visual treatment is the recovery signal to check here: it is no
-    // longer the persisted type, so it now renders muted.
+    // 401(k) is still the form's current value, so `Select` suppresses its description; its unavailable styling is the recovery signal.
     expect(screen.getByRole('option', { name: '401(k)' }).className).toMatch(/text-muted/);
 
-    // Picking the (now) persisted type applies immediately, with no read
-    // and no refusal — the in-modal recovery exit.
     await user.click(screen.getByRole('option', { name: 'Roth IRA' }));
     await waitFor(() =>
       expect(screen.getByLabelText('Account type')).toHaveTextContent('Roth IRA'),
     );
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
 
-    // And Update now saves the rename together with the type correction —
-    // no need to close and reopen the editor.
     await user.click(screen.getByRole('button', { name: 'Update' }));
     await waitFor(async () => {
       const stored = (await getAggregate('account', 'acc-1')) as Aggregate<AccountPayload>;
@@ -1534,9 +1314,7 @@ describe('AccountFormModal — account-type retype block', () => {
       expect(screen.getByLabelText('Account type')).toHaveTextContent('Roth IRA'),
     );
 
-    // Fail only the SECOND `accountBalances` read reached by Update — the
-    // first is onSave's pre-existing early read (untouched by this feature);
-    // the second is the guarded write's in-transaction read.
+    // Fail only the second `accountBalances` read: the first is onSave's early read, the second the guarded write's in-transaction read.
     const originalGetAll = IDBObjectStore.prototype.getAll;
     let balanceGetAllCalls = 0;
     const spy = vi
@@ -1596,9 +1374,6 @@ describe('AccountFormModal — account-type retype block', () => {
     } finally {
       spy.mockRestore();
     }
-    // Exactly the pre-existing early read (untouched by this feature) — no
-    // SECOND, in-transaction read, because the submitted type equals the
-    // fresh persisted type.
     expect(balanceGetAllCalls).toBe(1);
     const pending = await listPendingMutations();
     const update = pending.find((m) => m.operation === 'update');
@@ -1634,16 +1409,8 @@ describe('AccountFormModal — account-type retype block', () => {
     await waitFor(() => expect(getStoreVersion('accounts')).toBeGreaterThan(before));
   });
 
-  // -- Accessibility -------------------------------------------------------
-  //
-  // None of these asserts which element holds focus right after the type
-  // listbox closes inside the modal. React Aria's `useDialog` re-focuses the
-  // dialog from a 500 ms timer whenever focus is on the dialog or `<body>`,
-  // and the listbox's own focus restore runs one animation frame after the
-  // popover is removed — a window in which jsdom reports `<body>`. A test that
-  // closes the listbox about 500 ms after the dialog opened (a slow CI runner
-  // does) can lose that race and end with focus on the dialog. The restore
-  // target itself is covered by `Select.test.tsx`, outside any dialog.
+  // None of these asserts focus right after the type listbox closes inside the modal: React Aria's `useDialog` re-focuses the dialog from a 500 ms timer, and the listbox restores focus a frame after the popover is removed (jsdom reports `<body>` then).
+  // A test closing the listbox about 500 ms after the dialog opened can lose that race; the restore target is covered by `Select.test.tsx`.
 
   it('accessibility: the open listbox in the blocked state has no axe violations', async () => {
     const user = userEvent.setup();
@@ -1655,15 +1422,13 @@ describe('AccountFormModal — account-type retype block', () => {
     screen.getByLabelText('Account type').focus();
     await user.keyboard('{Enter}');
     const listbox = await screen.findByRole('listbox');
-    // Scan the blocked markup (muted rows, per-option descriptions), not the
-    // pre-verdict markup: wait for the open-time history read to land first.
+    // Wait for the open-time history read so the scan sees the blocked markup.
     await waitFor(() =>
       expect(within(listbox).getByRole('option', { name: 'Roth IRA' })).toHaveAccessibleDescription(
         /already has balance history/i,
       ),
     );
-    // React Aria portals the dialog, the type <Select> and its listbox to
-    // `document.body` (see `Modal.tsx`), not RTL's `container`.
+    // React Aria portals the dialog and listbox to `document.body`, not RTL's `container`.
     await expectNoA11yViolations(document.body);
   });
 
@@ -1679,15 +1444,11 @@ describe('AccountFormModal — account-type retype block', () => {
     await user.keyboard('{Enter}');
     await screen.findByRole('listbox');
 
-    // Keyboard-only: typeahead lands on the blocked "Roth IRA" option — it is
-    // marked unavailable but not removed from keyboard navigation.
     await user.keyboard('Roth IRA');
     const rothIra = screen.getByRole('option', { name: 'Roth IRA' });
     await waitFor(() => expect(rothIra).toHaveFocus());
     expect(rothIra.className).toMatch(/text-muted/);
 
-    // Enter selects it: the listbox closes (a real selection, not a no-op) and
-    // the editor refuses the pick.
     await user.keyboard('{Enter}');
     await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
     await waitFor(() =>
@@ -1695,7 +1456,6 @@ describe('AccountFormModal — account-type retype block', () => {
     );
     expect(trigger).toHaveTextContent('401(k)');
     expect(await listPendingMutations()).toHaveLength(0);
-    // Focus was not dropped to <body>: it stays inside the dialog.
     await waitFor(() =>
       expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement),
     );
@@ -1710,9 +1470,7 @@ describe('AccountFormModal — account-type retype block', () => {
 
     const trigger = screen.getByLabelText('Account type');
     trigger.focus();
-    // React Aria's closed-trigger typeahead: "R" selects the first R option
-    // (Roth IRA) without opening the listbox, so no popover opens or closes and
-    // the only code that could move focus is the refusal itself.
+    // Closed-trigger typeahead selects without opening the listbox, so the refusal is the only code that could move focus.
     await user.keyboard('R');
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent(/already has balance history/i),

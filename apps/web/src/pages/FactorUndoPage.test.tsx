@@ -1,9 +1,4 @@
-/**
- * Tests for FactorUndoPage. The prefetch defence is
- * the load-bearing property: a mail client or mail-security scanner may GET
- * this page, so the undo must never run until an explicit button click —
- * asserted directly below, not just inferred from "it works when clicked".
- */
+// FactorUndoPage. The prefetch defence is load-bearing: a mail client or scanner may GET this page, so the undo must not run until an explicit button click.
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { expectNoA11yViolations } from '../test/a11y';
@@ -52,7 +47,6 @@ describe('FactorUndoPage', () => {
   it('performs nothing on mount — the undo only runs on the explicit click', async () => {
     setHash(`u=${USER_ID}&t=${TOKEN}&k=passkey_add`);
     renderPage();
-    // Let any pending microtasks/effects settle before asserting the negative.
     await waitFor(() => expect(window.location.hash).toBe(''));
     expect(apiRequest).not.toHaveBeenCalled();
   });

@@ -1,8 +1,4 @@
-/**
- * The AI assistants card in Settings → Preferences: gates, the opt-in switch,
- * the launch commands, the pairing-code field, the status line and the
- * diagnosis texts. Rendered inside the real provider with a scripted socket.
- */
+// AI assistants card in Settings → Preferences, rendered in the real provider with a scripted socket.
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -20,7 +16,6 @@ const auth = vi.hoisted(() => ({
 }));
 vi.mock('../auth/AuthContext', () => ({ useAuth: () => auth.value }));
 
-// The bridge file state the card reads; each test sets it before rendering.
 const bridgeFile = vi.hoisted(() => ({
   state: { status: 'ready', info: { version: '1.2.3', sha256: 'c'.repeat(64), size: 1234 } } as
     | { status: 'loading' }
@@ -104,7 +99,6 @@ describe('AssistantSettingsCard gates', () => {
     const note = screen.getByText(`${MODEL_PROVIDER_STATEMENT} ${GENEROUS_DEFAULTS_STATEMENT}`);
     const copyButtons = screen.getAllByRole('button', { name: /^Copy .* command$/ });
     expect(copyButtons.at(-1)!.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // The pre-opt-in note is not repeated beside the same sentence.
     expect(screen.getAllByText(MODEL_PROVIDER_STATEMENT, { exact: false })).toHaveLength(1);
   });
 
@@ -217,7 +211,6 @@ describe('connecting', () => {
     await userEvent.type(codeField(), '7qw49-kxmz2');
     await userEvent.click(screen.getByRole('button', { name: 'Connect' }));
     expect(openSocket).toHaveBeenCalledTimes(1);
-    // The code left the field the moment Connect was pressed.
     expect(codeField()).toHaveValue('');
     expect(screen.getByRole('status')).toHaveTextContent('Connecting to the bridge');
     await act(async () => {

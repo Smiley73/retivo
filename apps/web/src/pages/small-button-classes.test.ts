@@ -1,13 +1,5 @@
-/**
- * Standalone small (compact) button-class strings.
- *
- * Guards the Tailwind-v4 source-order fix ("Buttons and destructive actions" in docs/ui-conventions.md): the compact button classes
- * are full **standalone** strings, not `${roleClass} ${btnSmClass}`
- * concats — on equal specificity Tailwind emits utilities in numeric
- * source order, so a role class's `px-4 py-2` would silently beat an
- * appended `px-2.5 py-1`. Each standalone string must therefore carry
- * the compact sizing directly and never the full-size padding/text.
- */
+// Standalone small button-class strings, guarding the Tailwind-v4 source-order fix ("Buttons and destructive actions" in docs/ui-conventions.md): on equal specificity Tailwind emits utilities in numeric source order, so a role class's `px-4 py-2` would silently beat an appended `px-2.5 py-1`.
+// Each standalone string must carry the compact sizing directly and never the full-size padding/text.
 import { describe, expect, it } from 'vitest';
 import {
   btnPrimarySmClass,

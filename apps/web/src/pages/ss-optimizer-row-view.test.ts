@@ -1,8 +1,4 @@
-/**
- * Unit tests for the claim-age comparison + current-age resolution that
- * drive the optimizer table's "current → recommended" cell and the
- * live "already applied" button state.
- */
+// The claim-age comparison and current-age resolution behind the optimizer table's "current → recommended" cell and the live "already applied" button state.
 import { describe, expect, it } from 'vitest';
 import {
   claimAgeMatches,
@@ -42,7 +38,6 @@ describe('claimAgeMatches', () => {
   });
 
   it('should_not_match_when_current_carries_months', () => {
-    // A 65y6m current is NOT already at a "65" recommendation.
     expect(claimAgeMatches({ ageYears: 65, ageMonths: 6 }, 65)).toBe(false);
   });
 
@@ -55,8 +50,7 @@ describe('claimAgeMatches', () => {
   });
 
   it('should_match_null_recommendation_only_against_null_current', () => {
-    // Secondary past the claim-age window (null recommendation) is
-    // "already optimal" only when the scenario sets no secondary age.
+    // A secondary past the claim-age window (null recommendation) is already optimal only when the scenario sets no secondary age.
     expect(claimAgeMatches(null, null)).toBe(true);
     expect(claimAgeMatches({ ageYears: 67, ageMonths: 0 }, null)).toBe(false);
   });

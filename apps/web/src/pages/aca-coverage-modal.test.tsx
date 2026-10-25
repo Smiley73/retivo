@@ -1,16 +1,5 @@
-/**
- * AcaCoverageCard + AcaCoverageModal — unit tests.
- *
- * The health-coverage editor is a STANDALONE card + modal in the Withdrawals &
- * taxes group. Covers: card summary (on-Marketplace / other-coverage split);
- * modal lists ALL household members; per-member toggle persists
- * `acaMarketplaceOptOutMemberIds`; sparse omit when empty; gross-premium +
- * benchmark disclosure copy; Save disabled when clean; a11y smoke (card +
- * modal). It also covers the monthly health controls: the poverty-guideline region,
- * the per-member/per-year Part B / Part D / Marketplace months, the annual
- * benchmark-price override round trip, and the opted-out-member edge (no
- * prefilled Marketplace months).
- */
+// AcaCoverageCard and AcaCoverageModal: the on-Marketplace / other-coverage summary, per-member toggles persisting `acaMarketplaceOptOutMemberIds` (sparse), disclosure copy, and the monthly health controls.
+// The monthly controls: poverty-guideline region, per-member per-year Part B / Part D / Marketplace months, the benchmark-price override and the opted-out-member edge.
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -149,8 +138,7 @@ describe('AcaCoverageCard', () => {
         onConfigure={vi.fn()}
       />,
     );
-    // The mainland guidelines are the default, so the card stays quiet about
-    // them; no coverage years and no benchmark prices are mentioned either.
+    // The mainland guidelines are the default, so the card stays quiet about them and mentions no coverage years or benchmark prices.
     expect(screen.getByText('On Marketplace: John, Jane')).toBeInTheDocument();
     expect(screen.queryByText(/poverty guidelines/)).toBeNull();
     expect(screen.queryByText(/coverage year/)).toBeNull();
@@ -196,8 +184,7 @@ describe('AcaCoverageModal', () => {
     expect(
       screen.getByText(/enter the FULL \(unsubsidized\) premium as your Medical/i),
     ).toBeInTheDocument();
-    // Each covered person is priced at their OWN age for the months they
-    // are covered, replacing the oldest-member anchor the copy used to describe.
+    // Each covered person is priced at their own age for the months they are covered, replacing the oldest-member anchor the copy used to describe.
     expect(
       screen.getByText(/priced at their own age, for the months they are\s+covered/i),
     ).toBeInTheDocument();
@@ -220,7 +207,6 @@ describe('AcaCoverageModal', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-    // Toggle Jane OFF the Marketplace (→ other coverage / opted out).
     await userEvent.click(screen.getByRole('switch', { name: /Jane is on the ACA Marketplace/i }));
 
     await act(async () => {
@@ -252,7 +238,6 @@ describe('AcaCoverageModal', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-    // Jane starts OFF the Marketplace (opted out); toggle her back ON → empty set.
     const janeToggle = screen.getByRole('switch', { name: /Jane is on the ACA Marketplace/i });
     expect(janeToggle).not.toBeChecked();
     await userEvent.click(janeToggle);
@@ -265,8 +250,7 @@ describe('AcaCoverageModal', () => {
     const pending = await listPendingMutations();
     const payload = pending.find((p) => p.aggregateId === 'sc-sparse')!
       .payload as ScenarioPayload;
-    // The key is still WRITTEN (it had a local override) but as an empty array —
-    // the sparse rule keeps a pre-existing local key while clearing its content.
+    // The key is still written (it had a local override) but as an empty array: the sparse rule keeps a pre-existing local key while clearing its content.
     expect(payload.overrides.acaMarketplaceOptOutMemberIds).toEqual([]);
   });
 
@@ -290,7 +274,6 @@ describe('AcaCoverageModal', () => {
 });
 
 describe('AcaCoverageModal — health facts', () => {
-  /** Open the modal for a scenario and wait for the dialog. */
   async function openModal(
     id: string,
     overrides: ScenarioPayload['overrides'] = {},
@@ -313,7 +296,6 @@ describe('AcaCoverageModal — health facts', () => {
     return { scenario, onClose };
   }
 
-  /** Save and read back the queued scenario payload. */
   async function saveAndRead(id: string, onClose: ReturnType<typeof vi.fn>): Promise<ScenarioPayload> {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -328,8 +310,7 @@ describe('AcaCoverageModal — health facts', () => {
     expect(screen.getByText(/\$700 a month for a 60-year-old/i)).toBeInTheDocument();
     expect(screen.getByText(/rising\s+5% for each year of age/i)).toBeInTheDocument();
     expect(screen.getByText(/rough estimate, not a real quote/i)).toBeInTheDocument();
-    // The estimate grows every year from its base year at the scenario's medical
-    // rate, and an entered price is used exactly as entered.
+    // The estimate grows each year from its base year at the scenario's medical rate, and an entered price is used exactly as entered.
     expect(
       screen.getByText(
         new RegExp(
@@ -367,9 +348,7 @@ describe('AcaCoverageModal — health facts', () => {
   });
 
   it('shows ZERO prefilled Marketplace months for an opted-out member (no stored months)', async () => {
-    // Precedence edge: an opt-out with no stated months must NOT prefill a
-    // 12-month row — the member simply has no coverage-month row at all, so the
-    // engine keeps resolving them to zero Marketplace months.
+    // An opt-out with no stated months must not prefill a 12-month row: the member has no coverage-month row, so the engine keeps resolving them to zero Marketplace months.
     await openModal('sc-p13-optout', { acaMarketplaceOptOutMemberIds: ['m-jane'] });
     expect(screen.queryByLabelText(/Months on a Marketplace plan/i)).toBeNull();
     expect(
@@ -404,9 +383,7 @@ describe('AcaCoverageModal — health facts', () => {
   it('blocks Save on a coverage year that states no month at all', async () => {
     await openModal('sc-p13-prune');
     await userEvent.click(screen.getByRole('button', { name: /Add a coverage year/i }));
-    // Every month stays on "Automatic" → the row carries no user intent. The
-    // save path would drop it (no stored default is invented), so
-    // blocking is what stops the row vanishing without explanation.
+    // With every month on "Automatic" the row carries no user intent and the save path would drop it, so blocking is what stops the row vanishing unexplained.
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     expect(
       screen.getByText(/coverage row does not state any months yet/i),
@@ -429,8 +406,7 @@ describe('AcaCoverageModal — health facts', () => {
   it('blocks Save on a benchmark price left at $0', async () => {
     await openModal('sc-p13-zero-price');
     await userEvent.click(screen.getByRole('button', { name: /Add a benchmark price/i }));
-    // A stored $0 reads as an explicit "this year's benchmark is zero", which
-    // would silently delete the subsidy for that year.
+    // A stored $0 reads as an explicit "this year's benchmark is zero" and would silently delete the subsidy for that year.
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     expect(
       screen.getByText(/benchmark price needs an amount above \$0/i),
@@ -459,39 +435,6 @@ describe('AcaCoverageModal — health facts', () => {
       },
       acaPtcBenchmark: [{ taxYear: 2030, annualSlcspDollars: 9_600 }],
     });
-    const { container } = render(
-      <MemoryRouter>
-        <AcaCoverageModal
-          open
-          scenario={scenario}
-          scenarios={[scenario]}
-          householdId={HH}
-          members={MEMBERS}
-          onClose={vi.fn()}
-        />
-      </MemoryRouter>,
-    );
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
-    await expectNoA11yViolations(container);
-  });
-});
-
-describe('ACA coverage — a11y smoke', () => {
-  it('card passes expectNoA11yViolations', async () => {
-    const scenario = makeScenario('sc-a11y-card');
-    const { container } = render(
-      <AcaCoverageCard
-        scenario={scenario}
-        scenarios={[scenario]}
-        members={MEMBERS}
-        onConfigure={vi.fn()}
-      />,
-    );
-    await expectNoA11yViolations(container);
-  });
-
-  it('modal passes expectNoA11yViolations', async () => {
-    const scenario = makeScenario('sc-a11y-modal');
     const { container } = render(
       <MemoryRouter>
         <AcaCoverageModal

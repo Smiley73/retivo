@@ -16,7 +16,7 @@ import { formatCurrencyShort } from '../lib/format-currency';
 import { bandSectionH2Class } from './accounts-page-chrome';
 
 /** First RMD year, RMD year count, peak single-year requirement and lifetime shortfall; inputs are already deflated so these match the chart sums. */
-export function summarizeRmd(
+function summarizeRmd(
   rows: ReadonlyArray<RmdChartRow>,
   totalSurplus = 0,
   totalNetTaxableRmd = 0,

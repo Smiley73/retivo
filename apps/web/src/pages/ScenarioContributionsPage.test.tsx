@@ -1,13 +1,5 @@
-/**
- * ScenarioContributionsPage — RA Table migration smoke. Asserts the grid
- * landmark, single-row header, and a
- * focusable in-row money input.
- *
- * Full arrow-key row navigation is not asserted: React Aria's grid
- * focus-delegate fires browser-level focus-manager events that jsdom
- * cannot faithfully synthesize. The keyboard model is covered by the
- * manual keyboard check (Chromium / Firefox / Safari).
- */
+// ScenarioContributionsPage grid landmark, single-row header and a focusable in-row money input.
+// Arrow-key navigation is not asserted: React Aria's grid focus-delegate fires browser-level focus-manager events jsdom cannot synthesize; it is covered by a manual keyboard check.
 import 'fake-indexeddb/auto';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -137,8 +129,7 @@ describe('ScenarioContributionsPage', () => {
       { timeout: 5000 },
     );
     expect(grid).toBeInTheDocument();
-    // The RA grid landmark can mount a tick before its columnheaders under
-    // parallel load; `findByRole` retries until the header row settles.
+    // The grid landmark can mount a tick before its columnheaders under parallel load.
     expect(
       await screen.findByRole('columnheader', { name: 'Account' }),
     ).toBeInTheDocument();
@@ -148,8 +139,6 @@ describe('ScenarioContributionsPage', () => {
     expect(
       await screen.findByRole('columnheader', { name: 'Scenario pre-tax' }),
     ).toBeInTheDocument();
-    // a11y smoke (jest-axe WCAG 2.1 AA) — rolls the shared-component smoke
-    // into the new page-level RA Table tests too.
     await expectNoA11yViolations(container);
   });
 
@@ -170,17 +159,13 @@ describe('ScenarioContributionsPage', () => {
     await waitFor(() =>
       expect(screen.getByText('My 401k')).toBeInTheDocument(),
     );
-    // The first focusable in-row control is the scenario pre-tax
-    // <MoneyInput variant="cell">; assert by its accessible name.
     expect(
       screen.getByLabelText('My 401k scenario pre-tax'),
     ).toBeInTheDocument();
   });
 
   it('no longer shows the stale flat-nominal contribution hint (contributions now track inflation)', async () => {
-    // The override surface drops the old
-    // flat-nominal hint along with AccountContributionsPage — contributions are
-    // inflation-indexed by default now. Assert its absence after the table renders.
+    // Contributions are inflation-indexed by default, so the override surface drops the old flat-nominal hint.
     await seed();
     renderPage();
     await screen.findByRole('columnheader', { name: 'Account' });
@@ -193,12 +178,7 @@ describe('ScenarioContributionsPage', () => {
   });
 
   it('keeps the editable in-row MoneyInput cell mounted across consecutive edits (no-remount proxy)', async () => {
-    // Mirrors the ScenarioReturnsPage pattern: typing into the
-    // MoneyInput cell must NOT trigger a mid-edit remount that evicts
-    // the pending keystroke. The jsdom-stable proxy is that
-    // consecutive input events to the same element both reach the
-    // controlled value AND the queried-by-name reference is the same
-    // object across edits (remount would replace it).
+    // Typing into the MoneyInput cell must not remount mid-edit and evict the pending keystroke; the same element instance must survive consecutive input events.
     await seed();
     renderPage();
     await waitFor(() =>
@@ -210,10 +190,7 @@ describe('ScenarioContributionsPage', () => {
     act(() => {
       fireEvent.input(firstRef, { target: { value: '1000' } });
     });
-    // MoneyInput normalises display to two decimals (`1000` → `1000.00`);
-    // the typed digits must still be present (a mid-edit remount would
-    // clear them). Asserting the prefix keeps the test resilient to
-    // the cell's display-format helper.
+    // MoneyInput normalises display to two decimals (`1000` → `1000.00`); assert the prefix so the test survives the display-format helper.
     expect(firstRef.value).toMatch(/^1000/);
     const secondRef = screen.getByLabelText(
       'My 401k scenario pre-tax',
@@ -222,13 +199,11 @@ describe('ScenarioContributionsPage', () => {
       fireEvent.input(secondRef, { target: { value: '1500' } });
     });
     expect(secondRef.value).toMatch(/^1500/);
-    // The cell was not remounted — same element instance both times.
     expect(firstRef === secondRef).toBe(true);
   });
 
   it('renders <NotesIndicator> next to the account name when notes are set (parity with Accounts + AccountBalances pages)', async () => {
     await seed();
-    // Re-seed the account with a non-empty notes field; same id ⇒ replace.
     const accWithNotes: Aggregate<AccountPayload> = {
       id: 'acc-1',
       householdId: HH,
@@ -262,8 +237,7 @@ describe('ScenarioContributionsPage', () => {
   });
 
   it('shows the "Match inflation (X%)" placeholder with the resolved rate (scenario)', async () => {
-    // This page HAS scenario context, so the inherited-growth placeholder
-    // carries the scenario's resolved general inflation rate.
+    // This page has scenario context, so the inherited-growth placeholder carries the scenario's resolved inflation rate.
     await seed();
     renderPage();
     await waitFor(() =>
@@ -272,7 +246,6 @@ describe('ScenarioContributionsPage', () => {
     const placeholder = screen.getByRole('button', {
       name: /My 401k annual increase — match inflation \(\d+(\.\d+)?%\) \(set a rate\)/i,
     });
-    // The visible copy shows the numeric resolved rate (scenario context).
     expect(placeholder).toHaveTextContent(/Match inflation \(\d+(\.\d+)?%\)/);
   });
 
@@ -282,7 +255,6 @@ describe('ScenarioContributionsPage', () => {
     await waitFor(() =>
       expect(screen.getByText('My 401k')).toBeInTheDocument(),
     );
-    // Start editing growth (placeholder → 0), then type a rate.
     await act(async () => {
       fireEvent.click(
         screen.getByRole('button', {
@@ -314,7 +286,6 @@ describe('ScenarioContributionsPage', () => {
 
   it('clears a scenario annual-increase override back to inherited (scenario)', async () => {
     await seed();
-    // Seed a pre-existing growth override so the input renders on mount.
     const scWithGrowth: Aggregate<ScenarioPayload> = {
       id: SCENARIO_ID,
       householdId: HH,
@@ -341,8 +312,6 @@ describe('ScenarioContributionsPage', () => {
     await waitFor(() =>
       expect(screen.getByText('My 401k')).toBeInTheDocument(),
     );
-    // The override renders the editable input; clearing it drops back to the
-    // inherited "Match inflation (X%)" placeholder.
     expect(
       await screen.findByLabelText('My 401k scenario annual increase'),
     ).toBeInTheDocument();
@@ -363,7 +332,6 @@ describe('ScenarioContributionsPage', () => {
       const stored = (await getAggregate('scenario', SCENARIO_ID)) as
         | Aggregate<ScenarioPayload>
         | null;
-      // No amount diff + no growth override → the whole section is dropped.
       expect(stored?.payload.overrides.accountContributions).toBeUndefined();
     });
   });
@@ -399,13 +367,8 @@ describe('ScenarioContributionsPage', () => {
   });
 
   it('preserves a pre-existing contributionGrowthPct override when an amount is edited', async () => {
-    // Regression: an imported / demo scenario can carry a per-account
-    // `contributionGrowthPct` override that this amounts-only screen never
-    // edits. Saving an amount change must NOT silently drop that growth
-    // override — including for a GROWTH-ONLY account whose amounts match the
-    // baseline (acc-2: no amount diff, growth override only).
+    // Regression: an imported or demo scenario can carry a per-account `contributionGrowthPct` override that this amounts-only screen never edits; saving an amount change must not drop it, including for a growth-only account whose amounts match the baseline (acc-2).
     await seed();
-    // Second account, growth-only override below.
     const acc2: Aggregate<AccountPayload> = {
       id: 'acc-2',
       householdId: HH,
@@ -430,8 +393,6 @@ describe('ScenarioContributionsPage', () => {
       },
     };
     await putAggregate('account', acc2);
-    // Seed the scenario with pre-existing growth overrides (as import/demo
-    // data would): acc-1 has growth only (amounts inherit), acc-2 growth only.
     const scWithGrowth: Aggregate<ScenarioPayload> = {
       id: SCENARIO_ID,
       householdId: HH,
@@ -462,7 +423,6 @@ describe('ScenarioContributionsPage', () => {
     await waitFor(() =>
       expect(screen.getByText('My 401k')).toBeInTheDocument(),
     );
-    // Edit acc-1's pre-tax amount only.
     const acc1Pre = screen.getByLabelText(
       'My 401k scenario pre-tax',
     ) as HTMLInputElement;
@@ -482,20 +442,14 @@ describe('ScenarioContributionsPage', () => {
         | null;
       const per = stored?.payload.overrides.accountContributions?.perAccount;
       expect(per).toBeDefined();
-      // acc-1: amount edited AND growth preserved.
       expect(per?.['acc-1']?.plannedContributionPreTax).toBe(25000);
       expect(per?.['acc-1']?.contributionGrowthPct).toBe(4);
-      // acc-2: growth-only entry survives even with no amount edit.
       expect(per?.['acc-2']?.contributionGrowthPct).toBe(2);
     });
   });
 
   it('shows the inherited explicit rate placeholder on a CHILD scenario (S4a — buildInheritedGrowthMap child branch)', async () => {
-    // A child scenario with no growth override of its own resolves the
-    // PARENT chain via `resolveContributionGrowth(parentScenarioId, …)`.
-    // With the account baseline carrying a fixed 6% rate, the inherited
-    // placeholder must read "Inherited (6%)" — exercising the child branch
-    // (`parentScenarioId !== null`) that every other test leaves untested.
+    // A child scenario with no growth override resolves the parent chain via `resolveContributionGrowth(parentScenarioId, …)`; with a fixed 6% account baseline the placeholder must read "Inherited (6%)", the child branch no other test reaches.
     const m: Aggregate<HouseholdMemberPayload> = {
       id: 'hm-1',
       householdId: HH,
@@ -513,7 +467,6 @@ describe('ScenarioContributionsPage', () => {
       },
     };
     await putAggregate('householdMember', m);
-    // Base scenario, no growth overrides.
     const base: Aggregate<ScenarioPayload> = {
       id: 'base-1',
       householdId: HH,
@@ -532,7 +485,6 @@ describe('ScenarioContributionsPage', () => {
       },
     };
     await putAggregate('scenario', base);
-    // Child scenario, no growth overrides of its own.
     const child: Aggregate<ScenarioPayload> = {
       id: 'child-1',
       householdId: HH,
@@ -551,7 +503,6 @@ describe('ScenarioContributionsPage', () => {
       },
     };
     await putAggregate('scenario', child);
-    // Account baseline carries a fixed 6% annual-increase rate.
     const acc: Aggregate<AccountPayload> = {
       id: 'acc-1',
       householdId: HH,

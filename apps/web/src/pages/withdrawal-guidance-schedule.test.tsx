@@ -1,9 +1,4 @@
-/**
- * WithdrawalGuidanceSchedule — focused tests for the schedule table's
- * Withdraw-cell split sub-note. The overall schedule table wiring is
- * exercised by the WithdrawalGuidancePage integration tests; these tests cover
- * the MIXED per-sub-account split note added in the feature branch.
- */
+// WithdrawalGuidanceSchedule's Withdraw-cell split sub-note for MIXED accounts; the overall table wiring is exercised by the WithdrawalGuidancePage tests.
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
@@ -61,9 +56,7 @@ describe('WithdrawalGuidanceSchedule — MIXED sub-note in Withdraw cell', () =>
         postLabel: 'Roth',
       }),
     ]);
-    // Total still present
     expect(screen.getByText('$10,000')).toBeInTheDocument();
-    // Sub-note present
     expect(screen.getByText(/\$6,000 pre-tax/)).toBeInTheDocument();
     expect(screen.getByText(/\$4,000/)).toBeInTheDocument();
     expect(screen.getByText(/Roth/)).toBeInTheDocument();
@@ -71,16 +64,12 @@ describe('WithdrawalGuidanceSchedule — MIXED sub-note in Withdraw cell', () =>
 
   it('renders no split sub-note for a non-MIXED line', () => {
     renderSchedule([makeRow()]);
-    // Total present
     expect(screen.getByText('$10,000')).toBeInTheDocument();
-    // No pre-tax sub-note
     expect(screen.queryByText(/pre-tax/)).not.toBeInTheDocument();
   });
 
   it('split sub-note: preTaxWithdrawnDollars + postWithdrawnDollars === withdrawnDollars (residual rule)', () => {
-    // $9,999 total, $6,666.67 pre (666_667 cents → $6,666.67 → floor/round to $6,666.67)
-    // post = 9_999 − 6_666.67 = 3_332.33
-    // We supply pre/post already computed (as the data layer does it).
+    // Pre and post are supplied already computed, as the data layer does.
     const pre = 6_666;
     const post = 9_999 - pre; // residual
     const rows = [
@@ -92,7 +81,6 @@ describe('WithdrawalGuidanceSchedule — MIXED sub-note in Withdraw cell', () =>
         postLabel: 'Roth',
       }),
     ];
-    // Assert the math (data layer guarantee)
     const acc = rows[0].accounts[0];
     expect(acc.preTaxWithdrawnDollars! + acc.postWithdrawnDollars!).toBe(acc.withdrawnDollars);
     renderSchedule(rows);
@@ -100,8 +88,7 @@ describe('WithdrawalGuidanceSchedule — MIXED sub-note in Withdraw cell', () =>
   });
 
   it('renders a MIXED account with no split data as having no sub-note in the Withdraw cell', () => {
-    // The schedule only renders the split sub-note when preTaxWithdrawnDollars is
-    // defined; with no split data the cell carries no pre-tax/post-tax sub-note.
+    // The schedule renders the split sub-note only when preTaxWithdrawnDollars is defined; with no split data the cell carries no pre-tax/post-tax sub-note.
     renderSchedule([makeRow({ isMixed: true })]);
     expect(screen.queryByText(/pre-tax/)).not.toBeInTheDocument();
   });

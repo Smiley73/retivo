@@ -1,10 +1,4 @@
-/**
- * Component tests for the Workspace page's Data card: the standalone export
- * re-auth gate, the five-modal import pipeline, and the Data · Workspace tools
- * card-order check. Renders through WorkspacePage, which hosts the card. (The
- * Appearance theme picker moved to the Preferences page — see
- * PreferencesPage.test.tsx.)
- */
+// Workspace page Data card: the standalone export re-auth gate, the five-modal import pipeline and the Data · Workspace tools card order, rendered through WorkspacePage.
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { WorkspacePage } from '../pages/WorkspacePage';
@@ -76,16 +70,12 @@ vi.mock('../sync/SyncContext', () => ({
     notifyPending: notifyPendingMock,
     syncRoundTrip: syncRoundTripMock,
     forceRefresh: forceRefreshMock,
-    // Pass-through fence stub: runs the destructive `fn` so the demo-overwrite
-    // handler body executes (the real provider adds the poll fence + mutex).
+    // Pass-through fence stub: runs the destructive `fn` so the demo-overwrite handler body executes (the real provider adds the poll fence and mutex).
     runDestructive: vi.fn(async (fn: () => Promise<unknown>) => fn()),
   }),
 }));
 
-// The "Export my data" download is the server-authoritative path.
-// Mock its single entry point so the
-// component tests exercise the gate + completion UI without a real
-// bootstrap/pull; the merge logic is unit-tested in server-data-export.test.ts.
+// The "Export my data" download is the server-authoritative path; mock its single entry point so tests cover the gate and completion UI without a real bootstrap/pull (the merge logic is in server-data-export.test.ts).
 vi.mock('../lib/server-data-export', () => ({
   exportServerData: vi.fn().mockResolvedValue({ unresolvedCount: 0 }),
 }));
@@ -129,8 +119,6 @@ function renderPage(overrides: Record<string, unknown> = {}) {
     removePasskey: vi.fn(),
     enrollPasskeyForEncryption: vi.fn().mockResolvedValue(undefined),
     recacheHdk: recacheHdkMock,
-    // Server-authoritative export deps: the export builds a one-shot
-    // sync transport from these.
     getHdk: () => null,
     refreshAccessToken: vi.fn().mockResolvedValue(null),
     hasRole: () => true,
@@ -149,8 +137,6 @@ describe('WorkspacePage Data card — export', () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Export my data' })).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Import from file' })).toBeInTheDocument();
-    // The security/credential cards (Appearance, Passkeys, Recovery, Delete
-    // account) moved off this page — only the Data + Workspace tools cards remain.
     const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
     expect(headings).not.toContain('Appearance');
     expect(headings).not.toContain('Passkeys');
@@ -169,7 +155,6 @@ describe('WorkspacePage Data card — export', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Export my data' })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Export my data' }));
     await waitFor(() => expect(screen.getByText('Export your data?')).toBeInTheDocument());
-    // Gate is open but no export has run yet (ordering: verify before export).
     expect(exportServerData).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'correct-pw' } });
@@ -187,11 +172,7 @@ describe('WorkspacePage Data card — export', () => {
     await waitFor(() => expect(screen.getByText(/Export ready/i)).toBeInTheDocument());
   });
 
-  // The Data card once offered a second, plain-JSON download beside Export.
-  // Gzip is now the only exported format, so the row carries ONE affordance and
-  // the gate's copy never promises an uncompressed file. The lib layer keeps its
-  // `format` parameter (server-data-export.test.ts covers it) — only the UI
-  // choice is gone.
+  // The Data card once offered a plain-JSON download beside Export; gzip is the only format now, so the row carries one affordance and the gate copy never promises an uncompressed file. The lib keeps its `format` parameter (server-data-export.test.ts).
   it('offers a single export affordance — no plain-JSON alternative', async () => {
     renderPage();
     await waitFor(() =>
@@ -224,14 +205,7 @@ describe('WorkspacePage Data card — export', () => {
   });
 
   it('rapid Enter presses while verify is in flight run verify+export only once', async () => {
-    // Hold verifyPassword in flight so the modal stays open while the first
-    // submit is still resolving. A second Enter (a native form submission —
-    // the prompt is a real <form> for password-manager interop) during that
-    // window must be dropped (the form's onSubmit guard returns while the
-    // action is disabled, and the handler's re-entrancy guard backstops it),
-    // not double-verify or double-export. jsdom doesn't run implicit
-    // submission from a keydown, so the Enter press is driven as the submit
-    // event it produces in a real browser.
+    // Hold verifyPassword in flight so the modal stays open: a second Enter (a native form submission) during that window must be dropped by the form's onSubmit guard and the handler's re-entrancy guard.
     let resolveVerify!: () => void;
     const verifyPassword = vi.fn().mockImplementation(
       () => new Promise<void>((resolve) => { resolveVerify = resolve; }),
@@ -246,13 +220,11 @@ describe('WorkspacePage Data card — export', () => {
     const form = input.closest('form');
     expect(form).not.toBeNull();
     fireEvent.change(input, { target: { value: 'correct-pw' } });
-    // First Enter starts the in-flight verify; the button flips to "Exporting…".
     fireEvent.submit(form!);
     await waitFor(() => expect(verifyPassword).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Exporting…' })).toBeInTheDocument(),
     );
-    // Second Enter while still verifying must be a no-op.
     fireEvent.submit(form!);
     expect(verifyPassword).toHaveBeenCalledTimes(1);
 
@@ -268,8 +240,7 @@ describe('WorkspacePage Data card — export', () => {
     await waitFor(() => expect(screen.getByText('Export your data?')).toBeInTheDocument());
 
     const input = screen.getByLabelText('Current password');
-    // Real <form> + autocomplete tokens: password managers key autofill,
-    // save prompts, and fill-and-submit on these.
+    // A real `<form>` with autocomplete tokens is what password managers key autofill, save prompts and fill-and-submit on.
     const form = input.closest('form');
     expect(form).not.toBeNull();
     expect(input).toHaveAttribute('name', 'current-password');
@@ -302,7 +273,6 @@ describe('WorkspacePage Data card — export', () => {
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(/current password is incorrect/i),
     );
-    // Gate still open, export never ran.
     expect(screen.getByText('Export your data?')).toBeInTheDocument();
     expect(exportServerData).not.toHaveBeenCalled();
   });
@@ -321,8 +291,7 @@ describe('WorkspacePage Data card — export', () => {
   });
 
   it('Export my data prompts the gate even on an empty workspace', async () => {
-    // listAggregates already resolves to [] in the db/store mock, so the
-    // rendered workspace is empty. The gate must still prompt.
+    // listAggregates resolves to [] in the db/store mock, so the workspace is empty; the gate must still prompt.
     const verifyPassword = vi.fn().mockResolvedValue(undefined);
     renderPage({ verifyPassword });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Export my data' })).toBeInTheDocument());
@@ -350,11 +319,7 @@ describe('WorkspacePage Data card — export', () => {
 describe('WorkspacePage Data card — import', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset the syncRoundTrip mock fully — `clearAllMocks` clears call
-    // counts but leaves any `mockResolvedValueOnce` queued from a prior
-    // test in place. `mockReset` drains that queue; the
-    // `mockResolvedValue` below restores the success default for tests
-    // that don't override it.
+    // `clearAllMocks` clears call counts but leaves queued `mockResolvedValueOnce` values, so `mockReset` drains them; the `mockResolvedValue` below restores the success default.
     syncRoundTripMock.mockReset();
     syncRoundTripMock.mockResolvedValue({ ok: true });
   });
@@ -440,7 +405,6 @@ describe('WorkspacePage Data card — import', () => {
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(/current password is incorrect/i),
     );
-    // Modal still open, confirm dialog never reached.
     expect(screen.getByText(/Confirm with your password/i)).toBeInTheDocument();
     expect(screen.queryByText(/Replace workspace with file contents\?/i)).not.toBeInTheDocument();
     expect(applyImport).not.toHaveBeenCalled();

@@ -7,13 +7,16 @@
  *
  *   vi.mock('../db/store', async () => (await import('./security-page.test-harness')).dbStoreMock());
  *
- * The spies the cases assert on live on `securityMocks`; the default `useAuth()`
- * value comes from `securityAuthValue`.
+ * The spies the cases assert on live on `securityMocks`; `renderPage` mounts the
+ * page with `useAuth()` returning `securityAuthValue`.
  */
-import { vi } from 'vitest';
+import { render } from '@testing-library/react';
+import type { ComponentType, ReactNode } from 'react';
+import { beforeAll, vi } from 'vitest';
 import { mfaAuthDefaults } from './profile-test-mfa';
 
 export const securityMocks = {
+  useAuth: vi.fn(),
   mockNavigate: vi.fn(),
   notifyPendingMock: vi.fn(),
   syncRoundTripMock: vi.fn().mockResolvedValue({ ok: true }),
@@ -85,7 +88,7 @@ export function apiClientMock(extra: Record<string, unknown> = {}) {
 
 export function authContextMock() {
   return {
-    useAuth: vi.fn(),
+    useAuth: securityMocks.useAuth,
     AuthProvider: ({ children }: { children: unknown }) => children,
     DEVICE_ID_STORAGE_KEY: 'retivo.auth.deviceId',
   };
@@ -157,4 +160,17 @@ export function securityAuthValue(extra: Record<string, unknown> = {}, overrides
     ...mfaAuthDefaults(),
     ...overrides,
   };
+}
+
+// The factories above run while the page's modules are still being mocked, so a static import of the page here would cycle. Suites import this file before any mocked module: first loaded from inside the AuthContext factory, it mounted the page on the real AuthContext.
+let SecurityPage: ComponentType;
+let MemoryRouter: ComponentType<{ children: ReactNode }>;
+beforeAll(async () => {
+  ({ SecurityPage } = await import('./SecurityPage'));
+  ({ MemoryRouter } = await import('react-router'));
+});
+
+export function renderPage(extra: Record<string, unknown> = {}, overrides: Record<string, unknown> = {}) {
+  securityMocks.useAuth.mockReturnValue(securityAuthValue(extra, overrides));
+  return render(<MemoryRouter><SecurityPage /></MemoryRouter>);
 }

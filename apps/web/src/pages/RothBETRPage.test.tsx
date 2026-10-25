@@ -1,10 +1,5 @@
-/**
- * RothBETRPage render tests — empty state, working-years panel (with and
- * without taxable income), retirement table, Apply dialogs, backdoor callout.
- *
- * The deterministic projection runs synchronously off `useBalanceProjectionData`
- * (IndexedDB seeded via `loadDemoData`). `useAuth` is mocked for `householdId`.
- */
+// RothBETRPage: empty state, working-years panel, retirement table, Apply dialogs and backdoor callout.
+// The projection runs synchronously off `useBalanceProjectionData` (IndexedDB seeded via `loadDemoData`); `useAuth` is mocked for `householdId`.
 import 'fake-indexeddb/auto';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -50,13 +45,7 @@ async function findHeader(): Promise<HTMLElement> {
   );
 }
 
-/**
- * Lower the demo Baseline's working-years taxable income so the IRA-source
- * bracket-fill lands in a LOW bracket (T_now) below the RMD-era T_future — the
- * deterministic state where at least one tranche's verdict is `convert` and the
- * working-years Apply button is enabled. (At the demo default of $120k the 22%
- * bracket rate exceeds T_future, so every tranche `hold`s.)
- */
+// Lower the demo Baseline's working-years taxable income so the IRA-source bracket fill lands in a low bracket below the RMD-era T_future: at least one tranche then converts and the working-years Apply button is enabled (at the demo default of $120k every tranche holds).
 async function seedLowWorkingYearsIncome(): Promise<void> {
   const scenarios = (await listAggregates(
     'scenario',
@@ -73,9 +62,7 @@ async function seedLowWorkingYearsIncome(): Promise<void> {
   });
 }
 
-/** No control on the page reads a retired action label, matched by EXACT
- *  accessible name (never a case-insensitive scan over page text, which would
- *  fire on the page's legitimate ordinary-verb "apply" copy). */
+// Matched by exact accessible name: a case-insensitive scan over page text would fire on the page's legitimate ordinary-verb "apply" copy.
 function expectNoRetiredActionLabels(): void {
   expect(screen.queryAllByRole('button', { name: 'Apply' })).toHaveLength(0);
   expect(screen.queryAllByRole('button', { name: 'Applied' })).toHaveLength(0);
@@ -111,12 +98,7 @@ describe('RothBETRPage', () => {
   });
 
   it('should_render_the_save_to_the_scenario_sentence_in_the_page_subtitle', async () => {
-    // The subtitle describes the save action, one of the surfaces the scoped
-    // action-label invariant covers. `expectNoRetiredActionLabels()` queries
-    // only buttons and headings by exact accessible name, and `findHeader()`
-    // matches only the h1, so the subtitle is reachable from nothing else —
-    // without this a revert to the old "one-click apply" wording would leave
-    // the suite green. Verbatim, not a loose regex.
+    // The subtitle describes the save action but is reachable from neither `expectNoRetiredActionLabels()` (buttons and headings by exact name) nor `findHeader()` (h1 only), so without this a revert to "one-click apply" would leave the suite green. Verbatim, not a loose regex.
     await loadDemoData({ householdId: HH, email: 'demo@example.test', displayName: 'Demo User' });
     const { container } = renderPage();
     await findHeader();
@@ -126,7 +108,6 @@ describe('RothBETRPage', () => {
     expect(text).toContain(
       'controls that save a modeled bracket-fill conversion schedule or a pre-RMD MAGI-cap Fill window to the scenario.',
     );
-    // The retired wording must be gone from the subtitle entirely.
     expect(text).not.toContain('one-click apply');
   });
 
@@ -137,8 +118,6 @@ describe('RothBETRPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Working years', level: 2 }),
     ).toBeInTheDocument();
-    // The demo Baseline scenario seeds preRetirementTaxableIncomeDollars, so the
-    // panel shows the populated headroom rather than the needs-input state.
     expect(
       await screen.findByText('Bracket headroom'),
     ).toBeInTheDocument();
@@ -158,8 +137,6 @@ describe('RothBETRPage', () => {
     renderPage();
     await findHeader();
     const input = await screen.findByRole('textbox', { name: 'Leftover-tax rate percent' });
-    // Defaults to the page's RMD-era rate rounded to a whole percent (or the
-    // documented fallback), never blank or fractional.
     const initial = Number((input as HTMLInputElement).value);
     expect(initial).toBeGreaterThan(0);
     expect(Number.isInteger(initial)).toBe(true);
@@ -179,7 +156,6 @@ describe('RothBETRPage', () => {
     expect(
       retirementYears.compareDocumentPosition(comparison) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    // Nothing runs until the user asks.
     expect(screen.getByRole('button', { name: 'Compare conversion plans' })).toBeEnabled();
     expect(screen.queryByRole('progressbar')).toBeNull();
   });
@@ -189,8 +165,6 @@ describe('RothBETRPage', () => {
     await seedLowWorkingYearsIncome();
     renderPage();
     await findHeader();
-    // With a low working-years income the IRA-source bracket-fill produces a
-    // `convert` tranche → the Apply button is ENABLED. Clicking opens the dialog.
     const button = await screen.findByRole('button', {
       name: 'Save working-years conversions to scenario',
     });
@@ -202,19 +176,13 @@ describe('RothBETRPage', () => {
     ).toBeInTheDocument();
   });
 
-  // Scoped action-label invariant, disabled-working-years + retirement-dialog
-  // half. On this page no action control — a control's visible label and its
-  // accessible name, dialog titles and their primary/cancel labels — reads
-  // `Apply` or `Applied` in any state it can reach. The positive assertions
-  // elsewhere in this file cannot catch a control left on the old wording:
-  // they only query names that already changed.
+  // Scoped action-label invariant: no action control (label, accessible name, dialog title, primary/cancel label) reads `Apply` or `Applied` in any reachable state. The positive assertions elsewhere cannot catch a control left on the old wording.
   it('should_render_no_apply_or_applied_action_label_with_the_retirement_dialog_open', async () => {
     await loadDemoData({ householdId: HH, email: 'demo@example.test', displayName: 'Demo User' });
     renderPage();
     await findHeader();
 
-    // At the demo default every tranche holds, so the working-years control
-    // renders in its disabled state here.
+    // At the demo default every tranche holds, so the working-years control renders disabled.
     expect(
       await screen.findByRole('button', {
         name: 'Save working-years conversions to scenario',
@@ -238,8 +206,7 @@ describe('RothBETRPage', () => {
     expectNoRetiredActionLabels();
   });
 
-  // Same invariant over the enabled working-years control and its dialog —
-  // the state the seed below is the only way to reach.
+  // Same invariant over the enabled working-years control and its dialog, reachable only through the seed.
   it('should_render_no_apply_or_applied_action_label_with_the_working_years_dialog_open', async () => {
     await loadDemoData({ householdId: HH, email: 'demo@example.test', displayName: 'Demo User' });
     await seedLowWorkingYearsIncome();
@@ -259,8 +226,6 @@ describe('RothBETRPage', () => {
         name: 'Save working-years conversions to scenario',
       }),
     ).toBeInTheDocument();
-    // The primary control is disabled until a source/target pair is chosen —
-    // both of its states carry the same label.
     expect(within(dialog).getByRole('button', { name: 'Save to scenario' })).toBeDisabled();
     expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expectNoRetiredActionLabels();
@@ -278,10 +243,7 @@ describe('RothBETRPage', () => {
     expect(button).toBeEnabled();
     await userEvent.click(button);
     const dialog = await screen.findByRole('dialog');
-    // Pick the same-owner source/target pair the demo seeds (primary IRA →
-    // primary Roth IRA). The target picker is source-aware, so the source
-    // must be chosen first. The pickers are React Aria listboxes — click the
-    // trigger (by aria-label), then the option.
+    // The target picker is source-aware, so choose the source first. The pickers are React Aria listboxes: click the trigger (by aria-label), then the option.
     await userEvent.click(within(dialog).getByLabelText('Source pre-tax account'));
     await userEvent.click(await screen.findByRole('option', { name: 'Demo Primary IRA' }));
     await userEvent.click(within(dialog).getByLabelText('Target Roth IRA'));
@@ -324,9 +286,6 @@ describe('RothBETRPage', () => {
     });
     await userEvent.click(button);
     const dialog = await screen.findByRole('dialog');
-    // Selecting a Roth target enables Apply (the MAGI-line picker defaults to
-    // IRMAA, so no further input is needed). React Aria listbox: click the
-    // trigger, then the option.
     await userEvent.click(within(dialog).getByLabelText('Target Roth IRA'));
     await userEvent.click(await screen.findByRole('option', { name: 'Demo Primary Roth IRA' }));
     saveMock.mockClear();
@@ -349,14 +308,13 @@ describe('RothBETRPage', () => {
     await userEvent.click(field);
     await userEvent.keyboard('{Control>}a{/Control}{Backspace}');
     await userEvent.type(field, '90000');
-    // Per-keystroke typing must NOT have queued any save (blur-commit).
+    // Per-keystroke typing must not queue a save (blur-commit).
     expect(saveMock).not.toHaveBeenCalled();
     await userEvent.tab(); // blur commits exactly one save
     expect(saveMock).toHaveBeenCalledTimes(1);
   });
 
   it('should_show_an_empty_state_when_no_scenario_is_resolvable', async () => {
-    // No demo data → no scenarios → the page renders its empty state.
     renderPage();
     await findHeader();
     expect(
@@ -365,10 +323,7 @@ describe('RothBETRPage', () => {
   });
 
   it('should_show_the_empty_state_when_the_scenario_has_no_primary_member', async () => {
-    // A resolvable primary base scenario exists, so the page runs the
-    // deterministic builder — but with every household member removed the
-    // runner raises NoPrimaryRetirementError. The page must collapse that to
-    // the empty state, not re-throw it to ErrorBoundary.
+    // With every household member removed the runner raises NoPrimaryRetirementError; the page must collapse that to the empty state, not re-throw to ErrorBoundary.
     await loadDemoData({ householdId: HH, email: 'demo@example.test', displayName: 'Demo User' });
     await deleteAllHouseholdMembers();
     renderPage();
@@ -379,12 +334,7 @@ describe('RothBETRPage', () => {
   });
 
   it('should_show_the_empty_state_when_the_primary_member_has_no_resolvable_retirement_date', async () => {
-    // The primary member stays in the household, but with a blank birthdate
-    // `resolveMemberRetirementDates` can't compute a retirement date for
-    // them (retirementDate() throws, caught, folded to null) — the runner
-    // raises NoPrimaryRetirementError via the same `!primaryRetIso` branch as
-    // the no-primary-member case above. The page must collapse it to the
-    // same empty state, not re-throw it to ErrorBoundary.
+    // A blank birthdate leaves `resolveMemberRetirementDates` unable to compute a retirement date, so the runner raises NoPrimaryRetirementError via the same `!primaryRetIso` branch; same empty state, not ErrorBoundary.
     await loadDemoData({ householdId: HH, email: 'demo@example.test', displayName: 'Demo User' });
     await blankPrimaryMemberBirthdate();
     renderPage();

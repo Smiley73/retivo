@@ -1,26 +1,4 @@
-/**
- * ScenarioFloorsPage render + save tests.
- *
- * Most tests render the page DIRECTLY at the floors route (the `renderAt`
- * helper mounts `<ScenarioFloorsPage>` under a `MemoryRouter`); a separate
- * smoke test renders the full `<App>` at `/scenarios/:id/floors` to prove the
- * route is registered in App.tsx and reachable.
- *
- * Asserts:
- *  - only floor-eligible accounts (taxTreatment ∈ {POST_TAX, HSA})
- *    render; ineligible accounts (401k PRE_TAX, Roth IRA) are absent;
- *  - a floor value can be set on an eligible account (MoneyInput edit →
- *    Save surfaces) and Save persists the numeric / null / trimmed override;
- *  - a row resets to the inherited baseline (clears the local override);
- *  - Reset all clears the whole accountFloors override;
- *  - the HSA mode toggle is present for an HSA row and absent for a
- *    POST_TAX row, and is disabled when no floor is set;
- *  - no floor-ineffective warning renders for any withdrawal strategy;
- *  - the empty-state (no eligible accounts) + scenario-not-found branches;
- *  - keyboard reachability + a WCAG 2.2 AA a11y smoke (shared axe helper);
- *  - the /scenarios/:id/floors route is registered in App.tsx and the
- *    page mounts (integration render of <App> at the floors route).
- */
+// ScenarioFloorsPage render and save over fake-indexeddb. Most cases render the page directly at the floors route; one smoke case renders the full `<App>` to prove the route is registered.
 import 'fake-indexeddb/auto';
 import {
   act,
@@ -48,9 +26,7 @@ import type { AccountType } from '../api/types';
 
 vi.mock('../auth/AuthContext', () => ({ useAuth: vi.fn() }));
 vi.mock('../sync/SyncContext', () => ({ useSync: vi.fn() }));
-// The full-App smoke test mounts the real `<App>`; stub the heavy shell chrome
-// so the route table is reachable without the first-run/bootstrap machinery
-// (mirrors App.test.tsx's stub set).
+// The full-App smoke test stubs the heavy shell chrome so the route table is reachable without the first-run/bootstrap machinery (mirrors App.test.tsx's stub set).
 vi.mock('../layout/Sidebar', () => ({ Sidebar: () => <nav data-testid="sidebar" /> }));
 vi.mock('../components/MobileNavDrawer', () => ({
   MobileNavDrawer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -84,7 +60,7 @@ function setupContexts(): void {
     isBooting: false,
     hasRole: () => true,
     logout: vi.fn(),
-    // The shell's first-run check (never reached here: `lastSyncedAt` is null).
+    // The shell's first-run check is never reached here (`lastSyncedAt` is null).
     fetchAccountRecord: vi.fn().mockResolvedValue({ email: 'me@example.test' }),
   });
   (useSync as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -191,8 +167,6 @@ async function seedScenario(
   await putAggregate('scenario', s);
 }
 
-/** Seed the four-account fixture: two eligible (brokerage POST_TAX, HSA),
- *  two ineligible (401k PRE_TAX, Roth IRA). */
 async function seedEligibilityFixture(): Promise<void> {
   await seedMember('hm-1', 'Alex');
   await seedAccount('acc-bro', 'My Brokerage', 'BROKERAGE', 'POST_TAX');
@@ -221,13 +195,10 @@ describe('ScenarioFloorsPage', () => {
     const grid = await screen.findByRole('grid', {
       name: 'Per-account minimum-balance floors',
     });
-    // Eligible accounts appear.
     expect(await within(grid).findByText('My Brokerage')).toBeInTheDocument();
     expect(within(grid).getByText('My HSA')).toBeInTheDocument();
-    // Ineligible accounts (PRE_TAX 401k, Roth IRA) are filtered out.
     expect(within(grid).queryByText('My 401k')).not.toBeInTheDocument();
     expect(within(grid).queryByText('My Roth IRA')).not.toBeInTheDocument();
-    // Footnote counts the eligible set (2), not all accounts.
     expect(
       screen.getByText('0 of 2 eligible accounts overridden here.'),
     ).toBeInTheDocument();
@@ -240,15 +211,12 @@ describe('ScenarioFloorsPage', () => {
     renderAt('sc-1');
 
     await screen.findByRole('grid', { name: 'Per-account minimum-balance floors' });
-    // Initially no floor → no Save button, and a "No floor" affordance.
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
-    // findBy*, not getBy*: the grid resolving does not guarantee its ROWS
-    // have rendered, and a synchronous get has no retry — this raced.
+    // findBy, not getBy: the grid resolving does not guarantee its rows have rendered, and a synchronous get has no retry.
     const setBtn = await screen.findByRole('button', {
       name: 'My Brokerage minimum balance — no floor (set one)',
     });
     await userEvent.click(setBtn);
-    // The MoneyInput now shows; type a value.
     const input = (await screen.findByLabelText(
       'My Brokerage minimum balance',
     )) as HTMLInputElement;
@@ -262,7 +230,6 @@ describe('ScenarioFloorsPage', () => {
 
   it('resets a row to the inherited baseline (clears the local override)', async () => {
     await seedEligibilityFixture();
-    // Base scenario carries a local floor on the brokerage account.
     await seedScenario('sc-1', 'Base', {
       accountFloors: { perAccount: { 'acc-bro': { floorDollars: 25000 } } },
     });
@@ -270,7 +237,6 @@ describe('ScenarioFloorsPage', () => {
     renderAt('sc-1');
 
     await screen.findByRole('grid', { name: 'Per-account minimum-balance floors' });
-    // The override is reflected: a MoneyInput with the value + a Reset button.
     expect(
       await screen.findByLabelText('My Brokerage minimum balance'),
     ).toBeInTheDocument();
@@ -278,8 +244,6 @@ describe('ScenarioFloorsPage', () => {
       name: 'Reset My Brokerage floor override',
     });
     await userEvent.click(resetBtn);
-    // Reset drops back to inherited (none) → the "No floor" affordance returns
-    // and the row becomes dirty (Save appears).
     expect(
       await screen.findByRole('button', {
         name: 'My Brokerage minimum balance — no floor (set one)',
@@ -292,7 +256,6 @@ describe('ScenarioFloorsPage', () => {
 
   it('shows the HSA mode toggle for an HSA row and not for a POST_TAX row', async () => {
     await seedEligibilityFixture();
-    // Give both eligible accounts a floor so the HSA mode toggle is enabled.
     await seedScenario('sc-1', 'Base', {
       accountFloors: {
         perAccount: {
@@ -305,7 +268,6 @@ describe('ScenarioFloorsPage', () => {
     renderAt('sc-1');
 
     await screen.findByRole('grid', { name: 'Per-account minimum-balance floors' });
-    // HSA row carries the mode radiogroup; brokerage row does not.
     expect(
       await screen.findByRole('radiogroup', { name: 'My HSA HSA floor mode' }),
     ).toBeInTheDocument();
@@ -357,11 +319,9 @@ describe('ScenarioFloorsPage', () => {
       'My Brokerage minimum balance',
     )) as HTMLInputElement;
     await waitFor(() => expect(input).toBeInTheDocument());
-    // The input is reachable + editable by the keyboard (no mouse).
     input.focus();
     expect(input).toHaveFocus();
     await user.keyboard('15000');
-    // A keyboard edit reaches the controlled value (Save surfaces).
     expect(
       await screen.findByRole('button', { name: 'Save' }),
     ).toBeInTheDocument();
@@ -386,8 +346,7 @@ describe('ScenarioFloorsPage', () => {
       renderAt('sc-1');
       await screen.findByRole('grid', { name: 'Per-account minimum-balance floors' });
 
-      // Reveal the MoneyInput, then type a floor.
-      // findBy*: the grid resolving does not guarantee its rows are drawn.
+      // findBy: the grid resolving does not guarantee its rows are drawn.
       await userEvent.click(
         await screen.findByRole('button', {
           name: 'My Brokerage minimum balance — no floor (set one)',
@@ -418,9 +377,7 @@ describe('ScenarioFloorsPage', () => {
 
     it('saves a null floor (clears an inherited floor)', async () => {
       await seedEligibilityFixture();
-      // Parent sets a brokerage floor; the child inherits it. Clearing the
-      // child's floor must persist an explicit `null` (not an absent key) so
-      // the inherited floor is overridden off.
+      // Clearing the child's floor must persist an explicit `null` (not an absent key) so the inherited floor is overridden off.
       await seedScenario('parent', 'Parent', {
         accountFloors: { perAccount: { 'acc-bro': { floorDollars: 30000 } } },
       });
@@ -429,7 +386,6 @@ describe('ScenarioFloorsPage', () => {
       renderAt('sc-1');
       await screen.findByRole('grid', { name: 'Per-account minimum-balance floors' });
 
-      // The inherited floor shows as a MoneyInput; clear it.
       await screen.findByLabelText('My Brokerage minimum balance');
       await userEvent.click(
         screen.getByRole('button', { name: 'Clear My Brokerage minimum balance' }),
@@ -453,8 +409,7 @@ describe('ScenarioFloorsPage', () => {
 
     it('trims sparse — removes accountFloors when a row is set back to the inherited baseline', async () => {
       await seedEligibilityFixture();
-      // Parent floor 30000; child overrides it to 50000. Setting the child back
-      // to exactly the inherited 30000 must drop the whole accountFloors key.
+      // Setting the child back to exactly the inherited value must drop the whole accountFloors key.
       await seedScenario('parent', 'Parent', {
         accountFloors: { perAccount: { 'acc-bro': { floorDollars: 30000 } } },
       });
@@ -512,7 +467,6 @@ describe('ScenarioFloorsPage', () => {
 
   it('shows the empty state when no eligible accounts exist', async () => {
     await seedMember('hm-1', 'Alex');
-    // Only ineligible accounts (PRE_TAX 401k + Roth IRA).
     await seedAccount('acc-401k', 'My 401k', 'RETIREMENT_401K', 'PRE_TAX');
     await seedAccount('acc-roth', 'My Roth IRA', 'RETIREMENT_ROTH_IRA', 'ROTH');
     await seedScenario('sc-1', 'Base');
@@ -529,7 +483,6 @@ describe('ScenarioFloorsPage', () => {
 
   it('shows an error and an All-scenarios link when the scenario is not found', async () => {
     await seedEligibilityFixture();
-    // Do not seed `nonexistent-id`.
 
     renderAt('nonexistent-id');
 
@@ -543,7 +496,6 @@ describe('ScenarioFloorsPage', () => {
 
   it('disables the HSA mode radiogroup when no floor is set', async () => {
     await seedEligibilityFixture();
-    // HSA seeded with no floor (no accountFloors override at all).
     await seedScenario('sc-1', 'Base');
 
     renderAt('sc-1');
@@ -558,11 +510,7 @@ describe('ScenarioFloorsPage', () => {
   });
 
   it('inherits hsaMode from parent even when parent has no floorDollars (regression)', async () => {
-    // Parent sets hsaMode:strict but no floorDollars on acc-hsa.
-    // Child then adds a floorDollars override.  buildInheritedFloors must
-    // walk the parent chain independently for hsaMode so the page shows
-    // 'strict' as the inherited (and current) value — not the emergencyOnly
-    // default that a naive resolver would return.
+    // The parent sets hsaMode:strict without floorDollars; `buildInheritedFloors` must walk the parent chain independently for hsaMode so the page shows 'strict', not the emergencyOnly default a naive resolver returns.
     await seedEligibilityFixture();
     await seedScenario('sc-parent', 'Base', {
       accountFloors: { perAccount: { 'acc-hsa': { hsaMode: 'strict' } } },
@@ -587,18 +535,8 @@ describe('ScenarioFloorsPage', () => {
 
     renderApp('sc-1');
 
-    // The page heading proves the App route table mounts ScenarioFloorsPage.
-    // Re-query inside waitFor rather than asserting on a node captured by
-    // findBy*: mounting the real <App/> resolves the lazy route and then
-    // re-renders, so a node captured on an earlier poll can be detached by
-    // the time the assertion runs (`toBeInTheDocument` then fails even
-    // though the heading is on screen). Re-querying each attempt is immune.
-    // The generous timeout covers the other half of the flake: this is the
-    // only test here that mounts the REAL <App/>, so it pays a cold route
-    // table + lazy-route resolve that occasionally overran waitFor's 1s
-    // default. Measured solo over 50 runs: re-querying alone cut the failure
-    // rate from 20% to 2%; the headroom covers the remainder. A genuine
-    // route-registration break still fails fast — the page never appears.
+    // Re-query inside waitFor rather than asserting on a node captured by findBy: mounting the real `<App/>` resolves the lazy route and re-renders, so a captured node can be detached.
+    // The generous timeout covers the cold route table and lazy-route resolve, which occasionally overran the 1 s default; a genuine route break still fails because the page never appears.
     await waitFor(
       () => {
         expect(

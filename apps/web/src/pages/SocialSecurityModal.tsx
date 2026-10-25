@@ -56,8 +56,8 @@ function collapseAgeToSliderYear(
   return Math.max(min, Math.min(max, raw));
 }
 
-/** Collapses to the slider's whole year (half-away-from-zero) and clamps into [62, 70], e.g. 65y6m → 66 and 61y → 62. Exported for isolation tests. */
-export function claimAgeToSliderYear(years: number, months: number): number {
+/** Collapses to the slider's whole year (half-away-from-zero) and clamps into [62, 70], e.g. 65y6m → 66 and 61y → 62. */
+function claimAgeToSliderYear(years: number, months: number): number {
   return collapseAgeToSliderYear(years, months, SS_CLAIM_MIN, SS_CLAIM_MAX);
 }
 
@@ -66,8 +66,8 @@ const SURVIVOR_CLAIM_MIN = 60;
 const SURVIVOR_CLAIM_MAX = 70;
 const SURVIVOR_CLAIM_SEED = 67;
 
-/** Same collapse clamped into the survivor window [60, 70]. Exported for isolation tests. */
-export function survivorAgeToSliderYear(years: number, months: number): number {
+/** Same collapse clamped into the survivor window [60, 70]. */
+function survivorAgeToSliderYear(years: number, months: number): number {
   return collapseAgeToSliderYear(years, months, SURVIVOR_CLAIM_MIN, SURVIVOR_CLAIM_MAX);
 }
 

@@ -116,9 +116,7 @@ describe('AccountTaxProfileSection', () => {
   });
 
   it('states no basis default in the closed summary or the intro, only the start-year one', () => {
-    // Both basis totals are derived from recorded balance history now, so the
-    // section makes no claim about a blank one. The start-year default is the
-    // one cautious assumption left, and it stays stated.
+    // Both basis totals derive from recorded balance history, so the section makes no claim about a blank one; the start-year default is the one cautious assumption left, and it stays stated.
     render(
       <Controlled
         balances={[
@@ -141,10 +139,7 @@ describe('AccountTaxProfileSection', () => {
     ).toBeInTheDocument();
   });
 
-  // The four removed money labels, across every account shape that used to show
-  // one. Rewritten from the assertions that pinned their presence: the point is
-  // that no account type renders a Roth basis input any more, while the year
-  // editor beside it is untouched.
+  // No account type renders a Roth basis input any more, while the year editor beside it is untouched.
   it.each([
     { label: 'a Roth IRA', type: 'RETIREMENT_ROTH_IRA' as const, taxTreatment: 'ROTH' as const, inherited: false },
     { label: 'an inherited Roth IRA', type: 'RETIREMENT_ROTH_IRA' as const, taxTreatment: 'ROTH' as const, inherited: true },
@@ -163,7 +158,6 @@ describe('AccountTaxProfileSection', () => {
     expect(screen.queryByLabelText('Total contributions made so far')).toBeNull();
     expect(screen.queryByLabelText("Original owner's total contributions")).toBeNull();
     expect(screen.queryByLabelText('Roth contributions in this plan')).toBeNull();
-    // The paired year editor still renders (its derived-value line + override).
     const yearLabel =
       type === 'RETIREMENT_ROTH_IRA'
         ? inherited
@@ -311,11 +305,7 @@ describe('AccountTaxProfileSection', () => {
     expect(screen.getByText("The original owner's date of death")).toBeInTheDocument();
   });
 
-  // No on-screen string may characterise an inherited Roth IRA's five-year
-  // clock: neither engine consults one, so wording that says the clock is
-  // "treated as unmet" describes a treatment no code applies. This is a
-  // factual-accuracy fix to descriptive copy, NOT a change to what is collected — the date
-  // FIELD itself is asserted unchanged in the next test.
+  // No on-screen string may characterise an inherited Roth IRA's five-year clock: neither engine consults one, so wording like "treated as unmet" describes a treatment no code applies. This fixes descriptive copy, not what is collected (the date field is asserted unchanged below).
   it('never characterises an inherited Roth IRA’s five-year clock', () => {
     render(
       <Controlled
@@ -326,20 +316,14 @@ describe('AccountTaxProfileSection', () => {
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Advanced tax details' }));
-    // The five surfaces that used to describe a five-year clock on this account:
-    // the closed summary, the derived-value line, the field hint, the section
-    // intro, and the conversion-recording note (hidden here because an inherited
-    // Roth IRA can no longer receive conversions and no clock is tracked for it).
+    // The five surfaces that used to describe the clock: the closed summary, the derived-value line, the field hint, the section intro and the conversion-recording note (hidden because an inherited Roth IRA can no longer receive conversions).
     expect(screen.queryByText(/five-year rule/i)).toBeNull();
     expect(screen.queryByText(/treated as unmet/i)).toBeNull();
     expect(screen.queryByText(/five-year clock/i)).toBeNull();
     expect(screen.getByText(/Roth start: not recorded/)).toBeInTheDocument();
   });
 
-  // The inherited basis hint used to be the one place that
-  // still described a basis ordering. Both the field and its hint are gone: the
-  // intro says only that an inherited Roth IRA's withdrawals are fully tax-free,
-  // and names no basis figure at all.
+  // The intro says only that an inherited Roth IRA's withdrawals are fully tax-free; the basis field and hint are gone.
   it('makes no basis claim of any kind on an inherited Roth IRA', () => {
     render(
       <Controlled
@@ -362,13 +346,9 @@ describe('AccountTaxProfileSection', () => {
     render(<Controlled type="RETIREMENT_ROTH_IRA" taxTreatment="ROTH" />);
     fireEvent.click(screen.getByRole('button', { name: 'Advanced tax details' }));
     expect(screen.getAllByText(/five-year rule/i).length).toBeGreaterThan(0);
-    // The conversion-recording note (and its per-conversion-year clock wording)
-    // still renders when the account is NOT inherited.
     expect(screen.getByText(/Each conversion year has its own five-year clock/)).toBeInTheDocument();
   });
 
-  // The date field itself is untouched on an inherited Roth IRA: still
-  // labelled, still editable, still stored.
   it('still collects the first-contribution year on an inherited Roth IRA', () => {
     render(
       <Controlled

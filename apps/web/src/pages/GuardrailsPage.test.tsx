@@ -1,10 +1,4 @@
-/**
- * Tests for `GuardrailsPage`.
- *
- * The vm is mocked so the page's verdict mapping, PoS-temper display, config
- * summary, empty states, and Check-now wiring are asserted in isolation; a11y
- * smoke covers the interactive ready state.
- */
+// GuardrailsPage with the vm mocked: verdict mapping, PoS-temper display, config summary, empty states and Check-now wiring.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -105,7 +99,6 @@ describe('GuardrailsPage — config summary + verdict mapping', () => {
     expect(
       screen.getByText('Guaranteed income covers your spending'),
     ).toBeInTheDocument();
-    // Never NaN/∞ — the ratio renders as an em dash.
     expect(screen.getByText('—')).toBeInTheDocument();
   });
 
@@ -119,13 +112,10 @@ describe('GuardrailsPage — config summary + verdict mapping', () => {
       checkNow: vi.fn(),
     };
     renderPage();
-    // Range position reflects the RAW verdict (140% is objectively above the
-    // 115% upper edge); tempering only drives the MC-context Alert.
+    // Range position reflects the raw verdict; tempering only drives the MC-context Alert.
     expect(screen.getByText('Above the selected funded range')).toBeInTheDocument();
     expect(screen.getByText(/only 62%/i)).toBeInTheDocument();
-    // Regression lock: the range-position BODY reflects the RAW verdict, so it
-    // must state the ratio is at/above the upper edge — never the tempered
-    // 'hold' body that would falsely claim it falls BETWEEN the edges.
+    // The range-position body reflects the raw verdict: at/above the upper edge, never the tempered 'hold' body that would claim it falls between the edges.
     expect(
       screen.getByText(
         'Your funded ratio is 140% — at or above the upper edge of your selected range (115%).',
@@ -139,7 +129,6 @@ describe('GuardrailsPage — config summary + verdict mapping', () => {
     expect(
       screen.getByLabelText('Guardrails disclaimer'),
     ).toBeInTheDocument();
-    // Lock the substantive scope-specific content, not just the card's presence.
     expect(
       screen.getByText(/statistical, hypothetical estimate/i),
     ).toBeInTheDocument();

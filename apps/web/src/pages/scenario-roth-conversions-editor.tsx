@@ -50,9 +50,9 @@ import {
 
 /**
 * A fresh seed: the first pre-tax source and Roth-IRA target, $10k/yr, a one-year window at the current year.
-* A year END anchor is inclusive (resolveEndMonth maps it to Jan 1 of Y+1), so start = end converts exactly one year. Exported for the default-window regression test.
+* A year END anchor is inclusive (resolveEndMonth maps it to Jan 1 of Y+1), so start = end converts exactly one year.
 */
-export function defaultConversion(
+function defaultConversion(
   sourceId: string,
   targetId: string,
 ): DraftRothConversion {
