@@ -1,18 +1,5 @@
-// Required-stack-config coverage guard. Two concerns, both creds-free and
-// dependency-free (node --test, run under `pnpm test:scripts`):
-//
-//   1. Example-YAML coverage — both Pulumi.<stack>.yaml.example files carry all
-//      ten required stack config keys with their selected values, so
-//      the "fail-loud when missing" contract is never accidentally regressed
-//      by an example that drops a key.
-//   2. Parser/validator behavior — the pure helpers in
-//      infrastructure/src/config-helpers.mjs reject a missing required key
-//      and an off-enum logRetentionDays such as 45, and accept
-//      the example values 7 and 90. These run without a Pulumi runtime or AWS
-//      credentials because the helpers consume a plain string getter.
-//
-// Pattern: scripts/test/csp-contract.test.mjs (reads an infra file as text) +
-// scripts/test/affected-core.test.mjs (imports a pure .mjs helper).
+// Both Pulumi.<stack>.yaml.example files carry every required stack config key, and the helpers in
+// infrastructure/src/config-helpers.mjs reject a missing key or an off-enum logRetentionDays.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,9 +25,7 @@ import {
   parseRequiredBoolean,
 } from '../../infrastructure/src/config-helpers.mjs';
 
-// The protocol package is ESM-only and infrastructure is CommonJS, so only
-// this test imports it (built `dist`, by relative path) to pin the documented
-// default to the package.
+// ESM-only package, CommonJS infrastructure: only this test imports the built `dist` to pin the documented default.
 const { DEFAULT_BRIDGE_PORT } = await import(
   '../../packages/assistant-protocol/dist/index.js'
 ).catch((error) => {
@@ -56,40 +41,31 @@ const INFRA = resolve(__dirname, '../../infrastructure');
 // --- 1. Example-YAML coverage ----------------------------------------------
 
 const REQUIRED_VALUES = {
-  // The dev example ships every paid-service switch off: a fresh copy
-  // deploys the cheapest stack and each switch is an explicit opt-in.
+  // Dev ships every paid-service switch off.
   dev: {
     'retivo:enableWaf': 'false',
     'retivo:manageCloudTrail': 'false',
     'retivo:enablePitr': 'false',
-    // Immutable AWS Backup vault — prod-only, so dev ships false.
     'retivo:enableBackups': 'false',
-    // Four alarm groups, each deploying exactly its own alarms.
     'retivo:enableSecurityAlarms': 'false',
     'retivo:enableApiHealthAlarms': 'false',
     'retivo:enableBackgroundJobAlarms': 'false',
     'retivo:enableCapacityAlarms': 'false',
     'retivo:logRetentionDays': '7',
-    // Blank: with nothing alerting the key is not required, and a non-empty
-    // placeholder would let a later dev alarm group deploy mailing a dead
-    // address instead of failing loud.
+    // Blank: a placeholder would let a later alarm group deploy mailing a dead address instead of failing loud.
     'retivo:alarmNotificationEmail': '',
   },
   prod: {
     'retivo:enableWaf': 'true',
     'retivo:manageCloudTrail': 'true',
     'retivo:enablePitr': 'true',
-    // Immutable AWS Backup vault — enabled on prod.
     'retivo:enableBackups': 'true',
-    // Prod ships the full alarm inventory: all four groups on.
     'retivo:enableSecurityAlarms': 'true',
     'retivo:enableApiHealthAlarms': 'true',
     'retivo:enableBackgroundJobAlarms': 'true',
     'retivo:enableCapacityAlarms': 'true',
     'retivo:logRetentionDays': '90',
-    // Prod ships the alarm-email key present-but-blank (mirrors sesFromAddress):
-    // the operator fills a real monitored inbox before `pulumi up --stack prod`.
-    // The key must still be declared so config load can fail loud if dropped.
+    // Present but blank: config load fails loud if the key is dropped.
     'retivo:alarmNotificationEmail': '',
   },
 };
@@ -114,10 +90,7 @@ for (const [stack, keys] of Object.entries(REQUIRED_VALUES)) {
   });
 }
 
-// Signup-approval inbox (`retivo:approverEmail` → api APPROVER_EMAIL).
-// Conditionally required by infrastructure/src/config.ts (whenever
-// sesFromAddress is a real address), so both examples must declare the key
-// present-but-blank next to sesFromAddress for the operator to fill in.
+// `retivo:approverEmail` is required once sesFromAddress is real, so both examples declare it blank.
 for (const stack of ['dev', 'prod']) {
   test(`${stack} example declares retivo:approverEmail`, () => {
     const source = readFileSync(
@@ -132,10 +105,7 @@ for (const stack of ['dev', 'prod']) {
   });
 }
 
-// Optional (non-required) key: `retivo:lambdaConcurrencyQuota`. Both examples
-// ship the current real quota ("10") — the `retivo:approverEmail` block above
-// is the right precedent, not REQUIRED_VALUES, since this key has a code
-// default and must never be counted among the required keys.
+// Optional key with a code default, so it stays out of REQUIRED_VALUES.
 for (const stack of ['dev', 'prod']) {
   test(`${stack} example declares retivo:lambdaConcurrencyQuota: "10"`, () => {
     const source = readFileSync(
@@ -150,8 +120,7 @@ for (const stack of ['dev', 'prod']) {
   });
 }
 
-// `retivo:enableObservability` was replaced by the four alarm switches and
-// has no upgrade path: neither example may carry it any more.
+// Replaced by the four alarm switches, with no upgrade path.
 for (const stack of ['dev', 'prod']) {
   test(`${stack} example does not declare the removed retivo:enableObservability`, () => {
     const source = readFileSync(
@@ -162,10 +131,7 @@ for (const stack of ['dev', 'prod']) {
   });
 }
 
-// Optional keys for the dev edge IP gate + the API Gateway stage throttle.
-// The dev example ships the gate key present-but-blank (off) next to a
-// deliberately LOW throttle; prod ships the code-default throttle and no gate
-// key at all (config load refuses a non-empty one there).
+// Prod has no gate key: config load refuses a non-empty one there.
 test('dev example declares retivo:edgeAllowedIps: "" (gate off until the operator fills it)', () => {
   const source = readFileSync(resolve(INFRA, 'Pulumi.dev.yaml.example'), 'utf8');
   assert.match(source, /^\s*retivo:edgeAllowedIps:\s*""\s*$/m);
@@ -187,10 +153,7 @@ for (const [stack, rate, burst] of [
   });
 }
 
-// The AI assistant connector switch is OFF by default: neither example may
-// set it (a stack that copies an example must not enable the connector), and
-// the commented hint carries the package's default port so the documented
-// value cannot drift from DEFAULT_BRIDGE_PORT.
+// The connector is off by default: neither example sets it, and the commented hint must carry DEFAULT_BRIDGE_PORT.
 for (const stack of ['dev', 'prod']) {
   test(`${stack} example cannot switch the assistant connector on, and documents DEFAULT_BRIDGE_PORT`, () => {
     const source = readFileSync(resolve(INFRA, `Pulumi.${stack}.yaml.example`), 'utf8');
@@ -203,8 +166,7 @@ for (const stack of ['dev', 'prod']) {
 
 // --- 2. parseRequiredBoolean -----------------------------------------------
 
-// Map-backed getter mirroring pulumi.Config.get: returns the string or
-// undefined for an absent key.
+// Mirrors pulumi.Config.get.
 const getterFor = (entries) => (key) => entries[key];
 
 test('parseRequiredBoolean — missing required key throws', () => {
@@ -420,8 +382,7 @@ for (const bad of [
   '2001:db8::1',
   '1.2.3.4/33',
   '1.2.3.4/0',
-  // Leading zeros read as octal by inet_aton/curl but decimal by a naive
-  // parse — the operator would test one host and allow another.
+  // inet_aton/curl read leading zeros as octal, a naive parse as decimal.
   '010.0.0.1',
   '1.2.3.04',
   '1.2.3.4/01',

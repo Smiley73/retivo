@@ -1,17 +1,6 @@
 /**
- * The AI assistant connector, end to end on the dev origin: the real built
- * bridge is started as a stdio MCP server and driven by a hand-written stdio
- * client (no MCP SDK enters the web workspace). The journey: every tool is
- * declared at start and answers `NOT_PAIRED` with a one-time code before
- * pairing; the code goes into the Settings card, the consent dialog is
- * accepted, `retivo_status` then returns a real envelope, the activity viewer
- * lists the call with its byte size and shows no email or last name in what
- * was sent, and Disconnect ends it.
- *
- * Needs `apps/mcp-bridge/dist` (build the protocol package and the bridge
- * first) and a dev build that carries the bridge port; `playwright.config.ts`
- * hands the web server `VITE_ASSISTANT_BRIDGE_PORT`, so a dev server that was
- * already running without it skips this journey with the reason.
+ * The AI assistant connector against the real built bridge over stdio: pair, consent, answer a tool, list it in the activity viewer, disconnect.
+ * Needs `apps/mcp-bridge/dist` built; a dev server started without `VITE_ASSISTANT_BRIDGE_PORT` skips it with the reason.
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';

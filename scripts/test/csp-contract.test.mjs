@@ -1,36 +1,5 @@
-// CSP regression guard. EXECUTES the CloudFront security-headers function
-// generator (infrastructure/src/edge-functions.mjs → securityHeadersCode)
-// against a fake viewer-response event and asserts on the CSP it sets, in both
-// branches of the one stack-gated entry:
-//
-//   - OFF (`retivo:assistantBridgePort` unset, the default on every stack):
-//     the emitted code is byte-for-byte what cloudfront.ts inlined before the
-//     generator moved, so `pulumi preview` on an existing stack shows no
-//     change to the `*-security-headers` function, and `connect-src 'self'`
-//     carries no `ws` anywhere.
-//   - ON: the CSP gains exactly one entry, `ws://127.0.0.1:<port>`, equal to
-//     `loopbackWsUrl(port)` from packages/assistant-protocol, and no other
-//     directive changes. Never `ws:`, `wss:`, `*` or `localhost`.
-//
-// It also keeps the two directives the Tailwind v4 + React Aria primitive
-// layer and the Argon2id WASM module depend on:
-//
-//   - `style-src 'self' 'unsafe-inline'`  — Tailwind/React Aria inject
-//     component positioning + dev styles inline; tightening this breaks the
-//     UI.
-//   - `script-src 'self' 'wasm-unsafe-eval'` — the strict XSS posture MUST
-//     stay intact; `'wasm-unsafe-eval'` (WASM compile only) is added for the
-//     Argon2id key-wrapping WASM module. The insecure `'unsafe-eval'`
-//     (arbitrary JS eval) MUST stay absent in every infra file that emits
-//     function code.
-//
-// The protocol package is ESM-only and infrastructure is CommonJS, so
-// infrastructure formats the entry itself; this test imports the package's
-// built `dist` by relative path to pin the two strings to each other.
-//
-// Runs under `pnpm test:scripts` (already invoked by `pnpm test`). Lives in
-// scripts/test/ (not flat scripts/) so Node's test runner does not match the
-// built-in `test-*.mjs` discovery glob. Pattern: scripts/test/edge-functions.test.mjs.
+// CSP of the CloudFront security-headers function: the stack-gated `ws://127.0.0.1:<port>` entry (absent by default) plus the style-src and script-src directives the UI and Argon2id WASM need.
+// Imports the protocol package's built `dist` by relative path, since infrastructure is CommonJS and formats the entry itself.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,9 +25,7 @@ const { DEFAULT_BRIDGE_PORT, loopbackWsUrl } = await import(
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INFRA_SRC = resolve(__dirname, '../../infrastructure/src');
 const CLOUDFRONT_SOURCE = readFileSync(resolve(INFRA_SRC, 'cloudfront.ts'), 'utf8');
-// The SPA-router / IP-gate / security-headers generators live in a sibling
-// dependency-free module; scan it too so the 'unsafe-eval' guard covers every
-// byte of function code the edge publishes.
+// Scanned too so the 'unsafe-eval' guard covers all function code the edge publishes.
 const EDGE_FUNCTIONS_SOURCE = readFileSync(resolve(INFRA_SRC, 'edge-functions.mjs'), 'utf8');
 
 /** Compile generated function source and return its `handler`. */
@@ -90,10 +57,7 @@ function directivesOf(headers) {
   return headers['content-security-policy'].value.split('; ');
 }
 
-// The handler source cloudfront.ts inlined before the generator moved here,
-// comments included. Pinned byte for byte: a regex check would pass a
-// reordered or re-commented function that still makes `pulumi preview` show a
-// function update on an unchanged stack.
+// Pinned byte for byte, comments included: a reordered or re-commented function would make `pulumi preview` show an update on an unchanged stack.
 const TODAY_SOURCE = [
   'function handler(event) {',
   '  var response = event.response;',
@@ -166,7 +130,7 @@ test('SPA CSP keeps script-src strict with WASM-only eval (XSS posture)', () => 
         "'wasm-unsafe-eval' (WASM compile only) is required for the Argon2id " +
         'key-wrapping WASM module',
     );
-    // The insecure form ('unsafe-eval' = arbitrary JS eval) must NEVER appear.
+    // Plain 'unsafe-eval' (arbitrary JS eval) must be absent.
     assert.doesNotMatch(csp, /(?<!wasm-)unsafe-eval/);
   }
 });

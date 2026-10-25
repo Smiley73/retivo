@@ -1,15 +1,5 @@
-// SPA-bucket deletion-protection guard. Reads infrastructure/src/spa-hosting.ts
-// as TEXT and asserts the structural proof that `protect: true` +
-// `forceDestroy: false` are declared UNCONDITIONALLY for every stack — the same
-// technique scripts/test/monitoring-contract.test.mjs uses for its ungated
-// alarms: slice the source to the resource's own declaration, then assert both
-// the values AND the absence of any conditional token that could scope them to
-// one stack. Pulumi resources can't be unit-tested directly (no live AWS
-// runtime), so this static IaC contract is what actually pins the guard.
-//
-// Creds-free, no Pulumi runtime, no new dependency. Runs under `pnpm
-// test:scripts`. Lives in scripts/test/ so node's `test-*.mjs` discovery glob
-// does not match it.
+// infrastructure/src/spa-hosting.ts is read as text: `protect: true` and `forceDestroy: false` are declared unconditionally,
+// with no conditional token that could scope them to one stack.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,20 +10,12 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SPA_HOSTING = readFileSync(resolve(__dirname, '../../infrastructure/src/spa-hosting.ts'), 'utf8');
 
-/** Strip block + line comments so the conditional-token scan (and the
- *  protect-stripped fixture below) never trip on the prose EXPLAINING the
- *  guard rather than the guard itself — the declaration's own comments
- *  legitimately say "every stack" and quote `protect: true` in prose. */
+/** Strip comments: the declaration's own prose says "every stack" and quotes `protect: true`. */
 function stripComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 }
 
-/**
- * The source substring of the SPA bucket's own `new aws.s3.Bucket(...)` call —
- * from the `${namePrefix}-spa` name token through its matching closing `);` —
- * comments stripped, so every assertion below scopes to that resource's
- * actual CODE, not its own explanatory prose.
- */
+/** The SPA bucket's own `new aws.s3.Bucket(...)` call, from its name token through the closing `);`, comments stripped. */
 function spaBucketDeclaration() {
   const marker = '`${namePrefix}-spa`';
   const at = SPA_HOSTING.indexOf(marker);
@@ -43,9 +25,7 @@ function spaBucketDeclaration() {
   return stripComments(SPA_HOSTING.slice(at, end));
 }
 
-// A conditional token on any of these would mean the guard is scoped to one
-// stack rather than declared for all of them — the exact regression this
-// guards against (e.g. `protect: stack === "prod"`).
+// A conditional token on any of these would scope the guard to one stack (e.g. `protect: stack === "prod"`).
 const CONDITIONAL_TOKENS = [/\bstack\b/, /\bisProd\b/, /\?\s*[^:]+:/, /\bnamePrefix\s*===/];
 
 function assertUnconditional(slice, label) {
@@ -69,10 +49,7 @@ test('the SPA bucket declares forceDestroy: false', () => {
 });
 
 test('protect: true is unconditional — no stack/isProd/ternary/namePrefix gate anywhere in the declaration', () => {
-  // Scoped to the whole declaration (not just around the `protect:` line):
-  // the structural proof the monitoring contract uses for its ungated alarms
-  // — a `stack === "prod" ? true : false` gate elsewhere in the same
-  // resource-options object would still defeat the "every stack" guarantee.
+  // The whole declaration, not just around `protect:`: a gate elsewhere in the same options object would still defeat it.
   assertUnconditional(spaBucketDeclaration(), 'protect: true');
 });
 

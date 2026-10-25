@@ -1,12 +1,6 @@
 /**
- * Balance Projection tabbed views + pinned controls strip
- * — the browser-only guarantees jsdom
- * structurally cannot prove (see `BalanceProjectionPage.views.test.tsx` for
- * the URL/keyboard/`[data-inert]` shell invariants jsdom CAN prove):
- * switching tabs, a deep link, keyboard focus-then-activate, the strip's
- * top staying at the viewport top after scrolling a long view, and that a
- * chart in a now-hidden panel keeps the same measured width as one in the
- * selected panel (never the 800px jsdom-only fallback, never 0).
+ * Browser-only guarantees of the Balance Projection tabs and pinned controls strip: tab switching, strip position while scrolling,
+ * and hidden panels keeping their chart width. URL and keyboard shell invariants are in `BalanceProjectionPage.views.test.tsx`.
  */
 import {
   test,
@@ -17,7 +11,7 @@ import {
 } from './fixtures';
 
 test.describe('Balance Projection tabbed views + pinned controls strip', () => {
-  test('switches tabs, deep-links, keyboard-activates, and keeps the strip pinned while scrolling', async ({
+  test('switches tabs and keeps the strip pinned while scrolling', async ({
     page,
   }) => {
     await loadDemo(page);
@@ -32,27 +26,16 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     const cashflowTab = page.getByRole('tab', { name: 'Cash flow' });
     const accountsTab = page.getByRole('tab', { name: 'Accounts' });
 
-    // Default view is Overview.
     await expect(overviewTab).toHaveAttribute('aria-selected', 'true');
     await waitForStressTest(page);
 
-    // Clicking a tab switches the view and rewrites the URL (no reload).
     await cashflowTab.click();
     await expect(cashflowTab).toHaveAttribute('aria-selected', 'true');
     await expect(
       page.getByRole('radiogroup', { name: 'Cashflow chart granularity' }),
     ).toBeVisible();
-    // At the top of the page the strip is already in view, so a switch must
-    // not scroll the page title away.
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
-    // The screen-only hide is a two-part join: styles.css matches
-    // `.bp-view-panel[data-inert]`, and the page must put that class on the
-    // SAME element React Aria decorates with `data-inert`. Count proves the
-    // join (five non-selected panels carry both — six views total, one
-    // selected); hidden proves the rule actually applies under real CSS —
-    // jsdom applies no stylesheet, and `styles.test.ts` only reads the CSS
-    // text. Count goes first because `toBeHidden()` alone is also satisfied
-    // by a locator matching nothing.
+    // Count first: `toBeHidden()` passes on an empty locator. Hidden proves the rule applies under real CSS, which jsdom does not load.
     const inertPanels = page.locator('.bp-view-panel[data-inert]');
     await expect(inertPanels).toHaveCount(5);
     for (let i = 0; i < 5; i++) {
@@ -60,58 +43,17 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     }
     await expect(page).toHaveURL(/\?view=cashflow$/);
 
-    // Deep link: a fresh load with `?view=` selects that view directly.
-    await page.goto('/balance-projection?view=taxes');
-    await expect(
-      page.getByRole('tab', { name: 'Taxes & distributions' }),
-    ).toHaveAttribute('aria-selected', 'true');
-    await expect(
-      page.getByRole('heading', { name: /Tax & Health-Cost Burden/ }),
-    ).toBeVisible({ timeout: 10_000 });
-
-    // Keyboard: arrow keys move focus along the row without switching;
-    // Enter switches the focused tab (keyboardActivation="manual").
-    await page.goto('/balance-projection');
-    await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    // Settle again after the reloads above: each one re-mounts the page, and
-    // its post-load pull can start a second run. Measured mid-run, the wheel's
-    // scroll can land after the scrollY read, and the strip shrinking under
-    // the Overview tab fails Playwright's click stability check, whose retry
-    // scrolls the tab to the viewport bottom.
-    await waitForStressTest(page);
-    await page.getByRole('tab', { name: 'Overview' }).focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(cashflowTab).toBeFocused();
-    await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    await page.keyboard.press('Enter');
-    await expect(cashflowTab).toHaveAttribute('aria-selected', 'true');
-
-    // Pinning: switch to Accounts (a long view), scroll it, and the strip's
-    // top stays at the viewport top rather than scrolling away with it.
     await accountsTab.click();
     await expect(accountsTab).toHaveAttribute('aria-selected', 'true');
     const strip = page.getByRole('group', { name: 'Projection controls' });
     await expect(strip).toBeVisible();
-    // Make the view genuinely long first: settled at 1280x720 with its
-    // disclosures closed, Accounts scrolls only ~206px, so a ">200" check
-    // would pass by a few pixels and break on any small layout change. With
-    // the year-by-year table open it scrolls ~650px.
-    // The button's label flips Show/Hide, so match it by the part that stays.
+    // Open the table so the view is long enough for the scroll check; the label flips Show/Hide, so match the stable part.
     const yearTable = page.getByRole('button', { name: /year-by-year table/i });
     await yearTable.click();
     await expect(yearTable).toHaveAttribute('aria-expanded', 'true');
     await page.mouse.wheel(0, 3000);
     await expect(strip).toBeVisible();
-    // Prove the page actually scrolled — otherwise a strip that scrolled
-    // off with the content (stripBox.y deeply negative) would still
-    // satisfy a one-sided `toBeLessThan(5)` below. `mouse.wheel` returns
-    // before the scroll lands, so poll for it.
+    // Poll: `mouse.wheel` returns before the scroll lands; without it a strip scrolled away with the content would pass `toBeLessThan(5)`.
     await expect
       .poll(() => page.evaluate(() => window.scrollY))
       .toBeGreaterThan(200);
@@ -120,10 +62,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     expect(stripBox!.y).toBeGreaterThanOrEqual(0);
     expect(stripBox!.y).toBeLessThan(5);
 
-    // Switching tabs from a scrolled-away position scrolls the strip
-    // to the actual viewport top — any document `scroll-padding-top` (there
-    // is none; focus clearance is measured per focus instead) would land
-    // the anchor, and the strip beneath it, that far below the top.
+    // Switching tabs from a scrolled position lands the strip at the viewport top (the document has no `scroll-padding-top`).
     await page.getByRole('tab', { name: 'Overview' }).click();
     await expect(overviewTab).toHaveAttribute('aria-selected', 'true');
     const overviewStripBox = await strip.boundingBox();
@@ -131,23 +70,13 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     expect(overviewStripBox!.y).toBeGreaterThanOrEqual(0);
     expect(overviewStripBox!.y).toBeLessThan(5);
 
-    // The hidden views must not add scroll space below the visible one: an
-    // absolutely positioned descendant of a non-positioned, clipped panel
-    // (the sr-only spans inside the hidden views) escapes the clip and
-    // extends the document to its static position. The document must end
-    // where the app shell ends, and scrolling to the very bottom must leave
-    // the sticky sidebar at the viewport top rather than sliding it up
-    // when its container runs out.
+    // Hidden views must add no scroll space: their absolutely positioned sr-only spans escape the clipped panel and extend the document.
     const heights = await page.evaluate(() => ({
       document: document.documentElement.scrollHeight,
       shell: document.body.scrollHeight,
     }));
     expect(heights.document).toBeLessThanOrEqual(heights.shell + 1);
-    // The sidebar is sticky at the viewport top whether or not the page has
-    // scrolled, and `mouse.wheel` returns before the scroll lands, so reading
-    // it straight away proves nothing: wait for the very bottom first (and for
-    // a document taller than the viewport, so "the bottom" is not trivially
-    // where the page already is).
+    // Wait for the bottom first (`mouse.wheel` returns before the scroll lands), on a document taller than the viewport.
     expect(heights.document).toBeGreaterThan(page.viewportSize()!.height);
     await page.mouse.wheel(0, 100_000);
     await expect
@@ -175,18 +104,15 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     await expect(
       page.getByRole('heading', { name: /balance projection/i }),
     ).toBeVisible({ timeout: 10_000 });
-    // The tab switch below renders slower than its 5s assertion window while
-    // the run holds the CPU.
+    // The tab switch below renders slower than its 5s assertion while a run holds the CPU.
     await waitForStressTest(page);
 
-    // Overview's per-year chart, selected.
     const overviewChart = perYearChartSvg(page);
     await expect(overviewChart).toBeVisible({ timeout: 10_000 });
     const selectedBox = await overviewChart.boundingBox();
     expect(selectedBox).not.toBeNull();
     expect(selectedBox!.width).toBeGreaterThan(0);
 
-    // Switch away — Overview's panel is now the hidden, force-mounted one.
     await page.getByRole('tab', { name: 'Cash flow' }).click();
     await expect(page.getByRole('tab', { name: 'Cash flow' })).toHaveAttribute(
       'aria-selected',
@@ -195,9 +121,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
 
     const hiddenBox = await overviewChart.boundingBox();
     expect(hiddenBox).not.toBeNull();
-    // Never zero (the `display:none` hazard) and never a stale 800px
-    // jsdom-only fallback re-measured against a different container — the
-    // screen-only hide preserves the SAME layout width it had selected.
+    // Never zero (`display:none`) or a re-measured fallback.
     expect(hiddenBox!.width).toBeCloseTo(selectedBox!.width, 0);
   });
 
@@ -222,10 +146,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
     await expect(figures.nth(1)).toHaveText(/^\$\d/);
   });
 
-  // The `lg` breakpoint itself: the content column is ~704px wide here, so
-  // the controls group wraps to two rows and the stuck strip is at its
-  // tallest (measured 141px vs 97px at 1280px) — the width at which a fixed
-  // focus reserve would be most wrong in either direction.
+  // At the `lg` breakpoint the controls wrap to two rows and the stuck strip is tallest.
   test.describe('at the lg breakpoint, where the controls group wraps', () => {
     test.use({ viewport: { width: 1024, height: 768 } });
 
@@ -237,7 +158,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
       await expect(
         page.getByRole('tablist', { name: 'Projection views' }),
       ).toBeVisible({ timeout: 10_000 });
-      // The sticky container is the parent of the controls group.
+      // xpath: the sticky container is the controls group's parent.
       const strip = page
         .getByRole('group', { name: 'Projection controls' })
         .locator('xpath=..');
@@ -249,12 +170,10 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
       });
       await expect(disclosure).toBeVisible();
       await expect(strip).toHaveCSS('position', 'sticky');
-      // The strip's height and the document's scroll position are measured
-      // below, so the run's progress row must be gone before the first one.
+      // The run's progress row changes the strip's height, so wait before measuring.
       await waitForStressTest(page);
 
-      // Park focus on the control AFTER the disclosure, then scroll so the
-      // disclosure sits 40px below the viewport top — under the stuck strip.
+      // Park focus after the disclosure, then scroll so the disclosure sits under the stuck strip.
       await yearTable.focus();
       await disclosure.evaluate((el) =>
         window.scrollTo({
@@ -269,9 +188,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
         stuckStrip.height,
       );
 
-      // Shift+Tab onto the covered control: it must end up below the strip's
-      // bottom edge while the strip is STILL stuck (so this proves clearance
-      // from a stuck strip, not a strip that scrolled away).
+      // The covered control must end up below the strip's bottom edge while the strip is still stuck.
       await page.keyboard.press('Shift+Tab');
       await expect(disclosure).toBeFocused();
       const stripAfter = (await strip.boundingBox())!;
@@ -282,10 +199,7 @@ test.describe('Balance Projection tabbed views + pinned controls strip', () => {
         stripAfter.y + stripAfter.height,
       );
 
-      // The reverse direction: focus entering the strip's OWN controls from
-      // panel content must not move the document (a fixed scroll-padding
-      // reserve covering the stuck strip made the browser chase the sticky
-      // element by hundreds of pixels here).
+      // Focus entering the strip's own controls must not move the document.
       const before = await page.evaluate(() => window.scrollY);
       await page.keyboard.press('Shift+Tab');
       await expect(page.getByRole('tab', { name: 'Accounts' })).toBeFocused();

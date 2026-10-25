@@ -1,17 +1,5 @@
-// Bundle contract for the AI assistant connector: a production SPA build that
-// carries no `VITE_ASSISTANT_BRIDGE_PORT` (the connector is off) contains no
-// loopback WebSocket URL, and one that does carries it.
-//
-// The URL template lives in `loopbackWsUrl` (packages/assistant-protocol) and is
-// reached only through `bridgeSocketUrl` (apps/web/src/assistant/bridge-port.ts),
-// whose guard is a compile-time constant in such a build, so the bundler drops
-// the template with the dead branch. This test builds the real web app twice
-// (`vite build` into throwaway directories, NODE_ENV=production exactly as
-// `build_spa` pins it) and scans every emitted file.
-//
-// Heavier than the other scripts/test/ checks (two real Vite builds), so it is a
-// plain node:test run by `pnpm test:contracts` (RUN_CONTRACT_TESTS=1) and
-// skipped under `pnpm test:scripts`. Pattern: lambda-artifact-contract.test.mjs.
+// A production SPA build without `VITE_ASSISTANT_BRIDGE_PORT` has no loopback WebSocket URL and one with it does; two real Vite builds.
+// Gated: skipped under `pnpm test:scripts`, run by `pnpm test:contracts` (RUN_CONTRACT_TESTS=1).
 
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,8 +15,7 @@ const WEB_ROOT = resolve(REPO_ROOT, 'apps', 'web');
 const BUILD_TIMEOUT_MS = 300_000;
 const PORT = '24580';
 
-// The bridge URL, not a bare `127.0.0.1`: the dev-credentials host check
-// legitimately names that address and is not a socket URL.
+// Not a bare `127.0.0.1`: the dev-credentials host check names that address too.
 const LOOPBACK_WS_URL = /ws:\/\/127\.0\.0\.1/;
 
 const RUN = process.env.RUN_CONTRACT_TESTS === '1';

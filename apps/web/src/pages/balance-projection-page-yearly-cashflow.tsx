@@ -96,7 +96,6 @@ export const YearlyCashflowBand: React.FC<YearlyCashflowBandProps> = ({
         </div>
         <div className="report-print-hide flex items-center gap-2">
           <ChartZoomReset isZoomed={zoom.isZoomed} onReset={zoom.reset} />
-          {/* A distinct ariaLabel from the granularity group so the name-scoped balance-projection-radiogroup e2e is unaffected. */}
           <SegmentedRadioGroup<ExpenseMode>
             size="sm"
             ariaLabel="Cashflow expense breakdown"

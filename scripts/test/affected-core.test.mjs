@@ -1,8 +1,5 @@
-// Unit tests for the pure affected-test decision logic. Runs via
-// `node --test scripts/test/` (joined to `pnpm test` by the root `test`
-// script). Lives in scripts/test/ — NOT flat scripts/ — so Node's test
-// runner does not auto-execute scripts/test-affected.mjs (it matches Node's
-// built-in `test-*.mjs` discovery glob and would fire git/child_process).
+// Unit tests for the pure affected-test decision logic. Lives in scripts/test/, not flat scripts/, because Node's
+// `test-*.mjs` discovery glob would otherwise execute scripts/test-affected.mjs.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

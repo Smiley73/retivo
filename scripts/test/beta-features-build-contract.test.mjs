@@ -1,24 +1,5 @@
-// Deploy contract for the stack-driven SPA build config: `build_spa` in
-// infrastructure/scripts/lib/deploy-common.sh reads two optional Pulumi stack
-// keys and bakes them into the bundle.
-//
-//   - `retivo:betaFeatures` -> VITE_BETA_FEATURES via `resolve_beta_features`.
-//     A genuinely *missing* key defaults to `all`; any other `pulumi config get`
-//     failure aborts, and an id the registry
-//     (apps/web/src/lib/feature-flags.ts) does not know is rejected.
-//   - `retivo:assistantBridgePort` -> VITE_ASSISTANT_BRIDGE_PORT via
-//     `resolve_assistant_bridge_port`. A missing key means OFF: the build gets
-//     no such variable at all (not an empty one). The CSP entry the same key
-//     adds is pinned in csp-contract.test.mjs.
-//
-// Runs the real shell function under bash with `pulumi` and `pnpm` replaced by
-// stub executables on PATH — no Pulumi runtime, no AWS, no build. The stubbed
-// `pulumi` answers `config get retivo:<key>` per key; the stubbed `pnpm`
-// records the environment the web build was invoked with. A stack that sets the
-// bridge port also serves the bridge file (`stage_bridge_bundle`): the stubs
-// record that second build and the staging call, and a stack without the port
-// makes neither. The staging script itself is tested in
-// stage-bridge-bundle.test.mjs. Runs under `pnpm test:scripts`.
+// Deploy contract for `build_spa` (infrastructure/scripts/lib/deploy-common.sh): the stack keys `retivo:betaFeatures` and
+// `retivo:assistantBridgePort` become VITE_* build variables. Runs the real shell function with `pulumi` and `pnpm` stubbed on PATH.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,14 +25,7 @@ const NOT_FOUND = (key) => ({
   stderr: `error: configuration key 'retivo:${key}' not found for stack 'dev'`,
 });
 
-/**
- * Run `build_spa dev` with a stub `pulumi` that answers `config get
- * retivo:<key>` from `answers` (`{ betaFeatures, assistantBridgePort }`, each
- * `{ stdout, stderr, exit }`); a key with no entry is "not found", like a
- * stack that never set it. The stub `pnpm` dumps its env. `ambient` adds
- * variables to the operator's shell. Returns the spawn result, the baked env
- * (null when the build never ran) and the keys `pulumi` was asked for.
- */
+/** Run `build_spa dev`: stub `pulumi` answers `config get retivo:<key>` from `answers` (a missing key is "not found"); stub `pnpm` dumps the web build's env. */
 function runBuildSpa(answers = {}, ambient = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'beta-build-'));
   const bin = join(dir, 'bin');

@@ -1,11 +1,5 @@
-// Static IaC contract for the RevokedToken `UserIndex` GSI (used by the
-// full-account export). Reads infrastructure/src/dynamo.ts and
-// infrastructure/src/iam.ts as TEXT and asserts: the GSI is declared on the
-// RevokedToken table, its ARN is listed in the api role's resource list, and
-// no OTHER DynamoDB action was added to the api policy for it. Pulumi resources can't be
-// unit-tested directly (no live AWS runtime), so this static contract is what
-// actually pins the grant boundary — mirrors
-// scripts/test/monitoring-contract.test.mjs.
+// Static IaC contract for the RevokedToken `UserIndex` GSI: infrastructure/src/dynamo.ts and iam.ts are read as text.
+// The GSI is declared, its ARN is in the api role's resources, and no other DynamoDB action was added for it.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,12 +35,7 @@ test('the api role resource list includes the UserIndex GSI ARN', () => {
 });
 
 test('no DynamoDB action beyond the existing set was added to the api policy', () => {
-  // The complete, exact action vocabulary the api policy is allowed to use
-  // across every DynamoDB statement (DynamoTableActions, ScanLimitedTables,
-  // HouseholdSweepBatchWrites, HouseholdKeyEnvelopeActions, MfaSecretPointOps,
-  // TrustedDevicePointOpsAndQuery). This deliverable adds
-  // a Query-on-GSI read (already covered by the existing `dynamodb:Query`
-  // grant) and no new action name.
+  // The exact action vocabulary of every DynamoDB statement in the api policy.
   const allowedActions = new Set([
     'dynamodb:GetItem',
     'dynamodb:PutItem',
@@ -57,15 +46,11 @@ test('no DynamoDB action beyond the existing set was added to the api policy', (
     'dynamodb:DescribeTable',
     'dynamodb:Scan',
     'dynamodb:BatchWriteItem',
-    // Named only in comments explaining AWS has no such action to grant/
-    // withhold — never an actual statement action. Allow-listed here so
-    // that documentation doesn't fail this contract.
+    // Named only in comments, never as a statement action.
     'dynamodb:TransactWriteItems',
     'dynamodb:TransactGetItems',
   ]);
-  // Scope to the api role's policy document only: from its `apiPolicyDocument`
-  // declaration up to (not including) the compactor role's declaration, which
-  // follows the api `RolePolicy` that closes the api policy.
+  // The api policy document only: up to the compactor role's declaration.
   const start = IAM.indexOf('const apiPolicyDocument');
   const end = IAM.indexOf('const compactorRole = new aws.iam.Role(');
   assert.notEqual(start, -1);

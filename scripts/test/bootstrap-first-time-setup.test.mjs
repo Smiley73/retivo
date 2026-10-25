@@ -1,17 +1,5 @@
-// Contract for bootstrap-stack.sh's first-time setup
-// (infrastructure/scripts/lib/first-time-setup.sh): on a fresh account it
-// creates the hardened state bucket, a per-stack passphrase in SSM and the
-// Pulumi stack; a re-run creates nothing and never replaces the stored
-// passphrase; and deploy-stack.sh's setup_pulumi_backend never creates any of
-// them.
-//
-// Runs the real shell functions under bash with stub `aws` and `pulumi`
-// executables first on PATH. The stubs keep their state in files under a temp
-// dir (buckets, SSM parameters, the stack's state object) so a second run sees
-// what the first created, and log every call with its arguments to
-// calls.log. INFRA_DIR is a temp dir with its own Pulumi.<stack>.yaml and
-// .deploy.env: setup_pulumi_backend appends to .deploy.env, so pointing at the
-// real infrastructure/ would change the developer's file.
+// bootstrap-stack.sh's first-time setup creates the state bucket, SSM passphrase and Pulumi stack once and never replaces the passphrase.
+// Runs the real shell functions under bash with stub `aws` and `pulumi` on PATH and a temp INFRA_DIR, so the real .deploy.env is untouched.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
