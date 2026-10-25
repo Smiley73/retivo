@@ -1,15 +1,5 @@
-/**
- * Unit tests for FailedLoginService.verifyWithBackoff — the shared password
- * re-verify + per-account backoff primitive behind the destructive step-up
- * flows (DELETE /auth/account, POST /sync/workspace/clear).
- *
- * The decisive contract: a failure is recorded ONLY on a genuine wrong
- * password (`verify` resolves `false`), NEVER on a backend/transient fault
- * (`verify` throws). The earlier catch-all recorded a failure on any thrown
- * error, so a transient DynamoDB/argon2 fault after a CORRECT password could
- * increment the counter and eventually 429-lock a legitimate account. These
- * pure-stub tests exercise all four branches directly.
- */
+// FailedLoginService.verifyWithBackoff, the shared password re-verify and backoff primitive: a failure is recorded only on a genuine wrong password (verify resolves false), never on a backend fault
+// (verify throws); a catch-all that counted any thrown error could let a transient fault after a correct password eventually 429-lock a legitimate account.
 import 'reflect-metadata';
 import { HttpException, UnauthorizedException } from '@nestjs/common';
 import { FailedLoginService } from './failed-login.service.js';
@@ -40,8 +30,6 @@ function makeService() {
   const trustedDevices = buildTrustedDevices();
   const notice = buildNotice();
   const service = new FailedLoginService(repo, trustedDevices, notice);
-  // Spy on the collaborators so the assertions isolate verifyWithBackoff's
-  // dispatch logic from the DynamoDB-backed counter mechanics.
   const checkBackoff = jest.spyOn(service, 'checkBackoff');
   const recordFailure = jest
     .spyOn(service, 'recordFailure')
@@ -85,7 +73,6 @@ describe('FailedLoginService.verifyWithBackoff', () => {
     expect((err as HttpException).getResponse()).toMatchObject({
       code: 'LOGIN_BACKOFF',
     });
-    // The password is never tested and the counter is never touched.
     expect(verify).not.toHaveBeenCalled();
     expect(recordFailure).not.toHaveBeenCalled();
     expect(clear).not.toHaveBeenCalled();
@@ -119,7 +106,6 @@ describe('FailedLoginService.verifyWithBackoff', () => {
     });
     expect(recordFailure).toHaveBeenCalledTimes(1);
     expect(recordFailure).toHaveBeenCalledWith(EMAIL, null, null, undefined);
-    // A rejected password must NOT clear the counter.
     expect(clear).not.toHaveBeenCalled();
   });
 
@@ -133,10 +119,8 @@ describe('FailedLoginService.verifyWithBackoff', () => {
       service.verifyWithBackoff({ emailLowercase: EMAIL, verify }),
     );
 
-    // The original fault propagates verbatim — not reshaped into a 401.
     expect(err).toBe(backendFault);
-    // The decisive assertion: a thrown error is a backend/transient fault, not
-    // an auth failure, so the backoff counter is left completely untouched.
+    // A thrown error is a backend fault, not an auth failure, so the backoff counter is left untouched.
     expect(recordFailure).not.toHaveBeenCalled();
     expect(clear).not.toHaveBeenCalled();
   });
@@ -189,7 +173,7 @@ describe('FailedLoginService.checkBackoff — derived from count + latest failur
 
   it('is unblocked once the derived window has elapsed (old failure timestamp)', async () => {
     const { service, repo } = build();
-    // 4th failure earns a 2 s wait, but the miss was 60 s ago → window passed.
+    // The 4th failure earns a 2 s wait, but the miss was 60 s ago.
     (repo.find as jest.Mock).mockResolvedValue(
       attemptRow({
         consecutiveFailures: 4,

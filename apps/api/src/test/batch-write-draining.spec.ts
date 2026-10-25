@@ -1,25 +1,12 @@
-/**
- * Unit tests for `batchWriteDraining` — the shared household-sweep helper
- * that drains DynamoDB `BatchWriteItem` `UnprocessedItems`.
- *
- * DynamoDB can return HTTP 200 with a non-empty `UnprocessedItems` map
- * (throttling / capacity) that the SDK does NOT auto-resubmit. The four
- * sweep repos route their batch-delete through this helper so a throttled
- * sweep resubmits the leftover items (delete is idempotent) instead of
- * silently leaving household rows behind. Focused unit test: the document
- * client is stubbed so the send sequence is deterministic; fake timers
- * collapse the backoff sleeps so the persistent-throttle case stays fast.
- */
+// batchWriteDraining, the household-sweep helper that drains BatchWriteItem UnprocessedItems: DynamoDB can return HTTP 200 with leftover items the SDK does not resubmit, so a throttled sweep must
+// resubmit them (delete is idempotent) rather than leave rows behind. The document client is stubbed; fake timers collapse the backoff sleeps.
 import {
   BatchWriteCommand,
   type DynamoDBDocumentClient,
 } from '@aws-sdk/lib-dynamodb';
-import {
-  BATCH_WRITE_MAX_ATTEMPTS,
-  BatchWriteDrainError,
-  batchWriteDraining,
-  type BatchWriteRequestItems,
-} from '../dynamo/batch-write.util.js';
+import { batchWriteDraining } from '../dynamo/batch-write.util.js';
+
+type BatchWriteRequestItems = Parameters<typeof batchWriteDraining>[1];
 
 const TABLE = 'MutationLog';
 
@@ -32,7 +19,6 @@ describe('batchWriteDraining', () => {
     const initial: BatchWriteRequestItems = {
       [TABLE]: [deleteRequest('a'), deleteRequest('b')],
     };
-    // First send leaves `b` unprocessed; the resubmit clears it.
     const leftover: BatchWriteRequestItems = { [TABLE]: [deleteRequest('b')] };
     const send = jest
       .fn()
@@ -43,8 +29,7 @@ describe('batchWriteDraining', () => {
     await expect(batchWriteDraining(doc, initial)).resolves.toBeUndefined();
 
     expect(send).toHaveBeenCalledTimes(2);
-    // The second send carries ONLY the returned unprocessed subset — not the
-    // full original batch.
+    // The second send carries only the returned unprocessed subset, not the full original batch.
     const secondCommand = send.mock.calls[1][0] as BatchWriteCommand;
     expect(secondCommand).toBeInstanceOf(BatchWriteCommand);
     expect(secondCommand.input.RequestItems).toEqual(leftover);
@@ -54,20 +39,18 @@ describe('batchWriteDraining', () => {
     jest.useFakeTimers();
     try {
       const items: BatchWriteRequestItems = { [TABLE]: [deleteRequest('a')] };
-      // Every send reports the same item unprocessed — a persistent throttle.
       const send = jest.fn().mockResolvedValue({ UnprocessedItems: items });
       const doc = { send } as unknown as DynamoDBDocumentClient;
 
       const promise = batchWriteDraining(doc, items);
-      // Surface the rejection to the pending-rejection tracker before draining
-      // timers, so a throw inside the loop is captured rather than unhandled.
-      const assertion = expect(promise).rejects.toBeInstanceOf(
-        BatchWriteDrainError,
-      );
+      // Attaching the rejection handler before draining timers keeps a throw inside the loop from being unhandled.
+      const assertion = expect(promise).rejects.toMatchObject({
+        name: 'BatchWriteDrainError',
+      });
       await jest.runAllTimersAsync();
       await assertion;
 
-      expect(send).toHaveBeenCalledTimes(BATCH_WRITE_MAX_ATTEMPTS);
+      expect(send).toHaveBeenCalledTimes(8);
     } finally {
       jest.useRealTimers();
     }

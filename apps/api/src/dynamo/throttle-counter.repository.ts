@@ -11,10 +11,10 @@ import { BaseRepository } from './base.repository.js';
 // Separates throttle rows from passkey-challenge rows in the shared table key namespace.
 const KEY_PREFIX = 'throttle:';
 
-export interface ThrottleCounterResult {
-  /** Hit count within the current window, INCLUDING this call's hit. */
+interface ThrottleCounterResult {
+  // Hit count within the current window, INCLUDING this call's hit.
   hits: number;
-  /** Epoch-milliseconds the current window ends. */
+  // Epoch-milliseconds the current window ends.
   windowEndMs: number;
 }
 

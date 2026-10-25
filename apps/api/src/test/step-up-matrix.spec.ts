@@ -1,27 +1,7 @@
-/**
- * Step-up proof matrix, proven once per gated endpoint.
- *
- * With `AUTH_MFA_ENFORCED=true`, every destructive or factor-changing write
- * demands the account password plus a fresh step-up factor. The five outcomes
- * are the same for every endpoint, so this table-driven spec runs them across
- * all of them in a single app boot instead of each feature spec carrying its
- * own copy:
- *
- *   - valid authenticator-app code            -> success
- *   - emailed code (the no-lockout floor)     -> success
- *   - correct password, no factor             -> 400 STEP_UP_PROOF_MISSING
- *   - wrong factor code                       -> 401 MFA_CODE_INVALID
- *   - wrong emailed code                      -> 401 MFA_CODE_INVALID
- *   - wrong password (with a valid factor)    -> 401 INVALID_CREDENTIALS
- *
- * Endpoint-specific behaviour (replay, restriction lifecycle, audit rows that
- * differ per endpoint, flag-off floors) stays in the feature specs.
- *
- * `@simplewebauthn/server`'s registration verifier is mocked to a deterministic
- * verified outcome (same seam as enrollment-gate.spec.ts) so the passkey
- * enrollment endpoint can be driven without a software authenticator.
- */
+// Step-up proof matrix, once per gated endpoint under AUTH_MFA_ENFORCED=true: authenticator and emailed codes succeed, no factor is 400 STEP_UP_PROOF_MISSING, a wrong
+// factor or emailed code is 401 MFA_CODE_INVALID, a wrong password is 401 INVALID_CREDENTIALS. Endpoint-specific behaviour stays in the feature specs.
 
+// The passkey enrollment endpoint is driven by mocking the registration verifier, since there is no software authenticator.
 const verifyRegistrationResponse = jest.fn();
 jest.mock('@simplewebauthn/server', () => ({
   ...jest.requireActual('@simplewebauthn/server'),
@@ -51,24 +31,17 @@ const WRONG_PASSWORD = 'WrongPassw0rd!';
 type Reject = 'missing' | 'wrongPassword' | 'wrongFactor';
 
 interface Prepared {
-  /** TOTP secret when an authenticator app was enrolled during setup. */
   secret?: string;
-  /** Fire the endpoint with `proof` merged in and the given account password. */
   send(proof: Record<string, unknown>, password?: string): request.Test;
-  /** Endpoint-specific assertions on a successful response. */
   afterOk?(res: request.Response): Promise<void>;
-  /** Endpoint-specific assertions after a rejection (nothing was changed). */
   afterReject?(kind: Reject): Promise<void>;
 }
 
 interface Op {
   name: string;
-  /** Purpose the emailed step-up code is bound to. */
   purpose: string;
   ok: number;
-  /** Whether a live authenticator-app code can prove this op. */
   totpProves: boolean;
-  /** Prepare account state; `totp` enrols an authenticator app first. */
   prepare(s: Session, totp: boolean): Promise<Prepared>;
 }
 
@@ -207,8 +180,7 @@ describe('step-up proof matrix (AUTH_MFA_ENFORCED=true)', () => {
       purpose: 'mfa_totp_disable',
       ok: 200,
       totpProves: true,
-      // The authenticator app is the factor being removed, so it is always
-      // enrolled; the emailed code is then the no-lockout floor.
+      // The authenticator app is the factor being removed, so it is always enrolled; the emailed code is then the no-lockout floor.
       async prepare(s) {
         const secret = await enrollTotp(t, s);
         return {
@@ -293,8 +265,7 @@ describe('step-up proof matrix (AUTH_MFA_ENFORCED=true)', () => {
       name: 'POST /auth/mfa/totp/enroll/confirm',
       purpose: 'mfa_totp_enroll',
       ok: 200,
-      // An enrolled authenticator app would make this a re-enrolment, so only
-      // the emailed-code floor proves it.
+      // An enrolled authenticator app would make this a re-enrolment, so only the emailed-code floor proves it.
       totpProves: false,
       async prepare(s) {
         const start = await authSet(s)(api().post('/api/v1/auth/mfa/totp/enroll/start')).send({});

@@ -3,12 +3,9 @@ import { Module } from '@nestjs/common';
 import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
 import pino, { type DestinationStream } from 'pino';
 
-/**
- * Builds the pino destination: a SonicBoom sink on fd 1 with `sync: true`. Under Lambda freeze a pipe write is
- * buffered in userland (including pino default `pino.destination(1)`), so a line logged near the end of an invocation
- * could never reach CloudWatch; only a synchronous destination hands the byte to the OS before the handler returns.
- */
-export function createSyncStdoutDestination(): DestinationStream {
+// A SonicBoom sink on fd 1 with `sync: true`: under Lambda freeze a pipe write is buffered in userland (including pino
+// default `pino.destination(1)`), so a line logged near the end of an invocation could never reach CloudWatch.
+function createSyncStdoutDestination(): DestinationStream {
   return pino.destination({ dest: 1, sync: true });
 }
 

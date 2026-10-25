@@ -1,23 +1,5 @@
-/**
- * Cross-instance + opt-out guarantees for the shared request-throttle
- * counter.
- *
- * The cross-instance guarantee rests on DynamoDB's item-level atomicity, so
- * it is proved against the real emulator (`pnpm emu:up`) with TWO
- * INDEPENDENTLY bootstrapped app instances — separate `TestingModule`/DI
- * containers, each resolving its OWN `ThrottlerStorage` instance (the exact
- * object `ThrottlerGuard` calls in a running app, fetched via
- * `@nestjs/throttler`'s own `getStorageToken()`), sharing one table
- * namespace. A test that reused one DI container or one storage object
- * would prove nothing here — the old per-process `ThrottlerStorageService`
- * passed that degenerate shape too.
- *
- * The opt-out test runs against the shared harness's default
- * `DISABLE_THROTTLE=true` (jest.setup.ts) — unlike
- * `clear-workspace-throttle.spec.ts`, which is the one file that clears the
- * flag to prove throttling IS enforced, this file proves the opt-out
- * short-circuits BEFORE the guard ever touches storage.
- */
+// Cross-instance and opt-out guarantees of the shared request-throttle counter, proved with two independently bootstrapped app instances each resolving its own ThrottlerStorage (the object ThrottlerGuard calls) over one table namespace.
+// The opt-out test uses the harness default DISABLE_THROTTLE=true (jest.setup.ts), unlike clear-workspace-throttle.spec.ts, and proves the opt-out short-circuits before the guard touches storage.
 import { getStorageToken } from '@nestjs/throttler';
 import type { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
@@ -31,8 +13,7 @@ describe('shared throttle counter storage — cross-instance', () => {
   let storageB: ThrottlerStorage;
 
   beforeAll(async () => {
-    // Two independently bootstrapped app instances — the real-world shape
-    // of two Lambda instances sharing one table.
+    // Two Lambda instances sharing one table.
     a = await bootstrapTestApp();
     b = await bootstrapTestApp();
     storageA = a.module.get(getStorageToken());
@@ -61,9 +42,7 @@ describe('shared throttle counter storage — cross-instance', () => {
     expect(r3.totalHits).toBe(3);
     expect(r3.isBlocked).toBe(false);
 
-    // The 4th hit, on the OTHER instance, is the one that trips the limit —
-    // proving the count is the cross-instance total, not either object's
-    // own view.
+    // The 4th hit on the other instance trips the limit, so the count is the cross-instance total.
     const r4 = await storageB.increment(key, ttl, limit, ttl, 'default');
     expect(r4.totalHits).toBe(4);
     expect(r4.isBlocked).toBe(true);
@@ -74,8 +53,7 @@ describe('shared throttle counter storage — opt-out', () => {
   let t: TestApp;
 
   beforeAll(async () => {
-    // Relies on the shared harness's default `DISABLE_THROTTLE=true`
-    // (jest.setup.ts) — deliberately NOT flipped here.
+    // Relies on the harness default DISABLE_THROTTLE=true; deliberately not flipped here.
     t = await bootstrapTestApp();
   });
 

@@ -1,16 +1,5 @@
-/**
- * Passkey-as-second-factor integration tests.
- * Covers the parts that run in-process without a hardware/software authenticator
- * simulator: the scoped `mfa/passkey/start` endpoint (allowCredentials + token
- * gating), the public/CSRF-exempt/Origin-checked posture, and the
- * method-conditional `mfa/verify` DTO validation. The full WebAuthn signature
- * path (a real assertion → session) lives in the manual / e2e suite, as the
- * existing passkey.spec.ts notes; the cryptographic branch is unit-tested in
- * passkey-assertion.service.spec.ts.
- *
- * Runs with AUTH_MFA_ENFORCED=true so `POST /auth/login` mints a challenge
- * token the passkey-start endpoint can be gated on.
- */
+// Passkey as a second factor, for what runs without an authenticator: the scoped mfa/passkey/start endpoint, its public CSRF-exempt Origin-checked posture and the method-conditional mfa/verify DTO.
+// The signature path is e2e territory and unit-tested in passkey-assertion.service.spec.ts. Runs with AUTH_MFA_ENFORCED=true so login mints a challenge token.
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { ConfigService } from '@nestjs/config';
@@ -23,7 +12,6 @@ import {
   signupVerifyApprove,
 } from './test-helpers.js';
 import { JwtKeyStore } from '../auth/jwt-key-store.js';
-import { MFA_CHALLENGE_PURPOSE } from '../auth/mfa-challenge.service.js';
 import { PasskeyAssertionService } from '../auth/passkey-assertion.service.js';
 import type { AuthEventRow, TrustedDeviceRow } from '../dynamo/types.js';
 
@@ -35,7 +23,6 @@ interface ChallengeResponse {
   methods?: string[];
 }
 
-/** A DTO-valid WebAuthn authentication response envelope (base64url fields). */
 function validAuthResponse() {
   return {
     id: 'cred-id',
@@ -46,14 +33,12 @@ function validAuthResponse() {
   };
 }
 
-/** Password login → return the minted MFA challenge token. */
 async function challengeTokenFor(
   t: TestApp,
   email: string,
   deviceId: string = freshDeviceId(),
 ): Promise<string> {
-  // The challenge is bound to this login deviceId: a subsequent mfa/verify must present the SAME
-  // deviceId.
+  // The challenge is bound to this login deviceId, which a later mfa/verify must present.
   const login = await request(t.app.getHttpServer())
     .post('/api/v1/auth/login')
     .set('Origin', ORIGIN())
@@ -90,8 +75,7 @@ describe('passkey as a second factor', () => {
       expect(res.status).toBe(200);
       expect(res.body.challenge).toBeTruthy();
       expect(res.body.userVerification).toBe('required');
-      // A no-passkey user gets an empty allowCredentials (no enumeration signal) — a forged/expired
-      // token returns the same MFA_CHALLENGE_* error regardless of passkey count.
+      // A no-passkey user gets an empty allowCredentials (no enumeration signal); a forged or expired token returns the same MFA_CHALLENGE_* error regardless of passkey count.
       expect(res.body.allowCredentials).toEqual([]);
     });
 
@@ -106,12 +90,10 @@ describe('passkey as a second factor', () => {
 
     it('rejects an expired challenge token with 401 MFA_CHALLENGE_EXPIRED', async () => {
       const { userId } = await signupVerifyApprove(t);
-      // Mint a correctly-signed challenge token (right key/kid/purpose) but
-      // already past its TTL, so it fails only the expiry check — distinct from
-      // the forged-token MFA_CHALLENGE_INVALID case above.
+      // Correctly signed (right key, kid, purpose) but past its TTL, so it fails only the expiry check.
       const { kid, privateKey } = t.module.get(JwtKeyStore).current();
       const expiredToken = jwt.sign(
-        { userId, purpose: MFA_CHALLENGE_PURPOSE },
+        { userId, purpose: 'mfa_challenge' },
         privateKey,
         { algorithm: 'RS256', keyid: kid, expiresIn: -10 },
       );
@@ -156,10 +138,7 @@ describe('passkey as a second factor', () => {
   });
 
   describe('mfa/verify — passkey arm controller seam (verifyMfaAssertion stubbed)', () => {
-    // The full WebAuthn signature path needs a hardware/software authenticator,
-    // so stub PasskeyAssertionService.verifyMfaAssertion to return a credentialId
-    // and exercise the controller's passkey arm: the trust-mint (passkey is
-    // always a routine factor) + the AuthEvent metadata.credentialId spread.
+    // There is no software authenticator, so PasskeyAssertionService.verifyMfaAssertion is stubbed to return a credentialId, exercising the controller's passkey arm: the trust mint (passkey is always a routine factor) and the AuthEvent credentialId spread.
     it('records the login AuthEvent with mfa=passkey + credentialId and mints a TrustedDevice on rememberDevice', async () => {
       const { email, userId } = await signupVerifyApprove(t);
       const deviceId = freshDeviceId();
@@ -183,14 +162,12 @@ describe('passkey as a second factor', () => {
           });
         expect(res.status).toBe(200);
         expect(res.body.accessToken).toBeTruthy();
-        // passkey is always a routine factor → trust is minted.
         expect(res.body.deviceRemembered).toBe(true);
         expect(spy).toHaveBeenCalledWith(userId, expect.objectContaining({ id: 'cred-id' }));
       } finally {
         spy.mockRestore();
       }
 
-      // (a) the login AuthEvent carries metadata.mfa='passkey' + the credentialId.
       const cfg = t.module.get(ConfigService);
       const authEventTable = cfg.get('TABLE_AUTH_EVENT', { infer: true } as never) as unknown as string;
       const events = await scanAll<AuthEventRow>(t.doc, authEventTable);
@@ -200,7 +177,6 @@ describe('passkey as a second factor', () => {
       expect(loginEvent).toBeTruthy();
       expect(loginEvent!.metadata?.credentialId).toBe(STUB_CREDENTIAL_ID);
 
-      // (b) a TrustedDevice row was minted for (userId, deviceId).
       const trustedTable = cfg.get('TABLE_TRUSTED_DEVICE', { infer: true } as never) as unknown as string;
       const devices = await scanAll<TrustedDeviceRow>(t.doc, trustedTable);
       const trusted = devices.find((d) => d.userId === userId && d.deviceId === deviceId);

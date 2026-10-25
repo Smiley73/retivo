@@ -1,11 +1,4 @@
-/**
- * CORS preflight handler tests.
- *
- * Locks the behavior: an allowed-origin
- * `OPTIONS /api/v1/*` returns `204` with the credentialed-CORS headers;
- * a missing or hostile origin returns a bare `204` with no permissive
- * CORS headers. Covers the multi-origin allowlist.
- */
+// CORS preflight: an allowed-origin OPTIONS /api/v1/* returns 204 with the credentialed-CORS headers, a missing or hostile origin returns a bare 204 with no permissive headers, and the multi-origin allowlist holds.
 import express from 'express';
 import request from 'supertest';
 import { createCorsPreflightHandler, CORS_EXPOSED_HEADERS } from './cors-preflight.js';
@@ -16,7 +9,6 @@ const LAN_ORIGIN = 'http://192.168.1.42:5173';
 function appWithPreflight(allowed: readonly string[] = [WEB_ORIGIN]) {
   const app = express();
   app.use('/api/v1', createCorsPreflightHandler(allowed));
-  // A trivial downstream route so non-OPTIONS requests pass through.
   app.post('/api/v1/auth/login', (_req, res) => {
     res.status(200).json({ ok: true });
   });
@@ -88,7 +80,6 @@ describe('createCorsPreflightHandler', () => {
         .options('/api/v1/auth/login')
         .set('Origin', LAN_ORIGIN);
       expect(res.status).toBe(204);
-      // Only the exact matched origin is reflected, never the whole list.
       expect(res.headers['access-control-allow-origin']).toBe(LAN_ORIGIN);
       expect(res.headers['access-control-allow-credentials']).toBe('true');
     });
@@ -104,13 +95,8 @@ describe('createCorsPreflightHandler', () => {
   });
 });
 
-// `Retry-After` must be on the CORS
-// exposed-headers list `main.ts`'s `app.enableCors(...)` reads from, or a
-// cross-origin (local `pnpm dev`) browser reads the header back as `null` —
-// every other local browser check of the client retry policy silently
-// observes nothing without this. `main.ts` itself isn't unit-testable (it's
-// the Nest bootstrap entrypoint), so this is the assertion against the
-// single source of truth both it and this preflight handler share.
+// `Retry-After` must be in the CORS exposed-headers list that main.ts's enableCors reads, or a cross-origin browser reads it back as null and the client retry policy silently observes nothing.
+// main.ts is not unit-testable, so this asserts the constant both it and this handler share.
 describe('CORS_EXPOSED_HEADERS', () => {
   it('includes Retry-After alongside the existing exposed headers', () => {
     expect(CORS_EXPOSED_HEADERS).toContain('Retry-After');

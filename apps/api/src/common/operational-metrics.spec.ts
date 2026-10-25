@@ -1,11 +1,9 @@
-/**
- * Contract for the EMF operational-metrics writer: exact JSON shape, no
- * dimensions, allow-list enforcement (a non-allow-listed name and an arbitrary
- * extra field never reach stdout), and non-fatal PII-free failure handling.
- */
+// The EMF operational-metrics writer: exact JSON shape, no dimensions, allow-list enforcement (a non-allow-listed name or an extra field never reaches stdout), and non-fatal PII-free failure handling.
 import fs from 'node:fs';
 
-import { emitOperationalMetric, type MetricSpec } from './operational-metrics.js';
+import { emitOperationalMetric } from './operational-metrics.js';
+
+type MetricSpec = Parameters<typeof emitOperationalMetric>[0];
 
 interface EmfLine {
   _aws: {
@@ -19,12 +17,8 @@ interface EmfLine {
   [key: string]: unknown;
 }
 
-// The writer emits with `fs.writeSync(1, ...)` (synchronous fd-1 write — see
-// operational-metrics.ts), NOT `process.stdout.write`, so a line cannot sit in
-// a userland buffer when Lambda freezes the environment. Capture at the
-// `fs.writeSync` layer for fd 1 and pass every other fd through to the real
-// implementation; return the byte length so the writer's own accounting (if
-// any) never loops on a perceived partial write.
+// The writer emits with `fs.writeSync(1, ...)`, not `process.stdout.write`, so a line cannot sit in a userland buffer when Lambda freezes; capture at that layer for fd 1
+// and pass other fds through, returning the byte length so the writer never loops on a perceived partial write.
 function captureStdout(): { lines: string[]; restore: () => void } {
   const lines: string[] = [];
   const realWriteSync = fs.writeSync.bind(fs);
@@ -72,13 +66,12 @@ describe('emitOperationalMetric', () => {
     try {
       emitOperationalMetric({
         namespace: 'Retivo/prod/Security',
-        // Not on the allow-list.
         name: 'ArbitraryUserMetric',
         value: 1,
       });
       expect(cap.lines).toHaveLength(0);
       expect(errSpy).toHaveBeenCalledTimes(1);
-      // Fallback breadcrumb carries no name/value (PII-free).
+      // The fallback breadcrumb carries no name or value (PII-free).
       expect(String(errSpy.mock.calls[0][0])).not.toContain('ArbitraryUserMetric');
     } finally {
       errSpy.mockRestore();
@@ -130,8 +123,7 @@ describe('emitOperationalMetric', () => {
       ...rest: unknown[]
     ): number => {
       if (fd === 1) {
-        // A synchronous fd-1 write can still throw (e.g. EPIPE); the writer
-        // must catch it and stay non-fatal.
+        // A synchronous fd-1 write can still throw (e.g. EPIPE); the writer must stay non-fatal.
         throw new Error('EPIPE');
       }
       return (realWriteSync as (...a: unknown[]) => number)(fd, data, ...rest);

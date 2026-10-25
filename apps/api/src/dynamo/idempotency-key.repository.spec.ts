@@ -1,16 +1,5 @@
-/**
- * Integration tests for `IdempotencyKeyRepository` additions backing the
- * version-aware rejection replay:
- *   - `rowFor` stamps the server-internal `expectedVersion` only when the
- *     caller supplies one (rejections only — applied rows never need it).
- *   - `delete(key, expectedVersion)` is a CONDITIONAL single-key delete: it
- *     only removes a row that is STILL a `rejected` outcome at that exact
- *     `expectedVersion` (TOCTOU-safe), and treats a mismatched / already-gone
- *     row as "changed underneath" (returns `false`, never throws).
- *
- * Verified against the local DynamoDB emulator so the ConditionExpression
- * itself proves the guard, not a mock.
- */
+// IdempotencyKeyRepository's version-aware rejection replay support on DynamoDB Local: rowFor stamps the server-internal expectedVersion only for rejections, and delete(key, expectedVersion) is a TOCTOU-safe
+// conditional delete that removes only a still-rejected row at that exact version and returns false for a mismatched or gone row. The ConditionExpression itself is the guard under test, not a mock.
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { PutCommand } from '@aws-sdk/lib-dynamodb';
@@ -101,7 +90,6 @@ describe('IdempotencyKeyRepository — version-aware rejection replay', () => {
       const deleted = await repo.delete(key, 4);
 
       expect(deleted).toBe(false);
-      // TOCTOU-safe: the mismatched delete attempt left the row intact.
       expect(await repo.lookup(key)).not.toBeNull();
     });
 

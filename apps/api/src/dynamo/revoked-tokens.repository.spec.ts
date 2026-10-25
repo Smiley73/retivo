@@ -1,13 +1,5 @@
-/**
- * Focused unit test for `RevokedTokensRepository.isGenerationRevoked` — the
- * strongly-consistent generation-tombstone read.
- *
- * The load-bearing `ConsistentRead: true` cannot be proven against DynamoDB
- * Local: the emulator never reproduces replica lag, so an emulator-backed
- * test still passes if strong consistency is silently dropped — production
- * could then briefly trust a just-retired generation. Stubs the
- * document client directly so the GetItem parameters are asserted at the boundary.
- */
+// RevokedTokensRepository.isGenerationRevoked must read with ConsistentRead: true, which DynamoDB Local cannot prove (it never reproduces replica lag, so an emulator test passes if strong consistency is dropped);
+// the document client is stubbed to assert the GetItem parameters.
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
 import type { ConfigService } from '@nestjs/config';
@@ -38,11 +30,7 @@ describe('RevokedTokensRepository.isGenerationRevoked', () => {
     expect(sent?.input).toEqual({
       TableName: TABLE,
       Key: { jti: 'gen:user-1:0' },
-      // Regression guard: the default eventually-consistent read
-      // can be served from a replica that has not yet received the tombstone
-      // this call is checking for, immediately after the generation-bump
-      // transaction commits it — letting a just-retired generation's access
-      // token pass the guard for the length of that replica lag.
+      // An eventually consistent read could be served from a replica that has not received the tombstone just committed by the generation bump, letting a just-retired generation's token pass the guard for the length of the lag.
       ConsistentRead: true,
     });
   });

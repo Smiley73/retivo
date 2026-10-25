@@ -4,7 +4,7 @@ import fs from 'node:fs';
 
 import type { AuthEventType } from '../dynamo/types.js';
 
-export interface MetricSpec {
+interface MetricSpec {
   /** CloudWatch namespace, e.g. `Retivo/prod/Security`. */
   namespace: string;
   /** Allow-listed metric name (see `ALLOWED_METRIC_NAMES`). */

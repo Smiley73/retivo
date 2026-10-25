@@ -1,32 +1,12 @@
-/**
- * Per-worker setup. Runs once per Jest worker before the test framework
- * is installed.
- *
- * The repo-root `.env`, the emulator endpoint/credential defaults, and
- * the per-run `JEST_RUN_ID` are all bootstrapped in `jest.config.cjs`
- * (jest-main, pre-fork) — workers inherit them via the fork-time env
- * snapshot. This file only adds the per-*worker* table/bucket namespace
- * and the per-worker JWT keypair.
- */
+// Per-worker setup: the table/bucket namespace and JWT keypair. The env, emulator endpoints and `JEST_RUN_ID` come from
+// jest.config.cjs and are inherited.
 import { generateKeyPairSync } from 'node:crypto';
 
 /**
- * Fail loud: jest.config.cjs stamps `JEST_RUN_ID` in the jest-main
- * process before the worker pool forks. If it is missing the worker is
- * running with a misconfigured runner — namespacing would silently
- * degrade and global-teardown could not match this run's tables, so
- * refuse to start.
- *
- * Kept independent of `global-teardown.ts`'s twin guard on purpose:
- * this module is a per-worker `setupFiles` entry, so importing
- * global-teardown (which pulls the `@aws-sdk/client-s3` graph) into
- * every worker triggers an SDK lazy `import()` jest's CJS VM cannot
- * satisfy. The two five-line guards are a deliberate, low-cost
- * duplication; both are exported + unit-tested for the unset → throw
- * path in test-isolation.spec.ts.
- *
- * @returns the resolved `JEST_RUN_ID`
- * @throws if `process.env.JEST_RUN_ID` is unset/empty
+ * Fails loud when `JEST_RUN_ID` (stamped by jest.config.cjs in jest-main) is unset, since namespacing would silently degrade. Not shared
+ * with global-teardown.ts: importing it here would pull the `@aws-sdk/client-s3` graph into every worker, whose lazy `import()`
+ * jest's CJS VM cannot satisfy.
+ * @throws if `JEST_RUN_ID` is unset or empty
  */
 export function assertJestRunId(): string {
   const runId = process.env.JEST_RUN_ID;
@@ -41,20 +21,12 @@ export function assertJestRunId(): string {
 
 assertJestRunId();
 
-// Throttler off so happy-path + brute-force suites don't trip per-IP
-// limits at higher-than-real velocity. Backoff logic still runs (tests
-// that exercise it manage their own backoff state).
+// Throttler off so happy-path and brute-force suites do not trip per-IP limits; backoff logic still runs.
 process.env.DISABLE_THROTTLE = 'true';
 
-// Silence pino-http per-request lines unless a test explicitly asks
-// for them via LOG_LEVEL=info.
 process.env.LOG_LEVEL = process.env.LOG_LEVEL ?? 'silent';
 
-// Belt-and-suspenders: a missing/placeholder JWT key would fail boot;
-// we don't trust the developer's `.env` to be filled in for tests.
-// Each Jest worker mints a fresh RSA-2048 keypair (sub-100 ms) — RS256
-// needs PKCS#8 + SPKI PEMs, which can't be
-// hard-coded in source the way the old HS256 secret could.
+// RS256 needs PKCS#8 and SPKI PEMs, so each worker mints a keypair instead of trusting the developer's `.env`.
 if (
   !process.env.AUTH_JWT_PRIVATE_KEYS ||
   process.env.AUTH_JWT_PRIVATE_KEYS.includes('replace-with')
@@ -69,22 +41,11 @@ if (
   process.env.AUTH_JWT_CURRENT_KID = 'test-key';
 }
 
-// Origin-check middleware demands a parseable WEB_ORIGIN.
 process.env.WEB_ORIGIN = process.env.WEB_ORIGIN ?? 'http://localhost:5173';
 
-// Test-isolation: redirect every DynamoDB table + the snapshots S3
-// bucket to a per-process, per-worker namespace so the integration
-// suite never touches the dev workspace's `retirement-local-*` tables
-// AND two concurrent jest processes (e.g. two worktrees)
-// never share state. `JEST_RUN_ID` is the jest-main pid (set in
-// jest.config.cjs); `JEST_WORKER_ID` is jest's per-worker id. The
-// trailing hyphen anchors the prefix so `global-teardown.ts` can
-// prefix-match exactly this run's tables/buckets (a run id that is a
-// numeric prefix of another, e.g. 123 vs 1234, cannot cross-match).
-// `local-bootstrap.ts` provisions whatever names the env declares, so
-// these are auto-created on first use. Hard override (`=`, not `??=`) —
-// even when the developer's `.env` pins the *-local- names for
-// `pnpm dev`, tests must use the namespaced set.
+// Every DynamoDB table and the snapshots bucket move to a per-run, per-worker namespace so concurrent jest processes never share state
+// or touch `retirement-local-*`. The trailing hyphen lets global-teardown prefix-match exactly this run (run id 123 vs 1234).
+// Hard override (`=`, not `??=`): a `.env` pinning the local names for `pnpm dev` must not leak into tests.
 const NS = `retirement-test-${process.env.JEST_RUN_ID}-${process.env.JEST_WORKER_ID}-`;
 process.env.TABLE_WORKSPACE_META = `${NS}workspace-meta`;
 process.env.TABLE_MUTATION_LOG = `${NS}mutation-log`;

@@ -1,15 +1,5 @@
-/**
- * Unit tests for MfaChallengeService. Proves the 5-minute MFA
- * challenge token round-trips for its minting environment and fails closed —
- * with the `MFA_CHALLENGE_INVALID` code — for a token signed with the wrong
- * issuer/audience domain or carrying no issuer/audience claims at all. Mirrors
- * data-export-authorization.service.spec.ts: a real generated RS256 keypair +
- * the real JwtKeyStore so the sign/verify path is genuine; only the config is
- * stubbed.
- *
- * The "never accepted as a session bearer" property is proven in
- * jwt-auth.guard.spec.ts (the guard rejects any token carrying a `purpose`).
- */
+// MfaChallengeService: the 5-minute challenge token round-trips for its minting environment and fails closed with MFA_CHALLENGE_INVALID for the wrong issuer/audience or none at all,
+// using a real RS256 keypair and JwtKeyStore with only config stubbed. That it is never accepted as a session bearer is proven in jwt-auth.guard.spec.ts.
 import 'reflect-metadata';
 import { generateKeyPairSync } from 'node:crypto';
 import jwt from 'jsonwebtoken';
@@ -17,7 +7,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { EnvConfig } from '../common/env.config.js';
 import { JwtKeyStore } from './jwt-key-store.js';
-import { MfaChallengeService, MFA_CHALLENGE_PURPOSE } from './mfa-challenge.service.js';
+import { MfaChallengeService } from './mfa-challenge.service.js';
 
 type TypedConfig = ConfigService<EnvConfig, true>;
 
@@ -57,7 +47,6 @@ function buildService(config: TypedConfig = configFor()): {
   return { svc: new MfaChallengeService(keyStore, config), keyStore };
 }
 
-/** Assert `fn` throws the `MFA_CHALLENGE_INVALID` UnauthorizedException. */
 function expectChallengeInvalid(fn: () => unknown): void {
   let thrown: unknown;
   try {
@@ -75,23 +64,20 @@ describe('MfaChallengeService', () => {
     const { svc } = buildService();
     const decoded = svc.verify(svc.sign(USER_ID, DEVICE_ID, 'rev-1', 0));
     expect(decoded).toMatchObject({ userId: USER_ID, deviceId: DEVICE_ID });
-    // Single-use ledger claims: a namespace-disjoint `mfa:`-prefixed
-    // jti and the numeric epoch-second expiry used as the ledger row TTL.
+    // Single-use ledger claims: a namespace-disjoint `mfa:`-prefixed jti, and the numeric epoch-second expiry used as the ledger row TTL.
     expect(decoded.jti).toMatch(/^mfa:[0-9a-f-]+$/);
     expect(typeof decoded.expiresAt).toBe('number');
   });
 
   it('should_reject_a_token_missing_or_mis-prefixed_jti', () => {
-    // A token minted with the real key + iss/aud but a bare-UUID jti must fail
-    // closed: only the namespace-disjoint `mfa:`-prefixed jti is accepted, so a
-    // consumption ledger row can never collide with a bearer-token revocation.
+    // A bare-UUID jti must fail closed: only the `mfa:`-prefixed jti is accepted, so a consumption ledger row can never collide with a bearer-token revocation.
     const { svc, keyStore } = buildService();
     const { kid, privateKey: pk } = keyStore.current();
     const badJtiToken = jwt.sign(
       {
         userId: USER_ID,
         deviceId: DEVICE_ID,
-        purpose: MFA_CHALLENGE_PURPOSE,
+        purpose: 'mfa_challenge',
         jti: 'not-mfa-prefixed',
       },
       pk,
@@ -107,8 +93,7 @@ describe('MfaChallengeService', () => {
   });
 
   it('should_reject_a_token_signed_for_a_different_issuer_audience_domain', () => {
-    // A token minted for a DIFFERENT environment/service must fail closed even
-    // though it is otherwise a valid RS256 challenge token.
+    // A token minted for another environment or service must fail closed though otherwise a valid RS256 challenge token.
     const other = buildService(
       configFor({ issuer: 'retivo-api/other', audience: 'retivo-web/other' }),
     );
@@ -118,12 +103,11 @@ describe('MfaChallengeService', () => {
   });
 
   it('should_reject_a_token_carrying_no_issuer_audience_claims', () => {
-    // A legacy challenge token was signed without iss/aud — mint one directly
-    // with the real key but no issuer/audience options.
+    // A legacy challenge token signed without iss/aud, minted directly with the real key.
     const { svc, keyStore } = buildService();
     const { kid, privateKey: pk } = keyStore.current();
     const legacyToken = jwt.sign(
-      { userId: USER_ID, deviceId: DEVICE_ID, purpose: MFA_CHALLENGE_PURPOSE },
+      { userId: USER_ID, deviceId: DEVICE_ID, purpose: 'mfa_challenge' },
       pk,
       { algorithm: 'RS256', keyid: kid, expiresIn: MFA_CHALLENGE_TTL_SEC },
     );

@@ -1,17 +1,5 @@
-/**
- * Lambda-handler integration test for the snapshot janitor.
- *
- * `janitor.spec.ts` exercises `JanitorService.runOnce()` against the
- * AppModule context. This test invokes the deployed handler entry
- * point — `janitor-lambda.handler` — which boots
- * `JanitorLambdaModule` via `NestFactory.createApplicationContext`,
- * the same path EventBridge takes in production.
- *
- * Catches the same class of regressions that bit the compactor
- * Lambda: missing ConfigModule.forRoot in the standalone
- * wrapper, accidental loadSecretsFromSsm(), env-var typos that only
- * matter in the Lambda env.
- */
+// Janitor Lambda handler through the standalone JanitorLambdaModule boot path EventBridge uses, catching the regressions that bit the compactor Lambda:
+// a missing ConfigModule.forRoot, a stray loadSecretsFromSsm() and env-var typos that only matter in Lambda.
 import {
   ListObjectsV2Command,
   PutObjectCommand,
@@ -61,11 +49,8 @@ describe('janitor-lambda handler', () => {
   });
 
   afterAll(async () => {
-    // The handler caches its own standalone Nest context (`cachedApp`) whose
-    // AWS clients hold separate keep-alive pools that `t.app.close()` never
-    // touches. Tear down both contexts; the try/finally guarantees the
-    // bootstrapped app still closes even if the cached-context teardown
-    // throws (the first error is preserved).
+    // The handler caches its own standalone Nest context whose AWS clients hold separate keep-alive pools that `t.app.close()` never touches, so
+    // tear down both; try/finally closes the bootstrapped app even if the cached-context teardown throws.
     try {
       await closeJanitorForTests();
     } finally {
@@ -74,8 +59,7 @@ describe('janitor-lambda handler', () => {
   });
 
   it('boots the standalone Nest context and returns a run summary', async () => {
-    // Seed one snapshot so the bucket isn't empty — exercises the
-    // listing + grouping paths even though nothing here is delete-eligible.
+    // One seeded snapshot exercises the listing and grouping paths though nothing is delete-eligible.
     await s3.send(
       new PutObjectCommand({
         Bucket: bucket,
@@ -90,7 +74,7 @@ describe('janitor-lambda handler', () => {
     expect(summary.householdsProcessed).toBeGreaterThanOrEqual(1);
     expect(summary.durationMs).toBeGreaterThanOrEqual(0);
 
-    // Smoke-check the seeded object survived (1 < minKeep=10).
+    // 1 < minKeep=10, so the seeded object survives.
     const r = await s3.send(
       new ListObjectsV2Command({
         Bucket: bucket,

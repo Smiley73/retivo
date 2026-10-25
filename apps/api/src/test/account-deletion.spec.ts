@@ -1,10 +1,4 @@
-/**
- * Account-deletion integration tests against the local emulator.
- *
- * Covers the `DELETE /auth/account` cascade: password re-auth, sweep of
- * every household-scoped row + S3 object, sweep of every auth-state row
- * for the user, retention of `account_deletion_*` `AuthEvent` rows.
- */
+// DELETE /auth/account against the local emulator: password re-auth, the sweep of every household-scoped row, S3 object and auth-state row, and retention of account_deletion_* AuthEvents.
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import KSUID from 'ksuid';
@@ -30,11 +24,7 @@ import type {
   UserRow,
 } from '../dynamo/types.js';
 
-/**
- * Seed a MutationLog row for the household directly. A plaintext
- * `POST /sync/push` 403s, so the deletion-sweep test seeds the row it expects
- * the cascade to purge rather than pushing it through the API.
- */
+// A plaintext push 403s, so the sweep test seeds the row it expects the cascade to purge.
 async function seedHouseholdMutation(t: TestApp, s: Session): Promise<void> {
   await t.doc.send(
     new PutCommand({
@@ -90,8 +80,7 @@ describe('account deletion', () => {
     const s = await signupVerifyLogin(t);
     await seedHouseholdMutation(t, s);
 
-    // Plant a snapshot under the household prefix so we can prove the S3
-    // sweep deletes it (the compactor doesn't run in tests).
+    // The compactor does not run in tests, so a planted snapshot proves the S3 sweep.
     await s3.send(
       new PutObjectCommand({
         Bucket: snapshotsBucket,
@@ -103,13 +92,11 @@ describe('account deletion', () => {
     const res = await deleteAccount(t, s, STRONG_PASSWORD);
     expect(res.status).toBe(204);
 
-    // User row gone.
     const userRow = await t.doc.send(
       new GetCommand({ TableName: tableName(t, 'TABLE_USER'), Key: { userId: s.userId } }),
     );
     expect(userRow.Item).toBeUndefined();
 
-    // Credential gone.
     const cred = await t.doc.send(
       new GetCommand({
         TableName: tableName(t, 'TABLE_CREDENTIAL'),
@@ -118,7 +105,6 @@ describe('account deletion', () => {
     );
     expect(cred.Item).toBeUndefined();
 
-    // EmailReservation gone — email becomes free again.
     const reservation = await t.doc.send(
       new GetCommand({
         TableName: tableName(t, 'TABLE_EMAIL_RESERVATION'),
@@ -127,21 +113,18 @@ describe('account deletion', () => {
     );
     expect(reservation.Item).toBeUndefined();
 
-    // No refresh-token rows for the user.
     const refresh = (await scanAll<RefreshTokenRow>(
       t.doc,
       tableName(t, 'TABLE_REFRESH_TOKEN'),
     )).filter((r) => r.userId === s.userId);
     expect(refresh).toHaveLength(0);
 
-    // MutationLog has nothing for this household.
     const muts = (await scanAll<MutationLogRow>(
       t.doc,
       tableName(t, 'TABLE_MUTATION_LOG'),
     )).filter((r) => r.householdId === s.householdId);
     expect(muts).toHaveLength(0);
 
-    // S3 prefix is empty.
     const list = await s3.send(
       new ListObjectsV2Command({
         Bucket: snapshotsBucket,
@@ -150,7 +133,6 @@ describe('account deletion', () => {
     );
     expect(list.KeyCount ?? 0).toBe(0);
 
-    // Audit events retained — both initiated + completed.
     const events = (await scanAll<AuthEventRow>(
       t.doc,
       tableName(t, 'TABLE_AUTH_EVENT'),
@@ -158,13 +140,11 @@ describe('account deletion', () => {
     expect(events.some((e) => e.eventType === 'account_deletion_initiated')).toBe(true);
     expect(events.some((e) => e.eventType === 'account_deletion_completed')).toBe(true);
 
-    // Old access token rejected on the denylist.
     const stale = await request(t.app.getHttpServer())
       .get('/api/v1/auth/passkey/list')
       .set('Authorization', `Bearer ${s.accessToken}`);
     expect(stale.status).toBe(401);
 
-    // Login with the same email + password fails — user is gone.
     const reLogin = await request(t.app.getHttpServer())
       .post('/api/v1/auth/login')
       .set('Origin', process.env.WEB_ORIGIN!)
@@ -178,13 +158,11 @@ describe('account deletion', () => {
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('INVALID_CREDENTIALS');
 
-    // User row still present.
     const userRow = await t.doc.send(
       new GetCommand({ TableName: tableName(t, 'TABLE_USER'), Key: { userId: s.userId } }),
     );
     expect((userRow.Item as UserRow | undefined)?.userId).toBe(s.userId);
 
-    // Credential row still present.
     const cred = await t.doc.send(
       new GetCommand({
         TableName: tableName(t, 'TABLE_CREDENTIAL'),
@@ -193,8 +171,7 @@ describe('account deletion', () => {
     );
     expect((cred.Item as CredentialRow | undefined)?.userId).toBe(s.userId);
 
-    // The first 3 wrong-password attempts are within the grace window); subsequent
-    // login still works because no backoff is in effect yet.
+    // Within the 3-miss grace window, so a later login still works: no backoff is in effect yet.
     const stillWorks = await request(t.app.getHttpServer())
       .post('/api/v1/auth/login')
       .set('Origin', process.env.WEB_ORIGIN!)
@@ -226,7 +203,6 @@ describe('account deletion', () => {
       .send({ email: s.email, password: STRONG_PASSWORD });
     expect(recreate.status).toBe(202);
 
-    // The recreated reservation is owned by a *new* userId.
     const reservation = await t.doc.send(
       new GetCommand({
         TableName: tableName(t, 'TABLE_EMAIL_RESERVATION'),
@@ -235,8 +211,7 @@ describe('account deletion', () => {
     );
     expect((reservation.Item as EmailReservationRow | undefined)?.userId).not.toBe(s.userId);
 
-    // And the idempotency-key sweep didn't blow away another household's
-    // rows (sanity guard against scan filter misuse).
+    // The idempotency-key sweep must not blow away another household's rows (scan-filter misuse guard).
     const stillThere = await t.doc.send(
       new ScanCommand({
         TableName: tableName(t, 'TABLE_IDEMPOTENCY_KEY'),

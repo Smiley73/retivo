@@ -13,9 +13,9 @@ import {
 } from './cookie-config.js';
 
 // The claim that bars the token from being used as a session bearer.
-export const DATA_EXPORT_AUTHORIZATION_PURPOSE = 'data_export';
+const DATA_EXPORT_AUTHORIZATION_PURPOSE = 'data_export';
 
-export interface ExportAuthorizationBinding {
+interface ExportAuthorizationBinding {
   userId: string;
   householdId: string;
   jti: string;

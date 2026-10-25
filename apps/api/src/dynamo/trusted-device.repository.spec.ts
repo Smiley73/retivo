@@ -1,16 +1,4 @@
-/**
- * Integration tests for `TrustedDeviceRepository` against DynamoDB Local.
- * Covers the get/put/delete/listByUser
- * contract:
- *  - get on a missing (userId, deviceId) returns null;
- *  - put round-trips a trust row;
- *  - listByUser returns only the calling user's rows (Query by PK, no Scan)
- *    and never another user's;
- *  - delete forgets one device.
- *
- * Uses fresh userIds per case so suites stay independent on the shared
- * DynamoDB Local instance.
- */
+// TrustedDeviceRepository on DynamoDB Local: a missing (userId, deviceId) is null, put round-trips a row, listByUser queries by PK (no Scan) and returns only the caller's rows, and delete forgets one device.
 import { randomUUID } from 'node:crypto';
 import { bootstrapTestApp, type TestApp } from '../test/test-helpers.js';
 import { TrustedDeviceRepository } from './trusted-device.repository.js';
@@ -22,8 +10,7 @@ function makeRow(userId: string, deviceId: string): TrustedDeviceRow {
     deviceId,
     tokenHash: 'c'.repeat(64),
     createdAt: '2026-06-12T00:00:00.000Z',
-    // Numeric epoch-second TTL so DynamoDB TTL
-    // can auto-purge the row.
+    // A numeric epoch-second TTL lets DynamoDB TTL auto-purge the row.
     expiresAt: Math.floor(Date.now() / 1000) + 30 * 86_400,
     lastUsedAt: '2026-06-12T00:00:00.000Z',
     ip: '203.0.113.7',
@@ -85,10 +72,7 @@ describe('TrustedDeviceRepository', () => {
     const userId = randomUUID();
     const deviceId = randomUUID();
     const row = makeRow(userId, deviceId);
-    // Seed a `lastUsedAt` that is definitely earlier than "now" (the row's
-    // `createdAt` default), so a real `UpdateItem` against DynamoDB Local is
-    // the only way this assertion can pass — a stub can't prove the
-    // UpdateExpression / Key shape actually lands.
+    // A `lastUsedAt` earlier than the `createdAt` default means only a real UpdateItem against DynamoDB Local can pass; a stub cannot prove the UpdateExpression and Key shape land.
     row.lastUsedAt = '2020-01-01T00:00:00.000Z';
     await repo.put(row);
 
@@ -97,7 +81,6 @@ describe('TrustedDeviceRepository', () => {
     const got = await repo.get(userId, deviceId);
     expect(got?.lastUsedAt).not.toBe('2020-01-01T00:00:00.000Z');
     expect(Date.parse(got!.lastUsedAt)).toBeGreaterThan(Date.parse(row.createdAt));
-    // Every other attribute is untouched by the targeted stamp.
     expect(got?.tokenHash).toBe(row.tokenHash);
     expect(got?.expiresAt).toBe(row.expiresAt);
   });

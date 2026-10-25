@@ -6,18 +6,16 @@ import {
   type DynamoDBDocumentClient,
 } from '@aws-sdk/lib-dynamodb';
 
-/** A `BatchWriteItem` `RequestItems` map (also the shape of `UnprocessedItems`). */
-export type BatchWriteRequestItems = NonNullable<
+type BatchWriteRequestItems = NonNullable<
   BatchWriteCommandInput['RequestItems']
 >;
 
-/** Total attempts (initial send + resubmits) before giving up. */
-export const BATCH_WRITE_MAX_ATTEMPTS = 8;
+// Total attempts (initial send + resubmits) before giving up.
+const BATCH_WRITE_MAX_ATTEMPTS = 8;
 const BATCH_WRITE_BASE_DELAY_MS = 50;
 const BATCH_WRITE_MAX_DELAY_MS = 1000;
 
-/** Thrown when `UnprocessedItems` never drains within the bounded attempts. */
-export class BatchWriteDrainError extends Error {
+class BatchWriteDrainError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = 'BatchWriteDrainError';

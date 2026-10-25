@@ -1,10 +1,5 @@
-/**
- * Compactor safety-budget + restore-epoch race-guard tests (starvation + silent-undo fixes). Colocated with the emulator harness in
- * `compactor.spec.ts` / `restore.spec.ts`, kept in its own file so the
- * budget field mutation (`compactor.budgets = {...}`) can't leak into
- * unrelated tests via the shared `CompactorService` DI singleton — every
- * test that overrides it restores the default in a `finally`.
- */
+// Compactor safety budgets and restore-epoch race guards (starvation and silent-undo). A separate file because `compactor.budgets = {...}` would
+// leak through the shared CompactorService singleton; every override is restored in a `finally`.
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
@@ -17,21 +12,13 @@ import {
   type Session,
   type TestApp,
 } from './test-helpers.js';
-import {
-  CompactorBudgetSkipError,
-  CompactorService,
-  type CompactorBudgets,
-} from '../compactor/compactor.service.js';
+import { CompactorService } from '../compactor/compactor.service.js';
 import { RestoreService } from '../sync/restore.service.js';
 import { SnapshotsService } from '../sync/snapshots.service.js';
 import { AggregateVersionRepository } from '../dynamo/aggregate-version.repository.js';
-import {
-  RestoreEpochLostError,
-  WorkspaceMetaRepository,
-} from '../dynamo/workspace-meta.repository.js';
+import { WorkspaceMetaRepository } from '../dynamo/workspace-meta.repository.js';
 import { S3_CLIENT } from '../aws/aws.module.js';
 
-/** Mint a sequenceId backdated past the compactor's 60 s safety margin. */
 function backdatedSeq(slot: number): string {
   return KSUID.fromParts(Date.now() - 10 * 60_000 + slot * 1000, Buffer.alloc(16)).string;
 }
@@ -115,7 +102,6 @@ async function householdLogRowCount(t: TestApp, householdId: string): Promise<nu
   return (r.Items ?? []).length;
 }
 
-/** Capture EMF lines written via the compactor's synchronous fd-1 write. */
 function captureStdout(): { lines: string[]; restore: () => void } {
   const lines: string[] = [];
   const realWriteSync = fs.writeSync.bind(fs);
@@ -150,7 +136,7 @@ function budgetLimitedEmf(lines: string[]): Record<string, unknown> | undefined 
 describe('compactor safety budgets', () => {
   let t: TestApp;
   let compactor: CompactorService;
-  let defaultBudgets: CompactorBudgets;
+  let defaultBudgets: CompactorService['budgets'];
 
   beforeAll(async () => {
     t = await bootstrapTestApp();
@@ -169,13 +155,8 @@ describe('compactor safety budgets', () => {
   it('starvation fix (criterion 4): a household whose pass THROWS a budget skip does not stop the household visited right after it from compacting in the same run', async () => {
     const heavy = await loginAsFreshUser(t);
     const light = await loginAsFreshUser(t);
-    // heavy: compact once under default budgets so it owns a baseline
-    // snapshot, then seed a row above the cursor so the next pass must
-    // re-read that baseline — the read a 10-byte decompression cap makes
-    // THROW (`CompactorBudgetSkipError` 'baseline_oversized'). A prefix-shaped
-    // budget trip would not do here: it returns a metric normally and could
-    // never stop the loop, so the assertions below would stay green with the
-    // continuation logic in `runOnce` removed entirely.
+    // A 10-byte decompression cap makes the re-read of heavy's baseline throw (`CompactorBudgetSkipError` 'baseline_oversized'). A prefix-shaped
+    // budget trip returns a metric normally and could never stop the loop, so the assertions would pass with the continuation logic removed.
     await seedMutationLogRow(t, heavy, {
       aggregateId: randomUUID(),
       version: 1,
@@ -190,7 +171,6 @@ describe('compactor safety budgets', () => {
       payload: { name: 'heavy-inflight', currency: 'USD' },
       sequenceId: backdatedSeq(5),
     });
-    // light: no baseline yet (nothing to decompress), one row to fold.
     await seedMutationLogRow(t, light, {
       aggregateId: randomUUID(),
       version: 1,
@@ -198,11 +178,8 @@ describe('compactor safety budgets', () => {
       sequenceId: backdatedSeq(10),
     });
 
-    // Deterministic visiting order heavy → light: pin the household
-    // enumeration to exactly these two and the fairness rotation's offset to
-    // 0, so the run must SURVIVE heavy's throw before it ever reaches light.
-    // Left to the real rotation, light is visited first half the time and
-    // the test would pass without the continuation ever being exercised.
+    // Pins the visiting order heavy then light (enumeration and fairness rotation offset 0), so the run must survive heavy's throw before reaching
+    // light; a real rotation visits light first half the time and would pass without exercising the continuation.
     const listSpy = jest
       .spyOn(
         compactor as unknown as { listHouseholdIds: () => Promise<string[]> },
@@ -220,15 +197,13 @@ describe('compactor safety budgets', () => {
       compactor.budgets = defaultBudgets;
     }
 
-    // heavy was a TRUE skip, recorded through the budget-specific catch
-    // branch (not the generic failure path, which would not record it).
+    // A true skip recorded through the budget-specific catch branch, not the generic failure path.
     expect(summary.budgetLimitedHouseholdIds).toEqual([heavy.householdId]);
     expect(summary.householdsSkipped).toBe(1);
     expect(summary.householdsProcessed).toBe(1);
     const heavyMetaAfter = await fetchMeta(t, heavy.householdId);
     expect(heavyMetaAfter?.latestSnapshotId).toBe(heavyMetaBefore?.latestSnapshotId);
 
-    // light — visited AFTER the throw — still compacted in the SAME run.
     const lightMeta = await fetchMeta(t, light.householdId);
     expect(lightMeta?.latestSnapshotId).toBeTruthy();
   });
@@ -258,14 +233,11 @@ describe('compactor safety budgets', () => {
     expect(metric!.mutationsCompacted).toBe(2);
     expect(metric!.budgetLimited).toBe(true);
 
-    // The cursor lands EXACTLY on the prefix's last folded row.
     const meta = await fetchMeta(t, s.householdId);
     expect(meta?.latestSnapshotCursor).toBe(seqs[1]);
 
-    // The row above the prefix survives — not deleted, not lost.
     expect(await householdLogRowCount(t, s.householdId)).toBe(1);
 
-    // EMF: per-stack namespace, no custom dimensions.
     const emf = budgetLimitedEmf(capture.lines);
     expect(emf).toBeTruthy();
     const aws = emf!._aws as {
@@ -282,7 +254,6 @@ describe('compactor safety budgets', () => {
     );
     expect(JSON.stringify(emf)).not.toContain(s.householdId);
 
-    // A second run (default budgets) drains the surviving row.
     compactor.budgets = defaultBudgets;
     const second = await compactor.compactHousehold(s.householdId);
     expect(second).not.toBeNull();
@@ -302,8 +273,7 @@ describe('compactor safety budgets', () => {
     expect(first).not.toBeNull();
     const metaBefore = await fetchMeta(t, s.householdId);
 
-    // A new mutation forces the next pass to re-read the just-written
-    // baseline before merging — that decompressed read is what we bound.
+    // The new mutation forces the next pass to re-read the baseline, the decompressed read being bounded.
     await seedMutationLogRow(t, s, {
       aggregateId: randomUUID(),
       version: 1,
@@ -322,10 +292,8 @@ describe('compactor safety budgets', () => {
     } finally {
       capture.restore();
     }
-    expect(err).toBeInstanceOf(CompactorBudgetSkipError);
-    expect((err as CompactorBudgetSkipError).budgetCause).toBe('baseline_oversized');
+    expect(err).toMatchObject({ householdId: s.householdId, budgetCause: 'baseline_oversized' });
 
-    // True skip: nothing moved.
     const metaAfter = await fetchMeta(t, s.householdId);
     expect(metaAfter?.latestSnapshotId).toBe(metaBefore?.latestSnapshotId);
     expect(metaAfter?.latestSnapshotCursor).toBe(metaBefore?.latestSnapshotCursor);
@@ -334,8 +302,7 @@ describe('compactor safety budgets', () => {
     const emf = budgetLimitedEmf(capture.lines);
     expect(emf).toBeTruthy();
 
-    // The run continues past a household whose compactHousehold throws —
-    // runOnce catches CompactorBudgetSkipError specifically (not a failure).
+    // runOnce catches the budget skip specifically, so the run continues.
     compactor.budgets = defaultBudgets;
     const other = await loginAsFreshUser(t);
     await seedMutationLogRow(t, other, {
@@ -385,11 +352,8 @@ describe('restore-epoch race guard', () => {
     const firstSnapshotId = metaAfterFirst?.latestSnapshotId as string;
     expect(metaAfterFirst?.latestSnapshotCursor).toBeTruthy();
 
-    // A second mutation above the cursor drives a real second compaction
-    // pass that reads `latestSnapshotCursor` as the SAME value the restore
-    // below will restore to — the discriminating shape: any test where the
-    // cursor changes proves nothing, because the existing cursor-only guard
-    // already catches that.
+    // The second pass reads `latestSnapshotCursor` as the same value the restore will restore to: a test where the cursor changes proves nothing,
+    // since the cursor-only guard already catches that.
     await seedMutationLogRow(t, s, {
       aggregateId: randomUUID(),
       version: 1,
@@ -397,10 +361,8 @@ describe('restore-epoch race guard', () => {
       sequenceId: backdatedSeq(5),
     });
 
-    // Intercept the compactor's OWN snapshot PutObjectCommand — the last
-    // awaited S3 step before its conditional cursor-advance UpdateCommand —
-    // and, on that ONE call, synchronously run a full restore back to the
-    // FIRST snapshot (cutoff === the cursor this pass observed).
+    // Intercepts the compactor's own snapshot PutObjectCommand, the last awaited step before its conditional cursor advance, and on that one call
+    // runs a full restore back to the first snapshot.
     const s3 = t.module.get<S3Client>(S3_CLIENT);
     const realSend = s3.send.bind(s3);
     let intercepted = false;
@@ -421,27 +383,14 @@ describe('restore-epoch race guard', () => {
     } finally {
       s3Spy.mockRestore();
     }
-    // Aborted: lost the epoch race (the existing ConditionalCheckFailedException
-    // branch — warn, return null, retry next hour).
     expect(metric).toBeNull();
 
     const metaAfter = await fetchMeta(t, s.householdId);
-    // The restore's fresh snapshot still owns the pointer, not the
-    // compactor's just-written (now orphaned in S3) snapshot.
     expect(metaAfter?.latestSnapshotId).not.toBe(firstSnapshotId);
     expect(metaAfter?.restoreEpoch).toBe(1);
 
-    // `metric === null` above already certifies the compactor's own
-    // coverage-guarded delete phase never ran — the abort happens in the
-    // cursor-advance catch block, structurally BEFORE `deleteUpToCutoff` is
-    // ever called. A raw MutationLog row-count check would not discriminate
-    // here: the restore's OWN household sweep (a normal, expected part of
-    // every restore) already deletes every row regardless of whether the
-    // compactor's guard fires, so an empty log post-race proves nothing
-    // about the compactor. What the guard prevents is the SILENT DATA LOSS
-    // shape — the compactor overwriting `latestSnapshotId` back to a
-    // snapshot built from the pre-restore log — which the assertions above
-    // already rule out.
+    // `metric === null` already shows the coverage-guarded delete phase never ran (the abort precedes `deleteUpToCutoff`). A row-count check would
+    // not discriminate: the restore's own sweep deletes every row regardless of the guard.
     expect(await householdLogRowCount(t, s.householdId)).toBe(0);
   });
 
@@ -450,39 +399,29 @@ describe('restore-epoch race guard', () => {
     const workspaceMeta = t.module.get(WorkspaceMetaRepository);
     const householdId = s.householdId;
 
-    // Two concurrent restores BOTH observe the epoch as absent (the ordinary
-    // first-ever-restore case for this household).
     const observedEpoch = undefined;
 
-    // The sweep gap: between "the sweep deleted the row" and "the restore's
-    // own write", a concurrent bootstrap's createIfMissing legitimately
-    // recreates an epoch-less row.
+    // Between the sweep's delete and the restore's own write, a concurrent bootstrap's createIfMissing legitimately recreates an epoch-less row.
     await workspaceMeta.createIfMissing(householdId);
     const recreated = await workspaceMeta.find(householdId);
     expect(recreated?.restoreEpoch).toBeUndefined();
 
-    // The FIRST restore's write still wins against that recreated row — an
-    // absent epoch is a distinct pinned state, not a live epoch to beat.
+    // The first restore's write still wins against that row: an absent epoch is a distinct pinned state, not a live epoch to beat.
     await workspaceMeta.reinitializeForRestore(householdId, 'snap-a', '0', observedEpoch);
     const afterFirst = await workspaceMeta.find(householdId);
     expect(afterFirst?.restoreEpoch).toBe(1);
     expect(afterFirst?.latestSnapshotId).toBe('snap-a');
 
-    // The SECOND, concurrent restore observed the same stale (absent) epoch
-    // before either committed — it now loses the race and must throw, never
-    // silently report success for a pointer it did not write.
+    // The second restore observed the same stale (absent) epoch, so it must throw, never report success for a pointer it did not write.
     await expect(
       workspaceMeta.reinitializeForRestore(householdId, 'snap-b', '0', observedEpoch),
-    ).rejects.toThrow(RestoreEpochLostError);
+    ).rejects.toThrow(/lost the epoch race/);
 
-    // The winner's pointer is untouched by the loser's attempt.
     const finalMeta = await workspaceMeta.find(householdId);
     expect(finalMeta?.latestSnapshotId).toBe('snap-a');
   });
 
-  /** Seed one row and compact it so the household owns a real snapshot with
-   *  one aggregate — a restore of it then reseeds one AggregateVersion row,
-   *  which is the row a losing restore's sweep would otherwise destroy. */
+  // Restoring the seeded compacted household reseeds one AggregateVersion row, the row a losing restore's sweep would otherwise destroy.
   async function seedCompactedHousehold(
     s: Session,
   ): Promise<{ snapshotId: string; aggregateId: string }> {
@@ -506,11 +445,7 @@ describe('restore-epoch race guard', () => {
     const aggregateVersions = t.module.get(AggregateVersionRepository);
     const { snapshotId, aggregateId } = await seedCompactedHousehold(s);
 
-    // Restore B reads the epoch and pauses; restore A then runs to
-    // completion; B resumes with its stale observation. The pause point is
-    // B's own strongly-consistent epoch read: on that call, run A in full and
-    // hand B the value it saw BEFORE A committed. (A's own epoch read passes
-    // straight through — the flag is already set by then.)
+    // Pauses restore B at its strongly consistent epoch read, runs restore A in full, and hands B the value it saw before A committed (A's own read passes through).
     const realFind = workspaceMeta.findConsistent.bind(workspaceMeta);
     let newer: Record<string, unknown> | undefined;
     let injected = false;
@@ -534,17 +469,14 @@ describe('restore-epoch race guard', () => {
       findSpy.mockRestore();
     }
     expect(newer?.restoreEpoch).toBe(1);
-    // B lost — surfaced as an error, never `{ ok: true }` for a pointer it
-    // did not write. Without the fence B's sweep erases A's row (epoch
-    // included), its pointer flip then passes as a fresh write, and A's
-    // completed restore is silently undone.
-    expect(err).toBeInstanceOf(RestoreEpochLostError);
+    // B's loss must surface as an error: without the fence B's sweep erases A's row (epoch included), B's pointer flip passes as a fresh write and
+    // A's restore is silently undone.
+    expect((err as Error).message).toMatch(/lost the epoch race/);
 
     const finalMeta = await fetchMeta(t, s.householdId);
     expect(finalMeta?.latestSnapshotId).toBe(newer?.latestSnapshotId);
     expect(finalMeta?.restoreEpoch).toBe(1);
-    // The fence is the sweep's FIRST step, so B touched nothing: A's
-    // reseeded version row is still there.
+    // The fence is the sweep's first step, so B touched nothing.
     const versions = await aggregateVersions.listForHousehold(s.householdId);
     expect(versions.map((v) => v.aggregateId)).toEqual([aggregateId]);
   });
@@ -555,16 +487,12 @@ describe('restore-epoch race guard', () => {
     const snapshots = t.module.get(SnapshotsService);
     const { snapshotId } = await seedCompactedHousehold(s);
 
-    // A prior restore, so the OLDER caller below observes epoch 1 and would
-    // mint 2 — numerically above the 1 a gap restore re-mints from an absent
-    // row. A "strictly below mine" pointer-flip condition lets 2 overwrite 1.
+    // After a prior restore the older caller observes epoch 1 and mints 2, above the 1 a gap restore re-mints from an absent row; a "strictly below
+    // mine" pointer-flip condition would let 2 overwrite 1.
     await restoreService.restore(s.householdId, snapshotId);
     expect((await fetchMeta(t, s.householdId))?.restoreEpoch).toBe(1);
 
-    // Older restore B: observes 1, fences + sweeps (row gone). On B's own
-    // fresh-snapshot write — its first step after the sweep — a newer
-    // restore C runs to completion: it observes the row as absent, mints
-    // epoch 1 again, and commits. B then resumes and must lose.
+    // Restore B fences and sweeps, then on its fresh-snapshot write a newer restore C observes the row absent, mints epoch 1 again and commits; B must lose.
     const realWrite = snapshots.write.bind(snapshots);
     let newer: Record<string, unknown> | undefined;
     let injected = false;
@@ -588,7 +516,7 @@ describe('restore-epoch race guard', () => {
       writeSpy.mockRestore();
     }
     expect(newer?.restoreEpoch).toBe(1);
-    expect(err).toBeInstanceOf(RestoreEpochLostError);
+    expect((err as Error).message).toMatch(/lost the epoch race/);
 
     const finalMeta = await fetchMeta(t, s.householdId);
     expect(finalMeta?.latestSnapshotId).toBe(newer?.latestSnapshotId);
@@ -624,9 +552,7 @@ describe('restore-epoch race guard', () => {
       sendSpy.mockRestore();
     }
 
-    // At least one WorkspaceMeta GetItem happened (the epoch read), and every
-    // one of them was strongly consistent — the eventually-consistent default
-    // would silently reproduce the stale-epoch race this test guards against.
+    // Every WorkspaceMeta GetItem for the epoch must be strongly consistent; the eventually consistent default would reproduce the stale-epoch race.
     expect(seen.length).toBeGreaterThan(0);
     for (const read of seen) {
       expect(read.consistentRead).toBe(true);

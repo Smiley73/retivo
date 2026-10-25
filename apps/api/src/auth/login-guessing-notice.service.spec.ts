@@ -1,12 +1,5 @@
-/**
- * Unit tests for `LoginGuessingNoticeService`.
- *
- * The decisive properties: the mail send is dispatched WITHOUT being awaited
- * (an unknown email must not pay SES latency it never sends), the once-per-
- * 24h stamp gate is atomic (delegated to the repository, never a TOCTOU read
- * here), and an unknown email follows the identical stamp-check + lookup
- * shape as a known one while sending/recording nothing.
- */
+// LoginGuessingNoticeService: the mail send is dispatched without being awaited (an unknown email must not pay SES latency it never sends), the once-per-24h stamp gate is atomic in the repository (no TOCTOU read here),
+// and an unknown email follows the same stamp-check and lookup shape as a known one while sending and recording nothing.
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
@@ -77,8 +70,6 @@ describe('LoginGuessingNoticeService.notifyIfNeeded', () => {
     expect(auth.record).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'u1', eventType: 'login_guessing_notice_sent' }),
     );
-    // ses.send is invoked synchronously inside the fire-and-forget dispatch —
-    // observable immediately, without needing a microtask flush.
     expect(ses.send).toHaveBeenCalledTimes(1);
   });
 
@@ -93,9 +84,6 @@ describe('LoginGuessingNoticeService.notifyIfNeeded', () => {
       Message: { Subject: { Data: string }; Body: { Text: { Data: string }; Html: { Data: string } } };
     };
     expect(sent.Message.Subject.Data).toBe('Failed sign-in attempts on your Retivo account');
-    // The interpolated timestamp is escaped in the HTML body specifically —
-    // proven by asserting the escaped form is present (it is inert for a
-    // real timestamp, but the mechanism is exercised).
     expect(sent.Message.Body.Html.Data).toContain('<p>Someone entered');
     expect(sent.Message.Body.Text.Data).toMatch(/once a day/i);
   });
@@ -132,7 +120,6 @@ describe('LoginGuessingNoticeService.notifyIfNeeded', () => {
     ses.send.mockRejectedValue(new Error('SES throttled: alice@example.test'));
 
     await expect(svc.notifyIfNeeded(EMAIL, 10, null, null)).resolves.toBeUndefined();
-    // Flush the microtask queue so the fire-and-forget catch has run.
     await Promise.resolve();
     await Promise.resolve();
 

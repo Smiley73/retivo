@@ -1,13 +1,5 @@
-/**
- * Unit tests for the MFA login branch:
- *   - AUTH_MFA_ENFORCED=false → session issued directly (unchanged behaviour),
- *   - AUTH_MFA_ENFORCED=true + untrusted device → MfaChallenge (no session),
- *   - AUTH_MFA_ENFORCED=true + trusted device → session, audited
- *     `mfa: 'device_trusted'`.
- *
- * Pure unit test: every collaborator is stubbed. argon2 runs against a real
- * hash so the password verify passes.
- */
+// LoginService MFA branch: AUTH_MFA_ENFORCED false issues a session directly, true with an untrusted device returns an MfaChallenge, and true with a trusted
+// device issues a session audited as 'device_trusted'. Every collaborator is stubbed; argon2 verifies a real hash.
 import 'reflect-metadata';
 import * as argon2 from 'argon2';
 import type { ConfigService } from '@nestjs/config';
@@ -28,8 +20,6 @@ import type { UserRow } from '../dynamo/types.js';
 type TypedConfig = ConfigService<EnvConfig, true>;
 
 const PASSWORD = 'correct-horse-battery';
-/** The stubbed trust row's epoch-second expiry (carried on a trusted login's
- *  result so the controller can re-issue the cookie). */
 const TRUST_EXPIRES_AT = Math.floor(Date.now() / 1000) + 10 * 86_400;
 
 function user(): UserRow {
@@ -49,10 +39,7 @@ async function build(opts: {
   mfaEnforced: boolean;
   trusted?: boolean;
   totpEnabled?: boolean;
-  /** Number of enrolled passkeys for the challenge user. */
   passkeyCount?: number;
-  /** Make the stubbed per-address backoff report this many seconds of wait
-   *  (the trust bypass is `checkBackoff`'s own concern and stays stubbed). */
   blockedForSec?: number;
 }) {
   const hash = await argon2.hash(PASSWORD, { type: argon2.argon2id });
@@ -149,8 +136,7 @@ describe('LoginService — enforced-MFA branch', () => {
     const result = (await svc.login(args)) as LoginResult;
     expect('mfaRequired' in result).toBe(false);
     expect(result.accessToken).toBe('access');
-    // Trust is still resolved (in the same shape as under the flag) and handed
-    // to the backoff primitive — the flag governs only the MFA challenge.
+    // Trust is still resolved and handed to the backoff primitive; the flag governs only the MFA challenge.
     expect(trustedDevices.resolveTrust).toHaveBeenCalledTimes(1);
     expect(failed.checkBackoff).toHaveBeenCalledWith(
       'a@b.test',
@@ -159,10 +145,7 @@ describe('LoginService — enforced-MFA branch', () => {
     expect(result.deviceTrust).toBeUndefined();
   });
 
-  // Regression: a device remembered while the flag was on keeps a
-  // live trust row + cookie after an operational rollback to 'false'. The
-  // pre-fix build passed `undefined` trust to the backoff primitive on this
-  // path, so an elevated per-address counter 429'd the correct password.
+  // A device remembered while the flag was on keeps its trust row and cookie after a rollback to false; passing undefined trust to the backoff primitive used to 429 the correct password under an elevated per-address counter.
   it('keeps the trusted-device backoff bypass when AUTH_MFA_ENFORCED is false (MFA rollback)', async () => {
     const { svc, failed } = await build({ mfaEnforced: false, trusted: true });
     const result = (await svc.login({ ...args, deviceTrustToken: 'dt' })) as LoginResult;
@@ -176,7 +159,6 @@ describe('LoginService — enforced-MFA branch', () => {
       'a@b.test',
       expect.objectContaining({ trusted: true }),
     );
-    // The trusted login also carries the row expiry for the cookie re-issue.
     expect(result.deviceTrust).toEqual({ expiresAt: TRUST_EXPIRES_AT });
   });
 
@@ -192,7 +174,6 @@ describe('LoginService — enforced-MFA branch', () => {
           "a device you've already chosen to remember can still sign in.",
       },
     });
-    // Singular at exactly one second left.
     const one = await build({ mfaEnforced: true, blockedForSec: 1 });
     await expect(one.svc.login(args)).rejects.toMatchObject({
       response: { message: expect.stringContaining('Try again in 1 second. ') },
@@ -271,21 +252,10 @@ describe('LoginService — enforced-MFA branch', () => {
   });
 });
 
-/**
- * The session generation a login stamps must come from a STRONGLY CONSISTENT
- * base-table read, never from the `EmailIndex` GSI image `findByEmail`
- * returns. A GSI cannot
- * be read consistently at all, and its lag is independent of the base
- * table's — so right after a password reset's `revokeAll` bumps the
- * generation 0 → 1, the index can still say 0 while the base table already
- * holds 1. Stamping the stale 0 fails `RefreshTokenService.issue`'s
- * ConditionCheck and rejects a legitimate sign-in. DynamoDB Local has no GSI
- * replication lag, so the integration suite cannot reproduce this; the
- * stubbed repository below can.
- */
+// The session generation a login stamps must come from a strongly consistent base-table read, not the EmailIndex GSI image: a GSI cannot be read
+// consistently, so right after a reset's revokeAll bumps 0 to 1 it can still say 0, and stamping that fails RefreshTokenService.issue's ConditionCheck.
+// DynamoDB Local has no GSI lag, so only the stubbed repository can reproduce this.
 describe('LoginService — session generation pinned from a strongly consistent base-table read (3.resilience.1)', () => {
-  /** The index image lagging a just-committed revoke: still 0 while the base
-   *  table already holds 1. */
   function staleIndexImage(users: UsersRepository): void {
     (users.findByEmail as jest.Mock).mockResolvedValue({ ...user(), sessionGeneration: 0 });
     (users.findByIdConsistent as jest.Mock).mockResolvedValue({ ...user(), sessionGeneration: 1 });
@@ -323,9 +293,7 @@ describe('LoginService — session generation pinned from a strongly consistent 
 
     await svc.login(args);
 
-    // Reading the generation AFTER the password verifies would re-open a
-    // window: a revoke committing between the proof and
-    // that read would be adopted silently instead of failing closed.
+    // Reading the generation after the password verifies would let a revoke committed between the proof and the read be adopted silently instead of failing closed.
     const [userRead] = (users.findByIdConsistent as jest.Mock).mock.invocationCallOrder;
     const [credentialRead] = (credentials.findByUserId as jest.Mock).mock.invocationCallOrder;
     expect(userRead).toBeLessThan(credentialRead);

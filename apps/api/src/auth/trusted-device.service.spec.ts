@@ -1,15 +1,5 @@
-/**
- * Unit tests for TrustedDeviceService:
- *   - hash round-trip: set stores sha256(secret); verify accepts the matching
- *     cookie value and rejects a wrong one,
- *   - expiry: a past `expiresAt` fails verify (and best-effort deletes the row),
- *   - revoke: deletes the keyed row,
- *   - cross-user isolation: the lookup is keyed (userId, deviceId), so user B's
- *     verify never matches user A's row.
- *
- * Pure unit test: the TrustedDevice repository + AuthEvents are stubbed; the
- * real sha256 from refresh-token.service drives the hash check.
- */
+// TrustedDeviceService: the hash round trip (sha256 of the secret), expiry (a past `expiresAt` fails verify and best-effort deletes the row), revoke, and cross-user
+// isolation (lookup keyed by userId and deviceId). The repository and AuthEvents are stubbed; the real sha256 drives the hash check.
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import type { Response } from 'express';
@@ -37,7 +27,6 @@ function row(over: Partial<TrustedDeviceRow> = {}): TrustedDeviceRow {
     deviceId: 'dev1',
     tokenHash: sha256('the-secret'),
     createdAt: new Date().toISOString(),
-    // Numeric epoch-second TTL.
     expiresAt: nowSec() + 30 * 86_400,
     lastUsedAt: new Date().toISOString(),
     ip: null,
@@ -63,13 +52,11 @@ describe('TrustedDeviceService — verify', () => {
     } as unknown as TrustedDeviceRepository;
     const svc = new TrustedDeviceService(repo, buildAuth());
     expect(await svc.verify('userA', 'dev1', 'the-secret')).toBe(true);
-    // Best-effort lastUsedAt stamp on a successful verify.
     expect(stampLastUsed).toHaveBeenCalledWith('userA', 'dev1');
   });
 
   it('still returns true when the best-effort lastUsedAt stamp throws', async () => {
-    // A transient DynamoDB fault stamping the last-use time must never fail
-    // the login it is riding along with.
+    // A transient DynamoDB fault stamping the last-use time must never fail the login it rides along with.
     const warnSpy = jest
       .spyOn(Logger.prototype, 'warn')
       .mockImplementation(() => undefined);
@@ -108,8 +95,7 @@ describe('TrustedDeviceService — verify', () => {
   it('rejects + deletes a legacy ISO-string `expiresAt` row (clean cutover)', async () => {
     const del = jest.fn().mockResolvedValue(undefined);
     const repo = {
-      // A pre-cutover row whose TTL is still an ISO string (nonnumeric) must
-      // fail the numeric guard, so old device trust never skips the challenge.
+      // A pre-cutover row whose TTL is still an ISO string must fail the numeric guard, so old device trust never skips the challenge.
       get: jest.fn().mockResolvedValue(
         row({ expiresAt: '2030-01-01T00:00:00.000Z' as unknown as number }),
       ),
@@ -121,8 +107,7 @@ describe('TrustedDeviceService — verify', () => {
   });
 
   it('still returns false when the best-effort hygiene delete throws', async () => {
-    // A transient DynamoDB fault on the hygiene delete must not crash verify —
-    // it falls through to the same MFA re-challenge (return false).
+    // A transient fault on the hygiene delete must not crash verify; it falls through to the same MFA re-challenge.
     const warnSpy = jest
       .spyOn(Logger.prototype, 'warn')
       .mockImplementation(() => undefined);
@@ -139,13 +124,11 @@ describe('TrustedDeviceService — verify', () => {
   });
 
   it('cross-user isolation: user B misses user A row (keyed lookup returns null)', async () => {
-    // The repo is keyed (userId, deviceId): a get for userB returns no row.
     const repo = {
       get: jest.fn(async (userId: string) => (userId === 'userA' ? row() : null)),
       delete: jest.fn(),
     } as unknown as TrustedDeviceRepository;
     const svc = new TrustedDeviceService(repo, buildAuth());
-    // User B presenting user A's actual secret still misses — different PK.
     expect(await svc.verify('userB', 'dev1', 'the-secret')).toBe(false);
   });
 });
@@ -164,12 +147,11 @@ describe('TrustedDeviceService — set + revoke', () => {
 
     const stored = put.mock.calls[0][0] as TrustedDeviceRow;
     expect(stored.tokenHash).toMatch(/^[0-9a-f]{64}$/);
-    // The cookie carries the RAW secret; the row stores its hash — they must match.
+    // The cookie carries the raw secret and the row its hash, which must match.
     const cookieSecret = cookie.mock.calls[0][1] as string;
     expect(sha256(cookieSecret)).toBe(stored.tokenHash);
     expect(cookie.mock.calls[0][2]).toEqual(expect.objectContaining({ path: '/api/v1' }));
-    // The mint also expires the same-name cookie a pre-widening browser still
-    // holds at /api/v1/auth, so it never ends up with two.
+    // The mint also expires the same-name cookie a pre-widening browser still holds at /api/v1/auth, so it never ends up with two.
     expect(clearCookie).toHaveBeenCalledWith(
       cookie.mock.calls[0][0],
       expect.objectContaining({ path: '/api/v1/auth', maxAge: 0 }),
@@ -194,8 +176,7 @@ describe('TrustedDeviceService — set + revoke', () => {
     );
     const [name, value, opts] = cookie.mock.calls[0] as [string, string, { path: string; maxAge: number }];
     expect(name).toBe(clearCookie.mock.calls[0][0]);
-    // The SAME secret — no rotation — at the widened path, for what is left
-    // of the row's TTL (not a fresh 30 days).
+    // The same secret (no rotation) at the widened path, for the row's remaining TTL, not a fresh 30 days.
     expect(value).toBe('the-secret');
     expect(opts.path).toBe('/api/v1');
     expect(opts.maxAge).toBeGreaterThan((tenDaysSec - 5) * 1000);
@@ -264,8 +245,7 @@ describe('TrustedDeviceService — resolveTrust (constant-time hazard)', () => {
     const repo = { get: jest.fn().mockResolvedValue(live) } as unknown as TrustedDeviceRepository;
     const svc = new TrustedDeviceService(repo, buildAuth());
     const ctx = await svc.resolveTrust('userA', 'dev1', 'the-secret');
-    // `expiresAt` rides along so a trusted login can re-issue the cookie with
-    // its remaining lifetime without a second Get.
+    // `expiresAt` lets a trusted login re-issue the cookie with its remaining lifetime without a second Get.
     expect(ctx).toEqual({
       trusted: true,
       userId: 'userA',
@@ -287,7 +267,6 @@ describe('TrustedDeviceService — resolveTrust (constant-time hazard)', () => {
     const svc = new TrustedDeviceService(repo, buildAuth());
     const ctx = await svc.resolveTrust(null, 'dev1', 'some-cookie');
     expect(ctx.trusted).toBe(false);
-    // A real Get was still issued (not skipped) — same shape as a known user.
     expect(get).toHaveBeenCalledTimes(1);
   });
 });
@@ -356,12 +335,9 @@ describe('TrustedDeviceService — list', () => {
 
     const listed = await svc.list('userA');
 
-    // Only the still-trusted (live numeric TTL) device survives the filter;
-    // the expired numeric row and the pre-cutover ISO-string row are excluded.
+    // The expired numeric row and the pre-cutover ISO-string row are excluded.
     expect(listed.map((d) => d.deviceId)).toEqual(['live']);
-    // The response boundary surfaces an ISO string, not the stored epoch second.
     expect(listed[0].expiresAt).toBe(new Date(live.expiresAt * 1000).toISOString());
-    // The at-rest tokenHash is never surfaced.
     expect(listed[0]).not.toHaveProperty('tokenHash');
   });
 });

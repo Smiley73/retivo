@@ -1,16 +1,5 @@
-/**
- * Workspace-clear rate-limit test.
- *
- * The shared test harness sets `DISABLE_THROTTLE=true` (jest.setup.ts), so
- * every other integration test runs with throttling off. This file is the
- * ONE place that exercises the real `@Throttle(5/hr)` on
- * POST /sync/workspace/clear: it clears the env flag BEFORE building the app
- * (the ThrottlerModule `skipIf` reads `process.env` per request) so the
- * guard is active, then proves the 6th call in the window is throttled.
- *
- * Isolated in its own file because clearing the flag affects the whole
- * worker process — no other clear behaviour is asserted here.
- */
+// The real @Throttle(5/hr) on POST /sync/workspace/clear: the harness sets DISABLE_THROTTLE=true (jest.setup.ts), so this file clears the flag before building the app (the ThrottlerModule skipIf reads process.env per request) and proves the 6th call is throttled.
+// Isolated in its own file because clearing the flag affects the whole worker process.
 import request from 'supertest';
 import {
   bootstrapTestApp,
@@ -25,8 +14,6 @@ describe('POST /sync/workspace/clear — rate limit', () => {
   let priorFlag: string | undefined;
 
   beforeAll(async () => {
-    // Enable throttling for this worker: the guard's skipIf reads
-    // process.env at request time, so removing the flag activates it.
     priorFlag = process.env.DISABLE_THROTTLE;
     delete process.env.DISABLE_THROTTLE;
     t = await bootstrapTestApp();

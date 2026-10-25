@@ -1,9 +1,4 @@
-/**
- * Unit tests for env validation. Locks the production guard on
- * DISABLE_THROTTLE so a stray `true` value copied from a test .env into
- * a real deployment fails boot instead of silently disabling every rate
- * limit.
- */
+// Env validation: the production guard on DISABLE_THROTTLE, so a stray `true` copied from a test .env into a deployment fails boot instead of silently disabling every rate limit.
 import { generateKeyPairSync } from 'node:crypto';
 import { validateEnv } from './env.config.js';
 
@@ -74,14 +69,10 @@ describe('validateEnv — EXPOSE_VERIFICATION_TOKEN deployed-stack guard', () =>
     process.env.AUTH_JWT_PUBLIC_KEYS = JSON.stringify({ 'kid-1': TEST_PUBLIC_PEM });
     process.env.AUTH_JWT_CURRENT_KID = 'kid-1';
     process.env.WEB_ORIGIN = 'http://localhost:5173';
-    // These tests pin STACK, which makes the snapshot-purge function
-    // name and the edge shared secret deployed-stack requirements — set
-    // both so they exercise only the EXPOSE_VERIFICATION_TOKEN guard.
+    // Pinning STACK makes the snapshot-purge function name and the edge shared secret deployed-stack requirements; set both so these cases exercise only the EXPOSE_VERIFICATION_TOKEN guard.
     process.env.SNAPSHOT_PURGE_FUNCTION_NAME = 'retirement-test-snapshot-purge';
     process.env.EDGE_SHARED_SECRET = 'retirement-test-edge-secret';
-    // The test runner sets DISABLE_THROTTLE=true, which has its own
-    // NODE_ENV=production guard — drop it so the cases below that
-    // simulate a deployed Lambda fail on nothing but this flag.
+    // The test runner sets DISABLE_THROTTLE=true, which has its own NODE_ENV=production guard; drop it so the deployed-Lambda cases fail on nothing but this flag.
     delete process.env.DISABLE_THROTTLE;
   }
 
@@ -92,8 +83,7 @@ describe('validateEnv — EXPOSE_VERIFICATION_TOKEN deployed-stack guard', () =>
     expect(() => validateEnv()).toThrow(/EXPOSE_VERIFICATION_TOKEN=true is not allowed/);
   });
 
-  // The shortcut is local-development only: an AWS dev Lambda runs
-  // NODE_ENV=production, so it must be refused there too — not just on prod.
+  // The shortcut is local-development only: an AWS dev Lambda runs NODE_ENV=production, so it must be refused there too.
   it('rejects EXPOSE_VERIFICATION_TOKEN=true on a deployed dev stack (NODE_ENV=production)', () => {
     applyMinimumValidEnv();
     process.env.STACK = 'dev';
@@ -280,9 +270,7 @@ describe('validateEnv — SNAPSHOT_PURGE_FUNCTION_NAME deployed-stack guard', ()
     process.env.AUTH_JWT_PUBLIC_KEYS = JSON.stringify({ 'kid-1': TEST_PUBLIC_PEM });
     process.env.AUTH_JWT_CURRENT_KID = 'kid-1';
     process.env.WEB_ORIGIN = 'http://localhost:5173';
-    // These tests pin STACK, which also makes the edge shared secret a
-    // deployed-stack requirement — set it so they exercise only the
-    // SNAPSHOT_PURGE_FUNCTION_NAME guard.
+    // Pinning STACK also makes the edge shared secret a deployed-stack requirement; set it so these tests exercise only the SNAPSHOT_PURGE_FUNCTION_NAME guard.
     process.env.EDGE_SHARED_SECRET = 'retirement-test-edge-secret';
   }
 
@@ -325,8 +313,7 @@ describe('validateEnv — EDGE_SHARED_SECRET deployed-stack guard', () => {
     process.env.AUTH_JWT_PUBLIC_KEYS = JSON.stringify({ 'kid-1': TEST_PUBLIC_PEM });
     process.env.AUTH_JWT_CURRENT_KID = 'kid-1';
     process.env.WEB_ORIGIN = 'http://localhost:5173';
-    // Pinning STACK also makes SNAPSHOT_PURGE_FUNCTION_NAME a deployed-stack
-    // requirement — set it so these tests exercise only the edge-secret guard.
+    // Pinning STACK also makes SNAPSHOT_PURGE_FUNCTION_NAME a deployed-stack requirement; set it so these tests exercise only the edge-secret guard.
     process.env.SNAPSHOT_PURGE_FUNCTION_NAME = 'retirement-test-snapshot-purge';
   }
 

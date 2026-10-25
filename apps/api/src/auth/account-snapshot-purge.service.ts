@@ -17,7 +17,7 @@ import type { EnvConfig } from '../common/env.config.js';
 
 const DELETE_BATCH_SIZE = 1000; // S3 DeleteObjects hard cap.
 
-export class SnapshotPurgeError extends Error {
+class SnapshotPurgeError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = 'SnapshotPurgeError';

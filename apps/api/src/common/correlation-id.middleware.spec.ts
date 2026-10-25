@@ -1,9 +1,4 @@
-/**
- * Unit tests for CorrelationIdMiddleware. The middleware is the single
- * place where the external `x-correlation-id` enters the system, so it
- * must reject anything that doesn't match the canonical UUID shape.
- * Otherwise log-forging payloads would flow into Pino + the response.
- */
+// CorrelationIdMiddleware is the one place the external x-correlation-id enters, so it must reject anything outside the canonical UUID shape or log-forging payloads would flow into Pino and the response.
 import { CorrelationIdMiddleware } from './correlation-id.middleware.js';
 import type { Request, Response } from 'express';
 

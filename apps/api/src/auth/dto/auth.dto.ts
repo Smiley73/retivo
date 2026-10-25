@@ -51,7 +51,7 @@ const ENCRYPTED_WORKSPACE_RESET_PHRASE = 'DELETE';
 // class-definition time.
 const MAX_OPAQUE_BLOB_LEN = 8192;
 
-export function birthdateBoundsForUtcDate(today: string): {
+function birthdateBoundsForUtcDate(today: string): {
   min: string;
   max: string;
 } {

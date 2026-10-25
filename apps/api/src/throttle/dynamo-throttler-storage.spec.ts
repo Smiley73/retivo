@@ -1,32 +1,17 @@
-/**
- * Unit tests for `DynamoThrottlerStorage`. Pure unit test: the repository is stubbed, so no
- * DynamoDB Local round trip is needed (the repository's own contract is covered by
- * `../dynamo/throttle-counter.repository.spec.ts`; the cross-instance and wire-level guarantees
- * live under `../test/`).
- *
- * Covers the failure policy this class owns: the store call succeeding, the
- * deadline firing on a slow store, a throwing store, the fallback being
- * bounded rather than an open door, the once-per-episode warning/metric
- * (including across a flapping failure pattern, not just a clean outage),
- * and that nothing logged carries the throttle key/tracker.
- */
+// DynamoThrottlerStorage's failure policy with the repository stubbed: the store succeeding, the deadline firing on a slow store, a throwing store, the fallback being bounded rather than an open door,
+// the once-per-episode warning and metric (also across a flapping failure pattern), and nothing logged carrying the throttle key or tracker.
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import fs from 'node:fs';
 import type { ConfigService } from '@nestjs/config';
 import { DynamoThrottlerStorage } from './dynamo-throttler-storage.js';
 import type { EnvConfig } from '../common/env.config.js';
-import type {
-  ThrottleCounterRepository,
-  ThrottleCounterResult,
-} from '../dynamo/throttle-counter.repository.js';
+import type { ThrottleCounterRepository } from '../dynamo/throttle-counter.repository.js';
 
 function configFor(stack: string): ConfigService<EnvConfig, true> {
   return { get: () => stack } as unknown as ConfigService<EnvConfig, true>;
 }
 
-/** Captures every EMF metric name written to fd 1, passing every other fd
- *  through untouched (mirrors `bootstrap.service.spec.ts`'s capture shape). */
 function captureMetricNames(): { names: string[]; restore: () => void } {
   const names: string[] = [];
   const realWriteSync = fs.writeSync.bind(fs);
@@ -44,7 +29,6 @@ function captureMetricNames(): { names: string[]; restore: () => void } {
       };
       if (parsed._aws) names.push(parsed._aws.CloudWatchMetrics[0].Metrics[0].Name);
     } catch {
-      // non-EMF fd-1 line — ignore.
     }
     return Buffer.byteLength(String(data));
   }) as unknown as typeof fs.writeSync);
@@ -61,7 +45,7 @@ describe('DynamoThrottlerStorage', () => {
       increment: jest.fn().mockResolvedValue({
         hits: 3,
         windowEndMs: Date.now() + 10_000,
-      } satisfies ThrottleCounterResult),
+      }),
     } as unknown as ThrottleCounterRepository;
     const storage = new DynamoThrottlerStorage(repo, configFor('dev'));
 

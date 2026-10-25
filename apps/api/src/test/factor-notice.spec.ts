@@ -1,19 +1,5 @@
-/**
- * API-integration tests for the factor-change notice + undo: the four controller call sites
- * (passkey add/remove, TOTP add/ remove) and the public `POST /auth/factor-undo/consume` endpoint.
- *
- * SES is disabled by default in `bootstrapTestApp()`, so — unlike the
- * password-reset token, which has an `EXPOSE_VERIFICATION_TOKEN` dev
- * trapdoor — this suite has no way to recover the RAW token a real
- * controller-triggered notify() mints (only its SHA-256 hash is ever
- * persisted). The consume-focused cases below mint their OWN known token and
- * write it directly through `UsersRepository.setPendingFactorUndo` — the same
- * shape `FactorNoticeService.notify` writes — which proves the CONSUME
- * contract (single-use, expiry, credential/TOTP action, all-rows session
- * revoke) without depending on SES. The controller-wiring cases (does
- * enrolling/removing actually call notify) are proven separately, by
- * asserting the pending-undo fields exist after a real HTTP call.
- */
+// Factor-change notice and undo: the four controller call sites (passkey and TOTP add/remove) and the public POST /auth/factor-undo/consume. SES is
+// disabled and only the token's SHA-256 is persisted, so consume cases write their own known token through UsersRepository.setPendingFactorUndo.
 import request from 'supertest';
 import { generateSync } from 'otplib';
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
@@ -66,7 +52,6 @@ async function insertPasskey(t: TestApp, userId: string, credentialId: string): 
   await t.module.get(PasskeysRepository).insert(row);
 }
 
-/** Mint a fresh raw undo token and persist it directly — bypasses SES. */
 async function seedPendingUndo(
   t: TestApp,
   args: {
@@ -135,8 +120,7 @@ describe('factor-change notice + undo', () => {
         stepUp: { currentPassword: STRONG_PASSWORD },
       })
       .expect(200);
-    // SES is disabled in this harness, so the local-dev log path counts as
-    // the mail having been handed off.
+    // SES is disabled in this harness, so the local-dev log path counts as the mail being handed off.
     expect(confirm.body).toEqual({ totpEnabled: true, noticeSent: true });
 
     const user = await readUser(t, s.userId);
@@ -176,7 +160,6 @@ describe('factor-change notice + undo', () => {
 
   it('removing an unknown/already-removed credential does not overwrite a live pending undo', async () => {
     const s = await signupVerifyLogin(t);
-    // A real earlier change left a passkey_add undo outstanding.
     const addedCredentialId = `cred-${randomUUID()}`;
     const token = await seedPendingUndo(t, {
       userId: s.userId,
@@ -185,8 +168,6 @@ describe('factor-change notice + undo', () => {
     });
     const before = await readUser(t, s.userId);
 
-    // A no-op removal of a credential that doesn't exist (idempotent 200,
-    // and no notice was minted for it).
     const unknownCredentialId = `cred-${randomUUID()}`;
     const noop = await authSet(s)(
       request(t.app.getHttpServer()).post(`/api/v1/auth/passkey/${unknownCredentialId}/remove`),
@@ -195,7 +176,6 @@ describe('factor-change notice + undo', () => {
       .expect(200);
     expect(noop.body).toEqual({ noticeSent: false });
 
-    // The pending undo is untouched — the original passkey_add link still works.
     const after = await readUser(t, s.userId);
     expect(after.pendingFactorUndoKind).toBe('passkey_add');
     expect(after.pendingFactorUndoCredentialId).toBe(addedCredentialId);
@@ -216,15 +196,10 @@ describe('factor-change notice + undo', () => {
     const users = t.module.get(UsersRepository);
     const nowSec = Math.floor(Date.now() / 1000);
 
-    // A newer factor change supersedes the pending undo before the stale
-    // link is clicked (one outstanding undo per account).
     const newToken = await seedPendingUndo(t, { userId: s.userId, kind: 'totp_add' });
 
-    // The stale token's claim must fail outright — it must never hand back
-    // the OLD kind/credentialId for the caller to act on, even though the
-    // row still has a live (different) pending undo. This is what closes
-    // the race: FactorNoticeService.consume acts only on what a successful
-    // claim returns, never on a plain read taken before the claim.
+    // The stale token's claim must fail outright rather than return the old kind/credentialId for the caller to act on; FactorNoticeService.consume
+    // acts only on what a successful claim returns, never on a read taken before it.
     const staleClaim = await users.claimFactorUndo({
       userId: s.userId,
       presentedTokenHash: sha256(staleToken),
@@ -234,8 +209,6 @@ describe('factor-change notice + undo', () => {
     });
     expect(staleClaim).toBeNull();
 
-    // The newer token still claims correctly and is untouched by the failed
-    // attempt above.
     const freshClaim = await users.claimFactorUndo({
       userId: s.userId,
       presentedTokenHash: sha256(newToken),
@@ -245,10 +218,7 @@ describe('factor-change notice + undo', () => {
     });
     expect(freshClaim).toEqual({ kind: 'totp_add' });
 
-    // A successful claim does not itself clear the pending fields — that
-    // stays UsersRepository.consumeFactorUndo's job (committed together with
-    // the undo action), so a retry after a downstream failure can still
-    // complete via the same link.
+    // A successful claim does not clear the pending fields: UsersRepository.consumeFactorUndo does that with the undo action, so a retry after a downstream failure can still complete.
     const afterClaim = await readUser(t, s.userId);
     expect(afterClaim.pendingFactorUndoTokenHash).toBe(sha256(newToken));
 
@@ -261,11 +231,8 @@ describe('factor-change notice + undo', () => {
     await enrollTotp(t, s);
     const staleToken = await seedPendingUndo(t, { userId: s.userId, kind: 'totp_add' });
 
-    // Reproduce the race deterministically: the stale token's claim succeeds,
-    // and THEN a newer factor change overwrites the pending undo before the
-    // consume commits — the window a destructive write performed as a
-    // separate step after the claim would fall into, clearing an
-    // authenticator the clicked link was never about.
+    // The stale token's claim succeeds, then a newer factor change overwrites the pending undo before the consume commits: the window a destructive
+    // write made as a separate step after the claim would fall into, clearing an authenticator the clicked link was not about.
     const users = t.module.get(UsersRepository);
     const realClaim = users.claimFactorUndo.bind(users);
     let newToken = '';
@@ -283,8 +250,6 @@ describe('factor-change notice + undo', () => {
       claimSpy.mockRestore();
     }
 
-    // TOTP survives (the action and the clear aborted together), the newer
-    // token is still the live one, and it still works.
     const mfa = t.module.get(UserMfaRepository);
     expect((await mfa.get(s.userId))?.totpEnabled).toBe(true);
     expect((await readUser(t, s.userId)).pendingFactorUndoTokenHash).toBe(sha256(newToken));
@@ -317,7 +282,6 @@ describe('factor-change notice + undo', () => {
       persistSpy.mockRestore();
     }
 
-    // The promotion committed; no undo token was stored (and so none mailed).
     expect((await t.module.get(UserMfaRepository).get(s.userId))?.totpEnabled).toBe(true);
     expect((await readUser(t, s.userId)).pendingFactorUndoTokenHash).toBeFalsy();
   });
@@ -344,7 +308,6 @@ describe('factor-change notice + undo', () => {
   it('consuming a totp_add token disables TOTP', async () => {
     const s = await signupVerifyLogin(t);
     await enrollTotp(t, s);
-    // Overwrite the real (unrecoverable) token the enroll minted with a known one.
     const token = await seedPendingUndo(t, { userId: s.userId, kind: 'totp_add' });
 
     await consume(t, s.userId, token, 'totp_add').expect(200);
@@ -371,9 +334,7 @@ describe('factor-change notice + undo', () => {
     const s = await signupVerifyLogin(t);
     const preRotationClaims = decodeAccessClaims(s.accessToken);
 
-    // Rotate once: the OLD refresh row is now revoked (pre-rotation), but its
-    // paired access-token jti is untouched by ordinary rotation and still
-    // within its TTL — the exact case the all-rows scope must still catch.
+    // After one rotation the old refresh row is revoked but its paired access-token jti is still within its TTL: the case the all-rows scope must still catch.
     const refresh = await request(t.app.getHttpServer())
       .post('/api/v1/auth/refresh')
       .set('Origin', ORIGIN())
@@ -439,16 +400,12 @@ describe('factor-change notice + undo', () => {
     const s = await signupVerifyLogin(t);
     const credentialId = `cred-${randomUUID()}`;
     await insertPasskey(t, s.userId, credentialId);
-    // The stored pending undo is passkey_add; the request claims passkey_remove
-    // (e.g. an attacker-modified link fragment, or a page that fell back to
-    // the wrong copy).
+    // The pending undo is passkey_add; the request claims passkey_remove (a tampered link fragment).
     const token = await seedPendingUndo(t, { userId: s.userId, kind: 'passkey_add', credentialId });
 
     const res = await consume(t, s.userId, token, 'passkey_remove').expect(200);
     expect(res.body).toEqual({ ok: false });
 
-    // No side effects: the passkey survives and the pending undo is untouched
-    // (the genuine passkey_add link still works).
     const passkeys = t.module.get(PasskeysRepository);
     expect(await passkeys.find(s.userId, credentialId)).not.toBeNull();
     const user = await readUser(t, s.userId);

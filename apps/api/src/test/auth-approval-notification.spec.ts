@@ -1,20 +1,5 @@
-/**
- * Endpoint-level integration test for the approved-user notification.
- *
- * After the owner approves a pending signup, the approved user receives a
- * best-effort SES notice with a login link. This suite drives the real
- * `POST /api/v1/auth/approve-signup` endpoint and asserts:
- *   - the notice is sent to the approved user's own address (200), and
- *   - the approval still returns 200 when the SES send throws.
- *
- * The default test harness leaves SES disabled (no `SES_ENDPOINT`), so the
- * notice would only be logged. To exercise the actual send path this suite
- * builds its own Nest app with `SES_ENDPOINT` set (flips `sesEnabled` true)
- * and overrides the SES_CLIENT provider with a capturing fake — no real
- * AWS / Moto call. The verify-email mail dispatched during signup also
- * rides the same fake and is addressed to the same user, so the suite
- * filters captures by the approval-notice subject to isolate the notice.
- */
+// POST /auth/approve-signup sends the approved user a best-effort SES notice with a login link, and still returns 200 when the send throws. The default harness leaves SES
+// disabled, so this suite builds its own app with SES_ENDPOINT set and a capturing SES_CLIENT fake; verify-email mail rides the same fake, so captures are filtered by subject.
 import 'reflect-metadata';
 import request from 'supertest';
 import { Reflector } from '@nestjs/core';
@@ -39,8 +24,6 @@ import {
   freshEmail,
 } from './test-helpers.js';
 
-// Captured SES sends + a switch the fake reads on each call so a single
-// test can force the send to throw.
 let sesSends: SendEmailCommand[] = [];
 let sesShouldThrow = false;
 
@@ -51,9 +34,7 @@ describe('approved-user notification — POST /auth/approve-signup', () => {
   let prevSesEndpoint: string | undefined;
 
   beforeAll(async () => {
-    // Flip `sesEnabled` true for this module's SignupApprovalService
-    // (read once at construction from config) so the notice send path
-    // runs instead of the dev-mode log.
+    // Flips `sesEnabled` true for SignupApprovalService (read once at construction) so the send path runs instead of the dev-mode log.
     prevSesEndpoint = process.env.SES_ENDPOINT;
     process.env.SES_ENDPOINT = 'http://localhost:4566';
 
@@ -100,8 +81,7 @@ describe('approved-user notification — POST /auth/approve-signup', () => {
 
   afterAll(async () => {
     await app.close();
-    // This suite builds its own Nest app, so it isn't covered by the
-    // `bootstrapTestApp` close-patch; destroy the doc pool explicitly.
+    // This suite builds its own app, so the bootstrapTestApp close-patch does not cover the doc pool; destroy it explicitly.
     doc.destroy();
     if (prevSesEndpoint === undefined) {
       delete process.env.SES_ENDPOINT;
@@ -115,7 +95,6 @@ describe('approved-user notification — POST /auth/approve-signup', () => {
     sesShouldThrow = false;
   });
 
-  /** Signup + verify (no approve), returning the email + pending token. */
   async function signupVerifyAwaitingApproval(): Promise<{
     email: string;
     userId: string;
@@ -137,8 +116,7 @@ describe('approved-user notification — POST /auth/approve-signup', () => {
       .send({ token: verificationToken });
     expect(verify.status).toBe(200);
 
-    // The approval token is stored hashed; the RAW token is only
-    // available from the verify-email dev-trapdoor response.
+    // The approval token is stored hashed; the raw token comes from the verify-email dev trapdoor.
     expect(typeof verify.body.approvalToken).toBe('string');
     return { email, userId, approvalToken: verify.body.approvalToken as string };
   }
@@ -153,16 +131,13 @@ describe('approved-user notification — POST /auth/approve-signup', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ approved: true, email });
 
-    // The approve-notice is the one with the approval subject; the
-    // verify-email mail (also sent to this address) carries a different
-    // subject, so filter on it.
+    // The verify-email mail to the same address carries a different subject, so filter on the approval subject.
     const notices = sesSends.filter(
       (cmd) =>
         cmd.input.Message?.Subject?.Data ===
         'Your Retivo account is approved',
     );
     expect(notices).toHaveLength(1);
-    // Sent to the approved user's own address.
     expect(notices[0].input.Destination?.ToAddresses).toEqual([email]);
     const body = notices[0].input.Message!.Body!.Text!.Data!;
     expect(body).toContain('/login');
@@ -171,7 +146,6 @@ describe('approved-user notification — POST /auth/approve-signup', () => {
   it('returns 200 even when the notification SES send throws', async () => {
     const { email, approvalToken } = await signupVerifyAwaitingApproval();
 
-    // Force every send (including the approve notice) to throw.
     sesShouldThrow = true;
 
     const res = await request(app.getHttpServer())

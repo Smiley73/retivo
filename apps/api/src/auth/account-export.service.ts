@@ -51,34 +51,6 @@ import type {
 } from '../dynamo/types.js';
 
 /**
- * The complete, ordered set of account-export sections; the API integration test derives its own expected set
- * independently, so dropping a section here or from `build` fails it.
- */
-export const ACCOUNT_EXPORT_SECTION_KEYS = [
-  'workspaceMeta',
-  'mutationLog',
-  'aggregateVersion',
-  'idempotencyKey',
-  'deviceRegistry',
-  'user',
-  'emailReservations',
-  'emailVerifications',
-  'passwordReset',
-  'signupApprovals',
-  'credential',
-  'passkeys',
-  'refreshTokens',
-  'revokedTokens',
-  'failedLoginAttempt',
-  'history', // AuthEvent — the one paging section
-  'householdKeyEnvelope',
-  'userMfa',
-  'mfaEmailOtp',
-  'trustedDevices',
-  's3SnapshotInventory',
-] as const;
-
-/**
  * Thrown when the User row is gone when read, i.e. a concurrent `DELETE /auth/account`. A bundle around a fabricated
  * empty record would be presented as a complete export while holding only the rows the sweep raced past, so it fails
  * closed.

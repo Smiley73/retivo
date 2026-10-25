@@ -61,36 +61,28 @@ export interface CompactorHouseholdMetric {
   budgetLimited?: boolean;
 }
 
-/**
- * Compaction safety budgets: internal bounds, deliberately not stack config. A household just under all three byte
- * caps could exceed the 1024 MB Lambda heap from JSON expansion alone, so they are single-digit MB. `maxMergedBytes`
- * (8 MiB uncompressed) sits above the ~6.7 MiB uncompressed equivalent of the 5 MiB gzipped bootstrap ceiling
- * (`MAX_RESPONSE_BYTES`; base64 ciphertext deflates only to ~0.75x): a merged-size refusal is permanent (merged only
- * grows), so a lower cap would starve a servable household every hour. `CompactorService.budgets` is public and
- * mutable so a test can trip a budget with a few rows; production never reassigns it.
- */
-export interface CompactorBudgets {
-  /** Mutation-log page-read row cap per household; paging stops once any read budget trips. */
+// Compaction safety budgets: internal bounds, deliberately not stack config. A household just under all three byte
+// caps could exceed the 1024 MB Lambda heap from JSON expansion alone, so they are single-digit MB. `maxMergedBytes`
+// (8 MiB uncompressed) sits above the ~6.7 MiB uncompressed equivalent of the 5 MiB gzipped bootstrap ceiling
+// (`MAX_RESPONSE_BYTES`; base64 ciphertext deflates only to ~0.75x): a merged-size refusal is permanent (merged only
+// grows), so a lower cap would starve a servable household every hour. `CompactorService.budgets` is public and
+// mutable so a test can trip a budget with a few rows; production never reassigns it.
+interface CompactorBudgets {
+  // Mutation-log page-read row cap per household; paging stops once any read budget trips.
   maxLogRows: number;
   maxLogBytes: number;
-  /**
-   * Decompressed baseline byte cap, enforced at `gunzipSync` via `maxOutputLength` rather than trusting the S3
-   * compressed size.
-   */
+  // Decompressed baseline byte cap, enforced at `gunzipSync` via `maxOutputLength` rather than trusting the S3
+  // compressed size.
   maxSnapshotBytes: number;
-  /**
-   * Serialized merged-snapshot byte cap, checked before gzip and the S3 write. At or above the bootstrap ceiling
-   * equivalent, so anything bootstrap can serve is written; strictly below `maxSnapshotBytes`, because the read cap
-   * covers the whole decompressed envelope while this estimate covers aggregates only, and a merge the read cap then
-   * refuses is the same permanent skip.
-   */
+  // Serialized merged-snapshot byte cap, checked before gzip and the S3 write. At or above the bootstrap ceiling
+  // equivalent, so anything bootstrap can serve is written; strictly below `maxSnapshotBytes`, because the read cap
+  // covers the whole decompressed envelope while this estimate covers aggregates only, and a merge the read cap then
+  // refuses is the same permanent skip.
   maxMergedBytes: number;
   householdDeadlineMs: number;
   runDeadlineMs: number;
-  /**
-   * Reserve subtracted from the run deadline so the summary log still writes before Lambda freezes. Must be at least
-   * `householdDeadlineMs`: a household starting just before the run deadline may run that long.
-   */
+  // Reserve subtracted from the run deadline so the summary log still writes before Lambda freezes. Must be at least
+  // `householdDeadlineMs`: a household starting just before the run deadline may run that long.
   runDeadlineReserveMs: number;
 }
 
@@ -121,14 +113,12 @@ class SnapshotOversizedError extends Error {
   }
 }
 
-/**
- * Thrown by `compactHousehold` for a true skip forced by a safety budget; `runOnce` catches it to record the
- * household and cause and continue. Exported so a test can assert the cause of a direct call.
- */
-export class CompactorBudgetSkipError extends Error {
+// Thrown by `compactHousehold` for a true skip forced by a safety budget; `runOnce` catches it to record the
+// household and cause and continue.
+class CompactorBudgetSkipError extends Error {
   constructor(
     readonly householdId: string,
-    /** The budget cause; named `budgetCause` to avoid colliding with `Error.prototype.cause`. */
+    // The budget cause; named `budgetCause` to avoid colliding with `Error.prototype.cause`.
     readonly budgetCause: string,
   ) {
     super(`Compactor budget skip for household ${householdId}: ${budgetCause}`);

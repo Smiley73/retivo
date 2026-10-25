@@ -1,24 +1,5 @@
-/**
- * Version-aware, TOCTOU-safe rejection-cache replay.
- *
- * A cached REJECTED push outcome now carries the mutation's attempted
- * `expectedVersion` (server-internal — never on the client-facing
- * `RejectedMutationResult`). A later replay of the SAME
- * `(householdId, deviceId, mutationId)` whose incoming `version` differs
- * means the client re-based and retried with a corrected version, so the
- * stale rejection must not be replayed — the server conditionally deletes
- * the cached row and re-evaluates the mutation from scratch. A TRUE
- * duplicate (same version) still replays the cached rejection exactly, and
- * a legacy row minted before this field existed always re-evaluates
- * (bypass on any incoming version).
- *
- * HTTP/emulator-level (real DynamoDB Local + Moto) — exercises the full
- * push pipeline, matching the repo's sync-API test convention
- * (apps/api/src/test/sync.spec.ts). The TOCTOU-specific "concurrent
- * corrected retries never cache a false CONFLICT" case needs deterministic
- * control over interleaving the emulator can't provide — that is a
- * mock-based unit test, `push-rejection-cache-toctou.spec.ts`.
- */
+// Version-aware rejection-cache replay: a cached rejected push carries its attempted expectedVersion (server-internal), so a replay with a different version re-evaluates, a true duplicate replays the cached rejection, and a legacy row without the field always re-evaluates.
+// The concurrent TOCTOU case needs deterministic interleaving the emulator cannot give and lives in push-rejection-cache-toctou.spec.ts.
 import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
@@ -48,7 +29,6 @@ async function push(
     .send({ deviceId: s.deviceId, householdId: s.householdId, mutations, freshnessHead });
 }
 
-/** A strict encrypted-envelope payload. */
 function encryptedPayload(): Record<string, unknown> {
   return {
     encryptionVersion: 1,
@@ -78,9 +58,6 @@ describe('push rejection-cache replay', () => {
     ]);
     expect(created.body.applied).toHaveLength(1);
 
-    // Client mistakenly (or staleness-induced) sends an update at version 0
-    // when the server is already at version 1 → CONFLICT, cached with
-    // expectedVersion: 0.
     const mutationId = randomUUID();
     const stale = makeMutation(s, {
       id: mutationId,
@@ -94,8 +71,6 @@ describe('push rejection-cache replay', () => {
     expect(rejected.body.rejected[0].reason).toBe('CONFLICT');
     expect(rejected.body.rejected[0].currentVersion).toBe(1);
 
-    // Client re-bases and retries the SAME mutation id with the corrected
-    // version — must be APPLIED, not the stale cached CONFLICT.
     const corrected = { ...stale, version: 1 };
     const appliedRes = await push(t, s, [corrected]);
     expect(appliedRes.body.rejected).toHaveLength(0);
@@ -103,9 +78,7 @@ describe('push rejection-cache replay', () => {
     expect(appliedRes.body.applied[0].mutationId).toBe(mutationId);
     expect(appliedRes.body.applied[0].newVersion).toBe(2);
 
-    // The stale cached rejection row is gone: a further replay of the
-    // corrected mutation id returns the NEW cached applied result (stable
-    // exact-replay), not a resurrected conflict.
+    // The stale rejection row is gone: a further replay returns the new cached applied result, not a resurrected conflict.
     const replay = await push(t, s, [corrected]);
     expect(replay.body.rejected).toHaveLength(0);
     expect(replay.body.applied).toHaveLength(1);
@@ -130,8 +103,6 @@ describe('push rejection-cache replay', () => {
     expect(first.body.rejected).toHaveLength(1);
     expect(first.body.rejected[0].reason).toBe('CONFLICT');
 
-    // Exact same mutation id AND version — a genuine duplicate, not a
-    // re-based retry. Replays the identical cached rejection.
     const second = await push(t, s, [stale]);
     expect(second.body.rejected).toHaveLength(1);
     expect(second.body.rejected[0]).toEqual(first.body.rejected[0]);
@@ -145,8 +116,7 @@ describe('push rejection-cache replay', () => {
     const idemTable = config.get('TABLE_IDEMPOTENCY_KEY', { infer: true } as never) as unknown as string;
     const idemKey = IdempotencyKeyRepository.composeKey(s.householdId, s.deviceId, mutationId);
 
-    // Seed a LEGACY cached rejection minted before `expectedVersion`
-    // existed — no such attribute on the row at all.
+    // A legacy cached rejection minted before `expectedVersion` existed: the attribute is absent from the row.
     await t.doc.send(
       new PutCommand({
         TableName: idemTable,
@@ -167,9 +137,7 @@ describe('push rejection-cache replay', () => {
       }),
     );
 
-    // A fresh create at version 0 for an aggregate that doesn't exist yet —
-    // if the legacy rejection were replayed as-is this would wrongly stay a
-    // CONFLICT forever; instead it must re-evaluate and apply.
+    // Replayed as-is, this create would wrongly stay a CONFLICT forever; it must re-evaluate and apply.
     const mutation = makeMutation(s, {
       id: mutationId,
       aggregateId,

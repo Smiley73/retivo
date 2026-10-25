@@ -1,20 +1,5 @@
-/**
- * ChangeEmailService.confirm → sendSecurityNotice unit tests.
- *
- * Locks the live defect this fix closes: the security notice mailed
- * to the OLD address on a completed email change interpolated the NEW
- * address raw into a `<strong>` element. A hijacked session could set the
- * pending address to a valid-but-hostile quoted local part —
- * `"<b>x</b>"@example.com` passes `@IsEmail()` — and inject markup into the
- * mail the real owner reads. Escaping is the fix; nothing about the DTO
- * changes (out of scope here).
- *
- * Pure unit test, mirrors the harness in signup-approval.service.spec.ts: a
- * stub `ses` with a `send` that captures the SendEmailCommand, `sesEnabled`
- * forced on via SES_ENDPOINT. Does NOT go through the Moto-backed HTTP suite
- * (apps/api/src/test/change-email.spec.ts) — that suite asserts rows/response
- * bodies, never an SES payload, so it can't see the rendered HTML at all.
- */
+// ChangeEmailService.confirm's security notice to the old address must escape the new address: a hostile quoted local part like `"<b>x</b>"@example.com` passes @IsEmail() and would inject markup into the owner's mail.
+// A unit test with a stub `ses` capturing the SendEmailCommand, since the Moto-backed HTTP suite asserts rows and bodies, never an SES payload.
 import type { ConfigService } from '@nestjs/config';
 import type { SESClient } from '@aws-sdk/client-ses';
 import { SendEmailCommand } from '@aws-sdk/client-ses';
@@ -33,9 +18,7 @@ import type { EnvConfig } from '../common/env.config.js';
 import type { EmailVerificationRow, UserRow } from '../dynamo/types.js';
 
 const OLD_ADDRESS = 'real-owner@example.com';
-// A valid-but-hostile quoted local part — verified by hand to pass
-// `@IsEmail()`. The user sets THIS as
-// the pending new address; the security notice mails to the OLD address.
+// A valid-but-hostile quoted local part that passes `@IsEmail()`.
 const HOSTILE_NEW_ADDRESS = '"<b>x</b>"@example.com';
 const RAW_TOKEN = 'raw-change-email-token';
 const USER_ID = 'u-change-email';
@@ -49,8 +32,7 @@ function buildConfig(): ConfigService<EnvConfig, true> {
     TABLE_USER: 'User',
     AUTH_MFA_ENFORCED: 'false',
     NODE_ENV: 'test',
-    // Force SES "enabled" so confirm() issues a SendEmailCommand we can
-    // capture, rather than logging a fingerprint (dev-mode branch).
+    // SES is forced on via SES_ENDPOINT so confirm() issues a capturable SendEmailCommand instead of logging a fingerprint.
     SES_ENDPOINT: 'http://localhost:4566',
     EXPOSE_VERIFICATION_TOKEN: 'false',
   };
@@ -67,8 +49,6 @@ function buildService(sesSends: SendEmailCommand[]): ChangeEmailService {
     },
   } as unknown as SESClient;
   const doc = {
-    // The confirm-time swap transaction — its result is never inspected by
-    // this test, only that the flow proceeds to the post-commit mail.
     send: jest.fn().mockResolvedValue({}),
   } as unknown as DynamoDBDocumentClient;
   const userRow: UserRow = {
@@ -141,10 +121,7 @@ describe('ChangeEmailService.confirm — security notice to the old address', ()
     const result = await svc.confirm({ token: RAW_TOKEN, ip: null, userAgent: null });
 
     expect(result).toEqual({ email: HOSTILE_NEW_ADDRESS });
-    // Exactly one mail: the security notice (confirm() never calls
-    // sendVerificationMail — that runs on request/step-up, not confirm).
-    // A test that only checked "no raw <b>" would also pass if no mail were
-    // sent at all — assert the send happened.
+    // Asserting the send happened matters: a check only for no raw <b> would pass if no mail were sent.
     expect(sesSends).toHaveLength(1);
     const cmd = sesSends[0]!;
     expect(cmd.input.Destination!.ToAddresses).toEqual([OLD_ADDRESS]);
@@ -161,11 +138,9 @@ describe('ChangeEmailService.confirm — security notice to the old address', ()
     await svc.confirm({ token: RAW_TOKEN, ip: null, userAgent: null });
 
     const { subject, text } = bodyOf(sesSends[0]!);
-    // The plain-text body carries the address verbatim — escaping it would
-    // render literal `&quot;` etc. in the reader's mail client.
+    // The plain-text body keeps the address verbatim; escaping it would render literal `&quot;` in the reader's mail client.
     expect(text).toContain(HOSTILE_NEW_ADDRESS);
     expect(text).not.toContain(escapeHtml(HOSTILE_NEW_ADDRESS));
-    // The subject has no interpolation at all here, and must stay untouched.
     expect(subject).toBe('Your account email was changed');
   });
 });

@@ -36,15 +36,13 @@ import type { PushMutationDto } from './dto/push.dto.js';
 
 const MAX_PAYLOAD_BYTES = 64 * 1024;
 
-/** Daily push quota in mutations per household, sized above the demo loader burst; rolls over at the UTC day boundary. */
-export const MAX_DAILY_MUTATIONS = 10_000;
-export const MAX_DAILY_BYTES = 50 * 1024 * 1024;
+// Daily push quota in mutations per household, sized above the demo loader burst; rolls over at the UTC day boundary.
+const MAX_DAILY_MUTATIONS = 10_000;
+const MAX_DAILY_BYTES = 50 * 1024 * 1024;
 
-/**
- * Largest freshness-counter step a push may take over the stored value (the client advances by 1 per attempt).
- * A larger jump is forged and fails the push, the one freshness-head fault that does.
- */
-export const FRESHNESS_COUNTER_MAX_STEP = 1000;
+// Largest freshness-counter step a push may take over the stored value (the client advances by 1 per attempt). A larger
+// jump is forged and fails the push, the one freshness-head fault that does.
+const FRESHNESS_COUNTER_MAX_STEP = 1000;
 
 // A re-appended stranded row is minted one second above the cursor KSUID timestamp, so it sorts strictly above the cursor
 // whatever its payload. A fresh KSUID.random() carries the current second and could sort below a same-second or future cursor.

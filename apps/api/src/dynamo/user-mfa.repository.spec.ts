@@ -1,16 +1,5 @@
-/**
- * Integration tests for `UserMfaRepository` against DynamoDB Local.
- * Covers the get/put/update/delete contract:
- *  - get on a missing row returns null;
- *  - put round-trips the current TOTP row;
- *  - a raw legacy row with an unknown `backupCodes` attribute remains readable;
- *  - update applies a partial patch + stamps updatedAt without clobbering
- *    untouched attributes;
- *  - delete removes the row.
- *
- * Uses fresh userIds per case so suites stay independent on the shared
- * DynamoDB Local instance.
- */
+// UserMfaRepository on DynamoDB Local: get/put/update/delete (a missing row is null, a legacy row with an unknown `backupCodes` attribute stays readable,
+// a partial update stamps updatedAt without clobbering other attributes) and the conditional TOTP lock reservation.
 import { randomUUID } from 'node:crypto';
 import { PutCommand } from '@aws-sdk/lib-dynamodb';
 import { generateSecret, generateSync } from 'otplib';
@@ -103,9 +92,7 @@ describe('UserMfaRepository', () => {
     expect(got?.totpEnabled).toBe(true);
     expect(got?.totpSecret).toBe('CONFIRMEDSECRET5');
     expect(got?.enrolledAt).toBe('2026-06-12T02:00:00.000Z');
-    // Untouched attribute survives the partial update.
     expect(got?.pendingTotpSecret).toBe('PENDINGSECRET234');
-    // updatedAt was advanced past the original.
     expect(got?.updatedAt).not.toBe('2026-06-12T00:00:00.000Z');
   });
 
@@ -148,9 +135,7 @@ describe('UserMfaRepository', () => {
       pendingTotpSecret: 'PENDINGSECRET234',
       updatedAt: '2026-06-12T00:00:00.000Z',
     });
-    // Simulates a concurrent confirm winning first: TOTP is now enabled with
-    // a DIFFERENT live secret, and the pending secret has already been
-    // cleared.
+    // A concurrent confirm won first: TOTP is enabled with a different live secret and the pending secret is cleared.
     await repo.update(userId, {
       totpEnabled: true,
       totpSecret: 'WINNERSECRET5678',
@@ -165,8 +150,6 @@ describe('UserMfaRepository', () => {
     });
     expect(confirmed).toBe(false);
 
-    // The winner's live secret survives — the loser's stale write never
-    // landed.
     const got = await repo.get(userId);
     expect(got?.totpEnabled).toBe(true);
     expect(got?.totpSecret).toBe('WINNERSECRET5678');
@@ -205,18 +188,14 @@ describe('UserMfaRepository — per-account TOTP failure state', () => {
   });
 
   it('loses the swap — null, nothing written — when the observed state has already moved on', async () => {
-    // The property: an attempt whose observation is stale (it read the
-    // row before a concurrent attempt's reservation landed) must not count
-    // itself, or a refused attempt would restart the window it was refused
-    // under and the lock would never reopen.
+    // An attempt with a stale observation must not count itself, or a refused attempt would restart the window it was refused under and the lock would never reopen.
     const userId = randomUUID();
     const first = await repo.reserveTotpAttempt(userId, {}, DECAY_SEC);
     expect(await repo.reserveTotpAttempt(userId, {}, DECAY_SEC)).toBeNull();
     const row = await repo.get(userId);
     expect(row?.totpFailureCount).toBe(1);
     expect(row?.totpLastFailureAt).toBe(first?.totpLastFailureAt);
-    // A stale count under a matching timestamp loses too (two stamps can land
-    // in the same millisecond; the count is what still tells them apart).
+    // A stale count under a matching timestamp loses too: two stamps can land in the same millisecond, and the count tells them apart.
     expect(
       await repo.reserveTotpAttempt(
         userId,
@@ -228,9 +207,7 @@ describe('UserMfaRepository — per-account TOTP failure state', () => {
   });
 
   it('admits exactly one of N concurrent reservations against the same observed state', async () => {
-    // Against the real conditional write, not a stub: N requests that all read
-    // the same pre-burst row race the swap. A winner is an attempt that gets to
-    // compare a code, so there must be exactly one per observed state.
+    // N requests that read the same pre-burst row race the swap against the real conditional write; a winner is an attempt that gets to compare a code, so exactly one per observed state.
     const userId = randomUUID();
     const results = await Promise.all(
       Array.from({ length: 6 }, () => repo.reserveTotpAttempt(userId, {}, DECAY_SEC)),
@@ -240,9 +217,7 @@ describe('UserMfaRepository — per-account TOTP failure state', () => {
   });
 
   it('a reservation against a long-stale observed state resets rather than continues the count', async () => {
-    // A controlled-clock probe (real time would take 24h to reproduce): seed
-    // the row with a high count whose last failure is already past the decay
-    // window, then prove the NEXT attempt starts over at 1 rather than 6.
+    // A controlled-clock probe (real time would take 24h): a high count whose last failure is past the decay window must restart at 1, not 6.
     const userId = randomUUID();
     const staleTimestamp = new Date(Date.now() - (DECAY_SEC + 3600) * 1000).toISOString();
     await repo.put({

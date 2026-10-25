@@ -1,14 +1,4 @@
-/**
- * Unit tests for the standalone health-check probe Lambda.
- *
- * `fetch` is stubbed per test (no network). We assert the HealthCheckStatus
- * value the handler emits + returns for each branch:
- *   - HTTP 200 → 1
- *   - non-2xx → 0
- *   - thrown error (network failure / abort) → 0
- *   - missing API_ENDPOINT → 0 (caught before any fetch attempt)
- * plus the EMF JSON structure.
- */
+// The health-check probe Lambda with `fetch` stubbed: the emitted and returned HealthCheckStatus is 1 for HTTP 200 and 0 for non-2xx, a thrown error or a missing API_ENDPOINT (caught before any fetch), plus the EMF JSON structure.
 import 'reflect-metadata';
 import type { Context } from 'aws-lambda';
 import { handler } from './health-check-probe-lambda.js';

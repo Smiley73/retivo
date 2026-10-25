@@ -1,19 +1,5 @@
-/**
- * Test helpers for API integration tests.
- *
- * Each suite gets a fresh NestJS module via `bootstrapTestApp()`. Jest
- * runs workers in parallel (`apps/api/jest.config.cjs` → `maxWorkers`),
- * and each worker owns a private per-process/per-worker table + bucket
- * namespace (`jest.setup.ts`), so workers never collide across the
- * shared DynamoDB Local / Moto containers. *Within* one worker
- * namespace multiple suites still share one table set, so tests must
- * use unique data (random emails, random uuids) and clean up after
- * themselves with `purgeAllTables()` between cases that need isolation.
- *
- * No real AWS calls — `DYNAMODB_ENDPOINT` / `S3_ENDPOINT` are forced
- * by `jest.config.cjs` (the single env-bootstrap point) to point at
- * the local emulator.
- */
+// Helpers for the API integration suite: a booted Nest app per suite against the DynamoDB Local and Moto emulators.
+// Suites in one worker share a table set, so tests use unique data (random emails and uuids).
 import 'reflect-metadata';
 import { Reflector } from '@nestjs/core';
 import { INestApplication, ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
@@ -82,11 +68,7 @@ export interface RepoTestEnv {
   destroy: () => void;
 }
 
-/**
- * Lightweight alternative to `bootstrapTestApp()` for repository specs:
- * ensures the local tables exist, then returns a document client and config
- * so the spec can `new SomeRepository(doc, config)` without booting `AppModule`.
- */
+/** Repository-spec alternative to `bootstrapTestApp()`: ensures the local tables exist and returns a document client and config, without booting `AppModule`. */
 export async function createRepoTestEnv(): Promise<RepoTestEnv> {
   await ensureResources();
   const env = validateEnv();
@@ -102,18 +84,11 @@ export async function createRepoTestEnv(): Promise<RepoTestEnv> {
   return { doc, config, destroy: () => doc.destroy() };
 }
 
-/**
- * Build a test instance of the full API app, wired the same way as
- * `main.ts` (helmet skipped — irrelevant for in-process supertest;
- * cors skipped — supertest runs in-process so no CORS preflight).
- */
+/** Builds the full API app wired like `main.ts`, minus helmet and CORS (in-process supertest needs neither). */
 export async function bootstrapTestApp(): Promise<TestApp> {
   await ensureResources();
-  // Stub HibpClient so integration tests never reach api.pwnedpasswords.com.
-  // Always-on HIBP (no opt-out flag) means every signup/change-password path
-  // calls the client; a missing stub causes 3 s stalls when offline and
-  // introduces external-network flakiness. Focused HibpClient unit tests
-  // (password-validator.service.spec.ts) cover real-client fail-open behaviour.
+  // HibpClient is stubbed so tests never reach api.pwnedpasswords.com (3 s stalls offline, flaky); password-validator.service.spec.ts
+  // covers the real client's fail-open behaviour.
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   })
@@ -122,8 +97,6 @@ export async function bootstrapTestApp(): Promise<TestApp> {
     .compile();
 
   const app = moduleRef.createNestApplication({ bufferLogs: true });
-  // Silence pino in tests (the default logger calls process.stdout for every
-  // request — noisy and slow). Use the no-op fallback by disabling logs.
   app.useLogger(false);
 
   app.use(json({ limit: '5mb' }));
@@ -145,7 +118,6 @@ export async function bootstrapTestApp(): Promise<TestApp> {
   await app.init();
 
   const doc = moduleRef.get<DynamoDBDocumentClient>(DYNAMO_DOC_CLIENT);
-  // The doc client wraps a low-level client; reach in for raw scan/delete.
   const ddb = (
     doc as unknown as { config: { client: () => DynamoDBClient } }
   ).config.client?.() ?? new DynamoDBClient({
@@ -153,13 +125,8 @@ export async function bootstrapTestApp(): Promise<TestApp> {
     region: process.env.AWS_REGION ?? 'us-east-1',
   });
 
-  // Each AWS SDK client owns its own HTTP keep-alive socket pool. None of
-  // the four registered in `aws.module.ts` implements `OnModuleDestroy`, so
-  // the Nest `app.close()` leaves their pools open — under parallel load
-  // jest reports "a worker process has failed to exit gracefully" against
-  // whichever suite finishes last. Patch the returned `close()` to destroy
-  // every client pool *after* the Nest app shuts down, so all bootstrapped
-  // suites tear down cleanly.
+  // None of the registered AWS clients implements `OnModuleDestroy`, so `app.close()` leaves their keep-alive pools open and jest reports
+  // a worker that failed to exit; destroy them after the app shuts down.
   const s3 = moduleRef.get<S3Client>(S3_CLIENT);
   const ses = moduleRef.get<SESClient>(SES_CLIENT);
   const lambda = moduleRef.get<LambdaClient>(LAMBDA_CLIENT);
@@ -214,10 +181,6 @@ async function discoverTables(ddb: DynamoDBClient): Promise<TableInfo[]> {
   for (const key of TABLE_ENV_KEYS) {
     const name = env[key];
     if (!name) continue;
-    // DescribeTable would be cleanest, but we already know the keys from
-    // the bootstrap module — derive them by scanning a single row's
-    // attributes with Limit 1. Empty tables fall back to a hard-coded
-    // map.
     await ddb.send(new ScanCommand({ TableName: name, Limit: 1 }));
     out.push({ name, keyAttrs: keyAttrsFromSample(name) });
   }
@@ -226,8 +189,6 @@ async function discoverTables(ddb: DynamoDBClient): Promise<TableInfo[]> {
 }
 
 function keyAttrsFromSample(tableName: string): string[] {
-  // We can't reliably tell from a single item *which* attrs are keys vs
-  // payload. Defer to the static map by name.
   return keyAttrsByTable(tableName, validateEnv());
 }
 
@@ -280,11 +241,7 @@ function keyAttrsByTable(name: string, env: ReturnType<typeof validateEnv>): str
   }
 }
 
-/**
- * Scan + delete every row across every known table. Use sparingly:
- * scans are O(n) over the in-memory store, so this is "purge between
- * suites" not "between assertions".
- */
+/** Scans and deletes every row in every known table; O(n), so for purging between suites, not between assertions. */
 export async function purgeAllTables(ddb: DynamoDBClient): Promise<void> {
   const tables = await discoverTables(ddb);
   for (const t of tables) {
@@ -324,17 +281,10 @@ export async function purgeAllTables(ddb: DynamoDBClient): Promise<void> {
   }
 }
 
-/**
- * Default password for test signups: satisfies length + class rules and
- * the stubbed HIBP client never flags it.
- */
+/** Default password for test signups: meets the length and class rules, and the stubbed HIBP client never flags it. */
 export const STRONG_PASSWORD = 'TestPassw0rd!Test';
 
-/**
- * A logged-in test user's full credential set. Suites that only need a
- * subset (no email, no householdId, …) can consume just the fields they
- * use — the extra ones are harmless.
- */
+/** A logged-in test user's credential set; suites consume only the fields they need. */
 export interface Session {
   accessToken: string;
   refreshCookie: string;
@@ -359,14 +309,7 @@ export function parseSetCookies(raw: string[] | string | undefined): Record<stri
   return out;
 }
 
-/**
- * Full happy-path onboarding: signup → verify-email → owner approval →
- * login. Returns the session credentials most suites need.
- *
- * Owner-approval gate: test emails are random (`freshEmail()`), so every
- * signup is foreign relative to the configured `APPROVER_EMAIL`, lands in
- * `approvalStatus = 'pending'`, and must be approved before login succeeds.
- */
+/** Signup, verify-email, owner approval, login. Test emails are never the configured `APPROVER_EMAIL`, so approval is always required. */
 export async function signupVerifyLogin(
   t: Pick<TestApp, 'app' | 'module' | 'doc'>,
 ): Promise<Session> {
@@ -380,10 +323,7 @@ export async function signupVerifyLogin(
       `signupVerifyLogin: signup returned ${signup.status}: ${JSON.stringify(signup.body)}`,
     );
   }
-  // Capture the RAW approval token from the verify-email response: The
-  // SignupApproval table stores only the token's SHA-256 digest, so it can
-  // no longer be recovered by scanning — the dev trapdoor
-  // (`EXPOSE_VERIFICATION_TOKEN=true`) returns the raw token here instead.
+  // The SignupApproval table stores only the token's SHA-256 digest, so the raw token comes from the verify-email dev trapdoor (`EXPOSE_VERIFICATION_TOKEN=true`).
   const verify = await request(t.app.getHttpServer())
     .post('/api/v1/auth/verify-email')
     .set('Origin', process.env.WEB_ORIGIN!)
@@ -432,9 +372,8 @@ export interface PushMutation {
 }
 
 /**
- * Build a valid push mutation for the session's device. `version` carries
- * the client's expected *previous* version: a fresh create asserts "no row
- * exists yet" → previous version 0; the server stores newVersion = 1.
+ * Builds a valid push mutation for the session's device. `version` is the client's expected previous version: a fresh create
+ * asserts no row exists (0) and the server stores 1.
  */
 export function makeMutation(
   s: Pick<Session, 'deviceId'>,
@@ -454,10 +393,7 @@ export function makeMutation(
   };
 }
 
-/**
- * Generate a randomized, lower-case email so concurrent test cases do
- * not collide on the email-reservation row.
- */
+/** A random lower-case email, so concurrent cases do not collide on the email-reservation row. */
 export function freshEmail(prefix = 'user'): string {
   return `${prefix}-${randomUUID()}@example.test`;
 }
@@ -467,21 +403,7 @@ export function freshDeviceId(): string {
   return randomUUID();
 }
 
-/**
- * Approve a verified-but-pending signup by POSTing its RAW approval token
- * through `/auth/approve-signup`.
- *
- * Test emails are random-uuid (`user-<uuid>@example.test`), so every test signup
- * is foreign relative to the configured `APPROVER_EMAIL` and lands in
- * `User.approvalStatus = 'pending'`. Tests that want to exercise the post-login
- * flow (refresh, logout, change-password, etc.) need to flip the gate first;
- * this helper is the standard way to do it.
- *
- * The SignupApproval table stores
- * only the token's SHA-256 DIGEST, so the raw token can no longer be recovered
- * by scanning the table — the caller must capture it from the `verify-email`
- * response (whose dev trapdoor returns `approvalToken`) and pass it here.
- */
+/** Approves a verified-but-pending signup with its raw approval token, captured from the verify-email response (only the digest is stored). */
 export async function approvePendingSignup(
   app: { getHttpServer(): unknown },
   rawApprovalToken: string,
@@ -510,11 +432,7 @@ export function decodeAccessClaims(token: string): {
   return JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
 }
 
-/**
- * Read all rows of a table into plain JS objects. Useful for assertions
- * that need to count or inspect side-effect rows (auth events, refresh
- * tokens, etc.). Uses the document client so values arrive unmarshalled.
- */
+/** Reads every row of a table as plain objects, for counting or inspecting side-effect rows. */
 export async function scanAll<T>(doc: DynamoDBDocumentClient, tableName: string): Promise<T[]> {
   const out: T[] = [];
   let lastKey: Record<string, unknown> | undefined;
@@ -663,11 +581,7 @@ export async function completeEmailOtpLogin(
     .send({ challengeToken, method: 'email_otp', code, deviceId, rememberDevice });
 }
 
-/**
- * Signup -> verify -> approve -> MFA-challenged login, completing the
- * Email-OTP factor to obtain a real session (for suites that run with
- * `AUTH_MFA_ENFORCED=true`).
- */
+/** Signup, verify, approve, then an MFA-challenged login completed with Email-OTP (for suites running with `AUTH_MFA_ENFORCED=true`). */
 export async function signupAndLoginMfa(t: TestApp): Promise<Session> {
   const { email, userId } = await signupVerifyApprove(t);
   const deviceId = freshDeviceId();
@@ -687,9 +601,8 @@ export async function signupAndLoginMfa(t: TestApp): Promise<Session> {
 }
 
 /**
- * Send + recover a purpose-bound step-up Email-OTP on the step-up row. Clears
- * the 60s step-up send cooldown first (one counter per user across every
- * purpose) so a second send for the same user is not silently no-op'd.
+ * Sends and recovers a purpose-bound step-up Email-OTP. Clears the 60s send cooldown first (one counter per user across
+ * purposes) so a second send is not a silent no-op.
  */
 export async function sendAndRecoverStepUpOtp(
   t: TestApp,
@@ -713,12 +626,7 @@ export async function sendAndRecoverStepUpOtp(
   return recoverCodeHash(row!.codeHash);
 }
 
-/**
- * Enroll + confirm TOTP for an authenticated session and return the shared
- * secret. The confirm write is gated, and a fresh account's only eligible
- * factor is Email-OTP (the no-lockout floor), sent + recovered via the
- * purpose-bound step-up flow.
- */
+/** Enrolls and confirms TOTP and returns the secret. The confirm write is gated, so a fresh account proves it with Email-OTP. */
 export async function enrollTotp(t: TestApp, s: SessionCreds): Promise<string> {
   const start = await authSet(s)(
     request(t.app.getHttpServer()).post('/api/v1/auth/mfa/totp/enroll/start'),

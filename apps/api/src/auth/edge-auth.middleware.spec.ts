@@ -1,10 +1,4 @@
-/**
- * Unit tests for EdgeAuthMiddleware. Exercises the four paths:
- *   - both env vars unset → no-op pass-through (local dev / tests)
- *   - matching primary secret → next() called
- *   - matching previous secret → next() called (rotation overlap)
- *   - missing or wrong header → 403 EDGE_AUTH_REQUIRED
- */
+// EdgeAuthMiddleware: no-op pass-through with both secrets unset (local dev, tests), the primary or previous (rotation overlap) secret calls next(), and a missing or wrong header is 403 EDGE_AUTH_REQUIRED.
 import type { Request, Response } from 'express';
 import { EdgeAuthMiddleware } from './edge-auth.middleware.js';
 
@@ -105,13 +99,7 @@ describe('EdgeAuthMiddleware', () => {
   });
 });
 
-/**
- * Deployed-stack fail-closed guard: a deployed instance (STACK set)
- * with no usable secret must refuse rather than let `use()` pass every
- * request through. `FakeConfig`/`makeMiddleware` above never sets STACK
- * (undefined for every key, matching the local-dev shape), so a distinct
- * fake carrying STACK is built per test here instead.
- */
+// A deployed instance (STACK set) with no usable secret must refuse rather than pass every request through; the fake above never sets STACK, so each test builds its own.
 describe('EdgeAuthMiddleware — deployed-stack fail-closed guard', () => {
   interface DeployedFakeConfig {
     STACK?: string;

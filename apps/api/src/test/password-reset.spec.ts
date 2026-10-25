@@ -1,15 +1,5 @@
-/**
- * Password-reset flow integration tests against the local emulator.
- *
- * Covers request-reset (opaque-202 anti-oracle, cooldown + daily-cap
- * no-op, prior-token invalidation, dev-token only on a real send,
- * real-send-only audit), reset-password (204 happy path, expired/invalid/
- * superseded token, single-use racing token, password-policy rejection,
- * session revocation proven against a live pre-reset session, FailedLoginAttempt
- * clear, `password_reset` audit), the concurrent reset-request race (conditional
- * write closes the request-side TOCTOU → at most one real send), and the
- * middleware posture (Origin rejection + CSRF-exempt) for both routes.
- */
+// Password-reset flow against the local emulator: request-reset (opaque 202, cooldown and daily-cap no-ops), reset-password (token states, session
+// revocation, audit), the request-side TOCTOU race and the middleware posture.
 import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
 import { GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -24,7 +14,6 @@ import {
 } from './test-helpers.js';
 import { REFRESH_COOKIE_NAME } from '../auth/cookie-config.js';
 import { sha256 } from '../auth/refresh-token.service.js';
-import { RESPONSE_TIME_FLOOR_MS, RESET_DAILY_LIMIT } from '../auth/password-reset.service.js';
 import { CredentialsRepository } from '../dynamo/credentials.repository.js';
 import type { AuthEventRow } from '../dynamo/types.js';
 
@@ -54,7 +43,6 @@ function authEventTable(t: TestApp): string {
     .get('TABLE_AUTH_EVENT', { infer: true } as never) as unknown as string;
 }
 
-/** Signup → verify → approve so the account is a fully usable verified user. */
 async function createVerifiedUser(
   t: TestApp,
 ): Promise<{ email: string; userId: string }> {
@@ -71,9 +59,7 @@ async function createVerifiedUser(
     .send({ token: body.verificationToken });
   expect(verify.status).toBe(200);
 
-  // Flip the owner-approval gate so the user can sign in. The approval
-  // token is stored hashed; use the RAW token from the verify-email
-  // dev-trapdoor response rather than scanning the table.
+  // The approval token is stored hashed, so the raw token comes from the verify-email dev trapdoor.
   const approve = await request(t.app.getHttpServer())
     .post('/api/v1/auth/approve-signup')
     .set('Origin', origin())
@@ -104,14 +90,11 @@ async function login(
   return res.status;
 }
 
-
 interface Session {
   accessToken: string;
   refreshCookie: string;
 }
 
-/** Full login capturing the access token + refresh cookie so a test can prove
- * the pre-reset session is rejected after the consume's session nuke. */
 async function loginSession(
   t: TestApp,
   email: string,
@@ -161,8 +144,6 @@ describe('password reset', () => {
       const before = await countAuthEvents(t, userId, 'password_reset_requested');
       const body = await requestReset(t, email);
       expect(body.accepted).toBe(true);
-      // The local-dev shortcut (NODE_ENV=test here) returns the raw token
-      // on a real send; no deployed stack does.
       expect(body.resetToken).toBeTruthy();
       const after = await countAuthEvents(t, userId, 'password_reset_requested');
       expect(after).toBe(before + 1);
@@ -195,10 +176,7 @@ describe('password reset', () => {
 
     it('silently no-ops when the daily cap is reached (no token, no new audit)', async () => {
       const { email, userId } = await createVerifiedUser(t);
-      // Drive the user to the daily cap for today's dayKey directly (mirrors the
-      // REMOVE lastResetSentAt manipulation in the supersession test): set the
-      // counter at the limit and clear the cooldown anchor so only the daily-cap
-      // branch can trip.
+      // Set the counter at the limit and clear the cooldown anchor so only the daily-cap branch can trip.
       const dayKey = Math.floor(Date.now() / 1000 / 86400);
       await t.doc.send(
         new UpdateCommand({
@@ -206,13 +184,12 @@ describe('password reset', () => {
           Key: { userId },
           UpdateExpression:
             'SET resetsSentDayKey = :day, resetsSentToday = :count REMOVE lastResetSentAt',
-          ExpressionAttributeValues: { ':day': dayKey, ':count': RESET_DAILY_LIMIT },
+          ExpressionAttributeValues: { ':day': dayKey, ':count': 5 },
         }),
       );
       const before = await countAuthEvents(t, userId, 'password_reset_requested');
 
       const body = await requestReset(t, email);
-      // Daily cap hit → silent no-op, identical opaque shape, no token, no audit.
       expect(body.accepted).toBe(true);
       expect(body.resetToken).toBeUndefined();
       const after = await countAuthEvents(t, userId, 'password_reset_requested');
@@ -226,15 +203,12 @@ describe('password reset', () => {
       const afterFirst = await countAuthEvents(t, userId, 'password_reset_requested');
 
       const second = await requestReset(t, email);
-      // Cooldown not elapsed → silent no-op, identical opaque shape, no token.
       expect(second.resetToken).toBeUndefined();
       const afterSecond = await countAuthEvents(t, userId, 'password_reset_requested');
       expect(afterSecond).toBe(afterFirst);
     });
 
-    // Response-time enumeration hardening. Every branch
-    // returns the identical opaque 202 AND takes at least the constant floor,
-    // so the response timing can't reveal whether the email is registered.
+    // Every branch returns the identical opaque 202 and takes at least the constant floor, so timing cannot reveal whether the email is registered.
     describe('constant-time response floor (anti-enumeration)', () => {
       async function timedRequest(
         email: string,
@@ -256,7 +230,7 @@ describe('password reset', () => {
         elapsedMs: number;
       }): void {
         expect(result.status).toBe(202);
-        expect(result.elapsedMs).toBeGreaterThanOrEqual(RESPONSE_TIME_FLOOR_MS);
+        expect(result.elapsedMs).toBeGreaterThanOrEqual(200);
         expect(result.elapsedMs).toBeLessThan(RESPONSE_TIME_CEILING_MS);
       }
 
@@ -270,8 +244,6 @@ describe('password reset', () => {
         const { email } = await createVerifiedUser(t);
         const result = await timedRequest(email);
         expectFlooredOpaque202(result);
-        // Identical opaque shape — real send carries the dev token; the timing
-        // floor is what makes it indistinguishable from the no-op branches.
         expect(result.body.accepted).toBe(true);
       });
     });
@@ -298,12 +270,7 @@ describe('password reset', () => {
       const afterReset = await countAuthEvents(t, userId, 'password_reset');
       expect(afterReset).toBe(beforeReset + 1);
 
-      // The reset consume mints a FRESH, non-empty credential revision
-      // (reset is one of the three writers required to mint one on every write).
-      // A regression that stopped this writer from minting one would leave
-      // every account reset through this path permanently in the
-      // "owed" legacy-resolution state; reset's other observable behaviour
-      // is otherwise unchanged.
+      // The reset consume must mint a fresh credential revision; otherwise every account reset through this path stays in the "owed" legacy-resolution state.
       const credentialAfterReset = await credentials.findByUserId(userId);
       expect(credentialAfterReset?.credentialRevision).toBeTruthy();
       expect(credentialAfterReset?.credentialRevision).not.toBe(revisionBeforeReset);
@@ -311,9 +278,7 @@ describe('password reset', () => {
 
     it('revokes a pre-reset session: the old access token 401s and the old refresh cookie cannot rotate', async () => {
       const { email } = await createVerifiedUser(t);
-      // Establish a live session BEFORE the reset.
       const session = await loginSession(t, email, STRONG_PASSWORD);
-      // Sanity: the access token authorizes a protected endpoint pre-reset.
       const preReset = await request(t.app.getHttpServer())
         .get('/api/v1/auth/passkey/list')
         .set('Authorization', `Bearer ${session.accessToken}`);
@@ -326,13 +291,11 @@ describe('password reset', () => {
         .send({ token: resetToken, newPassword: RESET_PASSWORD });
       expect(reset.status).toBe(204);
 
-      // The pre-reset access token is now on the denylist → 401.
       const stale = await request(t.app.getHttpServer())
         .get('/api/v1/auth/passkey/list')
         .set('Authorization', `Bearer ${session.accessToken}`);
       expect(stale.status).toBe(401);
 
-      // The pre-reset refresh family is revoked → the cookie can no longer rotate.
       const rotate = await request(t.app.getHttpServer())
         .post('/api/v1/auth/refresh')
         .set('Origin', origin())
@@ -342,11 +305,7 @@ describe('password reset', () => {
 
     it('denylists a rotated-then-reset access token: BOTH the pre-refresh and post-refresh tokens 401', async () => {
       const { email } = await createVerifiedUser(t);
-      // Establish a live session, then rotate it once via /auth/refresh so the
-      // pre-refresh refresh row is REVOKED (revokedAt set) while its access
-      // token's jti is still within its 60-min TTL, and the post-refresh row is
-      // ACTIVE. A reset must denylist BOTH access-token jtis, not just the one
-      // on the active row.
+      // Rotating once leaves the pre-refresh row revoked while its access token's jti is still within its 60-min TTL; a reset must denylist both jtis, not just the active row's.
       const session = await loginSession(t, email, STRONG_PASSWORD);
       const preRefreshAccess = session.accessToken;
 
@@ -358,7 +317,6 @@ describe('password reset', () => {
       const postRefreshAccess = refresh.body.accessToken as string;
       expect(postRefreshAccess).not.toEqual(preRefreshAccess);
 
-      // Both access tokens authorize a protected endpoint before the reset.
       for (const token of [preRefreshAccess, postRefreshAccess]) {
         const ok = await request(t.app.getHttpServer())
           .get('/api/v1/auth/passkey/list')
@@ -373,9 +331,6 @@ describe('password reset', () => {
         .send({ token: resetToken, newPassword: RESET_PASSWORD });
       expect(reset.status).toBe(204);
 
-      // The reset's jti denylist covers ALL rows (active + already-revoked but
-      // still-valid), so BOTH tokens are now rejected — the pre-refresh one
-      // (on the revoked row) is no longer a survivor.
       for (const token of [preRefreshAccess, postRefreshAccess]) {
         const stale = await request(t.app.getHttpServer())
           .get('/api/v1/auth/passkey/list')
@@ -386,7 +341,6 @@ describe('password reset', () => {
 
     it('clears the failed-login backoff so the new password logs in immediately', async () => {
       const { email } = await createVerifiedUser(t);
-      // Drive the per-email backoff past the grace window (4 misses → blocked).
       for (let i = 0; i < 5; i += 1) {
         await login(t, email, 'WrongPassw0rd!x');
       }
@@ -400,19 +354,16 @@ describe('password reset', () => {
         .send({ token: resetToken, newPassword: RESET_PASSWORD });
       expect(reset.status).toBe(204);
 
-      // Backoff cleared: the new password logs in without a 429.
       expect(await login(t, email, RESET_PASSWORD)).toBe(200);
     });
 
     it('returns 410 RESET_TOKEN_EXPIRED for an expired token', async () => {
       const { email } = await createVerifiedUser(t);
       const { resetToken } = await requestReset(t, email);
-      // Force the row past its TTL by rewriting expiresAt into the past.
       const table = t.module
         .get(ConfigService)
         .get('TABLE_PASSWORD_RESET', { infer: true } as never) as unknown as string;
-      // DynamoDB stores the SHA-256 hash as the PK; the HTTP endpoint still
-      // receives the raw token (the service hashes it internally).
+      // DynamoDB stores the SHA-256 hash as the PK; the endpoint still receives the raw token.
       await t.doc.send(
         new UpdateCommand({
           TableName: table,
@@ -454,7 +405,6 @@ describe('password reset', () => {
       expect(replay.status).toBe(400);
       expect(replay.body.error.code).toBe('RESET_TOKEN_INVALID');
 
-      // The replay's password must NOT have taken effect.
       expect(await login(t, email, 'AnotherPassw0rd!2')).toBe(401);
       expect(await login(t, email, RESET_PASSWORD)).toBe(200);
     });
@@ -466,7 +416,6 @@ describe('password reset', () => {
         .post('/api/v1/auth/reset-password')
         .set('Origin', origin())
         .send({ token: resetToken, newPassword: 'short' });
-      // class-validator MinLength(12) rejects at the boundary → 400.
       expect(weak.status).toBe(400);
     });
   });
@@ -476,37 +425,28 @@ describe('password reset', () => {
       const { email, userId } = await createVerifiedUser(t);
       const before = await countAuthEvents(t, userId, 'password_reset_requested');
 
-      // Fire two requests at once. The conditional User update closes the
-      // read-then-write TOCTOU: only one transaction can commit against the
-      // observed (first-send) rate-limit state; the loser aborts and returns
-      // the same opaque 202 no-op.
+      // The conditional User update closes the read-then-write TOCTOU: only one transaction commits against the observed rate-limit state, and the loser aborts with the same opaque 202 no-op.
       const [a, b] = await Promise.all([
         requestReset(t, email),
         requestReset(t, email),
       ]);
 
-      // Both responses are the opaque 202; at most one carries a real token.
       const tokensIssued = [a.resetToken, b.resetToken].filter(Boolean);
       expect(tokensIssued.length).toBeLessThanOrEqual(1);
 
-      // Exactly one real send → exactly one new `password_reset_requested` audit.
       const after = await countAuthEvents(t, userId, 'password_reset_requested');
       expect(after).toBe(before + 1);
 
-      // The cooldown now holds: a follow-up request inside the window is a no-op.
       const third = await requestReset(t, email);
       expect(third.resetToken).toBeUndefined();
     });
 
     it('leaves exactly one valid link (the latest); the superseded token is 400', async () => {
       const { email } = await createVerifiedUser(t);
-      // First request mints token A.
       const a = await requestReset(t, email);
       expect(a.resetToken).toBeTruthy();
 
-      // A second request inside the cooldown is a no-op — so to exercise the
-      // supersession path we advance the cooldown anchor by clearing
-      // lastResetSentAt, then request again to mint token B.
+      // A second request inside the cooldown is a no-op, so clear lastResetSentAt to reach the supersession path.
       const userTable = t.module
         .get(ConfigService)
         .get('TABLE_USER', { infer: true } as never) as unknown as string;
@@ -531,12 +471,7 @@ describe('password reset', () => {
       expect(b.resetToken).toBeTruthy();
       expect(b.resetToken).not.toEqual(a.resetToken);
 
-      // Prove the prior row was actually
-      // deleted (folded into the same atomic transaction that mints B), not
-      // just that its pointer was overwritten — a silently-dropped Delete
-      // entry in that TransactWriteItems array would pass every assertion
-      // below (consuming A already 400s on the currentResetToken pointer
-      // mismatch alone) without this direct table read.
+      // The prior row must be deleted in the same transaction that mints B; a silently dropped Delete entry would pass every assertion below, since consuming A already 400s on the currentResetToken mismatch.
       const resetTable = t.module
         .get(ConfigService)
         .get('TABLE_PASSWORD_RESET', { infer: true } as never) as unknown as string;
@@ -548,7 +483,6 @@ describe('password reset', () => {
       );
       expect(priorRow.Item).toBeUndefined();
 
-      // Token A is now superseded (currentResetToken == B): consuming it 400s.
       const consumeA = await request(t.app.getHttpServer())
         .post('/api/v1/auth/reset-password')
         .set('Origin', origin())
@@ -556,7 +490,6 @@ describe('password reset', () => {
       expect(consumeA.status).toBe(400);
       expect(consumeA.body.error.code).toBe('RESET_TOKEN_INVALID');
 
-      // Token B is the one authoritative link.
       const consumeB = await request(t.app.getHttpServer())
         .post('/api/v1/auth/reset-password')
         .set('Origin', origin())
@@ -581,9 +514,7 @@ describe('password reset', () => {
     });
 
     it('both routes are CSRF-exempt: a state-changing POST without a CSRF token is not 403 CSRF', async () => {
-      // No csrf-token cookie / header present. If the routes were not exempt
-      // the CSRF middleware would 403 with CSRF_TOKEN_MISMATCH before the
-      // handler runs. The request endpoint returns its opaque 202 instead.
+      // If the routes were not CSRF-exempt the middleware would 403 CSRF_TOKEN_MISMATCH before the handler runs.
       const { email } = await createVerifiedUser(t);
       const res = await request(t.app.getHttpServer())
         .post('/api/v1/auth/request-password-reset')

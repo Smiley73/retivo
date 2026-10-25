@@ -2,7 +2,7 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import type { Request, Response, NextFunction } from 'express';
 
-export const BUILD_ID = process.env.BUILD_ID ?? 'dev';
+const BUILD_ID = process.env.BUILD_ID ?? 'dev';
 
 @Injectable()
 export class BuildIdMiddleware implements NestMiddleware {
