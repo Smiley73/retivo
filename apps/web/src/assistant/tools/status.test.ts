@@ -3,8 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { clearAllStores, queueMutation, writeDeviceMetadata } from '../../db/store';
 import { CLIENT_BUILD_ID } from '../../lib/build-id';
 import { ENGINE_VERSION } from '../../lib/monte-carlo';
-import { TEST_NOW, callPlanTool, choicesWith, envelopeOf, toolContext } from '../../test/assistant-tools';
-import { planToolHandlers } from '.';
+import { TEST_NOW, callPlanTool, choicesWith, envelopeOf, planToolHandler, toolContext } from '../../test/assistant-tools';
 
 interface StatusData {
   connection: { state: string; assistant?: string; connectedSince?: string };
@@ -64,7 +63,7 @@ describe('retivo_status', () => {
   });
 
   it('sanitizes the assistant’s self-reported name and omits it when there is none', async () => {
-    const handler = planToolHandlers().get('retivo_status')!;
+    const handler = planToolHandler('retivo_status');
     const context = toolContext();
     const named = await handler({}, { ...context, connection: { assistantName: `Evil‮\u0000 ${'x'.repeat(100)}`, pairedAt: null } });
     const name = ((envelopeOf(named).data as unknown as StatusData).connection.assistant ?? '');

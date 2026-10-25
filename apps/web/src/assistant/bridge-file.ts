@@ -12,7 +12,7 @@
 import { useEffect, useState } from 'react';
 import { BRIDGE_MANIFEST_FILE } from '@retirement/assistant-protocol';
 
-export interface BridgeFileInfo {
+interface BridgeFileInfo {
   version: string;
   sha256: string;
   size: number;
@@ -26,7 +26,7 @@ const MAX_BRIDGE_BYTES = 50 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 5_000;
 
 /** The manifest the copy serves, or null when it serves none or one that does not validate. Never throws. */
-export async function fetchBridgeFileInfo(signal?: AbortSignal): Promise<BridgeFileInfo | null> {
+async function fetchBridgeFileInfo(signal?: AbortSignal): Promise<BridgeFileInfo | null> {
   try {
     const response = await fetch(`/${BRIDGE_MANIFEST_FILE}`, {
       cache: 'no-store',

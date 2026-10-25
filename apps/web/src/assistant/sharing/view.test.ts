@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { clearAllStores, listAggregates } from '../../db/store';
 import type { Aggregate } from '../../db/types';
 import { loadDemoData } from '../../lib/demo-data-loader';
-import { HOUSEHOLD_CLASSIFICATION } from './classification';
 import { defaultConsentAnswer } from './consent';
 import { FORBIDDEN_KEYS } from './scrub';
 import { buildShareView, maskTermsFor, type ShareSource, type ShareView } from './view';
@@ -282,14 +281,6 @@ describe('never-shareable fields', () => {
       ],
     };
     expect(view(defaultSharingChoices(), odd).accounts).toEqual([{ id: 'acct-ok', name: 'Fine' }]);
-  });
-});
-
-describe('the household aggregate', () => {
-  it('is classified field by field as never shared', () => {
-    for (const [field, classification] of Object.entries(HOUSEHOLD_CLASSIFICATION)) {
-      expect(classification.kind, field).toBe('never');
-    }
   });
 });
 

@@ -3,7 +3,7 @@
  * package's input schema accepts every one of them: an entry whose schema rejects what its handler is tested with
  * would reach agents as INVALID_ARGS on a current app, which the dispatcher's generic tests cannot tell apart.
  */
-import { EXPLAIN_METRICS } from '@retirement/assistant-protocol';
+import { TOOL_REGISTRY, toMcpToolDeclaration, type ExplainMetric } from '@retirement/assistant-protocol';
 import { ENGINE_VERSION, type MonteCarloSummary } from '../lib/monte-carlo';
 import { MC_PATH_COUNT } from '../lib/monte-carlo-scenario-input';
 
@@ -11,6 +11,11 @@ export const BASE_ID = 'demo-scenario-base';
 export const EARLY_ID = 'demo-scenario-early';
 export const DELAY_ID = 'demo-scenario-delay';
 export const NO_CONTRIB_ID = 'demo-scenario-early-no-contrib';
+
+/** The metrics `retivo_explain` accepts, read from the schema the agent receives. */
+export const EXPLAIN_METRICS = (
+  toMcpToolDeclaration(TOOL_REGISTRY.find((entry) => entry.name === 'retivo_explain')!).inputSchema.properties as { metric: { enum: ExplainMetric[] } }
+).metric.enum;
 
 export const ANALYSIS_TEST_INPUTS: Readonly<Record<string, ReadonlyArray<Record<string, unknown>>>> = {
   retivo_get_projection: [

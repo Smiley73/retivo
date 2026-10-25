@@ -9,20 +9,20 @@
  */
 import { MAX_TOOL_RESULT_BYTES, type ErrorCode } from '@retirement/assistant-protocol';
 
-export const AUDIT_MAX_ENTRIES = 200;
+const AUDIT_MAX_ENTRIES = 200;
 /**
  * Largest result (UTF-8 bytes) kept verbatim on an entry. It is the largest result the dispatcher
  * will send, so every result that reached the bridge keeps its exact text.
  */
-export const AUDIT_MAX_PAYLOAD_BYTES = MAX_TOOL_RESULT_BYTES;
+const AUDIT_MAX_PAYLOAD_BYTES = MAX_TOOL_RESULT_BYTES;
 /**
  * Total retained payload bytes across the log. Memory is bounded by evicting whole older entries
  * (counted in `dropped()`), never by trimming a body; the newest entry is always kept.
  */
-export const AUDIT_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+const AUDIT_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 
 /** The arguments the bridge sent, as JSON text, are kept to this many characters; a longer one ends in an ellipsis. */
-export const AUDIT_MAX_ARGS_CHARS = 2_000;
+const AUDIT_MAX_ARGS_CHARS = 2_000;
 
 const MAX_SUMMARY_CHARS = 200;
 const MAX_SUMMARY_VALUE_CHARS = 40;
@@ -43,7 +43,7 @@ export interface AuditEntry {
   durationMs: number;
   /** UTF-8 size of the result the call produced. */
   bytes: number;
-  /** Whether finishing this call moved the idle clock (the D7 switch). */
+  /** Whether finishing this call moved the idle clock (`keepSignedInWhileActive`). */
   movedIdleClock: boolean;
   /** The exact result as sent, or `null` when it exceeded the per-entry cap. */
   payload: string | null;

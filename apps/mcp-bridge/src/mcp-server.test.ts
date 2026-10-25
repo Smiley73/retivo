@@ -137,6 +137,7 @@ describe('NOT_PAIRED', () => {
     expect(result.isError).toBeUndefined();
     expect(errorOf(result)).toMatchObject({ code: 'NOT_PAIRED', state: 'awaiting-consent' });
     expect(errorOf(result).pairingCode).toBeUndefined();
+    expect(result.content[0]!.text).toContain('approve');
     expect(tab.received).toBe(2); // hello and paired; no call frame
   });
 

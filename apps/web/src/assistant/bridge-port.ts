@@ -36,13 +36,7 @@ export function readBridgePort(): number | null {
   return null;
 }
 
-/**
- * The WebSocket URL for the bridge on `port`. In a production build that
- * carries no `VITE_ASSISTANT_BRIDGE_PORT` the condition is a compile-time
- * constant, the call below is dead code, and the URL template never reaches the
- * bundle. No caller can reach this branch there: `readBridgePort()` is `null`
- * without the variable, and the session never dials without a port.
- */
+/** The WebSocket URL for the bridge on `port`. No caller reaches it without a port: the session never dials without one. */
 export function bridgeSocketUrl(port: number): string {
   if (import.meta.env.PROD && import.meta.env.VITE_ASSISTANT_BRIDGE_PORT === undefined) {
     throw new Error('This build carries no AI assistant bridge port.');

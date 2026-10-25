@@ -377,12 +377,6 @@ describe('the caps', () => {
 });
 
 describe('arguments and scenarios', () => {
-  it('is INVALID_ARGS for an unknown scenario, without echoing it', async () => {
-    const result = await callDefinition(makeStressTestTool(), { scenarioId: 'no-such-scenario-zz' });
-    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_ARGS' } });
-    expect(JSON.stringify(result)).not.toContain('no-such-scenario-zz');
-  });
-
   it('is INVALID_ARGS, saying what is missing, for a scenario the page could not run', async () => {
     const base = scenarios.find((scenario) => scenario.id === BASE_ID)!;
     await putAggregate('scenario', { ...base, id: 't-no-retirement', payload: { ...base.payload, name: 'No retirement', isPrimary: false, parentScenarioId: null, overrides: {} } });

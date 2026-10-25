@@ -4,7 +4,7 @@
  * the narrowing of a result to its envelope.
  */
 import type { ToolResult } from '@retirement/assistant-protocol';
-import type { ToolCallContext } from '../assistant/dispatcher';
+import type { ToolCallContext, ToolHandler } from '../assistant/dispatcher';
 import { loadWorkspace } from '../assistant/tools/workspace';
 import { monteCarloInputFor } from '../assistant/tools/stress-cache';
 import { mcCacheKey, putCached } from '../db/monte-carlo-cache';
@@ -12,7 +12,7 @@ import { savedSummary } from './assistant-analysis-inputs';
 import { createConsentRecord } from '../assistant/sharing/consent';
 import { defaultSharingChoices, type SharingChoices } from '../assistant/sharing/switches';
 import { buildShareView } from '../assistant/sharing/view';
-import { planToolHandlers } from '../assistant/tools';
+import { registerPlanTools } from '../assistant/tools';
 import { toHandler, type ToolDefinition } from '../assistant/tools/define';
 import type { ToolEnvelope } from '../assistant/tools/envelope';
 
@@ -34,6 +34,19 @@ export function toolContext(choices: SharingChoices = defaultSharingChoices(), n
   };
 }
 
+const HANDLERS = new Map<string, ToolHandler>();
+registerPlanTools((name, handler) => {
+  HANDLERS.set(name, handler);
+  return () => undefined;
+});
+
+/** The shipped handler for a registry tool. */
+export function planToolHandler(name: string): ToolHandler {
+  const handler = HANDLERS.get(name);
+  if (handler === undefined) throw new Error(`no handler for ${name}`);
+  return handler;
+}
+
 /** Runs a plan tool's handler directly, the way the dispatcher does once its own gates pass. */
 export async function callPlanTool(
   name: string,
@@ -41,9 +54,7 @@ export async function callPlanTool(
   choices: SharingChoices = defaultSharingChoices(),
   now: Date = TEST_NOW,
 ): Promise<ToolResult> {
-  const handler = planToolHandlers().get(name);
-  if (handler === undefined) throw new Error(`no handler for ${name}`);
-  return handler(args, toolContext(choices, now));
+  return planToolHandler(name)(args, toolContext(choices, now));
 }
 
 /** Runs a tool built outside the shipped list (one with injected workers, say) through the same `toHandler` wrapper. */

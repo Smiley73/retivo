@@ -25,10 +25,10 @@ import { stressRunner, type StressRunner } from './stress-test';
 import { buildWhatIf, getPath, setPath, type EchoChange, type EchoKept } from './what-if-overrides';
 
 /** The fixed label the throwaway scenario carries; the agent supplies no text of its own. */
-export const WHAT_IF_LABEL = 'What-if (not saved)';
+const WHAT_IF_LABEL = 'What-if (not saved)';
 
 /** Said with every result: nothing was saved, and where the person makes it real. */
-export const NOT_SAVED_STATEMENT =
+const NOT_SAVED_STATEMENT =
   'Nothing was saved. This what-if is not a scenario: it does not appear on the Scenarios page and is gone when this call ends. To make it real, the person creates it in Retivo (Planning, Scenarios, Create scenario, with the base scenario as the parent) and sets the same values; it cannot be done through the assistant.';
 
 /** The throwaway child: every field the engines do not read is inert, so only the parent link and the overrides matter. */

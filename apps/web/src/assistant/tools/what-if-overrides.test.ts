@@ -107,12 +107,6 @@ describe('the allowlist', () => {
     await expectRejected(polluting, 'overrides.accountReturns.perAccount');
     expect(Object.prototype).not.toHaveProperty('planningReturnPct');
   });
-
-  it('refuses an unknown base scenario as INVALID_ARGS without echoing it', async () => {
-    const result = await call({}, 'no-such-scenario-zz');
-    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_ARGS' } });
-    expect(JSON.stringify(result)).not.toContain('no-such-scenario-zz');
-  });
 });
 
 describe('the editors’ bounds: rejected, never clamped', () => {

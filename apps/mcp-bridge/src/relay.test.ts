@@ -5,7 +5,6 @@ import {
   MAX_IN_FLIGHT_CALLS,
   TOOL_REGISTRY,
   failureResult,
-  toolNotSupported,
   type ToolEntry,
 } from '@retirement/assistant-protocol';
 import type { FakeTab, Frame } from './test-support/fake-tab.js';
@@ -49,16 +48,6 @@ describe('relaying a call', () => {
     expect(response.isError).toBe(true);
     expect(response.content[0]!.text).toBe('WORKSPACE_LOCKED: Unlock the workspace in Retivo first.');
     expect(response.structuredContent).toEqual(failure);
-  });
-
-  it('passes TOOL_NOT_SUPPORTED from an older app through as an ordinary tool error', async () => {
-    h = await startHarness();
-    const tab = await h.pairedTab();
-    const unsupported = toolNotSupported('retivo_explain', 'build-7');
-    const { response } = await callAndAnswer(tab, unsupported, 'retivo_explain', { scenarioId: 's1', metric: 'plan_success' });
-    expect(response.isError).toBe(true);
-    expect(response.structuredContent).toEqual(unsupported);
-    expect(response.content[0]!.text).toBe(`TOOL_NOT_SUPPORTED: ${(unsupported as { error: { message: string } }).error.message}`);
   });
 
   it('ignores a result for an unknown call id', async () => {

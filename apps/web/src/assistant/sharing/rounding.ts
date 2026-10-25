@@ -18,16 +18,12 @@ const MONTHLY_ROUNDING_STEP_DOLLARS = 100;
  * value, so -1,500 reads -2,000 as 1,500 reads 2,000). `null` stays `null`. A non-finite number is
  * not a dollar figure; it becomes `null` rather than passing through.
  */
-export function roundToNearestThousand(value: number): number;
-export function roundToNearestThousand(value: number | null): number | null;
-export function roundToNearestThousand(value: number | null): number | null {
+function roundToNearestThousand(value: number | null): number | null {
   return roundToStep(value, ROUNDING_STEP_DOLLARS);
 }
 
 /** Same rule as `roundToNearestThousand`, for a monthly figure: the nearest $100. */
-export function roundToNearestHundred(value: number): number;
-export function roundToNearestHundred(value: number | null): number | null;
-export function roundToNearestHundred(value: number | null): number | null {
+function roundToNearestHundred(value: number | null): number | null {
   return roundToStep(value, MONTHLY_ROUNDING_STEP_DOLLARS);
 }
 
@@ -50,14 +46,14 @@ export interface RoundingDescriptor {
   statement: string;
 }
 
-export const EXACT_ROUNDING: RoundingDescriptor = {
+const EXACT_ROUNDING: RoundingDescriptor = {
   exact: true,
   stepDollars: null,
   monthlyStepDollars: null,
   statement: 'Dollar figures are exact.',
 };
 
-export const NEAREST_THOUSAND_ROUNDING: RoundingDescriptor = {
+const NEAREST_THOUSAND_ROUNDING: RoundingDescriptor = {
   exact: false,
   stepDollars: ROUNDING_STEP_DOLLARS,
   monthlyStepDollars: MONTHLY_ROUNDING_STEP_DOLLARS,

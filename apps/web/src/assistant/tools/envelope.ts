@@ -78,7 +78,7 @@ function sanitizeLeaf(value: string, masker: Masker): string | typeof DROP {
  * is never shareable is removed at any depth. Generic on purpose: it knows
  * nothing about the tool that produced the data.
  */
-export function sanitizeLeaves(value: unknown, masker: Masker): unknown {
+function sanitizeLeaves(value: unknown, masker: Masker): unknown {
   if (typeof value === 'string') {
     const leaf = sanitizeLeaf(value, masker);
     return leaf === DROP ? undefined : leaf;

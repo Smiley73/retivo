@@ -1,13 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import {
-  applyMonthlyRounding,
-  applyRounding,
-  EXACT_ROUNDING,
-  NEAREST_THOUSAND_ROUNDING,
-  roundingDescriptor,
-  roundToNearestHundred,
-  roundToNearestThousand,
-} from './rounding';
+import { applyMonthlyRounding, applyRounding, roundingDescriptor } from './rounding';
+
+const roundToNearestThousand = (value: number | null) => applyRounding(value, false);
+const roundToNearestHundred = (value: number | null) => applyMonthlyRounding(value, false);
+const EXACT_ROUNDING = roundingDescriptor(true);
+const NEAREST_THOUSAND_ROUNDING = roundingDescriptor(false);
 
 describe('roundToNearestThousand', () => {
   it('rounds half up on the absolute value', () => {
@@ -65,8 +62,8 @@ describe('rounding choice', () => {
   });
 
   it('describes itself for the disclosure', () => {
-    expect(roundingDescriptor(true)).toBe(EXACT_ROUNDING);
-    expect(roundingDescriptor(false)).toBe(NEAREST_THOUSAND_ROUNDING);
+    expect(EXACT_ROUNDING.exact).toBe(true);
+    expect(NEAREST_THOUSAND_ROUNDING.exact).toBe(false);
     expect(NEAREST_THOUSAND_ROUNDING.stepDollars).toBe(1000);
     expect(NEAREST_THOUSAND_ROUNDING.monthlyStepDollars).toBe(100);
     expect(NEAREST_THOUSAND_ROUNDING.statement).toContain('nearest $1,000');

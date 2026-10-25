@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_TOOL_RESULT_BYTES } from '@retirement/assistant-protocol';
-import { checkOutputSize, checkSerializedSize } from './output-cap';
+import { checkOutputSize } from './output-cap';
 
 describe('output size cap', () => {
   it('accepts a result exactly at the cap', () => {
@@ -23,7 +23,7 @@ describe('output size cap', () => {
     // Each euro sign is one UTF-16 unit and three UTF-8 bytes: the length passes the cap, the bytes do not.
     const text = '\u20AC'.repeat(Math.floor(MAX_TOOL_RESULT_BYTES / 3) + 1);
     expect(text.length).toBeLessThan(MAX_TOOL_RESULT_BYTES);
-    const check = checkSerializedSize(JSON.stringify(text));
+    const check = checkOutputSize(text);
     expect(check.ok).toBe(false);
     if (!check.ok) expect(check.code).toBe('OUTPUT_TOO_LARGE');
   });

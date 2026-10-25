@@ -18,7 +18,7 @@ const BRIDGE_DIR = '"$HOME/.retivo"';
 const BRIDGE_PATH = `"$HOME/.retivo/${BRIDGE_FILE}"`;
 const BRIDGE_DOWNLOAD_PATH = `"$HOME/.retivo/${BRIDGE_FILE}.download"`;
 /** What the agent runs to start the saved bridge. */
-export const BRIDGE_LAUNCHER = `node ${BRIDGE_PATH}`;
+const BRIDGE_LAUNCHER = `node ${BRIDGE_PATH}`;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 export type AgentName = 'claude' | 'codex';

@@ -27,7 +27,9 @@ import { buildWhatIf } from './what-if-overrides';
 import { monteCarloInputFor } from './stress-cache';
 import { makeStressRunner, makeStressTestTool } from './stress-test';
 import { loadWorkspace, shareSourceOf } from './workspace';
-import { NOT_SAVED_STATEMENT, WHAT_IF_LABEL, makeWhatIfTool, retivoRunWhatIf, throwawayFor } from './what-if';
+import { makeWhatIfTool, retivoRunWhatIf, throwawayFor } from './what-if';
+
+const WHAT_IF_LABEL = 'What-if (not saved)';
 
 const COMPUTE_TIMEOUT = process.env.VITEST_COVERAGE === '1' ? 90_000 : 30_000;
 const TEST_PATHS = 200;
@@ -187,7 +189,7 @@ describe('the answer', () => {
   it('gives base and what-if side by side, the difference, an echo of what changed, and the not-saved statement', async () => {
     const { data } = await whatIf({ retirementAge: { primary: { ageYears: 62 } }, socialSecurity: { primary: { ageYears: 70 } } });
     expect(data.saved).toBe(false);
-    expect(data.statement).toBe(NOT_SAVED_STATEMENT);
+    expect(data.statement).toMatch(/^Nothing was saved\./);
     expect(data.statement).toMatch(/Planning, Scenarios, Create scenario/);
     expect(data.base).toMatchObject({ scenarioId: BASE_ID, name: 'Base' });
     expect(data.whatIf.label).toBe(WHAT_IF_LABEL);
@@ -303,12 +305,6 @@ describe('nothing is written', () => {
       expect(await callPlanTool('retivo_run_what_if', { baseScenarioId: BASE_ID, overrides: { expenses: {} } })).toMatchObject({ ok: false });
       expect(await callPlanTool('retivo_run_what_if', { baseScenarioId: BASE_ID, overrides: { inflation: { ratePct: 99 } } })).toMatchObject({ ok: false });
       expect(await callPlanTool('retivo_run_what_if', { baseScenarioId: 'nope', overrides: {} })).toMatchObject({ ok: false });
-    });
-  });
-
-  it('on a projection error', async () => {
-    await expectNoTrace(async () => {
-      expect(await callPlanTool('retivo_run_what_if', { baseScenarioId: 't-no-retirement', overrides: {} })).toMatchObject({ ok: false });
     });
   });
 

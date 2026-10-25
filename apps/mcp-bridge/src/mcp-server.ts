@@ -4,17 +4,18 @@
  * `list_changed` notification is ever sent and nothing about tools comes from
  * the tab. Each tool hands its call to the relay.
  */
-import { McpServer, fromJsonSchema, type ProgressToken } from '@modelcontextprotocol/server';
+import { McpServer, fromJsonSchema, type CallToolResult, type ProgressToken } from '@modelcontextprotocol/server';
 import {
+  PAIRING_ENTRY_PATH,
   PROMPTS,
   TOOL_REGISTRY,
   toMcpPromptDeclaration,
   toMcpToolDeclaration,
   type PromptEntry,
   type ToolEntry,
+  type ToolResult,
 } from '@retirement/assistant-protocol';
 import type { Relay } from './relay.js';
-import { toCallToolResult } from './tool-result.js';
 
 export interface McpServerDeps {
   relay: Relay;
@@ -22,6 +23,26 @@ export interface McpServerDeps {
   /** Overridable for tests; the registries by default. */
   tools?: readonly ToolEntry[];
   prompts?: readonly PromptEntry[];
+}
+
+/** Where the person types the code; the protocol's instructions name the page, this names the card. */
+const SETTINGS_CARD_HINT = `The page is Retivo's Settings (${PAIRING_ENTRY_PATH}); look for the "AI assistants" card.`;
+
+/**
+ * Maps the protocol's tool result onto an MCP `tools/call` result. `NOT_PAIRED` is a normal result, not an
+ * error: clients tend to summarize or hide errors and the person has to see the code.
+ */
+function toCallToolResult(result: ToolResult): CallToolResult {
+  const structuredContent = result as unknown as Record<string, unknown>;
+  if (result.ok) {
+    return { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent };
+  }
+  const { error } = result;
+  if (error.code === 'NOT_PAIRED') {
+    const hint = error.state === 'awaiting-code' ? `\n\n${SETTINGS_CARD_HINT}` : '';
+    return { content: [{ type: 'text', text: `${error.instructions}${hint}` }], structuredContent };
+  }
+  return { content: [{ type: 'text', text: `${error.code}: ${error.message}` }], structuredContent, isError: true };
 }
 
 /** Progress must increase on every notification; a tab that repeats a fraction still gets a monotonic stream. */

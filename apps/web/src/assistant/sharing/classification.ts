@@ -12,22 +12,6 @@
  * so a payload field added later fails `pnpm typecheck` until someone classifies it.
  * Nested shapes (anchors, overrides) are built with `shape<T>()`, which holds
  * them to the same rule for the interfaces they describe.
- *
- * What a classification means:
- *  - `never`    the field is not shared in any setting.
- *  - `plain`    an enum, flag, percentage, year, age or count; a string must be one enum-like token.
- *  - `dollars`  an annual dollar figure; rounded to the nearest $1,000 unless exact figures are on.
- *  - `monthlyDollars` a monthly dollar figure (a benefit estimate, a pension payment); rounded to the nearest $100.
- *  - `periodDollars` an expense amount, per its `frequency`: rounded to the nearest $100 for a weekly, monthly or
- *               quarterly amount (or when the frequency is not stored beside it, as in a patch) and to the nearest
- *               $1,000 for a yearly or one-off amount.
- *  - `label`    a name; governed by its category's switch, sanitized, 60 characters.
- *  - `text`     a note or description; governed by the notes switch, sanitized, 500 characters.
- *  - `id`       an opaque reference to another aggregate.
- *  - `date`     a calendar date or timestamp, validated.
- *  - `firstName` shown as the member's first name, or a role label when first names are off.
- *  - `gated`    a subtree that also needs another category's switch (embedded rows, birth dates on accounts,
- *               income figures in scenario overrides).
  */
 import type {
   AccountBalancePayload,
@@ -43,7 +27,6 @@ import type {
   GlideAnchor,
   HealthCoverageMonthsOverride,
   HouseholdMemberPayload,
-  HouseholdPayload,
   IncomeOverride,
   IncomeStreamPayload,
   InflationOverride,
@@ -116,14 +99,7 @@ const BIRTHDATE: Classification = gated('members', DATE);
  */
 const INCOME_DOLLARS: Classification = gated('income', DOLLARS);
 
-// ---------- Household ----------
-
-/** The household aggregate is not exposed at all; its name is commonly the family surname. */
-export const HOUSEHOLD_CLASSIFICATION = {
-  name: never('the household name is commonly the family surname'),
-  currency: never('the household aggregate is not exposed'),
-  createdAt: never('the household aggregate is not exposed'),
-} satisfies Record<KnownKeys<HouseholdPayload>, Classification>;
+// ---------- Members ----------
 
 export const MEMBER_CLASSIFICATION = {
   isPrimary: PLAIN,
@@ -269,9 +245,8 @@ type PerAccount<K extends keyof ScenarioOverrides> = NonNullable<ScenarioOverrid
   ? V
   : never;
 
-const ROW_ID = ID;
-const EXPENSE_ROW = shape<ExpensePayload & { _localId: string }>({ ...EXPENSE_CLASSIFICATION, _localId: ROW_ID });
-const INCOME_ROW = shape<IncomeStreamPayload & { _localId: string }>({ ...INCOME_CLASSIFICATION, _localId: ROW_ID });
+const EXPENSE_ROW = shape<ExpensePayload & { _localId: string }>({ ...EXPENSE_CLASSIFICATION, _localId: ID });
+const INCOME_ROW = shape<IncomeStreamPayload & { _localId: string }>({ ...INCOME_CLASSIFICATION, _localId: ID });
 const EXPENSE_PATCH = shape<ExpensePayload>(EXPENSE_CLASSIFICATION);
 const INCOME_PATCH = shape<IncomeStreamPayload>(INCOME_CLASSIFICATION);
 

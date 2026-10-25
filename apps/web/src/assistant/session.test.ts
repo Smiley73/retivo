@@ -7,15 +7,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CLOSE_CODES,
   PROTOCOL_VERSION,
-  TAB_CLOSE_REASONS,
   type TabCloseReason,
 } from '@retirement/assistant-protocol';
 import { ScriptedSocket, allowKeepingSignedIn, allowWithDefaults, bridgeHello, handshakeScripted, pairScripted, until } from '../test/assistant-socket';
 import { diagnose } from './diagnosis';
-import { AssistantSession, CONNECT_TIMEOUT_MS, HELLO_TIMEOUT_MS, PAIRED_TIMEOUT_MS, type SessionOptions } from './session';
+import { AssistantSession, type SessionOptions } from './session';
 import type { ConsentRequest, SocketLike } from './session-types';
 import { defaultConsentAnswer, type ConsentAnswer } from './sharing/consent';
 import { defaultSharingChoices } from './sharing/switches';
+
+/** Every close reason but the decline, which is the consent step's own. */
+const TEARDOWN_REASONS = Object.keys({
+  disconnect: 0,
+  'sign-out': 0,
+  idle: 0,
+  lock: 0,
+  'user-switch': 0,
+  pagehide: 0,
+} satisfies Record<Exclude<TabCloseReason, 'consent-declined'>, 0>) as TabCloseReason[];
+
+const CONNECT_TIMEOUT_MS = 120_000;
+const HELLO_TIMEOUT_MS = 5_000;
+const PAIRED_TIMEOUT_MS = 10_000;
 
 // Frozen vector from the protocol package: with these nonces the tab's proof is fixed.
 const VECTOR = {
@@ -413,10 +426,10 @@ describe('gates on connect', () => {
   });
 });
 
-describe.each([false, true])('teardown (D7 switch %s)', (keepSignedIn) => {
+describe.each([false, true])('teardown (keep-signed-in switch %s)', (keepSignedIn) => {
   const options = (): Partial<SessionOptions> => ({ requestConsent: allowKeepingSignedIn(keepSignedIn) });
 
-  it.each(TAB_CLOSE_REASONS.filter((reason) => reason !== 'consent-declined'))(
+  it.each(TEARDOWN_REASONS)(
     'ends on %s: socket closed with the reason, secrets gone, nothing runs after, a fresh code needed',
     async (reason: TabCloseReason) => {
       const { session, sockets, openSocket } = makeSession(options());

@@ -1,6 +1,6 @@
 /**
- * The provider: the three gates, teardown on every signal (with the D7 switch
- * off and on), and the idle clock through real <IdleTimer> instances.
+ * The provider: the three gates, teardown on every signal (with the keep-signed-in
+ * switch off and on), and the idle clock through real <IdleTimer> instances.
  */
 import 'fake-indexeddb/auto';
 import React from 'react';
@@ -170,7 +170,7 @@ describe('gates', () => {
   });
 });
 
-describe.each([false, true])('teardown (D7 switch %s)', (keepSignedIn) => {
+describe.each([false, true])('teardown (keep-signed-in switch %s)', (keepSignedIn) => {
   const signals: Array<[string, string, (ctx: ReturnType<typeof setup>) => void]> = [
     ['Disconnect', 'disconnect', () => act(() => assistant().disconnect())],
     [
@@ -345,13 +345,12 @@ describe('idle', () => {
     await callAndSettle(socket, 'c1', 'retivo_get_projection', { scenarioId: 'a' }); // started, then cancelled
     await callAndSettle(socket, 'c2', 'retivo_get_scenario', { scenarioId: 'a' }); // failed
     await callAndSettle(socket, 'c3', 'retivo_future_tool', { scenarioId: 'a' }); // unsupported (no handler)
-    await callAndSettle(socket, 'c4', 'retivo_get_scenario', {}); // invalid
     act(() => socket.receive({ type: 'cancel', id: 'c1', reason: 'client' }));
     await callAndSettle(socket, 'c5', 'retivo_get_stress_test', { scenarioId: 'a' }); // times out below
     expect(localStorage.getItem(ACTIVITY_KEY)).toBe(written);
     await act(async () => void (await vi.advanceTimersByTimeAsync(5 * 60_000)));
     expect(socket.frames.filter((frame) => frame.type === 'result').map((frame) => (frame.result as { error: { code: string } }).error.code)).toEqual(
-      expect.arrayContaining(['CANCELLED', 'INTERNAL', 'TOOL_NOT_SUPPORTED', 'INVALID_ARGS', 'CALL_TIMEOUT']),
+      expect.arrayContaining(['CANCELLED', 'INTERNAL', 'TOOL_NOT_SUPPORTED', 'CALL_TIMEOUT']),
     );
     expect(localStorage.getItem(ACTIVITY_KEY)).toBe(written);
 

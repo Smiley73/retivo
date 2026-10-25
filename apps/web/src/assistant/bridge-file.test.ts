@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { fetchBridgeFileInfo, useBridgeFile } from './bridge-file';
+import { useBridgeFile } from './bridge-file';
 
 const SHA = 'a'.repeat(64);
 
@@ -13,6 +13,13 @@ function serve(body: unknown, init: { ok?: boolean; json?: () => Promise<unknown
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** The manifest the hook settles on, or null when it ends unavailable. */
+async function fetchBridgeFileInfo() {
+  const { result } = renderHook(() => useBridgeFile(true));
+  await waitFor(() => expect(result.current.status).not.toBe('loading'));
+  return result.current.status === 'ready' ? result.current.info : null;
+}
 
 describe('fetchBridgeFileInfo', () => {
   it('reads the manifest from the app origin without cache or credentials', async () => {

@@ -124,7 +124,7 @@ export async function pairScripted(socket: ScriptedSocket, code: string): Promis
 /** A consent step that allows at once with every switch at its default (keep-signed-in off). */
 export const allowWithDefaults: ConsentStep = async () => defaultConsentAnswer();
 
-/** A consent step that allows at once, with the D7 switch set as given. */
+/** A consent step that allows at once, with the keep-signed-in switch set as given. */
 export function allowKeepingSignedIn(keepSignedInWhileActive: boolean): ConsentStep {
   return async () => ({ ...defaultConsentAnswer(), keepSignedInWhileActive });
 }

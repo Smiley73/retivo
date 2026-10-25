@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { errorCodeSchema, type ErrorCode } from './codes.js';
 import { PAIRING_ENTRY_PATH } from './constants.js';
 
-/** Assumptions, rounding and not-financial-advice framing a result relied on; the tool rows fill it. */
-export const disclosureSchema = z.object({
+/** Assumptions, rounding and not-financial-advice framing a result relied on. */
+const disclosureSchema = z.object({
   assumptions: z.array(z.string()).optional(),
   rounding: z.string().optional(),
   framing: z.string().optional(),
@@ -42,13 +42,12 @@ const toolNotSupportedSchema = z.object({
   appBuildId: z.string(),
 });
 
-export const toolErrorSchema = z.union([
+const toolErrorSchema = z.union([
   awaitingCodeSchema,
   awaitingConsentSchema,
   toolNotSupportedSchema,
   genericErrorSchema,
 ]);
-export type ToolError = z.infer<typeof toolErrorSchema>;
 
 /** `{ ok: true, payload, disclosure }` or `{ ok: false, error }`; `payload` is narrowed per tool. */
 export const toolResultSchema = z.discriminatedUnion('ok', [
@@ -63,7 +62,7 @@ export function failureResult(code: Exclude<ErrorCode, 'NOT_PAIRED' | 'TOOL_NOT_
 }
 
 /** What the person is told to do, built from the same parts the result carries so the two cannot disagree. */
-export function notPairedInstructions(parts: { pairingCode?: string; enterAt?: string }): string {
+function notPairedInstructions(parts: { pairingCode?: string; enterAt?: string }): string {
   if (parts.pairingCode === undefined || parts.enterAt === undefined) {
     return 'Waiting for you to approve the assistant in the Retivo tab. Nothing is shared until you do.';
   }

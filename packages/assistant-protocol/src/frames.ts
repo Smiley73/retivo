@@ -8,9 +8,8 @@
  *
  * The bridge is usually older than the tab, so these use the default
  * `z.object` (unknown keys stripped), never `strictObject`. Additions inside one
- * protocol version are optional fields. Unlike the sync envelopes' warn-and-degrade
- * stance, a frame that fails to parse here is a protocol violation and closes
- * the socket.
+ * protocol version are optional fields. A frame that fails to parse is a protocol
+ * violation and closes the socket.
  */
 import { z } from 'zod';
 import { MAX_FRAME_BYTES, NONCE_BYTES } from './constants.js';
@@ -22,7 +21,7 @@ const proofSchema = hexField(32);
 const callIdSchema = z.string().min(1).max(64);
 const protocolVersionSchema = z.number().int();
 
-export const helloFrameSchema = z.object({
+const helloFrameSchema = z.object({
   type: z.literal('hello'),
   protocolVersion: protocolVersionSchema,
   bridgeNonce: nonceSchema,
@@ -30,49 +29,49 @@ export const helloFrameSchema = z.object({
   /** Learned at MCP `initialize` and untrusted: display and log only. */
   client: z.object({ name: z.string().max(128), version: z.string().max(64) }).optional(),
 });
-export const pairedFrameSchema = z.object({ type: z.literal('paired'), bridgeProof: proofSchema });
-export const callFrameSchema = z.object({
+const pairedFrameSchema = z.object({ type: z.literal('paired'), bridgeProof: proofSchema });
+const callFrameSchema = z.object({
   type: z.literal('call'),
   id: callIdSchema,
   tool: z.string().min(1).max(64),
   args: z.record(z.string(), z.unknown()),
 });
-export const cancelFrameSchema = z.object({
+const cancelFrameSchema = z.object({
   type: z.literal('cancel'),
   id: callIdSchema,
   reason: z.enum(['client', 'timeout']),
 });
 
-export const pairFrameSchema = z.object({
+const pairFrameSchema = z.object({
   type: z.literal('pair'),
   protocolVersion: protocolVersionSchema,
   tabNonce: nonceSchema,
   tabProof: proofSchema,
 });
-export const readyFrameSchema = z.object({
+const readyFrameSchema = z.object({
   type: z.literal('ready'),
   /** Absent from an old tab, which never extends anything. */
   keepSignedInWhileActive: z.boolean().default(false),
 });
-export const progressFrameSchema = z.object({
+const progressFrameSchema = z.object({
   type: z.literal('progress'),
   id: callIdSchema,
   fraction: z.number().min(0).max(1).optional(),
   message: z.string().max(200).optional(),
 });
-export const resultFrameSchema = z.object({
+const resultFrameSchema = z.object({
   type: z.literal('result'),
   id: callIdSchema,
   result: toolResultSchema,
 });
 
-export const bridgeFrameSchema = z.discriminatedUnion('type', [
+const bridgeFrameSchema = z.discriminatedUnion('type', [
   helloFrameSchema,
   pairedFrameSchema,
   callFrameSchema,
   cancelFrameSchema,
 ]);
-export const tabFrameSchema = z.discriminatedUnion('type', [
+const tabFrameSchema = z.discriminatedUnion('type', [
   pairFrameSchema,
   readyFrameSchema,
   progressFrameSchema,
@@ -82,12 +81,12 @@ export type BridgeFrame = z.infer<typeof bridgeFrameSchema>;
 export type TabFrame = z.infer<typeof tabFrameSchema>;
 
 /** Who sent a frame; `decodeFrame` accepts only that side's frames. */
-export type FrameSender = 'bridge' | 'tab';
+type FrameSender = 'bridge' | 'tab';
 type FrameBySender = { bridge: BridgeFrame; tab: TabFrame };
 const SCHEMA_BY_SENDER = { bridge: bridgeFrameSchema, tab: tabFrameSchema } as const;
 
 /** Why a frame was refused; the caller closes the socket with `CLOSE_CODES[code]`. */
-export interface FrameFailure {
+interface FrameFailure {
   ok: false;
   code: 'FRAME_TOO_LARGE' | 'PROTOCOL_ERROR';
   /** Fixed wording plus a field path, never frame contents, so it is safe to log. */
