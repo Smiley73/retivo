@@ -29,11 +29,11 @@
     "gate": "pnpm lint && pnpm depcruise && pnpm knip && pnpm typecheck && pnpm test && pnpm audit:ci"
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^8.71.2",
-    "@typescript-eslint/parser": "^8.71.2",
-    "dependency-cruiser": "^18.6.0",
-    "eslint": "^10.12.0",
+    "@typescript-eslint/eslint-plugin": "^8.72.0",
+    "@typescript-eslint/parser": "^8.72.0",
+    "dependency-cruiser": "^18.7.0",
+    "eslint": "^10.13.0",
     "globals": "^17.13.0",
-    "knip": "^6.41.0"
+    "knip": "^6.42.1"
   }
 }
