@@ -192,7 +192,7 @@ export class StepUpService {
     switch (args.method) {
       case 'totp':
         return {
-          ok: await this.mfaSvc.verifyTotpForStepUp(
+          ok: await this.mfaSvc.verifyTotp(
             args.userId,
             this.requireCode(args.code),
             args.ip,

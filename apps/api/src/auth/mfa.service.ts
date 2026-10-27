@@ -65,8 +65,8 @@ export class MfaService {
     return valid;
   }
 
-  // Verify that also returns the matched time step so step-up callers can commit it for single use; `afterTimeStep`
-  // makes otplib reject reused steps. The login path passes none (no consume).
+  // Verify that also returns the matched time step so live-factor callers can commit it for single use;
+  // `afterTimeStep` makes otplib reject reused steps. Enrollment passes none (it does not consume).
   private async verifyTotpStep(
     code: string,
     secret: string,
@@ -230,11 +230,13 @@ export class MfaService {
   }
 
   /**
-   * Verifies a live TOTP `code` (+-1 step). The per-account lock is consulted first: while the window is open even a
-   * correct code gets the shared 429, so the lock cannot be mistaken for a wrong code. The attempt is reserved before
-   * comparison so a concurrent burst cannot slip through one read. On success it stamps `lastVerifiedAt`, undoes its
-   * reservation and audits; on a miss the reservation stands. Returns false with no enabled factor (nothing to
-   * guess).
+   * Verifies a live TOTP `code` (+-1 step) for sign-in or step-up. The matched time step is single-use across both:
+   * `afterTimeStep` is seeded from the stored step and a fresh match is committed by a conditional update that closes
+   * the concurrent-double-use TOCTOU. The per-account lock is consulted first: while the window is open even a correct
+   * code gets the shared 429, so the lock cannot be mistaken for a wrong code. The attempt is reserved before
+   * comparison so a concurrent burst cannot slip through one read. A reused step or lost conditional write is a miss
+   * and the reservation stands; on success it stamps `lastVerifiedAt`, undoes its reservation and audits. Returns
+   * false with no enabled factor (nothing to guess).
    */
   async verifyTotp(
     userId: string,
@@ -245,45 +247,7 @@ export class MfaService {
     // Consistent read: the lock decision must not see a replica behind the previous reservation.
     const row = await this.userMfa.getConsistent(userId);
     // A restricted factor is treated as no enabled factor, the same silent false with no distinct audit, so naming it
-    // directly leaks no existence oracle.
-    if (!row?.totpEnabled || !row.totpSecret || row.totpRestrictedPostReset) return false;
-    this.assertTotpNotLocked(row);
-    const reserved = await this.reserveTotpAttempt(userId, row);
-    const ok = await this.verifyTotpCode(code, row.totpSecret);
-    if (ok) {
-      await this.userMfa.update(userId, {
-        lastVerifiedAt: new Date().toISOString(),
-      });
-      await this.userMfa.clearTotpFailure(userId);
-      await this.auth.record({
-        userId,
-        eventType: 'mfa_totp_verified',
-        ip: ip ?? null,
-        userAgent: userAgent ?? null,
-      });
-    } else {
-      await this.auditTotpMiss(userId, reserved, ip ?? null, userAgent ?? null);
-    }
-    return ok;
-  }
-
-  /**
-   * Verifies a live TOTP `code` for step-up. Unlike `verifyTotp`, the matched time step is single-use:
-   * `afterTimeStep` is seeded from `lastUsedTotpStepStepUp` and a fresh match is committed by a conditional update
-   * that closes the concurrent-double-use TOCTOU. Returns false with no enabled factor, a wrong code, or a consumed
-   * step. It shares the same per-account lock as `verifyTotp`, so a distributed guesser cannot route around it via
-   * step-up.
-   */
-  async verifyTotpForStepUp(
-    userId: string,
-    code: string,
-    ip?: string | null,
-    userAgent?: string | null,
-  ): Promise<boolean> {
-    // Consistent read, as in `verifyTotp`.
-    const row = await this.userMfa.getConsistent(userId);
-    // A restricted factor refuses a step-up proof; checked here, where the factor is resolved, because a caller can
-    // name `method: totp` directly.
+    // directly (a caller can name `method: totp`) leaks no existence oracle.
     if (!row?.totpEnabled || !row.totpSecret || row.totpRestrictedPostReset) return false;
     this.assertTotpNotLocked(row);
     const reserved = await this.reserveTotpAttempt(userId, row);
@@ -292,8 +256,6 @@ export class MfaService {
       row.totpSecret,
       row.lastUsedTotpStepStepUp ?? undefined,
     );
-    // A reused step (rejected by `afterTimeStep`) and a concurrent double-use (lost the conditional write) both
-    // fail here.
     const consumed =
       valid && timeStep !== undefined
         ? await this.userMfa.consumeTotpStepUpStep(userId, timeStep)

@@ -20,8 +20,10 @@ function buildAuth(): AuthEventsRepository {
 function defaultLockStubs(): {
   reserveTotpAttempt: jest.Mock;
   clearTotpFailure: jest.Mock;
+  consumeTotpStepUpStep: jest.Mock;
 } {
   return {
+    consumeTotpStepUpStep: jest.fn().mockResolvedValue(true),
     reserveTotpAttempt: jest.fn().mockResolvedValue({
       totpFailureCount: 1,
       totpLastFailureAt: new Date().toISOString(),
@@ -414,10 +416,12 @@ describe('MfaService — per-account TOTP lock', () => {
     const update = jest.fn();
     const reserveTotpAttempt = jest.fn();
     const clearTotpFailure = jest.fn();
+    const consumeTotpStepUpStep = jest.fn();
     const userMfa = {
       get: jest.fn().mockResolvedValue(lockedRow(secret)),
       getConsistent: jest.fn().mockResolvedValue(lockedRow(secret)),
       update,
+      consumeTotpStepUpStep,
       reserveTotpAttempt,
       clearTotpFailure,
     } as unknown as UserMfaRepository;
@@ -431,26 +435,8 @@ describe('MfaService — per-account TOTP lock', () => {
     expect(update).not.toHaveBeenCalled();
     expect(reserveTotpAttempt).not.toHaveBeenCalled();
     expect(clearTotpFailure).not.toHaveBeenCalled();
-    expect(auth.record).not.toHaveBeenCalled();
-  });
-
-  it('verifyTotpForStepUp refuses with the same 429 shape while locked', async () => {
-    const secret = totp.generateSecret();
-    const consumeTotpStepUpStep = jest.fn();
-    const userMfa = {
-      get: jest.fn().mockResolvedValue(lockedRow(secret)),
-      getConsistent: jest.fn().mockResolvedValue(lockedRow(secret)),
-      update: jest.fn(),
-      consumeTotpStepUpStep,
-      reserveTotpAttempt: jest.fn(),
-      clearTotpFailure: jest.fn(),
-    } as unknown as UserMfaRepository;
-    const svc = new MfaService(userMfa, buildAuth());
-
-    await expect(
-      svc.verifyTotpForStepUp('u1', totp.generate(secret)),
-    ).rejects.toBeInstanceOf(ThrottlerException);
     expect(consumeTotpStepUpStep).not.toHaveBeenCalled();
+    expect(auth.record).not.toHaveBeenCalled();
   });
 
   it('a successful verify clears the per-account failure state', async () => {
@@ -461,6 +447,7 @@ describe('MfaService — per-account TOTP lock', () => {
       get: jest.fn().mockResolvedValue(row),
       getConsistent: jest.fn().mockResolvedValue(row),
       update: jest.fn().mockResolvedValue(undefined),
+      consumeTotpStepUpStep: jest.fn().mockResolvedValue(true),
       reserveTotpAttempt: jest
         .fn()
         .mockResolvedValue({ totpFailureCount: 1, totpLastFailureAt: new Date().toISOString() }),
@@ -517,20 +504,6 @@ describe('MfaService — per-account TOTP lock', () => {
     expect(eventsOf(auth, 'mfa_totp_locked')).toHaveLength(0);
   });
 
-  it('reopens on the step-up path too: a correct step-up code after the window verifies and clears', async () => {
-    const secret = totp.generateSecret();
-    const elapsed = new Date(Date.now() - 3_000).toISOString();
-    const { userMfa, clearTotpFailure, state } = lockStateStubs(enabledRow(secret), {
-      totpFailureCount: 4,
-      totpLastFailureAt: elapsed,
-    });
-    const svc = new MfaService(userMfa, buildAuth());
-
-    expect(await svc.verifyTotpForStepUp('u1', totp.generate(secret))).toBe(true);
-    expect(clearTotpFailure).toHaveBeenCalledWith('u1');
-    expect(state()).toEqual({});
-  });
-
   it('a wrong code after the window has elapsed counts as one more miss: the window grows, the lock is not re-audited, and a correct code inside the new window is refused', async () => {
     const secret = totp.generateSecret();
     const elapsed = new Date(Date.now() - 3_000).toISOString();
@@ -551,6 +524,54 @@ describe('MfaService — per-account TOTP lock', () => {
       ThrottlerException,
     );
     expect(reserveTotpAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it('a code whose step was already consumed is a miss: no consume, reservation stands, mfa_totp_failed recorded', async () => {
+    const secret = totp.generateSecret();
+    const currentStep = Math.floor(Date.now() / 1000 / 30);
+    const row = { ...enabledRow(secret), lastUsedTotpStepStepUp: currentStep + 1 };
+    const { userMfa, clearTotpFailure, state } = lockStateStubs(row);
+    const auth = buildAuth();
+    const svc = new MfaService(userMfa, auth);
+
+    expect(await svc.verifyTotp('u1', totp.generate(secret))).toBe(false);
+    expect(userMfa.consumeTotpStepUpStep).not.toHaveBeenCalled();
+    expect(clearTotpFailure).not.toHaveBeenCalled();
+    expect(state().totpFailureCount).toBe(1);
+    expect(eventsOf(auth, 'mfa_totp_failed')).toHaveLength(1);
+    expect(eventsOf(auth, 'mfa_totp_verified')).toHaveLength(0);
+  });
+
+  it('a lost conditional write is a miss: reservation stands, mfa_totp_failed recorded, no verified event', async () => {
+    const secret = totp.generateSecret();
+    const { userMfa, clearTotpFailure, state } = lockStateStubs(enabledRow(secret));
+    (userMfa.consumeTotpStepUpStep as jest.Mock).mockResolvedValue(false);
+    const auth = buildAuth();
+    const svc = new MfaService(userMfa, auth);
+
+    expect(await svc.verifyTotp('u1', totp.generate(secret))).toBe(false);
+    expect(userMfa.update).not.toHaveBeenCalled();
+    expect(clearTotpFailure).not.toHaveBeenCalled();
+    expect(state().totpFailureCount).toBe(1);
+    expect(eventsOf(auth, 'mfa_totp_failed')).toHaveLength(1);
+    expect(eventsOf(auth, 'mfa_totp_verified')).toHaveLength(0);
+  });
+
+  it('a won conditional write commits the matched step, clears the failure state and records mfa_totp_verified', async () => {
+    const secret = totp.generateSecret();
+    const { userMfa, clearTotpFailure, state } = lockStateStubs(enabledRow(secret), {
+      totpFailureCount: 2,
+      totpLastFailureAt: new Date().toISOString(),
+    });
+    const auth = buildAuth();
+    const svc = new MfaService(userMfa, auth);
+
+    expect(await svc.verifyTotp('u1', totp.generate(secret))).toBe(true);
+    expect(userMfa.consumeTotpStepUpStep).toHaveBeenCalledWith('u1', expect.any(Number));
+    expect(clearTotpFailure).toHaveBeenCalledWith('u1');
+    expect(state()).toEqual({});
+    expect(eventsOf(auth, 'mfa_totp_verified')).toHaveLength(1);
+    expect(eventsOf(auth, 'mfa_totp_failed')).toHaveLength(0);
   });
 
   it('bounds a burst of genuinely concurrent requests to the same attempts an honest sequence gets, not letting every request in the burst evaluate a code', async () => {

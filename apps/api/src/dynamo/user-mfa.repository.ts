@@ -162,8 +162,8 @@ export class UserMfaRepository extends BaseRepository {
   }
 
   /**
-   * Consumes a step-up TOTP time step, committing it only if it strictly advances the stored value. Two step-ups
-   * racing the same code both pass the otplib guard, but only one wins this write; the loser gets false.
+   * Consumes a TOTP time step for sign-in or step-up, committing it only if it strictly advances the stored value.
+   * Two verifies racing the same code both pass the otplib guard, but only one wins this write; the loser gets false.
    */
   async consumeTotpStepUpStep(userId: string, step: number): Promise<boolean> {
     const now = new Date().toISOString();

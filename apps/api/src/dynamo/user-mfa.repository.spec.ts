@@ -259,3 +259,43 @@ describe('UserMfaRepository — per-account TOTP failure state', () => {
     expect((await repo.get(userId))?.totpFailureCount).toBeUndefined();
   });
 });
+
+describe('UserMfaRepository — TOTP step consumption', () => {
+  let env: RepoTestEnv;
+  let repo: UserMfaRepository;
+
+  beforeAll(async () => {
+    env = await createRepoTestEnv();
+    repo = new UserMfaRepository(env.doc, env.config);
+  });
+
+  afterAll(async () => {
+    env.destroy();
+  });
+
+  it('commits a step strictly above the stored one and refuses an equal or lower step, leaving the row unchanged', async () => {
+    const userId = randomUUID();
+    await repo.put({ userId, totpEnabled: true, updatedAt: '2026-06-12T00:00:00.000Z' });
+
+    expect(await repo.consumeTotpStepUpStep(userId, 100)).toBe(true);
+    expect((await repo.get(userId))?.lastUsedTotpStepStepUp).toBe(100);
+
+    expect(await repo.consumeTotpStepUpStep(userId, 100)).toBe(false);
+    expect(await repo.consumeTotpStepUpStep(userId, 99)).toBe(false);
+    expect((await repo.get(userId))?.lastUsedTotpStepStepUp).toBe(100);
+
+    expect(await repo.consumeTotpStepUpStep(userId, 101)).toBe(true);
+    expect((await repo.get(userId))?.lastUsedTotpStepStepUp).toBe(101);
+  });
+
+  it('admits exactly one of several concurrent attempts at the same step', async () => {
+    const userId = randomUUID();
+    await repo.put({ userId, totpEnabled: true, updatedAt: '2026-06-12T00:00:00.000Z' });
+
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () => repo.consumeTotpStepUpStep(userId, 200)),
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect((await repo.get(userId))?.lastUsedTotpStepStepUp).toBe(200);
+  });
+});
