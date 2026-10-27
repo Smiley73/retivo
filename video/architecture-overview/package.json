@@ -5,14 +5,14 @@
   "private": true,
   "license": "Apache-2.0",
   "dependencies": {
-    "@remotion/cli": "4.0.536",
-    "@remotion/fonts": "4.0.536",
-    "@remotion/media": "4.0.536",
-    "@remotion/transitions": "4.0.536",
+    "@remotion/cli": "4.0.538",
+    "@remotion/fonts": "4.0.538",
+    "@remotion/media": "4.0.538",
+    "@remotion/transitions": "4.0.538",
     "@retivo/video-kit": "*",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "remotion": "4.0.536",
+    "remotion": "4.0.538",
     "zod": "4.5.4"
   },
   "scripts": {
