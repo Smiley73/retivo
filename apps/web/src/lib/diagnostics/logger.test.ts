@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { forceCloseDatabase } from 'fake-indexeddb';
+// eslint-disable-next-line no-restricted-imports -- unwrap the cached handle so fake-indexeddb can force-close it
 import { unwrap } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -271,11 +272,13 @@ describe('diagnostics logger', () => {
     forceCloseDatabase(unwrap(handle) as unknown as Parameters<typeof forceCloseDatabase>[0]);
     // A sibling tab holds a connection, so another tab's deleteDatabase queues behind it.
     const sibling = await new Promise<IDBDatabase>((resolve, reject) => {
+      // eslint-disable-next-line no-restricted-properties -- a second connection standing in for another tab
       const req = indexedDB.open('retirement');
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
     });
     const deleted = new Promise<void>((resolve, reject) => {
+      // eslint-disable-next-line no-restricted-properties -- another tab deleting the database
       const req = indexedDB.deleteDatabase('retirement');
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
