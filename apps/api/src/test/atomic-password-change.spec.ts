@@ -13,8 +13,17 @@ import {
   type Session,
   type TestApp,
   recoverEmailOtp,
+  signupVerifyApprove,
+  deviceForgottenReasons,
+  rememberDeviceViaEmailOtp,
+  sendAndRecoverStepUpOtp,
+  decodeAccessClaims,
 } from './test-helpers.js';
-import { REFRESH_COOKIE_NAME, CSRF_COOKIE_NAME } from '../auth/cookie-config.js';
+import {
+  REFRESH_COOKIE_NAME,
+  CSRF_COOKIE_NAME,
+  DEVICE_TRUST_COOKIE_NAME,
+} from '../auth/cookie-config.js';
 import { sha256 } from '../auth/refresh-token.service.js';
 import { RefreshTokensRepository } from '../dynamo/refresh-tokens.repository.js';
 import { HouseholdKeyEnvelopesRepository } from '../dynamo/household-key-envelopes.repository.js';
@@ -874,5 +883,62 @@ describe('atomic password change', () => {
       envelopeSetTag: 'tag-v1',
     });
     expect(writeAfter.status).toBe(204);
+  });
+});
+
+describe('password change with enforced MFA', () => {
+  let t: TestApp;
+  let priorEnforced: string | undefined;
+
+  beforeAll(async () => {
+    priorEnforced = process.env.AUTH_MFA_ENFORCED;
+    process.env.AUTH_MFA_ENFORCED = 'true';
+    t = await bootstrapTestApp();
+  });
+
+  afterAll(async () => {
+    await t.app.close();
+    if (priorEnforced === undefined) delete process.env.AUTH_MFA_ENFORCED;
+    else process.env.AUTH_MFA_ENFORCED = priorEnforced;
+  });
+
+  it('forgets a remembered device: it is challenged again, audited as a change, and the response expires the trust cookie', async () => {
+    const { email, userId } = await signupVerifyApprove(t);
+    const deviceId = freshDeviceId();
+    const { verify, trustCookie } = await rememberDeviceViaEmailOtp(t, email, userId, deviceId);
+    const cookies = parseSetCookies(verify.headers['set-cookie']);
+    const sess: Session = {
+      accessToken: verify.body.accessToken,
+      refreshCookie: `${REFRESH_COOKIE_NAME}=${encodeURIComponent(cookies[REFRESH_COOKIE_NAME])}`,
+      csrfCookie: `${CSRF_COOKIE_NAME}=${encodeURIComponent(cookies[CSRF_COOKIE_NAME])}`,
+      csrfValue: cookies[CSRF_COOKIE_NAME],
+      deviceId,
+      householdId: decodeAccessClaims(verify.body.accessToken).householdId,
+      userId,
+      email,
+    };
+
+    const code = await sendAndRecoverStepUpOtp(t, sess, 'change_password');
+    const res = await changePasswordRequest(t, sess, {
+      currentPassword: STRONG_PASSWORD,
+      newPassword: STRONGER_PASSWORD,
+      method: 'email_otp',
+      code,
+    });
+    expect(res.status).toBe(200);
+    const trustCookieHeader = (res.headers['set-cookie'] as unknown as string[]).filter((c) =>
+      c.startsWith(`${DEVICE_TRUST_COOKIE_NAME}=;`),
+    );
+    expect(trustCookieHeader.length).toBeGreaterThan(0);
+    expect(trustCookieHeader.every((c) => /Expires=Thu, 01 Jan 1970/.test(c))).toBe(true);
+
+    const after = await request(t.app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', process.env.WEB_ORIGIN!)
+      .set('Cookie', trustCookie)
+      .send({ email, password: STRONGER_PASSWORD, deviceId });
+    expect(after.status).toBe(200);
+    expect(after.body.mfaRequired).toBe(true);
+    expect(await deviceForgottenReasons(t, userId, deviceId)).toEqual(['password_change']);
   });
 });

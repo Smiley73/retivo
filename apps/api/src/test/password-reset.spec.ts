@@ -11,6 +11,9 @@ import {
   parseSetCookies,
   scanAll,
   type TestApp,
+  loginRaw,
+  deviceForgottenReasons,
+  rememberDeviceViaEmailOtp,
 } from './test-helpers.js';
 import { REFRESH_COOKIE_NAME } from '../auth/cookie-config.js';
 import { sha256 } from '../auth/refresh-token.service.js';
@@ -522,5 +525,47 @@ describe('password reset', () => {
         .send({ email });
       expect(res.status).toBe(202);
     });
+  });
+});
+
+describe('password reset with enforced MFA', () => {
+  let t: TestApp;
+  let priorEnforced: string | undefined;
+
+  beforeAll(async () => {
+    priorEnforced = process.env.AUTH_MFA_ENFORCED;
+    process.env.AUTH_MFA_ENFORCED = 'true';
+    t = await bootstrapTestApp();
+  });
+
+  afterAll(async () => {
+    await t.app.close();
+    if (priorEnforced === undefined) delete process.env.AUTH_MFA_ENFORCED;
+    else process.env.AUTH_MFA_ENFORCED = priorEnforced;
+  });
+
+  it('forgets a remembered device: its next sign-in is challenged and the forget is audited as a reset', async () => {
+    const { email, userId } = await createVerifiedUser(t);
+    const deviceId = freshDeviceId();
+    const { trustCookie } = await rememberDeviceViaEmailOtp(t, email, userId, deviceId);
+    const before = await loginRaw(t, email, deviceId, [trustCookie]);
+    expect(before.body.accessToken).toBeTruthy();
+
+    const { resetToken } = await requestReset(t, email);
+    await request(t.app.getHttpServer())
+      .post('/api/v1/auth/reset-password')
+      .set('Origin', origin())
+      .send({ token: resetToken, newPassword: RESET_PASSWORD })
+      .expect(204);
+
+    const after = await request(t.app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('Origin', origin())
+      .set('Cookie', trustCookie)
+      .send({ email, password: RESET_PASSWORD, deviceId });
+    expect(after.status).toBe(200);
+    expect(after.body.mfaRequired).toBe(true);
+    expect(after.body.accessToken).toBeUndefined();
+    expect(await deviceForgottenReasons(t, userId, deviceId)).toEqual(['password_reset']);
   });
 });

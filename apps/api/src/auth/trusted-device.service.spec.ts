@@ -341,3 +341,45 @@ describe('TrustedDeviceService — list', () => {
     expect(listed[0]).not.toHaveProperty('tokenHash');
   });
 });
+
+describe('TrustedDeviceService — revokeAll', () => {
+  it('deletes every row for the user, expired ones included, and audits each with the reason', async () => {
+    const rows = [
+      row({ deviceId: 'dev1' }),
+      row({ deviceId: 'dev2' }),
+      row({ deviceId: 'dev3', expiresAt: nowSec() - 60 }),
+    ];
+    const del = jest.fn().mockResolvedValue(undefined);
+    const repo = {
+      listByUser: jest.fn().mockResolvedValue(rows),
+      delete: del,
+    } as unknown as TrustedDeviceRepository;
+    const auth = buildAuth();
+    const svc = new TrustedDeviceService(repo, auth);
+
+    await svc.revokeAll('userA', '1.2.3.4', 'ua', 'password_reset');
+
+    expect(del.mock.calls.map((c: unknown[]) => c[1]).sort()).toEqual(['dev1', 'dev2', 'dev3']);
+    const record = auth.record as jest.Mock;
+    expect(record).toHaveBeenCalledTimes(3);
+    for (const [event] of record.mock.calls as Array<[{ eventType: string; metadata: { reason: string } }]>) {
+      expect(event.eventType).toBe('mfa_device_forgotten');
+      expect(event.metadata.reason).toBe('password_reset');
+    }
+  });
+
+  it('is a no-op for a user with no rows', async () => {
+    const del = jest.fn();
+    const repo = {
+      listByUser: jest.fn().mockResolvedValue([]),
+      delete: del,
+    } as unknown as TrustedDeviceRepository;
+    const auth = buildAuth();
+    const svc = new TrustedDeviceService(repo, auth);
+
+    await svc.revokeAll('userA', null, null, 'password_change');
+
+    expect(del).not.toHaveBeenCalled();
+    expect(auth.record).not.toHaveBeenCalled();
+  });
+});

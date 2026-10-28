@@ -20,6 +20,7 @@ import { RefreshTokenService } from './refresh-token.service.js';
 import { MfaChallengeService, type MfaChallenge } from './mfa-challenge.service.js';
 import { TrustedDeviceService, type DeviceTrustContext } from './trusted-device.service.js';
 import { sha256 } from './refresh-token.service.js';
+import { hasUsablePasskey } from './factor-restriction.js';
 import type { EnvConfig } from '../common/env.config.js';
 
 // Dummy password hashed at load, so the unknown-user branch costs the same as a wrong password.
@@ -271,7 +272,7 @@ export class LoginService {
     // A factor restricted post-reset is not offered; it stays refused if named directly (see
     // `passkey-assertion.service.ts` and `mfa.service.ts#verifyTotp`).
     const totpEnabled = !!mfa?.totpEnabled && !mfa.totpRestrictedPostReset;
-    const hasPasskey = passkeys.some((p) => !p.restrictedPostReset);
+    const hasPasskey = hasUsablePasskey(passkeys);
     const methods: MfaChallenge['methods'] = [];
     if (hasPasskey) methods.push('passkey');
     if (totpEnabled) methods.push('totp');

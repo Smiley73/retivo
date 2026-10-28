@@ -240,6 +240,43 @@ export class TrustedDeviceService {
   }
 
   /**
+   * Forgets the given devices through `revoke`, at most 10 concurrent deletes to avoid hot-partition spikes.
+   */
+  async revokeMany(
+    userId: string,
+    deviceIds: string[],
+    ip?: string | null,
+    userAgent?: string | null,
+    reason?: string,
+  ): Promise<void> {
+    const BATCH = 10;
+    for (let i = 0; i < deviceIds.length; i += BATCH) {
+      await Promise.all(
+        deviceIds
+          .slice(i, i + BATCH)
+          .map((id) => this.revoke(userId, id, ip, userAgent, reason)),
+      );
+    }
+  }
+
+  /** Forgets every device row for the user, expired ones included; a user with none records nothing. */
+  async revokeAll(
+    userId: string,
+    ip?: string | null,
+    userAgent?: string | null,
+    reason?: string,
+  ): Promise<void> {
+    const rows = await this.trustedDevices.listByUser(userId);
+    await this.revokeMany(
+      userId,
+      rows.map((r) => r.deviceId),
+      ip,
+      userAgent,
+      reason,
+    );
+  }
+
+  /**
    * Every still-trusted device for the manage-devices list; expired rows are excluded by a filter on the numeric TTL,
    * which is the truth for what is still trusted.
    */

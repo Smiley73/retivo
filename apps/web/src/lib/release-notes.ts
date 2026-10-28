@@ -13,6 +13,16 @@ export interface ReleaseNote {
 /** Newest-first; new entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-28',
+    kind: 'improved',
+    title: 'Remembered devices are forgotten when your password changes',
+    blurb:
+      'Changing your password, or finishing a password reset, now also forgets every device ' +
+      'you had asked to remember, so each one asks for your second factor the next time you ' +
+      'sign in. Also, on an account with a passkey, the emailed code no longer offers to ' +
+      'remember a device.',
+  },
+  {
     date: '2026-10-27',
     kind: 'improved',
     title: 'Each authenticator code now works only once',

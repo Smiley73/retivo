@@ -13,6 +13,10 @@ import {
   type TestApp,
   table,
   authSet,
+  freshDeviceId,
+  loginRaw,
+  signupVerifyApprove,
+  rememberDeviceViaEmailOtp,
 } from './test-helpers.js';
 import { sha256 } from '../auth/refresh-token.service.js';
 import { UsersRepository } from '../dynamo/users.repository.js';
@@ -413,5 +417,39 @@ describe('factor-change notice + undo', () => {
 
     const claims = decodeAccessClaims(s.accessToken);
     expect(await isJtiRevoked(t, claims.jti)).toBe(false);
+  });
+});
+
+describe('factor-undo with enforced MFA', () => {
+  let t: TestApp;
+  let priorEnforced: string | undefined;
+
+  beforeAll(async () => {
+    priorEnforced = process.env.AUTH_MFA_ENFORCED;
+    process.env.AUTH_MFA_ENFORCED = 'true';
+    t = await bootstrapTestApp();
+  });
+
+  afterAll(async () => {
+    await t.app.close();
+    if (priorEnforced === undefined) delete process.env.AUTH_MFA_ENFORCED;
+    else process.env.AUTH_MFA_ENFORCED = priorEnforced;
+  });
+
+  it('leaves a remembered device trusted', async () => {
+    const { email, userId } = await signupVerifyApprove(t);
+    const deviceId = freshDeviceId();
+    const { trustCookie } = await rememberDeviceViaEmailOtp(t, email, userId, deviceId);
+    const credentialId = `cred-${randomUUID()}`;
+    await insertPasskey(t, userId, credentialId);
+    const token = await seedPendingUndo(t, { userId, kind: 'passkey_add', credentialId });
+
+    const res = await consume(t, userId, token, 'passkey_add').expect(200);
+    expect(res.body).toEqual({ ok: true });
+
+    const next = await loginRaw(t, email, deviceId, [trustCookie]);
+    expect(next.status).toBe(200);
+    expect(next.body.mfaRequired).toBeUndefined();
+    expect(next.body.accessToken).toBeTruthy();
   });
 });

@@ -1,5 +1,6 @@
 // MFA endpoints with AUTH_MFA_ENFORCED=true: two-step login (TOTP, Email-OTP, passkey), trusted-device skip and trust eligibility, retired backup
 // codes, the auth-rejection matrix and CSRF exemption. Email-OTP codes are stored as sha256, so tests recover the live code by brute force.
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
 import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -20,7 +21,8 @@ import {
   authSet,
   freshEmail,
 } from './test-helpers.js';
-import type { AuthEventRow } from '../dynamo/types.js';
+import type { AuthEventRow, PasskeyRow } from '../dynamo/types.js';
+import { PasskeysRepository } from '../dynamo/passkeys.repository.js';
 import {
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
@@ -58,6 +60,21 @@ async function authEventsFor(t: TestApp, userId: string): Promise<AuthEventRow[]
     .get('TABLE_AUTH_EVENT', { infer: true } as never) as unknown as string;
   const rows = await scanAll<AuthEventRow>(t.doc, table);
   return rows.filter((r) => r.userId === userId);
+}
+
+function seedPasskeyRow(userId: string, overrides: Partial<PasskeyRow> = {}): PasskeyRow {
+  return {
+    userId,
+    credentialId: randomUUID(),
+    publicKey: Buffer.from('pk').toString('base64url'),
+    counter: 0,
+    deviceType: 'singleDevice',
+    backedUp: false,
+    transports: null,
+    createdAt: new Date().toISOString(),
+    lastUsedAt: null,
+    ...overrides,
+  };
 }
 
 function wrongTotpCode(secret: string): string {
@@ -415,6 +432,44 @@ describe('enforced MFA endpoints', () => {
       expect((verify.body as ChallengeResponse).deviceRemembered).toBe(false);
       const cookies = parseSetCookies(verify.headers['set-cookie']);
       expect(cookies[DEVICE_TRUST_COOKIE_NAME]).toBeUndefined();
+    });
+  });
+
+  describe('email-code trust on a passkey account', () => {
+    it('an unrestricted passkey blocks trust; a restricted one does not', async () => {
+      const blocked = await signupVerifyApprove(t);
+      await t.module
+        .get(PasskeysRepository)
+        .insert(seedPasskeyRow(blocked.userId));
+      const blockedVerify = await completeEmailOtpLogin(
+        t,
+        blocked.email,
+        blocked.userId,
+        freshDeviceId(),
+        true,
+      );
+      expect(blockedVerify.status).toBe(200);
+      expect((blockedVerify.body as ChallengeResponse).deviceRemembered).toBe(false);
+      expect(
+        parseSetCookies(blockedVerify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME],
+      ).toBeUndefined();
+
+      const restricted = await signupVerifyApprove(t);
+      await t.module
+        .get(PasskeysRepository)
+        .insert(seedPasskeyRow(restricted.userId, { restrictedPostReset: true }));
+      const restrictedVerify = await completeEmailOtpLogin(
+        t,
+        restricted.email,
+        restricted.userId,
+        freshDeviceId(),
+        true,
+      );
+      expect(restrictedVerify.status).toBe(200);
+      expect((restrictedVerify.body as ChallengeResponse).deviceRemembered).toBe(true);
+      expect(
+        parseSetCookies(restrictedVerify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME],
+      ).toBeTruthy();
     });
   });
 
