@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
-import { PutCommand, UpdateCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, UpdateCommand, GetCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import {
   STRONG_PASSWORD,
   bootstrapTestApp,
@@ -1584,6 +1584,25 @@ describe('auth flow', () => {
       expect(user.firstName).toBe('Jane');
       expect(user.lastName).toBe('Smith');
       expect(user.birthdate).toBe('1980-04-15');
+    });
+
+    it('rejects a bidi-override name with 400 and creates no user', async () => {
+      const email = freshEmail();
+      const res = await request(t.app.getHttpServer())
+        .post('/api/v1/auth/signup')
+        .set('Origin', process.env.WEB_ORIGIN!)
+        .send({ email, password: STRONG_PASSWORD, firstName: 'Jane\u202e', lastName: 'Smith' });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('BAD_REQUEST');
+      const byEmail = await t.doc.send(
+        new QueryCommand({
+          TableName: userTable(),
+          IndexName: 'EmailIndex',
+          KeyConditionExpression: 'emailLowercase = :e',
+          ExpressionAttributeValues: { ':e': email.toLowerCase() },
+        }),
+      );
+      expect(byEmail.Items).toEqual([]);
     });
 
     it('leaves the profile fields unset when absent (no stale values)', async () => {

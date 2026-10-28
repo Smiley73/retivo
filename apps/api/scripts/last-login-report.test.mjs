@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { signInStatsFor } from './last-login-report.mjs';
+import { formatTable, signInStatsFor } from './last-login-report.mjs';
 
 class FakeQueryCommand {
   constructor(input) {
@@ -89,4 +89,17 @@ test('signInStatsFor returns no sign-in when all pages are empty', async () => {
   const result = await signInStatsFor(doc, FakeQueryCommand, 'auth-events', 'user-2');
 
   assert.deepEqual(result, { lastSignIn: null, count: 0 });
+});
+
+test('formatTable prints only the visible characters of a cell and pads to that width', () => {
+  const dirty = 'Al\u001b[31mice\u0000\u202e';
+  const lines = formatTable(['NAME', 'N'], [[dirty, '1'], ['Alice', '2']]);
+
+  assert.deepEqual(lines, ['NAME       N', 'Al[31mice  1', 'Alice      2']);
+});
+
+test('formatTable keeps joiners out of a cell without breaking the letters apart', () => {
+  const lines = formatTable(['NAME'], [['a\u200db\u200cc']]);
+
+  assert.deepEqual(lines, ['NAME', 'abc']);
 });
