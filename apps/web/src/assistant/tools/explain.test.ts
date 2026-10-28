@@ -219,17 +219,18 @@ describe('deterministic metrics', () => {
     expect(Math.abs(data.valueTodayDollars! % 1000)).toBe(0);
   });
 
+  it('refuses a scenario other than the base while the Scenarios switch is off', async () => {
+    const { data } = await explain('ending_balance', { scenarioId: EARLY_ID }, choicesWith({ scenarios: false }));
+    expect(data).toMatchObject({ omittedSections: ['scenarios'] });
+    expect(data.value).toBeUndefined();
+    expect(data.inputs).toBeUndefined();
+  });
+
   it('leaves the inputs out, and still answers, while the Scenarios switch is off', async () => {
     const { data } = await explain('ending_balance', {}, choicesWith({ scenarios: false }));
     expect(data.inputs).toEqual({ omittedSections: ['scenarios'] });
     expect(data.defaultsApplied).toEqual([]);
     expect(data.value).not.toBeNull();
-  });
-
-  it('withholds a setting whose own category is off, naming the switch', async () => {
-    const { data } = await explain('ending_balance', {}, choicesWith({ accounts: false }));
-    const inputs = data.inputs as Record<string, { withheld?: boolean; switch?: string }>;
-    expect(inputs.accountReturns).toEqual({ withheld: true, switch: 'accounts' });
   });
 });
 

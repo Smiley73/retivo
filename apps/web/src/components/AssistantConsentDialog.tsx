@@ -14,7 +14,7 @@ import {
   SESSION_GROUP_HEADING,
   SHARING_GROUP_HEADING,
 } from '../assistant/sharing/sentences';
-import { CONSENT_SWITCHES, KEEP_SIGNED_IN_ID, SHARING_SWITCHES, type SharingChoices, type SwitchDefinition } from '../assistant/sharing/switches';
+import { ANALYSIS_TOOLS_STATEMENT, CONSENT_SWITCHES, KEEP_SIGNED_IN_ID, SHARING_SWITCHES, type SharingChoices, type SwitchDefinition } from '../assistant/sharing/switches';
 import { defaultConsentAnswer, type ConsentAnswer } from '../assistant/sharing/consent';
 import { sanitizeClientName } from '../assistant/sharing/sanitize';
 import { btnPrimaryClass, btnSecondaryClass } from './dialog-chrome';
@@ -74,6 +74,9 @@ export const AssistantConsentDialog: React.FC<AssistantConsentDialogProps> = ({ 
         {SHARING_SWITCHES.map((definition) =>
           renderSwitch(definition, choices[definition.id], (next) => setChoices((current) => ({ ...current, [definition.id]: next }))),
         )}
+        <Muted as="p" className="m-0 mb-4 text-xs">
+          {ANALYSIS_TOOLS_STATEMENT}
+        </Muted>
       </div>
 
       <hr className="my-4 border-line" />

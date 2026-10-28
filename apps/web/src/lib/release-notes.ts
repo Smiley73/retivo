@@ -14,6 +14,17 @@ export interface ReleaseNote {
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-28',
+    kind: 'improved',
+    title: 'The assistant stays silent on projections when a part of your plan is switched off',
+    blurb:
+      'A projection, stress test, comparison, explanation or what-if depends on your members, accounts, ' +
+      'balances, income, expenses and Social Security together, so a figure cannot be traced to one of them. ' +
+      'When any of those six sharing switches is off, the assistant now gets no figure from those tools, ' +
+      'only a note naming what is switched off. Comparing or explaining a scenario other than the base one ' +
+      'also needs the Scenarios switch.',
+  },
+  {
+    date: '2026-10-28',
     kind: 'fixed',
     title: 'Devices and sign-in history show the address you connected from',
     blurb:

@@ -17,8 +17,8 @@ import { defineTool, PROJECTION_UNAVAILABLE_MESSAGE, ToolArgsError, ToolFailure,
 import { signedDifference } from './compare-scenarios';
 import { projectionRows } from './get-projection';
 import { deterministicAssumptions } from './projection-assumptions';
-import { dollarsFor, headlineOf, requireMethodSlice, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
-import { gateOf, projectSection } from './scenario-report';
+import { analysisRefusal, dollarsFor, headlineOf, requireMethodSlice, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
+import { projectSection } from './scenario-report';
 import { monteCarloInputFor } from './stress-cache';
 import { STRESS_BASIS, monteCarloAssumptions, stressFigures } from './stress-figures';
 import { stressRunner } from './stress-test';
@@ -93,64 +93,50 @@ function shared(section: EchoChange['section'], path: string, accountId: string 
 }
 
 /**
- * The echo, through the field model: a section whose sharing switch is off is named and withheld, a value the
- * model will not share is withheld, and an account is named only when the accounts switch lets its name out.
+ * The echo, through the field model: a value the model will not share is withheld, and an account is named
+ * only when the accounts switch lets its name out.
  */
 function echoOf(changes: readonly EchoChange[], kept: readonly EchoKept[], env: ToolEnv) {
   const accountNames = new Map((env.view().accounts ?? []).map((row) => [String(row.id), row.name]));
-  const withheldSections: Array<{ section: string; switch: string }> = [];
-  const open = (section: EchoChange['section']): boolean => {
-    const gate = gateOf(section);
-    if (gate === undefined || env.choices[gate]) return true;
-    if (!withheldSections.some((entry) => entry.section === section)) withheldSections.push({ section, switch: gate });
-    return false;
-  };
   const accountFields = (accountId: string | undefined) =>
     accountId === undefined ? {} : { accountId, ...(accountNames.has(accountId) && { accountName: accountNames.get(accountId) }) };
 
-  const changeRows = changes
-    .filter((change) => open(change.section))
-    .map((change) => {
-      const setting = `${change.section}.${change.path}`;
-      const previous = shared(change.section, change.path, change.accountId, change.previous, env);
-      const next = shared(change.section, change.path, change.accountId, change.new, env);
-      if (previous === undefined || next === undefined) return { setting, withheld: true, ...accountFields(change.accountId) };
-      return {
-        setting,
-        ...accountFields(change.accountId),
-        previous,
-        previousSource: change.previousSource,
-        ...(change.basis !== undefined && { previousBasis: change.basis }),
-        new: next,
-        changed: change.changed,
-        ...(change.derived !== undefined && { followsFrom: change.derived }),
-      };
-    });
-  const keptRows = kept
-    .filter((entry) => open(entry.section))
-    .flatMap((entry) => {
-      const value = shared(entry.section, entry.path, entry.accountId, entry.value, env);
-      if (value === undefined) return [];
-      return [
-        {
-          setting: `${entry.section}.${entry.path}`,
-          ...accountFields(entry.accountId),
-          value,
-          source: entry.source,
-          ...(entry.basis !== undefined && { basis: entry.basis }),
-        },
-      ];
-    });
-  return {
-    changes: changeRows,
-    unchangedInTheseSections: keptRows,
-    ...(withheldSections.length > 0 && { withheldSections }),
-  };
+  const changeRows = changes.map((change) => {
+    const setting = `${change.section}.${change.path}`;
+    const previous = shared(change.section, change.path, change.accountId, change.previous, env);
+    const next = shared(change.section, change.path, change.accountId, change.new, env);
+    if (previous === undefined || next === undefined) return { setting, withheld: true, ...accountFields(change.accountId) };
+    return {
+      setting,
+      ...accountFields(change.accountId),
+      previous,
+      previousSource: change.previousSource,
+      ...(change.basis !== undefined && { previousBasis: change.basis }),
+      new: next,
+      changed: change.changed,
+      ...(change.derived !== undefined && { followsFrom: change.derived }),
+    };
+  });
+  const keptRows = kept.flatMap((entry) => {
+    const value = shared(entry.section, entry.path, entry.accountId, entry.value, env);
+    if (value === undefined) return [];
+    return [
+      {
+        setting: `${entry.section}.${entry.path}`,
+        ...accountFields(entry.accountId),
+        value,
+        source: entry.source,
+        ...(entry.basis !== undefined && { basis: entry.basis }),
+      },
+    ];
+  });
+  return { changes: changeRows, unchangedInTheseSections: keptRows };
 }
 
 export const retivoRunWhatIf = defineTool('retivo_run_what_if', async (args, env) => {
   const baseId = resolveScenarioArg(args.baseScenarioId, env);
-  if (!env.choices.scenarios) return { data: { omittedSections: ['scenarios'] } };
+  const refused = analysisRefusal(env, [baseId], true);
+  if (refused !== null) return refused;
   const from = typeof args.fromYear === 'number' ? args.fromYear : undefined;
   const to = typeof args.toYear === 'number' ? args.toYear : undefined;
   if (from !== undefined && to !== undefined && from > to) throw new ToolArgsError('fromYear is after toYear.');

@@ -11,7 +11,7 @@ import {
   UNKNOWN_ASSISTANT_NAME,
   keepSignedInDescription,
 } from '../assistant/sharing/sentences';
-import { CONSENT_SWITCHES, KEEP_SIGNED_IN_ID, SHARING_SWITCHES } from '../assistant/sharing/switches';
+import { ANALYSIS_TOOLS_STATEMENT, CONSENT_SWITCHES, KEEP_SIGNED_IN_ID, SHARING_SWITCHES } from '../assistant/sharing/switches';
 import { expectNoA11yViolations } from '../test/a11y';
 import { AssistantConsentDialog } from './AssistantConsentDialog';
 
@@ -72,6 +72,8 @@ describe('AssistantConsentDialog', () => {
     expect(within(dialog).getByText(MODEL_PROVIDER_STATEMENT)).toBeInTheDocument();
     expect(within(dialog).getByText(GENEROUS_DEFAULTS_STATEMENT)).toBeInTheDocument();
     expect(within(dialog).getByText(CONSENT_CHOICES_FIXED_STATEMENT)).toBeInTheDocument();
+    const sharing = within(dialog).getByRole('group', { name: 'What the assistant may read' });
+    expect(within(sharing).getByText(ANALYSIS_TOOLS_STATEMENT)).toBeInTheDocument();
     const neverShared = within(dialog).getByRole('group', { name: /Never shared/ });
     for (const item of NEVER_SHARED_ITEMS) expect(within(neverShared).getByText(item)).toBeInTheDocument();
   });

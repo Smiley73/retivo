@@ -14,7 +14,7 @@ import type { ScenarioOverrides } from '../../db/types';
 import type { MonteCarloSummary } from '../../lib/monte-carlo';
 import { defineTool, ToolArgsError, type ToolEnv } from './define';
 import { deterministicAssumptions, healthAssumptionLines, taxTableNote } from './projection-assumptions';
-import { assemblePlan, dollarsFor, headlineOf, requireMethodSlice, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
+import { analysisRefusal, assemblePlan, dollarsFor, headlineOf, requireMethodSlice, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
 import { reportScenarioSections } from './scenario-report';
 import { NOT_COMPUTED, peekStressSummary } from './stress-cache';
 import { monteCarloAssumptions } from './stress-figures';
@@ -122,6 +122,8 @@ export const retivoExplain = defineTool('retivo_explain', async (args, env) => {
   const metric = args.metric as ExplainMetric;
   if (!Object.hasOwn(METRIC_DOCS, metric)) throw new ToolArgsError('That metric is not one retivo_explain knows.');
   const scenarioId = resolveScenarioArg(args.scenarioId, env);
+  const refused = analysisRefusal(env, [scenarioId]);
+  if (refused !== null) return refused;
   const dollars = dollarsFor(env);
   const { inputs, defaultsApplied, assumptions: inputAssumptions } = inputsFor(scenarioId, metric, env);
 

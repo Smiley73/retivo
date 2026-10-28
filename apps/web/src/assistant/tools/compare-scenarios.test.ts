@@ -245,18 +245,7 @@ describe('retivo_compare_scenarios: arguments and sharing', () => {
 
   it('leaves everything out while the Scenarios switch is off', async () => {
     const { envelope } = await compare(BASE_ID, EARLY_ID, choicesWith({ scenarios: false }));
-    expect(envelope.data).toEqual({ omittedSections: ['scenarios'] });
-  });
-
-  it('does not compare a setting whose own category is off, and says so', async () => {
-    const all = (await compare(BASE_ID, EARLY_ID)).data.settingDifferences.map((entry) => entry.key);
-    const { envelope, data } = await compare(BASE_ID, EARLY_ID, choicesWith({ accounts: false, members: false, expenses: false, income: false }));
-    const keys = data.settingDifferences.map((entry) => entry.key);
-    expect(keys.length).toBeLessThan(all.length);
-    expect(keys).not.toContain('accountContributions');
-    expect(envelope.assumptions.some((line) => /sharing switch is off are not compared/.test(line))).toBe(true);
-    // Switches never change what was computed: the outcomes are the same.
-    expect(data.scenario.endingBalanceTodayDollars).toBe((await compare(BASE_ID, EARLY_ID)).data.scenario.endingBalanceTodayDollars);
+    expect(envelope.data).toMatchObject({ omittedSections: ['scenarios'] });
   });
 
   it('shows the scenarios’ names through the share view', async () => {
