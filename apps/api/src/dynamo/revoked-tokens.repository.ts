@@ -136,6 +136,21 @@ export class RevokedTokensRepository extends BaseRepository {
   }
 
   /**
+   * Builds the ConditionCheck asserting `generation` has not been retired for `userId`, in the same transaction as a
+   * write that must not outlive an account-wide revocation. Revocation commits the tombstone before sweeping, so a
+   * write that commits before it is swept and one after it fails this check.
+   */
+  conditionCheckGenerationNotRetiredTransactItem(userId: string, generation: number): TransactItem {
+    return {
+      ConditionCheck: {
+        TableName: this.tableName,
+        Key: { jti: generationTombstoneKey(userId, generation) },
+        ConditionExpression: 'attribute_not_exists(jti)',
+      },
+    };
+  }
+
+  /**
    * Builds the ConditionCheck asserting a token family has no revocation barrier, in the same transaction as an
    * issuance or rotation Put.
    */

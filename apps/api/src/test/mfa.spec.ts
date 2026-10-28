@@ -23,6 +23,9 @@ import {
 } from './test-helpers.js';
 import type { AuthEventRow, PasskeyRow } from '../dynamo/types.js';
 import { PasskeysRepository } from '../dynamo/passkeys.repository.js';
+import { MfaEmailOtpService } from '../auth/mfa-email-otp.service.js';
+import { SessionRevocationService } from '../auth/session-revocation.service.js';
+import { TrustedDeviceService } from '../auth/trusted-device.service.js';
 import {
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
@@ -432,6 +435,47 @@ describe('enforced MFA endpoints', () => {
       expect((verify.body as ChallengeResponse).deviceRemembered).toBe(false);
       const cookies = parseSetCookies(verify.headers['set-cookie']);
       expect(cookies[DEVICE_TRUST_COOKIE_NAME]).toBeUndefined();
+    });
+  });
+
+  describe('trust minting racing an account-wide revocation', () => {
+    it('a verify paused after the factor check cannot recreate trust once a reset/change sweep has run', async () => {
+      const { email, userId } = await signupVerifyApprove(t);
+      const deviceId = freshDeviceId();
+      const login = await loginRaw(t, email, deviceId);
+      const challengeToken = (login.body as ChallengeResponse).challengeToken!;
+      await clearEmailOtpCooldown(t, userId);
+      await request(t.app.getHttpServer())
+        .post('/api/v1/auth/mfa/email/send')
+        .set('Origin', ORIGIN())
+        .send({ challengeToken })
+        .expect(202);
+      const code = await recoverEmailOtp(t, userId);
+
+      // The verify has passed its generation check; the credential change then retires the generation and sweeps
+      // the remembered devices, exactly as `afterConsume` and `ChangePasswordService.change` do, before trust is set.
+      const emailOtp = t.module.get(MfaEmailOtpService);
+      const realVerify = emailOtp.verify.bind(emailOtp);
+      const paused = jest.spyOn(emailOtp, 'verify').mockImplementationOnce(async (args) => {
+        const result = await realVerify(args);
+        await t.module.get(SessionRevocationService).revokeAll({ userId });
+        await t.module.get(TrustedDeviceService).revokeAll(userId, null, null, 'password_reset');
+        return result;
+      });
+      let verify: request.Response;
+      try {
+        verify = await request(t.app.getHttpServer())
+          .post('/api/v1/auth/mfa/verify')
+          .set('Origin', ORIGIN())
+          .send({ challengeToken, method: 'email_otp', code, deviceId, rememberDevice: true });
+      } finally {
+        paused.mockRestore();
+      }
+
+      expect(verify.status).toBe(401);
+      expect((verify.body as { error: { code: string } }).error.code).toBe('MFA_CHALLENGE_INVALID');
+      expect(parseSetCookies(verify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME]).toBeUndefined();
+      expect(await t.module.get(TrustedDeviceService).list(userId)).toEqual([]);
     });
   });
 

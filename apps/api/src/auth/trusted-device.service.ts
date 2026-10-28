@@ -1,10 +1,12 @@
 // The "remember this device" MFA-skip trust (~30 days): an opaque secret in an httpOnly SameSite=Strict cookie at `/api/v1`, only
 // its SHA-256 stored per (userId, deviceId). See docs/security.md, "Trust this device".
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import type { Response } from 'express';
 import { randomBytes } from 'node:crypto';
 import { TrustedDeviceRepository } from '../dynamo/trusted-device.repository.js';
 import { AuthEventsRepository } from '../dynamo/auth-events.repository.js';
+import { RevokedTokensRepository } from '../dynamo/revoked-tokens.repository.js';
+import { TransientTransactionError } from '../dynamo/transact-write.js';
 import type { TrustedDeviceRow } from '../dynamo/types.js';
 import { sha256 } from './refresh-token.service.js';
 import {
@@ -68,6 +70,7 @@ export class TrustedDeviceService {
   constructor(
     private readonly trustedDevices: TrustedDeviceRepository,
     private readonly auth: AuthEventsRepository,
+    private readonly revoked: RevokedTokensRepository,
   ) {}
 
   /**
@@ -166,11 +169,14 @@ export class TrustedDeviceService {
 
   /**
    * Mints a fresh device-trust secret, stores its hash, and sets the cookie; replaces any prior trust for the pair.
-   * Audits `mfa_device_trusted`.
+   * Audits `mfa_device_trusted`. The row commits in one transaction with a check that `sessionGeneration`, the one the
+   * sign-in challenge was minted under, is not retired, so a password reset or change sweeping devices in between
+   * cannot have trust recreated behind it: the write fails closed as an invalid challenge and no cookie is set.
    */
   async set(
     userId: string,
     deviceId: string,
+    sessionGeneration: number,
     res: Response,
     ip: string | null,
     userAgent: string | null,
@@ -188,7 +194,26 @@ export class TrustedDeviceService {
       ip,
       userAgent,
     };
-    await this.trustedDevices.put(row);
+    try {
+      await this.trustedDevices.putChecked(
+        row,
+        this.revoked.conditionCheckGenerationNotRetiredTransactItem(userId, sessionGeneration),
+        () => {
+          throw new UnauthorizedException({
+            code: 'MFA_CHALLENGE_INVALID',
+            message: 'The MFA challenge is invalid.',
+          });
+        },
+      );
+    } catch (err) {
+      if (err instanceof TransientTransactionError) {
+        throw new ServiceUnavailableException({
+          code: 'MFA_TRUST_CONFLICT',
+          message: 'Could not remember this device right now. Please retry.',
+        });
+      }
+      throw err;
+    }
     this.writeCookie(res, secret, DEVICE_TRUST_TTL_SEC * 1000);
     await this.auth.record({
       userId,

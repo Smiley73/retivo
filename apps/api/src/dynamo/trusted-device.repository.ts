@@ -14,6 +14,7 @@ import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import { DYNAMO_DOC_CLIENT } from '../aws/aws.module.js';
 import type { EnvConfig } from '../common/env.config.js';
 import { BaseRepository } from './base.repository.js';
+import { runTransactWrite, type TransactItem } from './transact-write.js';
 import type { TrustedDeviceRow } from './types.js';
 
 @Injectable()
@@ -40,6 +41,22 @@ export class TrustedDeviceRepository extends BaseRepository {
   async put(row: TrustedDeviceRow): Promise<void> {
     await this.doc.send(
       new PutCommand({ TableName: this.tableName, Item: row }),
+    );
+  }
+
+  /**
+   * Put (create or replace) a trust row in one transaction with `check`, a ConditionCheck on another table, so the row
+   * commits only while the check holds; `onCheckFailed` must throw the caller's conflict error.
+   */
+  async putChecked(
+    row: TrustedDeviceRow,
+    check: TransactItem,
+    onCheckFailed: () => never,
+  ): Promise<void> {
+    await runTransactWrite(
+      this.doc,
+      [{ Put: { TableName: this.tableName, Item: row } }, check],
+      onCheckFailed,
     );
   }
 

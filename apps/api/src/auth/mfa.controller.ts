@@ -218,7 +218,7 @@ export class MfaController {
     let deviceRemembered = false;
     if (dto.rememberDevice && isRoutineFactor) {
       // The deviceId rides in the login body, not the challenge.
-      await this.trustedDeviceSvc.set(userId, dto.deviceId, res, ip, userAgent);
+      await this.trustedDeviceSvc.set(userId, dto.deviceId, sessionGeneration, res, ip, userAgent);
       deviceRemembered = true;
     }
 

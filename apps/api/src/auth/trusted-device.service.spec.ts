@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { TrustedDeviceService } from './trusted-device.service.js';
 import type { TrustedDeviceRepository } from '../dynamo/trusted-device.repository.js';
 import type { AuthEventsRepository } from '../dynamo/auth-events.repository.js';
+import type { RevokedTokensRepository } from '../dynamo/revoked-tokens.repository.js';
 import type { TrustedDeviceRow } from '../dynamo/types.js';
 
 function sha256(s: string): string {
@@ -15,6 +16,12 @@ function sha256(s: string): string {
 
 function buildAuth(): AuthEventsRepository {
   return { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuthEventsRepository;
+}
+
+function buildRevoked(): RevokedTokensRepository {
+  return {
+    conditionCheckGenerationNotRetiredTransactItem: jest.fn().mockReturnValue({ ConditionCheck: {} }),
+  } as unknown as RevokedTokensRepository;
 }
 
 function nowSec(): number {
@@ -38,7 +45,7 @@ function row(over: Partial<TrustedDeviceRow> = {}): TrustedDeviceRow {
 describe('TrustedDeviceService — verify', () => {
   it('returns false when no cookie value is presented', async () => {
     const repo = { get: jest.fn() } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     expect(await svc.verify('userA', 'dev1', undefined)).toBe(false);
     expect(repo.get).not.toHaveBeenCalled();
   });
@@ -50,7 +57,7 @@ describe('TrustedDeviceService — verify', () => {
       delete: jest.fn(),
       stampLastUsed,
     } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     expect(await svc.verify('userA', 'dev1', 'the-secret')).toBe(true);
     expect(stampLastUsed).toHaveBeenCalledWith('userA', 'dev1');
   });
@@ -66,7 +73,7 @@ describe('TrustedDeviceService — verify', () => {
       delete: jest.fn(),
       stampLastUsed,
     } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     expect(await svc.verify('userA', 'dev1', 'the-secret')).toBe(true);
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
@@ -77,7 +84,7 @@ describe('TrustedDeviceService — verify', () => {
       get: jest.fn().mockResolvedValue(row()),
       delete: jest.fn(),
     } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     expect(await svc.verify('userA', 'dev1', 'wrong-secret')).toBe(false);
   });
 
@@ -87,7 +94,7 @@ describe('TrustedDeviceService — verify', () => {
       get: jest.fn().mockResolvedValue(row({ expiresAt: nowSec() - 1 })),
       delete: del,
     } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     expect(await svc.verify('userA', 'dev1', 'the-secret')).toBe(false);
     expect(del).toHaveBeenCalledWith('userA', 'dev1');
   });
@@ -101,7 +108,7 @@ describe('TrustedDeviceService — verify', () => {
       ),
       delete: del,
     } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     expect(await svc.verify('userA', 'dev1', 'the-secret')).toBe(false);
     expect(del).toHaveBeenCalledWith('userA', 'dev1');
   });
@@ -116,7 +123,7 @@ describe('TrustedDeviceService — verify', () => {
       get: jest.fn().mockResolvedValue(row({ expiresAt: nowSec() - 1 })),
       delete: del,
     } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     expect(await svc.verify('userA', 'dev1', 'the-secret')).toBe(false);
     expect(del).toHaveBeenCalledWith('userA', 'dev1');
     expect(warnSpy).toHaveBeenCalled();
@@ -128,24 +135,24 @@ describe('TrustedDeviceService — verify', () => {
       get: jest.fn(async (userId: string) => (userId === 'userA' ? row() : null)),
       delete: jest.fn(),
     } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     expect(await svc.verify('userB', 'dev1', 'the-secret')).toBe(false);
   });
 });
 
 describe('TrustedDeviceService — set + revoke', () => {
   it('set stores sha256(secret) and sets the device-trust cookie', async () => {
-    const put = jest.fn().mockResolvedValue(undefined);
-    const repo = { put } as unknown as TrustedDeviceRepository;
+    const putChecked = jest.fn().mockResolvedValue(undefined);
+    const repo = { putChecked } as unknown as TrustedDeviceRepository;
     const auth = buildAuth();
-    const svc = new TrustedDeviceService(repo, auth);
+    const svc = new TrustedDeviceService(repo, auth, buildRevoked());
     const cookie = jest.fn();
     const clearCookie = jest.fn();
     const res = { cookie, clearCookie } as unknown as Response;
 
-    await svc.set('userA', 'dev1', res, '1.2.3.4', 'UA');
+    await svc.set('userA', 'dev1', 3, res, '1.2.3.4', 'UA');
 
-    const stored = put.mock.calls[0][0] as TrustedDeviceRow;
+    const stored = putChecked.mock.calls[0][0] as TrustedDeviceRow;
     expect(stored.tokenHash).toMatch(/^[0-9a-f]{64}$/);
     // The cookie carries the raw secret and the row its hash, which must match.
     const cookieSecret = cookie.mock.calls[0][1] as string;
@@ -161,8 +168,36 @@ describe('TrustedDeviceService — set + revoke', () => {
     );
   });
 
+  it('set guards the row on the challenge session generation, and a retired one stores no row and sets no cookie', async () => {
+    const check = { ConditionCheck: { Key: { jti: 'gen:userA:3' } } };
+    const revoked = {
+      conditionCheckGenerationNotRetiredTransactItem: jest.fn().mockReturnValue(check),
+    } as unknown as RevokedTokensRepository;
+    const putChecked = jest
+      .fn()
+      .mockImplementation(
+        async (_row: TrustedDeviceRow, _check: unknown, onCheckFailed: () => never) => {
+          onCheckFailed();
+        },
+      );
+    const repo = { putChecked } as unknown as TrustedDeviceRepository;
+    const auth = buildAuth();
+    const svc = new TrustedDeviceService(repo, auth, revoked);
+    const cookie = jest.fn();
+    const res = { cookie, clearCookie: jest.fn() } as unknown as Response;
+
+    await expect(svc.set('userA', 'dev1', 3, res, null, null)).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'MFA_CHALLENGE_INVALID' }),
+    });
+
+    expect(revoked.conditionCheckGenerationNotRetiredTransactItem).toHaveBeenCalledWith('userA', 3);
+    expect(putChecked.mock.calls[0][1]).toBe(check);
+    expect(cookie).not.toHaveBeenCalled();
+    expect(auth.record).not.toHaveBeenCalled();
+  });
+
   it('reissueCookie re-sets an already-verified secret at /api/v1 with its remaining lifetime and expires the /api/v1/auth copy', () => {
-    const svc = new TrustedDeviceService({} as TrustedDeviceRepository, buildAuth());
+    const svc = new TrustedDeviceService({} as TrustedDeviceRepository, buildAuth(), buildRevoked());
     const cookie = jest.fn();
     const clearCookie = jest.fn();
     const res = { cookie, clearCookie } as unknown as Response;
@@ -184,7 +219,7 @@ describe('TrustedDeviceService — set + revoke', () => {
   });
 
   it('reissueCookie writes nothing for an already-elapsed expiry', () => {
-    const svc = new TrustedDeviceService({} as TrustedDeviceRepository, buildAuth());
+    const svc = new TrustedDeviceService({} as TrustedDeviceRepository, buildAuth(), buildRevoked());
     const cookie = jest.fn();
     const clearCookie = jest.fn();
     const res = { cookie, clearCookie } as unknown as Response;
@@ -199,7 +234,7 @@ describe('TrustedDeviceService — set + revoke', () => {
     const del = jest.fn().mockResolvedValue(undefined);
     const repo = { delete: del } as unknown as TrustedDeviceRepository;
     const auth = buildAuth();
-    const svc = new TrustedDeviceService(repo, auth);
+    const svc = new TrustedDeviceService(repo, auth, buildRevoked());
 
     await svc.revoke('userA', 'dev1');
     expect(del).toHaveBeenCalledWith('userA', 'dev1');
@@ -216,7 +251,7 @@ describe('TrustedDeviceService — set + revoke', () => {
   it('revoke carries the caller ip/userAgent into the audit row', async () => {
     const repo = { delete: jest.fn().mockResolvedValue(undefined) } as unknown as TrustedDeviceRepository;
     const auth = buildAuth();
-    const svc = new TrustedDeviceService(repo, auth);
+    const svc = new TrustedDeviceService(repo, auth, buildRevoked());
 
     await svc.revoke('userA', 'dev1', '1.2.3.4', 'UA');
     expect(auth.record).toHaveBeenCalledWith(
@@ -227,7 +262,7 @@ describe('TrustedDeviceService — set + revoke', () => {
   it('revoke carries an optional reason in the audit metadata', async () => {
     const repo = { delete: jest.fn().mockResolvedValue(undefined) } as unknown as TrustedDeviceRepository;
     const auth = buildAuth();
-    const svc = new TrustedDeviceService(repo, auth);
+    const svc = new TrustedDeviceService(repo, auth, buildRevoked());
 
     await svc.revoke('userA', 'dev1', null, null, 'failed_attempts_ceiling');
     expect(auth.record).toHaveBeenCalledWith(
@@ -243,7 +278,7 @@ describe('TrustedDeviceService — resolveTrust (constant-time hazard)', () => {
   it('resolves trusted:true for a genuine userId with a matching cookie, carrying the row expiry', async () => {
     const live = row();
     const repo = { get: jest.fn().mockResolvedValue(live) } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     const ctx = await svc.resolveTrust('userA', 'dev1', 'the-secret');
     // `expiresAt` lets a trusted login re-issue the cookie with its remaining lifetime without a second Get.
     expect(ctx).toEqual({
@@ -256,7 +291,7 @@ describe('TrustedDeviceService — resolveTrust (constant-time hazard)', () => {
 
   it('resolves trusted:false without an expiry for a wrong secret', async () => {
     const repo = { get: jest.fn().mockResolvedValue(row()) } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     const ctx = await svc.resolveTrust('userA', 'dev1', 'wrong-secret');
     expect(ctx).toEqual({ trusted: false, userId: 'userA', deviceId: 'dev1' });
   });
@@ -264,7 +299,7 @@ describe('TrustedDeviceService — resolveTrust (constant-time hazard)', () => {
   it('issues the SAME lookup shape for an unresolved (null) identity as a real one', async () => {
     const get = jest.fn().mockResolvedValue(null);
     const repo = { get } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
     const ctx = await svc.resolveTrust(null, 'dev1', 'some-cookie');
     expect(ctx.trusted).toBe(false);
     expect(get).toHaveBeenCalledTimes(1);
@@ -277,7 +312,7 @@ describe('TrustedDeviceService — per-device failure ceiling', () => {
     const del = jest.fn();
     const repo = { incrementFailure, delete: del } as unknown as TrustedDeviceRepository;
     const auth = buildAuth();
-    const svc = new TrustedDeviceService(repo, auth);
+    const svc = new TrustedDeviceService(repo, auth, buildRevoked());
 
     await svc.recordDeviceFailure('userA', 'dev1');
     expect(del).not.toHaveBeenCalled();
@@ -288,7 +323,7 @@ describe('TrustedDeviceService — per-device failure ceiling', () => {
     const del = jest.fn().mockResolvedValue(undefined);
     const repo = { incrementFailure, delete: del } as unknown as TrustedDeviceRepository;
     const auth = buildAuth();
-    const svc = new TrustedDeviceService(repo, auth);
+    const svc = new TrustedDeviceService(repo, auth, buildRevoked());
 
     await svc.recordDeviceFailure('userA', 'dev1');
     expect(del).toHaveBeenCalledWith('userA', 'dev1');
@@ -304,7 +339,7 @@ describe('TrustedDeviceService — per-device failure ceiling', () => {
     const incrementFailure = jest.fn().mockResolvedValue(null);
     const del = jest.fn();
     const repo = { incrementFailure, delete: del } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
 
     await svc.recordDeviceFailure('userA', 'dev1');
     expect(del).not.toHaveBeenCalled();
@@ -313,7 +348,7 @@ describe('TrustedDeviceService — per-device failure ceiling', () => {
   it('clearDeviceFailures delegates to the repository', async () => {
     const clearFailure = jest.fn().mockResolvedValue(undefined);
     const repo = { clearFailure } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
 
     await svc.clearDeviceFailures('userA', 'dev1');
     expect(clearFailure).toHaveBeenCalledWith('userA', 'dev1');
@@ -331,7 +366,7 @@ describe('TrustedDeviceService — list', () => {
     const repo = {
       listByUser: jest.fn().mockResolvedValue([live, expired, legacyIso]),
     } as unknown as TrustedDeviceRepository;
-    const svc = new TrustedDeviceService(repo, buildAuth());
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
 
     const listed = await svc.list('userA');
 
@@ -355,7 +390,7 @@ describe('TrustedDeviceService — revokeAll', () => {
       delete: del,
     } as unknown as TrustedDeviceRepository;
     const auth = buildAuth();
-    const svc = new TrustedDeviceService(repo, auth);
+    const svc = new TrustedDeviceService(repo, auth, buildRevoked());
 
     await svc.revokeAll('userA', '1.2.3.4', 'ua', 'password_reset');
 
@@ -375,7 +410,7 @@ describe('TrustedDeviceService — revokeAll', () => {
       delete: del,
     } as unknown as TrustedDeviceRepository;
     const auth = buildAuth();
-    const svc = new TrustedDeviceService(repo, auth);
+    const svc = new TrustedDeviceService(repo, auth, buildRevoked());
 
     await svc.revokeAll('userA', null, null, 'password_change');
 
