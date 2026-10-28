@@ -3,6 +3,7 @@ import { dtoViolations } from '../../test/dto-validation.js';
 import {
   EncryptedWorkspaceResetDto,
   PasskeyRemoveDto,
+  SignupDto,
   UpdateAccountDto,
   UpsertKeyEnvelopeDto,
   UpsertKeyEnvelopeSlotDto,
@@ -50,6 +51,40 @@ describe('UpdateAccountDto', () => {
       'firstName:maxLength',
     );
   });
+});
+
+describe.each<[string, new () => object, object]>([
+  ['SignupDto', SignupDto, { email: 'a@example.com', password: 'a-long-enough-password' }],
+  [
+    'UpdateAccountDto',
+    UpdateAccountDto,
+    { firstName: 'Alicia', lastName: 'Smythe', birthdate: '1971-05-13' },
+  ],
+])('%s name characters', (_label, Dto, base) => {
+  it.each(['firstName', 'lastName'])('rejects a control character in %s', (field) => {
+    for (const control of ['\t', '\n']) {
+      expect(dtoViolations(Dto, { ...base, [field]: `Al${control}ice` })).toContain(
+        `${field}:nameHasNoControlCharacters`,
+      );
+    }
+  });
+
+  it.each(['firstName', 'lastName'])('rejects a bidi override or isolate in %s', (field) => {
+    for (const bidi of ['\u202a', '\u202e', '\u2066', '\u2069']) {
+      expect(dtoViolations(Dto, { ...base, [field]: `Al${bidi}ice` })).toContain(
+        `${field}:nameHasNoControlCharacters`,
+      );
+    }
+  });
+
+  it.each(['firstName', 'lastName'])(
+    'accepts joiners, combining marks and soft hyphens in %s',
+    (field) => {
+      for (const name of ['\u0915\u094d\u200d\u0937', 'Jose\u0301', 'Ali\u00adce', 'a\u200cb']) {
+        expect(dtoViolations(Dto, { ...base, [field]: name })).toEqual([]);
+      }
+    },
+  );
 });
 
 describe('UpdateAccountDto — unknown fields', () => {

@@ -138,13 +138,19 @@ export function formatLocalDateTime(isoTimestamp) {
   return parsed.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' });
 }
 
+// A stored name can carry terminal escapes or bidi overrides; Cc and Cf cover both, and a dropped joiner only
+// changes how a name prints.
+const UNPRINTABLE = /[\p{Cc}\p{Cf}]/gu;
+
 /**
  * Lay the report out as fixed-width columns sized to their widest cell. Tabs
  * alone render ragged, because a single tab stop cannot absorb the spread
  * between a short name and a long email address.
  */
 export function formatTable(header, rows, rightAlign = new Set()) {
-  const all = [header, ...rows];
+  const all = [header, ...rows].map((cells) =>
+    cells.map((cell) => cell.replace(UNPRINTABLE, '')),
+  );
   const widths = header.map((_, column) =>
     Math.max(...all.map((cells) => cells[column].length)),
   );
