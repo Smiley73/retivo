@@ -18,6 +18,7 @@ import { AppModule } from './app.module.js';
 import { HttpErrorFilter } from './common/http-error.filter.js';
 import { CorrelationIdMiddleware } from './common/correlation-id.middleware.js';
 import { BuildIdMiddleware } from './common/build-id.middleware.js';
+import { visitorAddressMiddleware } from './common/visitor-address.js';
 import { loadSecretsFromSsm } from './aws/ssm-bootstrap.js';
 import { createCorsPreflightHandler } from './common/cors-preflight.js';
 import { validateEnv, type EnvConfig } from './common/env.config.js';
@@ -25,7 +26,7 @@ import { validateEnv, type EnvConfig } from './common/env.config.js';
 let cachedHandler: Handler | undefined;
 
 /**
- * Registers the middleware and security chain (trust proxy, CORS preflight, body parsers, helmet, validation pipe,
+ * Registers the middleware and security chain (trust proxy, visitor address, CORS preflight, body parsers, helmet, validation pipe,
  * interceptors, filters, correlation and build-id middleware, global prefix, `app.init()`). Extracted so the
  * structured-logging integration test can drive the real chain via `createApp()`.
  */
@@ -33,9 +34,11 @@ export async function configureAppMiddleware(
   app: INestApplication,
   env: EnvConfig,
 ): Promise<void> {
-  // Only CloudFront appends to X-Forwarded-For (API Gateway HTTP API v2 passes it through), so trust exactly one
-  // hop; `true` would trust the attacker-controlled leftmost value and let per-IP throttling be bypassed.
+  // serverless-express pins `req.ip` to the gateway's sourceIp (a CloudFront edge), so this setting does not govern it here; it
+  // still governs `req.protocol`, `req.hostname` and `req.ips`. `true` would trust the attacker-controlled leftmost value.
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  // Runs before the throttler guard and every controller read `req.ip`.
+  app.use(visitorAddressMiddleware);
 
   // Answer the CORS preflight before Nest routing, from the parsed WEB_ALLOWED_ORIGINS allowlist.
   app.use(
