@@ -100,16 +100,11 @@ export async function parseImportFile(file: Blob): Promise<unknown> {
   if (isGzip) {
     try {
       text = await ungzipToText(arrayBuf);
-    } catch {
+    } catch (err) {
+      if (err instanceof DataImportError) throw err;
       throw new DataImportError(
         'MALFORMED_BUNDLE',
         'File is gzipped but could not be decompressed.',
-      );
-    }
-    if (text.length > MAX_DECOMPRESSED_BYTES) {
-      throw new DataImportError(
-        'BUNDLE_TOO_LARGE',
-        `Decompressed bundle is ${formatBytes(text.length)}; the importer accepts up to ${formatBytes(MAX_DECOMPRESSED_BYTES)} decompressed.`,
       );
     }
   } else {
@@ -141,7 +136,30 @@ async function ungzipToText(arrayBuf: ArrayBuffer): Promise<string> {
   // Uint8Array<ArrayBufferLike> as a BlobPart.
   const body = new Response(new Blob([arrayBuf])).body;
   if (!body) throw new Error('Response body unavailable in this runtime.');
-  return new Response(body.pipeThrough(new DecompressionStream('gzip'))).text();
+  const reader = body.pipeThrough(new DecompressionStream('gzip')).getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_DECOMPRESSED_BYTES) {
+      // Cancelling an already-errored stream can reject; that carries nothing the importer needs.
+      await reader.cancel().catch(() => undefined);
+      throw new DataImportError(
+        'BUNDLE_TOO_LARGE',
+        `Decompressed bundle is ${formatBytes(total)}; the importer accepts up to ${formatBytes(MAX_DECOMPRESSED_BYTES)} decompressed.`,
+      );
+    }
+    chunks.push(value);
+  }
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(joined);
 }
 
 function formatBytes(n: number): string {
