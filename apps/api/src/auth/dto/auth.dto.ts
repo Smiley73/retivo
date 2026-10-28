@@ -87,6 +87,21 @@ class BirthdateInSupportedRangeConstraint implements ValidatorConstraintInterfac
   }
 }
 
+// Rejects control characters and the bidirectional embedding, override and isolate controls, which can spoof or
+// reorder a name wherever it is shown. Other format characters (joiners, soft hyphens) stay: real names need them.
+const NAME_FORBIDDEN_CHARS = /[\p{Cc}\u202A-\u202E\u2066-\u2069]/u;
+
+@ValidatorConstraint({ name: 'nameHasNoControlCharacters', async: false })
+class NameHasNoControlCharactersConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return typeof value !== 'string' || !NAME_FORBIDDEN_CHARS.test(value);
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    return `${args.property} must not contain control or bidirectional override characters.`;
+  }
+}
+
 export class SignupDto {
   @IsEmail()
   @MaxLength(255)
@@ -100,11 +115,13 @@ export class SignupDto {
   @IsOptional()
   @IsString()
   @MaxLength(80)
+  @Validate(NameHasNoControlCharactersConstraint)
   firstName?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(80)
+  @Validate(NameHasNoControlCharactersConstraint)
   lastName?: string;
 
   // `@Matches` pins date-only; strict `@IsDateString` rejects impossible calendar dates; the range constraint
@@ -125,12 +142,14 @@ export class UpdateAccountDto {
   @IsNotEmpty()
   @Matches(/\S/, { message: 'firstName must not be blank.' })
   @MaxLength(80)
+  @Validate(NameHasNoControlCharactersConstraint)
   firstName!: string;
 
   @IsString()
   @IsNotEmpty()
   @Matches(/\S/, { message: 'lastName must not be blank.' })
   @MaxLength(80)
+  @Validate(NameHasNoControlCharactersConstraint)
   lastName!: string;
 
   @Matches(/^\d{4}-\d{2}-\d{2}$/)

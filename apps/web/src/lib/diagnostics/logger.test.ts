@@ -1,4 +1,7 @@
 import 'fake-indexeddb/auto';
+import { forceCloseDatabase } from 'fake-indexeddb';
+// eslint-disable-next-line no-restricted-imports -- unwrap the cached handle so fake-indexeddb can force-close it
+import { unwrap } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clear,
@@ -9,6 +12,8 @@ import {
   recordError,
   recordSyncWarn,
   recordWarn,
+  resumeRecording,
+  suspendRecording,
 } from './logger';
 import {
   clearDiagnosticLogs,
@@ -22,6 +27,7 @@ describe('diagnostics logger', () => {
     await clearDiagnosticLogs();
   });
   afterEach(() => {
+    resumeRecording();
     clear();
     vi.restoreAllMocks();
   });
@@ -230,6 +236,97 @@ describe('diagnostics logger', () => {
     await flush();
     const rows = await listDiagnosticLogs();
     expect(rows.map((r) => r.message)).toEqual(['user B entry']);
+  });
+
+  it('should_NOT_persist_or_serve_entries_recorded_before_suspension', async () => {
+    recordError('user A queued');
+    suspendRecording();
+    expect(getEntries()).toHaveLength(0);
+    await flush();
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('should_NOT_resurrect_an_in_flight_batch_when_suspension_hits_and_the_append_rejects', async () => {
+    recordError('user A secret');
+    let rejectAppend: (reason?: unknown) => void = () => {};
+    vi.spyOn(store, 'appendDiagnosticLogs').mockImplementationOnce(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectAppend = reject;
+        }),
+    );
+    const flushing = flush();
+    suspendRecording();
+    rejectAppend(new Error('handle closed'));
+    await flushing;
+    resumeRecording();
+    await flush();
+    expect(getEntries()).toHaveLength(0);
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('should_NOT_persist_a_batch_whose_database_open_resolves_after_suspension_and_a_foreign_delete', async () => {
+    // Open the cached handle, then let the browser terminate it (fires `terminated()`, clearing the cached open).
+    const handle = await store.db();
+    // fake-indexeddb types the argument as the IDBDatabase constructor, not an instance.
+    forceCloseDatabase(unwrap(handle) as unknown as Parameters<typeof forceCloseDatabase>[0]);
+    // A sibling tab holds a connection, so another tab's deleteDatabase queues behind it.
+    const sibling = await new Promise<IDBDatabase>((resolve, reject) => {
+      // eslint-disable-next-line no-restricted-properties -- a second connection standing in for another tab
+      const req = indexedDB.open('retirement');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const deleted = new Promise<void>((resolve, reject) => {
+      // eslint-disable-next-line no-restricted-properties -- another tab deleting the database
+      const req = indexedDB.deleteDatabase('retirement');
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+    recordError('user A queued entry');
+    const flushing = flush(); // drains the batch; its reopen queues behind the delete
+    suspendRecording();
+    sibling.close(); // delete completes, then the open resolves against the replacement database
+    await deleted;
+    await flushing;
+    resumeRecording();
+    expect(getEntries()).toHaveLength(0);
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('should_drop_entries_recorded_while_suspended_and_write_nothing_on_flush', async () => {
+    suspendRecording();
+    recordError('captured while stale');
+    await flush();
+    resumeRecording();
+    expect(getEntries()).toHaveLength(0);
+    await flush();
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('clearAll_should_still_wipe_the_store_while_suspended', async () => {
+    recordError('persisted');
+    await flush();
+    suspendRecording();
+    await clearAll();
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('should_record_and_persist_again_after_resume', async () => {
+    suspendRecording();
+    resumeRecording();
+    recordError('user B entry');
+    expect(getEntries()).toHaveLength(1);
+    await flush();
+    expect((await listDiagnosticLogs()).map((r) => r.message)).toEqual(['user B entry']);
+  });
+
+  it('resume_should_leave_a_never_suspended_logger_unchanged', async () => {
+    recordError('kept');
+    resumeRecording();
+    expect(getEntries().map((e) => e.message)).toEqual(['kept']);
+    await flush();
+    expect(await listDiagnosticLogs()).toHaveLength(1);
   });
 
   it('clear_should_empty_rings_and_pending_flush', () => {

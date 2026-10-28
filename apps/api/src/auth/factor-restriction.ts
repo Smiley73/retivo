@@ -1,7 +1,7 @@
 // The password-reset restriction window for newly enrolled factors, the control against the reset-then-inbox-takeover path: an attacker who
 // owns the mailbox satisfies an emailed-code step-up, so step-up alone does not close it.
 import { RESET_TTL_SEC } from './password-reset.service.js';
-import type { UserRow } from '../dynamo/types.js';
+import type { PasskeyRow, UserRow } from '../dynamo/types.js';
 
 /**
  * Post-completion restriction window, 24 hours: long enough for the owner to notice a reset they did not request,
@@ -69,4 +69,9 @@ export function resolveOpenResetWindow(
   }
 
   return openRequestedAt !== null ? { requestedAt: openRequestedAt } : null;
+}
+
+/** Whether any passkey is usable as a sign-in factor: one restricted post-reset is not offered. */
+export function hasUsablePasskey(passkeys: readonly Pick<PasskeyRow, 'restrictedPostReset'>[]): boolean {
+  return passkeys.some((p) => !p.restrictedPostReset);
 }

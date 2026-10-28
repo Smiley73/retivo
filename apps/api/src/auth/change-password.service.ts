@@ -281,6 +281,8 @@ export class ChangePasswordService {
       userId: args.userId,
       extraJti: { jti: args.currentJti, expiresAt: args.currentAccessExp },
     });
+    // Remembered devices go with the sessions, so every device is challenged again on its next sign-in.
+    await this.trustedDeviceSvc.revokeAll(args.userId, args.ip, args.userAgent, 'password_change');
 
     // Record the revision this commit just minted, so the new session carries write authority for a subsequent
     // change. `sessionGeneration` is the value `revokeAll` just committed, not re-read: a stale replica could hold

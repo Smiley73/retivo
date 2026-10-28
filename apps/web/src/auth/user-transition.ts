@@ -5,7 +5,10 @@ import {
   hasForeignHouseholdData,
   nudgeOtherTabsToReleaseIdb,
 } from '../db/store';
-import { clear as clearDiagnosticsRings } from '../lib/diagnostics/logger';
+import {
+  clear as clearDiagnosticsRings,
+  resumeRecording,
+} from '../lib/diagnostics/logger';
 
 const LAST_USER_STORAGE_KEY = 'retivo.auth.lastUserId';
 
@@ -29,6 +32,11 @@ export interface MaybeResetForNewUserDeps {
    * `logger.clear`.
    */
   clearDiagnostics?: () => void;
+  /**
+   * Lifts the suspension a foreign drop put on this tab's diagnostics; called on every successful completion, since
+   * this tab has now signed in itself. Defaults to `logger.resumeRecording`.
+   */
+  resumeDiagnostics?: () => void;
   /**
    * Tells other same-origin tabs to close their IDB handle so a blocked delete can complete. Defaults to the `db/store`
    * BroadcastChannel nudge.
@@ -75,6 +83,7 @@ export async function maybeResetForNewUser(
     // no leak).
     (deps.clearDiagnostics ?? clearDiagnosticsRings)();
   }
+  (deps.resumeDiagnostics ?? resumeRecording)();
   deps.storeLastUserId(claims.userId);
 }
 
@@ -91,6 +100,7 @@ export const productionDeps: MaybeResetForNewUserDeps = {
   hasForeignHouseholdData,
   dropLocalDatabase,
   clearDiagnostics: clearDiagnosticsRings,
+  resumeDiagnostics: resumeRecording,
   nudgeOtherTabsToReleaseIdb,
 };
 

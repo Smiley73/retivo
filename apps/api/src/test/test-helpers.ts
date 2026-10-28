@@ -23,11 +23,15 @@ import { ConfigService } from '@nestjs/config';
 import { generateSync } from 'otplib';
 import { randomUUID } from 'node:crypto';
 import { sha256 } from '../auth/refresh-token.service.js';
-import type { MfaEmailOtpRow } from '../dynamo/types.js';
+import type { AuthEventRow, MfaEmailOtpRow } from '../dynamo/types.js';
 import { stepUpOtpPk } from '../dynamo/mfa-email-otp.repository.js';
 import request from 'supertest';
 import { AppModule } from '../app.module.js';
-import { REFRESH_COOKIE_NAME, CSRF_COOKIE_NAME } from '../auth/cookie-config.js';
+import {
+  REFRESH_COOKIE_NAME,
+  CSRF_COOKIE_NAME,
+  DEVICE_TRUST_COOKIE_NAME,
+} from '../auth/cookie-config.js';
 import { HibpClient } from '../auth/hibp-client.js';
 import { HttpErrorFilter } from '../common/http-error.filter.js';
 import { CorrelationIdMiddleware } from '../common/correlation-id.middleware.js';
@@ -579,6 +583,40 @@ export async function completeEmailOtpLogin(
     .post('/api/v1/auth/mfa/verify')
     .set('Origin', process.env.WEB_ORIGIN!)
     .send({ challengeToken, method: 'email_otp', code, deviceId, rememberDevice });
+}
+
+/**
+ * Completes an Email-OTP challenge with `rememberDevice` and returns the verify response plus the `Cookie` header value
+ * that presents the minted device trust (for suites running with `AUTH_MFA_ENFORCED=true`).
+ */
+export async function rememberDeviceViaEmailOtp(
+  t: TestApp,
+  email: string,
+  userId: string,
+  deviceId: string,
+): Promise<{ verify: request.Response; trustCookie: string }> {
+  const verify = await completeEmailOtpLogin(t, email, userId, deviceId, true);
+  expect(verify.status).toBe(200);
+  const trust = parseSetCookies(verify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME];
+  expect(trust).toBeTruthy();
+  return { verify, trustCookie: `${DEVICE_TRUST_COOKIE_NAME}=${encodeURIComponent(trust)}` };
+}
+
+/** The `reason` of every `mfa_device_forgotten` event for `deviceId`, in no particular order. */
+export async function deviceForgottenReasons(
+  t: TestApp,
+  userId: string,
+  deviceId: string,
+): Promise<unknown[]> {
+  const rows = await scanAll<AuthEventRow>(t.doc, table(t, 'TABLE_AUTH_EVENT'));
+  return rows
+    .filter(
+      (r) =>
+        r.userId === userId &&
+        r.eventType === 'mfa_device_forgotten' &&
+        r.metadata?.deviceId === deviceId,
+    )
+    .map((r) => r.metadata?.reason);
 }
 
 /** Signup, verify, approve, then an MFA-challenged login completed with Email-OTP (for suites running with `AUTH_MFA_ENFORCED=true`). */

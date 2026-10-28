@@ -173,7 +173,8 @@ data), you get **Unlock your data** instead and enter the password.
    is locked until they approve. Any email other than `APPROVER_EMAIL` starts
    out waiting for approval. `APPROVER_EMAIL` falls back to `SES_FROM_ADDRESS`,
    which is `no-reply@example.invalid` locally. Use the **approve this account**
-   link, again marked **Dev shortcut**. (To skip approval, set `APPROVER_EMAIL`
+   link, again marked **Dev shortcut**; it opens a page where you click
+   **Approve**. (To skip approval, set `APPROVER_EMAIL`
    in `.env` to the address you sign up with and restart `pnpm dev`; that
    address is approved on sign-up. You still verify the email.)
 5. Choose **Go to sign in** and sign in with your email and password.

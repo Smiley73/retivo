@@ -14,6 +14,7 @@ import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import { DYNAMO_DOC_CLIENT } from '../aws/aws.module.js';
 import type { EnvConfig } from '../common/env.config.js';
 import { BaseRepository } from './base.repository.js';
+import { runTransactWrite, type TransactItem } from './transact-write.js';
 import type { TrustedDeviceRow } from './types.js';
 
 @Injectable()
@@ -25,12 +26,16 @@ export class TrustedDeviceRepository extends BaseRepository {
     super(doc, config, 'TABLE_TRUSTED_DEVICE');
   }
 
-  /** The trust row for `(userId, deviceId)`, or null if the device is untrusted. */
+  /**
+   * The trust row for `(userId, deviceId)`, or null if the device is untrusted. ConsistentRead: this read decides
+   * whether sign-in skips MFA, and a replica can still return a row a password reset or change just deleted.
+   */
   async get(userId: string, deviceId: string): Promise<TrustedDeviceRow | null> {
     const r = await this.doc.send(
       new GetCommand({
         TableName: this.tableName,
         Key: { userId, deviceId },
+        ConsistentRead: true,
       }),
     );
     return (r.Item as TrustedDeviceRow | undefined) ?? null;
@@ -40,6 +45,22 @@ export class TrustedDeviceRepository extends BaseRepository {
   async put(row: TrustedDeviceRow): Promise<void> {
     await this.doc.send(
       new PutCommand({ TableName: this.tableName, Item: row }),
+    );
+  }
+
+  /**
+   * Put (create or replace) a trust row in one transaction with `check`, a ConditionCheck on another table, so the row
+   * commits only while the check holds; `onCheckFailed` must throw the caller's conflict error.
+   */
+  async putChecked(
+    row: TrustedDeviceRow,
+    check: TransactItem,
+    onCheckFailed: () => never,
+  ): Promise<void> {
+    await runTransactWrite(
+      this.doc,
+      [{ Put: { TableName: this.tableName, Item: row } }, check],
+      onCheckFailed,
     );
   }
 
@@ -68,8 +89,16 @@ export class TrustedDeviceRepository extends BaseRepository {
     );
   }
 
-  /** Every trusted device for a user, by Query on the `userId` PK (the grant includes Query, not Scan). */
-  async listByUser(userId: string): Promise<TrustedDeviceRow[]> {
+  /**
+   * Every trusted device for a user, by Query on the `userId` PK (the grant includes Query, not Scan).
+   * `opts.consistentRead`: a sweep after a generation retirement must see a trust row committed just before it, which
+   * a lagging replica could miss; DynamoDB Local is more consistent than production, so only ConsistentRead
+   * guarantees it. Other callers keep the cheaper default read.
+   */
+  async listByUser(
+    userId: string,
+    opts: { consistentRead?: boolean } = {},
+  ): Promise<TrustedDeviceRow[]> {
     const out: TrustedDeviceRow[] = [];
     let lastKey: Record<string, unknown> | undefined;
     do {
@@ -79,6 +108,7 @@ export class TrustedDeviceRepository extends BaseRepository {
           KeyConditionExpression: 'userId = :u',
           ExpressionAttributeValues: { ':u': userId },
           ExclusiveStartKey: lastKey,
+          ConsistentRead: opts.consistentRead,
         }),
       );
       for (const item of (r.Items as TrustedDeviceRow[] | undefined) ?? []) {

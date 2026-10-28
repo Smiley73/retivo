@@ -398,6 +398,8 @@ export class AuthController {
       userAgent: (req.headers['user-agent'] as string | undefined) ?? null,
     });
 
+    // This device's trust row is gone too; do not hand the fresh session a dead trust cookie.
+    this.trustedDeviceSvc.clearCookie(res);
     // The old refresh token was revoked with the others; mint a fresh one so the caller tab keeps working.
     res.cookie(
       REFRESH_COOKIE_NAME,

@@ -64,6 +64,10 @@ let lastCoalesceEntry: DiagnosticEntry | null = null;
 // prior user's entries (cross-user leak).
 let clearEpoch = 0;
 
+// Set while another tab's drop has left this tab's rings describing a previous user: nothing is recorded, kept or
+// persisted until `resumeRecording`.
+let suspended = false;
+
 // Saved-original console.error, so recordCaught re-emits to devtools without the console shim
 // re-capturing it; defaults to the live binding until install.ts wires it.
 let devtoolsError: (...args: unknown[]) => void = (...args) => {
@@ -158,6 +162,7 @@ function recordEntry(
   args: readonly unknown[],
   isBreadcrumb: boolean,
 ): void {
+  if (suspended) return;
   const key = coalesceKey(level, source, args);
   if (key !== null && key === lastCoalesceKey && lastCoalesceEntry !== null) {
     // Duplicate: bump count in place. The queued copy is the same object, so a pending flush picks
@@ -311,6 +316,20 @@ export function clear(): void {
   }
 }
 
+/**
+ * Empty the rings and stop recording, because another tab dropped the database under this one. Entries are dropped,
+ * not buffered: any captured before the next sign-in may describe the previous user.
+ */
+export function suspendRecording(): void {
+  suspended = true;
+  clear();
+}
+
+/** Resume recording after this tab's own sign-in; the rings are already empty. No-op when not suspended. */
+export function resumeRecording(): void {
+  suspended = false;
+}
+
 function scheduleFlush(): void {
   if (flushTimer !== null) return;
   flushTimer = setTimeout(() => {
@@ -332,7 +351,11 @@ export async function flush(): Promise<void> {
   const epochAtStart = clearEpoch;
   try {
     const rows: DiagnosticLogEntry[] = batch.map((e) => ({ ...e }));
-    const persisted = await appendDiagnosticLogs(rows, MAX_PERSISTED);
+    const persisted = await appendDiagnosticLogs(
+      rows,
+      MAX_PERSISTED,
+      () => clearEpoch === epochAtStart,
+    );
     if (clearEpoch !== epochAtStart) return; // cleared mid-flight — drop silently.
     // Re-stamp with the authoritative cross-tab seq so getEntries() orders like the persisted
     // store.

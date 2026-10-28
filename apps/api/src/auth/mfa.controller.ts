@@ -47,7 +47,6 @@ import { MfaChallengeService } from './mfa-challenge.service.js';
 import { PasskeyAssertionService } from './passkey-assertion.service.js';
 import { MfaEmailOtpService } from './mfa-email-otp.service.js';
 import { TrustedDeviceService } from './trusted-device.service.js';
-import { UserMfaRepository } from '../dynamo/user-mfa.repository.js';
 import { AuthEventsRepository } from '../dynamo/auth-events.repository.js';
 import { RevokedTokensRepository } from '../dynamo/revoked-tokens.repository.js';
 import { FactorNoticeService } from './factor-notice.service.js';
@@ -70,7 +69,6 @@ export class MfaController {
     private readonly passkeyAssertions: PasskeyAssertionService,
     private readonly mfaEmailOtpSvc: MfaEmailOtpService,
     private readonly trustedDeviceSvc: TrustedDeviceService,
-    private readonly userMfa: UserMfaRepository,
     private readonly revoked: RevokedTokensRepository,
     private readonly factorNotice: FactorNoticeService,
     private readonly factorEnrollmentGuard: FactorEnrollmentGuardService,
@@ -210,20 +208,17 @@ export class MfaController {
       });
     }
 
-    // Only a routine factor may mint device trust: TOTP, passkey, or Email-OTP when TOTP is not enrolled; Email-OTP
-    // used as recovery for a TOTP account does not.
-    let isRoutineFactor: boolean;
-    if (dto.method === 'totp' || dto.method === 'passkey') {
-      isRoutineFactor = true;
-    } else {
-      // Fetch MFA state only on the email_otp path, avoiding a DynamoDB round trip on the common TOTP path.
-      const mfa = await this.userMfa.get(userId);
-      isRoutineFactor = !mfa?.totpEnabled;
-    }
+    // Only a routine factor may mint device trust: TOTP, passkey, or Email-OTP when the account has no authenticator
+    // app and no usable passkey; Email-OTP used as recovery for such an account does not. The MFA state is read only
+    // on the email_otp path, avoiding DynamoDB round trips on the common TOTP and passkey paths.
+    const isRoutineFactor =
+      dto.method === 'email_otp'
+        ? await this.stepUpSvc.emailCodeMayRememberDevice(userId)
+        : true;
     let deviceRemembered = false;
     if (dto.rememberDevice && isRoutineFactor) {
       // The deviceId rides in the login body, not the challenge.
-      await this.trustedDeviceSvc.set(userId, dto.deviceId, res, ip, userAgent);
+      await this.trustedDeviceSvc.set(userId, dto.deviceId, sessionGeneration, res, ip, userAgent);
       deviceRemembered = true;
     }
 
@@ -449,24 +444,12 @@ export class MfaController {
   ) {
     const ip = req.ip ?? null;
     const userAgent = (req.headers['user-agent'] as string | undefined) ?? null;
-    const revokeAll = async (ids: string[]) => {
-      // Cap at 10 concurrent deletes to avoid hot-partition spikes.
-      const BATCH = 10;
-      for (let i = 0; i < ids.length; i += BATCH) {
-        await Promise.all(
-          ids
-            .slice(i, i + BATCH)
-            .map((id) => this.trustedDeviceSvc.revoke(me.userId, id, ip, userAgent)),
-        );
-      }
-    };
 
     if (dto.deviceIds === undefined) {
-      const all = await this.trustedDeviceSvc.list(me.userId);
-      await revokeAll(all.map((d) => d.deviceId));
+      await this.trustedDeviceSvc.revokeAll(me.userId, ip, userAgent);
       this.trustedDeviceSvc.clearCookie(res);
     } else {
-      await revokeAll(dto.deviceIds);
+      await this.trustedDeviceSvc.revokeMany(me.userId, dto.deviceIds, ip, userAgent);
     }
   }
 

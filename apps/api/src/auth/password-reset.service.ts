@@ -30,6 +30,7 @@ import { sha256 } from './refresh-token.service.js';
 import { emailFingerprint } from '../common/email-fingerprint.js';
 import { escapeHtml } from '../common/escape-html.js';
 import { SessionRevocationService } from './session-revocation.service.js';
+import { TrustedDeviceService } from './trusted-device.service.js';
 
 /**
  * Reset-link validity; exported so `factor-restriction.ts` bounds how long an unconsumed request keeps the post-reset
@@ -77,6 +78,7 @@ export class PasswordResetService {
     private readonly auth: AuthEventsRepository,
     private readonly failed: FailedLoginService,
     private readonly passwords: PasswordValidatorService,
+    private readonly trustedDevices: TrustedDeviceService,
     config: ConfigService<EnvConfig, true>,
   ) {
     this.fromAddress = config.get('SES_FROM_ADDRESS', { infer: true });
@@ -375,14 +377,15 @@ export class PasswordResetService {
     }
   }
 
-  // Post-commit work (it can exceed the 100-item transaction limit): revoke all sessions, clear the failed-login
-  // backoff, audit `password_reset`, and send a best-effort completion notice.
+  // Post-commit work (it can exceed the 100-item transaction limit): revoke all sessions and remembered devices, clear
+  // the failed-login backoff, audit `password_reset`, and send a best-effort completion notice.
   private async afterConsume(
     row: PasswordResetRow,
     ip?: string | null,
     userAgent?: string | null,
   ): Promise<void> {
     await this.sessions.revokeAll({ userId: row.userId });
+    await this.trustedDevices.revokeAll(row.userId, ip, userAgent, 'password_reset');
     await this.failed.clear(row.email.toLowerCase());
 
     await this.auth.record({

@@ -67,7 +67,10 @@ date of birth. The browser sends all of them to the API over HTTPS
    address in the stack setting `approverEmail` (the API reads it as
    `APPROVER_EMAIL`). After the new person verifies their email, the approver
    gets a message with the applicant's name and email address (not the date of
-   birth) and an approve link and a decline link. The new person cannot sign in
+   birth) and an approve link and a decline link. Each link opens a page where
+   the owner chooses Approve or Decline; nothing happens until that click, so a
+   mail client or link scanner that opens the link approves nobody, and the page
+   itself does not show who applied. The new person cannot sign in
    until the owner approves. If nobody acts for 7 days the pending account is
    deleted (`signup-approval.service.ts`).
 
@@ -128,8 +131,9 @@ a notice email, at most once every 24 hours (`failed-login.service.ts`,
   "Let assistant activity keep me signed in" for that session; see
   [AI assistants](#ai-assistants).
 - **Ending sessions.** Signing out revokes that session on the server. Changing
-  the password or completing a password reset ends every session. Signing out
-  does not clear the data kept on the device (see
+  the password or completing a password reset ends every session and also
+  forgets every remembered device (see [Trust this device](#trust-this-device)).
+  Signing out does not clear the data kept on the device (see
   [Data on the device](#data-on-the-device)).
 
 ### Request-forgery protection
@@ -197,6 +201,12 @@ code is always offered as a fallback**, even when stronger factors exist.
 Repeated wrong authenticator codes for an account trigger the same growing wait
 as wrong passwords (`mfa.service.ts`).
 
+An authenticator code is accepted **once**, at sign-in or to confirm a sensitive
+action. The server records the 30-second step of the last code it accepted, and
+the same code presented again, even inside that half-minute, is treated as a
+wrong code (and counts toward the wait above), so a captured code cannot be
+replayed. Wait for the next code.
+
 ### When it is required
 
 A deployed stack requires a second factor by default (stack setting
@@ -210,7 +220,7 @@ this off with the setting. Running locally, it is off. See
 
 On the challenge screen, a passkey or an authenticator code can be passed with
 **Trust this device for 30 days** ticked. So can an email code, but only when it
-is the account's only second factor (no passkey and no authenticator app). The browser then skips the second factor on later sign-ins for 30
+is the account's only second factor (no authenticator app and no passkey that sign-in offers). The browser then skips the second factor on later sign-ins for 30
 days. The browser keeps a secret in a cookie named `__Secure-dt` (production;
 `HttpOnly`, `SameSite=Strict`), and the server stores its SHA-256 hash together
 with the device id, the IP address and the browser's user agent. Passing the
@@ -397,9 +407,12 @@ record's content, so it is not proof that every record is the latest one.
 - **Changing the password** (Settings, Security, Password) needs the data to be
   unlocked. The browser re-wraps the password slot under the new password, the
   API swaps the sign-in password and the slot together, and every other session
-  is signed out.
+  is signed out. Every remembered device is forgotten too, so the next sign-in
+  from any of them asks for the second factor.
 - **A password reset** cannot re-wrap anything, because the server holds no key.
-  It sets a new sign-in password and ends all sessions. The password slot stays
+  It sets a new sign-in password, ends all sessions and forgets every remembered
+  device, so the next sign-in from any of them asks for the second factor. The
+  password slot stays
   locked under the old password. The next sign-in lands on "Unlock your data".
   The recovery key or a passkey slot opens the data there
   (`ResetPasswordPage.tsx`), and so does the **old password**, because the slot
@@ -622,7 +635,7 @@ descriptions), one for exact dollar figures and one for first names. All are on 
 default. A part switched off is left out of every answer and named in it. With
 **Exact dollar figures** off, annual figures round to the nearest $1,000 and monthly
 ones to the nearest $100; with **First names** off, members read Primary and
-Secondary. The choices are fixed for the session
+Secondary. The projection, stress-test, comparison, explain and what-if answers draw on Household members, Accounts, Account balances, Income, Expenses and Social Security together, so while any of them is off those answers carry no figures, and one that names a scenario other than the base one needs Scenarios on as well. The choices are fixed for the session
 (`sharing/switches.ts`, `sharing/consent.ts`). A separate **Let assistant activity
 keep me signed in** switch is off by default; see [the idle stance](#the-idle-stance).
 

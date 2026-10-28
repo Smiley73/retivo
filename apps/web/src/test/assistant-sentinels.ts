@@ -14,7 +14,7 @@ import {
 } from '../db/store';
 import type { Aggregate, AggregateType } from '../db/types';
 import { loadDemoData } from '../lib/demo-data-loader';
-import type { SharingSwitchId } from '../assistant/sharing/switches';
+import { ANALYSIS_REQUIRED_SWITCH_IDS, type SharingSwitchId } from '../assistant/sharing/switches';
 
 export const HOUSEHOLD_ID_SENTINEL = 'zz-household-id-sentinel';
 export const SCENARIO_SENTINEL_ID = 'zq-scenario-sentinel';
@@ -46,11 +46,14 @@ const COMPARE = 'retivo_compare_scenarios';
 const EXPLAIN = 'retivo_explain';
 const WHAT_IF = 'retivo_run_what_if';
 
+/** Every category the analysis tools draw on: a tool that computes answers nothing while one of these is off. */
+const ANALYSIS = ANALYSIS_REQUIRED_SWITCH_IDS;
+
 export const CATEGORY_SENTINELS: readonly CategorySentinel[] = [
   { token: 'Zqprimaryfirst', requires: ['members', 'firstNames'], tools: [PLAN] },
   { token: 'Zqsecondfirst', requires: ['members', 'firstNames'], tools: [PLAN] },
-  // The what-if tool names its base scenario, so it answers only while the scenarios switch is on.
-  { token: 'Zqacctname', requires: ['accounts'], tools: [PLAN, WHAT_IF], toolRequires: { [WHAT_IF]: ['scenarios'] } },
+  // The what-if tool names its base scenario, so it answers only while the scenarios switch is on, and it computes.
+  { token: 'Zqacctname', requires: ['accounts'], tools: [PLAN, WHAT_IF], toolRequires: { [WHAT_IF]: [...ANALYSIS, 'scenarios'] } },
   { token: 'Zqinstitution', requires: ['accounts'], tools: [PLAN] },
   { token: 'Zqacctnote', requires: ['accounts', 'notes'], tools: [PLAN] },
   { token: 'Zqbalcomment', requires: ['balances', 'notes'], tools: [PLAN] },
@@ -60,12 +63,13 @@ export const CATEGORY_SENTINELS: readonly CategorySentinel[] = [
   { token: 'Zqexpdesc', requires: ['expenses', 'notes'], tools: [PLAN] },
   { token: 'Zqcatname', requires: ['expenses'], tools: [PLAN] },
   { token: 'Zqssnote', requires: ['socialSecurity', 'notes'], tools: [PLAN] },
-  { token: 'Zqscnname', requires: ['scenarios'], tools: [PLAN, LIST, SCENARIO, COMPARE, EXPLAIN, WHAT_IF] },
+  { token: 'Zqscnname', requires: ['scenarios'], tools: [PLAN, LIST, SCENARIO, COMPARE, EXPLAIN, WHAT_IF],
+    toolRequires: { [COMPARE]: ANALYSIS, [EXPLAIN]: ANALYSIS, [WHAT_IF]: ANALYSIS } },
   { token: 'Zqscndesc', requires: ['scenarios', 'notes'], tools: [PLAN, LIST, SCENARIO] },
   { token: 'Zqscnnote', requires: ['scenarios', 'notes'], tools: [PLAN, SCENARIO] },
   // Names inside the rows a scenario adds follow the scenarios switch and their own category's.
-  { token: 'Zqovrexp', requires: ['scenarios', 'expenses'], tools: [PLAN, SCENARIO, COMPARE, EXPLAIN] },
-  { token: 'Zqovrinc', requires: ['scenarios', 'income'], tools: [PLAN, SCENARIO, COMPARE, EXPLAIN] },
+  { token: 'Zqovrexp', requires: ['scenarios', 'expenses'], tools: [PLAN, SCENARIO, COMPARE, EXPLAIN], toolRequires: { [COMPARE]: ANALYSIS, [EXPLAIN]: ANALYSIS } },
+  { token: 'Zqovrinc', requires: ['scenarios', 'income'], tools: [PLAN, SCENARIO, COMPARE, EXPLAIN], toolRequires: { [COMPARE]: ANALYSIS, [EXPLAIN]: ANALYSIS } },
 ];
 
 async function rewrite(

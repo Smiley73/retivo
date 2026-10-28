@@ -388,6 +388,14 @@ describe('arguments and scenarios', () => {
     expect(worker.constructed()).toBe(0);
   });
 
+  it('runs nothing and answers the refusal on a miss while a switch the analysis draws on is off', async () => {
+    const run = vi.fn();
+    const result = await callDefinition(makeStressTestTool({ runner: { pathCount: MC_PATH_COUNT, run } }), {}, toolContext(choicesWith({ balances: false })));
+    expect(envelopeOf(result).data).toMatchObject({ omittedSections: ['balances'] });
+    expect(run).not.toHaveBeenCalled();
+    expect(await monteCarloCacheCount()).toBe(0);
+  });
+
   it('defaults to the base scenario', async () => {
     const input = await baseInput();
     await putCached(await mcCacheKey(input), savedSummary());

@@ -14,6 +14,7 @@ import type { PageDrawdownMethodResult, RunBalanceProjectionPageResult } from '.
 import { assemblePageProjection, type PageProjectionAssembly } from '../../lib/page-projection-args';
 import { realDeflatorAt } from '../../lib/projection-context';
 import { applyRounding } from '../sharing/rounding';
+import { ANALYSIS_REQUIRED_SWITCH_IDS, ANALYSIS_TOOLS_STATEMENT, type SharingSwitchId } from '../sharing/switches';
 import { PROJECTION_UNAVAILABLE_MESSAGE, ToolArgsError, ToolFailure, type ToolEnv } from './define';
 
 /** The scenario a call names, or the base scenario when it names none. */
@@ -28,6 +29,18 @@ export function resolveScenarioArg(raw: unknown, env: ToolEnv): string {
   const base = scenarios.find((scenario) => scenario.payload.isPrimary === true);
   if (base === undefined) throw new ToolArgsError('The plan has no base scenario. Pass a scenarioId from retivo_list_scenarios.');
   return base.id;
+}
+
+/**
+ * The answer that replaces every computed figure when a switch the analysis draws on is off, or `null` when the tool may
+ * run. The engines use the whole workspace, so a figure cannot be attributed to one category: the answer is none.
+ * Scenarios is needed when a named scenario is not the base one, or always with `scenariosRequired`.
+ */
+export function analysisRefusal(env: ToolEnv, scenarioIds: readonly string[], scenariosRequired = false): { data: Record<string, unknown> } | null {
+  const namesNonBase = scenarioIds.some((id) => env.workspace.scenarios.find((scenario) => scenario.id === id)?.payload.isPrimary !== true);
+  const required: readonly SharingSwitchId[] = [...ANALYSIS_REQUIRED_SWITCH_IDS, ...(scenariosRequired || namesNonBase ? (['scenarios'] as const) : [])];
+  const off = required.filter((id) => !env.choices[id]);
+  return off.length === 0 ? null : { data: { omittedSections: off, statement: ANALYSIS_TOOLS_STATEMENT } };
 }
 
 /** Rounds one dollar figure to the person's choice: exact as computed, or to the nearest $1,000. */

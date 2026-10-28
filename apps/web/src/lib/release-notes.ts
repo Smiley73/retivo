@@ -13,6 +13,54 @@ export interface ReleaseNote {
 /** Newest-first; new entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-28',
+    kind: 'improved',
+    title: 'Approving or declining a sign-up now asks first',
+    blurb:
+      'The approve and decline links in the sign-up email now open a page with Approve and Decline buttons ' +
+      'instead of acting straight away. Opening the email or a link preview no longer approves or declines anyone.',
+  },
+  {
+    date: '2026-10-28',
+    kind: 'improved',
+    title: 'The assistant stays silent on projections when a part of your plan is switched off',
+    blurb:
+      'A projection, stress test, comparison, explanation or what-if depends on your members, accounts, ' +
+      'balances, income, expenses and Social Security together, so a figure cannot be traced to one of them. ' +
+      'When any of those six sharing switches is off, the assistant now gets no figure from those tools, ' +
+      'only a note naming what is switched off. Comparing or explaining a scenario other than the base one ' +
+      'also needs the Scenarios switch.',
+  },
+  {
+    date: '2026-10-28',
+    kind: 'fixed',
+    title: 'Devices and sign-in history show the address you connected from',
+    blurb:
+      'The Devices list and your sign-in history now record the address you connected from ' +
+      'rather than Amazon\'s edge network, so they show where each sign-in came from. ' +
+      'Devices you already remembered keep the address they were recorded with.',
+  },
+  {
+    date: '2026-10-28',
+    kind: 'improved',
+    title: 'Remembered devices are forgotten when your password changes',
+    blurb:
+      'Changing your password, or finishing a password reset, now also forgets every device ' +
+      'you had asked to remember, so each one asks for your second factor the next time you ' +
+      'sign in. Also, on an account with a passkey, the emailed code no longer offers to ' +
+      'remember a device.',
+  },
+  {
+    date: '2026-10-27',
+    kind: 'improved',
+    title: 'Each authenticator code now works only once',
+    blurb:
+      'If you sign in with an authenticator code and then confirm a sensitive action within ' +
+      'the same half-minute, the same code is reported as wrong. Wait for the next code from ' +
+      'your app and enter that. Each code works once, at sign-in or for a sensitive action, ' +
+      'so a code someone else sees cannot be used again.',
+  },
+  {
     date: '2026-10-21',
     kind: 'new',
     title: 'Add Medicare premiums to your expenses in one step',

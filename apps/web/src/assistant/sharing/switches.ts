@@ -29,6 +29,16 @@ export type SharingCategoryId = Exclude<SharingSwitchId, 'exactDollars' | 'first
 
 export type SharingChoices = Record<SharingSwitchId, boolean>;
 
+/** The switches the projection, stress-test, comparison, explain and what-if answers draw on, in screen order. Each must be on for any of those answers to carry a figure. */
+export const ANALYSIS_REQUIRED_SWITCH_IDS = [
+  'members',
+  'accounts',
+  'balances',
+  'income',
+  'expenses',
+  'socialSecurity',
+] as const satisfies readonly SharingCategoryId[];
+
 export const KEEP_SIGNED_IN_ID = 'keepSignedInWhileActive';
 type ConsentSwitchId = SharingSwitchId | typeof KEEP_SIGNED_IN_ID;
 type SwitchGroup = 'sharing' | 'session';
@@ -103,6 +113,16 @@ export const CONSENT_SWITCHES: readonly SwitchDefinition[] = [
 export const SHARING_SWITCHES: readonly SwitchDefinition<SharingSwitchId>[] = CONSENT_SWITCHES.filter(
   (definition): definition is SwitchDefinition<SharingSwitchId> => definition.group === 'sharing',
 );
+
+const ANALYSIS_REQUIRED_LABELS = ANALYSIS_REQUIRED_SWITCH_IDS.map((id) => SHARING_SWITCHES.find((definition) => definition.id === id)!.label);
+
+/**
+ * Said in the consent dialog, in both docs and in every refused analysis answer. It lives here, not in `sentences.ts`,
+ * because it is built from the switch labels and `sentences.ts` cannot import this module without a cycle.
+ */
+export const ANALYSIS_TOOLS_STATEMENT =
+  `The projection, stress-test, comparison, explain and what-if answers draw on ${ANALYSIS_REQUIRED_LABELS.slice(0, -1).join(', ')} and ${ANALYSIS_REQUIRED_LABELS.at(-1)} together, ` +
+  'so while any of them is off those answers carry no figures, and one that names a scenario other than the base one needs Scenarios on as well.';
 
 export function defaultSharingChoices(): SharingChoices {
   const choices = {} as SharingChoices;

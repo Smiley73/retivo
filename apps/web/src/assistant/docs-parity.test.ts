@@ -16,7 +16,7 @@ import * as classifications from './sharing/classification';
 import type { Classification } from './sharing/classification';
 import { FORBIDDEN_KEYS } from './sharing/scrub';
 import { GENEROUS_DEFAULTS_STATEMENT, MODEL_PROVIDER_STATEMENT, NEVER_SHARED_ITEMS } from './sharing/sentences';
-import { CONSENT_SWITCHES } from './sharing/switches';
+import { ANALYSIS_TOOLS_STATEMENT, CONSENT_SWITCHES } from './sharing/switches';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const docsDir = resolve(here, '../../../../docs');
@@ -119,6 +119,17 @@ describe('the data-egress statement', () => {
       const normalized = flat(text);
       expect(normalized, name).toContain(MODEL_PROVIDER_STATEMENT);
       expect(normalized, name).toContain(GENEROUS_DEFAULTS_STATEMENT);
+    }
+  });
+});
+
+describe('the analysis statement', () => {
+  it('reads the same in the guide and the security section as in the consent dialog and the refused answers', () => {
+    for (const [name, text] of [
+      ['the guide', guide],
+      ['the security section', section(security, 'AI assistants')],
+    ] as const) {
+      expect(flat(text), name).toContain(ANALYSIS_TOOLS_STATEMENT);
     }
   });
 });

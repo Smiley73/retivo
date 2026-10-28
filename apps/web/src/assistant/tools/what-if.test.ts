@@ -73,7 +73,6 @@ interface WhatIfData {
   echo: {
     changes: Array<{ setting: string; previous?: unknown; previousSource?: string; new?: unknown; changed?: boolean; accountId?: string; accountName?: string; withheld?: boolean; followsFrom?: string }>;
     unchangedInTheseSections: Array<{ setting: string; value: unknown; source: string }>;
-    withheldSections?: Array<{ section: string; switch: string }>;
   };
   years?: { base: Array<{ year: number }>; whatIf: Array<{ year: number }> };
   stressTest?: { source: string; pathCount: number; seed: number; successProbability: number; tiers: Record<string, { endingBalanceReal: number }> };
@@ -248,7 +247,7 @@ describe('the answer', () => {
 
   it('omits itself while the scenarios switch is off, since the base is named by a scenario id', async () => {
     const result = envelopeOf(await callPlanTool('retivo_run_what_if', { baseScenarioId: BASE_ID, overrides: {} }, choicesWith({ scenarios: false })));
-    expect(result.data).toEqual({ omittedSections: ['scenarios'] });
+    expect(result.data).toMatchObject({ omittedSections: ['scenarios'] });
   });
 });
 
@@ -496,27 +495,12 @@ describe('the sharing switches', () => {
     expect(labelled).toContain('"mode":"role-labels"');
   });
 
-  it('follows the accounts switch for the account’s name, and withholds the section while it is off', async () => {
+  it('names the account in the echo', async () => {
     const [account] = (await listAggregates('account')).filter((candidate) => candidate.id === ACCOUNT_ID);
     const name = String(account!.payload.name);
     const on = (await whatIf(OVERRIDES)).data.echo.changes.find((change) => change.setting === 'accountReturns.perAccount.planningReturnPct')!;
     // The base sets no return for this account, so the previous one is the account's own.
     expect(on).toMatchObject({ accountId: ACCOUNT_ID, accountName: name, new: 4, previousSource: 'default' });
-
-    const { data: off, envelope } = await whatIf(OVERRIDES, {}, choicesWith({ accounts: false }));
-    expect(JSON.stringify(envelope)).not.toContain(name);
-    expect(off.echo.withheldSections).toEqual([{ section: 'accountReturns', switch: 'accounts' }]);
-    expect(off.echo.changes.some((change) => change.setting.startsWith('accountReturns'))).toBe(false);
-    expect(off.echo.changes.some((change) => change.setting.startsWith('retirementAge'))).toBe(true);
-    // The what-if itself is still computed with the account's new return.
-    expect(off.whatIf.headline).toEqual((await whatIf(OVERRIDES)).data.whatIf.headline);
-  });
-
-  it('withholds a Social Security setting’s echo while the Social Security switch is off', async () => {
-    const { data } = await whatIf({ socialSecurity: { primary: { ageYears: 70 } } }, {}, choicesWith({ socialSecurity: false }));
-    expect(data.echo.withheldSections).toEqual([{ section: 'socialSecurity', switch: 'socialSecurity' }]);
-    expect(data.echo.changes).toEqual([]);
-    expect(data.echo.unchangedInTheseSections).toEqual([]);
   });
 });
 

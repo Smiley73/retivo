@@ -511,8 +511,8 @@ export interface UserMfaRow {
   /** ISO timestamp of the last successful TOTP verification. */
   lastVerifiedAt?: string;
   /**
-   * Latest RFC-6238 time step consumed by a step-up verify, committed by a conditional UpdateItem so a step cannot be
-   * reused concurrently. Login MFA does not touch it.
+   * Latest RFC-6238 time step consumed by a live TOTP verify (sign-in or step-up), committed by a conditional
+   * UpdateItem so a step cannot be reused, even concurrently. The attribute name predates sign-in consuming.
    */
   lastUsedTotpStepStepUp?: number;
   /**

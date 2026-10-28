@@ -110,6 +110,43 @@ describe('parseImportFile', () => {
     });
   });
 
+  it('rejects MALFORMED_BUNDLE on a gzip truncated mid-body', async () => {
+    const whole = new Uint8Array(
+      await (await gzipJson(emptyBundle({ deviceId: 'x'.repeat(50_000) }))).arrayBuffer(),
+    );
+    const blob = new Blob([whole.slice(0, Math.floor(whole.length / 2))]);
+    await expect(parseImportFile(blob)).rejects.toMatchObject({
+      code: 'MALFORMED_BUNDLE',
+    });
+  });
+
+  it('parses a multi-megabyte gzipped bundle with non-ASCII text across chunk boundaries', async () => {
+    const bundle = emptyBundle({ deviceId: 'héllo €uro 日本語 '.repeat(250_000) });
+    const parsed = await parseImportFile(await gzipJson(bundle));
+    expect(parsed).toEqual(bundle);
+  });
+
+  it('rejects BUNDLE_TOO_LARGE on a gzip that inflates past 200 MB of multi-byte text', async () => {
+    // Three-byte characters: the payload is ~70M characters, under the cap if counted as characters.
+    const chunk = new TextEncoder().encode('€'.repeat(349_525));
+    let sent = 0;
+    const source = new ReadableStream<Uint8Array<ArrayBuffer>>({
+      pull(controller) {
+        if (sent === 201) {
+          controller.close();
+          return;
+        }
+        sent += 1;
+        controller.enqueue(chunk);
+      },
+    });
+    const bomb = await new Response(source.pipeThrough(new CompressionStream('gzip'))).blob();
+    expect(bomb.size).toBeLessThan(5 * 1024 * 1024);
+    await expect(parseImportFile(bomb)).rejects.toMatchObject({
+      code: 'BUNDLE_TOO_LARGE',
+    });
+  }, 30_000);
+
   it('rejects BUNDLE_TOO_LARGE on a gzipped file exceeding the 50 MB compressed ceiling', async () => {
     // Spoof `size` instead of allocating 50 MB+; the gzip magic bytes make the 50 MB compressed ceiling apply, not the plain-file one.
     const fake = new Blob([new Uint8Array([0x1f, 0x8b, 0x08])]) as Blob & { size: number };

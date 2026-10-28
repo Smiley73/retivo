@@ -44,7 +44,7 @@ interface WithheldSection {
 }
 
 /** The category whose switch gates a section, when the field model gates it. */
-export function gateOf(key: keyof ScenarioOverrides): SharingCategoryId | undefined {
+function gateOf(key: keyof ScenarioOverrides): SharingCategoryId | undefined {
   const classification = OVERRIDE_FIELDS[key];
   return classification?.kind === 'gated' ? classification.category : undefined;
 }
