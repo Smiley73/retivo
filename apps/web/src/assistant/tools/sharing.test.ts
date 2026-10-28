@@ -20,7 +20,7 @@ import {
   SOCIAL_SECURITY_CLASSIFICATION,
   type Classification,
 } from '../sharing/classification';
-import { SHARING_SWITCH_IDS, type SharingChoices } from '../sharing/switches';
+import { ANALYSIS_REQUIRED_SWITCH_IDS, ANALYSIS_TOOLS_STATEMENT, SHARING_SWITCH_IDS, type SharingChoices } from '../sharing/switches';
 
 const CALLS: ReadonlyArray<{ tool: string; args: Record<string, unknown> }> = [
   { tool: 'retivo_status', args: {} },
@@ -77,6 +77,22 @@ function numbersAt(value: unknown, keys: ReadonlySet<string>, found: number[] = 
   return found;
 }
 
+const ANALYSIS_TOOLS = new Set([
+  'retivo_get_projection',
+  'retivo_get_stress_test',
+  'retivo_compare_scenarios',
+  'retivo_explain',
+  'retivo_run_what_if',
+]);
+
+/** Whether a number sits anywhere in `value`: a computed figure is a numeric leaf. */
+function hasNumber(value: unknown): boolean {
+  if (typeof value === 'number') return true;
+  if (Array.isArray(value)) return (value as unknown[]).some(hasNumber);
+  if (typeof value === 'object' && value !== null) return Object.values(value).some(hasNumber);
+  return false;
+}
+
 beforeAll(async () => {
   await clearAllStores();
   await seedSentinelWorkspace();
@@ -123,5 +139,17 @@ describe.each(CALLS)('$tool', ({ tool, args }) => {
       expect(rows.find((row) => row.id === account.id)?.plannedContributionPreTax).toBe(account.payload.plannedContributionPreTax);
     }
     expect(envelope.rounding.exact).toBe(true);
+  });
+});
+
+describe.each(CALLS.filter(({ tool }) => ANALYSIS_TOOLS.has(tool)))('$tool $args analysis consent', ({ tool, args }) => {
+  it('carries figures while every switch is on', async () => {
+    expect(hasNumber(envelopeOf(await callPlanTool(tool, args, choicesWith())).data)).toBe(true);
+  });
+
+  it.each(ANALYSIS_REQUIRED_SWITCH_IDS)('answers with no figure and names the switch while %s is off', async (id) => {
+    const { data } = envelopeOf(await callPlanTool(tool, args, choicesWith({ [id]: false })));
+    expect(hasNumber(data)).toBe(false);
+    expect(data).toEqual({ omittedSections: [id], statement: ANALYSIS_TOOLS_STATEMENT });
   });
 });

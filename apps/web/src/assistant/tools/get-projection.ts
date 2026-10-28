@@ -12,7 +12,7 @@ import type { DrawdownYear } from '../../lib/drawdown-engine';
 import { realDeflatorAt } from '../../lib/projection-context';
 import { defineTool, ToolArgsError } from './define';
 import { deterministicAssumptions } from './projection-assumptions';
-import { dollarsFor, headlineOf, requireMethodSlice, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
+import { analysisRefusal, dollarsFor, headlineOf, requireMethodSlice, requirePageResult, resolveScenarioArg, runPlan } from './projection-support';
 
 /** Tax and benefit figures the engine stamps in integer cents, by the name they leave under. */
 const CENTS_FIELDS = {
@@ -73,6 +73,8 @@ export function projectionRows(
 
 export const retivoGetProjection = defineTool('retivo_get_projection', (args, env) => {
   const scenarioId = resolveScenarioArg(args.scenarioId, env);
+  const refused = analysisRefusal(env, [scenarioId]);
+  if (refused !== null) return refused;
   const method: ProjectionMethod = args.method === 'historical' ? 'historical' : 'planned';
   const run = runPlan(scenarioId, env);
   const pageResult = requirePageResult(run);

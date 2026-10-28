@@ -632,7 +632,7 @@ descriptions), one for exact dollar figures and one for first names. All are on 
 default. A part switched off is left out of every answer and named in it. With
 **Exact dollar figures** off, annual figures round to the nearest $1,000 and monthly
 ones to the nearest $100; with **First names** off, members read Primary and
-Secondary. The choices are fixed for the session
+Secondary. The projection, stress-test, comparison, explain and what-if answers draw on Household members, Accounts, Account balances, Income, Expenses and Social Security together, so while any of them is off those answers carry no figures, and one that names a scenario other than the base one needs Scenarios on as well. The choices are fixed for the session
 (`sharing/switches.ts`, `sharing/consent.ts`). A separate **Let assistant activity
 keep me signed in** switch is off by default; see [the idle stance](#the-idle-stance).
 

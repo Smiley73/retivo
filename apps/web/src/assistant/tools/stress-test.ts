@@ -24,7 +24,7 @@ import MCWorker from '../../workers/monte-carlo.worker.ts?worker';
 import { sanitizeFreeText } from '../sharing/sanitize';
 import { defineTool, PROJECTION_UNAVAILABLE_MESSAGE, ToolFailure, type ToolEnv } from './define';
 import { inputDefaultAssumptions } from './projection-assumptions';
-import { resolveScenarioArg } from './projection-support';
+import { analysisRefusal, resolveScenarioArg } from './projection-support';
 import { monteCarloInputFor, peekSummary } from './stress-cache';
 import { STRESS_BASIS, monteCarloAssumptions, stressFigures } from './stress-figures';
 
@@ -116,6 +116,8 @@ export function makeStressTestTool(options: StressTestOptions = {}) {
   const runner = options.runner ?? makeStressRunner(options);
   return defineTool('retivo_get_stress_test', async (args, env) => {
     const scenarioId = resolveScenarioArg(args.scenarioId, env);
+    const refused = analysisRefusal(env, [scenarioId]);
+    if (refused !== null) return refused;
     const input = monteCarloInputFor(scenarioId, env, runner.pathCount);
     if (input === null) throw new ToolFailure('INVALID_ARGS', PROJECTION_UNAVAILABLE_MESSAGE);
 

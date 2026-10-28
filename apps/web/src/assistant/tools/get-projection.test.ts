@@ -84,6 +84,15 @@ describe('retivo_get_projection', () => {
     expect((await projection({ scenarioId: EARLY_ID, fromYear: 2300 })).data.years).toEqual([]);
   });
 
+  it('with Scenarios off still projects the base scenario, and refuses a named one', async () => {
+    const off = choicesWith({ scenarios: false });
+    expect((await projection({ scenarioId: BASE_ID }, off)).data.years.length).toBeGreaterThan(0);
+    expect((await projection({}, off)).data.years.length).toBeGreaterThan(0);
+    const { data } = await projection({ scenarioId: EARLY_ID }, off);
+    expect(data).toMatchObject({ omittedSections: ['scenarios'] });
+    expect(data.years).toBeUndefined();
+  });
+
   it('refuses fromYear after toYear and an unknown scenario as INVALID_ARGS', async () => {
     const reversed = await callPlanTool('retivo_get_projection', { fromYear: 2050, toYear: 2040 });
     expect(reversed).toMatchObject({ ok: false, error: { code: 'INVALID_ARGS' } });

@@ -16,8 +16,8 @@ import { structurallyEqual } from '../../lib/structural-equality';
 import { scenarioChain } from '../../lib/scenario-resolution';
 import { defineTool, ToolArgsError, type ToolEnv } from './define';
 import { rowAssumptions } from './projection-assumptions';
-import { assemblePlan, dollarsFor, hasPlannedProjection, headlineOf, runPlan, type PlanRun } from './projection-support';
-import { gateOf, projectSection, sectionContextFor } from './scenario-report';
+import { analysisRefusal, assemblePlan, dollarsFor, hasPlannedProjection, headlineOf, runPlan, type PlanRun } from './projection-support';
+import { projectSection, sectionContextFor } from './scenario-report';
 import { SCENARIO_SECTION_COVERAGE } from './scenario-sections';
 import { NOT_COMPUTED, peekStressSummary } from './stress-cache';
 import { stressHeadline } from './stress-figures';
@@ -150,13 +150,14 @@ function outcomesOf(run: PlanRun): Outcomes {
 export const retivoCompareScenarios = defineTool('retivo_compare_scenarios', async (args, env) => {
   const scenarioId = String(args.scenarioId);
   const otherId = String(args.otherScenarioId);
-  const { workspace, choices } = env;
+  const { workspace } = env;
   for (const id of [scenarioId, otherId]) {
     if (!workspace.scenarios.some((scenario) => scenario.id === id)) {
       throw new ToolArgsError('No scenario has that id. Use an id from retivo_list_scenarios.');
     }
   }
-  if (!choices.scenarios) return { data: { omittedSections: ['scenarios'] } };
+  const refused = analysisRefusal(env, [scenarioId, otherId], true);
+  if (refused !== null) return refused;
 
   const rows = new Map((env.view().scenarios ?? []).map((row) => [row.id, row]));
   const describe = (id: string) => {
@@ -164,16 +165,10 @@ export const retivoCompareScenarios = defineTool('retivo_compare_scenarios', asy
     return { id, ...(typeof name === 'string' && { name }) };
   };
 
-  // Resolved settings, as the engines read them. A setting whose category is off is not compared at all.
+  // Resolved settings, as the engines read them.
   const contexts = { scenario: sectionContextFor(scenarioId, env), other: sectionContextFor(otherId, env) };
-  let skipped = false;
   const settings: Array<{ key: string; label: string; scenario: unknown; other: unknown; note?: string }> = [];
   for (const key of COMPARE_KEYS) {
-    const gate = gateOf(key);
-    if (gate !== undefined && !choices[gate]) {
-      skipped = true;
-      continue;
-    }
     const rule = SCENARIO_SECTION_COVERAGE[key];
     const mine = rule.read(contexts.scenario).value;
     const theirs = rule.read(contexts.other).value;
@@ -237,7 +232,6 @@ export const retivoCompareScenarios = defineTool('retivo_compare_scenarios', asy
       'Every difference is the first scenario minus the second (scenario − other). A year difference is positive when the first is later. A difference is null when either side has no such figure, for example when only one side runs out of money.',
       "Outcomes are the Planned projection. Ending balance and portfolio at retirement (today's dollars) remove each scenario's own inflation from the current month; the nominal portfolio at retirement does not.",
       'Settings are compared as the engines resolve them, with defaults filled in, so a scenario that re-sets a value it inherits does not differ. The list names what differs, not why a result moved.',
-      ...(skipped ? ['Settings whose sharing switch is off are not compared.'] : []),
       'Stress-test figures are read from the result the app already saved; none was computed for this call.',
       ...rowAssumptions(years, env),
     ],
