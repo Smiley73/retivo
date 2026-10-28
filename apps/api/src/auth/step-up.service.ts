@@ -13,6 +13,7 @@ import { MfaService } from './mfa.service.js';
 import { MfaEmailOtpService } from './mfa-email-otp.service.js';
 import { PasskeyAssertionService } from './passkey-assertion.service.js';
 import { VerifyPasswordService } from './verify-password.service.js';
+import { hasUsablePasskey } from './factor-restriction.js';
 
 /**
  * The sensitive operations a step-up can gate; each is the purpose stamp that scopes the passkey challenge namespace
@@ -90,7 +91,7 @@ export class StepUpService {
     // A factor restricted post-reset is not eligible and stays refused if named directly; the verifiers check the
     // resolved row, not this list.
     const totpEnabled = !!mfa?.totpEnabled && !mfa.totpRestrictedPostReset;
-    const hasPasskey = passkeys.some((p) => !p.restrictedPostReset);
+    const hasPasskey = hasUsablePasskey(passkeys);
     const methods: StepUpRoutineMethod[] = [];
     if (hasPasskey) methods.push('passkey');
     if (totpEnabled) methods.push('totp');
@@ -99,6 +100,18 @@ export class StepUpService {
       methods,
       recoveryMethods: ['email_otp'],
     };
+  }
+
+  /**
+   * Whether the emailed code may remember a device: it is the routine factor only when no authenticator app is
+   * enrolled (restricted or not) and no passkey is usable. Otherwise it is recovery and must not mint trust.
+   */
+  async emailCodeMayRememberDevice(userId: string): Promise<boolean> {
+    const [mfa, passkeys] = await Promise.all([
+      this.userMfa.get(userId),
+      this.passkeys.listForUser(userId),
+    ]);
+    return !mfa?.totpEnabled && !hasUsablePasskey(passkeys);
   }
 
   /**

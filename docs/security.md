@@ -128,8 +128,9 @@ a notice email, at most once every 24 hours (`failed-login.service.ts`,
   "Let assistant activity keep me signed in" for that session; see
   [AI assistants](#ai-assistants).
 - **Ending sessions.** Signing out revokes that session on the server. Changing
-  the password or completing a password reset ends every session. Signing out
-  does not clear the data kept on the device (see
+  the password or completing a password reset ends every session and also
+  forgets every remembered device (see [Trust this device](#trust-this-device)).
+  Signing out does not clear the data kept on the device (see
   [Data on the device](#data-on-the-device)).
 
 ### Request-forgery protection
@@ -216,7 +217,7 @@ this off with the setting. Running locally, it is off. See
 
 On the challenge screen, a passkey or an authenticator code can be passed with
 **Trust this device for 30 days** ticked. So can an email code, but only when it
-is the account's only second factor (no passkey and no authenticator app). The browser then skips the second factor on later sign-ins for 30
+is the account's only second factor (no authenticator app and no passkey that sign-in offers). The browser then skips the second factor on later sign-ins for 30
 days. The browser keeps a secret in a cookie named `__Secure-dt` (production;
 `HttpOnly`, `SameSite=Strict`), and the server stores its SHA-256 hash together
 with the device id, the IP address and the browser's user agent. Passing the
@@ -403,9 +404,12 @@ record's content, so it is not proof that every record is the latest one.
 - **Changing the password** (Settings, Security, Password) needs the data to be
   unlocked. The browser re-wraps the password slot under the new password, the
   API swaps the sign-in password and the slot together, and every other session
-  is signed out.
+  is signed out. Every remembered device is forgotten too, so the next sign-in
+  from any of them asks for the second factor.
 - **A password reset** cannot re-wrap anything, because the server holds no key.
-  It sets a new sign-in password and ends all sessions. The password slot stays
+  It sets a new sign-in password, ends all sessions and forgets every remembered
+  device, so the next sign-in from any of them asks for the second factor. The
+  password slot stays
   locked under the old password. The next sign-in lands on "Unlock your data".
   The recovery key or a passkey slot opens the data there
   (`ResetPasswordPage.tsx`), and so does the **old password**, because the slot

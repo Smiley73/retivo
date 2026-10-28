@@ -1,5 +1,6 @@
 // MFA endpoints with AUTH_MFA_ENFORCED=true: two-step login (TOTP, Email-OTP, passkey), trusted-device skip and trust eligibility, retired backup
 // codes, the auth-rejection matrix and CSRF exemption. Email-OTP codes are stored as sha256, so tests recover the live code by brute force.
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { ConfigService } from '@nestjs/config';
 import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -20,7 +21,11 @@ import {
   authSet,
   freshEmail,
 } from './test-helpers.js';
-import type { AuthEventRow } from '../dynamo/types.js';
+import type { AuthEventRow, PasskeyRow } from '../dynamo/types.js';
+import { PasskeysRepository } from '../dynamo/passkeys.repository.js';
+import { MfaEmailOtpService } from '../auth/mfa-email-otp.service.js';
+import { SessionRevocationService } from '../auth/session-revocation.service.js';
+import { TrustedDeviceService } from '../auth/trusted-device.service.js';
 import {
   REFRESH_COOKIE_NAME,
   CSRF_COOKIE_NAME,
@@ -58,6 +63,21 @@ async function authEventsFor(t: TestApp, userId: string): Promise<AuthEventRow[]
     .get('TABLE_AUTH_EVENT', { infer: true } as never) as unknown as string;
   const rows = await scanAll<AuthEventRow>(t.doc, table);
   return rows.filter((r) => r.userId === userId);
+}
+
+function seedPasskeyRow(userId: string, overrides: Partial<PasskeyRow> = {}): PasskeyRow {
+  return {
+    userId,
+    credentialId: randomUUID(),
+    publicKey: Buffer.from('pk').toString('base64url'),
+    counter: 0,
+    deviceType: 'singleDevice',
+    backedUp: false,
+    transports: null,
+    createdAt: new Date().toISOString(),
+    lastUsedAt: null,
+    ...overrides,
+  };
 }
 
 function wrongTotpCode(secret: string): string {
@@ -415,6 +435,126 @@ describe('enforced MFA endpoints', () => {
       expect((verify.body as ChallengeResponse).deviceRemembered).toBe(false);
       const cookies = parseSetCookies(verify.headers['set-cookie']);
       expect(cookies[DEVICE_TRUST_COOKIE_NAME]).toBeUndefined();
+    });
+  });
+
+  describe('trust minting racing an account-wide revocation', () => {
+    it('a verify paused after the factor check cannot recreate trust once a reset/change sweep has run', async () => {
+      const { email, userId } = await signupVerifyApprove(t);
+      const deviceId = freshDeviceId();
+      const login = await loginRaw(t, email, deviceId);
+      const challengeToken = (login.body as ChallengeResponse).challengeToken!;
+      await clearEmailOtpCooldown(t, userId);
+      await request(t.app.getHttpServer())
+        .post('/api/v1/auth/mfa/email/send')
+        .set('Origin', ORIGIN())
+        .send({ challengeToken })
+        .expect(202);
+      const code = await recoverEmailOtp(t, userId);
+
+      // The verify has passed its generation check; the credential change then retires the generation and sweeps
+      // the remembered devices, exactly as `afterConsume` and `ChangePasswordService.change` do, before trust is set.
+      const emailOtp = t.module.get(MfaEmailOtpService);
+      const realVerify = emailOtp.verify.bind(emailOtp);
+      const paused = jest.spyOn(emailOtp, 'verify').mockImplementationOnce(async (args) => {
+        const result = await realVerify(args);
+        await t.module.get(SessionRevocationService).revokeAll({ userId });
+        await t.module.get(TrustedDeviceService).revokeAll(userId, null, null, 'password_reset');
+        return result;
+      });
+      let verify: request.Response;
+      try {
+        verify = await request(t.app.getHttpServer())
+          .post('/api/v1/auth/mfa/verify')
+          .set('Origin', ORIGIN())
+          .send({ challengeToken, method: 'email_otp', code, deviceId, rememberDevice: true });
+      } finally {
+        paused.mockRestore();
+      }
+
+      expect(verify.status).toBe(401);
+      expect((verify.body as { error: { code: string } }).error.code).toBe('MFA_CHALLENGE_INVALID');
+      expect(parseSetCookies(verify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME]).toBeUndefined();
+      expect(await t.module.get(TrustedDeviceService).list(userId)).toEqual([]);
+    });
+
+    it('trust committed just before a reset/change sweep is swept, and its cookie no longer skips the challenge', async () => {
+      const { email, userId } = await signupVerifyApprove(t);
+      const deviceId = freshDeviceId();
+      const login = await loginRaw(t, email, deviceId);
+      const challengeToken = (login.body as ChallengeResponse).challengeToken!;
+      await clearEmailOtpCooldown(t, userId);
+      await request(t.app.getHttpServer())
+        .post('/api/v1/auth/mfa/email/send')
+        .set('Origin', ORIGIN())
+        .send({ challengeToken })
+        .expect(202);
+      const code = await recoverEmailOtp(t, userId);
+
+      // Trust commits and its cookie is set; the credential change then retires the generation and sweeps, before the
+      // verify issues its session.
+      const trustedDevices = t.module.get(TrustedDeviceService);
+      const realSet = trustedDevices.set.bind(trustedDevices);
+      const paused = jest.spyOn(trustedDevices, 'set').mockImplementationOnce(async (...args) => {
+        await realSet(...args);
+        await t.module.get(SessionRevocationService).revokeAll({ userId });
+        await trustedDevices.revokeAll(userId, null, null, 'password_change');
+      });
+      let verify: request.Response;
+      try {
+        verify = await request(t.app.getHttpServer())
+          .post('/api/v1/auth/mfa/verify')
+          .set('Origin', ORIGIN())
+          .send({ challengeToken, method: 'email_otp', code, deviceId, rememberDevice: true });
+      } finally {
+        paused.mockRestore();
+      }
+
+      expect(verify.status).toBe(401);
+      expect(await trustedDevices.list(userId)).toEqual([]);
+      const trust = parseSetCookies(verify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME];
+      const relogin = await loginRaw(t, email, deviceId, [
+        `${DEVICE_TRUST_COOKIE_NAME}=${encodeURIComponent(trust ?? '')}`,
+      ]);
+      expect((relogin.body as ChallengeResponse).mfaRequired).toBe(true);
+    });
+  });
+
+  describe('email-code trust on a passkey account', () => {
+    it('an unrestricted passkey blocks trust; a restricted one does not', async () => {
+      const blocked = await signupVerifyApprove(t);
+      await t.module
+        .get(PasskeysRepository)
+        .insert(seedPasskeyRow(blocked.userId));
+      const blockedVerify = await completeEmailOtpLogin(
+        t,
+        blocked.email,
+        blocked.userId,
+        freshDeviceId(),
+        true,
+      );
+      expect(blockedVerify.status).toBe(200);
+      expect((blockedVerify.body as ChallengeResponse).deviceRemembered).toBe(false);
+      expect(
+        parseSetCookies(blockedVerify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME],
+      ).toBeUndefined();
+
+      const restricted = await signupVerifyApprove(t);
+      await t.module
+        .get(PasskeysRepository)
+        .insert(seedPasskeyRow(restricted.userId, { restrictedPostReset: true }));
+      const restrictedVerify = await completeEmailOtpLogin(
+        t,
+        restricted.email,
+        restricted.userId,
+        freshDeviceId(),
+        true,
+      );
+      expect(restrictedVerify.status).toBe(200);
+      expect((restrictedVerify.body as ChallengeResponse).deviceRemembered).toBe(true);
+      expect(
+        parseSetCookies(restrictedVerify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME],
+      ).toBeTruthy();
     });
   });
 
