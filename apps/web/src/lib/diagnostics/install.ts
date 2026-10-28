@@ -2,6 +2,7 @@
  * Install/uninstall the diagnostics capture layer: wraps `console.*` (original first, recursion-guarded) and the global `error` / `unhandledrejection` handlers.
  * A `pagehide` / `visibilitychange→hidden` listener forces a final flush; a crash can lose only the last unflushed batch.
  */
+import { onForeignDatabaseDrop } from '../../db/store.js';
 import {
   recordBreadcrumb,
   recordError,
@@ -9,6 +10,7 @@ import {
   recordWindowError,
   setDevtoolsError,
   flush,
+  suspendRecording,
 } from './logger.js';
 
 type ConsoleMethod = (...args: unknown[]) => void;
@@ -26,6 +28,7 @@ let windowErrorHandler: ((event: ErrorEvent) => void) | null = null;
 let rejectionHandler: ((event: PromiseRejectionEvent) => void) | null = null;
 let finalFlushHandler: (() => void) | null = null;
 let visibilityHandler: (() => void) | null = null;
+let unsubscribeForeignDrop: (() => void) | null = null;
 
 // Recursion guard: a logger-internal console.error must not re-enter the shim.
 let inShim = false;
@@ -64,6 +67,8 @@ export function installDiagnostics(): void {
   // Lets recordCaught re-emit to devtools without the shim re-capturing it.
   setDevtoolsError(saved.error);
 
+  unsubscribeForeignDrop = onForeignDatabaseDrop(suspendRecording);
+
   console.error = wrap(saved.error, (...args) => recordError(...args));
   console.warn = wrap(saved.warn, (...args) => recordWarn(...args));
   console.info = wrap(saved.info, (...args) => recordBreadcrumb('info', ...args));
@@ -96,6 +101,9 @@ export function installDiagnostics(): void {
 export function uninstallDiagnostics(): void {
   if (!installed) return;
   installed = false;
+
+  unsubscribeForeignDrop?.();
+  unsubscribeForeignDrop = null;
 
   if (saved) {
     console.error = saved.error;

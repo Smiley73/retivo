@@ -22,6 +22,7 @@ interface StubState {
   dropCalls: number;
   nudgeCalls: number;
   clearDiagnosticsCalls: number;
+  resumeDiagnosticsCalls: number;
   storeCalls: string[];
   warnings: unknown[][];
 }
@@ -44,6 +45,9 @@ function makeDeps(state: StubState) {
     clearDiagnostics: () => {
       state.clearDiagnosticsCalls += 1;
     },
+    resumeDiagnostics: () => {
+      state.resumeDiagnosticsCalls += 1;
+    },
     nudgeOtherTabsToReleaseIdb: () => {
       state.nudgeCalls += 1;
     },
@@ -61,6 +65,7 @@ function freshState(overrides: Partial<StubState> = {}): StubState {
     dropCalls: 0,
     nudgeCalls: 0,
     clearDiagnosticsCalls: 0,
+    resumeDiagnosticsCalls: 0,
     storeCalls: [],
     warnings: [],
     ...overrides,
@@ -182,6 +187,24 @@ describe('maybeResetForNewUser', () => {
     expect(state.clearDiagnosticsCalls).toBe(0);
   });
 
+  it('resumes the diagnostics on both the drop and the no-drop success paths', async () => {
+    const dropped = freshState({ storedUserId: 'user-A', hasForeign: true });
+    await maybeResetForNewUser(CLAIMS_B, makeDeps(dropped));
+    expect(dropped.dropCalls).toBe(1);
+    expect(dropped.resumeDiagnosticsCalls).toBe(1);
+
+    const kept = freshState({ storedUserId: 'user-A', hasForeign: false });
+    await maybeResetForNewUser(CLAIMS_A, makeDeps(kept));
+    expect(kept.dropCalls).toBe(0);
+    expect(kept.resumeDiagnosticsCalls).toBe(1);
+  });
+
+  it('does NOT resume the diagnostics on the fail-closed re-throw path', async () => {
+    const state = freshState({ storedUserId: 'user-A', dropFails: true });
+    await expect(maybeResetForNewUser(CLAIMS_B, makeDeps(state))).rejects.toThrow('drop failed');
+    expect(state.resumeDiagnosticsCalls).toBe(0);
+  });
+
   it('does not nudge when no drop is required (same-user re-login)', async () => {
     const state = freshState({ storedUserId: 'user-A', hasForeign: false });
     await maybeResetForNewUser(CLAIMS_A, makeDeps(state));
@@ -223,6 +246,7 @@ describe('maybeResetForNewUser', () => {
       hasForeignHouseholdData,
       dropLocalDatabase,
       clearDiagnostics: clearDiagnosticsRings,
+      resumeDiagnostics: (): void => {},
       nudgeOtherTabsToReleaseIdb: (): void => {},
       warn: (): void => {},
     };
