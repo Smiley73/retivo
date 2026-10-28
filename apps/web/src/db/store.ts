@@ -272,9 +272,9 @@ let nudgeChannel: BroadcastChannel | null = null;
 const foreignDropListeners = new Set<() => void>();
 
 /**
- * Subscribes to "another tab is dropping this database": fired by the release nudge and by a `versionchange` with a
- * null target version, so a drop without a nudge (device clear, account deletion) is covered too. Returns the
- * unsubscribe.
+ * Subscribes to "this tab can no longer vouch that its database is the one in use": fired by the release nudge, by a
+ * `versionchange` with a null target version (a drop without a nudge: device clear, account deletion) and when the
+ * browser terminates the connection, after which a drop is invisible to this tab. Returns the unsubscribe.
  */
 export function onForeignDatabaseDrop(listener: () => void): () => void {
   foreignDropListeners.add(listener);
@@ -283,8 +283,12 @@ export function onForeignDatabaseDrop(listener: () => void): () => void {
   };
 }
 
-function releaseForForeignDrop(): void {
+function notifyForeignDrop(): void {
   for (const listener of foreignDropListeners) listener();
+}
+
+function releaseForForeignDrop(): void {
+  notifyForeignDrop();
   void closeIdbHandle();
 }
 
@@ -451,7 +455,10 @@ export function db(): Promise<IDBPDatabase<Schema>> {
       },
       terminated() {
         // The browser killed the connection (e.g. storage pressure): drop the cached promise so the next db() reopens.
+        // Without a connection no `versionchange` or nudge-driven close tells this tab if the database is then dropped
+        // and recreated, so treat it as dropped.
         dbPromise = null;
+        notifyForeignDrop();
       },
     });
     const wrapped = wrapOpenWithBlockedTimeout(rawOpen);
@@ -1003,8 +1010,7 @@ async function pruneDiagnosticsToMax(
  * Appends diagnostics entries and prunes the store back to `max` in one `readwrite` transaction. The monotonic `seq` is
  * allocated inside it (current max via the `seq` index, plus one), so order holds across tabs within a same-millisecond
  * batch, which a module-level counter or an ISO-`ts` index cannot give; the entries' own `seq` is overwritten. Returns
- * the entries as persisted, so the caller can keep the in-memory ring aligned. `isCurrent` is rechecked once the database
- * is open and before the transaction is created; when false nothing is written and `[]` is returned.
+ * the entries as persisted, so the caller can keep the in-memory ring aligned.
  */
 export async function appendDiagnosticLogs(
   entries: readonly DiagnosticLogEntry[],

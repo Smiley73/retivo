@@ -295,7 +295,6 @@ export function recordCaught(
 
 /** Snapshot of both rings, newest-last (errors+breadcrumbs interleaved by seq). */
 export function getEntries(): DiagnosticEntry[] {
-  if (suspended) return [];
   return [...errorRing, ...breadcrumbRing].sort((a, b) => a.seq - b.seq);
 }
 
@@ -344,7 +343,7 @@ function scheduleFlush(): void {
  * most `MAX_FLUSH_BATCH` per call; an IDB failure leaves the rings authoritative.
  */
 export async function flush(): Promise<void> {
-  if (suspended || flushQueue.length === 0) return;
+  if (flushQueue.length === 0) return;
   const batch = flushQueue.slice(0, MAX_FLUSH_BATCH);
   flushQueue = flushQueue.slice(batch.length);
   // Capture the clear epoch before the await: a clear() during the flush must not see its drained

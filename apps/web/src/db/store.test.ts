@@ -1,5 +1,8 @@
 // IndexedDB layer tests over `fake-indexeddb`, so the real `idb` code paths run end to end.
 import 'fake-indexeddb/auto';
+import { forceCloseDatabase } from 'fake-indexeddb';
+// eslint-disable-next-line no-restricted-imports -- unwrap the cached handle so fake-indexeddb can force-close it
+import { unwrap } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
   AccountRetypeBlockedError,
@@ -117,6 +120,13 @@ describe('foreign database drop notification', () => {
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires when the browser terminates the connection', async () => {
+    const handle = await db();
+    // fake-indexeddb types the argument as the IDBDatabase constructor, not an instance.
+    forceCloseDatabase(unwrap(handle) as unknown as Parameters<typeof forceCloseDatabase>[0]);
     expect(listener).toHaveBeenCalledTimes(1);
   });
 

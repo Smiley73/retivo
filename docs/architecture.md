@@ -123,9 +123,10 @@ and also checks the stored records for another household's data. A mismatch
 deletes the database. Because other open tabs may hold the database open,
 `store.ts` posts a `BroadcastChannel` message that asks them to release it so
 the delete can finish.
-A tab that is asked to release the database (or sees it deleted under it) also
-empties its diagnostics and stops recording until that tab next signs in, so no
-entry from the previous person is written into the new database.
+A tab that is asked to release the database, sees it deleted under it, or has its
+connection terminated by the browser also empties its diagnostics and stops
+recording until that tab next signs in, so no entry from the previous person is
+written into the new database.
 
 ## Sync
 
