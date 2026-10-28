@@ -14,6 +14,15 @@ export interface ReleaseNote {
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-28',
+    kind: 'fixed',
+    title: 'Devices and sign-in history show the address you connected from',
+    blurb:
+      'The Devices list and your sign-in history now record the address you connected from ' +
+      'rather than Amazon\'s edge network, so they show where each sign-in came from. ' +
+      'Devices you already remembered keep the address they were recorded with.',
+  },
+  {
+    date: '2026-10-28',
     kind: 'improved',
     title: 'Remembered devices are forgotten when your password changes',
     blurb:
