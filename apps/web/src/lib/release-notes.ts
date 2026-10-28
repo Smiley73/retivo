@@ -13,6 +13,16 @@ export interface ReleaseNote {
 /** Newest-first; new entries are prepended at ship time. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    date: '2026-10-27',
+    kind: 'improved',
+    title: 'Each authenticator code now works only once',
+    blurb:
+      'If you sign in with an authenticator code and then confirm a sensitive action within ' +
+      'the same half-minute, the same code is reported as wrong. Wait for the next code from ' +
+      'your app and enter that. Each code works once, at sign-in or for a sensitive action, ' +
+      'so a code someone else sees cannot be used again.',
+  },
+  {
     date: '2026-10-21',
     kind: 'new',
     title: 'Add Medicare premiums to your expenses in one step',

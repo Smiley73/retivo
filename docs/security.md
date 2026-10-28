@@ -197,6 +197,12 @@ code is always offered as a fallback**, even when stronger factors exist.
 Repeated wrong authenticator codes for an account trigger the same growing wait
 as wrong passwords (`mfa.service.ts`).
 
+An authenticator code is accepted **once**, at sign-in or to confirm a sensitive
+action. The server records the 30-second step of the last code it accepted, and
+the same code presented again, even inside that half-minute, is treated as a
+wrong code (and counts toward the wait above), so a captured code cannot be
+replayed. Wait for the next code.
+
 ### When it is required
 
 A deployed stack requires a second factor by default (stack setting

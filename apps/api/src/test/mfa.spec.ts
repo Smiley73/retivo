@@ -17,6 +17,8 @@ import {
   completeEmailOtpLogin,
   enrollTotp,
   sendAndRecoverStepUpOtp,
+  authSet,
+  freshEmail,
 } from './test-helpers.js';
 import type { AuthEventRow } from '../dynamo/types.js';
 import {
@@ -253,8 +255,8 @@ describe('enforced MFA endpoints', () => {
     });
 
     it('admits exactly one winner across a concurrent TOTP replay of the same challenge', async () => {
-      // TOTP is reusable and not consumed by a verify attempt, so both requests pass factor verification with the same code and race solely on
-      // the challenge-jti conditional PutItem (RevokedTokensRepository.consumeMfaChallenge).
+      // An accepted code is single-use, so the factor is verified before the challenge is consumed and the two requests race on the
+      // conditional step write (UserMfaRepository.consumeTotpStepUpStep): the loser is a wrong code, never a consumed challenge.
       const { email, userId } = await signupVerifyApprove(t);
       const deviceId = freshDeviceId();
 
@@ -285,9 +287,77 @@ describe('enforced MFA endpoints', () => {
       const winner = a.status === 200 ? a : b;
       const loser = a.status === 200 ? b : a;
       expect((winner.body as ChallengeResponse).accessToken).toBeTruthy();
-      expect(loser.body.error.code).toBe('MFA_CHALLENGE_INVALID');
+      expect(loser.body.error.code).toBe('MFA_CODE_INVALID');
       const loserCookies = parseSetCookies(loser.headers['set-cookie']);
       expect(loserCookies[REFRESH_COOKIE_NAME]).toBeUndefined();
+    });
+  });
+
+  describe('authenticator code single use', () => {
+    const verifyTotpSignIn = (challengeToken: string, code: string, deviceId: string) =>
+      request(t.app.getHttpServer())
+        .post('/api/v1/auth/mfa/verify')
+        .set('Origin', ORIGIN())
+        .send({ challengeToken, method: 'totp', code, deviceId });
+
+    async function startChallenge(email: string, deviceId: string): Promise<string> {
+      const login = await loginRaw(t, email, deviceId);
+      expect(login.status).toBe(200);
+      return (login.body as ChallengeResponse).challengeToken!;
+    }
+
+    const changeEmailStepUp = async (s: ReturnType<typeof authHeaders>, code: string) => {
+      await authSet(s)(request(t.app.getHttpServer()).post('/api/v1/auth/change-email/request'))
+        .send({ newEmail: freshEmail('new'), currentPassword: STRONG_PASSWORD })
+        .expect(200);
+      return authSet(s)(
+        request(t.app.getHttpServer()).post('/api/v1/auth/change-email/verify-step-up'),
+      ).send({ method: 'totp', code });
+    };
+
+    it('refuses a code at step-up after sign-in accepted it, and audits the refusal', async () => {
+      const { email, userId } = await signupVerifyApprove(t);
+      const bootstrap = authHeaders(
+        await completeEmailOtpLogin(t, email, userId, freshDeviceId()),
+      );
+      const secret = await enrollTotp(t, bootstrap);
+      const code = generateSync({ secret });
+
+      const device = freshDeviceId();
+      const signIn = await verifyTotpSignIn(await startChallenge(email, device), code, device);
+      expect(signIn.status).toBe(200);
+
+      const stepUp = await changeEmailStepUp(authHeaders(signIn), code);
+      expect(stepUp.status).toBe(401);
+      expect(stepUp.body.error.code).toBe('MFA_CODE_INVALID');
+      const events = await authEventsFor(t, userId);
+      expect(events.filter((e) => e.eventType === 'mfa_totp_failed')).toHaveLength(1);
+      expect(events.filter((e) => e.eventType === 'mfa_totp_verified')).toHaveLength(1);
+    });
+
+    it('refuses a code at sign-in after step-up consumed it, with no session and no verified event', async () => {
+      const { email, userId } = await signupVerifyApprove(t);
+      const bootstrap = authHeaders(
+        await completeEmailOtpLogin(t, email, userId, freshDeviceId()),
+      );
+      const secret = await enrollTotp(t, bootstrap);
+      const code = generateSync({ secret });
+
+      const stepUp = await changeEmailStepUp(bootstrap, code);
+      expect(stepUp.status).toBe(200);
+      const verifiedBefore = (await authEventsFor(t, userId)).filter(
+        (e) => e.eventType === 'mfa_totp_verified',
+      );
+      expect(verifiedBefore).toHaveLength(1);
+
+      const device = freshDeviceId();
+      const signIn = await verifyTotpSignIn(await startChallenge(email, device), code, device);
+      expect(signIn.status).toBe(401);
+      expect(signIn.body.error.code).toBe('MFA_CODE_INVALID');
+      expect(parseSetCookies(signIn.headers['set-cookie'])[REFRESH_COOKIE_NAME]).toBeUndefined();
+      const events = await authEventsFor(t, userId);
+      expect(events.filter((e) => e.eventType === 'mfa_totp_verified')).toHaveLength(1);
+      expect(events.filter((e) => e.eventType === 'mfa_totp_failed')).toHaveLength(1);
     });
   });
 
