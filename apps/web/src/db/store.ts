@@ -269,6 +269,25 @@ const IDB_RELEASE_NUDGE = 'release-idb';
 
 let nudgeChannel: BroadcastChannel | null = null;
 
+const foreignDropListeners = new Set<() => void>();
+
+/**
+ * Subscribes to "another tab is dropping this database": fired by the release nudge and by a `versionchange` with a
+ * null target version, so a drop without a nudge (device clear, account deletion) is covered too. Returns the
+ * unsubscribe.
+ */
+export function onForeignDatabaseDrop(listener: () => void): () => void {
+  foreignDropListeners.add(listener);
+  return () => {
+    foreignDropListeners.delete(listener);
+  };
+}
+
+function releaseForForeignDrop(): void {
+  for (const listener of foreignDropListeners) listener();
+  void closeIdbHandle();
+}
+
 // Lazily opens the nudge channel; a receiving tab closes its cached handle (the next `db()` reopens it). A stateful
 // singleton with lifecycle cleanup ({@link closeNudgeChannel}).
 function ensureNudgeChannel(): void {
@@ -276,7 +295,7 @@ function ensureNudgeChannel(): void {
   nudgeChannel = new BroadcastChannel(IDB_NUDGE_CHANNEL);
   nudgeChannel.onmessage = (event: MessageEvent) => {
     if (event.data !== IDB_RELEASE_NUDGE) return;
-    void closeIdbHandle();
+    releaseForForeignDrop();
   };
 }
 
@@ -417,8 +436,10 @@ export function db(): Promise<IDBPDatabase<Schema>> {
       // A v9 open blocked by an open v8 tab would stall db() and freeze this tab's IDB I/O: close this tab's cached
       // handle so a sibling's upgrade can proceed (as the nudge does); the blocked-timeout below then rejects with
       // DatabaseUpgradeBlockedError and resets the cache for a clean retry.
-      blocking() {
-        void closeIdbHandle();
+      blocking(_currentVersion, blockedVersion) {
+        // A null target version is `deleteDatabase`; a number is another tab's upgrade, which only needs the handle closed.
+        if (blockedVersion === null) releaseForForeignDrop();
+        else void closeIdbHandle();
       },
       blocked() {
         console.warn(

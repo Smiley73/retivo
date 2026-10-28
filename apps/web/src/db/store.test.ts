@@ -1,10 +1,11 @@
 // IndexedDB layer tests over `fake-indexeddb`, so the real `idb` code paths run end to end.
 import 'fake-indexeddb/auto';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
   AccountRetypeBlockedError,
   AccountRetypeCheckFailedError,
   clearAllStores,
+  closeNudgeChannel,
   ConcurrentQueueMutationError,
   DatabaseDropBlockedError,
   db,
@@ -21,6 +22,7 @@ import {
   listFailedConflicts,
   listFailedErrors,
   listMutationsByAggregate,
+  onForeignDatabaseDrop,
   listPendingMutations,
   parkFailedConflict,
   putAggregate,
@@ -83,6 +85,69 @@ function pendingMutation(id: string, overrides: Partial<PendingMutation> = {}): 
     ...overrides,
   };
 }
+
+describe('foreign database drop notification', () => {
+  let listener: Mock<() => void>;
+  let unsubscribe: () => void;
+
+  beforeEach(async () => {
+    await dropLocalDatabase();
+    listener = vi.fn<() => void>();
+    unsubscribe = onForeignDatabaseDrop(listener);
+  });
+  afterEach(async () => {
+    unsubscribe();
+    closeNudgeChannel();
+    await dropLocalDatabase();
+  });
+
+  it('fires when a nudge arrives from another tab', async () => {
+    await db();
+    const sender = new BroadcastChannel('retivo.idb.nudge');
+    sender.postMessage('release-idb');
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+    sender.close();
+  });
+
+  it('fires when another connection deletes the database this tab holds open', async () => {
+    await db();
+    await new Promise<void>((resolve, reject) => {
+      // eslint-disable-next-line no-restricted-properties -- a second connection standing in for another tab's drop
+      const req = indexedDB.deleteDatabase('retirement');
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fire for this tab\'s own drop or another tab\'s version upgrade', async () => {
+    await db();
+    await dropLocalDatabase();
+    expect(listener).not.toHaveBeenCalled();
+
+    await db();
+    await new Promise<void>((resolve, reject) => {
+      // eslint-disable-next-line no-restricted-properties -- a second connection standing in for another tab's upgrade
+      const req = indexedDB.open('retirement', 10);
+      req.onsuccess = () => {
+        req.result.close();
+        resolve();
+      };
+      req.onerror = () => reject(req.error);
+    });
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('stops notifying after unsubscribe', async () => {
+    unsubscribe();
+    await db();
+    const sender = new BroadcastChannel('retivo.idb.nudge');
+    sender.postMessage('release-idb');
+    await new Promise((r) => setTimeout(r, 50));
+    sender.close();
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
 
 describe('IndexedDB store', () => {
   beforeEach(async () => {

@@ -64,6 +64,10 @@ let lastCoalesceEntry: DiagnosticEntry | null = null;
 // prior user's entries (cross-user leak).
 let clearEpoch = 0;
 
+// Set while another tab's drop has left this tab's rings describing a previous user: nothing is recorded, kept or
+// persisted until `resumeRecording`.
+let suspended = false;
+
 // Saved-original console.error, so recordCaught re-emits to devtools without the console shim
 // re-capturing it; defaults to the live binding until install.ts wires it.
 let devtoolsError: (...args: unknown[]) => void = (...args) => {
@@ -158,6 +162,7 @@ function recordEntry(
   args: readonly unknown[],
   isBreadcrumb: boolean,
 ): void {
+  if (suspended) return;
   const key = coalesceKey(level, source, args);
   if (key !== null && key === lastCoalesceKey && lastCoalesceEntry !== null) {
     // Duplicate: bump count in place. The queued copy is the same object, so a pending flush picks
@@ -290,6 +295,7 @@ export function recordCaught(
 
 /** Snapshot of both rings, newest-last (errors+breadcrumbs interleaved by seq). */
 export function getEntries(): DiagnosticEntry[] {
+  if (suspended) return [];
   return [...errorRing, ...breadcrumbRing].sort((a, b) => a.seq - b.seq);
 }
 
@@ -311,6 +317,20 @@ export function clear(): void {
   }
 }
 
+/**
+ * Empty the rings and stop recording, because another tab dropped the database under this one. Entries are dropped,
+ * not buffered: any captured before the next sign-in may describe the previous user.
+ */
+export function suspendRecording(): void {
+  suspended = true;
+  clear();
+}
+
+/** Resume recording after this tab's own sign-in; the rings are already empty. No-op when not suspended. */
+export function resumeRecording(): void {
+  suspended = false;
+}
+
 function scheduleFlush(): void {
   if (flushTimer !== null) return;
   flushTimer = setTimeout(() => {
@@ -324,7 +344,7 @@ function scheduleFlush(): void {
  * most `MAX_FLUSH_BATCH` per call; an IDB failure leaves the rings authoritative.
  */
 export async function flush(): Promise<void> {
-  if (flushQueue.length === 0) return;
+  if (suspended || flushQueue.length === 0) return;
   const batch = flushQueue.slice(0, MAX_FLUSH_BATCH);
   flushQueue = flushQueue.slice(batch.length);
   // Capture the clear epoch before the await: a clear() during the flush must not see its drained

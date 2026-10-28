@@ -9,6 +9,8 @@ import {
   recordError,
   recordSyncWarn,
   recordWarn,
+  resumeRecording,
+  suspendRecording,
 } from './logger';
 import {
   clearDiagnosticLogs,
@@ -22,6 +24,7 @@ describe('diagnostics logger', () => {
     await clearDiagnosticLogs();
   });
   afterEach(() => {
+    resumeRecording();
     clear();
     vi.restoreAllMocks();
   });
@@ -230,6 +233,68 @@ describe('diagnostics logger', () => {
     await flush();
     const rows = await listDiagnosticLogs();
     expect(rows.map((r) => r.message)).toEqual(['user B entry']);
+  });
+
+  it('should_NOT_persist_or_serve_entries_recorded_before_suspension', async () => {
+    recordError('user A queued');
+    suspendRecording();
+    expect(getEntries()).toHaveLength(0);
+    await flush();
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('should_NOT_resurrect_an_in_flight_batch_when_suspension_hits_and_the_append_rejects', async () => {
+    recordError('user A secret');
+    let rejectAppend: (reason?: unknown) => void = () => {};
+    vi.spyOn(store, 'appendDiagnosticLogs').mockImplementationOnce(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectAppend = reject;
+        }),
+    );
+    const flushing = flush();
+    suspendRecording();
+    rejectAppend(new Error('handle closed'));
+    await flushing;
+    resumeRecording();
+    await flush();
+    expect(getEntries()).toHaveLength(0);
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('should_drop_entries_recorded_while_suspended_and_write_nothing_on_flush', async () => {
+    suspendRecording();
+    recordError('captured while stale');
+    await flush();
+    resumeRecording();
+    expect(getEntries()).toHaveLength(0);
+    await flush();
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('clearAll_should_still_wipe_the_store_while_suspended', async () => {
+    recordError('persisted');
+    await flush();
+    suspendRecording();
+    await clearAll();
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('should_record_and_persist_again_after_resume', async () => {
+    suspendRecording();
+    resumeRecording();
+    recordError('user B entry');
+    expect(getEntries()).toHaveLength(1);
+    await flush();
+    expect((await listDiagnosticLogs()).map((r) => r.message)).toEqual(['user B entry']);
+  });
+
+  it('resume_should_leave_a_never_suspended_logger_unchanged', async () => {
+    recordError('kept');
+    resumeRecording();
+    expect(getEntries().map((e) => e.message)).toEqual(['kept']);
+    await flush();
+    expect(await listDiagnosticLogs()).toHaveLength(1);
   });
 
   it('clear_should_empty_rings_and_pending_flush', () => {

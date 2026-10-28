@@ -1,8 +1,9 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installDiagnostics, uninstallDiagnostics } from './install';
-import { clear, getEntries } from './logger';
+import { clear, getEntries, resumeRecording } from './logger';
 import { clearDiagnosticLogs, listDiagnosticLogs } from '../../db/store';
+import * as store from '../../db/store';
 
 describe('installDiagnostics', () => {
   beforeEach(async () => {
@@ -11,6 +12,7 @@ describe('installDiagnostics', () => {
   });
   afterEach(() => {
     uninstallDiagnostics();
+    resumeRecording();
     clear();
     vi.restoreAllMocks();
   });
@@ -33,6 +35,33 @@ describe('installDiagnostics', () => {
     const entries = getEntries();
     expect(entries).toHaveLength(1);
     expect(entries[0].namespace).toBe('sync');
+  });
+
+  it('should_empty_the_rings_and_write_nothing_when_the_store_reports_a_foreign_drop', async () => {
+    let notifyDrop: () => void = () => {};
+    vi.spyOn(store, 'onForeignDatabaseDrop').mockImplementation((listener) => {
+      notifyDrop = listener;
+      return () => {};
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    installDiagnostics();
+    console.error('user A secret');
+    expect(getEntries()).toHaveLength(1);
+
+    notifyDrop();
+    window.dispatchEvent(new Event('pagehide'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(getEntries()).toHaveLength(0);
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('should_stop_reaching_the_logger_after_uninstall', () => {
+    const unsubscribe = vi.fn();
+    vi.spyOn(store, 'onForeignDatabaseDrop').mockReturnValue(unsubscribe);
+    installDiagnostics();
+    uninstallDiagnostics();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it('should_be_idempotent_on_double_install', () => {
