@@ -1003,13 +1003,17 @@ async function pruneDiagnosticsToMax(
  * Appends diagnostics entries and prunes the store back to `max` in one `readwrite` transaction. The monotonic `seq` is
  * allocated inside it (current max via the `seq` index, plus one), so order holds across tabs within a same-millisecond
  * batch, which a module-level counter or an ISO-`ts` index cannot give; the entries' own `seq` is overwritten. Returns
- * the entries as persisted, so the caller can keep the in-memory ring aligned.
+ * the entries as persisted, so the caller can keep the in-memory ring aligned. `isCurrent` is rechecked once the database
+ * is open and before the transaction is created; when false nothing is written and `[]` is returned.
  */
 export async function appendDiagnosticLogs(
   entries: readonly DiagnosticLogEntry[],
   max: number,
+  isCurrent: () => boolean = () => true,
 ): Promise<DiagnosticLogEntry[]> {
   const handle = await db();
+  // Opening can outlast a clear or suspension (a foreign delete holds the open); write nothing once the batch is stale.
+  if (!isCurrent()) return [];
   const tx = handle.transaction('diagnosticLogs', 'readwrite');
   const seqIndex = tx.store.index('seq');
   // Highest existing seq (cursor on the seq index, descending) → next seq.

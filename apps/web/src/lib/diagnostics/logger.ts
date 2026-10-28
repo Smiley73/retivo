@@ -352,7 +352,11 @@ export async function flush(): Promise<void> {
   const epochAtStart = clearEpoch;
   try {
     const rows: DiagnosticLogEntry[] = batch.map((e) => ({ ...e }));
-    const persisted = await appendDiagnosticLogs(rows, MAX_PERSISTED);
+    const persisted = await appendDiagnosticLogs(
+      rows,
+      MAX_PERSISTED,
+      () => clearEpoch === epochAtStart,
+    );
     if (clearEpoch !== epochAtStart) return; // cleared mid-flight — drop silently.
     // Re-stamp with the authoritative cross-tab seq so getEntries() orders like the persisted
     // store.

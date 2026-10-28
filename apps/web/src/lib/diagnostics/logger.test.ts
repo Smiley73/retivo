@@ -1,4 +1,6 @@
 import 'fake-indexeddb/auto';
+import { forceCloseDatabase } from 'fake-indexeddb';
+import { unwrap } from 'idb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clear,
@@ -258,6 +260,33 @@ describe('diagnostics logger', () => {
     await flushing;
     resumeRecording();
     await flush();
+    expect(getEntries()).toHaveLength(0);
+    expect(await listDiagnosticLogs()).toHaveLength(0);
+  });
+
+  it('should_NOT_persist_a_batch_whose_database_open_resolves_after_suspension_and_a_foreign_delete', async () => {
+    // Open the cached handle, then let the browser terminate it (fires `terminated()`, clearing the cached open).
+    const handle = await store.db();
+    // fake-indexeddb types the argument as the IDBDatabase constructor, not an instance.
+    forceCloseDatabase(unwrap(handle) as unknown as Parameters<typeof forceCloseDatabase>[0]);
+    // A sibling tab holds a connection, so another tab's deleteDatabase queues behind it.
+    const sibling = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open('retirement');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const deleted = new Promise<void>((resolve, reject) => {
+      const req = indexedDB.deleteDatabase('retirement');
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+    recordError('user A queued entry');
+    const flushing = flush(); // drains the batch; its reopen queues behind the delete
+    suspendRecording();
+    sibling.close(); // delete completes, then the open resolves against the replacement database
+    await deleted;
+    await flushing;
+    resumeRecording();
     expect(getEntries()).toHaveLength(0);
     expect(await listDiagnosticLogs()).toHaveLength(0);
   });
