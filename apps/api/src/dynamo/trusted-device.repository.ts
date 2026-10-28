@@ -26,12 +26,16 @@ export class TrustedDeviceRepository extends BaseRepository {
     super(doc, config, 'TABLE_TRUSTED_DEVICE');
   }
 
-  /** The trust row for `(userId, deviceId)`, or null if the device is untrusted. */
+  /**
+   * The trust row for `(userId, deviceId)`, or null if the device is untrusted. ConsistentRead: this read decides
+   * whether sign-in skips MFA, and a replica can still return a row a password reset or change just deleted.
+   */
   async get(userId: string, deviceId: string): Promise<TrustedDeviceRow | null> {
     const r = await this.doc.send(
       new GetCommand({
         TableName: this.tableName,
         Key: { userId, deviceId },
+        ConsistentRead: true,
       }),
     );
     return (r.Item as TrustedDeviceRow | undefined) ?? null;
