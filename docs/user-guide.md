@@ -64,7 +64,9 @@ Then choose **Create account**. Three more steps stand between you and the app:
    (**Resend verification email**).
 2. **Wait for the owner to approve your account.** Anyone other than the copy's
    owner starts out "waiting for approval". Once you have verified your email, the
-   owner is emailed an approval link, valid for 7 days. Until they approve, sign-in
+   owner is emailed an approval link, valid for 7 days. It opens a page where the
+   owner chooses Approve or Decline; nothing happens until they click, and the page
+   itself does not show who applied (the email does). Until they approve, sign-in
    is locked. If they decline, the pending account is deleted. The owner is
    whoever runs your copy; their own sign-up is approved automatically.
 3. **Sign in** with your email and password.

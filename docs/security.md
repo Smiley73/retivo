@@ -67,7 +67,10 @@ date of birth. The browser sends all of them to the API over HTTPS
    address in the stack setting `approverEmail` (the API reads it as
    `APPROVER_EMAIL`). After the new person verifies their email, the approver
    gets a message with the applicant's name and email address (not the date of
-   birth) and an approve link and a decline link. The new person cannot sign in
+   birth) and an approve link and a decline link. Each link opens a page where
+   the owner chooses Approve or Decline; nothing happens until that click, so a
+   mail client or link scanner that opens the link approves nobody, and the page
+   itself does not show who applied. The new person cannot sign in
    until the owner approves. If nobody acts for 7 days the pending account is
    deleted (`signup-approval.service.ts`).
 
