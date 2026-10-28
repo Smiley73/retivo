@@ -85,8 +85,16 @@ export class TrustedDeviceRepository extends BaseRepository {
     );
   }
 
-  /** Every trusted device for a user, by Query on the `userId` PK (the grant includes Query, not Scan). */
-  async listByUser(userId: string): Promise<TrustedDeviceRow[]> {
+  /**
+   * Every trusted device for a user, by Query on the `userId` PK (the grant includes Query, not Scan).
+   * `opts.consistentRead`: a sweep after a generation retirement must see a trust row committed just before it, which
+   * a lagging replica could miss; DynamoDB Local is more consistent than production, so only ConsistentRead
+   * guarantees it. Other callers keep the cheaper default read.
+   */
+  async listByUser(
+    userId: string,
+    opts: { consistentRead?: boolean } = {},
+  ): Promise<TrustedDeviceRow[]> {
     const out: TrustedDeviceRow[] = [];
     let lastKey: Record<string, unknown> | undefined;
     do {
@@ -96,6 +104,7 @@ export class TrustedDeviceRepository extends BaseRepository {
           KeyConditionExpression: 'userId = :u',
           ExpressionAttributeValues: { ':u': userId },
           ExclusiveStartKey: lastKey,
+          ConsistentRead: opts.consistentRead,
         }),
       );
       for (const item of (r.Items as TrustedDeviceRow[] | undefined) ?? []) {

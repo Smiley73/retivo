@@ -1,5 +1,9 @@
 // TrustedDeviceRepository on DynamoDB Local: a missing (userId, deviceId) is null, put round-trips a row, listByUser queries by PK (no Scan) and returns only the caller's rows, and delete forgets one device.
 import { randomUUID } from 'node:crypto';
+import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand } from '@aws-sdk/lib-dynamodb';
+import type { ConfigService } from '@nestjs/config';
+import type { EnvConfig } from '../common/env.config.js';
 import { bootstrapTestApp, type TestApp } from '../test/test-helpers.js';
 import { TrustedDeviceRepository } from './trusted-device.repository.js';
 import type { TrustedDeviceRow } from './types.js';
@@ -124,5 +128,32 @@ describe('TrustedDeviceRepository', () => {
       await expect(repo.clearFailure(userId, deviceId)).resolves.toBeUndefined();
       expect(await repo.get(userId, deviceId)).toBeNull();
     });
+  });
+});
+
+// DynamoDB Local never reproduces replica lag, so an emulator test passes if strong consistency is dropped; the
+// document client is stubbed to assert the Query parameters.
+describe('TrustedDeviceRepository.listByUser read mode', () => {
+  function stubbedRepo(sent: QueryCommand[]): TrustedDeviceRepository {
+    const doc = {
+      send: async (command: QueryCommand) => {
+        sent.push(command);
+        return { Items: [] };
+      },
+    } as unknown as DynamoDBDocumentClient;
+    const config = { get: () => 'test-trusted-device-table' } as unknown as ConfigService<EnvConfig, true>;
+    return new TrustedDeviceRepository(doc, config);
+  }
+
+  it('sends a strongly consistent Query when asked, and the default read otherwise', async () => {
+    const sent: QueryCommand[] = [];
+    const repo = stubbedRepo(sent);
+
+    await repo.listByUser('user-1', { consistentRead: true });
+    await repo.listByUser('user-1');
+
+    expect(sent[0]).toBeInstanceOf(QueryCommand);
+    expect(sent[0].input.ConsistentRead).toBe(true);
+    expect(sent[1].input.ConsistentRead).toBeUndefined();
   });
 });

@@ -284,14 +284,18 @@ export class TrustedDeviceService {
     }
   }
 
-  /** Forgets every device row for the user, expired ones included; a user with none records nothing. */
+  /**
+   * Forgets every device row for the user, expired ones included; a user with none records nothing. The listing is
+   * strongly consistent: a `set` that committed just before a password reset or change retired its generation must
+   * be swept here, since its ConditionCheck no longer stops it.
+   */
   async revokeAll(
     userId: string,
     ip?: string | null,
     userAgent?: string | null,
     reason?: string,
   ): Promise<void> {
-    const rows = await this.trustedDevices.listByUser(userId);
+    const rows = await this.trustedDevices.listByUser(userId, { consistentRead: true });
     await this.revokeMany(
       userId,
       rows.map((r) => r.deviceId),

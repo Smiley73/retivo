@@ -417,4 +417,16 @@ describe('TrustedDeviceService — revokeAll', () => {
     expect(del).not.toHaveBeenCalled();
     expect(auth.record).not.toHaveBeenCalled();
   });
+
+  it('lists with a strongly consistent read, so a trust row set just before the generation retirement is swept', async () => {
+    // DynamoDB Local never lags, so the reset/change interleaving where trust commits just before the retirement
+    // cannot fail on the emulator; the sweep's read mode is asserted here instead.
+    const listByUser = jest.fn().mockResolvedValue([]);
+    const repo = { listByUser, delete: jest.fn() } as unknown as TrustedDeviceRepository;
+    const svc = new TrustedDeviceService(repo, buildAuth(), buildRevoked());
+
+    await svc.revokeAll('userA', null, null, 'password_reset');
+
+    expect(listByUser).toHaveBeenCalledWith('userA', { consistentRead: true });
+  });
 });

@@ -477,6 +477,47 @@ describe('enforced MFA endpoints', () => {
       expect(parseSetCookies(verify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME]).toBeUndefined();
       expect(await t.module.get(TrustedDeviceService).list(userId)).toEqual([]);
     });
+
+    it('trust committed just before a reset/change sweep is swept, and its cookie no longer skips the challenge', async () => {
+      const { email, userId } = await signupVerifyApprove(t);
+      const deviceId = freshDeviceId();
+      const login = await loginRaw(t, email, deviceId);
+      const challengeToken = (login.body as ChallengeResponse).challengeToken!;
+      await clearEmailOtpCooldown(t, userId);
+      await request(t.app.getHttpServer())
+        .post('/api/v1/auth/mfa/email/send')
+        .set('Origin', ORIGIN())
+        .send({ challengeToken })
+        .expect(202);
+      const code = await recoverEmailOtp(t, userId);
+
+      // Trust commits and its cookie is set; the credential change then retires the generation and sweeps, before the
+      // verify issues its session.
+      const trustedDevices = t.module.get(TrustedDeviceService);
+      const realSet = trustedDevices.set.bind(trustedDevices);
+      const paused = jest.spyOn(trustedDevices, 'set').mockImplementationOnce(async (...args) => {
+        await realSet(...args);
+        await t.module.get(SessionRevocationService).revokeAll({ userId });
+        await trustedDevices.revokeAll(userId, null, null, 'password_change');
+      });
+      let verify: request.Response;
+      try {
+        verify = await request(t.app.getHttpServer())
+          .post('/api/v1/auth/mfa/verify')
+          .set('Origin', ORIGIN())
+          .send({ challengeToken, method: 'email_otp', code, deviceId, rememberDevice: true });
+      } finally {
+        paused.mockRestore();
+      }
+
+      expect(verify.status).toBe(401);
+      expect(await trustedDevices.list(userId)).toEqual([]);
+      const trust = parseSetCookies(verify.headers['set-cookie'])[DEVICE_TRUST_COOKIE_NAME];
+      const relogin = await loginRaw(t, email, deviceId, [
+        `${DEVICE_TRUST_COOKIE_NAME}=${encodeURIComponent(trust ?? '')}`,
+      ]);
+      expect((relogin.body as ChallengeResponse).mfaRequired).toBe(true);
+    });
   });
 
   describe('email-code trust on a passkey account', () => {
