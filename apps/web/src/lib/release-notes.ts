@@ -15,6 +15,14 @@ export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
     date: '2026-10-28',
     kind: 'improved',
+    title: 'Approving or declining a sign-up now asks first',
+    blurb:
+      'The approve and decline links in the sign-up email now open a page with Approve and Decline buttons ' +
+      'instead of acting straight away. Opening the email or a link preview no longer approves or declines anyone.',
+  },
+  {
+    date: '2026-10-28',
+    kind: 'improved',
     title: 'The assistant stays silent on projections when a part of your plan is switched off',
     blurb:
       'A projection, stress test, comparison, explanation or what-if depends on your members, accounts, ' +

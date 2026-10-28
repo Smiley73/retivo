@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { expectNoA11yViolations } from '../test/a11y';
 
 vi.mock('../api/client', () => ({
   apiRequest: vi.fn(),
@@ -14,13 +15,23 @@ vi.mock('../api/client', () => ({
 import { apiRequest, ApiRequestError } from '../api/client';
 import { DeclineSignupPage } from './DeclineSignupPage';
 
-const TOKEN = 'decline-token-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const TOKEN = 'test-approval-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 function setHashToken(token: string | null): void {
   window.history.replaceState(null, '', `/auth/decline-signup${token ? `#token=${token}` : ''}`);
 }
 
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <DeclineSignupPage />
+    </MemoryRouter>,
+  );
+}
+
+// The prefetch defence is load-bearing: a mail client or scanner may GET this page, so nothing may be consumed until a button is clicked.
 describe('DeclineSignupPage', () => {
+  // Restore the initial URL after each test; replacing with `/` would leak across files in the same worker and break suites that read `window.location`.
   const initialHref = window.location.href;
 
   afterEach(() => {
@@ -28,63 +39,53 @@ describe('DeclineSignupPage', () => {
     window.history.replaceState(null, '', initialHref);
   });
 
-  it('declines on mount when the URL fragment carries a token', async () => {
+  it('scrubs the fragment on mount and sends no request', async () => {
     setHashToken(TOKEN);
-    (apiRequest as any).mockResolvedValueOnce({ declined: true, email: 'spam@example.com' });
+    renderPage();
+    await waitFor(() => expect(window.location.hash).toBe(''));
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
 
-    render(
-      <MemoryRouter>
-        <DeclineSignupPage />
-      </MemoryRouter>,
-    );
-
-    await waitFor(() => {
-      expect(apiRequest).toHaveBeenCalledWith(
-        '/api/v1/auth/decline-signup',
-        expect.objectContaining({
-          method: 'POST',
-          body: { token: TOKEN },
-          auth: false,
-        }),
-      );
+  it('declines only on the click, once, and shows the confirmation', async () => {
+    setHashToken(TOKEN);
+    (apiRequest as any).mockResolvedValueOnce({ declined: true, email: 'foo@example.com' });
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    expect(await screen.findByText(/foo@example.com/)).toBeInTheDocument();
+    expect(screen.getByText(/pending account has been deleted/)).toBeInTheDocument();
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    expect(apiRequest).toHaveBeenCalledWith('/api/v1/auth/decline-signup', {
+      method: 'POST',
+      body: { token: TOKEN },
+      auth: false,
     });
-    expect(await screen.findByText(/spam@example.com/)).toBeInTheDocument();
-    expect(screen.getByText(/has been deleted/)).toBeInTheDocument();
-    expect(window.location.hash).toBe('');
   });
 
   it('shows the API error message when the token is rejected', async () => {
     setHashToken(TOKEN);
     (apiRequest as any).mockRejectedValueOnce(
-      new ApiRequestError(400, {
-        code: 'APPROVAL_TOKEN_INVALID',
-        message: 'Approval link is invalid or has already been used.',
+      new ApiRequestError(410, {
+        code: 'APPROVAL_TOKEN_EXPIRED',
+        message: 'Approval link has expired.',
       }),
     );
-
-    render(
-      <MemoryRouter>
-        <DeclineSignupPage />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      /already been used/i,
-    );
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Approval link has expired.');
   });
 
-  it('reports an error when the token is missing from the link', async () => {
+  it('a link without a token shows an inline error and never calls the API', async () => {
     setHashToken(null);
-
-    render(
-      <MemoryRouter>
-        <DeclineSignupPage />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      /token is missing/i,
-    );
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/missing its token/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it('passes axe accessibility checks in the pre-click state', async () => {
+    setHashToken(TOKEN);
+    const { container } = renderPage();
+    await expectNoA11yViolations(container);
   });
 });
