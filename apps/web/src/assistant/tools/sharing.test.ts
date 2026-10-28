@@ -20,7 +20,7 @@ import {
   SOCIAL_SECURITY_CLASSIFICATION,
   type Classification,
 } from '../sharing/classification';
-import { ANALYSIS_REQUIRED_SWITCH_IDS, SHARING_SWITCH_IDS, type SharingChoices } from '../sharing/switches';
+import { ANALYSIS_REQUIRED_SWITCH_IDS, ANALYSIS_TOOLS_STATEMENT, SHARING_SWITCH_IDS, type SharingChoices } from '../sharing/switches';
 
 const CALLS: ReadonlyArray<{ tool: string; args: Record<string, unknown> }> = [
   { tool: 'retivo_status', args: {} },
@@ -150,6 +150,6 @@ describe.each(CALLS.filter(({ tool }) => ANALYSIS_TOOLS.has(tool)))('$tool $args
   it.each(ANALYSIS_REQUIRED_SWITCH_IDS)('answers with no figure and names the switch while %s is off', async (id) => {
     const { data } = envelopeOf(await callPlanTool(tool, args, choicesWith({ [id]: false })));
     expect(hasNumber(data)).toBe(false);
-    expect(data.omittedSections).toEqual([id]);
+    expect(data).toEqual({ omittedSections: [id], statement: ANALYSIS_TOOLS_STATEMENT });
   });
 });
