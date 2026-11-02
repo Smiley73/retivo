@@ -24,7 +24,7 @@
     "test:coverage": "tsc -p tsconfig.build.json && vitest run --coverage"
   },
   "devDependencies": {
-    "@modelcontextprotocol/server": "2.3.1",
+    "@modelcontextprotocol/server": "2.4.0",
     "@retirement/assistant-protocol": "workspace:*",
     "@types/node": "24.19.2",
     "@types/ws": "8.18.2",
