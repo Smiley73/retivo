@@ -98,6 +98,15 @@ overrides:
   # 10.7.4. Reached through infrastructure > @pulumi/pulumi > @npmcli/arborist >
   # socks (deploy tooling only).
   "ip-address@<=10.7.3": ">=10.7.4"
+  # GHSA-3g3m-2fjr-6pw4: glob AbortSignal cancellation bypass allows
+  # post-timeout filesystem traversal, fixed in 14.0.2 (major jump from the 10.x
+  # and 13.x lines the parents declare). Reached through @nestjs/cli and jest >
+  # test-exclude (build and test tooling only).
+  "glob@>=9.0.0 <14.0.2": ">=14.0.2 <15"
+  # GHSA-g3hv-75wg-m249: denial of service via globparts amplification, fixed in
+  # 11.0.1 (major jump from the 9.x and 10.x lines the parents declare). Reached
+  # through typescript-eslint, jest and Pulumi (dev and deploy tooling only).
+  "minimatch@>=7.0.0 <11.0.1": ">=11.0.1 <12"
 
 # pnpm v11 renames onlyBuiltDependencies to allowBuilds; do not adopt while pinned to v10.
 onlyBuiltDependencies:
