@@ -3,7 +3,7 @@
 
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -82,9 +82,16 @@ test('a license supplied under third-party/ stands in for the missing package', 
   assert.match(notices, /^inner@2\.0\.0\nLicense: BSD-3-Clause\nCopyright: Copyright \(c\) 2021 Supplied Author$/m);
 });
 
+// The SDK's hashed chunk names change on every release, so find them by prefix.
+const sdkChunk = (sdkDist, prefix) => {
+  const name = readdirSync(sdkDist).find((file) => file.startsWith(`${prefix}-`) && file.endsWith('.mjs'));
+  assert.ok(name, `no ${prefix}-*.mjs chunk in ${sdkDist}`);
+  return name;
+};
+
 test("the real SDK's pre-bundled packages are all found, each at the version its dist carries", () => {
   const sdkDist = join(realpathSync(join(BRIDGE_ROOT, 'node_modules', '@modelcontextprotocol', 'server')), 'dist');
-  const inputs = ['ajvProvider-CEoC__sr.mjs', 'src-Cqbh3MYc.mjs'].map((chunk) => relative(BRIDGE_ROOT, join(sdkDist, chunk)));
+  const inputs = ['ajvProvider', 'src'].map((prefix) => relative(BRIDGE_ROOT, join(sdkDist, sdkChunk(sdkDist, prefix))));
   const metafile = {
     inputs: Object.fromEntries(inputs.map((input) => [input, { bytes: 1 }])),
     outputs: { 'out.mjs': { inputs: Object.fromEntries(inputs.map((input) => [input, { bytesInOutput: 1 }])) } },
@@ -95,7 +102,7 @@ test("the real SDK's pre-bundled packages are all found, each at the version its
     'ajv-formats@3.0.1',
     'content-type@1.0.5',
     'fast-deep-equal@3.1.3',
-    'fast-uri@3.1.0',
+    'fast-uri@3.1.8',
     'json-schema-traverse@1.0.0',
   ]) {
     assert.ok(keys.includes(expected), `${expected} is embedded in the SDK chunks but not found: ${keys.join(', ')}`);
@@ -117,7 +124,7 @@ test('the notices are embedded in the bundle text as comments no license text ca
 
 test('embedding the real generated notices keeps every embedded package notice in the text', () => {
   const sdkDist = join(realpathSync(join(BRIDGE_ROOT, 'node_modules', '@modelcontextprotocol', 'server')), 'dist');
-  const input = relative(BRIDGE_ROOT, join(sdkDist, 'ajvProvider-CEoC__sr.mjs'));
+  const input = relative(BRIDGE_ROOT, join(sdkDist, sdkChunk(sdkDist, 'ajvProvider')));
   const metafile = { inputs: { [input]: { bytes: 1 } }, outputs: { 'out.mjs': { inputs: { [input]: { bytesInOutput: 1 } } } } };
   const packages = embeddedPackages(metafile, BRIDGE_ROOT);
   const text = embedNotices('export {};\n', generateNotices(packages));
