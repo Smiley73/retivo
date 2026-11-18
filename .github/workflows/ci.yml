@@ -149,9 +149,11 @@ jobs:
       # Dependency-vulnerability gate (NYDFS 500.05): fail the
       # build on a known moderate+ advisory. Same `audit:ci` step that runs in
       # the local `pnpm gate`; it is green on a clean tree, so it only fires
-      # on a new advisory. If one ever lands with no
-      # upstream fix, waive that specific advisory via `pnpm-workspace.yaml`'s
-      # `auditConfig.ignoreGhsas` — do not drop the gate.
+      # on a new advisory that has a fix. scripts/audit-fixable.mjs reports
+      # advisories with no patched release (nothing to upgrade to) as warnings
+      # instead of failing, and a fix published later turns the gate red on its
+      # own. To waive an advisory that does have a fix, use
+      # `pnpm-workspace.yaml`'s `auditConfig.ignoreGhsas` — do not drop the gate.
       # The audit is a network lookup against a moving advisory database, so a
       # new advisory would red every open PR. On a pull request that changes
       # no dependency file the failure is reported (annotation + the

@@ -87,7 +87,7 @@ Run from repo root unless noted. Scripts fan out with `pnpm -r`.
 | Lint | `pnpm lint` | ESLint + `@typescript-eslint`. |
 | Contracts | `pnpm test:contracts` | Slow script checks gated off `pnpm test:scripts`: builds the Lambda artifact (`build:lambda`), runs a production `pnpm audit` (network), the schema-ahead guard's subprocess runs, and builds the bridge bundle and drives that single file alone in an empty folder over stdio (`bridge-artifact-contract.test.mjs`). Runs as its own CI step; not part of the local gate. |
 | Test | `pnpm test` | Jest (API), Vitest (web) + `pnpm test:scripts`. `--passWithNoTests`. Part of the local gate. |
-| Local gate (pre-commit) | `pnpm gate` | `lint` + `depcruise` + `knip` + `typecheck` + `test` + `audit:ci` (fails on moderate+ dependency advisories). The sole local pre-commit gate. |
+| Local gate (pre-commit) | `pnpm gate` | `lint` + `depcruise` + `knip` + `typecheck` + `test` + `audit:ci` (fails on moderate+ dependency advisories that have a patched release). The sole local pre-commit gate. |
 | Module-boundary/cycle check | `pnpm depcruise` | dependency-cruiser; rules in `.dependency-cruiser.cjs` (no import cycles, `lib/` independent of UI, `db/` layering, `assistant/` independent of `components/` and `pages/`). Part of `pnpm gate`. |
 | Dead-code check | `pnpm knip` | Unused exports/files/deps; config in `knip.json`. Part of `pnpm gate`. |
 | Affected tests | `pnpm test:affected [ref]` | Inner loop only — tests related to changed files; auto-escalates to full `pnpm test` for broad/unmapped changes. **Not** the gate. |

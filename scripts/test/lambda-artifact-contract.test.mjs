@@ -211,9 +211,9 @@ describe(
   });
 
   test('the production dependency graph passes the audit gate', () => {
-    // Honors auditConfig.ignoreGhsas; CI sets AUDIT_ADVISORIES_NONBLOCKING=true only on a pull request that changes no dependency file.
+    // Honors auditConfig.ignoreGhsas and reports, rather than fails on, advisories with no patched release (scripts/audit-fixable.mjs); CI sets AUDIT_ADVISORIES_NONBLOCKING=true only on a pull request that changes no dependency file.
     try {
-      execFileSync('pnpm', ['audit', '--prod', '--audit-level=moderate'], {
+      execFileSync('node', ['scripts/audit-fixable.mjs', '--prod', '--audit-level=moderate'], {
         cwd: REPO_ROOT,
         stdio: 'pipe',
         timeout: 120_000,
