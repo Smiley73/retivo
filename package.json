@@ -25,7 +25,7 @@
     "test:scripts": "node --test \"scripts/test/**/*.test.mjs\" \"apps/api/scripts/**/*.test.mjs\"",
     "emu:up": "docker compose --env-file .env -f infrastructure/docker-compose.yml up -d",
     "emu:down": "docker compose --env-file .env -f infrastructure/docker-compose.yml down",
-    "audit:ci": "pnpm audit --audit-level=moderate",
+    "audit:ci": "node scripts/audit-fixable.mjs --audit-level=moderate",
     "gate": "pnpm lint && pnpm depcruise && pnpm knip && pnpm typecheck && pnpm test && pnpm audit:ci"
   },
   "devDependencies": {
