@@ -237,7 +237,7 @@ and stops at the first failure.
 | `pnpm typecheck` | Builds the shared `packages/contracts` and `packages/assistant-protocol` packages, then type-checks every package, including the browser tests in `apps/web/e2e`. |
 | `pnpm test` | Runs each package's tests one package at a time, then the script tests. The AI assistant bridge's tests build `apps/mcp-bridge/dist` first, because some of them start the built program. |
 | `pnpm test:contracts` | Slow checks that are not part of `pnpm test`: builds the Lambda artifact, scans the web bundle for the assistant's loopback address, and builds the AI assistant bridge into its single-file bundle and drives that file alone in an empty folder (it answers an MCP handshake and lists the tools, its notices name everything it contains). Needs network access for the dependency audit. CI runs it as its own step. |
-| `pnpm audit:ci` | `pnpm audit` for known vulnerabilities in dependencies (moderate and above). Needs network access. |
+| `pnpm audit:ci` | `pnpm audit` for known vulnerabilities in dependencies (moderate and above) that have a patched release; advisories with no fix yet are listed but do not fail. Needs network access. |
 | `pnpm gate` | All of the above: `lint`, `depcruise`, `knip`, `typecheck`, `test`, `audit:ci`. |
 
 Other scripts:
