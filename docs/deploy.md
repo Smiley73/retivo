@@ -519,9 +519,22 @@ pnpm install
 
 ## Tearing down
 
-There is no teardown script. `pulumi destroy` alone does not do it, because
-several resources are set up to resist deletion. Work through these steps in
-order, from `infrastructure/` with
+`pulumi destroy` alone does not do it, because several resources are set up to
+resist deletion. The script below runs steps 1 to 4 for you: it fetches the
+passphrase, empties every bucket the stack owns, lifts the protection, destroys
+the stack (retrying once if a bucket refilled), and removes the stack record. It
+keeps `Pulumi.<stack>.yaml` so `bootstrap-stack.sh` can bring the stack back,
+and drops that file's old `encryptionsalt:` line, which bootstrap would
+otherwise refuse (unless the file holds `secure:` values, which need it). It asks
+you to type the stack name before it deletes anything. Afterwards, do
+[step 5](#5-clear-what-the-destroy-leaves-behind) by hand.
+
+```bash
+./infrastructure/scripts/destroy-stack.sh dev
+```
+
+To do it by hand instead, work through these steps in order, from
+`infrastructure/` with
 [Pulumi logged in and the passphrase exported](#running-pulumi-commands-yourself).
 Replace `dev` with your stack, and `us-east-1` in the commands with your region
 (`aws:region` in the stack file). If you only want to stop paying for an extra, turn
