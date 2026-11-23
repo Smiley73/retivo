@@ -28,10 +28,10 @@
     "@retirement/assistant-protocol": "workspace:*",
     "@types/node": "24.19.2",
     "@types/ws": "8.18.2",
-    "@vitest/coverage-v8": "5.1.0",
+    "@vitest/coverage-v8": "5.1.1",
     "esbuild": "0.28.2",
     "typescript": "5.9.3",
-    "vitest": "5.1.0",
+    "vitest": "5.1.1",
     "ws": "8.23.0"
   }
 }
