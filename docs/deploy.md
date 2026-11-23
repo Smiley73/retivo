@@ -522,10 +522,12 @@ pnpm install
 `pulumi destroy` alone does not do it, because several resources are set up to
 resist deletion. The script below runs steps 1 to 4 for you: it fetches the
 passphrase, empties every bucket the stack owns, lifts the protection, destroys
-the stack (retrying once if new logs land), and removes the stack record while
-keeping `Pulumi.<stack>.yaml`. It asks you to type the stack name before it
-changes anything. Afterwards, do [step 5](#5-clear-what-the-destroy-leaves-behind)
-by hand.
+the stack (retrying once if a bucket refilled), and removes the stack record. It
+keeps `Pulumi.<stack>.yaml` so `bootstrap-stack.sh` can bring the stack back,
+and drops that file's old `encryptionsalt:` line, which bootstrap would
+otherwise refuse (unless the file holds `secure:` values, which need it). It asks
+you to type the stack name before it deletes anything. Afterwards, do
+[step 5](#5-clear-what-the-destroy-leaves-behind) by hand.
 
 ```bash
 ./infrastructure/scripts/destroy-stack.sh dev
