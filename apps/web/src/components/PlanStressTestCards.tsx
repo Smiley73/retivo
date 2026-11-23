@@ -211,8 +211,9 @@ export function PlanStressTestMarketStress({
   // A retry is the only action left: cases are cache-first on a seed-inclusive key, so re-running
   // an unchanged plan re-serves what is on screen.
   const anyError = rows.some((c) => c.state === 'error');
-  // Stays mounted and disabled through its retry; unmounting under the pointer would drop focus to
-  // `body`.
+  // Stays mounted through its retry, disabled by `aria-disabled` rather than native `disabled`:
+  // unmounting it, or natively disabling it while focused, would drop focus to `body`. A press while
+  // running is a no-op, since `run()` ignores a call while a walk is live.
   const showRetry = anyError || (retried && running);
   return (
     <div className="flex flex-col gap-3">
@@ -221,12 +222,12 @@ export function PlanStressTestMarketStress({
           {showRetry && (
             <button
               type="button"
-              className={`report-print-hide ${btnSecondarySmClass} disabled:cursor-not-allowed disabled:opacity-50`}
+              className={`report-print-hide ${btnSecondarySmClass} aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-surface-raised`}
               onClick={() => {
                 setRetried(true);
                 comparison.run();
               }}
-              disabled={running}
+              aria-disabled={running ? 'true' : undefined}
             >
               {/* Named for its table: the page's own error banner has a "Try again" button too. */}
               Try the market stress comparison again
