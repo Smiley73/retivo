@@ -716,7 +716,7 @@ describe('PlanStressTestMarketStress — same-path stress comparison', () => {
 
     expect(retry).toBeInTheDocument();
     expect(retry).toHaveFocus();
-    expect(retry).toBeDisabled();
+    expect(retry).toHaveAttribute('aria-disabled', 'true');
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Retrying the market stress comparison.',
     );

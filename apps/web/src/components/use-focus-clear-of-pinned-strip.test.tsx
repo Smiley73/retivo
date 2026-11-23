@@ -63,15 +63,38 @@ function stubRect(el: HTMLElement, top: number, height?: number): void {
   el.getBoundingClientRect = () => rect(top, height);
 }
 
-// Keyboard-style focus that jsdom reads as `:focus-visible` every time: `user.tab()` depends on window-level memory that
-// leaks across tests, while a Tab keydown followed by programmatic focus is read as keyboard focus unconditionally.
+// jsdom matches `:focus-visible` exactly like `:focus`, so it cannot tell pointer focus from keyboard focus. This models
+// the browser heuristic for the one selector the hook queries: visible after a key press, not after a pointer press.
+let lastInput: 'keyboard' | 'pointer' = 'keyboard';
+const onKey = (): void => {
+  lastInput = 'keyboard';
+};
+const onPointer = (): void => {
+  lastInput = 'pointer';
+};
+const nativeMatches = Element.prototype.matches;
+function installFocusVisibleHeuristic(): void {
+  lastInput = 'keyboard';
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('pointerdown', onPointer, true);
+  document.addEventListener('mousedown', onPointer, true);
+  vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+    if (selector === ':focus-visible') return this === document.activeElement && lastInput === 'keyboard';
+    return nativeMatches.call(this, selector);
+  });
+}
+function removeFocusVisibleHeuristic(): void {
+  document.removeEventListener('keydown', onKey, true);
+  document.removeEventListener('pointerdown', onPointer, true);
+  document.removeEventListener('mousedown', onPointer, true);
+}
+
+// Keyboard-style focus: a Tab keydown followed by programmatic focus.
 function keyboardFocus(el: HTMLElement): void {
   fireEvent.keyDown(document.body, { key: 'Tab' });
   el.focus();
 }
 
-// Locate the region and grid by label, not role: a `getByRole` lookup leaves jsdom's selector engine holding a cached
-// "not `:focus-visible`" answer for the element until the next DOM mutation.
 function scrollerParts(): { region: HTMLElement; grid: HTMLElement } {
   return {
     region: screen.getByLabelText('Year-by-year projection table'),
@@ -84,6 +107,7 @@ describe('useFocusClearOfPinnedStrip', () => {
 
   beforeEach(() => {
     scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+    installFocusVisibleHeuristic();
     render(<Harness />);
     screen.getByTestId('strip').getBoundingClientRect = () =>
       rect(0, STRIP_BOTTOM);
@@ -91,6 +115,8 @@ describe('useFocusClearOfPinnedStrip', () => {
 
   afterEach(() => {
     scrollBy.mockRestore();
+    vi.mocked(Element.prototype.matches).mockRestore();
+    removeFocusVisibleHeuristic();
   });
 
   it('scrolls the window up by exactly the overlap plus clearance when keyboard focus lands under the strip', async () => {
