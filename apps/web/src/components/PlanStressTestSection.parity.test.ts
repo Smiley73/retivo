@@ -173,10 +173,10 @@ describe('market-stress-core — same-path stress transforms', () => {
    *  each 800-path run, and a fully parallel local coverage run (maxWorkers is
    *  CI-only) adds CPU contention on top — measured 13.1s
    *  against the old flat 10s budget, so these two failed under coverage on main
-   *  regardless of what changed. Non-coverage runs keep the tight 10s budget so
-   *  a genuine hang still fails fast. Mirrors the coverage-aware timeout on this
-   *  file's first test. */
-  const MC_TEST_TIMEOUT_MS = process.env.VITEST_COVERAGE === '1' ? 60_000 : 10_000;
+   *  regardless of what changed. The ISOLATION test (four runs, ~4s alone) also
+   *  timed out at 10s in a full parallel `pnpm test`, so non-coverage runs get
+   *  the 20s the file's first test already uses; a genuine hang still fails. */
+  const MC_TEST_TIMEOUT_MS = process.env.VITEST_COVERAGE === '1' ? 60_000 : 20_000;
   const PATHS = 800;
   const SEED = 1234567;
   let base: MonteCarloInput;
