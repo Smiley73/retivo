@@ -118,16 +118,35 @@ describe('EdgeAuthMiddleware — viewer address', () => {
     return parts;
   }
 
-  it('takes the header on the primary and the previous secret when the proof derives from either', () => {
-    for (const proof of [PROOF, PREVIOUS_PROOF]) {
+  it('takes the header when the proof derives from the secret the request matched', () => {
+    for (const [verify, proof] of [
+      ['edge-secret-test-vector', PROOF],
+      ['edge-secret-test-vector-previous', PREVIOUS_PROOF],
+    ]) {
       const { req, res, next } = ownIpReqRes({
-        'x-origin-verify': 'edge-secret-test-vector',
+        'x-origin-verify': verify,
         'x-viewer-address': VIEWER,
         'x-viewer-address-proof': proof,
       });
       makeMiddleware(SECRETS).use(req, res, next);
       expect(next).toHaveBeenCalledTimes(1);
       expect(req.ip).toBe(VIEWER);
+    }
+  });
+
+  it('keeps the gateway address when the proof derives from the other secret', () => {
+    for (const [verify, proof] of [
+      ['edge-secret-test-vector', PREVIOUS_PROOF],
+      ['edge-secret-test-vector-previous', PROOF],
+    ]) {
+      const { req, res, next } = ownIpReqRes({
+        'x-origin-verify': verify,
+        'x-viewer-address': VIEWER,
+        'x-viewer-address-proof': proof,
+      });
+      makeMiddleware(SECRETS).use(req, res, next);
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(req.ip).toBe('130.176.0.1');
     }
   });
 

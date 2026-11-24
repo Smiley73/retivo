@@ -10,15 +10,16 @@ import { settleViewerAddress, viewerAddressProof } from '../common/visitor-addre
 
 @Injectable()
 export class EdgeAuthMiddleware implements NestMiddleware {
-  private readonly accepted: ReadonlyArray<Buffer>;
-  private readonly acceptedProofs: ReadonlyArray<Buffer>;
+  private readonly accepted: ReadonlyArray<{ secret: Buffer; proof: Buffer }>;
 
   constructor(config: ConfigService<EnvConfig, true>) {
     const primary = config.get('EDGE_SHARED_SECRET', { infer: true });
     const previous = config.get('EDGE_SHARED_SECRET_PREVIOUS', { infer: true });
     const secrets = [primary, previous].filter((secret): secret is string => !!secret);
-    this.accepted = secrets.map((secret) => Buffer.from(secret));
-    this.acceptedProofs = secrets.map((secret) => Buffer.from(viewerAddressProof(secret)));
+    this.accepted = secrets.map((secret) => ({
+      secret: Buffer.from(secret),
+      proof: Buffer.from(viewerAddressProof(secret)),
+    }));
 
     // Fail closed: on a deployed stack (STACK set) env.config already refuses to boot without a real secret; refuse
     // to start here too rather than let `use()` read an empty accepted set as "edge auth is off".
@@ -31,19 +32,17 @@ export class EdgeAuthMiddleware implements NestMiddleware {
 
   use(req: Request, res: Response, next: NextFunction): void {
     if (this.accepted.length === 0) {
-      settleViewerAddress(req, this.acceptedProofs);
+      settleViewerAddress(req, []);
       return next();
     }
 
     const presented = req.headers['x-origin-verify'];
     if (typeof presented === 'string' && presented.length > 0) {
       const presentedBuf = Buffer.from(presented);
-      for (const candidate of this.accepted) {
-        if (
-          presentedBuf.length === candidate.length &&
-          timingSafeEqual(presentedBuf, candidate)
-        ) {
-          settleViewerAddress(req, this.acceptedProofs);
+      for (const { secret, proof } of this.accepted) {
+        if (presentedBuf.length === secret.length && timingSafeEqual(presentedBuf, secret)) {
+          // Only the proof derived from the secret this request matched counts.
+          settleViewerAddress(req, [proof]);
           return next();
         }
       }
