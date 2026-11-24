@@ -1,4 +1,5 @@
 // EdgeAuthMiddleware: no-op pass-through with both secrets unset (local dev, tests), the primary or previous (rotation overlap) secret calls next(), and a missing or wrong header is 403 EDGE_AUTH_REQUIRED.
+// Accepting exits settle `req.ip` from the viewer-address header; the rejecting exit never does.
 import type { Request, Response } from 'express';
 import { EdgeAuthMiddleware } from './edge-auth.middleware.js';
 
@@ -96,6 +97,67 @@ describe('EdgeAuthMiddleware', () => {
     mw.use(req, res, next);
     expect(next).not.toHaveBeenCalled();
     expect(calls.status).toBe(403);
+  });
+});
+
+describe('EdgeAuthMiddleware — viewer address', () => {
+  const VIEWER = '203.0.113.9';
+  // printf '%s' 'viewer-address-v1' | openssl dgst -sha256 -hmac 'edge-secret-test-vector'
+  const PROOF = '9aec177ceb9bc60c5875610065ec2d03679328f6e8d08fdb85b08537a45d6dbc';
+  // The same, keyed with 'edge-secret-test-vector-previous'.
+  const PREVIOUS_PROOF = 'be68abb2cae84b681d8491e32d55c020f6aa6963a02f198cc5cf553cb36638c2';
+  const SECRETS = {
+    EDGE_SHARED_SECRET: 'edge-secret-test-vector',
+    EDGE_SHARED_SECRET_PREVIOUS: 'edge-secret-test-vector-previous',
+  };
+
+  function ownIpReqRes(headers: Record<string, string>) {
+    const parts = makeReqRes();
+    (parts.req as { ip?: string }).ip = '130.176.0.1';
+    Object.assign(parts.req.headers, headers);
+    return parts;
+  }
+
+  it('takes the header on the primary and the previous secret when the proof derives from either', () => {
+    for (const proof of [PROOF, PREVIOUS_PROOF]) {
+      const { req, res, next } = ownIpReqRes({
+        'x-origin-verify': 'edge-secret-test-vector',
+        'x-viewer-address': VIEWER,
+        'x-viewer-address-proof': proof,
+      });
+      makeMiddleware(SECRETS).use(req, res, next);
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(req.ip).toBe(VIEWER);
+    }
+  });
+
+  it('keeps the gateway address when the proof is absent', () => {
+    const { req, res, next } = ownIpReqRes({
+      'x-origin-verify': 'edge-secret-test-vector',
+      'x-viewer-address': VIEWER,
+    });
+    makeMiddleware(SECRETS).use(req, res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.ip).toBe('130.176.0.1');
+  });
+
+  it('takes the header with no secret configured, where there is no proof to check', () => {
+    const { req, res, next } = ownIpReqRes({ 'x-viewer-address': VIEWER });
+    makeMiddleware({}).use(req, res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(req.ip).toBe(VIEWER);
+  });
+
+  it('never honors the header on a rejected request, even behind a correct proof', () => {
+    const { req, res, next, calls } = ownIpReqRes({
+      'x-origin-verify': 'wrong-secret',
+      'x-viewer-address': VIEWER,
+      'x-viewer-address-proof': PROOF,
+    });
+    makeMiddleware(SECRETS).use(req, res, next);
+    expect(calls.status).toBe(403);
+    expect(next).not.toHaveBeenCalled();
+    expect(req.ip).toBe('130.176.0.1');
   });
 });
 
