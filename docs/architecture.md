@@ -331,8 +331,10 @@ One CloudFront distribution sits in front of everything. It serves the web app
 from the S3 bucket and forwards `/api/*` to API Gateway, adding a shared secret
 header (`X-Origin-Verify`). The API rejects any request without it
 (`apps/api/src/auth/edge-auth.middleware.ts`), so calls that skip CloudFront
-get nowhere. A firewall (AWS WAF) in front of CloudFront can be turned on with a
-setting. The routing is in `infrastructure/src/cloudfront.ts`.
+get nowhere. CloudFront also tells the API the visitor's address, so the API
+records the visitor rather than CloudFront. A firewall (AWS WAF) in front of
+CloudFront can be turned on with a setting. The routing is in
+`infrastructure/src/cloudfront.ts`.
 
 ### Running locally
 

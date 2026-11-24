@@ -15,7 +15,10 @@ export declare function gatedSpaRouterCode(
   rules: ReadonlyArray<EdgeGateRule>,
 ): string;
 
-export declare function gateOnlyCode(rules: ReadonlyArray<EdgeGateRule>): string;
+export declare function apiViewerRequestCode(
+  signal: string,
+  rules: ReadonlyArray<EdgeGateRule>,
+): string;
 
 export declare function securityHeadersCode(
   assistantBridgePort?: number,
