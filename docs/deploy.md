@@ -288,7 +288,7 @@ source, and they change.
 |---|---|---|
 | [Custom domains](#custom-domains) | `domainName`, `apiDomainName` | Route 53 |
 | [Firewall](#firewall-and-the-dev-edge-ip-gate) | `enableWaf` | AWS WAF |
-| [Edge IP gate](#firewall-and-the-dev-edge-ip-gate) | `edgeAllowedIps` | CloudFront Functions |
+| [Edge IP gate](#firewall-and-the-dev-edge-ip-gate) | `edgeAllowedIps` | None added: the check runs in functions every stack already has |
 | [Audit trail](#audit-trail-managecloudtrail) | `manageCloudTrail` | CloudTrail, S3 |
 | [Backups](#backups-enablebackups) | `enableBackups` | AWS Backup, S3, CloudWatch, EventBridge, SNS |
 | [Alarms](#alarms) | four `enable...Alarms` switches | CloudWatch alarms, SNS |
@@ -350,7 +350,8 @@ requests it inspects)
 stack: a comma-separated list of IPv4 addresses or blocks, for example
 `"203.0.113.7/32"`. Anyone outside the list gets a plain `403` from CloudFront
 before the web app files, the API or any database is touched. `prod` refuses
-this key. Cost driver: **CloudFront Functions** invocations
+this key. It adds no cost of its own: every stack already runs a CloudFront
+Function on each page and API request, and the gate is a check inside those
 ([CloudFront pricing](https://aws.amazon.com/cloudfront/pricing/)).
 
 - Find your address with `curl -4 https://checkip.amazonaws.com`, then set the key

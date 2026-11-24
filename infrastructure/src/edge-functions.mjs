@@ -123,20 +123,30 @@ ${spaRouterBody()}
 }
 
 /**
- * Gate-only viewer-request handler for `/api/*`: 403 outside the allowlist, otherwise the request passes through.
- * @param {ReadonlyArray<{ base: number, mask: number }>} rules
+ * Viewer-request handler for `/api/*`, on every stack: with rules, the 403 gate first; then it overwrites `X-Viewer-Address` with the
+ * viewer's connection address and sets the signal header, both in this one function so no edge forwards the signal without the address.
+ * The names and the signal's derivation are a contract with the API's `visitor-address.ts`.
+ * @param {string} signal value the API accepts for the stack's edge secret
+ * @param {ReadonlyArray<{ base: number, mask: number }>} rules empty = no gate
  * @returns {string}
  */
-export function gateOnlyCode(rules) {
+export function apiViewerRequestCode(signal, rules) {
+  const gate = rules.length > 0;
   return assertFunctionSize(
     `
-${edgeGateSnippet(rules)}
+${gate ? `${edgeGateSnippet(rules)}\n` : ""}var SIGNAL = ${JSON.stringify(signal)};
 function handler(event) {
-  if (!allowed(event.viewer && event.viewer.ip)) return FORBIDDEN;
-  return event.request;
+  var ip = event.viewer && event.viewer.ip;
+${gate ? "  if (!allowed(ip)) return FORBIDDEN;\n" : ""}  var req = event.request;
+  delete req.headers['x-viewer-address'];
+  if (typeof ip === 'string' && ip.length > 0) {
+    req.headers['x-viewer-address'] = { value: ip };
+  }
+  req.headers['x-viewer-address-proof'] = { value: SIGNAL };
+  return req;
 }
 `.trim(),
-    "api-gate",
+    "api-viewer-request",
   );
 }
 
