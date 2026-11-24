@@ -55,3 +55,5 @@ export declare const ASSISTANT_BRIDGE_PORT_RANGE: {
 export declare function parseAssistantBridgePort(
   get: (key: string) => string | undefined,
 ): number | undefined;
+
+export declare function viewerAddressProof(secret: string): string;

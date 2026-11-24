@@ -1,6 +1,8 @@
 // Pure parse/validate helpers for the stack config keys, free of @pulumi imports so `node --test` runs them.
 // config.ts passes pulumi.Config's raw getter; see docs/deploy.md.
 
+import { createHmac } from "node:crypto";
+
 /**
  * CloudWatch Logs retention values the AWS API accepts; it silently coerces any other, so config load rejects it.
  * @type {ReadonlyArray<number>}
@@ -291,4 +293,15 @@ export function assertEdgeAllowedIpsForStack(stack, edgeAllowedIps) {
       `retivo:edgeAllowedIps must be empty on the prod stack (got ${count}) — prod is a public product; the edge IP gate is dev-only. Remove the key from the prod stack config: pulumi config rm retivo:edgeAllowedIps --stack prod`,
     );
   }
+}
+
+/**
+ * The value the edge sends in `X-Viewer-Address-Proof` so the API honors `X-Viewer-Address`: lowercase hex HMAC-SHA256 of
+ * `viewer-address-v1` keyed with the edge secret string. Written a second time from `apps/api/src/common/visitor-address.ts`;
+ * the two must agree or the API silently ignores the address.
+ * @param {string} secret the edge shared secret, exactly as sent in `X-Origin-Verify`
+ * @returns {string}
+ */
+export function viewerAddressProof(secret) {
+  return createHmac("sha256", secret).update("viewer-address-v1").digest("hex");
 }

@@ -1,11 +1,11 @@
 // CloudFront distribution, the optional WAF web ACL, and the CloudFront Functions (security headers, SPA
-// rewrite, dev viewer IP gate). WAFv2 for CLOUDFRONT scope must live in us-east-1.
+// rewrite, viewer address for the API, dev viewer IP gate). WAFv2 for CLOUDFRONT scope must live in us-east-1.
 
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
-import { ipv4CidrToRule } from "./config-helpers.mjs";
+import { ipv4CidrToRule, viewerAddressProof } from "./config-helpers.mjs";
 import {
-  gateOnlyCode,
+  apiViewerRequestCode,
   gatedSpaRouterCode,
   securityHeadersCode,
   spaRouterCode,
@@ -61,14 +61,17 @@ export function createEdge(opts: CloudFrontOpts): Edge {
     assistantBridgePort,
   } = opts;
 
-  // Generated here, before any `new aws.*`, so an oversized or malformed allowlist fails the
-  // preview.
+  // The SPA router and the allowlist rules are generated here, before any `new aws.*`, so a malformed allowlist
+  // fails the preview. The `/api/*` source embeds a value derived from the secret, so it is built in an `apply`
+  // (still secret); an oversized allowlist throws there, before the function is created.
   const gated = edgeAllowedIps.length > 0;
   const gateRules = edgeAllowedIps.map(ipv4CidrToRule);
   const spaRouterSource = gated
     ? gatedSpaRouterCode(gateRules)
     : spaRouterCode();
-  const apiGateSource = gated ? gateOnlyCode(gateRules) : undefined;
+  const apiViewerRequestSource = edgeSharedSecret.apply((secret) =>
+    apiViewerRequestCode(viewerAddressProof(secret), gateRules),
+  );
   const securityHeadersSource = securityHeadersCode(assistantBridgePort);
 
   // ---------- WAF web ACL ----------
@@ -161,19 +164,19 @@ export function createEdge(opts: CloudFrontOpts): Edge {
     { provider: usEast1 },
   );
 
-  // ---------- CloudFront Function gating /api/* (dev IP gate only) ----------
-  const apiGateFn = apiGateSource
-    ? new aws.cloudfront.Function(
-        `${namePrefix}-api-gate`,
-        {
-          name: `${namePrefix}-api-gate`,
-          runtime: "cloudfront-js-2.0",
-          code: apiGateSource,
-          comment: "Viewer IP allowlist for /api/* (viewer-request)",
-        },
-        { provider: usEast1 },
-      )
-    : undefined;
+  // ---------- CloudFront Function for /api/* (viewer address and signal; the dev IP gate too when on) ----------
+  const apiViewerRequestFn = new aws.cloudfront.Function(
+    `${namePrefix}-api-viewer-request`,
+    {
+      name: `${namePrefix}-api-viewer-request`,
+      runtime: "cloudfront-js-2.0",
+      code: apiViewerRequestSource,
+      comment: gated
+        ? "Viewer IP allowlist + viewer address headers for /api/* (viewer-request)"
+        : "Viewer address headers for /api/* (viewer-request)",
+    },
+    { provider: usEast1 },
+  );
 
   // ---------- Origin: API Gateway (custom domain when configured) ----------
   const apiHost = apiOriginUrl.apply((url) =>
@@ -249,9 +252,10 @@ export function createEdge(opts: CloudFrontOpts): Edge {
             "Managed-AllViewerExceptHostHeader",
           ),
           functionAssociations: [
-            ...(apiGateFn
-              ? [{ eventType: "viewer-request", functionArn: apiGateFn.arn }]
-              : []),
+            {
+              eventType: "viewer-request",
+              functionArn: apiViewerRequestFn.arn,
+            },
             {
               eventType: "viewer-response",
               functionArn: securityHeadersFn.arn,
